@@ -2,6 +2,7 @@
 
 §5/§6 tui3_impl. UI не знает деталей хранения (файлы / БД / удалённый API).
 """
+
 from __future__ import annotations
 
 from typing import Protocol
@@ -10,7 +11,9 @@ from gc_tui.models import TailResult, TaskCursor, TaskSummary
 
 
 class TaskStore(Protocol):
-    def list_tasks(self, *, limit: int = 200, offset: int = 0) -> list[TaskSummary]:
+    def list_tasks(
+        self, *, limit: int = 200, offset: int = 0
+    ) -> list[TaskSummary]:
         """Список задач для экрана /tasks."""
         ...
 

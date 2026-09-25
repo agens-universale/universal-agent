@@ -13,11 +13,11 @@
 новый на каждый вебхук, у CLI прогон один, переиспользует владельца только TUI.
 Различаются эти два происхождения по счётчику `Task.cancelling()`.
 """
+
 import asyncio
 import time
 
 import pytest
-
 from gc_core.mcp_session_owner import reset_owner, set_owner
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
@@ -135,7 +135,7 @@ async def test_an_outside_cancel_is_not_swallowed():
     token = set_owner("owner-6")
     try:
         task = asyncio.create_task(registry.aclose_all())
-        await asyncio.sleep(0.02)              # дать начать первую
+        await asyncio.sleep(0.02)  # дать начать первую
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
@@ -150,10 +150,11 @@ async def test_an_outside_cancel_is_not_swallowed():
         await asyncio.sleep(0.02)
 
     assert [s.name for s in sessions if not s.closed] == [], (
-        "остаток брошен: его процессы переживут агента, а следующий снос придёт "
-        "с другим владельцем и не увидит их"
+        "остаток брошен: его процессы переживут агента, а следующий снос придёт с другим владельцем и не увидит их"
     )
-    assert registry._sessions == {}, f"остаток остался в реестре: {registry._sessions}"
+    assert registry._sessions == {}, (
+        f"остаток остался в реестре: {registry._sessions}"
+    )
 
 
 async def test_the_drain_after_an_outside_cancel_is_bounded(monkeypatch):
@@ -176,7 +177,7 @@ async def test_the_drain_after_an_outside_cancel_is_bounded(monkeypatch):
     token = set_owner("owner-7")
     try:
         task = asyncio.create_task(registry.aclose_all())
-        await asyncio.sleep(0.02)              # дать начать первую
+        await asyncio.sleep(0.02)  # дать начать первую
         started = time.monotonic()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -186,12 +187,13 @@ async def test_the_drain_after_an_outside_cancel_is_bounded(monkeypatch):
         reset_owner(token)
 
     assert spent < 1.0, (
-        f"отмена шла до вызывающего {spent:.2f} с при бюджете 0.1 — дочистка "
-        f"не ограничена"
+        f"отмена шла до вызывающего {spent:.2f} с при бюджете 0.1 — дочистка не ограничена"
     )
 
 
-async def test_what_the_budget_did_not_cover_stays_in_the_registry(monkeypatch):
+async def test_what_the_budget_did_not_cover_stays_in_the_registry(
+    monkeypatch,
+):
     """Кончился бюджет — остаток остаётся В реестре, а не пропадает.
 
     Снять сессию с реестра и не закрыть — худший из исходов: она перестаёт
@@ -213,6 +215,5 @@ async def test_what_the_budget_did_not_cover_stays_in_the_registry(monkeypatch):
         reset_owner(token)
 
     assert len(registry._sessions) == 2, (
-        f"сессии сняты с реестра, но не закрыты — их не увидит и хук на выход: "
-        f"{registry._sessions}"
+        f"сессии сняты с реестра, но не закрыты — их не увидит и хук на выход: {registry._sessions}"
     )

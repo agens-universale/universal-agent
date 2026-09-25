@@ -1,12 +1,19 @@
 """Шаг 2: thread identity на child ctx + gate sidecar без sink."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink, child_progress_enabled
-from gc_core.tools.subagents.sidecar import bind_thread_identity, clear_thread_identity, resolve_sidecar_identity
+from gc_core.tools.subagents.progress import (
+    QueueSubagentProgressSink,
+    child_progress_enabled,
+)
+from gc_core.tools.subagents.sidecar import (
+    bind_thread_identity,
+    clear_thread_identity,
+    resolve_sidecar_identity,
+)
 
 
 class TestResolveSidecarIdentityGate:
@@ -123,10 +130,12 @@ class TestBindClearThreadIdentity:
 
 class TestChildCtxCopiesThreadIdentity:
     @pytest.mark.asyncio
-    async def test_build_child_ctx_copies_identity_without_sink(self, tmp_path):
+    async def test_build_child_ctx_copies_identity_without_sink(
+        self, tmp_path
+    ):
         from gc_core.states import SharedStateData, State
-        from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         state = State(
             verbose=False,
@@ -193,8 +202,8 @@ class TestChildCtxCopiesThreadIdentity:
 async def _child_ctx_of_parent_with(tmp_path, *, threads_dir: str):
     """Настоящий `_build_child_ctx` над родителем с заданным каталогом тредов."""
     from gc_core.states import SharedStateData, State
-    from gc_testkit.helpers.tool_ctx import local_ctx
     from gc_core.tools.subagents.runner import SubagentRunner
+    from gc_testkit.helpers.tool_ctx import local_ctx
 
     state = State(
         verbose=False,
@@ -253,8 +262,7 @@ async def test_child_keeps_the_thread_address_without_a_directory(tmp_path):
     child = await _child_ctx_of_parent_with(tmp_path, threads_dir="")
 
     assert (child.system_id, child.thread_id) == ("cli", "task-9"), (
-        f"адрес треда стёрт из-за пустого каталога: "
-        f"{(child.system_id, child.thread_id)}"
+        f"адрес треда стёрт из-за пустого каталога: {(child.system_id, child.thread_id)}"
     )
     assert resolve_sidecar_identity(child) is not None, (
         "identity не собралась — трасса субагента не будет записана"
@@ -263,7 +271,9 @@ async def test_child_keeps_the_thread_address_without_a_directory(tmp_path):
 
 async def test_child_still_loses_the_address_without_a_thread(tmp_path):
     """Обратная половина: нет самого адреса — личность снимается, как и раньше."""
-    child = await _child_ctx_of_parent_with(tmp_path, threads_dir=str(tmp_path))
+    child = await _child_ctx_of_parent_with(
+        tmp_path, threads_dir=str(tmp_path)
+    )
     child.thread_id = None
 
     assert resolve_sidecar_identity(child) is None
@@ -287,7 +297,9 @@ async def test_no_store_and_no_directory_writes_nowhere(tmp_path, monkeypatch):
         threads_dir="",
     )
 
-    written = await apersist_subagent_trace(ctx, kind="child_start", payload={"x": 1})
+    written = await apersist_subagent_trace(
+        ctx, kind="child_start", payload={"x": 1}
+    )
 
     assert written is None, "запись состоялась, хотя писать некуда"
     assert list(tmp_path.iterdir()) == [], (
@@ -320,12 +332,16 @@ async def test_trace_reaches_a_store_without_files():
         system_id="cli",
         thread_id="t1",
         thread_store=store,
-        threads_dir=None,          # хранилище без файлов
+        threads_dir=None,  # хранилище без файлов
     )
 
-    written = await apersist_subagent_trace(ctx, kind="child_start", payload={"x": 1})
+    written = await apersist_subagent_trace(
+        ctx, kind="child_start", payload={"x": 1}
+    )
 
-    assert written is not None, "запись не состоялась — гейт снова требует каталог"
+    assert written is not None, (
+        "запись не состоялась — гейт снова требует каталог"
+    )
     trace = store.read_subagent_trace("cli", "t1")
     assert len(trace) == 1, trace
     assert trace[0]["parent_call_id"] == "call-1", trace[0]

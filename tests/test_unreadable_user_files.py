@@ -15,6 +15,7 @@ Windows в UTF-16 — приложение падает трейсбеком т�
 Новый читатель файла человека добавляется СЮДА строкой `_Case`, а не отдельным
 тестом рядом: отдельными тестами класс и закрывали четыре раза.
 """
+
 from __future__ import annotations
 
 import sys
@@ -65,51 +66,84 @@ def _cases() -> list[_Case]:
     # --- слои конфига (дома правила, закрытые прежними коммитами) ---
     def _load_config_ex(path, **_):
         from gc_core import config as config_mod
-        return config_mod.load_config_ex(str(path), apply_to_process=False)
+
+        return config_mod.load_config_ex(str(path))
 
     def _read_document(path, **_):
         from gc_core import config_raw
+
         return config_raw.read_document(path)
 
     def _safe_yaml_dict(path, **_):
         from gc_core.config_modules import layers
+
         return layers._safe_yaml_dict(path)
 
     def _readable_layer_document(path, **_):
         from gc_core.config_modules import layers
+
         return layers._readable_layer_document(path, "config.yml")
 
     def _load_profile_document(path, **_):
         from gc_core.config_modules.profiles import load_profile_document
+
         return load_profile_document(path)
 
     def _registry_read(path, **_):
         from gc_core.config_modules import registry_write
+
         return registry_write._read(path)
 
     def _instructions_read(path, **_):
         from gc_core.instructions import loader
+
         return loader._read(Path(path))
 
     cases += [
-        _Case("config.load_config_ex", "config.yml", _BODY_YAML, _load_config_ex),
-        _Case("config_raw.read_document", "config.yml", _BODY_YAML, _read_document),
-        _Case("layers._safe_yaml_dict", "config.yml", _BODY_YAML, _safe_yaml_dict),
-        _Case("layers._readable_layer_document", "config.yml", _BODY_YAML,
-              _readable_layer_document),
-        _Case("profiles.load_profile_document", "work.yml", _BODY_YAML,
-              _load_profile_document),
-        _Case("registry_write._read", "config.yml", _BODY_YAML, _registry_read),
-        _Case("instructions.loader._read", "AGENTS.md", _BODY_TEXT, _instructions_read),
+        _Case(
+            "config.load_config_ex", "config.yml", _BODY_YAML, _load_config_ex
+        ),
+        _Case(
+            "config_raw.read_document",
+            "config.yml",
+            _BODY_YAML,
+            _read_document,
+        ),
+        _Case(
+            "layers._safe_yaml_dict", "config.yml", _BODY_YAML, _safe_yaml_dict
+        ),
+        _Case(
+            "layers._readable_layer_document",
+            "config.yml",
+            _BODY_YAML,
+            _readable_layer_document,
+        ),
+        _Case(
+            "profiles.load_profile_document",
+            "work.yml",
+            _BODY_YAML,
+            _load_profile_document,
+        ),
+        _Case(
+            "registry_write._read", "config.yml", _BODY_YAML, _registry_read
+        ),
+        _Case(
+            "instructions.loader._read",
+            "AGENTS.md",
+            _BODY_TEXT,
+            _instructions_read,
+        ),
     ]
 
     # --- синхронизация конфига по пакетному шаблону ---
     def _sync_config(path, **_):
         from gc_core import config_sync
+
         return config_sync.sync_config(path)
 
     def _reset_config_template(path, *, target, **_):
         from gc_core import config_sync
+
         return config_sync.reset_config(target, template_path=path)
 
     def _reset_setup(tmp: Path) -> dict:
@@ -118,70 +152,114 @@ def _cases() -> list[_Case]:
         return {"target": target}
 
     cases += [
-        _Case("config_sync.sync_config", "config.yml", _BODY_YAML, _sync_config),
-        _Case("config_sync.reset_config(шаблон)", "config.default.yml", _BODY_YAML,
-              _reset_config_template, setup=_reset_setup),
+        _Case(
+            "config_sync.sync_config", "config.yml", _BODY_YAML, _sync_config
+        ),
+        _Case(
+            "config_sync.reset_config(шаблон)",
+            "config.default.yml",
+            _BODY_YAML,
+            _reset_config_template,
+            setup=_reset_setup,
+        ),
     ]
 
     # --- писатель конфига (отказ обязан назвать файл) ---
     def _write_values(path, **_):
         from gc_core import onboarding_config_writer as ocw
+
         return ocw.write_values(path, {"model": "m"})
 
     def _ensure_pointer_anchor(path, *, template, **_):
         from gc_core import onboarding_config_writer as ocw
+
         return ocw.ensure_pointer_anchor(path, template, key="profile")
 
     def _ensure_section_anchor(path, **_):
         from gc_core import onboarding_config_writer as ocw
+
         return ocw.ensure_section_anchor(path, "models", "models: {}\n")
 
     def _template_setup(tmp: Path) -> dict:
         template = tmp / "config.default.yml"
-        template.write_text("profile: \"\"\nmodel: m\n", encoding="utf-8")
+        template.write_text('profile: ""\nmodel: m\n', encoding="utf-8")
         return {"template": template}
 
     cases += [
         _Case("ocw.write_values", "config.yml", _BODY_YAML, _write_values),
-        _Case("ocw.ensure_pointer_anchor", "config.yml", _BODY_YAML,
-              _ensure_pointer_anchor, setup=_template_setup),
-        _Case("ocw.ensure_section_anchor", "config.yml", _BODY_YAML,
-              _ensure_section_anchor),
+        _Case(
+            "ocw.ensure_pointer_anchor",
+            "config.yml",
+            _BODY_YAML,
+            _ensure_pointer_anchor,
+            setup=_template_setup,
+        ),
+        _Case(
+            "ocw.ensure_section_anchor",
+            "config.yml",
+            _BODY_YAML,
+            _ensure_section_anchor,
+        ),
     ]
 
     # --- память проекта: эти файлы человек правит руками чаще прочих ---
     def _memory_read(path, **_):
         from gc_core.project_memory import storage
+
         return storage.read(Path(path))
 
     def _memory_stat(path, **_):
         from gc_core.project_memory import storage
+
         return storage.stat(Path(path))
 
     def _memory_append(path, **_):
         from gc_core.project_memory import storage
+
         return storage.append(Path(path), "новая заметка")
 
     cases += [
-        _Case("project_memory.storage.read", "memory.md", _BODY_TEXT, _memory_read),
-        _Case("project_memory.storage.stat", "memory.md", _BODY_TEXT, _memory_stat),
-        _Case("project_memory.storage.append", "memory.md", _BODY_TEXT, _memory_append),
+        _Case(
+            "project_memory.storage.read",
+            "memory.md",
+            _BODY_TEXT,
+            _memory_read,
+        ),
+        _Case(
+            "project_memory.storage.stat",
+            "memory.md",
+            _BODY_TEXT,
+            _memory_stat,
+        ),
+        _Case(
+            "project_memory.storage.append",
+            "memory.md",
+            _BODY_TEXT,
+            _memory_append,
+        ),
     ]
 
     # --- история ввода TUI ---
     def _input_history_load(path, **_):
         from gc_tui.services.input_history import InputHistory
+
         history = InputHistory(Path(path).parent)
         history.load()
         return history.size
 
     cases.append(
-        _Case("InputHistory.load", "input_history.jsonl", _BODY_JSON,
-              _input_history_load))
+        _Case(
+            "InputHistory.load",
+            "input_history.jsonl",
+            _BODY_JSON,
+            _input_history_load,
+        )
+    )
 
     # --- экраны TUI: чтение идёт на КАЖДОМ проходе отрисовки меню ---
     def _target_snapshot(path, **_):
         from gc_tui.screens.settings import SettingsScreen
+
         screen = SettingsScreen.__new__(SettingsScreen)
         screen._config_path = str(path)
         screen._menu_pass_snapshot = None
@@ -190,17 +268,20 @@ def _cases() -> list[_Case]:
 
     def _file_snapshot(path, **_):
         from gc_tui.screens.settings import SettingsScreen
+
         screen = SettingsScreen.__new__(SettingsScreen)
         return screen._file_snapshot(path)
 
     def _restore_snapshot(path, **_):
         from gc_tui.screens.settings import SettingsScreen
+
         screen = SettingsScreen.__new__(SettingsScreen)
         return screen._restore_snapshot(path, "model: m\n")
 
     def _post_update_needs_sync(path, **_):
         from gc_core import config_sync
         from gc_tui.screens.post_update import PostUpdateScreen
+
         screen = PostUpdateScreen.__new__(PostUpdateScreen)
         screen._config_path = str(path)
         screen._config_sync = config_sync
@@ -208,18 +289,41 @@ def _cases() -> list[_Case]:
 
     def _read_lock(path, **_):
         from gc_tui.services import session_lock
+
         return session_lock.read_lock(str(path))
 
     cases += [
-        _Case("SettingsScreen._target_snapshot", "config.yml", _BODY_YAML,
-              _target_snapshot, marks=("textual",)),
-        _Case("SettingsScreen._file_snapshot", "config.yml", _BODY_YAML,
-              _file_snapshot, marks=("textual",)),
-        _Case("SettingsScreen._restore_snapshot", "config.yml", _BODY_YAML,
-              _restore_snapshot, marks=("textual",)),
-        _Case("PostUpdateScreen._compute_needs_sync", "config.yml", _BODY_YAML,
-              _post_update_needs_sync, marks=("textual",)),
-        _Case("session_lock.read_lock", "session.lock", _BODY_JSON, _read_lock),
+        _Case(
+            "SettingsScreen._target_snapshot",
+            "config.yml",
+            _BODY_YAML,
+            _target_snapshot,
+            marks=("textual",),
+        ),
+        _Case(
+            "SettingsScreen._file_snapshot",
+            "config.yml",
+            _BODY_YAML,
+            _file_snapshot,
+            marks=("textual",),
+        ),
+        _Case(
+            "SettingsScreen._restore_snapshot",
+            "config.yml",
+            _BODY_YAML,
+            _restore_snapshot,
+            marks=("textual",),
+        ),
+        _Case(
+            "PostUpdateScreen._compute_needs_sync",
+            "config.yml",
+            _BODY_YAML,
+            _post_update_needs_sync,
+            marks=("textual",),
+        ),
+        _Case(
+            "session_lock.read_lock", "session.lock", _BODY_JSON, _read_lock
+        ),
     ]
 
     # --- конфиги вне основного стека ---
@@ -227,13 +331,19 @@ def _cases() -> list[_Case]:
         from gc_core.config_modules import env_vars
         from gc_core.config_modules.env_vars import EnvVars
         from gc_server.rest_api import server_config as server_config
-        monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=Path(path)))
+
+        monkeypatch.setattr(
+            env_vars, "env", EnvVars(server_config_path=Path(path))
+        )
         return server_config.load_server_config()
 
     def _voice_base_config(path, *, monkeypatch, **_):
         from gc_core import config as config_mod
         from gc_tui.voice_runtime import wire
-        monkeypatch.setattr(config_mod, "resolve_config_path", lambda _p: str(path))
+
+        monkeypatch.setattr(
+            config_mod, "resolve_config_path", lambda _p: str(path)
+        )
         return wire.base_config_raw()
 
     # Проводка рецептов живёт в СВОЁМ дистрибутиве: `recommended_mcp.runtime.wiring`,
@@ -244,60 +354,109 @@ def _cases() -> list[_Case]:
     def _load_managed(path, *, monkeypatch, **_):
         from gc_core.config_modules import env_vars
         from recommended_mcp.runtime import wiring
-        monkeypatch.setattr(env_vars, "managed_config_path", lambda: Path(path))
+
+        monkeypatch.setattr(
+            env_vars, "managed_config_path", lambda: Path(path)
+        )
         return wiring.load_managed()
 
     def _read_snippet(path, **_):
         from recommended_mcp.runtime import wiring
+
         return wiring.read_snippet(Path(path).parent)
 
     cases += [
-        _Case("server_config.load_server_config", "config_server.yml", _BODY_YAML,
-              _server_config),
-        _Case("voice_runtime.wire.base_config_raw", "config.yml", _BODY_YAML,
-              _voice_base_config),
-        _Case("recommended_mcp.runtime.wiring.load_managed", "config.local.yml", _BODY_YAML,
-              _load_managed),
-        _Case("recommended_mcp.runtime.wiring.read_snippet", "agent_config.snippet.yml", _BODY_YAML,
-              _read_snippet),
+        _Case(
+            "server_config.load_server_config",
+            "config_server.yml",
+            _BODY_YAML,
+            _server_config,
+        ),
+        _Case(
+            "voice_runtime.wire.base_config_raw",
+            "config.yml",
+            _BODY_YAML,
+            _voice_base_config,
+        ),
+        _Case(
+            "recommended_mcp.runtime.wiring.load_managed",
+            "config.local.yml",
+            _BODY_YAML,
+            _load_managed,
+        ),
+        _Case(
+            "recommended_mcp.runtime.wiring.read_snippet",
+            "agent_config.snippet.yml",
+            _BODY_YAML,
+            _read_snippet,
+        ),
     ]
 
     # --- определения кастомных сабагентов: файлы пишет человек ---
     def _discover_subagents(path, **_):
-        from gc_core.tools.subagents.custom.file_definitions import discover_subagent_definitions
+        from gc_core.tools.subagents.custom.file_definitions import (
+            discover_subagent_definitions,
+        )
+
         return discover_subagent_definitions(
-            {"subagents_dir": str(Path(path).parent)}, builtin_names=())
+            {"subagents_dir": str(Path(path).parent)}, builtin_names=()
+        )
 
     cases.append(
-        _Case("file_definitions.discover_subagent_definitions", "reviewer.md",
-              "---\nname: reviewer\n---\nТы ревьюер.\n", _discover_subagents))
+        _Case(
+            "file_definitions.discover_subagent_definitions",
+            "reviewer.md",
+            "---\nname: reviewer\n---\nТы ревьюер.\n",
+            _discover_subagents,
+        )
+    )
 
     # --- промпты по путям из конфига: человек вправе показать на свой файл ---
     def _summary_prompt(path, **_):
         from gc_core.summarize import prompt_loading
+
         return prompt_loading.load_prompt_template(str(path))
 
     def _intent_scope_prompt(path, **_):
         from gc_core.intent_scope import summarizer
+
         return summarizer._load_prompt_file(str(path))
 
     def _intent_guard_prompt(path, **_):
         from gc_core.intent_guard import final_report_consistency
+
         return final_report_consistency._load_guard_prompt(str(path))
 
     def _command_judge_prompt(path, **_):
         from gc_core.security import command_moderation
+
         return command_moderation._load_prompt_file(Path(path))
 
     cases += [
-        _Case("summarize.load_prompt_template", "summary_prompt.md", _BODY_TEXT,
-              _summary_prompt),
-        _Case("intent_scope._load_prompt_file", "scope_prompt.md", _BODY_TEXT,
-              _intent_scope_prompt),
-        _Case("intent_guard._load_guard_prompt", "guard_prompt.md", _BODY_TEXT,
-              _intent_guard_prompt),
-        _Case("command_moderation._load_prompt_file", "judge_prompt.md", _BODY_TEXT,
-              _command_judge_prompt),
+        _Case(
+            "summarize.load_prompt_template",
+            "summary_prompt.md",
+            _BODY_TEXT,
+            _summary_prompt,
+        ),
+        _Case(
+            "intent_scope._load_prompt_file",
+            "scope_prompt.md",
+            _BODY_TEXT,
+            _intent_scope_prompt,
+        ),
+        _Case(
+            "intent_guard._load_guard_prompt",
+            "guard_prompt.md",
+            _BODY_TEXT,
+            _intent_guard_prompt,
+        ),
+        _Case(
+            "command_moderation._load_prompt_file",
+            "judge_prompt.md",
+            _BODY_TEXT,
+            _command_judge_prompt,
+        ),
     ]
 
     return cases
@@ -316,13 +475,11 @@ def test_utf16_user_file_does_not_crash(case: _Case, tmp_path, monkeypatch):
     kwargs = case.setup(tmp_path) if case.setup is not None else {}
     try:
         case.call(path, monkeypatch=monkeypatch, **kwargs)
-    except UnicodeDecodeError as exc:      # именно тот класс, ради которого сторож
+    except UnicodeDecodeError as exc:  # именно тот класс, ради которого сторож
         pytest.fail(
-            f"{case.id}: UnicodeDecodeError ушёл наружу — приложение упадёт "
-            f"трейсбеком на файле человека: {exc}"
+            f"{case.id}: UnicodeDecodeError ушёл наружу — приложение упадёт трейсбеком на файле человека: {exc}"
         )
-    except Exception as exc:               # отказ законен, безымянный отказ — нет
+    except Exception as exc:  # отказ законен, безымянный отказ — нет
         assert path.name in str(exc), (
-            f"{case.id}: отказ не называет файл ({type(exc).__name__}: {exc}) — "
-            f"человеку нечего чинить"
+            f"{case.id}: отказ не называет файл ({type(exc).__name__}: {exc}) — человеку нечего чинить"
         )

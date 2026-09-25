@@ -1,10 +1,9 @@
 """Спека 04: unknown tool → JSON + suggestions; streak stop; tool_error_cnt."""
+
 from __future__ import annotations
 
 import json
 from types import SimpleNamespace
-
-import pytest
 
 from gc_core.states import State
 from gc_core.tools import aapply_tool, is_unknown_tool_output
@@ -13,10 +12,11 @@ from gc_testkit import run_coro
 
 def _async_noop(fn):
     """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def _make_state(**overrides):
@@ -39,7 +39,14 @@ def _registry(*names: str):
     return {
         name: {
             "tool_fabric": lambda **_kw: None,
-            "spec": {"name": name, "parameters": {"type": "object", "properties": {}, "required": []}},
+            "spec": {
+                "name": name,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
             "description": {"name": name},
             "injected_fields": [],
         }
@@ -54,7 +61,9 @@ async def test_apply_tool_unknown_returns_json_with_suggestions():
     raw = await aapply_tool(
         tool_name="read_file",
         arguments="{}",
-        tools_data_=_registry("fs_read_file", "fs_read_file_range", "session_think"),
+        tools_data_=_registry(
+            "fs_read_file", "fs_read_file_range", "session_think"
+        ),
     )
     payload = json.loads(raw)
     assert payload["ok"] is False
@@ -77,11 +86,17 @@ async def test_apply_tool_unknown_empty_suggestions_for_distant_name():
     assert payload["error"]["type"] == "unknown_tool"
     assert payload["error"]["suggestions"] == []
     assert "Maybe you mean tools:" not in payload["message"]
-    assert "Use only tools from the provided tool list in section <tools> in system prompt." in payload["message"]
+    assert (
+        "Use only tools from the provided tool list in section <tools> in system prompt."
+        in payload["message"]
+    )
 
 
 def test_is_unknown_tool_output_legacy_substring():
-    assert is_unknown_tool_output("phase1 - there is not such tool on client") is True
+    assert (
+        is_unknown_tool_output("phase1 - there is not such tool on client")
+        is True
+    )
     assert is_unknown_tool_output('{"ok": true, "message": "ok"}') is False
 
 
@@ -106,16 +121,29 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
         )
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     state = _make_state()
     ctx = SimpleNamespace(config_dict={}, logger=None)
     messages = [
-        {"type": "function_call", "name": "phase1", "call_id": "c1", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "phase1",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
     ]
-    outs = run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
+    outs = run_coro(
+        pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None)
+    )
     assert len(outs) == 1
     assert state.last_unknown_tool_name == "phase1"
     assert state.unknown_tool_repeat_count == 1
@@ -148,8 +176,14 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
         return json.dumps({"ok": True, "message": "done"})
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     state = _make_state()
@@ -157,8 +191,18 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
     state.unknown_tool_repeat_count = 2
     ctx = SimpleNamespace(config_dict={}, logger=None)
     messages = [
-        {"type": "function_call", "name": "phase1", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "session_think", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "phase1",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "session_think",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
     run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.last_unknown_tool_name is None
@@ -189,8 +233,14 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
         return unknown_payload
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
 
     round_id = {"n": 0}
 
@@ -257,8 +307,14 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
         return unknown_payload
 
     monkeypatch.setattr(pr, "aapply_tool", fake_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **_kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
 
     round_id = {"n": 0}
 

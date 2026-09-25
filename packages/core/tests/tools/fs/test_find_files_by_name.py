@@ -1,13 +1,11 @@
-import sys
 import json
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.fs_tools import FsFindFilesByNameConfig
 from gc_core.tools.fs.find_files_by_name import FindFilesByName
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+from pydantic import ValidationError
 
 
 def _tool(extra=None):
@@ -180,7 +178,11 @@ def test_summary_for_max_visited_does_not_blame_max_matches(tmp_path: Path):
         ok=True,
         matches=[],
         truncated=True,
-        walk_stats={"visited": 500_001, "stop_reason": "max_visited", "max_visited": 500_000},
+        walk_stats={
+            "visited": 500_001,
+            "stop_reason": "max_visited",
+            "max_visited": 500_000,
+        },
     )
     res = json.loads(raw)
     assert "max_visited" in res["guidance"]
@@ -191,7 +193,9 @@ def test_find_max_matches_hard_cap_300(tmp_path: Path):
     for i in range(5):
         (tmp_path / f"f{i}.dat").write_text("x", encoding="utf-8")
 
-    res = json.loads(_tool()(path=str(tmp_path), query="*.dat", max_matches=500))
+    res = json.loads(
+        _tool()(path=str(tmp_path), query="*.dat", max_matches=500)
+    )
     assert res["ok"] is True
     assert res["max_matches"] == 300
     assert res["count"] == 5
@@ -206,7 +210,9 @@ def _write_dat_files(tmp_path: Path, n: int) -> None:
 
 def test_config_default_max_matches_applies_when_caller_omits(tmp_path: Path):
     _write_dat_files(tmp_path, 5)
-    res = json.loads(_tool({"default_max_matches": 2})(path=str(tmp_path), query="*.dat"))
+    res = json.loads(
+        _tool({"default_max_matches": 2})(path=str(tmp_path), query="*.dat")
+    )
     assert res["ok"] is True
     assert res["count"] == 2
     assert res["max_matches"] == 2
@@ -242,7 +248,9 @@ def test_config_hard_max_matches_clamps_requested(tmp_path: Path):
 
 def test_config_max_visited_is_the_walk_cap(tmp_path: Path):
     _write_dat_files(tmp_path, 5)
-    res = json.loads(_tool({"max_visited": 2})(path=str(tmp_path), query="*.dat"))
+    res = json.loads(
+        _tool({"max_visited": 2})(path=str(tmp_path), query="*.dat")
+    )
     assert res["ok"] is True
     assert res["truncated"] is True
     assert res["walk_stats"]["stop_reason"] == "max_visited"
@@ -314,11 +322,15 @@ def test_find_case_insensitive(tmp_path: Path):
     assert default["count"] == 1
     assert Path(default["matches"][0]["path"]) == f.resolve()
 
-    cs = json.loads(_tool()(path=str(tmp_path), query="readme.md", case_insensitive=False))
+    cs = json.loads(
+        _tool()(path=str(tmp_path), query="readme.md", case_insensitive=False)
+    )
     assert cs["ok"] is True
     assert cs["count"] == 0
 
-    ci = json.loads(_tool()(path=str(tmp_path), query="readme.md", case_insensitive=True))
+    ci = json.loads(
+        _tool()(path=str(tmp_path), query="readme.md", case_insensitive=True)
+    )
     assert ci["ok"] is True
     assert ci["count"] == 1
     assert Path(ci["matches"][0]["path"]) == f.resolve()
@@ -339,7 +351,10 @@ def test_find_validation(tmp_path: Path):
     f = tmp_path / "file.txt"
     f.write_text("x", encoding="utf-8")
     not_dir = json.loads(tool(path=str(f), query="x"))
-    assert not_dir["ok"] is False and not_dir["error"]["type"] == "not_a_directory"
+    assert (
+        not_dir["ok"] is False
+        and not_dir["error"]["type"] == "not_a_directory"
+    )
 
 
 def test_registered_name():
@@ -352,9 +367,9 @@ def test_glob_auto_detection_rule_is_documented():
     Само поведение (скобки = класс символов) осознанное, литерального режима у
     тула нет; значит модель должна хотя бы знать об этом из описания.
     """
-    schema_desc = FindFilesByName.tool_description()["parameters"]["properties"]["query"][
-        "description"
-    ]
+    schema_desc = FindFilesByName.tool_description()["parameters"][
+        "properties"
+    ]["query"]["description"]
     prompt_desc = FindFilesByName.prompt_description()
 
     for text in (schema_desc, prompt_desc):
@@ -364,11 +379,12 @@ def test_glob_auto_detection_rule_is_documented():
 
 # --- размер из обхода вместо getsize на совпадение ------------------------------
 
+
 def test_size_from_walk_spares_getsize():
     import json
 
-    from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
     from gc_core.tools.fs.find_files_by_name import FindFilesByName
+    from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
     class _Counting(FakeBackend):
         def __init__(self, files):
@@ -392,11 +408,13 @@ def test_size_from_walk_spares_getsize():
 def test_walk_prunes_hard_excludes_in_the_backend(tmp_path, monkeypatch):
     import json
 
-    from gc_testkit.helpers.tool_ctx import with_local_ctx
     from gc_core.tools.fs.find_files_by_name import FindFilesByName
+    from gc_testkit.helpers.tool_ctx import with_local_ctx
 
     (tmp_path / "app.py").write_text("x\n", encoding="utf-8")
-    tool = with_local_ctx(FindFilesByName, config_dict={"launch_root": str(tmp_path)})
+    tool = with_local_ctx(
+        FindFilesByName, config_dict={"launch_root": str(tmp_path)}
+    )
     backend_cls = type(tool._backend)
     seen = {}
     original = backend_cls.iter_walk_entries
@@ -414,14 +432,19 @@ def test_walk_prunes_hard_excludes_in_the_backend(tmp_path, monkeypatch):
     assert seen["prune_dot_dirs"] is True
 
 
-def test_find_lists_excluded_dirs_by_name_but_not_their_contents(tmp_path: Path):
+def test_find_lists_excluded_dirs_by_name_but_not_their_contents(
+    tmp_path: Path,
+):
     """Жёсткие исключения — «не спускаться», а не «не показывать»: сам каталог
     находится по имени (как на develop), его содержимое — нет."""
     (tmp_path / "node_modules" / "pkg").mkdir(parents=True)
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
     (tmp_path / "src").mkdir()
 
-    for query, expected in (("node_modules", "node_modules"), (".github", ".github")):
+    for query, expected in (
+        ("node_modules", "node_modules"),
+        (".github", ".github"),
+    ):
         res = json.loads(_tool()(path=str(tmp_path), query=query))
         assert res["ok"] is True, query
         assert [Path(m["path"]).name for m in res["matches"]] == [expected]

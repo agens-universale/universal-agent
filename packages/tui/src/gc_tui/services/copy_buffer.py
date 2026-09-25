@@ -9,6 +9,7 @@
 Модуль чисто функциональный, без I/O — запись в meta делает вызывающий код
 из UI-потока Textual через `update_tui_meta`.
 """
+
 from __future__ import annotations
 
 COPY_BUFFER_MAX: int = 20000

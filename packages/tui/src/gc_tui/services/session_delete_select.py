@@ -2,6 +2,7 @@
 
 Используется и живым счётчиком MassDeleteScreen, и оркестрацией SessionsScreen —
 поэтому `now` инъектируется (детерминируемые тесты)."""
+
 from __future__ import annotations
 
 from datetime import datetime, timedelta
@@ -13,7 +14,9 @@ def _parse_updated_at(value: str, now: datetime) -> Optional[datetime]:
         dt = datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
-    if dt.tzinfo is None:  # naive → считаем локальной зоной (как cleanup-скрипт)
+    if (
+        dt.tzinfo is None
+    ):  # naive → считаем локальной зоной (как cleanup-скрипт)
         dt = dt.replace(tzinfo=now.tzinfo)
     return dt
 

@@ -10,14 +10,13 @@ import os
 from pathlib import Path
 
 import pytest
-
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_testkit.helpers.tool_ctx import with_local_ctx
-
 
 # ------------------------------------------------------------------
 # helpers
 # ------------------------------------------------------------------
+
 
 def _call(tool, **kw):
     """Call FindInFiles and parse JSON response.
@@ -78,11 +77,16 @@ def _assert_slim_success_keys(data):
 # 1. Single file — basic
 # ------------------------------------------------------------------
 
+
 class TestSingleFile:
     def test_single_file_match(self, tmp_path):
         f = tmp_path / "code.py"
-        f.write_text("import os\nprint('hello')\nimport os\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="import")
+        f.write_text(
+            "import os\nprint('hello')\nimport os\n", encoding="utf-8"
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="import"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
         assert data["mode"] == "file"
@@ -124,7 +128,9 @@ class TestSingleFile:
     def test_single_file_match_limit(self, tmp_path):
         f = tmp_path / "many.py"
         f.write_text("X\n" * 500, encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=10)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=10
+        )
         assert data["ok"] is True
         assert data["count"] == 10
         assert data["stop_reason"] == "match_limit"
@@ -139,7 +145,9 @@ class TestSingleFile:
     def test_single_file_limit_capped(self, tmp_path):
         f = tmp_path / "many.py"
         f.write_text("X\n" * 500, encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=500)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="X", limit=500
+        )
         assert data["ok"] is True
         assert data["limit_eff"] == 300
         assert data["limit_requested"] == 500
@@ -152,7 +160,9 @@ class TestSingleFile:
     def test_single_file_limit_capped_no_match(self, tmp_path):
         f = tmp_path / "t.txt"
         f.write_text("hello\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="zzz", limit=500)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="zzz", limit=500
+        )
         assert data["ok"] is True
         assert data["limit_eff"] == 300
         assert data["limit_capped"] is True
@@ -187,7 +197,9 @@ class TestSingleFile:
         """Inline (?i) flag should set effective CI even without the arg."""
         f = tmp_path / "t.txt"
         f.write_text("Hello\nHELLO\nhello\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="(?i)hello")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="(?i)hello"
+        )
         assert data["ok"] is True
         assert data["count"] == 3
         assert data["case_insensitive"] is True
@@ -197,11 +209,14 @@ class TestSingleFile:
 # 2. Single file — binary / encoding / size
 # ------------------------------------------------------------------
 
+
 class TestSingleFileRejections:
     def test_binary_file_skipped(self, tmp_path):
         f = tmp_path / "blob.bin"
         f.write_bytes(b"\x00\x01\x02\x03" * 100)
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="anything")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="anything"
+        )
         assert data["ok"] is True
         assert data["count"] == 0
         assert data["scan_complete"] is True
@@ -225,21 +240,30 @@ class TestSingleFileRejections:
         assert data["scan_complete"] is False
         assert data["more_matches_may_exist"] is False
         assert data["guidance"] is not None
-        assert "size limit" in data["guidance"].lower() or "chunks" in data["guidance"]
+        assert (
+            "size limit" in data["guidance"].lower()
+            or "chunks" in data["guidance"]
+        )
 
 
 # ------------------------------------------------------------------
 # 3. Directory — basic search, A/B/C
 # ------------------------------------------------------------------
 
+
 class TestDirectoryBasic:
     def test_dir_basic_match(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "target line\n",
-            "b.py": "nothing here\n",
-            "c.py": "target again\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target")
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "target line\n",
+                "b.py": "nothing here\n",
+                "c.py": "target again\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
         assert data["mode"] == "dir"
@@ -249,11 +273,16 @@ class TestDirectoryBasic:
         _assert_slim_success_keys(data)
 
     def test_dir_no_match_scan_complete_B(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "foo\n",
-            "b.py": "bar\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\w+")
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "foo\n",
+                "b.py": "bar\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\w+"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
         assert data["scan_complete"] is True
@@ -262,11 +291,16 @@ class TestDirectoryBasic:
 
     def test_dir_prefilter_skips_files(self, tmp_path):
         """Prefilter with literal needle skips files that don't contain it."""
-        _make_tree(tmp_path, {
-            "a.py": "foo\n",
-            "b.py": "bar\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="zzz")
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "foo\n",
+                "b.py": "bar\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="zzz"
+        )
         assert data["ok"] is True
         assert data["count"] == 0
         assert data["scan_complete"] is True
@@ -276,7 +310,12 @@ class TestDirectoryBasic:
     def test_dir_match_limit_A(self, tmp_path):
         files = {f"f{i}.py": "HIT\n" for i in range(20)}
         _make_tree(tmp_path, files)
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="HIT", limit=5)
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern="HIT",
+            limit=5,
+        )
         assert data["ok"] is True
         assert data["count"] == 5
         assert data["stop_reason"] == "match_limit"
@@ -290,11 +329,14 @@ class TestDirectoryBasic:
         assert "candidate_count" not in data
 
     def test_dir_file_pattern_filter(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "needle\n",
-            "b.md": "needle\n",
-            "c.txt": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "needle\n",
+                "b.md": "needle\n",
+                "c.txt": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -327,12 +369,16 @@ class TestDirectoryBasic:
 # 4. Directory — excluded_dirs (opt-in show_excluded_dirs)
 # ------------------------------------------------------------------
 
+
 class TestExcludedDirs:
     def test_excluded_dir_names_venv(self, tmp_path):
-        _make_tree(tmp_path, {
-            "main.py": "target\n",
-            "venv/lib.py": "target\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "main.py": "target\n",
+                "venv/lib.py": "target\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -347,10 +393,13 @@ class TestExcludedDirs:
         assert "venv" in excluded[0]["path"]
 
     def test_excluded_dir_names_pycache(self, tmp_path):
-        _make_tree(tmp_path, {
-            "code.py": "target\n",
-            "__pycache__/cache.py": "target\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "code.py": "target\n",
+                "__pycache__/cache.py": "target\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -364,10 +413,13 @@ class TestExcludedDirs:
         assert data["count"] == 1
 
     def test_excluded_dot_dir(self, tmp_path):
-        _make_tree(tmp_path, {
-            "main.py": "target\n",
-            ".hidden/secret.py": "target\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "main.py": "target\n",
+                ".hidden/secret.py": "target\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -381,14 +433,17 @@ class TestExcludedDirs:
         assert data["count"] == 1
 
     def test_excluded_multiple_dirs(self, tmp_path):
-        _make_tree(tmp_path, {
-            "main.py": "target\n",
-            "venv/lib.py": "target\n",
-            "__pycache__/c.py": "target\n",
-            ".git/config": "target\n",
-            ".cache/x.py": "target\n",
-            "node_modules/pkg.py": "target\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "main.py": "target\n",
+                "venv/lib.py": "target\n",
+                "__pycache__/c.py": "target\n",
+                ".git/config": "target\n",
+                ".cache/x.py": "target\n",
+                "node_modules/pkg.py": "target\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -403,28 +458,39 @@ class TestExcludedDirs:
         assert data["count"] == 1
         # sorted by reason, then path
         paths = [e["path"] for e in excluded]
-        assert paths == sorted(paths, key=lambda p: (
-            next(e["reason"] for e in excluded if e["path"] == p),
-            p,
-        ))
+        assert paths == sorted(
+            paths,
+            key=lambda p: (
+                next(e["reason"] for e in excluded if e["path"] == p),
+                p,
+            ),
+        )
 
     def test_excluded_dirs_default_omitted(self, tmp_path):
-        _make_tree(tmp_path, {
-            "main.py": "target\n",
-            "venv/lib.py": "target\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target")
+        _make_tree(
+            tmp_path,
+            {
+                "main.py": "target\n",
+                "venv/lib.py": "target\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 1
         assert "excluded_dirs" not in data
 
     def test_hard_floor_survives_empty_config_exclude_list(self, tmp_path):
         """Clearing fs_tools.find_in_files.exclude_dir_names must not re-open junk."""
-        _make_tree(tmp_path, {
-            "main.py": "target\n",
-            "venv/lib.py": "target\n",
-            "node_modules/pkg.py": "target\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "main.py": "target\n",
+                "venv/lib.py": "target\n",
+                "node_modules/pkg.py": "target\n",
+            },
+        )
         cfg = {
             "fs_tools": {
                 "find_in_files": {
@@ -448,21 +514,31 @@ class TestExcludedDirs:
     def test_start_path_not_excluded(self, tmp_path):
         """If path itself is an excluded name (e.g. venv/), search inside."""
         venv = tmp_path / "venv"
-        _make_tree(tmp_path, {
-            "venv/lib.py": "target\n",
-            "venv/sub/deep.py": "target\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(venv), pattern="target")
+        _make_tree(
+            tmp_path,
+            {
+                "venv/lib.py": "target\n",
+                "venv/sub/deep.py": "target\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(venv), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
 
     def test_dot_file_in_regular_dir_searched(self, tmp_path):
         """.env files in normal dirs ARE searchable (only dirs excluded)."""
-        _make_tree(tmp_path, {
-            ".env": "SECRET=target\n",
-            "main.py": "target\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target")
+        _make_tree(
+            tmp_path,
+            {
+                ".env": "SECRET=target\n",
+                "main.py": "target\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="target"
+        )
         assert data["ok"] is True
         assert data["count"] == 2
 
@@ -471,13 +547,17 @@ class TestExcludedDirs:
 # 5. Directory — sorting (basename_needle,depth,path)
 # ------------------------------------------------------------------
 
+
 class TestSortOrder:
     def test_basename_hit_priority(self, tmp_path):
         """File with needle in basename should be scanned first."""
-        _make_tree(tmp_path, {
-            "zzz.py": "needle\n",
-            "needle.py": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "zzz.py": "needle\n",
+                "needle.py": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -490,10 +570,13 @@ class TestSortOrder:
 
     def test_depth_priority(self, tmp_path):
         """Shallower files are scanned before deeper ones (same basename_hit)."""
-        _make_tree(tmp_path, {
-            "shallow.py": "HIT\n",
-            "deep/a/b/c.py": "HIT\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "shallow.py": "HIT\n",
+                "deep/a/b/c.py": "HIT\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -507,6 +590,7 @@ class TestSortOrder:
 # ------------------------------------------------------------------
 # 6. Directory — limits & stop reasons
 # ------------------------------------------------------------------
+
 
 class TestDirectoryLimits:
     def test_too_many_candidate_files(self, tmp_path):
@@ -624,10 +708,13 @@ class TestDirectoryLimits:
 
     def test_complete_scan_no_top_level_dirs(self, tmp_path):
         """Complete content scan: no breakdown / top_level_dirs."""
-        _make_tree(tmp_path, {
-            "a.py": "needle\n",
-            "sub/b.py": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "needle\n",
+                "sub/b.py": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -678,18 +765,29 @@ class TestDirectoryLimits:
         assert data["scan_complete"] is False
         assert data["more_matches_may_exist"] is True
         assert data["guidance"] is not None
-        assert "partial" in data["guidance"].lower() or "budget" in data["guidance"].lower()
+        assert (
+            "partial" in data["guidance"].lower()
+            or "budget" in data["guidance"].lower()
+        )
         # no breakdown on open budget (v1)
         assert "top_level_dirs" not in data
 
     def test_A_boundary_exact_limit(self, tmp_path):
         """Last candidate gives exactly limit_eff → A (not B)."""
-        _make_tree(tmp_path, {
-            "a.py": "HIT\n",
-            "b.py": "HIT\n",
-            "c.py": "HIT\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="HIT", limit=3)
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "HIT\n",
+                "b.py": "HIT\n",
+                "c.py": "HIT\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles),
+            path=str(tmp_path),
+            pattern="HIT",
+            limit=3,
+        )
         assert data["ok"] is True
         assert data["count"] == 3
         assert data["stop_reason"] == "match_limit"
@@ -698,11 +796,16 @@ class TestDirectoryLimits:
 
     def test_B_complete_no_stop(self, tmp_path):
         """B outcome: full scan, no stop_reason."""
-        _make_tree(tmp_path, {
-            "a.py": "needle\n",
-            "b.py": "needle\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="needle")
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "needle\n",
+                "b.py": "needle\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="needle"
+        )
         assert data["ok"] is True
         assert "stop_reason" not in data
         assert data["scan_complete"] is True
@@ -713,26 +816,35 @@ class TestDirectoryLimits:
 # 7. Prefilter / needles through the API (behavior only)
 # ------------------------------------------------------------------
 
+
 class TestPrefilterNeedles:
     def test_like_literal_prefilter(self, tmp_path):
         """like mode: required_literal skips files without the substring."""
-        _make_tree(tmp_path, {
-            "a.py": "foo bar baz\n",
-            "b.py": "only bar\n",
-            "c.py": "nothing\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern="foo")
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "foo bar baz\n",
+                "b.py": "only bar\n",
+                "c.py": "nothing\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern="foo"
+        )
         assert data["ok"] is True
         assert data["count"] == 1
         assert data["matches"][0]["file"].endswith("a.py")
 
     def test_or_group_prefilter(self, tmp_path):
         """OR-group in pattern → files containing any branch pass prefilter."""
-        _make_tree(tmp_path, {
-            "a.py": "apple\n",
-            "b.py": "banana\n",
-            "c.py": "cherry\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "apple\n",
+                "b.py": "banana\n",
+                "c.py": "cherry\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -745,21 +857,29 @@ class TestPrefilterNeedles:
 
     def test_no_prefilter_pattern(self, tmp_path):
         """Pattern with no literal needles (e.g. \\d+) has no prefilter."""
-        _make_tree(tmp_path, {
-            "a.py": "123\n",
-            "b.py": "abc\n",
-        })
-        data = _call(with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\d+")
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "123\n",
+                "b.py": "abc\n",
+            },
+        )
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(tmp_path), pattern=r"\d+"
+        )
         assert data["ok"] is True
         assert data["count"] == 1
         assert data["matches"][0]["file"].endswith("a.py")
 
     def test_prefilter_case_insensitive(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "NEEDLE found\n",
-            "b.py": "needle found\n",
-            "c.py": "no match\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "NEEDLE found\n",
+                "b.py": "needle found\n",
+                "c.py": "no match\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -771,10 +891,13 @@ class TestPrefilterNeedles:
         assert data["case_insensitive"] is True
 
     def test_prefilter_case_sensitive(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "NEEDLE\n",
-            "b.py": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "NEEDLE\n",
+                "b.py": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -845,6 +968,7 @@ class TestPrefilterNeedles:
 # 8. Error envelopes
 # ------------------------------------------------------------------
 
+
 class TestErrorEnvelopes:
     def test_path_not_found(self, tmp_path):
         data = _call(
@@ -894,7 +1018,10 @@ class TestErrorEnvelopes:
         assert data["ok"] is False
         assert data["error"]["field"] == "pattern"
 
-    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="FIFO в файловой системе есть только в POSIX")
+    @pytest.mark.skipif(
+        not hasattr(os, "mkfifo"),
+        reason="FIFO в файловой системе есть только в POSIX",
+    )
     def test_path_is_neither_file_nor_dir(self, tmp_path):
         fifo = tmp_path / "pipe"
         os.mkfifo(str(fifo))
@@ -905,7 +1032,9 @@ class TestErrorEnvelopes:
     def test_bad_regex(self, tmp_path):
         f = tmp_path / "t.txt"
         f.write_text("hello\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern=r"[unclosed")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern=r"[unclosed"
+        )
         assert data["ok"] is False
         assert data["error"]["type"] == "invalid_argument"
         assert data["error"]["field"] == "pattern"
@@ -937,13 +1066,17 @@ class TestErrorEnvelopes:
 # exclude_dirs (call-time)
 # ------------------------------------------------------------------
 
+
 class TestExcludeDirsArg:
     def test_exclude_dirs_skips_subtree(self, tmp_path):
-        _make_tree(tmp_path, {
-            "keep/a.py": "target\n",
-            "skip/b.py": "target\n",
-            "skip/nested/c.py": "target\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "keep/a.py": "target\n",
+                "skip/b.py": "target\n",
+                "skip/nested/c.py": "target\n",
+            },
+        )
         skip = str(tmp_path / "skip")
         data = _call(
             with_local_ctx(FindInFiles),
@@ -1023,13 +1156,17 @@ class TestExcludeDirsArg:
 # 9. Case-insensitive in directory mode
 # ------------------------------------------------------------------
 
+
 class TestCaseInsensitiveDirectory:
     def test_ci_dir_match(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "Hello World\n",
-            "b.py": "HELLO there\n",
-            "c.py": "hello\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "Hello World\n",
+                "b.py": "HELLO there\n",
+                "c.py": "hello\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1041,10 +1178,13 @@ class TestCaseInsensitiveDirectory:
         assert data["case_insensitive"] is True
 
     def test_cs_dir_match(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "Hello\n",
-            "b.py": "hello\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "Hello\n",
+                "b.py": "hello\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1057,10 +1197,13 @@ class TestCaseInsensitiveDirectory:
         assert data["case_insensitive"] is False
 
     def test_ci_from_inline_flag_dir(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "Hello\n",
-            "b.py": "hello\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "Hello\n",
+                "b.py": "hello\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1075,13 +1218,17 @@ class TestCaseInsensitiveDirectory:
 # 10. file_pattern edge cases
 # ------------------------------------------------------------------
 
+
 class TestFilePatternEdge:
     def test_file_pattern_py_only(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "needle\n",
-            "b.txt": "needle\n",
-            "c.md": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "needle\n",
+                "b.txt": "needle\n",
+                "c.md": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1094,11 +1241,14 @@ class TestFilePatternEdge:
         assert data["matches"][0]["file"].endswith("a.py")
 
     def test_file_pattern_txt_only(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "needle\n",
-            "b.txt": "needle\n",
-            "c.md": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "needle\n",
+                "b.txt": "needle\n",
+                "c.md": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1110,10 +1260,13 @@ class TestFilePatternEdge:
         assert data["matches"][0]["file"].endswith("b.txt")
 
     def test_file_pattern_no_match(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "needle\n",
-            "b.txt": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "needle\n",
+                "b.txt": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1126,11 +1279,14 @@ class TestFilePatternEdge:
         assert data["file_pattern"] == "*.rs"
 
     def test_file_pattern_in_subdirs(self, tmp_path):
-        _make_tree(tmp_path, {
-            "src/a.py": "needle\n",
-            "src/b.txt": "needle\n",
-            "tests/c.py": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "src/a.py": "needle\n",
+                "src/b.txt": "needle\n",
+                "tests/c.py": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1142,12 +1298,15 @@ class TestFilePatternEdge:
 
     def test_file_pattern_basename_star_is_recursive(self, tmp_path):
         """Basename-only '*.py' matches at any depth (parity with name-locate)."""
-        _make_tree(tmp_path, {
-            "root.py": "needle\n",
-            "src/a.py": "needle\n",
-            "src/deep/b.py": "needle\n",
-            "src/a.txt": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "root.py": "needle\n",
+                "src/a.py": "needle\n",
+                "src/deep/b.py": "needle\n",
+                "src/a.txt": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1161,11 +1320,14 @@ class TestFilePatternEdge:
 
     def test_file_pattern_with_slash_stays_one_level(self, tmp_path):
         """Path globs with '/' keep single-segment '*' semantics."""
-        _make_tree(tmp_path, {
-            "src/a.py": "needle\n",
-            "src/deep/b.py": "needle\n",
-            "other/c.py": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "src/a.py": "needle\n",
+                "src/deep/b.py": "needle\n",
+                "other/c.py": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1174,15 +1336,18 @@ class TestFilePatternEdge:
         )
         assert data["ok"] is True
         assert data["count"] == 1
-        assert data["matches"][0]["file"].endswith("src/a.py") or data["matches"][0][
-            "file"
-        ].endswith("src\\a.py")
+        assert data["matches"][0]["file"].endswith("src/a.py") or data[
+            "matches"
+        ][0]["file"].endswith("src\\a.py")
 
     def test_file_pattern_all_files(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "needle\n",
-            "b.txt": "needle\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "needle\n",
+                "b.txt": "needle\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1206,11 +1371,14 @@ class TestFilePatternEdge:
 # 11. Match format — line / end_line / line_content / context
 # ------------------------------------------------------------------
 
+
 class TestMatchFormat:
     def test_match_has_required_fields(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("line1\nneedle\nline3\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["count"] == 1
         m = data["matches"][0]
         assert "file" in m
@@ -1222,7 +1390,9 @@ class TestMatchFormat:
     def test_line_content_single_line(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("alpha\nneedle here\nbeta\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         assert m["line"] == 2
         assert m["end_line"] == 2
@@ -1240,7 +1410,9 @@ class TestMatchFormat:
         long_line = "needle " + ("y" * 600)
         f = tmp_path / "t.py"
         f.write_text(long_line + "\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         assert m["line_content"].startswith("needle ")
         assert m["line_content"].endswith(
@@ -1253,7 +1425,9 @@ class TestMatchFormat:
         long_line = ("x" * 600) + "needle" + ("y" * 80)
         f = tmp_path / "t.py"
         f.write_text(long_line + "\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         lc = m["line_content"]
         assert "needle" in lc
@@ -1268,12 +1442,16 @@ class TestMatchFormat:
         long_line = ("a" * 700) + "TAILMATCH"
         f = tmp_path / "t.py"
         f.write_text(long_line + "\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="TAILMATCH")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="TAILMATCH"
+        )
         lc = data["matches"][0]["line_content"]
         assert lc.startswith("...")
         assert "TAILMATCH" in lc
         # Match at EOL → no trailing "..." before the total marker.
-        assert lc.endswith(f"TAILMATCH[line_truncated: total {len(long_line)} chars]")
+        assert lc.endswith(
+            f"TAILMATCH[line_truncated: total {len(long_line)} chars]"
+        )
 
     def test_multiline_match_line_content_is_start_line_only(self, tmp_path):
         f = tmp_path / "t.md"
@@ -1306,7 +1484,9 @@ class TestMatchFormat:
     def test_context_surrounds_match(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("l1\nl2\nl3\nneedle\nl5\nl6\nl7\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         m = data["matches"][0]
         assert "context" in m
         assert isinstance(m["context"], str)
@@ -1315,20 +1495,26 @@ class TestMatchFormat:
     def test_multiple_matches_line_numbers(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("a\nneedle\nb\nneedle\nc\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["count"] == 2
         assert [m["line"] for m in data["matches"]] == [2, 4]
 
     def test_match_at_file_start(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("needle\nline2\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["matches"][0]["line"] == 1
 
     def test_match_at_file_end(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("line1\nneedle\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="needle")
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="needle"
+        )
         assert data["matches"][0]["line"] == 2
 
 
@@ -1336,11 +1522,14 @@ class TestMatchFormat:
 # 12. Slim limits echo
 # ------------------------------------------------------------------
 
+
 class TestSlimLimits:
     def test_quiet_scan_omits_limits(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("x\n", encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=50)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=50
+        )
         assert data["ok"] is True
         assert "limit_requested" not in data
         assert "limit_eff" not in data
@@ -1349,7 +1538,9 @@ class TestSlimLimits:
     def test_match_limit_has_limit_eff_only(self, tmp_path):
         f = tmp_path / "t.py"
         f.write_text("x\n" * 20, encoding="utf-8")
-        data = _call(with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=5)
+        data = _call(
+            with_local_ctx(FindInFiles), path=str(f), pattern="x", limit=5
+        )
         assert data["stop_reason"] == "match_limit"
         assert data["limit_eff"] == 5
         assert "limit_requested" not in data
@@ -1359,6 +1550,7 @@ class TestSlimLimits:
 # ------------------------------------------------------------------
 # query_mode: text vs python-re vs python-re-dotall
 # ------------------------------------------------------------------
+
 
 class TestQueryMode:
     def test_text_matches_parens_literally(self, tmp_path):
@@ -1446,10 +1638,7 @@ class TestQueryMode:
         """Omit query_mode → python-re (regex | / groups work)."""
         f = tmp_path / "harbor.py"
         f.write_text(
-            "def is_hidden(path):\n"
-            "    return False\n"
-            "def iter_walk(root):\n"
-            "    yield root\n",
+            "def is_hidden(path):\n    return False\ndef iter_walk(root):\n    yield root\n",
             encoding="utf-8",
         )
         data = _call(
@@ -1508,11 +1697,14 @@ class TestQueryMode:
 
     def test_slim_payload_default(self, tmp_path):
         """Default: no debug/verbose; heavy fields not top-level."""
-        _make_tree(tmp_path, {
-            "a.py": "target line\n",
-            "b.py": "nothing\n",
-            "__pycache__/x.pyc": b"\x00\x01",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "target line\n",
+                "b.py": "nothing\n",
+                "__pycache__/x.pyc": b"\x00\x01",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),
@@ -1528,11 +1720,14 @@ class TestQueryMode:
         _assert_slim_success_keys(data)
 
     def test_show_excluded_dirs_opt_in(self, tmp_path):
-        _make_tree(tmp_path, {
-            "a.py": "target\n",
-            "venv/x.py": "target\n",
-            "__pycache__/y.py": "target\n",
-        })
+        _make_tree(
+            tmp_path,
+            {
+                "a.py": "target\n",
+                "venv/x.py": "target\n",
+                "__pycache__/y.py": "target\n",
+            },
+        )
         data = _call(
             with_local_ctx(FindInFiles),
             path=str(tmp_path),

@@ -1,6 +1,3 @@
-import pytest
-
-
 def test_mcp_server_config_accepts_headers():
     from gc_core.config_modules.mcp import McpServerConfig
 
@@ -107,4 +104,3 @@ def test_stream_http_client_merges_custom_headers(monkeypatch):
     assert captured["headers"] is not None
     assert captured["headers"]["Authorization"] == "Bearer CUSTOM"
     assert captured["headers"]["X-Test"] == "1"
-

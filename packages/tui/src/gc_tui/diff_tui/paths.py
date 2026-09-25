@@ -1,4 +1,5 @@
 """Канонизация путей и tracking-perimeter для Diff-TUI (cache-mode)."""
+
 from __future__ import annotations
 
 import hashlib
@@ -6,7 +7,11 @@ import os
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
-from gc_core.security.path_policy import is_within_any_root, is_within_root, normalize_path_for_policy
+from gc_core.security.path_policy import (
+    is_within_any_root,
+    is_within_root,
+    normalize_path_for_policy,
+)
 from gc_core.security.protected_paths import classify_path, protected_paths
 
 PathLike = Union[str, os.PathLike[str]]
@@ -42,7 +47,7 @@ def in_tracking_perimeter(
     try:
         target = normalize_path_for_policy(path, launch_root)
         root, extras = _normalize_roots(launch_root, extra_paths)
-    except (ValueError, FileNotFoundError, OSError):
+    except (ValueError, OSError):
         return False
     return is_within_any_root(
         target,
@@ -58,7 +63,9 @@ def is_protected_from_tracking(
     protected_extra: Sequence[str] | None = None,
 ) -> bool:
     """Agent-facing protected: operational / instructions — не трекаем."""
-    ps = protected_paths(cwd=str(launch_root), extra=list(protected_extra or ()))
+    ps = protected_paths(
+        cwd=str(launch_root), extra=list(protected_extra or ())
+    )
     cls = classify_path(path, ps)
     return cls in ("operational", "instructions")
 
@@ -72,11 +79,9 @@ def is_trackable_path(
 ) -> bool:
     if not in_tracking_perimeter(path, launch_root, extra_paths=extra_paths):
         return False
-    if is_protected_from_tracking(
+    return not is_protected_from_tracking(
         path, launch_root, protected_extra=protected_extra
-    ):
-        return False
-    return True
+    )
 
 
 def canonical_path_key(
@@ -93,7 +98,7 @@ def canonical_path_key(
     try:
         resolved = normalize_path_for_policy(path, launch_root)
         root, extras = _normalize_roots(launch_root, extra_paths)
-    except (ValueError, FileNotFoundError, OSError):
+    except (ValueError, OSError):
         return None
 
     ci = _case_insensitive()

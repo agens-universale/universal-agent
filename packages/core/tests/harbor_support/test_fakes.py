@@ -12,4 +12,6 @@ async def test_fake_backend_roundtrip():
 
 
 def test_strip_path_fields():
-    assert strip_path_fields({"path": "/x", "ok": True}, "path") == {"ok": True}
+    assert strip_path_fields({"path": "/x", "ok": True}, "path") == {
+        "ok": True
+    }

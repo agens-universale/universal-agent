@@ -15,17 +15,19 @@
 Прогрев идёт параллельно MCP-дискавери, которая и так занимает 866–1405 мс,
 поэтому на время сборки контекста он не влияет.
 """
+
 import asyncio
 import time
 
 import pytest
-
 from gc_core.backends import capabilities as capabilities
 from gc_core.backends.local import LocalFsBackend
 
 _CACHES = (
-    "_has_find_cache", "_has_grep_cache",
-    "_grep_exclude_dir_cache", "_grep_include_cache",
+    "_has_find_cache",
+    "_has_grep_cache",
+    "_grep_exclude_dir_cache",
+    "_grep_include_cache",
 )
 
 
@@ -96,8 +98,7 @@ async def test_awarm_capabilities_does_not_block_the_loop():
 
         assert backend._has_grep_cache is not None
         assert elapsed >= probe_delay, (
-            f"проверка пустая: прогрев занял {elapsed:.3f} с, то есть подменённые "
-            "пробы не звались"
+            f"проверка пустая: прогрев занял {elapsed:.3f} с, то есть подменённые пробы не звались"
         )
         assert gaps, "пульс не тикал — замер пуст"
         assert max(gaps) < 0.15, (

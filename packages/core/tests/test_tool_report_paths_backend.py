@@ -19,16 +19,28 @@ class FakeSandbox:
 
 
 def _ws() -> ExecutionWorkspace:
-    return ExecutionWorkspace(root="/testbed", backend=FakeSandbox(), shell="sh", os_name="Linux", root_writable=True)
+    return ExecutionWorkspace(
+        root="/testbed",
+        backend=FakeSandbox(),
+        shell="sh",
+        os_name="Linux",
+        root_writable=True,
+    )
 
 
 def test_relative_path_resolves_against_workspace_root():
     assert tool_report_abspath(".", workspace=_ws()) == "/testbed"
-    assert tool_report_abspath("pkg/mod.py", workspace=_ws()) == "/testbed/pkg/mod.py"
+    assert (
+        tool_report_abspath("pkg/mod.py", workspace=_ws())
+        == "/testbed/pkg/mod.py"
+    )
 
 
 def test_absolute_path_is_kept_and_normalized():
-    assert tool_report_abspath("/testbed/./pkg/../mod.py", workspace=_ws()) == "/testbed/mod.py"
+    assert (
+        tool_report_abspath("/testbed/./pkg/../mod.py", workspace=_ws())
+        == "/testbed/mod.py"
+    )
 
 
 def test_without_workspace_uses_host_abspath(tmp_path, monkeypatch):
@@ -42,4 +54,7 @@ def test_none_and_empty_pass_through():
 
 
 def test_backend_compat_shim_still_works():
-    assert tool_report_abspath("pkg/mod.py", backend=FakeSandbox()) == "/testbed/pkg/mod.py"
+    assert (
+        tool_report_abspath("pkg/mod.py", backend=FakeSandbox())
+        == "/testbed/pkg/mod.py"
+    )

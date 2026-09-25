@@ -8,15 +8,15 @@
 - тариф выключен / не задан → только токены, без цены (как в консольном отчёте);
 - итога запроса ещё нет (первый ход в процессе) → только сегмент сессии.
 """
+
 from __future__ import annotations
 
 from typing import Any, Optional
 
-from rich.text import Text
-
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.cost import CostReport, compute_cost
 from gc_core.usage.report import format_money, format_tokens
+from rich.text import Text
 
 from gc_tui.palette import DIM, INK
 
@@ -43,8 +43,12 @@ def _cost_display(report: CostReport, *, compact: bool) -> Optional[str]:
     """
     if not report.has_cost:
         return None
-    has_provider = any(p.source == "provider" for c in report.categories for p in c.parts)
-    has_tariff = any(p.source == "tariff" for c in report.categories for p in c.parts)
+    has_provider = any(
+        p.source == "provider" for c in report.categories for p in c.parts
+    )
+    has_tariff = any(
+        p.source == "tariff" for c in report.categories for p in c.parts
+    )
     marks = ""
     if has_provider and has_tariff:
         marks += "~"
@@ -57,8 +61,9 @@ def _cost_display(report: CostReport, *, compact: bool) -> Optional[str]:
     return "+".join(chunks) + marks
 
 
-def format_nonzero_cost(meta: Any, pricing: Any, model: str | None,
-                        endpoint_url: str | None = None) -> Optional[str]:
+def format_nonzero_cost(
+    meta: Any, pricing: Any, model: str | None, endpoint_url: str | None = None
+) -> Optional[str]:
     """Стоимость сессии («35.1 ₽», «10.5 $~») или None, если считать нечего / 0.
 
     Для списка /sessions: показываем даже крошечную ненулевую сумму (как
@@ -83,8 +88,13 @@ def _segment_from_report(label: str, report: CostReport) -> tuple[str, str]:
     return (label, f"{tokens}/{cost}" if cost else tokens)
 
 
-def _segment(label: str, meta: Any, pricing: Any, model: str | None,
-             endpoint_url: str | None = None) -> Optional[tuple[str, str]]:
+def _segment(
+    label: str,
+    meta: Any,
+    pricing: Any,
+    model: str | None,
+    endpoint_url: str | None = None,
+) -> Optional[tuple[str, str]]:
     """(label, «<tok>» либо «<tok>/<cost>») или None, если в meta нет вызовов."""
     account = UsageAccount.from_meta(meta)
     if account.is_empty():
@@ -104,8 +114,13 @@ def _to_text(seg: tuple[str, str] | None) -> Text | None:
     return t
 
 
-def _segment_text(label: str, meta: Any, pricing: Any, model: str | None,
-                   endpoint_url: str | None = None) -> Text | None:
+def _segment_text(
+    label: str,
+    meta: Any,
+    pricing: Any,
+    model: str | None,
+    endpoint_url: str | None = None,
+) -> Text | None:
     """Rich-Text одного сегмента «<label> <tok>[/<cost>]» или None."""
     return _to_text(_segment(label, meta, pricing, model, endpoint_url))
 
@@ -136,9 +151,13 @@ def usage_segments(
     session_account = UsageAccount.from_meta(session_meta)
     if session_account.is_empty():
         return (None, None)
-    session_report: CostReport = compute_cost(session_account, pricing, model, endpoint_url)
+    session_report: CostReport = compute_cost(
+        session_account, pricing, model, endpoint_url
+    )
     session = _to_text(_segment_from_report("сессия", session_report))
-    request = _segment_text("запрос", request_meta, pricing, model, endpoint_url)
+    request = _segment_text(
+        "запрос", request_meta, pricing, model, endpoint_url
+    )
     return (request, session)
 
 
@@ -157,7 +176,11 @@ def compose_adaptive_footer_right(
     деградируем — по решению вёрстки."""
     usage = [s for s in (request_seg, session_seg) if s is not None]
     single = _join([head, *usage], sep)
-    if single.cell_len <= available_width or request_seg is None or session_seg is None:
+    if (
+        single.cell_len <= available_width
+        or request_seg is None
+        or session_seg is None
+    ):
         return single
     out = Text()
     out.append_text(head)
@@ -174,8 +197,9 @@ def render_usage_meter(
     endpoint_url: str | None = None,
 ) -> Text | None:
     """Rich-Text «запрос …/… · сессия …/…» одной строкой или None (совместимость)."""
-    request, session = usage_segments(session_meta, last_run_meta, pricing, model,
-                                      endpoint_url)
+    request, session = usage_segments(
+        session_meta, last_run_meta, pricing, model, endpoint_url
+    )
     if session is None:
         return None
     return _join([s for s in (request, session) if s is not None])

@@ -63,12 +63,12 @@ PR #92 добавил в ответ финализатора поле ``task``, 
 фабрика ``get_async_client``, у синхронной — ``_NO_NETRC_SESSION``
 (``ScriptedBackend`` держит совместимый с ``requests`` ``post`` ровно для этого).
 """
+
 import json
 import re
 from pathlib import Path
 
 import pytest
-
 from toggle_matrix import ALL_CASES, run_case
 
 #: Эталон снят на origin/develop (e66a1e90) тем же стендом.
@@ -79,7 +79,9 @@ from toggle_matrix import ALL_CASES, run_case
 #: ЧУЖУЮ правку и краснела 144 случаями. Эталон обязан идти с той ветки, с
 #: которой сравниваем, иначе гейт меряет не то, что заявляет.
 REFERENCE = (
-    Path(__file__).parent / "fixtures" / "toggle_matrix_reference_e66a1e90.json"
+    Path(__file__).parent
+    / "fixtures"
+    / "toggle_matrix_reference_e66a1e90.json"
 )
 
 #: Поля, по которым идёт сверка.
@@ -118,15 +120,18 @@ def test_reference_covers_every_case(reference):
 
 
 @pytest.mark.parametrize("case", ALL_CASES, ids=lambda c: c.id)
-async def test_toggle_matches_pre_async(case, reference, tmp_path, monkeypatch):
+async def test_toggle_matches_pre_async(
+    case, reference, tmp_path, monkeypatch
+):
     """Один прогон на положение переключателей — против до-async эталона."""
     expected = reference[case.id]
     actual = await run_case(case, tmp_path, monkeypatch)
 
     for field in COMPARED:
-        assert _normalize(actual.get(field)) == _normalize(expected.get(field)), (
-            f"{case.id}: поле {field!r} разошлось с до-async прогоном"
-            + (f"\n  ({case.note})" if case.note else "")
+        assert _normalize(actual.get(field)) == _normalize(
+            expected.get(field)
+        ), f"{case.id}: поле {field!r} разошлось с до-async прогоном" + (
+            f"\n  ({case.note})" if case.note else ""
         )
 
 
@@ -142,6 +147,7 @@ def test_summary_cases_actually_compact(reference):
     work, закрытие по output») законно оставляет после сводки work и finish,
     и точное число перестало быть признаком компакции.
     """
+
     def _has_summary(row) -> bool:
         return "dialog_summary" in json.dumps(row["dump"], ensure_ascii=False)
 
@@ -152,8 +158,7 @@ def test_summary_cases_actually_compact(reference):
     baseline = len(reference["summary/trigger_off"]["dump"])
     for cid in compacted:
         assert len(reference[cid]["dump"]) < baseline, (
-            f"{cid}: сводка есть, а история не короче непожатой "
-            f"({len(reference[cid]['dump'])} против {baseline})"
+            f"{cid}: сводка есть, а история не короче непожатой ({len(reference[cid]['dump'])} против {baseline})"
         )
 
 
@@ -167,9 +172,8 @@ def test_every_live_schema_key_is_covered_or_explained(reference):
     «Не покрыт» и «покрывать нечем» — разные вещи, и различать их обязан
     ``NOT_IN_MATRIX``, а не память того, кто однажды считал.
     """
-    from pydantic import BaseModel
-
     from gc_core.config_modules.root import AppConfig
+    from pydantic import BaseModel
     from test_config_toggles_have_readers import KNOWN_UNREAD
     from toggle_matrix import NOT_IN_MATRIX
 
@@ -191,7 +195,8 @@ def test_every_live_schema_key_is_covered_or_explained(reference):
     }
     touched = {p.split(".")[-1] for case in ALL_CASES for p in case.overrides}
     gap = [
-        leaf for leaf in leaves(AppConfig)
+        leaf
+        for leaf in leaves(AppConfig)
         if leaf.split(".")[-1] not in touched
         and ALIAS.get(leaf, "") not in touched
         and leaf not in KNOWN_UNREAD

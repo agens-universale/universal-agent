@@ -1,6 +1,7 @@
 """areset_stale_summarizing_flag: протухший runtime.summarizing снимается на старте run'а."""
-from gc_core.thread_store import save_thread_meta, load_thread_meta
+
 from gc_core.run_summary_coordinator import areset_stale_summarizing_flag
+from gc_core.thread_store import load_thread_meta, save_thread_meta
 
 
 class _StubSession:
@@ -49,7 +50,9 @@ async def test_reset_noop_when_flag_absent(tmp_path):
     save_thread_meta(str(tmp_path), "cli", "t1", {"messages_count": 1})
     ts = _StubSession(str(tmp_path), {"messages_count": 1})
     await areset_stale_summarizing_flag(ts)
-    assert load_thread_meta(str(tmp_path), "cli", "t1").get("messages_count") == 1
+    assert (
+        load_thread_meta(str(tmp_path), "cli", "t1").get("messages_count") == 1
+    )
 
 
 async def test_reset_none_session_is_noop():

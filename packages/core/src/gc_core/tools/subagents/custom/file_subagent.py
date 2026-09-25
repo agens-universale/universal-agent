@@ -9,12 +9,18 @@ API адаптера собран на классе + ``BoundFileSubagent``: sch
 policy, bind, create, instance methods. Registry только compose'ит через
 ``FileDefinedSubagent.bound(definition)``.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict
 
-from gc_core.constants.tool_names import FINISH_TOOL_NAME, READ_STORED_TOOL_OUTPUT_NAME, SESSION_MEMORY_TOOL_NAME, SESSION_TODO_TOOL_NAME
+from gc_core.constants.tool_names import (
+    FINISH_TOOL_NAME,
+    READ_STORED_TOOL_OUTPUT_NAME,
+    SESSION_MEMORY_TOOL_NAME,
+    SESSION_TODO_TOOL_NAME,
+)
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
 
@@ -46,20 +52,24 @@ class FileDefinedSubagent(AbstractSubagent):
     # Все отказы выглядят как «модель тупит», поэтому ядро не отдаётся на усмотрение
     # файла вовсе — это не запрет, а гарантия.
     # Канон здесь, не в file_definitions: это runtime policy сдачи/stored output/памяти.
-    REQUIRED_TOOL_NAMES = frozenset({
-        FINISH_TOOL_NAME,
-        READ_STORED_TOOL_OUTPUT_NAME,
-        SESSION_MEMORY_TOOL_NAME,
-        SESSION_TODO_TOOL_NAME,
-    })
+    REQUIRED_TOOL_NAMES = frozenset(
+        {
+            FINISH_TOOL_NAME,
+            READ_STORED_TOOL_OUTPUT_NAME,
+            SESSION_MEMORY_TOOL_NAME,
+            SESSION_TODO_TOOL_NAME,
+        }
+    )
 
-    def __init__(self, definition: SubagentDefinition, task: str, reason: str = "") -> None:
+    def __init__(
+        self, definition: SubagentDefinition, task: str, reason: str = ""
+    ) -> None:
         self.definition = definition
         self.task = task
         self.reason = reason
 
     @classmethod
-    def bound(cls, definition: SubagentDefinition) -> "BoundFileSubagent":
+    def bound(cls, definition: SubagentDefinition) -> BoundFileSubagent:
         """Definition, замкнутое на контракт раннера/реестра.
 
         Раннер использует только ``create_instance``; registry — ещё
@@ -70,7 +80,9 @@ class FileDefinedSubagent(AbstractSubagent):
         return BoundFileSubagent(definition)
 
     @classmethod
-    def required_tools_banned(cls, definition: SubagentDefinition) -> list[str]:
+    def required_tools_banned(
+        cls, definition: SubagentDefinition
+    ) -> list[str]:
         """Служебные тулы, которые файл пытается запретить через ``stop_tools``.
 
         Запрет не исполняется (ядро выдаётся всегда), но и молчать нельзя: оператор
@@ -123,7 +135,7 @@ class FileDefinedSubagent(AbstractSubagent):
         task: str = "",
         reason: str = "",
         **_kwargs: Any,
-    ) -> "FileDefinedSubagent":
+    ) -> FileDefinedSubagent:
         # Прочие kwargs (model, config_dict, runtime_notices_enabled) раннер
         # передаёт всем сабагентам одинаково; файловому они не нужны — модель
         # наследуется от родителя, а LLM-вызова при создании у него нет.
@@ -143,13 +155,14 @@ class FileDefinedSubagent(AbstractSubagent):
         return self.definition.name
 
     @classmethod
-    def get_agent_specification(cls) -> Dict[str, Any]:  # pragma: no cover - см. ниже
+    def get_agent_specification(
+        cls,
+    ) -> Dict[str, Any]:  # pragma: no cover - см. ниже
         # Спека зависит от определения, а не от класса. Основной production-путь —
         # BoundFileSubagent.get_agent_specification() через bound(). Classmethod
         # оставлен только ради контракта AbstractSubagent.
         raise NotImplementedError(
-            "FileDefinedSubagent is data-driven; use "
-            "FileDefinedSubagent.bound(definition).get_agent_specification()"
+            "FileDefinedSubagent is data-driven; use FileDefinedSubagent.bound(definition).get_agent_specification()"
         )
 
 
@@ -183,6 +196,6 @@ REQUIRED_TOOL_NAMES = FileDefinedSubagent.REQUIRED_TOOL_NAMES
 
 __all__ = [
     "REQUIRED_TOOL_NAMES",
-    "FileDefinedSubagent",
     "BoundFileSubagent",
+    "FileDefinedSubagent",
 ]

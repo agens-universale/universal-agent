@@ -3,21 +3,36 @@ import pytest
 
 def _screen(**over):
     from gc_tui.screens.onboarding import OnboardingScreen
-    cfg = {"completions_url": "http://your-backend:PORT/v1/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-           "model": "<ВПИШИТЕ_МОДЕЛЬ>"}
-    kw = dict(config=cfg, config_path="cfg.yml", review_all=False,
-              on_commit=lambda: None, fetch=lambda *a, **k: None,
-              mcp=_FakeMcp())
+
+    cfg = {
+        "completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
+        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+    }
+    kw = dict(
+        config=cfg,
+        config_path="cfg.yml",
+        review_all=False,
+        on_commit=lambda: None,
+        fetch=lambda *a, **k: None,
+        mcp=_FakeMcp(),
+    )
     kw.update(over)
     return OnboardingScreen(**kw)
 
 
 class _FakeMcp:
-    def installable_names(self): return ["duckduckgo", "office"]
-    def wired_names(self): return []
-    def descriptions(self): return {}
-    def install(self, name=None): return 0
+    def installable_names(self):
+        return ["duckduckgo", "office"]
+
+    def wired_names(self):
+        return []
+
+    def descriptions(self):
+        return {}
+
+    def install(self, name=None):
+        return 0
 
 
 def _write_conn_cfg(tmp_path, *, url=None, auth=None, proxy=None, model=None):
@@ -26,8 +41,10 @@ def _write_conn_cfg(tmp_path, *, url=None, auth=None, proxy=None, model=None):
     Шаг «Подключение» берёт поля ИЗ ФАЙЛА (сырыми, без резолва ${ENV:...}) — на
     мок-пути ссылку было бы не увидеть."""
     from pathlib import Path
+
     from gc_core import onboarding_config_writer as w
     from gc_core.config import _default_config_path, validate_config_text
+
     template = Path(_default_config_path())
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
@@ -41,7 +58,12 @@ def _write_conn_cfg(tmp_path, *, url=None, auth=None, proxy=None, model=None):
     if model is not None:
         values["agent.model"] = model
     if values:
-        w.write_values(cfg_path, values, template_path=template, validate=validate_config_text)
+        w.write_values(
+            cfg_path,
+            values,
+            template_path=template,
+            validate=validate_config_text,
+        )
     return cfg_path
 
 
@@ -49,15 +71,21 @@ def _resolved_conn_cfg(cfg_path):
     """Конфиг, как его видит приложение: файл + резолв ${ENV:VAR} (тот же
     resolve_env_placeholders, что и config.load_config)."""
     import yaml
-    from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+    from gc_core.config_modules.env_interpolation import (
+        resolve_env_placeholders,
+    )
+
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     backend = raw.get("backend") or {}
-    return resolve_env_placeholders({
-        "completions_url": backend.get("completions_url"),
-        "chat_completion_headers": backend.get("chat_completion_headers") or {},
-        "proxy": backend.get("proxy"),
-        "model": (raw.get("agent") or {}).get("model"),
-    })
+    return resolve_env_placeholders(
+        {
+            "completions_url": backend.get("completions_url"),
+            "chat_completion_headers": backend.get("chat_completion_headers")
+            or {},
+            "proxy": backend.get("proxy"),
+            "model": (raw.get("agent") or {}).get("model"),
+        }
+    )
 
 
 def _profiles_cfg(tmp_path, *names, active=None):
@@ -69,13 +97,16 @@ def _profiles_cfg(tmp_path, *names, active=None):
     from gc_core import onboarding_config_writer as w
     from gc_core.config import validate_config_text
     from gc_core.config_modules.profiles import PROFILE_SKELETON
+
     cfg_path = _write_conn_cfg(tmp_path)
     root = tmp_path / "profiles"
     root.mkdir(exist_ok=True)
     for name in names:
         (root / f"{name}.yml").write_text(PROFILE_SKELETON, encoding="utf-8")
     if active is not None:
-        w.write_values(cfg_path, {"profile": active}, validate=validate_config_text)
+        w.write_values(
+            cfg_path, {"profile": active}, validate=validate_config_text
+        )
     return cfg_path
 
 
@@ -85,11 +116,29 @@ def test_wizard_steps_are_named_and_static():
     «Голосовой ввод» стоит между MCP и подтверждением — тем же местом, что и в
     install.html, readme и шапке `/settings`: порядок шагов человек читает раньше,
     чем видит, и расходиться эти два описания не имеют права."""
-    from gc_tui.screens.onboarding import (_BASE_STEPS, STEP_CONFIRM, STEP_CONNECTION,
-                                        STEP_LEVELS, STEP_MCP, STEP_MODEL, STEP_VOICE)
+    from gc_tui.screens.onboarding import (
+        _BASE_STEPS,
+        STEP_CONFIRM,
+        STEP_CONNECTION,
+        STEP_LEVELS,
+        STEP_MCP,
+        STEP_MODEL,
+        STEP_VOICE,
+    )
+
     scr = _screen()
-    assert scr._steps == _BASE_STEPS == (STEP_CONNECTION, STEP_MODEL, STEP_LEVELS,
-                                         STEP_MCP, STEP_VOICE, STEP_CONFIRM)
+    assert (
+        scr._steps
+        == _BASE_STEPS
+        == (
+            STEP_CONNECTION,
+            STEP_MODEL,
+            STEP_LEVELS,
+            STEP_MCP,
+            STEP_VOICE,
+            STEP_CONFIRM,
+        )
+    )
 
 
 def test_header_counter_names_the_position_and_the_finale():
@@ -98,14 +147,23 @@ def test_header_counter_names_the_position_and_the_finale():
     финале. Сверяется весь список заголовков разом — сдвиг на единицу, лишний
     шаг в знаменателе или счётчик на финале ломают его."""
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     scr = _screen()
     titles = []
     for position in range(len(scr._steps)):
         scr._step = position
         titles.append(scr._title_text())
-    assert titles == ["Настройка · 1/5", "Настройка · 2/5", "Настройка · 3/5",
-                      "Настройка · 4/5", "Настройка · 5/5", "Настройка · подтверждение"]
-    assert scr._steps[len(titles) - 1] == STEP_CONFIRM   # без счётчика — именно финал
+    assert titles == [
+        "Настройка · 1/5",
+        "Настройка · 2/5",
+        "Настройка · 3/5",
+        "Настройка · 4/5",
+        "Настройка · 5/5",
+        "Настройка · подтверждение",
+    ]
+    assert (
+        scr._steps[len(titles) - 1] == STEP_CONFIRM
+    )  # без счётчика — именно финал
 
 
 def test_wizard_steps_are_static_with_profiles_on_disk(tmp_path, monkeypatch):
@@ -113,6 +171,7 @@ def test_wizard_steps_are_static_with_profiles_on_disk(tmp_path, monkeypatch):
     запуска: шага «Профили» нет, дискавери нет вовсе (спека §2, §9)."""
     monkeypatch.chdir(tmp_path)
     from gc_tui.screens.onboarding import _BASE_STEPS
+
     _cfg_path, scr = _active_profile_screen(tmp_path)
     assert scr._steps == _BASE_STEPS
 
@@ -122,6 +181,7 @@ def test_wizard_module_has_no_profiles_step_left():
     мёртвая ветка тихо переживёт правку (спека §8)."""
     from gc_core import onboarding
     from gc_tui.screens import onboarding as screen_mod
+
     assert not hasattr(screen_mod, "STEP_PROFILES")
     assert not hasattr(onboarding, "discover_profiles_for_onboarding")
 
@@ -133,6 +193,7 @@ async def test_connection_step_mounts_one_editor_with_three_fields(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -152,12 +213,20 @@ async def test_connection_step_walks_three_fields_with_arrows(tmp_path):
     не забирал стрелки себе."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    cfg_path = _write_conn_cfg(tmp_path, url="https://custom.example/v1/chat/completions")
+
+    cfg_path = _write_conn_cfg(
+        tmp_path, url="https://custom.example/v1/chat/completions"
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config_path=str(cfg_path),
-                      config={"completions_url": "https://custom.example/v1/chat/completions",
-                              "chat_completion_headers": {}, "model": ""})
+        scr = _screen(
+            config_path=str(cfg_path),
+            config={
+                "completions_url": "https://custom.example/v1/chat/completions",
+                "chat_completion_headers": {},
+                "model": "",
+            },
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         seen = []
@@ -171,7 +240,7 @@ async def test_connection_step_walks_three_fields_with_arrows(tmp_path):
 def test_summary_hides_template_sentinels():
     """Шаблонные заглушки конфига (URL/MODEL_SENTINEL) в верхней сводке — прочерк,
     а не «your-backend:PORT» / «<ВПИШИТЕ_МОДЕЛЬ>» как заданное значение."""
-    scr = _screen()                       # config = все три ..._SENTINEL
+    scr = _screen()  # config = все три ..._SENTINEL
     line = scr._summary_text()
     assert "your-backend" not in line and "ВПИШИТЕ" not in line
     assert "сервер: —" in line and "модель: —" in line
@@ -197,22 +266,27 @@ async def test_connection_address_restored_on_return(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
-        ed.escape_presets()          # список раскрыт по умолчанию на пустом поле
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
-        await pilot.press("enter")           # → шаг модели
+        ed.escape_presets()  # список раскрыт по умолчанию на пустом поле
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
+        await pilot.press("enter")  # → шаг модели
         await pilot.pause()
         assert scr._step == 1
-        await pilot.press("pageup")          # PgUp назад на подключение
+        await pilot.press("pageup")  # PgUp назад на подключение
         await pilot.pause()
         assert scr._step == 0
-        assert scr.query_one(ConnectionEditor).query_one("#conn-url", Input).value == \
-            "https://h/v1/chat/completions"
+        assert (
+            scr.query_one(ConnectionEditor).query_one("#conn-url", Input).value
+            == "https://h/v1/chat/completions"
+        )
 
 
 @pytest.mark.asyncio
@@ -224,6 +298,7 @@ async def test_connection_token_placeholder_shows_masked_on_return(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -231,7 +306,9 @@ async def test_connection_token_placeholder_shows_masked_on_return(tmp_path):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-token", Input).value = "sk-secret"
         await pilot.press("enter")
         await pilot.pause()
@@ -241,12 +318,16 @@ async def test_connection_token_placeholder_shows_masked_on_return(tmp_path):
         await pilot.pause()
         assert scr._step == 0
         tok = scr.query_one(ConnectionEditor).query_one("#conn-token", Input)
-        assert tok.value == ""                    # секрет не лежит открытым текстом
-        assert tok.placeholder == "Bearer sk-***"  # но маска намекает, что он задан
+        assert tok.value == ""  # секрет не лежит открытым текстом
+        assert (
+            tok.placeholder == "Bearer sk-***"
+        )  # но маска намекает, что он задан
 
 
 @pytest.mark.asyncio
-async def test_connection_token_not_cleared_on_revisit_without_retyping(tmp_path):
+async def test_connection_token_not_cleared_on_revisit_without_retyping(
+    tmp_path,
+):
     """Токен не трогается пустым полем при повторном проходе шага: секрет никогда
     не лежит в поле открытым текстом (см. тест выше), и если человек вернулся
     поправить адрес и пошёл дальше, не тронув токен, — он не должен потеряться."""
@@ -254,6 +335,7 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(tmp_path
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -261,30 +343,43 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(tmp_path
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-token", Input).value = "sk-secret"
-        await pilot.press("enter")             # шаг без пометки — сразу сабмит
+        await pilot.press("enter")  # шаг без пометки — сразу сабмит
         await pilot.pause()
         assert scr._values["Authorization"] == "Bearer sk-secret"
         assert scr._step == 1
-        await pilot.press("pageup")             # вернулись поправить адрес
+        await pilot.press("pageup")  # вернулись поправить адрес
         await pilot.pause()
         assert scr._step == 0
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h2/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h2/v1/chat/completions"
         # токен НЕ перепечатан — поле пустое (секрет никогда не показывается открытым текстом)
         assert ed.query_one("#conn-token", Input).value == ""
         await pilot.press("enter")
         await pilot.pause()
         assert scr._step == 1
-        assert scr._values["completions_url"] == "https://h2/v1/chat/completions"
-        assert scr._values["Authorization"] == "Bearer sk-secret"   # не стёрт пустым полем
+        assert (
+            scr._values["completions_url"] == "https://h2/v1/chat/completions"
+        )
+        assert (
+            scr._values["Authorization"] == "Bearer sk-secret"
+        )  # не стёрт пустым полем
 
 
 async def _final_blob(pilot, scr, *, mcp):
     from gc_tui.screens.onboarding import STEP_CONFIRM
-    scr._values = {"completions_url": "https://h/v1", "Authorization": "Bearer sk", "model": "m"}
+
+    scr._values = {
+        "completions_url": "https://h/v1",
+        "Authorization": "Bearer sk",
+        "model": "m",
+    }
     scr._mcp_selected = set(mcp)
     scr._goto(STEP_CONFIRM)
     await pilot.pause()
@@ -295,15 +390,18 @@ async def _final_blob(pilot, scr, *, mcp):
 async def test_final_summary_shows_mcp_row_none_selected(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
         blob = await _final_blob(pilot, scr, mcp=[])
-        assert "MCP" in blob                                 # строка MCP есть всегда
-        assert "не выбраны" in blob                          # честная фраза «не ставим»
-        assert "Установятся после подтверждения" not in blob  # но не обещаем установку
+        assert "MCP" in blob  # строка MCP есть всегда
+        assert "не выбраны" in blob  # честная фраза «не ставим»
+        assert (
+            "Установятся после подтверждения" not in blob
+        )  # но не обещаем установку
 
 
 @pytest.mark.asyncio
@@ -317,9 +415,12 @@ async def test_final_summary_hides_template_sentinels(tmp_path):
     from gc_core import onboarding
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen()          # config несёт оба сентинела, поля в этот проход не тронуты
+        scr = (
+            _screen()
+        )  # config несёт оба сентинела, поля в этот проход не тронуты
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._goto(STEP_CONFIRM)
@@ -337,16 +438,20 @@ async def test_final_summary_glyph_only_for_filled_rows(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen()                    # адрес — плейсхолдер шаблона → «—»
+        scr = _screen()  # адрес — плейсхолдер шаблона → «—»
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._values = {"model": "m"}       # …а модель в этот проход выбрана
+        scr._values = {"model": "m"}  # …а модель в этот проход выбрана
         scr._goto(STEP_CONFIRM)
         await pilot.pause()
-        lines = [ln for w in scr.query("Static.onb-dyn")
-                 for ln in str(w.render()).splitlines()]
+        lines = [
+            ln
+            for w in scr.query("Static.onb-dyn")
+            for ln in str(w.render()).splitlines()
+        ]
         addr_line = next(ln for ln in lines if "адрес:" in ln)
         model_line = next(ln for ln in lines if "модель default:" in ln)
         assert addr_line.startswith("  ") and "✓" not in addr_line
@@ -364,21 +469,33 @@ async def test_final_summary_shows_a_level_assigned_in_the_config(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
-    cfg = {"completions_url": "https://h/v1/chat/completions",
-           "chat_completion_headers": {"Authorization": "Bearer sk"}, "model": "m",
-           "models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {"light": "fast"}}
+
+    cfg = {
+        "completions_url": "https://h/v1/chat/completions",
+        "chat_completion_headers": {"Authorization": "Bearer sk"},
+        "model": "m",
+        "models": {"fast": {"model": "qwen/qwen3-8b"}},
+        "slots": {"light": "fast"},
+    }
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(config=cfg)
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert "model_light" not in scr._values   # уровень не тронут в этом прогоне
+        assert (
+            "model_light" not in scr._values
+        )  # уровень не тронут в этом прогоне
         scr._goto(STEP_CONFIRM)
         await pilot.pause()
-        lines = [ln for w in scr.query("Static.onb-dyn")
-                 for ln in str(w.render()).splitlines()]
+        lines = [
+            ln
+            for w in scr.query("Static.onb-dyn")
+            for ln in str(w.render()).splitlines()
+        ]
         light_lines = [ln for ln in lines if "модель light:" in ln]
-        assert light_lines, f"строка уровня light отсутствует в сводке: {lines}"
+        assert light_lines, (
+            f"строка уровня light отсутствует в сводке: {lines}"
+        )
         assert "qwen/qwen3-8b" in light_lines[0]
 
 
@@ -391,17 +508,23 @@ async def test_final_summary_unset_level_says_so_and_gates_the_glyph(tmp_path):
     from gc_core import onboarding_fields as _of
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen()             # реестра нет вовсе — оба уровня не заданы
+        scr = _screen()  # реестра нет вовсе — оба уровня не заданы
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._goto(STEP_CONFIRM)
         await pilot.pause()
-        lines = [ln for w in scr.query("Static.onb-dyn")
-                 for ln in str(w.render()).splitlines()]
+        lines = [
+            ln
+            for w in scr.query("Static.onb-dyn")
+            for ln in str(w.render()).splitlines()
+        ]
         light_lines = [ln for ln in lines if "модель light:" in ln]
-        assert light_lines, f"строка уровня light отсутствует в сводке: {lines}"
+        assert light_lines, (
+            f"строка уровня light отсутствует в сводке: {lines}"
+        )
         light_line = light_lines[0]
         assert _of.LEVEL_UNSET in light_line
         assert light_line.startswith("  ") and "✓" not in light_line
@@ -411,6 +534,7 @@ async def test_final_summary_unset_level_says_so_and_gates_the_glyph(tmp_path):
 async def test_final_summary_shows_mcp_when_selected(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -422,15 +546,22 @@ async def test_final_summary_shows_mcp_when_selected(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_final_summary_notice_combines_mcp_and_voice(tmp_path, monkeypatch):
+async def test_final_summary_notice_combines_mcp_and_voice(
+    tmp_path, monkeypatch
+):
     """Одна служебная строка без скобок объединяет обе части (какие применимы),
     воздух — одна пустая строка после строк сводки."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import paths as vpaths
-    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
-                        lambda: tmp_path / "voice_data" / "state.json")
+
+    monkeypatch.setattr(
+        vpaths, "voice_data_dir", lambda: tmp_path / "voice_data"
+    )
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "voice_data" / "state.json",
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -438,8 +569,9 @@ async def test_final_summary_notice_combines_mcp_and_voice(tmp_path, monkeypatch
         await pilot.pause()
         scr._voice_choice = "local"
         blob = await _final_blob(pilot, scr, mcp=["office", "ddgs"])
-        assert ("Установятся после подтверждения: MCP (ddgs, office) · "
-                "локальный голосовой сервис (~0.9 ГБ)") in blob
+        assert (
+            "Установятся после подтверждения: MCP (ddgs, office) · локальный голосовой сервис (~0.9 ГБ)"
+        ) in blob
 
 
 @pytest.mark.asyncio
@@ -447,9 +579,14 @@ async def test_final_summary_notice_voice_only(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import paths as vpaths
-    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path",
-                        lambda: tmp_path / "voice_data" / "state.json")
+
+    monkeypatch.setattr(
+        vpaths, "voice_data_dir", lambda: tmp_path / "voice_data"
+    )
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path",
+        lambda: tmp_path / "voice_data" / "state.json",
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -457,7 +594,10 @@ async def test_final_summary_notice_voice_only(tmp_path, monkeypatch):
         await pilot.pause()
         scr._voice_choice = "local"
         blob = await _final_blob(pilot, scr, mcp=[])
-        assert "Установятся после подтверждения: локальный голосовой сервис (~0.9 ГБ)" in blob
+        assert (
+            "Установятся после подтверждения: локальный голосовой сервис (~0.9 ГБ)"
+            in blob
+        )
         assert "MCP (" not in blob
 
 
@@ -468,11 +608,17 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
     from gc_tui.app import TuiApp
 
     class _McpInstalled:
-        def installable_names(self): return ["office", "science"]
-        def wired_names(self): return ["office"]
-        def install(self, name=None): return 0
+        def installable_names(self):
+            return ["office", "science"]
+
+        def wired_names(self):
+            return ["office"]
+
+        def install(self, name=None):
+            return 0
 
     from gc_tui.screens.onboarding import STEP_MCP
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(mcp=_McpInstalled())
@@ -480,11 +626,13 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
         await pilot.pause()
         scr._goto(STEP_MCP)
         await pilot.pause()
-        await pilot.press("space")           # курсор на office (idx 0, установлен) → не выбирается
+        await pilot.press(
+            "space"
+        )  # курсор на office (idx 0, установлен) → не выбирается
         await pilot.pause()
         assert "office" not in scr._mcp_selected
         await pilot.press("down")
-        await pilot.press("space")           # science → выбирается
+        await pilot.press("space")  # science → выбирается
         await pilot.pause()
         assert "science" in scr._mcp_selected
         blob = " ".join(str(w.render()) for w in scr.query(".onb-option"))
@@ -495,6 +643,7 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
 async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -512,7 +661,10 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
         await pilot.press("escape")
         await pilot.pause()
         from gc_tui.screens.confirm import ConfirmScreen
-        assert not isinstance(app.screen, ConfirmScreen)   # первый Esc — только пресеты
+
+        assert not isinstance(
+            app.screen, ConfirmScreen
+        )  # первый Esc — только пресеты
         await pilot.press("escape")
         await pilot.pause()
         assert isinstance(app.screen, ConfirmScreen)
@@ -538,30 +690,37 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import _PRESET_HINT_EMPTY
     from gc_tui.editors.field_list import LIST_CLOSED_HINT
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert scr.query(".conn-preset-row")     # предусловие: список раскрыт по умолчанию
-        await pilot.press("escape")               # свернуть список, шаг мастера жив
+        assert scr.query(
+            ".conn-preset-row"
+        )  # предусловие: список раскрыт по умолчанию
+        await pilot.press("escape")  # свернуть список, шаг мастера жив
         await pilot.pause()
         assert scr._step == 0
         hints = scr.query(".conn-url-preset-hint")
         assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
-        await pilot.press("down")                  # уйти с адреса на токен
+        await pilot.press("down")  # уйти с адреса на токен
         await pilot.pause()
         hints = scr.query(".conn-url-preset-hint")
-        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT   # строка постоянна
-        await pilot.press("up")                    # вернуться на адрес
+        assert (
+            hints and str(hints[-1].render()) == LIST_CLOSED_HINT
+        )  # строка постоянна
+        await pilot.press("up")  # вернуться на адрес
         await pilot.pause()
-        assert scr.query(".conn-preset-row")        # список раскрылся заново
+        assert scr.query(".conn-preset-row")  # список раскрылся заново
         hints = scr.query(".conn-url-preset-hint")
         assert hints and str(hints[-1].render()) == _PRESET_HINT_EMPTY
 
 
 @pytest.mark.asyncio
-async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(tmp_path):
+async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(
+    tmp_path,
+):
     """Находка A финального ревью 2026-08-06 (парное место мастера): Alt+↓ раскрывает
     пресет-лист поверх своего адреса, которого нет среди пресетов (спека §2.4) —
     строки видны все, подсвеченной нет. Хинт и футер обязаны звать Enter «оставить
@@ -572,22 +731,32 @@ async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(tmp_pa
     from gc_tui.editors.preset_list import PRESET_HINT_NO_MATCH
     from gc_tui.screens.onboarding import _FOOTER_PRESET_LIST_NO_MATCH
     from textual.widgets import Static
+
     own_url = "https://my-own-host.internal/v1"
     cfg_path = _write_conn_cfg(tmp_path, url=own_url)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config_path=str(cfg_path),
-                      config={"completions_url": own_url,
-                              "chat_completion_headers": {}, "model": ""})
+        scr = _screen(
+            config_path=str(cfg_path),
+            config={
+                "completions_url": own_url,
+                "chat_completion_headers": {},
+                "model": "",
+            },
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
-        assert ed.presets_open is False      # предусловие: свой адрес, список закрыт
+        assert (
+            ed.presets_open is False
+        )  # предусловие: свой адрес, список закрыт
         await pilot.press("alt+down")
         await pilot.pause()
         assert ed.presets_open is True
         rows = [str(w.render()) for w in scr.query(".conn-preset-row")]
-        assert rows and not any(r.startswith("▸") for r in rows)   # видны все, подсвеченной нет
+        assert rows and not any(
+            r.startswith("▸") for r in rows
+        )  # видны все, подсвеченной нет
         hint = str(list(scr.query(".conn-url-preset-hint"))[-1].render())
         assert hint == PRESET_HINT_NO_MATCH
         footer = str(scr.query_one("#onb-footer", Static).render())
@@ -595,27 +764,32 @@ async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(tmp_pa
 
 
 @pytest.mark.asyncio
-async def test_wizard_connection_footer_names_alt_down_only_on_the_url_field(tmp_path):
+async def test_wizard_connection_footer_names_alt_down_only_on_the_url_field(
+    tmp_path,
+):
     """Находка D финального ревью 2026-08-06 (парное место мастера): футер шага
     «Подключение» обещает Alt+↓, только пока курсор на адресе — на «Токене»/«Прокси»
     клавиша молчит (`ConnectionEditor.on_url_field`)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from textual.widgets import Static
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen()                      # адрес пустой — список раскрыт сам
+        scr = _screen()  # адрес пустой — список раскрыт сам
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("escape")          # свернуть список, курсор остаётся на адресе
+        await pilot.press(
+            "escape"
+        )  # свернуть список, курсор остаётся на адресе
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Alt+↓ — показать список" in footer
-        await pilot.press("down")            # адрес → токен
+        await pilot.press("down")  # адрес → токен
         await pilot.pause()
         footer2 = str(scr.query_one("#onb-footer", Static).render())
         assert "Alt+↓" not in footer2
-        await pilot.press("up")              # обратно на адрес — список раскрылся заново
+        await pilot.press("up")  # обратно на адрес — список раскрылся заново
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
@@ -629,6 +803,7 @@ async def test_connection_invalid_address_shows_error_valid_advances(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -637,16 +812,20 @@ async def test_connection_invalid_address_shows_error_valid_advances(tmp_path):
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
         inp = ed.query_one("#conn-url", Input)
-        inp.value = "ttp://bad"            # опечатка → невалид
+        inp.value = "ttp://bad"  # опечатка → невалид
         await pilot.press("enter")
         await pilot.pause()
-        assert scr._step == 0               # остались
-        assert "http(s)" in str(scr.query_one(".onb-conn-probe").render())  # ошибка в строке-пробе
+        assert scr._step == 0  # остались
+        assert "http(s)" in str(
+            scr.query_one(".onb-conn-probe").render()
+        )  # ошибка в строке-пробе
         inp.value = "https://h/v1/chat/completions"
         await pilot.press("enter")
         await pilot.pause()
-        assert scr._step == 1               # перешли на модель
-        assert scr._values["completions_url"] == "https://h/v1/chat/completions"
+        assert scr._step == 1  # перешли на модель
+        assert (
+            scr._values["completions_url"] == "https://h/v1/chat/completions"
+        )
 
 
 @pytest.mark.asyncio
@@ -657,6 +836,7 @@ async def test_connection_no_token_writes_empty_auth(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -664,7 +844,9 @@ async def test_connection_no_token_writes_empty_auth(tmp_path):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         await pilot.press("enter")
         await pilot.pause()
         assert scr._values["Authorization"] == ""
@@ -672,7 +854,9 @@ async def test_connection_no_token_writes_empty_auth(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_connection_step_advances_with_one_enter_no_mark_needed(tmp_path):
+async def test_connection_step_advances_with_one_enter_no_mark_needed(
+    tmp_path,
+):
     """Шаг «Подключение» — без пометки: старый двухтакт Enter (сначала пометить
     выбор авторизации, потом «далее») пропал вместе с радио-блоком, одного Enter
     достаточно, если адрес валиден."""
@@ -680,6 +864,7 @@ async def test_connection_step_advances_with_one_enter_no_mark_needed(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -687,9 +872,11 @@ async def test_connection_step_advances_with_one_enter_no_mark_needed(tmp_path):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-token", Input).value = "tok"
-        await pilot.press("enter")            # один Enter — сразу далее
+        await pilot.press("enter")  # один Enter — сразу далее
         await pilot.pause()
         assert scr._step == 1
 
@@ -701,13 +888,17 @@ async def test_connection_token_becomes_bearer_header(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-token", Input).value = "sk-1"
         await pilot.press("enter")
         await pilot.pause()
@@ -726,60 +917,95 @@ async def test_model_step_receives_proxy_from_connection_step(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-proxy", Input).value = "http://corp-proxy:8080"
         await pilot.press("enter")
         await pilot.pause()
         assert scr._step == 1
-        assert scr.query_one(ModelEditor)._config_proxy == "http://corp-proxy:8080"
+        assert (
+            scr.query_one(ModelEditor)._config_proxy
+            == "http://corp-proxy:8080"
+        )
 
 
 @pytest.mark.asyncio
 async def test_model_list_marks_and_pick(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
-    fake = lambda *a, **k: [ModelInfo("Qwen", tool_capable=True),
-                            ModelInfo("Flash", tool_capable=False)]
+    fake = lambda *a, **k: [
+        ModelInfo("Qwen", tool_capable=True),
+        ModelInfo("Flash", tool_capable=False),
+    ]
     async with app.run_test() as pilot:
         scr = _screen(fetch=fake)
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._values["completions_url"] = "https://h/v1/chat/completions"
-        scr._step = 1; scr._render_step()
+        scr._step = 1
+        scr._render_step()
         # дождаться worker-загрузки в ModelEditor
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor)) and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         # ⚠ есть (Flash не tool-capable)
-        assert any("⚠" in s.renderable if hasattr(s, "renderable") else "⚠" in str(s.render())
-                   for s in scr.query(".onb-option"))
-        await pilot.press("enter"); await pilot.pause()   # курсор на Qwen → Enter#1 фиксирует
+        assert any(
+            "⚠" in s.renderable
+            if hasattr(s, "renderable")
+            else "⚠" in str(s.render())
+            for s in scr.query(".onb-option")
+        )
+        await pilot.press("enter")
+        await pilot.pause()  # курсор на Qwen → Enter#1 фиксирует
         assert scr._values["model"] == "Qwen"
 
 
 @pytest.mark.asyncio
 async def test_model_manual_fallback(tmp_path):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from textual.widgets import Input
     from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(fetch=lambda *a, **k: None)   # список не получен
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(fetch=lambda *a, **k: None)  # список не получен
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._values["completions_url"] = "https://h/v1/chat/completions"
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor)) and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         scr.query_one("#onb-model", Input).value = "my-model"
-        await pilot.press("enter"); await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
         assert scr._values["model"] == "my-model"
 
 
@@ -794,13 +1020,14 @@ async def test_connection_footer_always_says_next_no_mark_state(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from textual.widgets import Static
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
         await pilot.pause()
-        await pilot.press("escape")                  # свернуть пресет-лист, не выйти
+        await pilot.press("escape")  # свернуть пресет-лист, не выйти
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — далее" in footer
@@ -813,13 +1040,17 @@ async def test_connection_proxy_submitted(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-proxy", Input).value = "http://proxy:8080"
         await pilot.press("enter")
         await pilot.pause()
@@ -833,13 +1064,17 @@ async def test_connection_proxy_restored_on_return(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-proxy", Input).value = "http://proxy:8080"
         await pilot.press("enter")
         await pilot.pause()
@@ -847,12 +1082,18 @@ async def test_connection_proxy_restored_on_return(tmp_path):
         await pilot.press("pageup")
         await pilot.pause()
         assert scr._step == 0
-        assert scr.query_one(ConnectionEditor).query_one("#conn-proxy", Input).value == \
-            "http://proxy:8080"
+        assert (
+            scr.query_one(ConnectionEditor)
+            .query_one("#conn-proxy", Input)
+            .value
+            == "http://proxy:8080"
+        )
 
 
 @pytest.mark.asyncio
-async def test_connection_proxy_not_cleared_on_revisit_without_retyping(tmp_path):
+async def test_connection_proxy_not_cleared_on_revisit_without_retyping(
+    tmp_path,
+):
     """Тот же класс бага, что у токена (см. test_connection_token_not_cleared_...),
     но на монтировании, не на сабмите: прокси не секрет и не маскируется — он обязан
     лечь в поле готовым значением из файла (review_all), иначе шаг без единого следа
@@ -865,20 +1106,31 @@ async def test_connection_proxy_not_cleared_on_revisit_without_retyping(tmp_path
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer tok", proxy="http://real-corp-proxy:8080",
-                               model="m")
+
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer tok",
+        proxy="http://real-corp-proxy:8080",
+        model="m",
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path),
-                      config=_resolved_conn_cfg(cfg_path))
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=_resolved_conn_cfg(cfg_path),
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
-        assert ed.query_one("#conn-proxy", Input).value == "http://real-corp-proxy:8080"
+        assert (
+            ed.query_one("#conn-proxy", Input).value
+            == "http://real-corp-proxy:8080"
+        )
         ed.escape_presets()
-        scr._submit_connection()               # поля не тронуты
-        assert "proxy" not in scr._values      # нетронуто — писать нечего
+        scr._submit_connection()  # поля не тронуты
+        assert "proxy" not in scr._values  # нетронуто — писать нечего
 
 
 @pytest.mark.asyncio
@@ -891,25 +1143,40 @@ async def test_connection_proxy_explicit_clear_survives_revisit(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer tok", proxy="http://OLD-proxy:8080",
-                               model="m")
+
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer tok",
+        proxy="http://OLD-proxy:8080",
+        model="m",
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path),
-                      config=_resolved_conn_cfg(cfg_path))
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=_resolved_conn_cfg(cfg_path),
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
-        assert ed.query_one("#conn-proxy", Input).value == "http://OLD-proxy:8080"
+        assert (
+            ed.query_one("#conn-proxy", Input).value == "http://OLD-proxy:8080"
+        )
         ed.escape_presets()
-        ed.query_one("#conn-proxy", Input).value = ""     # явно стёр прокси
+        ed.query_one("#conn-proxy", Input).value = ""  # явно стёр прокси
         scr._submit_connection()
         assert scr._values["proxy"] == ""
-        await pilot.press("pageup")                        # назад на шаг «Подключение»
+        await pilot.press("pageup")  # назад на шаг «Подключение»
         await pilot.pause()
         assert scr._step == 0
-        assert scr.query_one(ConnectionEditor).query_one("#conn-proxy", Input).value == ""
+        assert (
+            scr.query_one(ConnectionEditor)
+            .query_one("#conn-proxy", Input)
+            .value
+            == ""
+        )
 
 
 @pytest.mark.asyncio
@@ -921,17 +1188,19 @@ async def test_connection_space_in_token_field_types_normally(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        await pilot.press("down")            # курсор → токен
+        await pilot.press("down")  # курсор → токен
         await pilot.press("a", "space", "b")
         await pilot.pause()
         assert ed.query_one("#conn-token", Input).value == "a b"
-        assert scr._step == 0                # шаг не сдвинулся
+        assert scr._step == 0  # шаг не сдвинулся
 
 
 @pytest.mark.asyncio
@@ -939,11 +1208,11 @@ async def test_connection_auto_probe_runs_on_leaving_token_field(tmp_path):
     """Уход с поля токена (стрелкой) запускает авто-пробу; результат ложится в
     строку .onb-conn-probe (ту же, что показывает «— не проверено» до пробы)."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
     from textual.widgets import Input
-    from gc_testkit.tui_support import wait_until
 
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         return ProbeResult("ok", 200, None, 5, "доступен")
@@ -955,15 +1224,52 @@ async def test_connection_auto_probe_runs_on_leaving_token_field(tmp_path):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
-        await pilot.press("down")             # уход с адреса на токен — триггер пробы
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
+        await pilot.press("down")  # уход с адреса на токен — триггер пробы
         await pilot.pause()
         # Фейк отвечает и на контрольный запрос без токена → честный вердикт
         # «авторизация не требуется», а не «доступен».
-        await wait_until(pilot,
-                         lambda: "не требует" in str(scr.query_one(".onb-conn-probe").render())
-                         or "не требуется" in str(scr.query_one(".onb-conn-probe").render()),
-                         "проба завершилась")
+        await wait_until(
+            pilot,
+            lambda: (
+                "не требует" in str(scr.query_one(".onb-conn-probe").render())
+                or "не требуется"
+                in str(scr.query_one(".onb-conn-probe").render())
+            ),
+            "проба завершилась",
+        )
+
+
+async def test_connection_auto_probe_preserves_ca_path(tmp_path):
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
+    from gc_tui.editors.connection import ConnectionEditor
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    seen = []
+
+    def probe(endpoint, auth, verify, model, *, config_proxy=None):
+        seen.append(verify)
+        return ProbeResult("ok", 200, None, 5, "доступен")
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        screen = _screen(config={"use_ssl": "/corp/root.pem"}, probe=probe)
+        await pilot.app.push_screen(screen)
+        await pilot.pause()
+        editor = screen.query_one(ConnectionEditor)
+        editor.escape_presets()
+        editor.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
+        await pilot.press("down")
+        await wait_until(
+            pilot, lambda: bool(seen), "проба с корпоративным CA выполнена"
+        )
+        assert set(seen) == {"/corp/root.pem"}
 
 
 @pytest.mark.asyncio
@@ -971,10 +1277,10 @@ async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
     """Подстановка пресета (Enter на открытом списке) — тоже триггер авто-пробы,
     не только уход с поля (спека §5.5)."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
 
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         return ProbeResult("ok", 200, None, 5, "доступен")
@@ -985,45 +1291,66 @@ async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
-        assert ed.presets_open                 # пусто → раскрыт по умолчанию
-        await pilot.press("enter")              # подставляет первый пресет
+        assert ed.presets_open  # пусто → раскрыт по умолчанию
+        await pilot.press("enter")  # подставляет первый пресет
         await pilot.pause()
         assert not ed.presets_open
         # Фейк отвечает и на контрольный запрос без токена → честный вердикт
         # «авторизация не требуется», а не «доступен»: токен здесь ни на что
         # не влияет, и писать про него что-либо было бы неправдой.
-        await wait_until(pilot,
-                         lambda: "не требует" in str(scr.query_one(".onb-conn-probe").render())
-                         or "не требуется" in str(scr.query_one(".onb-conn-probe").render()),
-                         "проба завершилась")
+        await wait_until(
+            pilot,
+            lambda: (
+                "не требует" in str(scr.query_one(".onb-conn-probe").render())
+                or "не требуется"
+                in str(scr.query_one(".onb-conn-probe").render())
+            ),
+            "проба завершилась",
+        )
 
 
 @pytest.mark.asyncio
 async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
     pytest.importorskip("textual")
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
-    from gc_core.model_picker import ModelInfo
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
-                                             ModelInfo(id="openai/gpt-5.6-terra", tool_capable=True)])
+        scr = _screen(
+            fetch=lambda *a, **k: [
+                ModelInfo(id="glm-5.2-fp8", tool_capable=True),
+                ModelInfo(id="openai/gpt-5.6-terra", tool_capable=True),
+            ]
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
-        ed.query_one("#conn-token", Input).value = "tok"   # необязателен, но проверяем маршрут
-        await pilot.press("pagedown")                   # PgDn — «далее» одним тактом → модель
-        await pilot.pause(); await pilot.pause()
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-token", Input
+        ).value = "tok"  # необязателен, но проверяем маршрут
+        await pilot.press("pagedown")  # PgDn — «далее» одним тактом → модель
+        await pilot.pause()
+        await pilot.pause()
         assert scr._step == 1
-        scr.query_one("#onb-model", Input).value = "gpt"   # поле само себе фильтр (§3.2.6)
+        scr.query_one(
+            "#onb-model", Input
+        ).value = "gpt"  # поле само себе фильтр (§3.2.6)
         await pilot.pause()
-        scr.query_one("#onb-model", Input).focus()   # фокус в поле (в pilot автофокус после mount не встаёт)
+        scr.query_one(
+            "#onb-model", Input
+        ).focus()  # фокус в поле (в pilot автофокус после mount не встаёт)
         await pilot.pause()
-        assert scr.query_one("#onb-model", Input).has_focus   # PgUp работает, пока фокус в поле
-        await pilot.press("pageup")                     # PgUp должен вернуть на шаг подключения
+        assert scr.query_one(
+            "#onb-model", Input
+        ).has_focus  # PgUp работает, пока фокус в поле
+        await pilot.press("pageup")  # PgUp должен вернуть на шаг подключения
         await pilot.pause()
         assert scr._step == 0
 
@@ -1031,39 +1358,51 @@ async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
 @pytest.mark.asyncio
 async def test_onboarding_model_step_filter_and_pick(tmp_path):
     pytest.importorskip("textual")
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
-    from gc_core.model_picker import ModelInfo
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(fetch=lambda *a, **k: [ModelInfo(id="glm-5.2-fp8", tool_capable=True),
-                                             ModelInfo(id="openai/gpt-5.6-terra", tool_capable=True),
-                                             ModelInfo(id="deepseek-v3-base", tool_capable=True)])
+        scr = _screen(
+            fetch=lambda *a, **k: [
+                ModelInfo(id="glm-5.2-fp8", tool_capable=True),
+                ModelInfo(id="openai/gpt-5.6-terra", tool_capable=True),
+                ModelInfo(id="deepseek-v3-base", tool_capable=True),
+            ]
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         ed.query_one("#conn-token", Input).value = "tok"
-        await pilot.press("pagedown")                   # PgDn — далее с шага подключения
-        await pilot.pause(); await pilot.pause()
-        scr.query_one("#onb-model", Input).value = "gpt"   # поле само себе фильтр (§3.2.6)
+        await pilot.press("pagedown")  # PgDn — далее с шага подключения
+        await pilot.pause()
+        await pilot.pause()
+        scr.query_one(
+            "#onb-model", Input
+        ).value = "gpt"  # поле само себе фильтр (§3.2.6)
         await pilot.pause()
         # Фильтр гасит строки через `display`, а не сносит их (общая механика
         # `FieldListController`) — «на экране» и значит `w.display`.
         rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
-        assert any("gpt-5.6-terra" in r for r in rows)              # совпадение осталось
-        assert not any("deepseek" in r for r in rows)               # не-совпадение убрано
+        assert any("gpt-5.6-terra" in r for r in rows)  # совпадение осталось
+        assert not any("deepseek" in r for r in rows)  # не-совпадение убрано
         # Строка под курсором (glm) фильтром убрана → якорь встаёт на первую строку
         # ВЫБОРА, то есть на уцелевшую модель. Раньше якорем была «вписать вручную»,
         # и до совпавшей модели приходилось доезжать ↑↓ (см. соседний тест на обрывок).
         from gc_tui.editors.model import ModelEditor
+
         assert scr.query_one(ModelEditor).submit() == "openai/gpt-5.6-terra"
-        await pilot.press("enter")                      # Enter#1 — пометить подсвеченную
-        await pilot.press("enter")                      # Enter#2 — далее, шаг уровней
+        await pilot.press("enter")  # Enter#1 — пометить подсвеченную
+        await pilot.press("enter")  # Enter#2 — далее, шаг уровней
         await pilot.pause()
         from gc_tui.screens.onboarding import STEP_LEVELS
+
         assert scr._step_id() == STEP_LEVELS
         assert scr._values.get("model") == "openai/gpt-5.6-terra"
 
@@ -1079,44 +1418,69 @@ async def test_filter_fragment_does_not_become_the_model(tmp_path):
     модель «gpt». Путь проверяем настоящий — через двухролевой Enter мастера,
     а не через submit() редактора."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
-                              "chat_completion_headers": {}},
-                      fetch=lambda *a, **k: [ModelInfo("glm-5.2-fp8", tool_capable=True),
-                                             ModelInfo("openai/gpt-5.6-terra", tool_capable=True),
-                                             ModelInfo("deepseek-v3-base", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr = _screen(
+            config={
+                "completions_url": "https://h/v1/chat/completions",
+                "chat_completion_headers": {},
+            },
+            fetch=lambda *a, **k: [
+                ModelInfo("glm-5.2-fp8", tool_capable=True),
+                ModelInfo("openai/gpt-5.6-terra", tool_capable=True),
+                ModelInfo("deepseek-v3-base", tool_capable=True),
+            ],
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.pause()
         ed = scr.query_one(ModelEditor)
-        assert ed.submit() == "glm-5.2-fp8"          # предусловие: курсор на первой модели
-        ed.query_one("#onb-model", Input).value = "gpt"   # обрывок: glm уходит, gpt остаётся
+        assert (
+            ed.submit() == "glm-5.2-fp8"
+        )  # предусловие: курсор на первой модели
+        ed.query_one(
+            "#onb-model", Input
+        ).value = "gpt"  # обрывок: glm уходит, gpt остаётся
         await pilot.pause()
-        await pilot.press("enter")                   # Enter#1 — пометить строку под курсором
-        await pilot.press("enter")                   # Enter#2 — далее
+        await pilot.press("enter")  # Enter#1 — пометить строку под курсором
+        await pilot.press("enter")  # Enter#2 — далее
         await pilot.pause()
-        assert scr._values.get("model") != "gpt", "обрывок фильтра записан как модель"
+        assert scr._values.get("model") != "gpt", (
+            "обрывок фильтра записан как модель"
+        )
         assert scr._values.get("model") == "openai/gpt-5.6-terra"
 
 
 # --- контракт интеракции: двухролевой Enter, PgDn-далее, пометка ●, футер ---
 
+
 @pytest.mark.asyncio
-async def test_double_enter_on_invalid_address_keeps_single_probe_line(tmp_path):
+async def test_double_enter_on_invalid_address_keeps_single_probe_line(
+    tmp_path,
+):
     """Повторный Enter на невалидном адресе не роняет приложение: строка-проба —
     одна и та же (пересоздание виджета с тем же классом в одном такте не плодит копий)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -1128,10 +1492,10 @@ async def test_double_enter_on_invalid_address_keeps_single_probe_line(tmp_path)
         await pilot.press("enter")
         await pilot.press("enter")
         await pilot.pause()
-        assert app.is_running                     # приложение живо
+        assert app.is_running  # приложение живо
         assert scr._step == 0
         assert len(scr.query(".onb-conn-probe")) == 1
-        await pilot.press("pagedown")             # тот же путь через «далее»
+        await pilot.press("pagedown")  # тот же путь через «далее»
         await pilot.pause()
         assert app.is_running and scr._step == 0
         assert len(scr.query(".onb-conn-probe")) == 1
@@ -1144,12 +1508,15 @@ async def test_double_enter_on_empty_address_keeps_single_probe_line(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr.query_one(ConnectionEditor).escape_presets()   # список свёрнут — поле по-прежнему пустое
+        scr.query_one(
+            ConnectionEditor
+        ).escape_presets()  # список свёрнут — поле по-прежнему пустое
         await pilot.press("enter")
         await pilot.press("enter")
         await pilot.pause()
@@ -1166,6 +1533,7 @@ async def test_pagedown_advances_connection_step(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -1173,11 +1541,15 @@ async def test_pagedown_advances_connection_step(tmp_path):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step == 1
-        assert scr._values["completions_url"] == "https://h/v1/chat/completions"
+        assert (
+            scr._values["completions_url"] == "https://h/v1/chat/completions"
+        )
 
 
 @pytest.mark.asyncio
@@ -1187,6 +1559,7 @@ async def test_pagedown_keeps_validation_of_connection_step(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
@@ -1215,38 +1588,53 @@ async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_MCP, STEP_VOICE
     from gc_tui.voice_runtime import paths as vpaths
+
     calls = []
 
     def _fake_state_path():
         calls.append(1)
         return tmp_path / "voice_data" / "state.json"
-    monkeypatch.setattr(vpaths, "voice_data_dir", lambda: tmp_path / "voice_data")
-    monkeypatch.setattr("gc_tui.voice_runtime.state.voice_state_path", _fake_state_path)
+
+    monkeypatch.setattr(
+        vpaths, "voice_data_dir", lambda: tmp_path / "voice_data"
+    )
+    monkeypatch.setattr(
+        "gc_tui.voice_runtime.state.voice_state_path", _fake_state_path
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_MCP); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_MCP)
+        await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step_id() == STEP_VOICE
-        assert calls, "изоляция не сработала — voice_runtime.state обошёл подмену"
+        assert calls, (
+            "изоляция не сработала — voice_runtime.state обошёл подмену"
+        )
 
 
 @pytest.mark.asyncio
 async def test_pagedown_does_not_commit_on_confirm_step(tmp_path, monkeypatch):
     """Финал подтверждают Enter'ом: навигационная PgDn конфиг не пишет."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core import onboarding_config_writer as w
+    from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     written = []
-    monkeypatch.setattr(w, "write_values", lambda path, vals, **kw: written.append(vals) or [])
+    monkeypatch.setattr(
+        w, "write_values", lambda path, vals, **kw: written.append(vals) or []
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_CONFIRM); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step_id() == STEP_CONFIRM and written == []
@@ -1258,11 +1646,14 @@ async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_VOICE
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_CONFIRM); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
         await pilot.press("pageup")
         await pilot.pause()
         assert scr._step_id() == STEP_VOICE
@@ -1272,27 +1663,43 @@ async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
 async def test_model_enter_marks_then_advances(tmp_path):
     """Шаг «Модель»: Enter#1 помечает подсвеченную (● переезжает на неё), Enter#2 — далее."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True),
-                                             ModelInfo("Flash", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(
+            fetch=lambda *a, **k: [
+                ModelInfo("Qwen", tool_capable=True),
+                ModelInfo("Flash", tool_capable=True),
+            ]
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._values["completions_url"] = "https://h/v1/chat/completions"
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.press("enter")
         await pilot.pause()
         assert scr._step == 1
         assert scr._values["model"] == "Qwen"
-        assert any("● Qwen" in str(w.render()) for w in scr.query(".onb-option"))
+        assert any(
+            "● Qwen" in str(w.render()) for w in scr.query(".onb-option")
+        )
         await pilot.press("enter")
         await pilot.pause()
         from gc_tui.screens.onboarding import STEP_LEVELS
+
         assert scr._step_id() == STEP_LEVELS
 
 
@@ -1300,24 +1707,36 @@ async def test_model_enter_marks_then_advances(tmp_path):
 async def test_model_footer_and_pagedown(tmp_path):
     """Футер шага модели меняется по пометке; PgDn ведёт дальше и без неё."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Static
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(
+            fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)]
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._values["completions_url"] = "https://h/v1/chat/completions"
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — выбрать" in footer and "PgDn — далее" in footer
         await pilot.press("pagedown")
         await pilot.pause()
         from gc_tui.screens.onboarding import STEP_LEVELS
+
         assert scr._step_id() == STEP_LEVELS
         assert scr._values["model"] == "Qwen"
 
@@ -1327,26 +1746,41 @@ async def test_model_manual_row_two_beat(tmp_path):
     """Своё имя — один такт: строки-посредника больше нет (смок 2026-08-04), поэтому
     метить нечего и Enter сразу ведёт дальше, унося набранное."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(
+            fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)]
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._values["completions_url"] = "https://h/v1/chat/completions"
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         # Поле само себе фильтр: вписываем имя, которого нет в списке.
         scr.query_one("#onb-model", Input).value = "my-model"
         await pilot.pause()
-        await pilot.press("enter")                 # метить нечего → сразу «далее»
+        await pilot.press("enter")  # метить нечего → сразу «далее»
         await pilot.pause()
         from gc_tui.screens.onboarding import STEP_LEVELS
-        assert scr._step_id() == STEP_LEVELS and scr._values["model"] == "my-model"
+
+        assert (
+            scr._step_id() == STEP_LEVELS
+            and scr._values["model"] == "my-model"
+        )
 
 
 @pytest.mark.asyncio
@@ -1354,26 +1788,46 @@ async def test_model_footer_follows_filter_reselect(tmp_path):
     """Фильтрация двигает курсор (строка исчезла → якорь): роль Enter меняется — футер
     обязан догнать, как на ↑↓."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input, Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input, Static
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
-                              "chat_completion_headers": {}, "model": "Qwen"},
-                      fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True),
-                                             ModelInfo("Flash", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr = _screen(
+            config={
+                "completions_url": "https://h/v1/chat/completions",
+                "chat_completion_headers": {},
+                "model": "Qwen",
+            },
+            fetch=lambda *a, **k: [
+                ModelInfo("Qwen", tool_capable=True),
+                ModelInfo("Flash", tool_capable=True),
+            ],
+        )
+        await pilot.app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("down")                  # → Flash (не помечена)
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.pause()
-        assert "Enter — выбрать" in str(scr.query_one("#onb-footer", Static).render())
-        scr.query_one("#onb-model", Input).value = "qw"   # Flash уходит → курсор на Qwen
+        await pilot.press("down")  # → Flash (не помечена)
+        await pilot.pause()
+        assert "Enter — выбрать" in str(
+            scr.query_one("#onb-footer", Static).render()
+        )
+        scr.query_one(
+            "#onb-model", Input
+        ).value = "qw"  # Flash уходит → курсор на Qwen
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — далее" in footer and "Enter — выбрать" not in footer
@@ -1384,18 +1838,27 @@ async def test_model_footer_says_next_when_no_list(tmp_path):
     """Сервер не отдал список — остаётся ручной ввод: помечать нечего, Enter ведёт
     дальше, и футер обещает «далее», а не «выбрать»."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Input, Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Input, Static
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: None)
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._values["completions_url"] = "https://h/v1/chat/completions"
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — далее" in footer and "Enter — выбрать" not in footer
@@ -1403,7 +1866,11 @@ async def test_model_footer_says_next_when_no_list(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
         from gc_tui.screens.onboarding import STEP_LEVELS
-        assert scr._step_id() == STEP_LEVELS and scr._values["model"] == "my-model"
+
+        assert (
+            scr._step_id() == STEP_LEVELS
+            and scr._values["model"] == "my-model"
+        )
 
 
 @pytest.mark.asyncio
@@ -1411,21 +1878,37 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
     """Модель уже задана в конфиге: список догрузился, курсор встал на помеченную —
     футер честно обещает «Enter — далее» (список приезжает воркером, футер догоняет)."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Static
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
+    from textual.widgets import Static
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
-                              "chat_completion_headers": {}, "model": "Qwen"},
-                      fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True),
-                                             ModelInfo("Flash", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr = _screen(
+            config={
+                "completions_url": "https://h/v1/chat/completions",
+                "chat_completion_headers": {},
+                "model": "Qwen",
+            },
+            fetch=lambda *a, **k: [
+                ModelInfo("Qwen", tool_capable=True),
+                ModelInfo("Flash", tool_capable=True),
+            ],
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — далее" in footer and "Enter — выбрать" not in footer
@@ -1435,35 +1918,50 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
 async def test_mcp_space_toggles(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from test_onboarding_voice_step import FakeVoice
     from gc_tui.screens.onboarding import STEP_MCP, STEP_VOICE
+    from test_onboarding_voice_step import FakeVoice
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(voice=FakeVoice())
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_MCP); await pilot.pause()
-        await pilot.press("space")          # отметить первый (duckduckgo)
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_MCP)
+        await pilot.pause()
+        await pilot.press("space")  # отметить первый (duckduckgo)
         await pilot.pause()
         assert "duckduckgo" in scr._mcp_selected
-        await pilot.press("enter"); await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
         assert scr._step_id() == STEP_VOICE
 
 
 @pytest.mark.asyncio
 async def test_summary_line_fills_as_steps_complete(tmp_path):
     """Строка сводки под степпером заполняется по ходу; токен маскируется."""
+    from gc_tui import app as app_mod
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.widgets import Static
-    from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(config={"completions_url": "", "chat_completion_headers": {},
-                                 "model": ""})
+    app = app_mod.TuiApp(
+        config={
+            "completions_url": "",
+            "chat_completion_headers": {},
+            "model": "",
+        }
+    )
     async with app.run_test() as pilot:
-        scr = OnboardingScreen(config=app._config, config_path=str(tmp_path / "c.yml"),
-                               review_all=True, on_commit=lambda: None)
+        scr = OnboardingScreen(
+            config=app._config,
+            config_path=str(tmp_path / "c.yml"),
+            review_all=True,
+            on_commit=lambda: None,
+        )
         app.push_screen(scr)
         await pilot.pause()
-        scr._values["completions_url"] = "https://46.243.227.147:15000/v1/chat/completions"
+        scr._values["completions_url"] = (
+            "https://46.243.227.147:15000/v1/chat/completions"
+        )
         scr._values["Authorization"] = "Bearer sk-SECRET"
         scr._render_step()
         await pilot.pause()
@@ -1482,29 +1980,47 @@ async def test_final_commit_writes_and_calls_on_commit(tmp_path):
     pytest.importorskip("textual")
     import yaml
     from gc_core import onboarding
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
-    from gc_testkit.tui_support import wait_until
-    cfg_path = _write_conn_cfg(tmp_path)      # чистый config.yml из пакетного шаблона
+
+    cfg_path = _write_conn_cfg(
+        tmp_path
+    )  # чистый config.yml из пакетного шаблона
     committed = []
     installed = []
-    mcp = _FakeMcp(); mcp.install = lambda name=None: installed.append(name) or 0
+    mcp = _FakeMcp()
+    mcp.install = lambda name=None: installed.append(name) or 0
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(on_commit=lambda: committed.append(True), mcp=mcp,
-                      config_path=str(cfg_path))
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._values = {"completions_url": "https://h/v1", "Authorization": "Bearer sk", "model": "m"}
+        scr = _screen(
+            on_commit=lambda: committed.append(True),
+            mcp=mcp,
+            config_path=str(cfg_path),
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._values = {
+            "completions_url": "https://h/v1",
+            "Authorization": "Bearer sk",
+            "model": "m",
+        }
         scr._mcp_selected = {"office"}
-        scr._goto(STEP_CONFIRM); await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
         assert raw["backend"]["completions_url"] == "https://h/v1"
-        assert raw["backend"]["chat_completion_headers"]["Authorization"] == "Bearer sk"
+        assert (
+            raw["backend"]["chat_completion_headers"]["Authorization"]
+            == "Bearer sk"
+        )
         assert raw["models"] == {"m": {"model": "m"}}
         assert raw["slots"]["default"] == "m"
-        assert raw["agent"]["model"] == onboarding.MODEL_SENTINEL   # легаси-ключ не тронут
+        assert (
+            raw["agent"]["model"] == onboarding.MODEL_SENTINEL
+        )  # легаси-ключ не тронут
         assert installed == ["office"]
         assert committed == [True]
 
@@ -1517,14 +2033,23 @@ def _registry_cfg(tmp_path, model_id, *, alias):
 
     Возвращает (путь к файлу, конфиг «как его видит приложение»)."""
     from pathlib import Path
+
     import yaml
     from gc_core.config import _default_config_path
     from gc_core.config_modules.registry_write import apply_registry_ops
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer tok")
+
+    cfg_path = _write_conn_cfg(
+        tmp_path, url="https://h/v1/chat/completions", auth="Bearer tok"
+    )
     template = Path(_default_config_path()).read_text(encoding="utf-8")
-    apply_registry_ops(cfg_path, [("upsert_model", alias, {"model": model_id}),
-                                  ("write_slot", "default", alias)], template)
+    apply_registry_ops(
+        cfg_path,
+        [
+            ("upsert_model", alias, {"model": model_id}),
+            ("write_slot", "default", alias),
+        ],
+        template,
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = _resolved_conn_cfg(cfg_path)
     cfg["models"] = raw.get("models")
@@ -1546,23 +2071,38 @@ async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
     import yaml
     from gc_core.model_picker import ModelInfo
     from gc_testkit.tui_support import wait_until
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_MODEL
-    cfg_path, cfg = _registry_cfg(tmp_path, "openai/gpt-5.6-terra", alias="gpt-5.6-terra")
+    from textual.widgets import Static
+
+    cfg_path, cfg = _registry_cfg(
+        tmp_path, "openai/gpt-5.6-terra", alias="gpt-5.6-terra"
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
-                      fetch=lambda *a, **k: [ModelInfo("glm-5.2-fp8", tool_capable=True),
-                                             ModelInfo("openai/gpt-5.6-terra",
-                                                       tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=cfg,
+            fetch=lambda *a, **k: [
+                ModelInfo("glm-5.2-fp8", tool_capable=True),
+                ModelInfo("openai/gpt-5.6-terra", tool_capable=True),
+            ],
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         summary = str(scr.query_one("#onb-summary", Static).render())
         assert "модель: openai/gpt-5.6-terra" in summary
         scr._goto(STEP_MODEL)
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.pause()
         rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
         current = [r for r in rows if "текущая" in r]
@@ -1570,17 +2110,21 @@ async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
         assert "openai/gpt-5.6-terra" in current[0]
         # Курсор ▸ и пометка ● — на ней же: Enter/PgDn отсюда подтверждают своё, не чужое.
         assert current[0].startswith("▸") and "●" in current[0]
-        await pilot.press("pagedown")                  # проход насквозь, ничего не выбирая
+        await pilot.press("pagedown")  # проход насквозь, ничего не выбирая
         await pilot.pause()
         assert scr._values.get("model") == "openai/gpt-5.6-terra"
         assert scr._commit_config() is True
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
         assert raw["slots"]["default"] == "gpt-5.6-terra"
-        assert raw["models"] == {"gpt-5.6-terra": {"model": "openai/gpt-5.6-terra"}}
+        assert raw["models"] == {
+            "gpt-5.6-terra": {"model": "openai/gpt-5.6-terra"}
+        }
 
 
 @pytest.mark.asyncio
-async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(tmp_path):
+async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(
+    tmp_path,
+):
     """Прогон ревьюера (M12): `slots: {light: slim}`, default не задан. Строки
     «текущая» не было, предвыбор вставал на ПЕРВУЮ модель сервера, и один PgDn
     молча писал `slots.default` на неё — резолв default уезжал с vendor/slim
@@ -1588,8 +2132,9 @@ async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(t
     подписью об источнике (правило — в ядре, общее с плоским мастером), предвыбор
     — встать на неё, а проход насквозь — оставить резолв прежним."""
     pytest.importorskip("textual")
-    import yaml
     from pathlib import Path
+
+    import yaml
     from gc_core.config import _default_config_path
     from gc_core.config_modules.registry_write import apply_registry_ops
     from gc_core.model_picker import ModelInfo
@@ -1597,38 +2142,64 @@ async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(t
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_MODEL
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer tok")
+
+    cfg_path = _write_conn_cfg(
+        tmp_path, url="https://h/v1/chat/completions", auth="Bearer tok"
+    )
     template = Path(_default_config_path()).read_text(encoding="utf-8")
-    apply_registry_ops(cfg_path, [("upsert_model", "slim", {"model": "vendor/slim"}),
-                                  ("write_slot", "light", "slim")], template)
+    apply_registry_ops(
+        cfg_path,
+        [
+            ("upsert_model", "slim", {"model": "vendor/slim"}),
+            ("write_slot", "light", "slim"),
+        ],
+        template,
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = _resolved_conn_cfg(cfg_path)
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
-                      fetch=lambda *a, **k: [ModelInfo("srv/first", tool_capable=True),
-                                             ModelInfo("vendor/slim", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=cfg,
+            fetch=lambda *a, **k: [
+                ModelInfo("srv/first", tool_capable=True),
+                ModelInfo("vendor/slim", tool_capable=True),
+            ],
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._goto(STEP_MODEL)
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.pause()
         rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
         current = [r for r in rows if "текущая" in r]
         assert current, f"строки «текущая» на шаге нет: {rows}"
         assert "vendor/slim" in current[0]
-        assert current[0].startswith("▸")              # предвыбор — на модели фоллбэка
+        assert current[0].startswith("▸")  # предвыбор — на модели фоллбэка
         hints = " ".join(str(w.render()) for w in scr.query(".onb-hint"))
         assert "default не задан — работает light" in hints
-        await pilot.press("pagedown")                  # проход насквозь, ничего не выбирая
+        await pilot.press("pagedown")  # проход насквозь, ничего не выбирая
         await pilot.pause()
         assert scr._values.get("model") == "vendor/slim"
         assert scr._commit_config() is True
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-        assert raw["models"] == {"slim": {"model": "vendor/slim"}}   # близнецов не завелось
-        assert raw["slots"] == {"light": "slim", "default": "slim"}  # резолв — прежний vendor/slim
+        assert raw["models"] == {
+            "slim": {"model": "vendor/slim"}
+        }  # близнецов не завелось
+        assert raw["slots"] == {
+            "light": "slim",
+            "default": "slim",
+        }  # резолв — прежний vendor/slim
 
 
 def _two_level_cfg(tmp_path, *, level):
@@ -1636,9 +2207,16 @@ def _two_level_cfg(tmp_path, *, level):
     раскладка, на которой видно, про какой уровень говорит шаг «Модель»."""
     import yaml
     from gc_core.config_modules.registry_write import apply_registry_ops
+
     cfg_path, cfg = _registry_cfg(tmp_path, "qwen/qwen3-8b", alias="fast")
-    apply_registry_ops(cfg_path, [("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
-                                  ("write_slot", "max", "brain")], "")
+    apply_registry_ops(
+        cfg_path,
+        [
+            ("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
+            ("write_slot", "max", "brain"),
+        ],
+        "",
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
     cfg["level"] = level
@@ -1646,7 +2224,9 @@ def _two_level_cfg(tmp_path, *, level):
 
 
 @pytest.mark.asyncio
-async def test_model_step_marks_the_default_slot_not_the_active_level(tmp_path):
+async def test_model_step_marks_the_default_slot_not_the_active_level(
+    tmp_path,
+):
     """Тот же промах, что чинили в плоском мастере (M6), — здесь: «текущей» бралась
     модель `onboarding.effective_model` — резолв АКТИВНОГО уровня. При `level: max` шаг про
     слот `default` метил строку модели max, и Enter/PgDn отсюда переставлял `default`
@@ -1660,16 +2240,30 @@ async def test_model_step_marks_the_default_slot_not_the_active_level(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_MODEL
+
     cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
-                      fetch=lambda *a, **k: [ModelInfo("qwen/qwen3-8b", tool_capable=True),
-                                             ModelInfo("qwen/qwen3-235b", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=cfg,
+            fetch=lambda *a, **k: [
+                ModelInfo("qwen/qwen3-8b", tool_capable=True),
+                ModelInfo("qwen/qwen3-235b", tool_capable=True),
+            ],
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._goto(STEP_MODEL)
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.pause()
         rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
         current = [r for r in rows if "текущая" in r]
@@ -1678,20 +2272,25 @@ async def test_model_step_marks_the_default_slot_not_the_active_level(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_row_of_the_default_slot_ignores_the_active_level(tmp_path):
+async def test_confirm_row_of_the_default_slot_ignores_the_active_level(
+    tmp_path,
+):
     """Строка витрины названа `модель default:` — и обязана говорить про слот
     `default`. Она читала `_shown_values`, то есть тот же резолв активного уровня:
     на одном экране рядом стояли «модель default: <модель max>» и «модель max: <она
     же>», а Enter записывал третье."""
     pytest.importorskip("textual")
     import re
+
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._goto(STEP_CONFIRM)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
@@ -1701,7 +2300,9 @@ async def test_confirm_row_of_the_default_slot_ignores_the_active_level(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(tmp_path):
+async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(
+    tmp_path,
+):
     """Ревью #14: M12 (`onboarding.model_step_display`) переехал на шаг «Модель» —
     строка «сейчас» уже пишет «сейчас: qwen/qwen3-235b (default не задан —
     работает max)», — но не на сводку/ленту подтверждения: `_shown_values`
@@ -1713,17 +2314,26 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(tm
     остался на старом резолве."""
     pytest.importorskip("textual")
     import re
-    import yaml
     from pathlib import Path
+
+    import yaml
     from gc_core.config import _default_config_path
     from gc_core.config_modules.registry_write import apply_registry_ops
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer tok")
+
+    cfg_path = _write_conn_cfg(
+        tmp_path, url="https://h/v1/chat/completions", auth="Bearer tok"
+    )
     template = Path(_default_config_path()).read_text(encoding="utf-8")
-    apply_registry_ops(cfg_path, [("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
-                                  ("write_slot", "max", "brain")], template)
+    apply_registry_ops(
+        cfg_path,
+        [
+            ("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
+            ("write_slot", "max", "brain"),
+        ],
+        template,
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = _resolved_conn_cfg(cfg_path)
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
@@ -1731,7 +2341,8 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(tm
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._goto(STEP_CONFIRM)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
@@ -1742,14 +2353,17 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(tm
 
 @pytest.mark.asyncio
 async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Инвариант межповерхностный, поэтому и тест один на оба мастера: у каждого в
     отдельности своя редакция правила выглядела бы исправной — так дефект и жил,
     починенный в плоском и уцелевший в TUI. Подменяем ЕДИНСТВЕННЫЙ дом правила и
     ждём подмену в обоих."""
     pytest.importorskip("textual")
     import re
+
     from gc_core import onboarding
+
     # gc-tui от gc-cli НЕ зависит: тест межповерхностный, и в наборе одного
     # пакета он законен только как условный. importorskip, а не import:
     # автономный прогон `cd packages/tui && pytest` обязан проходить БЕЗ
@@ -1758,8 +2372,11 @@ async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
     wz = pytest.importorskip("gc_cli.onboarding_wizard")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     sentinel = "модель-из-общего-дома"
-    monkeypatch.setattr(onboarding, "model_step_current", lambda config: sentinel)
+    monkeypatch.setattr(
+        onboarding, "model_step_current", lambda config: sentinel
+    )
 
     printed: list = []
     io = wz.WizardIO(reader=lambda p, secret: "", printer=printed.append)
@@ -1770,7 +2387,8 @@ async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._goto(STEP_CONFIRM)
         await pilot.pause()
         body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
@@ -1786,36 +2404,49 @@ async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
 
 
 @pytest.mark.asyncio
-async def test_env_refs_survive_untouched_connection_step(tmp_path, monkeypatch):
+async def test_env_refs_survive_untouched_connection_step(
+    tmp_path, monkeypatch
+):
     """Адрес, токен и прокси — все три ссылки ${ENV:...}, ни одно поле не тронуто:
     после полного прохода шага и коммита файл не изменился ни в одной из трёх строк,
     и ни один резолвнутый секрет в него не попал."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    monkeypatch.setenv("GC_URL", "https://real-server.example/v1/chat/completions")
+
+    monkeypatch.setenv(
+        "GC_URL", "https://real-server.example/v1/chat/completions"
+    )
     monkeypatch.setenv("GC_TOKEN", "sk-REALSECRET123")
     monkeypatch.setenv("GC_PROXY", "http://real-corp-proxy:8080")
-    cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}",
-                               auth="Bearer ${ENV:GC_TOKEN}", proxy="${ENV:GC_PROXY}",
-                               model="m")
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="${ENV:GC_URL}",
+        auth="Bearer ${ENV:GC_TOKEN}",
+        proxy="${ENV:GC_PROXY}",
+        model="m",
+    )
     original = cfg_path.read_text(encoding="utf-8")
     cfg = _resolved_conn_cfg(cfg_path)
-    assert cfg["completions_url"] == "https://real-server.example/v1/chat/completions"
+    assert (
+        cfg["completions_url"]
+        == "https://real-server.example/v1/chat/completions"
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
         await pilot.pause()
         from gc_tui.editors.connection import ConnectionEditor
+
         scr.query_one(ConnectionEditor).escape_presets()
-        scr._submit_connection()                 # ни одно поле не тронуто
+        scr._submit_connection()  # ни одно поле не тронуто
         assert "completions_url" not in scr._values
         assert "Authorization" not in scr._values
         assert "proxy" not in scr._values
         assert scr._commit_config() is True
         content = cfg_path.read_text(encoding="utf-8")
-        assert content == original                # файл не тронут вовсе
-        assert "sk-REALSECRET123" not in content   # резолвнутый секрет не утёк
+        assert content == original  # файл не тронут вовсе
+        assert "sk-REALSECRET123" not in content  # резолвнутый секрет не утёк
         assert "real-server.example" not in content
         assert "${ENV:GC_URL}" in content
         assert "Bearer ${ENV:GC_TOKEN}" in content
@@ -1830,17 +2461,25 @@ async def test_env_ref_token_survives_when_var_unset(tmp_path, monkeypatch):
     обязана остаться, авторизация — не быть стёртой явным "" в файле."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     monkeypatch.delenv("GC_TOKEN", raising=False)
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer ${ENV:GC_TOKEN}", model="m")
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer ${ENV:GC_TOKEN}",
+        model="m",
+    )
     cfg = _resolved_conn_cfg(cfg_path)
-    assert cfg["chat_completion_headers"]["Authorization"] == "Bearer "   # резолв в пустоту
+    assert (
+        cfg["chat_completion_headers"]["Authorization"] == "Bearer "
+    )  # резолв в пустоту
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
         await pilot.pause()
         from gc_tui.editors.connection import ConnectionEditor
+
         scr.query_one(ConnectionEditor).escape_presets()
         scr._submit_connection()
         assert "Authorization" not in scr._values
@@ -1858,9 +2497,14 @@ async def test_connection_new_token_replaces_env_ref(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
+
     monkeypatch.setenv("GC_TOKEN", "sk-OLDSECRET")
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer ${ENV:GC_TOKEN}", model="m")
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer ${ENV:GC_TOKEN}",
+        model="m",
+    )
     cfg = _resolved_conn_cfg(cfg_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -1896,10 +2540,14 @@ async def test_env_ref_token_survives_in_auto_mode(tmp_path, monkeypatch):
     он в проде включается."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     monkeypatch.setenv("GC_TOKEN", "sk-REALSECRET123")
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer ${ENV:GC_TOKEN}")   # model не передан — остаётся реальным
-                                                                 # значением шаблона, не сентинелом
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer ${ENV:GC_TOKEN}",
+    )  # model не передан — остаётся реальным
+    # значением шаблона, не сентинелом
     cfg = _resolved_conn_cfg(cfg_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -1907,8 +2555,9 @@ async def test_env_ref_token_survives_in_auto_mode(tmp_path, monkeypatch):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         from gc_tui.editors.connection import ConnectionEditor
+
         scr.query_one(ConnectionEditor).escape_presets()
-        scr._submit_connection()                 # ни одно поле не тронуто — Enter'ом как есть
+        scr._submit_connection()  # ни одно поле не тронуто — Enter'ом как есть
         assert "Authorization" not in scr._values
         assert scr._commit_config() is True
         content = cfg_path.read_text(encoding="utf-8")
@@ -1927,10 +2576,13 @@ async def test_auto_probe_resolves_env_ref_in_address(tmp_path, monkeypatch):
     """Проба должна проверять то, что реально уйдёт в запрос, — раскрытый адрес,
     а не литерал ${ENV:...}, которым теперь префилено поле."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
-    monkeypatch.setenv("GC_URL", "https://real-server.example/v1/chat/completions")
+
+    monkeypatch.setenv(
+        "GC_URL", "https://real-server.example/v1/chat/completions"
+    )
     cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}")
     cfg = _resolved_conn_cfg(cfg_path)
     seen = {}
@@ -1946,20 +2598,28 @@ async def test_auto_probe_resolves_env_ref_in_address(tmp_path, monkeypatch):
         await pilot.pause()
         scr._auto_probe()
         await wait_until(pilot, lambda: "endpoint" in seen, "проба ушла")
-        assert seen["endpoint"] == "https://real-server.example/v1/chat/completions"
+        assert (
+            seen["endpoint"]
+            == "https://real-server.example/v1/chat/completions"
+        )
 
 
 @pytest.mark.asyncio
-async def test_auto_probe_resolution_does_not_leak_into_field_or_file(tmp_path, monkeypatch):
+async def test_auto_probe_resolution_does_not_leak_into_field_or_file(
+    tmp_path, monkeypatch
+):
     """Парный к тесту выше: раскрытие адреса для пробы — только для самого
     запроса, оно не оседает ни в поле, ни в _values, ни в файле."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
     from textual.widgets import Input
-    monkeypatch.setenv("GC_URL", "https://real-server.example/v1/chat/completions")
+
+    monkeypatch.setenv(
+        "GC_URL", "https://real-server.example/v1/chat/completions"
+    )
     cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}")
     cfg = _resolved_conn_cfg(cfg_path)
     seen = {}
@@ -1978,7 +2638,7 @@ async def test_auto_probe_resolution_does_not_leak_into_field_or_file(tmp_path, 
         ed = scr.query_one(ConnectionEditor)
         assert ed.query_one("#conn-url", Input).value == "${ENV:GC_URL}"
         ed.escape_presets()
-        scr._submit_connection()                 # поле не тронуто
+        scr._submit_connection()  # поле не тронуто
         assert "completions_url" not in scr._values
         assert scr._commit_config() is True
         content = cfg_path.read_text(encoding="utf-8")
@@ -1998,11 +2658,15 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
     токеном, а не без авторизации — иначе рабочий сервер, требующий Bearer, отвечает
     401 «токен отклонён» под полностью рабочим конфигом."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer sk-REALSECRET123")
+
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer sk-REALSECRET123",
+    )
     cfg = _resolved_conn_cfg(cfg_path)
     seen = []
 
@@ -2011,7 +2675,9 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         seen.append(auth)
         if auth is None:
-            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2025,19 +2691,25 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, monkeypatch):
+async def test_auto_probe_resolves_env_ref_token_when_field_untouched(
+    tmp_path, monkeypatch
+):
     """То же, но токен в файле записан ссылкой ${ENV:...}: до пробы он доезжает уже
     раскрытым, потому что фолбэк берёт его из self._config (тот резолвится при
     загрузке). Тест сторожит именно это — что ссылка в файле не мешает пробе уйти
     с настоящим секретом. Раскрытие ссылки, НАБРАННОЙ на самом шаге, не покрыто:
     поле токена здесь принципиально пустое, и такой путь сейчас недостижим."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.services.settings_probe import ProbeResult
-    from gc_testkit.tui_support import wait_until
+
     monkeypatch.setenv("GC_TOKEN", "sk-REALSECRET123")
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer ${ENV:GC_TOKEN}")
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer ${ENV:GC_TOKEN}",
+    )
     cfg = _resolved_conn_cfg(cfg_path)
     seen = []
 
@@ -2046,7 +2718,9 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, 
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         seen.append(auth)
         if auth is None:
-            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2067,11 +2741,14 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(tmp_path, 
 
 
 @pytest.mark.asyncio
-async def test_auto_probe_reports_missing_env_var_instead_of_probing(tmp_path, monkeypatch):
+async def test_auto_probe_reports_missing_env_var_instead_of_probing(
+    tmp_path, monkeypatch
+):
     """Переменной в этой сессии нет: проба не должна стартовать вовсе, статус —
     честный про переменную, а не про «пустой адрес»/«нет соединения»."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     monkeypatch.delenv("GC_URL", raising=False)
     cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}")
     cfg = _resolved_conn_cfg(cfg_path)
@@ -2080,6 +2757,7 @@ async def test_auto_probe_reports_missing_env_var_instead_of_probing(tmp_path, m
     def fake_probe(*a, **k):
         called["n"] += 1
         from gc_tui.services.settings_probe import ProbeResult
+
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2089,7 +2767,7 @@ async def test_auto_probe_reports_missing_env_var_instead_of_probing(tmp_path, m
         await pilot.pause()
         scr._auto_probe()
         await pilot.pause()
-        assert called["n"] == 0                    # проба не ушла
+        assert called["n"] == 0  # проба не ушла
         line = str(scr.query_one(".onb-conn-probe").render())
         assert "GC_URL" in line
         assert "переменной нет" in line
@@ -2112,21 +2790,26 @@ async def test_ctrl_u_clears_the_saved_token_and_probes_without_it(tmp_path):
     Сервер здесь ТРЕБУЕТ авторизацию (401 на контрольный запрос): без этого токену
     некуда доехать, и «ушла без токена» вышло бы верным само собой."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
-    from gc_tui.editors.connection import ConnectionEditor, _TOKEN_PH_CLEARED
+    from gc_tui.editors.connection import _TOKEN_PH_CLEARED, ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer sk-REALSECRET123")
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer sk-REALSECRET123",
+    )
     cfg = _resolved_conn_cfg(cfg_path)
     seen = []
 
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         seen.append(auth)
         if auth is None:
-            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2136,14 +2819,18 @@ async def test_ctrl_u_clears_the_saved_token_and_probes_without_it(tmp_path):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         token = ed.query_one("#conn-token", Input)
-        assert "REALSECRET" not in token.placeholder      # маска, а не секрет
-        assert token.placeholder != _TOKEN_PH_CLEARED     # …но маска сохранённого есть
+        assert "REALSECRET" not in token.placeholder  # маска, а не секрет
+        assert (
+            token.placeholder != _TOKEN_PH_CLEARED
+        )  # …но маска сохранённого есть
 
-        ed.move(1)                                        # → поле токена: там клавиша и обещана
+        ed.move(1)  # → поле токена: там клавиша и обещана
         await pilot.press("ctrl+u")
         await pilot.pause()
         assert ed.token_cleared is True
-        assert token.placeholder == _TOKEN_PH_CLEARED     # маска ушла, обещано удаление
+        assert (
+            token.placeholder == _TOKEN_PH_CLEARED
+        )  # маска ушла, обещано удаление
 
         scr._auto_probe()
         await wait_until(pilot, lambda: seen, "проба ушла")
@@ -2156,11 +2843,11 @@ async def test_ctrl_space_reprobes_the_connection_step(tmp_path):
     менялись: снимок против дребезга гасит только автопробу, ручную глушить нельзя
     (спека §5.2 канона; развод клавиш — спека 2026-08-06 §2)."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
     calls = []
 
@@ -2175,15 +2862,21 @@ async def test_ctrl_space_reprobes_the_connection_step(tmp_path):
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
         await pilot.pause()
-        assert not calls                       # печать сама по себе пробу не шлёт
+        assert not calls  # печать сама по себе пробу не шлёт
         # Развод клавиш (спека 2026-08-06 §2): Ctrl+Space больше не спрашивает список —
         # одно нажатие сразу уходит в пробу.
         await pilot.press("ctrl+space")
-        await wait_until(pilot, lambda: len(calls) == 1, "ручная проверка ушла")
-        await pilot.press("ctrl+space")        # поля не трогали
-        await wait_until(pilot, lambda: len(calls) == 2, "снимок не глушит ручную")
+        await wait_until(
+            pilot, lambda: len(calls) == 1, "ручная проверка ушла"
+        )
+        await pilot.press("ctrl+space")  # поля не трогали
+        await wait_until(
+            pilot, lambda: len(calls) == 2, "снимок не глушит ручную"
+        )
 
 
 @pytest.mark.asyncio
@@ -2193,9 +2886,9 @@ async def test_alt_down_on_the_model_step_reloads_the_list(tmp_path):
     Ctrl+Space на этом шаге пробы не даёт, см. `test_ctrl_space_on_the_model_step_does_nothing`).
     Сервер лежал (одинокое поле), ожил — список собирается."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
     calls = []
@@ -2203,23 +2896,42 @@ async def test_alt_down_on_the_model_step_reloads_the_list(tmp_path):
     def fetch(*a, **k):
         calls.append(1)
         if len(calls) == 1:
-            return None                                   # сервер лежал
+            return None  # сервер лежал
         return [ModelInfo("glm-5.2-fp8", tool_capable=True)]
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
-                              "chat_completion_headers": {}},
-                      fetch=fetch)
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
-        assert not scr.query(".onb-option"), "предусловие: сервер списка не отдал"
+        scr = _screen(
+            config={
+                "completions_url": "https://h/v1/chat/completions",
+                "chat_completion_headers": {},
+            },
+            fetch=fetch,
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
+        assert not scr.query(".onb-option"), (
+            "предусловие: сервер списка не отдал"
+        )
         await pilot.press("alt+down")
-        await wait_until(pilot, lambda: any("glm-5.2-fp8" in str(w.render())
-                                            for w in scr.query(".onb-option")),
-                         "список перечитан с сервера")
+        await wait_until(
+            pilot,
+            lambda: any(
+                "glm-5.2-fp8" in str(w.render())
+                for w in scr.query(".onb-option")
+            ),
+            "список перечитан с сервера",
+        )
 
 
 @pytest.mark.asyncio
@@ -2227,9 +2939,9 @@ async def test_ctrl_space_on_the_model_step_does_nothing(tmp_path):
     """Пробы на шаге «Модель» нет (§2.5, §5.1 спеки 2026-08-06) — Ctrl+Space
     съедается молча: список не трогает, шаг не листает, не падает."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
     def fetch(*a, **k):
@@ -2237,19 +2949,33 @@ async def test_ctrl_space_on_the_model_step_does_nothing(tmp_path):
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
-                              "chat_completion_headers": {}},
-                      fetch=fetch)
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr = _screen(
+            config={
+                "completions_url": "https://h/v1/chat/completions",
+                "chat_completion_headers": {},
+            },
+            fetch=fetch,
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         rows_before = [str(w.render()) for w in scr.query(".onb-option")]
         await pilot.press("ctrl+space")
         await pilot.pause()
         assert app.screen is scr
         assert scr._step == 1
-        assert [str(w.render()) for w in scr.query(".onb-option")] == rows_before
+        assert [
+            str(w.render()) for w in scr.query(".onb-option")
+        ] == rows_before
 
 
 @pytest.mark.asyncio
@@ -2259,10 +2985,10 @@ async def test_ctrl_space_on_an_empty_address_says_what_is_missing(tmp_path):
     стартует с ПУСТЫМ адресом — именно там новичок жмёт клавишу первым делом, а
     _auto_probe выходит на `if not url` до записи любой строки."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
     calls = []
 
@@ -2278,7 +3004,9 @@ async def test_ctrl_space_on_an_empty_address_says_what_is_missing(tmp_path):
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
         await pilot.pause()
-        assert not ed.query_one("#conn-url", Input).value   # предусловие: адрес пуст
+        assert not ed.query_one(
+            "#conn-url", Input
+        ).value  # предусловие: адрес пуст
         # Развод клавиш (спека 2026-08-06 §2): Ctrl+Space сразу про пробу.
         await pilot.press("ctrl+space")
         await pilot.pause()
@@ -2288,7 +3016,9 @@ async def test_ctrl_space_on_an_empty_address_says_what_is_missing(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path, monkeypatch):
+async def test_ctrl_space_on_an_env_reference_still_probes(
+    tmp_path, monkeypatch
+):
     """Регресс ревью (фикс-раунд 1): шаг «Подключение» держит СЫРОЕ значение файла
     (`_write_conn_cfg`, без резолва) — `${ENV:GC_URL}` там штатное состояние, не
     фильтр. §2.3 бракует её так же, как «gr» (`_valid_endpoint_url` требует http(s)),
@@ -2296,12 +3026,14 @@ async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path, monkeypatch
     сценарий, а не край. Ctrl+Space обязан довести до `_auto_probe`, реальным
     нажатием (не прямым вызовом)."""
     pytest.importorskip("textual")
-    from textual.widgets import Input
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
 
-    monkeypatch.setenv("GC_URL", "https://real-server.example/v1/chat/completions")
+    monkeypatch.setenv(
+        "GC_URL", "https://real-server.example/v1/chat/completions"
+    )
     cfg_path = _write_conn_cfg(tmp_path, url="${ENV:GC_URL}", model="m")
     cfg = _resolved_conn_cfg(cfg_path)
     calls = []
@@ -2318,23 +3050,29 @@ async def test_ctrl_space_on_an_env_reference_still_probes(tmp_path, monkeypatch
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
         await pilot.pause()
-        assert ed.query_one("#conn-url", Input).value == "${ENV:GC_URL}"   # предусловие
+        assert (
+            ed.query_one("#conn-url", Input).value == "${ENV:GC_URL}"
+        )  # предусловие
         await pilot.press("ctrl+space")
         await pilot.pause()
-        assert calls, "ссылка обязана дойти до пробы, а не быть принятой за фильтр"
+        assert calls, (
+            "ссылка обязана дойти до пробы, а не быть принятой за фильтр"
+        )
         line = " ".join(str(w.render()) for w in scr.query(".onb-conn-probe"))
         assert "сначала выберите адрес" not in line
 
 
 @pytest.mark.asyncio
-async def test_alt_down_on_the_model_step_goes_past_the_session_cache(tmp_path):
+async def test_alt_down_on_the_model_step_goes_past_the_session_cache(
+    tmp_path,
+):
     """Мастер оборачивает свой fetch в тот же сессионный кэш (`OnboardingScreen.__init__`),
     значит и здесь перечитывание (Alt+↓) после УДАЧНОЙ загрузки обязано идти мимо
     него — иначе клавиша детерминированный no-op."""
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_testkit.tui_support import wait_until
     from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
+    from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
     calls = []
@@ -2343,24 +3081,39 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(tmp_path):
         calls.append(1)
         base = [ModelInfo("glm-5.2-fp8", tool_capable=True)]
         if len(calls) == 1:
-            return base                                # что сервер отдавал сначала
+            return base  # что сервер отдавал сначала
         return base + [ModelInfo("deepseek-v3-base", tool_capable=True)]
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(config={"completions_url": "https://h/v1/chat/completions",
-                              "chat_completion_headers": {}},
-                      fetch=fetch)
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._step = 1; scr._render_step()
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        scr = _screen(
+            config={
+                "completions_url": "https://h/v1/chat/completions",
+                "chat_completion_headers": {},
+            },
+            fetch=fetch,
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._step = 1
+        scr._render_step()
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         rows = lambda: [str(w.render()) for w in scr.query(".onb-option")]
-        assert any("glm-5.2-fp8" in r for r in rows())          # предусловие
+        assert any("glm-5.2-fp8" in r for r in rows())  # предусловие
         assert not any("deepseek" in r for r in rows())
         await pilot.press("alt+down")
-        await wait_until(pilot, lambda: any("deepseek" in r for r in rows()),
-                         "перечитывание должно идти мимо сессионного кэша")
+        await wait_until(
+            pilot,
+            lambda: any("deepseek" in r for r in rows()),
+            "перечитывание должно идти мимо сессионного кэша",
+        )
 
 
 # --- заглушка адреса из шаблона — не адрес: сетевой путь по ней не ходит -----
@@ -2371,14 +3124,16 @@ def test_endpoint_auth_does_not_hand_out_the_placeholder_address():
     Заглушка, отданная как адрес, уводила запрос за списком моделей на несуществующий
     `your-backend:PORT` — мастер печатал «не удалось получить список» при видимом в
     поле рабочем адресе человека."""
-    scr = _screen()                       # config = шаблон: оба сентинела на месте
+    scr = _screen()  # config = шаблон: оба сентинела на месте
     endpoint, auth = scr._endpoint_auth()
     assert endpoint == ""
-    assert auth is None                   # заглушку токена путь фильтровал и раньше
+    assert auth is None  # заглушку токена путь фильтровал и раньше
 
 
 @pytest.mark.asyncio
-async def test_model_step_on_placeholder_address_behaves_as_on_empty_one(tmp_path):
+async def test_model_step_on_placeholder_address_behaves_as_on_empty_one(
+    tmp_path,
+):
     """Шаг «Модель» на заглушке адреса = шаг «Модель» на чистой установке: в сеть не
     идём, списка нет, остаётся ручной ввод."""
     pytest.importorskip("textual")
@@ -2397,16 +3152,25 @@ async def test_model_step_on_placeholder_address_behaves_as_on_empty_one(tmp_pat
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(fetch=fetch)
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._goto(STEP_MODEL)
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "шаг отработал")
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "шаг отработал",
+        )
         assert dialed == []
         assert scr.query(ModelEditor).first().has_models is False
 
 
 @pytest.mark.asyncio
-async def test_probe_verdict_is_pulled_into_frame_on_every_update(tmp_path, monkeypatch):
+async def test_probe_verdict_is_pulled_into_frame_on_every_update(
+    tmp_path, monkeypatch
+):
     """Вердикт пробы обязан попадать в кадр — и на ПОВТОРНОЕ нажатие тоже.
 
     Строка стоит ниже поля «Прокси», тело шага длиннее вьюпорта рамки: без подводки
@@ -2414,16 +3178,19 @@ async def test_probe_verdict_is_pulled_into_frame_on_every_update(tmp_path, monk
     Подводка живёт у единственного писателя строки — заказанная при монтаже тела, она
     досталась бы только первому вердикту."""
     pytest.importorskip("textual")
-    from rich.text import Text
-    from gc_tui.screens import onboarding as onb
     from gc_tui.app import TuiApp
+    from gc_tui.screens import onboarding as onb
+    from rich.text import Text
 
     revealed = []
-    monkeypatch.setattr(onb, "reveal", lambda w: revealed.append(w), raising=False)
+    monkeypatch.setattr(
+        onb, "reveal", lambda w: revealed.append(w), raising=False
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen()
-        await pilot.app.push_screen(scr); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         line = scr.query_one(".onb-conn-probe")
         scr._set_conn_probe_line(Text("проверяю…"))
         scr._set_conn_probe_line(Text("✓ сервер отвечает"))
@@ -2438,14 +3205,24 @@ async def test_probe_verdict_is_pulled_into_frame_on_every_update(tmp_path, monk
 def _levels_screen(tmp_path, **over):
     """Мастер с пройденными шагами подключения и модели, стоящий на шаге уровней."""
     from gc_core.model_picker import ModelInfo
+
     cfg_path = _write_conn_cfg(tmp_path)
-    kw = dict(config_path=str(cfg_path),
-              fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True),
-                                     ModelInfo("Heavy", tool_capable=True)])
+    kw = dict(
+        config_path=str(cfg_path),
+        fetch=lambda *a, **k: [
+            ModelInfo("Flash", tool_capable=True),
+            ModelInfo("Heavy", tool_capable=True),
+        ],
+    )
     kw.update(over)
     scr = _screen(**kw)
-    scr._values.update({"completions_url": "https://h/v1/chat/completions",
-                        "Authorization": "Bearer sk", "model": "Qwen"})
+    scr._values.update(
+        {
+            "completions_url": "https://h/v1/chat/completions",
+            "Authorization": "Bearer sk",
+            "model": "Qwen",
+        }
+    )
     return cfg_path, scr
 
 
@@ -2455,21 +3232,29 @@ async def test_levels_step_skipped_writes_nothing(tmp_path):
     не уезжает ни записи, ни слота."""
     pytest.importorskip("textual")
     import yaml
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS, STEP_MCP
-    from gc_testkit.tui_support import wait_until
+
     committed = []
-    cfg_path, scr = _levels_screen(tmp_path, on_commit=lambda: committed.append(True))
+    cfg_path, scr = _levels_screen(
+        tmp_path, on_commit=lambda: committed.append(True)
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
         assert scr._step_id() == STEP_LEVELS
         await pilot.press("pagedown")
         await pilot.pause()
         assert scr._step_id() == STEP_MCP
-        assert "model_light" not in scr._values and "model_max" not in scr._values
-        scr._goto(STEP_CONFIRM); await pilot.pause()
+        assert (
+            "model_light" not in scr._values and "model_max" not in scr._values
+        )
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
@@ -2483,42 +3268,67 @@ async def test_levels_step_fills_light_and_max(tmp_path):
     выбора, что на шаге «Модель»: Enter#1 помечает, Enter#2 фиксирует)."""
     pytest.importorskip("textual")
     import yaml
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_LEVELS
-    from gc_testkit.tui_support import wait_until
+
     committed = []
-    cfg_path, scr = _levels_screen(tmp_path, on_commit=lambda: committed.append(True))
+    cfg_path, scr = _levels_screen(
+        tmp_path, on_commit=lambda: committed.append(True)
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
-        await pilot.press("enter")                       # под-форма «лёгкая»
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
-        await pilot.press("enter")                       # Enter#1 — пометить Flash
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
+        await pilot.press("enter")  # под-форма «лёгкая»
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
+        await pilot.press("enter")  # Enter#1 — пометить Flash
         await pilot.pause()
         assert scr._values["model_light"] == "Flash"
-        await pilot.press("enter")                       # Enter#2 — назад к списку уровней
+        await pilot.press("enter")  # Enter#2 — назад к списку уровней
         await pilot.pause()
         assert scr._levels_stage == "ask"
-        await pilot.press("down")                        # → строка «максимальная»
+        await pilot.press("down")  # → строка «максимальная»
         await pilot.press("enter")
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
-        await pilot.press("down")                        # → Heavy
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
+        await pilot.press("down")  # → Heavy
         await pilot.press("enter")
         await pilot.pause()
         assert scr._values["model_max"] == "Heavy"
         await pilot.press("enter")
         await pilot.pause()
-        scr._goto(STEP_CONFIRM); await pilot.pause()
+        scr._goto(STEP_CONFIRM)
+        await pilot.pause()
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-        assert raw["models"] == {"Qwen": {"model": "Qwen"}, "Flash": {"model": "Flash"},
-                                 "Heavy": {"model": "Heavy"}}
-        assert raw["slots"] == {"default": "Qwen", "light": "Flash", "max": "Heavy"}
+        assert raw["models"] == {
+            "Qwen": {"model": "Qwen"},
+            "Flash": {"model": "Flash"},
+            "Heavy": {"model": "Heavy"},
+        }
+        assert raw["slots"] == {
+            "default": "Qwen",
+            "light": "Flash",
+            "max": "Heavy",
+        }
 
 
 @pytest.mark.asyncio
@@ -2526,19 +3336,28 @@ async def test_level_form_escape_returns_to_the_list_without_setting(tmp_path):
     """Esc-вложенность второго под-состояния: под-форма уровня закрывается Esc к
     списку уровней, ничего не зафиксировав."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.confirm import ConfirmScreen
     from gc_tui.screens.onboarding import STEP_LEVELS
-    from gc_testkit.tui_support import wait_until
+
     _cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
         await pilot.press("enter")
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         await pilot.press("escape")
         await pilot.pause()
         assert scr._levels_stage == "ask"
@@ -2551,9 +3370,12 @@ def test_level_row_paints_the_level_name_with_its_own_color():
     как в раскрытом списке `/level` и в слотах секции «Модели»: одна сущность не имеет
     права выглядеть на одном экране двумя способами. Роль после «·» — обычная."""
     from gc_tui.palette import ACCENT, INK
+
     scr = _screen()
     row = scr._level_row_text(False, "max")
-    styles = {row.plain[span.start:span.end]: span.style for span in row.spans}
+    styles = {
+        row.plain[span.start : span.end]: span.style for span in row.spans
+    }
     assert styles.get("max") == ACCENT
     assert styles.get(" · самая сильная: сложные задачи") == INK
 
@@ -2564,14 +3386,19 @@ async def test_model_step_names_the_level_it_fills(tmp_path):
     Подпись называет связь: без неё слово «default» человек впервые встречает уже
     в итоговой сводке («модель default: …»)."""
     pytest.importorskip("textual")
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_MODEL
-    from gc_core.model_picker import ModelInfo
-    scr = _screen(fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True)])
+
+    scr = _screen(
+        fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True)]
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_MODEL); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_MODEL)
+        await pilot.pause()
         blob = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
         assert "уровень default" in blob
 
@@ -2584,18 +3411,24 @@ async def test_levels_continue_row_leaves_the_step_on_enter(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_LEVELS, STEP_MCP
+
     cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
-        await pilot.press("down"); await pilot.press("down")   # light → max → продолжить
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
+        await pilot.press("down")
+        await pilot.press("down")  # light → max → продолжить
         await pilot.pause()
         assert scr._levels_on_continue()
         await pilot.press("enter")
         await pilot.pause()
         assert scr._step_id() == STEP_MCP
-        assert "model_light" not in scr._values and "model_max" not in scr._values
+        assert (
+            "model_light" not in scr._values and "model_max" not in scr._values
+        )
 
 
 @pytest.mark.asyncio
@@ -2604,15 +3437,19 @@ async def test_levels_cursor_cycles_through_three_rows(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_LEVELS
+
     cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
         seen = []
         for _ in range(4):
             seen.append(scr._levels_idx)
-            await pilot.press("down"); await pilot.pause()
+            await pilot.press("down")
+            await pilot.pause()
         assert seen == [0, 1, 2, 0]
 
 
@@ -2621,17 +3458,21 @@ async def test_levels_footer_follows_the_row_under_the_cursor(tmp_path):
     """Футер обещает роль Enter для строки ПОД КУРСОРОМ: на уровне — «выбрать»
     (далее уводит PgDn), на строке-действии Enter сам и есть «далее»."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_LEVELS
+    from textual.widgets import Static
+
     cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — выбрать" in footer and "PgDn — далее" in footer
-        await pilot.press("down"); await pilot.press("down")   # → «продолжить»
+        await pilot.press("down")
+        await pilot.press("down")  # → «продолжить»
         await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — далее" in footer and "PgDn — далее" not in footer
@@ -2642,22 +3483,31 @@ async def test_levels_footer_promises_the_keys_that_work(tmp_path):
     """Футер шага: в списке уровней Enter выбирает (далее — PgDn), в под-форме
     работают Alt+↓ (перечитать список) и Esc — назад к списку, а не выход."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_LEVELS
-    from gc_testkit.tui_support import wait_until
+    from textual.widgets import Static
+
     _cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Enter — выбрать" in footer and "PgDn — далее" in footer
         assert "Esc — выход" in footer
         await pilot.press("enter")
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
         footer = str(scr.query_one("#onb-footer", Static).render())
         assert "Alt+↓ — перечитать список" in footer
         assert "Esc — назад" in footer and "Esc — выход" not in footer
@@ -2672,51 +3522,77 @@ def _screen_with_profiles_on_disk(tmp_path, **over):
 
 
 @pytest.mark.asyncio
-async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, monkeypatch):
+async def test_full_pass_through_both_new_steps_writes_valid_config(
+    tmp_path, monkeypatch
+):
     """Полный проход: подключение → модель → уровень max → MCP → голос → подтверждение.
     Итог — валидный конфиг (та же двухфазная проверка, что у записи реестра)."""
     pytest.importorskip("textual")
     import yaml
-    from gc_core.model_picker import ModelInfo
-    from textual.widgets import Input
     from gc_core.config import validate_config_text_with_sections
+    from gc_core.model_picker import ModelInfo
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
     from gc_tui.editors.model import ModelEditor
-    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_LEVELS, STEP_MCP,
-                                        STEP_MODEL, STEP_VOICE)
-    from gc_testkit.tui_support import wait_until
+    from gc_tui.screens.onboarding import (
+        STEP_CONFIRM,
+        STEP_LEVELS,
+        STEP_MCP,
+        STEP_MODEL,
+        STEP_VOICE,
+    )
     from test_onboarding_voice_step import FakeVoice
+    from textual.widgets import Input
+
     monkeypatch.chdir(tmp_path)
     committed = []
     cfg_path, scr = _screen_with_profiles_on_disk(
-        tmp_path, on_commit=lambda: committed.append(True),
+        tmp_path,
+        on_commit=lambda: committed.append(True),
         voice=FakeVoice(),
-        fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True),
-                               ModelInfo("Heavy", tool_capable=True)])
+        fetch=lambda *a, **k: [
+            ModelInfo("Flash", tool_capable=True),
+            ModelInfo("Heavy", tool_capable=True),
+        ],
+    )
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
         ed = scr.query_one(ConnectionEditor)
         ed.escape_presets()
-        ed.query_one("#conn-url", Input).value = "https://h/v1/chat/completions"
-        await pilot.press("enter")                       # → шаг «Модель»
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://h/v1/chat/completions"
+        await pilot.press("enter")  # → шаг «Модель»
         await pilot.pause()
         assert scr._step_id() == STEP_MODEL
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
-        await pilot.press("enter")                       # пометить Flash
-        await pilot.press("enter")                       # → шаг уровней
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
+        await pilot.press("enter")  # пометить Flash
+        await pilot.press("enter")  # → шаг уровней
         await pilot.pause()
         assert scr._step_id() == STEP_LEVELS
-        await pilot.press("down")                        # строка «максимальная»
+        await pilot.press("down")  # строка «максимальная»
         await pilot.press("enter")
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
-        await pilot.press("down")                        # → Heavy
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
+        await pilot.press("down")  # → Heavy
         await pilot.press("enter")
-        await pilot.press("enter")                       # зафиксировать и вернуться
+        await pilot.press("enter")  # зафиксировать и вернуться
         await pilot.pause()
         assert scr._step_id() == STEP_LEVELS
         await pilot.press("pagedown")
@@ -2731,11 +3607,14 @@ async def test_full_pass_through_both_new_steps_writes_valid_config(tmp_path, mo
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
         text = cfg_path.read_text(encoding="utf-8")
-        validate_config_text_with_sections(text)         # не бросает
+        validate_config_text_with_sections(text)  # не бросает
         raw = yaml.safe_load(text)
-        assert raw["models"] == {"Flash": {"model": "Flash"}, "Heavy": {"model": "Heavy"}}
+        assert raw["models"] == {
+            "Flash": {"model": "Flash"},
+            "Heavy": {"model": "Heavy"},
+        }
         assert raw["slots"] == {"default": "Flash", "max": "Heavy"}
-        assert raw["profile"] == ""                      # указатель не трогали
+        assert raw["profile"] == ""  # указатель не трогали
 
 
 # --- находки ревью Task 8 ---
@@ -2746,19 +3625,29 @@ async def test_leaving_the_level_form_does_not_survive_the_step(tmp_path):
     """То же правило для второго под-состояния: под-форма уровня не переживает уход
     со шага — вернувшийся застаёт список уровней."""
     pytest.importorskip("textual")
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
     from gc_tui.screens.onboarding import STEP_LEVELS, STEP_MCP
-    from gc_testkit.tui_support import wait_until
+
     _cfg_path, scr = _levels_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        await pilot.app.push_screen(scr); await pilot.pause()
-        scr._goto(STEP_LEVELS); await pilot.pause()
-        await pilot.press("enter")                       # под-форма «лёгкая»
-        await wait_until(pilot, lambda: bool(scr.query(ModelEditor))
-                         and scr.query(ModelEditor).first().models_loaded, "models loaded")
-        scr._goto(STEP_MCP); await pilot.pause()         # ушли со шага мимо под-формы
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_LEVELS)
+        await pilot.pause()
+        await pilot.press("enter")  # под-форма «лёгкая»
+        await wait_until(
+            pilot,
+            lambda: (
+                bool(scr.query(ModelEditor))
+                and scr.query(ModelEditor).first().models_loaded
+            ),
+            "models loaded",
+        )
+        scr._goto(STEP_MCP)
+        await pilot.pause()  # ушли со шага мимо под-формы
         await pilot.press("pageup")
         await pilot.pause()
         assert scr._step_id() == STEP_LEVELS
@@ -2777,21 +3666,29 @@ def _active_profile_screen(tmp_path, **over):
     вхождением, и короткое значение нашлось бы внутри соседнего адреса (`completions`),
     зеленя проверку модели независимо от того, показывает её витрина или нет."""
     cfg_path = _profiles_cfg(tmp_path, "home", "work", active="work")
-    kw = dict(config_path=str(cfg_path),
-              config={"completions_url": "https://h/v1/chat/completions",
-                      "chat_completion_headers": {}, "model": "profile-layer-model",
-                      "profile": "work"})
+    kw = dict(
+        config_path=str(cfg_path),
+        config={
+            "completions_url": "https://h/v1/chat/completions",
+            "chat_completion_headers": {},
+            "model": "profile-layer-model",
+            "profile": "work",
+        },
+    )
     kw.update(over)
     return cfg_path, _screen(**kw)
 
 
 @pytest.mark.asyncio
-async def test_layer_note_in_the_wizard_carries_the_settings_address(tmp_path, monkeypatch):
+async def test_layer_note_in_the_wizard_carries_the_settings_address(
+    tmp_path, monkeypatch
+):
     """Экран мастера — единственная поверхность, где «Настройки · Профили»
     существуют: общий текст политики он дополняет адресом действия."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
+
     monkeypatch.chdir(tmp_path)
     _cfg_path, scr = _active_profile_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2799,18 +3696,22 @@ async def test_layer_note_in_the_wizard_carries_the_settings_address(tmp_path, m
         await pilot.app.push_screen(scr)
         await pilot.pause()
         note = str(scr.query_one("#onb-profile-warn", Static).render())
-        assert note == ('действует профиль "work" — он перекроет модельные настройки'
-                        ' · изменить в Настройки · Профили')
+        assert note == (
+            'действует профиль "work" — он перекроет модельные настройки · изменить в Настройки · Профили'
+        )
 
 
 @pytest.mark.asyncio
-async def test_no_active_profile_shows_no_warning_plaque(tmp_path, monkeypatch):
+async def test_no_active_profile_shows_no_warning_plaque(
+    tmp_path, monkeypatch
+):
     """Профили `home`/`work` лежат на диске, но указателя `profile` в конфиге
     нет — действующего профиля тоже нет, и плашки `#onb-profile-warn` на экране
     быть не должно вовсе (а не пустой строкой)."""
     pytest.importorskip("textual")
-    from textual.css.query import NoMatches
     from gc_tui.app import TuiApp
+    from textual.css.query import NoMatches
+
     monkeypatch.chdir(tmp_path)
     cfg_path = _profiles_cfg(tmp_path, "home", "work")
     scr = _screen(config_path=str(cfg_path))
@@ -2827,35 +3728,49 @@ def _broken_profile_layout(tmp_path):
     самая раскладка живого стенда, на которой лестница приземляется на ступень
     `without_profile`: конфиг в памяти уже без профиля, а на диске он ещё есть."""
     base = tmp_path / "config.yml"
-    base.write_text('profile: "work"\nmodels:\n  fast:\n    model: q\n', encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  fast:\n    model: q\n', encoding="utf-8"
+    )
     profile = tmp_path / "profiles" / "work.yml"
     profile.parent.mkdir(parents=True, exist_ok=True)
     profile.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
     return base
 
 
-def test_layer_note_is_silent_about_the_profile_that_will_be_deactivated(tmp_path):
+def test_layer_note_is_silent_about_the_profile_that_will_be_deactivated(
+    tmp_path,
+):
     """Финал мастера деактивирует профиль — значит, перекрыть выбор человека он
     уже не сможет. Плашка «этот слой его перекроет» судит по диску, где профиль
     ещё лежит, и на одном экране с предупреждением о деактивации прямо ему
     противоречила (живой смок)."""
     base = _broken_profile_layout(tmp_path)
-    scr = _screen(config={"profile": "", "models": {"fast": {}}}, config_path=str(base),
-                  deactivate_profile=True)
+    scr = _screen(
+        config={"profile": "", "models": {"fast": {}}},
+        config_path=str(base),
+        deactivate_profile=True,
+    )
     assert scr._layer_note() is None
 
 
-def test_layer_note_still_warns_about_the_profile_without_deactivation(tmp_path):
+def test_layer_note_still_warns_about_the_profile_without_deactivation(
+    tmp_path,
+):
     """Сторож: без деактивации профиль на диске действительно перекроет запись —
     плашка обязана остаться."""
     base = _broken_profile_layout(tmp_path)
-    scr = _screen(config={"profile": "", "models": {"fast": {}}}, config_path=str(base),
-                  deactivate_profile=False)
+    scr = _screen(
+        config={"profile": "", "models": {"fast": {}}},
+        config_path=str(base),
+        deactivate_profile=False,
+    )
     note = scr._layer_note()
     assert note is not None and "реестр моделей" in note
 
 
-def test_layer_note_keeps_warning_about_a_project_layer_despite_deactivation(tmp_path, monkeypatch):
+def test_layer_note_keeps_warning_about_a_project_layer_despite_deactivation(
+    tmp_path, monkeypatch
+):
     """Деактивация снимает ТОЛЬКО профиль. Проектный `.gc/config.yml` продолжит
     перекрывать реестр — про него плашка молчать не имеет права.
 
@@ -2866,20 +3781,32 @@ def test_layer_note_keeps_warning_about_a_project_layer_despite_deactivation(tmp
     выбирал модель, мастер писал её в базу и снимал профиль, после чего молча
     побеждал слот из проектного слоя."""
     from gc_core.config_modules import env_vars
+
     base = tmp_path / "config.yml"
-    base.write_text('profile: "work"\nmodels:\n  base:\n    model: b\n'
-                    "slots:\n  default: base\n", encoding="utf-8")
+    base.write_text(
+        'profile: "work"\nmodels:\n  base:\n    model: b\nslots:\n  default: base\n',
+        encoding="utf-8",
+    )
     profile = tmp_path / "profiles" / "work.yml"
     profile.parent.mkdir(parents=True, exist_ok=True)
-    profile.write_text("models:\n  wk:\n    model: w\nslots:\n  default: wk\n",
-                       encoding="utf-8")
+    profile.write_text(
+        "models:\n  wk:\n    model: w\nslots:\n  default: wk\n",
+        encoding="utf-8",
+    )
     project = tmp_path / ".gc" / "config.yml"
     project.parent.mkdir(parents=True, exist_ok=True)
-    project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
-                       encoding="utf-8")
-    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(project))
-    scr = _screen(config={"profile": "", "models": {"proj": {}}}, config_path=str(base),
-                  deactivate_profile=True)
+    project.write_text(
+        "models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        env_vars, "project_local_config_path", lambda: str(project)
+    )
+    scr = _screen(
+        config={"profile": "", "models": {"proj": {}}},
+        config_path=str(base),
+        deactivate_profile=True,
+    )
     note = scr._layer_note()
     assert note is not None and "реестр моделей" in note
 
@@ -2889,13 +3816,18 @@ def test_registry_layer_note_has_no_settings_address(tmp_path, monkeypatch):
     «Настройки · Профили» к нему отношения не имеют: хвост клеится только к
     профильной ветке (спека §3)."""
     from gc_core.config_modules import env_vars
+
     base = tmp_path / "config.yml"
     base.write_text('profile: ""\n', encoding="utf-8")
     project = tmp_path / ".gc" / "config.yml"
     project.parent.mkdir(parents=True, exist_ok=True)
-    project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
-                       encoding="utf-8")
-    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(project))
+    project.write_text(
+        "models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        env_vars, "project_local_config_path", lambda: str(project)
+    )
     scr = _screen(config={"models": {"proj": {}}}, config_path=str(base))
     note = scr._layer_note()
     assert note is not None and "реестр моделей" in note
@@ -2903,13 +3835,16 @@ def test_registry_layer_note_has_no_settings_address(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_layer_note_shows_on_every_step_for_an_active_profile(tmp_path, monkeypatch):
+async def test_layer_note_shows_on_every_step_for_an_active_profile(
+    tmp_path, monkeypatch
+):
     """Информирование остаётся: активный профиль виден на каждом шаге и на
     подтверждении (спека §3)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_MODEL
+    from textual.widgets import Static
+
     monkeypatch.chdir(tmp_path)
     _cfg_path, scr = _active_profile_screen(tmp_path)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2933,12 +3868,16 @@ async def test_degraded_config_note_shows_on_every_step(tmp_path, monkeypatch):
     Человек не видел ни строчки и не понимал, почему поля мастера выглядят иначе,
     чем его файл (живой смок)."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
-    from gc_tui.screens.onboarding import (STEP_CONFIRM, STEP_CONNECTION, STEP_MODEL)
+    from gc_tui.screens.onboarding import (
+        STEP_CONFIRM,
+        STEP_CONNECTION,
+        STEP_MODEL,
+    )
+    from textual.widgets import Static
+
     monkeypatch.chdir(tmp_path)
-    message = ('config.yml не читается с профилем "work" (алиас "strong" не найден) — '
-               "профиль снят на этот запуск")
+    message = 'config.yml не читается с профилем "work" (алиас "strong" не найден) — профиль снят на этот запуск'
     cfg_path = _profiles_cfg(tmp_path, "work")
     scr = _screen(config_path=str(cfg_path), degraded_note=message)
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -2948,7 +3887,9 @@ async def test_degraded_config_note_shows_on_every_step(tmp_path, monkeypatch):
         for step in (STEP_CONNECTION, STEP_MODEL, STEP_CONFIRM):
             scr._goto(step)
             await pilot.pause()
-            assert message in str(scr.query_one("#onb-degraded-warn", Static).render())
+            assert message in str(
+                scr.query_one("#onb-degraded-warn", Static).render()
+            )
 
 
 @pytest.mark.asyncio
@@ -2957,6 +3898,7 @@ async def test_healthy_load_shows_no_degradation_note(tmp_path, monkeypatch):
     экране взяться неоткуда."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     monkeypatch.chdir(tmp_path)
     cfg_path = _profiles_cfg(tmp_path, "work")
     scr = _screen(config_path=str(cfg_path))
@@ -2974,9 +3916,10 @@ async def test_confirm_shows_the_profile_layer_values(tmp_path, monkeypatch):
     работать, а плашка рядом объясняет их происхождение."""
     pytest.importorskip("textual")
     import re
-    from textual.widgets import Static
+
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     monkeypatch.chdir(tmp_path)
     # конфиг слоя: url https://h/…, model profile-layer-model
     _cfg_path, scr = _active_profile_screen(tmp_path)
@@ -2989,12 +3932,12 @@ async def test_confirm_shows_the_profile_layer_values(tmp_path, monkeypatch):
         # Витрина подтверждения — тело шага (`.onb-dyn`), а не заголовочный
         # `#onb-body`: тот несёт только имя шага.
         body = " ".join(str(w.render()) for w in scr.query("Static.onb-dyn"))
-        flat = re.sub(r"\s+", " ", body)     # колонка меток — не предмет теста
+        flat = re.sub(r"\s+", " ", body)  # колонка меток — не предмет теста
         # Строки витрины целиком: значение обязано стоять ЗА своей меткой, иначе
         # проверка зеленела бы от случайного вхождения в соседнюю строку.
         assert "адрес: https://h/v1/chat/completions" in flat
         assert "модель default: profile-layer-model" in flat
-        assert "профиль:" not in flat        # строка выбора ушла вместе с шагом
+        assert "профиль:" not in flat  # строка выбора ушла вместе с шагом
 
 
 def test_stepper_marks_match_the_position(tmp_path, monkeypatch):
@@ -3021,28 +3964,37 @@ def test_wizard_checks_token_on_the_real_route():
     OpenRouter она отвечает без токена, а chat/completions его требует. Считаем
     вызовы — контроль без токена и повтор с ним, а не один запрос."""
     from gc_tui.services.settings_probe import ProbeResult
+
     seen = []
 
-    def fake_auth(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+    def fake_auth(
+        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+    ):
         seen.append(auth)
         if auth is None:
-            return ProbeResult("rejected", 401, None, 5, "токен отклонён (401)")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
         return ProbeResult("ok", 200, None, 5, "доступен")
 
     screen = _screen(probe=fake_auth)
-    result = screen._run_connection_probe("http://x/v1/chat/completions",
-                                          "Bearer good", True, None)
+    result = screen._run_connection_probe(
+        "http://x/v1/chat/completions", "Bearer good", True, None
+    )
     assert seen == [None, "Bearer good"]
     assert result.auth_state == "accepted" and "токен принят" in result.detail
 
 
 # ── Ctrl+U и автопроба шага «Подключение» (разбор ревью 2026-08-18) ──
 
+
 def _fake_auth_probe(seen=None):
     """Заглушка с сигнатурой `probe_auth`: сети нет, вызовы можно считать."""
     from gc_tui.services.settings_probe import ProbeResult
 
-    def probe(endpoint, auth, verify, model, *, config_proxy=None, post_ex=None):
+    def probe(
+        endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+    ):
         if seen is not None:
             seen.append(auth)
         return ProbeResult("ok", 200, None, 1, "доступен")
@@ -3052,16 +4004,25 @@ def _fake_auth_probe(seen=None):
 
 async def _conn_step(pilot, tmp_path, **over):
     """Мастер на шаге «Подключение» поверх конфига с СОХРАНЁННЫМ токеном."""
-    cfg_path = _write_conn_cfg(tmp_path, url="https://h/v1/chat/completions",
-                               auth="Bearer sk-SECRET", model="m")
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="https://h/v1/chat/completions",
+        auth="Bearer sk-SECRET",
+        model="m",
+    )
     cfg = _resolved_conn_cfg(cfg_path)
-    kw = dict(review_all=True, config_path=str(cfg_path), config=cfg,
-              probe=_fake_auth_probe())
+    kw = dict(
+        review_all=True,
+        config_path=str(cfg_path),
+        config=cfg,
+        probe=_fake_auth_probe(),
+    )
     kw.update(over)
     scr = _screen(**kw)
     await pilot.app.push_screen(scr)
     await pilot.pause()
     from gc_tui.editors.connection import ConnectionEditor
+
     ed = scr.query_one(ConnectionEditor)
     ed.escape_presets()
     return scr, ed
@@ -3089,10 +4050,11 @@ async def test_wizard_ctrl_u_on_token_clears_saved_token(tmp_path):
     первое же нажатие роняло мастер (`except NoMatches` этого не ловит)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
-        ed.move(1)                          # лента курсора: адрес → токен
+        ed.move(1)  # лента курсора: адрес → токен
         await pilot.press("ctrl+u")
         await pilot.pause()
         assert ed.token_cleared is True
@@ -3105,10 +4067,11 @@ async def test_wizard_ctrl_u_on_address_field_leaves_token_alone(tmp_path):
     целился очистить строку адреса."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
-        await pilot.press("ctrl+u")         # курсор на адресе (позиция 0)
+        await pilot.press("ctrl+u")  # курсор на адресе (позиция 0)
         await pilot.pause()
         assert ed.token_cleared is False
 
@@ -3122,11 +4085,14 @@ async def test_wizard_arrows_without_edits_do_not_reprobe(tmp_path):
     (на платном провайдере — деньги)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
         calls = _count_probes(scr)
-        await pilot.press("down")           # уход с адреса — первая (и единственная) проба
+        await pilot.press(
+            "down"
+        )  # уход с адреса — первая (и единственная) проба
         await pilot.press("down")
         await pilot.press("up")
         await pilot.press("up")
@@ -3142,13 +4108,14 @@ async def test_wizard_reprobes_after_token_cleared(tmp_path):
     где токена уже нет."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
         calls = _count_probes(scr)
-        await pilot.press("down")           # уход с адреса → проба #1
-        await pilot.press("ctrl+u")         # курсор на токене — снять сохранённый
-        await pilot.press("down")           # уход с токена → проба обязана повториться
+        await pilot.press("down")  # уход с адреса → проба #1
+        await pilot.press("ctrl+u")  # курсор на токене — снять сохранённый
+        await pilot.press("down")  # уход с токена → проба обязана повториться
         await pilot.pause()
         assert ed.token_cleared is True
         assert len(calls) == 2
@@ -3164,28 +4131,45 @@ async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
     Показывается ЯВНО назначенный слот, а не резолв матрицей фоллбэков: незаданный
     `max` работает моделью `default`, но написать против него её имя значило бы сказать
     «уровень назначен» там, где он не назначен."""
+    from gc_core.model_picker import ModelInfo
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_LEVELS
 
     cfg_path, cfg = _registry_cfg(tmp_path, "z-ai/glm-5.3", alias="glm-5.3")
     import yaml
     from gc_core.config_modules.registry_write import apply_registry_ops
-    apply_registry_ops(cfg_path, [("upsert_model", "gemini", {"model": "google/gemini-3.7"}),
-                                  ("write_slot", "light", "gemini")], "")
+
+    apply_registry_ops(
+        cfg_path,
+        [
+            ("upsert_model", "gemini", {"model": "google/gemini-3.7"}),
+            ("write_slot", "light", "gemini"),
+        ],
+        "",
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg,
-                      fetch=lambda *a, **k: [ModelInfo("z-ai/glm-5.3", tool_capable=True),
-                                             ModelInfo("google/gemini-3.7", tool_capable=True)])
-        await pilot.app.push_screen(scr); await pilot.pause()
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=cfg,
+            fetch=lambda *a, **k: [
+                ModelInfo("z-ai/glm-5.3", tool_capable=True),
+                ModelInfo("google/gemini-3.7", tool_capable=True),
+            ],
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
         scr._goto(STEP_LEVELS)
         await pilot.pause()
         rows = [str(w.render()) for w in scr.query(".onb-option") if w.display]
         light = [r for r in rows if "light" in r]
-        assert light and "google/gemini-3.7" in light[0], f"назначенный light не назван: {rows}"
+        assert light and "google/gemini-3.7" in light[0], (
+            f"назначенный light не назван: {rows}"
+        )
         # max в файле НЕ задан — остаётся «не задана», а не именем модели фоллбэка:
         # незаданный уровень работает моделью default, но назначенным от этого не стал
         max_row = [r for r in rows if "max" in r]
@@ -3194,7 +4178,8 @@ async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
 
 @pytest.mark.asyncio
 async def test_commit_does_not_claim_an_untouched_config_after_the_registry_landed(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Записей две, и реестр идёт первым (политика в `onboarding.write_wizard_values`).
     Отказ ВТОРОЙ оставляет записи моделей на диске — «конфиг не записан» тогда
     отправляет человека искать нетронутый файл, где уже лежит новый реестр.
@@ -3203,25 +4188,38 @@ async def test_commit_does_not_claim_an_untouched_config_after_the_registry_land
     инъецируется у самой плоской записи, чтобы политика отработала настоящая."""
     pytest.importorskip("textual")
     from gc_core import onboarding_config_writer
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
-    cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions",
-                               auth="Bearer t", model="m")
-    monkeypatch.setattr(onboarding_config_writer, "write_values",
-                        lambda *a, **kw: (_ for _ in ()).throw(ValueError("схема не валидна")))
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="http://host/v1/chat/completions",
+        auth="Bearer t",
+        model="m",
+    )
+    monkeypatch.setattr(
+        onboarding_config_writer,
+        "write_values",
+        lambda *a, **kw: (_ for _ in ()).throw(ValueError("схема не валидна")),
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path),
-                      config=_resolved_conn_cfg(cfg_path))
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=_resolved_conn_cfg(cfg_path),
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._values["model"] = "qwen/qwen3-coder"     # запись реестра — первая транзакция
+        scr._values["model"] = (
+            "qwen/qwen3-coder"  # запись реестра — первая транзакция
+        )
 
         assert scr._commit_config() is False
 
         import yaml
+
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
         assert raw["models"] == {"qwen3-coder": {"model": "qwen/qwen3-coder"}}
         body = str(scr.query_one("#onb-body", Static).render())
@@ -3231,28 +4229,42 @@ async def test_commit_does_not_claim_an_untouched_config_after_the_registry_land
 
 
 @pytest.mark.asyncio
-async def test_commit_reports_an_oserror_instead_of_crashing(tmp_path, monkeypatch):
+async def test_commit_reports_an_oserror_instead_of_crashing(
+    tmp_path, monkeypatch
+):
     """Близнец соседнего ValueError-кейса (ревью L33): OSError записи (диск,
     права, win-лок открытого файла) уходил мимо перехвата — падал весь Textual.
     «✗ конфиг не записан» — тот же честный отказ, что и на ValueError: реестра
     здесь нет, не легло ничего."""
     pytest.importorskip("textual")
     from gc_core import onboarding_config_writer
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
-    cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions",
-                               auth="Bearer t", model="m")
-    monkeypatch.setattr(onboarding_config_writer, "write_values",
-                        lambda *a, **kw: (_ for _ in ()).throw(OSError("нет прав на файл")))
+    cfg_path = _write_conn_cfg(
+        tmp_path,
+        url="http://host/v1/chat/completions",
+        auth="Bearer t",
+        model="m",
+    )
+    monkeypatch.setattr(
+        onboarding_config_writer,
+        "write_values",
+        lambda *a, **kw: (_ for _ in ()).throw(OSError("нет прав на файл")),
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path),
-                      config=_resolved_conn_cfg(cfg_path))
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=_resolved_conn_cfg(cfg_path),
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._values["Authorization"] = "Bearer sk"    # только плоская запись, реестра нет
+        scr._values["Authorization"] = (
+            "Bearer sk"  # только плоская запись, реестра нет
+        )
 
         assert scr._commit_config() is False
         body = str(scr.query_one("#onb-body", Static).render())
@@ -3262,7 +4274,8 @@ async def test_commit_reports_an_oserror_instead_of_crashing(tmp_path, monkeypat
 
 @pytest.mark.asyncio
 async def test_commit_names_the_deactivation_when_only_the_pointer_landed(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Та же ложь, что чинил плоский мастер: на ступени без профиля указатель
     снимается ПЕРВЫМ и в откате не участвует. Отказ дальше по цепочке печатал
     «✗ конфиг не записан» — неправда, профиль уже деактивирован, и человек уверен,
@@ -3272,39 +4285,53 @@ async def test_commit_names_the_deactivation_when_only_the_pointer_landed(
     из его порядка: реестра здесь нет вовсе, и «записи моделей уже в конфиге» было
     бы второй ложью на той же строке."""
     pytest.importorskip("textual")
+    import yaml
     from gc_core import onboarding_config_writer
     from gc_core import onboarding_fields as _of
-    import yaml
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
     cfg_path = _write_conn_cfg(tmp_path, url="http://host/v1/chat/completions")
     cfg_path.write_text(
-        cfg_path.read_text(encoding="utf-8").replace('profile: ""', 'profile: "work"'),
-        encoding="utf-8")
+        cfg_path.read_text(encoding="utf-8").replace(
+            'profile: ""', 'profile: "work"'
+        ),
+        encoding="utf-8",
+    )
     profile_file = tmp_path / "profiles" / "work.yml"
     profile_file.parent.mkdir(parents=True, exist_ok=True)
     profile_file.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
     real_write_values = onboarding_config_writer.write_values
 
     def refusing_flat_write(path, values, **kwargs):
-        if "profile" in values:                      # снятие указателя — настоящее
+        if "profile" in values:  # снятие указателя — настоящее
             return real_write_values(path, values, **kwargs)
         raise ValueError("схема не валидна")
 
-    monkeypatch.setattr(onboarding_config_writer, "write_values", refusing_flat_write)
+    monkeypatch.setattr(
+        onboarding_config_writer, "write_values", refusing_flat_write
+    )
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen(review_all=True, config_path=str(cfg_path),
-                      config=_resolved_conn_cfg(cfg_path), deactivate_profile=True)
+        scr = _screen(
+            review_all=True,
+            config_path=str(cfg_path),
+            config=_resolved_conn_cfg(cfg_path),
+            deactivate_profile=True,
+        )
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        scr._values["Authorization"] = "Bearer sk"    # модели нет — реестр не пишется
+        scr._values["Authorization"] = (
+            "Bearer sk"  # модели нет — реестр не пишется
+        )
 
         assert scr._commit_config() is False
 
-        assert yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"] == ""
+        assert (
+            yaml.safe_load(cfg_path.read_text(encoding="utf-8"))["profile"]
+            == ""
+        )
         body = str(scr.query_one("#onb-body", Static).render())
         assert "схема не валидна" in body
         assert _of.LANDED_WORDS["profile_pointer"] in body
@@ -3313,7 +4340,9 @@ async def test_commit_names_the_deactivation_when_only_the_pointer_landed(
 
 
 @pytest.mark.asyncio
-async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monkeypatch):
+async def test_both_wizards_name_the_landed_writes_from_one_place(
+    tmp_path, monkeypatch
+):
     """Инвариант межповерхностный, поэтому и тест один на оба мастера (тот же приём,
     что у предупреждения о деактивации): об одном и том же событии они обязаны
     говорить одними словами, а у каждого в отдельности своя копия выглядела бы
@@ -3321,24 +4350,32 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monk
     pytest.importorskip("textual")
     from gc_core import onboarding
     from gc_core import onboarding_fields as _of
+
     # gc-tui от gc-cli НЕ зависит: тест межповерхностный, и в наборе одного
     # пакета он законен только как условный. importorskip, а не import:
     # автономный прогон `cd packages/tui && pytest` обязан проходить БЕЗ
     # соседнего дистрибутива, иначе зелёный цвет означал бы лишь то, что
     # сосед оказался в общем окружении (см. tests/test_test_ownership.py).
     wz = pytest.importorskip("gc_cli.onboarding_wizard")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
+
     sentinel = "СЛОВО-ИЗ-ОБЩЕГО-ДОМА"
     monkeypatch.setattr(_of, "LANDED_WORDS", {"registry": sentinel})
 
-    def refusing_after_the_registry(config_path, values, *, deactivate_profile=False):
-        raise onboarding.PartialWriteError("схема не валидна", written=("registry",))
+    def refusing_after_the_registry(
+        config_path, values, *, deactivate_profile=False
+    ):
+        raise onboarding.PartialWriteError(
+            "схема не валидна", written=("registry",)
+        )
 
-    monkeypatch.setattr(onboarding, "write_wizard_values", refusing_after_the_registry)
+    monkeypatch.setattr(
+        onboarding, "write_wizard_values", refusing_after_the_registry
+    )
 
     printed: list = []
-    monkeypatch.setattr(wz, "_reload_config", lambda: {})
+    monkeypatch.setattr(wz, "_reload_config", dict)
     # Ридер отвечает URL только на ПЕРВЫЙ вопрос (адрес), дальше — Enter.
     # Константа здесь не годится: шаг выбора модели трактует непустой
     # несовпадающий ответ как новый запрос (см. `_ask_as_is`), и мастер честно
@@ -3352,8 +4389,12 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monk
     def _reader(prompt, secret):
         return next(answers, "")
 
-    wz.run({}, tmp_path / "nowhere.yml", review_all=False,
-           io=wz.WizardIO(reader=_reader, printer=printed.append))
+    wz.run(
+        {},
+        tmp_path / "nowhere.yml",
+        review_all=False,
+        io=wz.WizardIO(reader=_reader, printer=printed.append),
+    )
     assert any(sentinel in line for line in printed)
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
@@ -3369,13 +4410,16 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(tmp_path, monk
 
 
 @pytest.mark.asyncio
-async def test_confirm_step_warns_that_the_profile_will_be_deactivated(tmp_path):
+async def test_confirm_step_warns_that_the_profile_will_be_deactivated(
+    tmp_path,
+):
     """Enter на подтверждении снимет указатель профиля — человек обязан узнать об
     этом ДО нажатия, а не обнаружить постфактум. Текст берётся из общего дома."""
     pytest.importorskip("textual")
     from gc_core import onboarding_fields as _of
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
         scr = _screen(deactivate_profile=True)
@@ -3388,15 +4432,18 @@ async def test_confirm_step_warns_that_the_profile_will_be_deactivated(tmp_path)
 
 
 @pytest.mark.asyncio
-async def test_confirm_step_says_nothing_about_the_profile_on_a_healthy_config(tmp_path):
+async def test_confirm_step_says_nothing_about_the_profile_on_a_healthy_config(
+    tmp_path,
+):
     """Отрицательный сторож: конфиг собрался целиком (ступень `full`) — мастер
     профиля не касается, и обещать его снятие нельзя."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
-        scr = _screen()                       # признак не передан — ступень не «без профиля»
+        scr = _screen()  # признак не передан — ступень не «без профиля»
         await pilot.app.push_screen(scr)
         await pilot.pause()
         scr._goto(STEP_CONFIRM)
@@ -3406,19 +4453,27 @@ async def test_confirm_step_says_nothing_about_the_profile_on_a_healthy_config(t
 
 
 @pytest.mark.asyncio
-async def test_confirm_commits_the_deactivation_along_with_the_settings(tmp_path):
+async def test_confirm_commits_the_deactivation_along_with_the_settings(
+    tmp_path,
+):
     """Финал доводит признак до записи: указатель снят, файл профиля цел,
     настройки в файле. Без этого мастер доходил до конца и не мог записать
     собственную починку — гейт судит стек следующего старта, а там профиль."""
     pytest.importorskip("textual")
     import yaml
+    from gc_testkit.tui_support import wait_until
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
-    from gc_testkit.tui_support import wait_until
+
     committed = []
     cfg_path, scr = _levels_screen(
-        tmp_path, on_commit=lambda: committed.append(True), deactivate_profile=True)
-    text = cfg_path.read_text(encoding="utf-8").replace('profile: ""', 'profile: "work"')
+        tmp_path,
+        on_commit=lambda: committed.append(True),
+        deactivate_profile=True,
+    )
+    text = cfg_path.read_text(encoding="utf-8").replace(
+        'profile: ""', 'profile: "work"'
+    )
     cfg_path.write_text(text, encoding="utf-8")
     profile_file = tmp_path / "profiles" / "work.yml"
     profile_file.parent.mkdir(parents=True, exist_ok=True)
@@ -3432,18 +4487,21 @@ async def test_confirm_commits_the_deactivation_along_with_the_settings(tmp_path
         await pilot.press("enter")
         await wait_until(pilot, lambda: committed, "commit done")
         raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-        assert raw["profile"] == ""                     # указатель снят
-        assert profile_file.is_file()                   # …а файл профиля цел
-        assert raw["slots"]["default"] == "Qwen"        # настройки записаны
+        assert raw["profile"] == ""  # указатель снят
+        assert profile_file.is_file()  # …а файл профиля цел
+        assert raw["slots"]["default"] == "Qwen"  # настройки записаны
 
 
 @pytest.mark.asyncio
-async def test_both_wizards_take_the_deactivation_warning_from_one_place(tmp_path, monkeypatch):
+async def test_both_wizards_take_the_deactivation_warning_from_one_place(
+    tmp_path, monkeypatch
+):
     """Инвариант межповерхностный, поэтому и тест один на оба мастера: у каждого
     в отдельности своя копия текста выглядела бы исправной. Подменяем ЕДИНСТВЕННЫЙ
     дом текста и ждём подмену в обоих."""
     pytest.importorskip("textual")
     from gc_core import onboarding_fields as _of
+
     # gc-tui от gc-cli НЕ зависит: тест межповерхностный, и в наборе одного
     # пакета он законен только как условный. importorskip, а не import:
     # автономный прогон `cd packages/tui && pytest` обязан проходить БЕЗ
@@ -3452,14 +4510,19 @@ async def test_both_wizards_take_the_deactivation_warning_from_one_place(tmp_pat
     wz = pytest.importorskip("gc_cli.onboarding_wizard")
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
+
     sentinel = "СТРОКА-ИЗ-ОБЩЕГО-ДОМА"
     monkeypatch.setattr(_of, "PROFILE_DEACTIVATION_WARNING", sentinel)
 
     printed: list = []
-    monkeypatch.setattr(wz, "_reload_config", lambda: {})
-    wz.run({}, tmp_path / "nowhere.yml", review_all=False,
-           io=wz.WizardIO(reader=lambda p, s: "", printer=printed.append),
-           deactivate_profile=True)
+    monkeypatch.setattr(wz, "_reload_config", dict)
+    wz.run(
+        {},
+        tmp_path / "nowhere.yml",
+        review_all=False,
+        io=wz.WizardIO(reader=lambda p, s: "", printer=printed.append),
+        deactivate_profile=True,
+    )
     assert any(sentinel in line for line in printed)
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})

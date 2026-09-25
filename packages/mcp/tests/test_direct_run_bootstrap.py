@@ -27,7 +27,6 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 _RECIPES = REPO / "packages" / "mcp" / "src" / "recommended_mcp"
@@ -50,15 +49,25 @@ def _bare_python() -> Path:
     """Поддерживаемый интерпретатор без нашего .venv: базовый префикс текущего."""
     too_old: list[str] = []
     for name in ("python3", "python", "python3.exe", "python.exe"):
-        cand = Path(sys.base_prefix) / ("Scripts" if os.name == "nt" else "bin") / name
+        cand = (
+            Path(sys.base_prefix)
+            / ("Scripts" if os.name == "nt" else "bin")
+            / name
+        )
         if cand.is_file():
             version = subprocess.run(
-                [str(cand), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+                [
+                    str(cand),
+                    "-c",
+                    "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')",
+                ],
                 capture_output=True,
                 text=True,
             )
             if version.returncode == 0:
-                major, minor = (int(part) for part in version.stdout.strip().split(".", 1))
+                major, minor = (
+                    int(part) for part in version.stdout.strip().split(".", 1)
+                )
                 if (major, minor) >= (3, 11):
                     return cand
                 too_old.append(f"{cand} ({major}.{minor})")
@@ -72,7 +81,9 @@ def _bare_python() -> Path:
 
 def _env_without_repo(extra_path: Path) -> dict[str, str]:
     env = dict(os.environ)
-    env["PYTHONPATH"] = str(extra_path)   # только заглушка yaml, репозитория тут нет
+    env["PYTHONPATH"] = str(
+        extra_path
+    )  # только заглушка yaml, репозитория тут нет
     env["PYTHONNOUSERSITE"] = "1"
     return env
 
@@ -85,15 +96,22 @@ def test_direct_run_finds_our_packages(script, tmp_path):
 
     probe = subprocess.run(
         [str(python), "-c", "import gc_core"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     if probe.returncode == 0:
-        pytest.skip("базовому интерпретатору gc_core виден и без бутстрапа — "
-                    "проверять нечего")
+        pytest.skip(
+            "базовому интерпретатору gc_core виден и без бутстрапа — проверять нечего"
+        )
 
     res = subprocess.run(
         [str(python), str(_RECIPES / script), "--help"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert "No module named" not in res.stderr, (
         f"{script}: бутстрап не нашёл наши исходники\n{res.stderr}"

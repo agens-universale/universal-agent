@@ -1,4 +1,5 @@
 """FileViewerScreen — постраничный read-only просмотр текстового файла (`/view`)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,8 +12,31 @@ from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Static, TextArea
 
-from gc_tui.services.file_view import DEFAULT_PAGE_LINES_FALLBACK, MSG_EMPTY, PAGE_LINES_MAX, PAGE_LINES_MIN, FileViewSettings, OpenErr, OpenOk, ViewPositionStore, ViewWindow, apply_pygments_highlights, clamp_page_lines, clamp_start_line, count_lines, format_range_label, lexer_name_for_path, open_for_view, read_window, textarea_language_for_lexer
+from gc_tui.services.file_view import (
+    DEFAULT_PAGE_LINES_FALLBACK,
+    MSG_EMPTY,
+    PAGE_LINES_MAX,
+    PAGE_LINES_MIN,
+    FileViewSettings,
+    OpenErr,
+    OpenOk,
+    ViewPositionStore,
+    ViewWindow,
+    apply_pygments_highlights,
+    clamp_page_lines,
+    clamp_start_line,
+    count_lines,
+    format_range_label,
+    lexer_name_for_path,
+    open_for_view,
+    read_window,
+    textarea_language_for_lexer,
+)
 from gc_tui.services.skill_view import truncate_path_left
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_FILE_VIEW_BODY = "#file-view-body"
+
 
 _PATH_MAXLEN = 56
 # Схлопываем key-repeat: не чаще ~10 Hz один read_window + load_text.
@@ -34,7 +58,9 @@ class FileViewerScreen(Screen):
         Binding("up", "line_up", "строка вверх", show=False, priority=True),
         Binding("down", "line_down", "строка вниз", show=False, priority=True),
         Binding("pageup", "page_up", "стр. вверх", show=False, priority=True),
-        Binding("pagedown", "page_down", "стр. вниз", show=False, priority=True),
+        Binding(
+            "pagedown", "page_down", "стр. вниз", show=False, priority=True
+        ),
     ]
 
     def __init__(
@@ -84,7 +110,7 @@ class FileViewerScreen(Screen):
     def on_mount(self) -> None:
         self._bootstrap()
         try:
-            self.query_one("#file-view-body", TextArea).focus()
+            self.query_one(_SEL_FILE_VIEW_BODY, TextArea).focus()
         except Exception:
             pass
         if self._settings.page_lines is None:
@@ -123,7 +149,9 @@ class FileViewerScreen(Screen):
 
     def _bootstrap(self) -> None:
         result = open_for_view(
-            self._raw_path, cwd=self._cwd, settings=self._settings,
+            self._raw_path,
+            cwd=self._cwd,
+            settings=self._settings,
         )
         if isinstance(result, OpenErr):
             self._error = result.message
@@ -141,7 +169,9 @@ class FileViewerScreen(Screen):
         self._start_line = saved if saved is not None else 1
         if self._total_lines is not None:
             self._start_line = clamp_start_line(
-                self._start_line, total_lines=self._total_lines, page=self._page,
+                self._start_line,
+                total_lines=self._total_lines,
+                page=self._page,
             )
         self._reload_window()
 
@@ -153,12 +183,14 @@ class FileViewerScreen(Screen):
 
     def _page_from_body(self) -> int:
         try:
-            body = self.query_one("#file-view-body", TextArea)
+            body = self.query_one(_SEL_FILE_VIEW_BODY, TextArea)
             h = body.size.height
         except Exception:
             h = 0
         if h <= 0:
-            return self._page if self._page > 0 else DEFAULT_PAGE_LINES_FALLBACK
+            return (
+                self._page if self._page > 0 else DEFAULT_PAGE_LINES_FALLBACK
+            )
         return max(PAGE_LINES_MIN, min(PAGE_LINES_MAX, h))
 
     def _sync_page_from_layout(self) -> None:
@@ -172,7 +204,9 @@ class FileViewerScreen(Screen):
         self._page = new_page
         if self._total_lines is not None:
             self._start_line = clamp_start_line(
-                self._start_line, total_lines=self._total_lines, page=self._page,
+                self._start_line,
+                total_lines=self._total_lines,
+                page=self._page,
             )
         self._reload_window()
 
@@ -185,7 +219,8 @@ class FileViewerScreen(Screen):
             return
         self._flush_pending_delta()
         self._move_timer = self.set_timer(
-            _MOVE_THROTTLE_SEC, self._on_move_throttle_tick,
+            _MOVE_THROTTLE_SEC,
+            self._on_move_throttle_tick,
         )
 
     def _on_move_throttle_tick(self) -> None:
@@ -193,7 +228,8 @@ class FileViewerScreen(Screen):
         if self._pending_delta:
             self._flush_pending_delta()
             self._move_timer = self.set_timer(
-                _MOVE_THROTTLE_SEC, self._on_move_throttle_tick,
+                _MOVE_THROTTLE_SEC,
+                self._on_move_throttle_tick,
             )
 
     def _flush_pending_delta(self) -> None:
@@ -215,7 +251,9 @@ class FileViewerScreen(Screen):
         new_start = max(1, self._start_line + delta)
         if self._total_lines is not None:
             new_start = clamp_start_line(
-                new_start, total_lines=self._total_lines, page=self._page,
+                new_start,
+                total_lines=self._total_lines,
+                page=self._page,
             )
         if new_start == self._start_line and delta > 0:
             return
@@ -248,7 +286,9 @@ class FileViewerScreen(Screen):
                     self._show_error()
                     return
             self._start_line = clamp_start_line(
-                self._start_line, total_lines=self._total_lines, page=self._page,
+                self._start_line,
+                total_lines=self._total_lines,
+                page=self._page,
             )
             window = read_window(
                 self._path,
@@ -262,7 +302,7 @@ class FileViewerScreen(Screen):
         self._window = window
         empty = not window.lines
         plain = MSG_EMPTY if empty else "\n".join(window.lines)
-        body = self.query_one("#file-view-body", TextArea)
+        body = self.query_one(_SEL_FILE_VIEW_BODY, TextArea)
         # TextArea.language красит только при textual[syntax]/tree-sitter).
         # Иначе — pygments → _highlights (та же тема vscode_dark).
         try:
@@ -285,7 +325,7 @@ class FileViewerScreen(Screen):
         )
 
     def _show_error(self) -> None:
-        body = self.query_one("#file-view-body", TextArea)
+        body = self.query_one(_SEL_FILE_VIEW_BODY, TextArea)
         body.language = None
         body.load_text(self._error or "")
         apply_pygments_highlights(body, "", lexer=None)
@@ -334,7 +374,7 @@ class FileViewerScreen(Screen):
     def get_selected_text(self) -> str:
         """Выделение TextArea или, если пусто, текст текущей страницы."""
         try:
-            body = self.query_one("#file-view-body", TextArea)
+            body = self.query_one(_SEL_FILE_VIEW_BODY, TextArea)
             sel = body.selected_text
             if sel:
                 return sel

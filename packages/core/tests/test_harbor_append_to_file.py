@@ -5,14 +5,17 @@ file is the oracle — the same base tool driven by an in-memory FakeBackend mus
 an IDENTICAL envelope and IDENTICAL resulting file content for the same input.
 `_run_both` feeds one case through both backends.
 """
+
 import json
-from types import SimpleNamespace
 
 import pytest
-
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.append_to_file import AppendToFile
+from gc_testkit.harbor_fakes import (
+    FakeBackend,
+    bind_os_backend,
+    strip_path_fields,
+)
 
 EXISTING_CONTENT = "hello world"
 
@@ -96,6 +99,7 @@ def test_identical_to_base(tmp_path, case):
     # make_dirs case: place the file in a subdir that does not exist yet
     if _id == "missing_file_create_true_parent_absent_make_dirs_false":
         import os
+
         subdir = tmp_path / "no_such_dir"
         base_path = str(subdir / "f.txt")
         harbor_path = "/work/no_such_dir/f.txt"
@@ -108,13 +112,16 @@ def test_identical_to_base(tmp_path, case):
         h = _harbor({})
         harbor_env = json.loads(h(path=harbor_path, **kw))
 
-        assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
+        assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+            base_env, "path"
+        ), _id
         return
 
     if _id == "missing_file_create_true":
         # File absent; parent exists on real fs (tmp_path).
         # Seed FakeBackend with a sentinel so is_dir("/work") returns True.
         import os
+
         f = tmp_path / "f.txt"
         # No file on disk (existing_content is None)
         files = {"/work/.keep": ""}  # sentinel: makes is_dir("/work") == True
@@ -126,36 +133,51 @@ def test_identical_to_base(tmp_path, case):
         harbor_env = json.loads(h(path="/work/f.txt", **kw))
         harbor_content = h._backend.files.get("/work/f.txt")
 
-        assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
+        assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+            base_env, "path"
+        ), _id
         assert harbor_content == base_content, _id
         return
 
     if _id == "make_dirs":
         import os
+
         subdir = tmp_path / "deep" / "nested"
         base_path = str(subdir / "f.txt")
         harbor_path = "/work/deep/nested/f.txt"
 
         t_base = _base()
         base_env = json.loads(t_base(path=base_path, **kw))
-        base_content = open(base_path, "rb").read().decode("utf-8") if os.path.exists(base_path) else None
+        base_content = (
+            open(base_path, "rb").read().decode("utf-8")
+            if os.path.exists(base_path)
+            else None
+        )
 
         h = _harbor({})
         harbor_env = json.loads(h(path=harbor_path, **kw))
         harbor_content = h._backend.files.get(harbor_path)
 
-        assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path"), _id
+        assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+            base_env, "path"
+        ), _id
         assert harbor_content == base_content, _id
         return
 
-    b_env, b_content, h_env, h_content = _run_both(tmp_path, existing_content, **kw)
-    assert strip_path_fields(h_env, "path") == strip_path_fields(b_env, "path"), _id
+    b_env, b_content, h_env, h_content = _run_both(
+        tmp_path, existing_content, **kw
+    )
+    assert strip_path_fields(h_env, "path") == strip_path_fields(
+        b_env, "path"
+    ), _id
     assert h_content == b_content, _id
 
 
 def test_default_separator_inserts_double_newline(tmp_path):
     """Default separator must be \\n\\n, NOT empty string."""
-    b_env, b_content, h_env, h_content = _run_both(tmp_path, EXISTING_CONTENT, content="appended")  # noqa: E501 — `content` here is the tool kwarg, not the file param
+    b_env, b_content, h_env, h_content = _run_both(
+        tmp_path, EXISTING_CONTENT, content="appended"
+    )  # `content` here is the tool kwarg, not the file param
     assert h_content == EXISTING_CONTENT + "\n\n" + "appended"
     assert h_content == b_content
 
@@ -181,7 +203,9 @@ def test_create_if_missing_creates_file():
     """create_if_missing=True must create the file with content when missing but parent exists."""
     # Seed a sentinel so is_dir("/work") returns True (parent "exists" in the container).
     h = _harbor({"/work/.keep": ""})
-    env = json.loads(h(path="/work/new.txt", content="hello", create_if_missing=True))
+    env = json.loads(
+        h(path="/work/new.txt", content="hello", create_if_missing=True)
+    )
     assert env["ok"] is True
     assert env["created"] is True
     assert h._backend.files["/work/new.txt"] == "\n\nhello"

@@ -1,13 +1,14 @@
+import importlib
 import logging
 import os
 import sys
 import tempfile
-import importlib
-import unittest
 import types
+import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
 from gc_testkit.paths import module_dir
 
 
@@ -16,7 +17,10 @@ def _restore_tools_and_dependents() -> None:
     for name in list(sys.modules):
         # Полные имена: ключ в sys.modules — "gc_core.agent_executor". Старые
         # плоские имена пережили переезд внутри кортежа, и pop был no-op.
-        if name in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
+        if name in (
+            "gc_core.agent_executor",
+            "gc_core.run_summary_coordinator",
+        ):
             sys.modules.pop(name, None)
             dependents.append(name)
         elif name == "gc_core.tools" or name.startswith("gc_core.tools."):
@@ -60,7 +64,9 @@ def _stub_tools_modules() -> None:
 
     tools_pkg.aapply_tool = _apply_tool
     tools_pkg.abuild_tools_data = _build_tools_data
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.WrongFunctionArgumentsException = (
+        _WrongFunctionArgumentsException
+    )
     tools_pkg.is_unknown_tool_output = lambda *_a, **_kw: False
     # `processing_responses` импортирует это имя на уровне модуля: без него
     # подмена пакета даёт ImportError ещё до первой проверки.
@@ -77,7 +83,9 @@ def _stub_tools_modules() -> None:
 
     registry_mod = types.ModuleType("gc_core.tools.skills.registry")
 
-    registry_mod.get_skills_registry = lambda _config_dict, **_kw: _SkillsRegistryStub()
+    registry_mod.get_skills_registry = lambda _config_dict, **_kw: (
+        _SkillsRegistryStub()
+    )
     registry_mod.SkillsRegistry = _SkillsRegistryStub
 
     sys.modules["gc_core.tools.skills.registry"] = registry_mod
@@ -96,7 +104,10 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
         try:
             from gc_core import agent_executor as agent_executor_module
             from gc_core import processing_responses as processing_module
-            from gc_core.thread_store import load_thread_meta, resolve_threads_dir
+            from gc_core.thread_store import (
+                load_thread_meta,
+                resolve_threads_dir,
+            )
         except Exception:
             _restore_tools_and_dependents()
             raise
@@ -105,7 +116,15 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
         completions_calls = []
 
         def _mock_responses_backend(
-            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None, config_proxy=None,
+            data,
+            headers,
+            url,
+            verify=True,
+            cert=None,
+            use_retry=True,
+            logger=None,
+            timeout=None,
+            config_proxy=None,
         ):
             responses_calls.append(
                 {
@@ -137,7 +156,15 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
             )
 
         def _mock_completions_backend(
-            data, headers, url, verify=True, cert=None, use_retry=True, logger=None, timeout=None, config_proxy=None,
+            data,
+            headers,
+            url,
+            verify=True,
+            cert=None,
+            use_retry=True,
+            logger=None,
+            timeout=None,
+            config_proxy=None,
         ):
             completions_calls.append(
                 {
@@ -166,7 +193,9 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
 
         try:
             with tempfile.TemporaryDirectory() as tmp_dir:
-                prompt_path = os.path.join(tmp_dir, "chat_completions_system_prompt.md")
+                prompt_path = os.path.join(
+                    tmp_dir, "chat_completions_system_prompt.md"
+                )
                 with open(prompt_path, "w", encoding="utf-8") as fd:
                     fd.write("SYSTEM PROMPT FOR CHAT COMPLETIONS")
                 config_dict = {
@@ -207,7 +236,9 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                 )
 
                 def _mock_chat_completions_policy(**kwargs):
-                    payload = kwargs["payload_factory"](kwargs["initial_max_tokens"])
+                    payload = kwargs["payload_factory"](
+                        kwargs["initial_max_tokens"]
+                    )
                     completions_calls.append(
                         {
                             "data": payload,
@@ -224,12 +255,17 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                         logger=kwargs.get("logger"),
                     ), payload
 
-                with patch.object(
-                    processing_module, "arequest_backend", side_effect=_mock_responses_backend
-                ), patch.object(
-                    processing_module,
-                    "arequest_chat_completions_with_policy",
-                    side_effect=_mock_chat_completions_policy,
+                with (
+                    patch.object(
+                        processing_module,
+                        "arequest_backend",
+                        side_effect=_mock_responses_backend,
+                    ),
+                    patch.object(
+                        processing_module,
+                        "arequest_chat_completions_with_policy",
+                        side_effect=_mock_chat_completions_policy,
+                    ),
                 ):
                     executor = agent_executor_module.AgentExecutor(ctx)
                     thread_id = "switch_mode_1"
@@ -252,12 +288,17 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("step limit", result_step_2)
 
                     threads_dir = resolve_threads_dir(config_dict)
-                    meta_after_chat = load_thread_meta(threads_dir, "cli", thread_id)
-                    self.assertEqual(
-                        meta_after_chat.get("backend_api_mode"), "chat_completions"
+                    meta_after_chat = load_thread_meta(
+                        threads_dir, "cli", thread_id
                     )
                     self.assertEqual(
-                        meta_after_chat.get("chat_completions_system_prompt_rendered"),
+                        meta_after_chat.get("backend_api_mode"),
+                        "chat_completions",
+                    )
+                    self.assertEqual(
+                        meta_after_chat.get(
+                            "chat_completions_system_prompt_rendered"
+                        ),
                         "SYSTEM PROMPT FOR CHAT COMPLETIONS",
                     )
 
@@ -275,8 +316,13 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
 
                     completions_payload = completions_calls[0]["data"]
                     self.assertIn("messages", completions_payload)
-                    self.assertGreaterEqual(len(completions_payload["messages"]), 2)
-                    self.assertEqual(completions_payload["messages"][0].get("role"), "system")
+                    self.assertGreaterEqual(
+                        len(completions_payload["messages"]), 2
+                    )
+                    self.assertEqual(
+                        completions_payload["messages"][0].get("role"),
+                        "system",
+                    )
                     self.assertEqual(
                         completions_payload["messages"][0].get("content"),
                         "SYSTEM PROMPT FOR CHAT COMPLETIONS",
@@ -294,8 +340,12 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                     threads_dir = resolve_threads_dir(config_dict)
                     meta = load_thread_meta(threads_dir, "cli", thread_id)
                     self.assertEqual(meta.get("backend_api_mode"), "responses")
-                    self.assertEqual(meta.get("previous_response_id"), "resp_2")
-                    self.assertEqual(meta.get("last_backend_response_id"), "resp_2")
+                    self.assertEqual(
+                        meta.get("previous_response_id"), "resp_2"
+                    )
+                    self.assertEqual(
+                        meta.get("last_backend_response_id"), "resp_2"
+                    )
                     self.assertNotIn(
                         "chat_completions_system_prompt_rendered",
                         meta,

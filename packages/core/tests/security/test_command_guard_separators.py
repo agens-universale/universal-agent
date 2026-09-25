@@ -33,7 +33,6 @@ r"""Tripwire защищённых путей не обманывается ни 
 from __future__ import annotations
 
 import pytest
-
 from gc_core.security.command_guard import scan_command_for_protected
 
 

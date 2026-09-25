@@ -8,17 +8,30 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from gc_core.utils.url_addr import is_loopback
-
 from recommended_mcp.autostart import wait_daemon_url_ready
 from recommended_mcp.process_supervisor import (
-    RunSupervisor, is_pid_alive, read_pid, remove_pid, terminate_pid,
+    RunSupervisor,
+    is_pid_alive,
+    read_pid,
+    remove_pid,
+    terminate_pid,
 )
 
 from gc_tui.voice_runtime.leases import (
-    acquire, clear_agent_owned, is_agent_owned, live_leases, mark_agent_owned, release,
+    acquire,
+    clear_agent_owned,
+    is_agent_owned,
+    live_leases,
+    mark_agent_owned,
+    release,
 )
 from gc_tui.voice_runtime.paths import voice_pids_dir
-from gc_tui.voice_runtime.service import build_run_spec, port_alive, preheat, service_url
+from gc_tui.voice_runtime.service import (
+    build_run_spec,
+    port_alive,
+    preheat,
+    service_url,
+)
 from gc_tui.voice_runtime.state import load_state
 
 SERVICE_NAME = "speaches"
@@ -46,7 +59,7 @@ def url_is_ours(config_dict: dict[str, Any], port: int) -> bool:
         return False
     try:
         return urlsplit(url).port == port
-    except ValueError:          # мусор вместо номера порта — точно не наш адрес
+    except ValueError:  # мусор вместо номера порта — точно не наш адрес
         return False
 
 
@@ -54,9 +67,12 @@ def _preheat_bg(state) -> None:
     threading.Thread(target=preheat, args=(state,), daemon=True).start()
 
 
-def ensure_voice_service(config_dict: dict[str, Any], *,
-                         supervisor_factory=RunSupervisor,
-                         preheat_async: bool = True) -> bool:
+def ensure_voice_service(
+    config_dict: dict[str, Any],
+    *,
+    supervisor_factory=RunSupervisor,
+    preheat_async: bool = True,
+) -> bool:
     """Поднять локальный voice-сервис, если он установлен и сконфигурирован.
 
     True — сервис доступен (жил или поднят), lease взят, прогрев запущен.
@@ -74,14 +90,15 @@ def ensure_voice_service(config_dict: dict[str, Any], *,
             # False здесь — порт молчит, но pid-файл принадлежит живому процессу: это
             # чужой (форграундный `gc-voice serve`) сервис на взлёте, и он не наш.
             mark_agent_owned(SERVICE_NAME)
-        if not wait_daemon_url_ready(service_url(state), timeout=_VOICE_READY_TIMEOUT_SEC):
-            # Таймаут — не то же самое, что «не поднялся»: возможна гонка, когда порт
-            # ожил секундой позже последнего опроса. Перепроверяем факт перед вердиктом,
-            # иначе плашка соврёт про реально живой сервис (поймано живой приёмкой:
-            # строка режима — по факту — уже показывала «запущен», а плашка — «не
-            # запустился»).
-            if not port_alive(state):
-                return False
+        # Таймаут — не то же самое, что «не поднялся»: возможна гонка, когда порт
+        # ожил секундой позже последнего опроса. Перепроверяем факт перед вердиктом,
+        # иначе плашка соврёт про реально живой сервис (поймано живой приёмкой:
+        # строка режима — по факту — уже показывала «запущен», а плашка — «не
+        # запустился»).
+        if not wait_daemon_url_ready(
+            service_url(state), timeout=_VOICE_READY_TIMEOUT_SEC
+        ) and not port_alive(state):
+            return False
     acquire(os.getpid())
     if preheat_async:
         _preheat_bg(state)
@@ -112,7 +129,7 @@ def release_voice_service() -> None:
     pid = read_pid(SERVICE_NAME, voice_pids_dir())
     if pid is not None and is_pid_alive(pid):
         if live_leases():
-            return          # кто-то стартовал, пока мы шли гасить, — сервис ему нужен
+            return  # кто-то стартовал, пока мы шли гасить, — сервис ему нужен
         terminate_pid(pid)
         remove_pid(SERVICE_NAME, voice_pids_dir())
     clear_agent_owned(SERVICE_NAME)

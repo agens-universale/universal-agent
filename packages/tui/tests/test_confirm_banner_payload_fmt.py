@@ -16,6 +16,7 @@
 
 # ── T16: long payload multiline as-is (scroll + docked options) ──────────────
 
+
 def test_t16_fmt_payload_value_preserves_multiline():
     """_fmt_payload_value preserves newlines (unlike _fmt_field_value which collapses)."""
     from gc_tui.widgets.confirm_banner import _fmt_payload_value
@@ -42,7 +43,9 @@ def test_t16_fmt_payload_value_preserves_short_multiline():
     """Short multiline payload is fully preserved."""
     from gc_tui.widgets.confirm_banner import _fmt_payload_value
 
-    payload = "curl https://api.example.com \\\n  -H 'Accept: json' \\\n  -d 'data'"
+    payload = (
+        "curl https://api.example.com \\\n  -H 'Accept: json' \\\n  -d 'data'"
+    )
     result = _fmt_payload_value(payload)
     assert result == payload.strip()
     assert result.count("\n") == 2  # both newlines preserved

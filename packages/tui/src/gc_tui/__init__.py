@@ -3,6 +3,7 @@
 Тонкий парсинг startup-аргументов (--config, --task-root) + сборка
 стека: load_config → threads_dir → TuiApp.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,6 +29,7 @@ def _missing_textual_msg() -> str:
 def _interactive() -> bool:
     """TTY на входе и выходе → можно запускать интерактивный визард."""
     import sys as _sys
+
     return _sys.stdin.isatty() and _sys.stdout.isatty()
 
 
@@ -100,17 +102,21 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     # Паритет с gc-cli: создать <cwd>/.gc/ (project-local слой: config overlay,
     # project skills). Тихо игнорит отсутствие прав на запись в cwd.
-    from gc_core.config_modules.env_vars import ensure_project_gc_dir, project_local_config_path
+    from gc_core.config_modules.env_vars import (
+        ensure_project_gc_dir,
+        project_local_config_path,
+    )
+
     ensure_project_gc_dir()
 
+    from gc_core import onboarding
     from gc_core.config import (
-        load_config_ex,
+        _bootstrap_user_config,
         apply_cli_overrides,
+        load_config_ex,
         resolve_config_path,
         user_config_path,
-        _bootstrap_user_config,
     )
-    from gc_core import onboarding
 
     onb_write_path = user_config_path()
     onboarding_mode = None
@@ -138,8 +144,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # Лестница исчерпана: не собирается и шаблон — сломан слой, в
             # который мастер не пишет (оверлей). Чинить его мастером нечем: то
             # же объяснение, что на обычном старте, и код 1 — не трейсбек.
-            print(onboarding.explain_broken_config(
-                str(onb_write_path), exc, program="gc-ua"), file=sys.stderr)
+            print(
+                onboarding.explain_broken_config(
+                    str(onb_write_path), exc, program="gc-ua"
+                ),
+                file=sys.stderr,
+            )
             return 1
         config_dict, profile_meta = loaded.config, loaded.meta
         if not _interactive():
@@ -148,8 +158,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # запускать» врало бы человеку, чей следующий старт падает.
             if loaded.message:
                 print(f"[gc] {loaded.message}", file=sys.stderr)
-            print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua",
-                                         just_created=just_created, repair=loaded), file=sys.stderr)
+            print(
+                onboarding.setup_guide(
+                    str(onb_write_path),
+                    config_dict,
+                    program="gc-ua",
+                    just_created=just_created,
+                    repair=loaded,
+                ),
+                file=sys.stderr,
+            )
             return 0
         if loaded.message:
             # А здесь stderr не живёт: через мгновение Textual занимает экран
@@ -166,8 +184,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             # это уместная история запуска — почему конфиг собрался не целиком.
             from gc_core.runtime_notices import push_runtime_notice
             from gc_core.startup_notices import Notice
-            push_runtime_notice(Notice(
-                "warning", "config_load_degraded", loaded.message, ("config.yml",)))
+
+            push_runtime_notice(
+                Notice(
+                    "warning",
+                    "config_load_degraded",
+                    loaded.message,
+                    ("config.yml",),
+                )
+            )
         # Ступень «без профиля» значит, что конфиг собрался только со снятым
         # профилем: финал мастера обязан снять и указатель, иначе гейт записи
         # отвергнет собранное (стек следующего старта поднимет тот же профиль) —
@@ -178,33 +203,53 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         onboarding_deactivate_profile = loaded.deactivate_profile
         onboarding_mode = "review"
     else:
-        just_created = _bootstrap_user_config() if args.config is None else False
+        just_created = (
+            _bootstrap_user_config() if args.config is None else False
+        )
         try:
-            config_dict, profile_meta = load_config_ex(args.config, profile_override=args.profile)
+            config_dict, profile_meta = load_config_ex(
+                args.config, profile_override=args.profile
+            )
         except ValueError as exc:
             # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый
             # traceback: падение здесь случается ДО создания TuiApp, так что
             # собственный crash-репорт Textual не включится (см. explain_broken_config).
             # Профиль — тот же, что грузили: по указателю из файла объяснение
             # описывало бы чужой стек.
-            print(onboarding.explain_broken_config(
-                resolve_config_path(args.config), exc, program="gc-ua",
-                profile_override=args.profile), file=sys.stderr)
+            print(
+                onboarding.explain_broken_config(
+                    resolve_config_path(args.config),
+                    exc,
+                    program="gc-ua",
+                    profile_override=args.profile,
+                ),
+                file=sys.stderr,
+            )
             return 1
         apply_cli_overrides(config_dict)
 
         if args.config is None and onboarding.is_unconfigured(config_dict):
             if not _interactive():
-                print(onboarding.setup_guide(str(onb_write_path), config_dict, program="gc-ua", just_created=just_created), file=sys.stderr)
+                print(
+                    onboarding.setup_guide(
+                        str(onb_write_path),
+                        config_dict,
+                        program="gc-ua",
+                        just_created=just_created,
+                    ),
+                    file=sys.stderr,
+                )
                 return 0
             onboarding_mode = "auto"
 
     # Поля, вычисляемые рантаймом TUI (в файле конфига их нет) — владелец
     # tui/runtime_config; тот же модуль переносит их через hot-reload настроек.
     from gc_tui.runtime_config import apply_runtime_fields
+
     apply_runtime_fields(config_dict)
 
     from gc_core.thread_store import resolve_threads_dir
+
     threads_dir = resolve_threads_dir(config_dict)
 
     from recommended_mcp.runtime.daemon_autostart import (
@@ -216,13 +261,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     auto_mcp = args.auto_mcp
     if auto_mcp:
         ensure_mcp_daemons(
-            config_dict, disable_hint="отключить автозапуск целиком: `--no-auto-mcp`"
+            config_dict,
+            disable_hint="отключить автозапуск целиком: `--no-auto-mcp`",
         )
 
     voice_expected = False
     _release_voice = None
     try:
-        from gc_tui.voice_runtime.autostart import release_voice_service, url_is_ours
+        from gc_tui.voice_runtime.autostart import (
+            release_voice_service,
+            url_is_ours,
+        )
         from gc_tui.voice_runtime.state import load_state as _voice_state
 
         _release_voice = release_voice_service
@@ -236,9 +285,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # и совет «запустить без профиля, ничего не потеряв» переставал работать
     # ровно там, где человек начинал чинить. У чинилки флага нет: она читает и
     # пишет ПОЛЬЗОВАТЕЛЬСКИЙ файл, и `--profile` там не в счёт (см. выше).
-    app = _app_mod.TuiApp(threads_dir=threads_dir, system="cli", config=config_dict,
-                          profile_override=None if args.init_config else args.profile)
-    app.set_config_path(onb_write_path if onboarding_mode else resolve_config_path(args.config))
+    app = _app_mod.TuiApp(
+        threads_dir=threads_dir,
+        system="cli",
+        config=config_dict,
+        profile_override=None if args.init_config else args.profile,
+    )
+    app.set_config_path(
+        onb_write_path if onboarding_mode else resolve_config_path(args.config)
+    )
     app._config_project_local = project_local_config_path()  # str | None
     # Подъём (`ensure_voice_service`: spawn + ожидание готовности, до 90 с на холодном
     # старте) идёт ЦЕЛИКОМ фоном: TuiApp запускает его после первого кадра
@@ -251,12 +306,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # (не сессионным переключением) — тот же notice, что и сессионный путь
     # (`TuiApp._profile_remerge`), но здесь ProfileMeta есть только на этом
     # единственном старте загрузки, до создания app/треда.
-    app._maybe_notice_profile_activation(profile_meta.active_name or "", profile_meta, config_dict)
+    app._maybe_notice_profile_activation(
+        profile_meta.active_name or "", profile_meta, config_dict
+    )
     app._onboarding_mode = onboarding_mode
     app._onboarding_deactivate_profile = onboarding_deactivate_profile
     app._onboarding_degraded = onboarding_degraded
     app._onboarding_config_path = onb_write_path
     from gc_core import upgrade_gate
+
     app._upgrade_info = upgrade_gate.detect_upgrade()
     if app._upgrade_info is None:
         # Нет апгрейда в этом запуске — стампим сразу (база для будущего
@@ -271,6 +329,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # и умрёт вместе с процессом, а сам git пережил бы программу, дочитывая
         # репозиторий без хозяина. Быстро и не бросает: ошибки гашения глотаются внутри.
         from gc_tui.services import file_index
+
         file_index.kill_running_processes()
         # Осознанно две РАЗНЫЕ модели гашения демонов: voice — light-switch
         # (lease-файлы, гасит последний живой клиент, безопасно при N TUI);
@@ -300,7 +359,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # перед выходом. Голос сюда не входит: сервис общий для нескольких TUI.
     from gc_tui.services.terminal_guard import TerminalGuard
 
-    guard = TerminalGuard(_shutdown_runtime, force_kill=kill_mcp_daemons_now if auto_mcp else None)
+    guard = TerminalGuard(
+        _shutdown_runtime,
+        force_kill=kill_mcp_daemons_now if auto_mcp else None,
+    )
     try:
         guard.install()
         app.run()

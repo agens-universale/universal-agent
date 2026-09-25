@@ -1,10 +1,14 @@
 """S3: trace_mapper вырезает незакрытый <think> (как stream_sink), сохраняя
 greedy-to-last для закрытых/цитируемых тегов."""
+
 from gc_tui.services.trace_mapper import _extract_assistant_text
 
 
 def test_unclosed_think_stripped():
-    assert _extract_assistant_text("<think>длинное рассуждение без закрытия") == ""
+    assert (
+        _extract_assistant_text("<think>длинное рассуждение без закрытия")
+        == ""
+    )
 
 
 def test_unclosed_think_keeps_leading_prose():

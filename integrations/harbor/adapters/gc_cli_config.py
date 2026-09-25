@@ -14,6 +14,7 @@ Layering uses ``config_modules.merge.deep_merge`` — the same rules the project
 Kept free of any ``harbor`` import on purpose: the config contract is testable without
 the harbor runtime installed.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,12 +43,20 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
     """
     return {
         "backend_api_mode": "chat_completions",
-        "chat_completions_system_prompt_path": str(prompts_dir / "chat_completions_system_prompt.md"),
-        "chat_completions_intent_guard_prompt_path": str(prompts_dir / "chat_completions_intent_guard_prompt.md"),
+        "chat_completions_system_prompt_path": str(
+            prompts_dir / "chat_completions_system_prompt.md"
+        ),
+        "chat_completions_intent_guard_prompt_path": str(
+            prompts_dir / "chat_completions_intent_guard_prompt.md"
+        ),
         "skills_data_path": str(skills_dir),
         "summary_params": {
-            "chat_completions_summary_prompt_path": str(prompts_dir / "chat_completions_summary_prompt.md"),
-            "chat_completions_memory_patch_replace_prompt_path": str(prompts_dir / "chat_completions_memory_patch_replace.md"),
+            "chat_completions_summary_prompt_path": str(
+                prompts_dir / "chat_completions_summary_prompt.md"
+            ),
+            "chat_completions_memory_patch_replace_prompt_path": str(
+                prompts_dir / "chat_completions_memory_patch_replace.md"
+            ),
         },
         "use_ssl": False,
         "use_retry": True,

@@ -5,6 +5,7 @@
 `os._exit` подменены всегда, а гарды закрываются в teardown фикстуры, которая
 зависит от подмен, — поток-сторож завершается ДО их отката.
 """
+
 from __future__ import annotations
 
 import atexit
@@ -22,10 +23,12 @@ from gc_tui.services.terminal_guard import TerminalGuard
 
 POLL = 0.05
 BUDGET = 0.2
-QUIET = 3 * POLL      # «ничего не произошло»: три периода опроса
-DEADLINE = 2.0        # потолок ожидания события
+QUIET = 3 * POLL  # «ничего не произошло»: три периода опроса
+DEADLINE = 2.0  # потолок ожидания события
 
-posix_only = pytest.mark.skipif(sys.platform == "win32", reason="SIGHUP и tty — только POSIX")
+posix_only = pytest.mark.skipif(
+    sys.platform == "win32", reason="SIGHUP и tty — только POSIX"
+)
 
 
 class _FakeExit:
@@ -72,7 +75,9 @@ def patched(monkeypatch):
     monkeypatch.setattr(atexit, "_run_exitfuncs", run_exitfuncs)
     monkeypatch.setattr(terminal_guard, "POLL_S", POLL)
     monkeypatch.setattr(terminal_guard, "CLEANUP_BUDGET_S", BUDGET)
-    return SimpleNamespace(exit=exit_, silenced=silenced, exit_hooks=exit_hooks, hooked=hooked)
+    return SimpleNamespace(
+        exit=exit_, silenced=silenced, exit_hooks=exit_hooks, hooked=hooked
+    )
 
 
 @pytest.fixture
@@ -147,7 +152,9 @@ def test_emergency_exit_runs_cleanup_and_exit_hooks(patched, make_guard):
     assert patched.exit.codes == [129]
 
 
-def test_exit_hooks_run_even_if_cleanup_fails(monkeypatch, patched, make_guard):
+def test_exit_hooks_run_even_if_cleanup_fails(
+    monkeypatch, patched, make_guard
+):
     hooked = threading.Event()
     monkeypatch.setattr(threading, "excepthook", lambda args: hooked.set())
 
@@ -164,14 +171,19 @@ def test_exit_hooks_run_even_if_cleanup_fails(monkeypatch, patched, make_guard):
     assert patched.exit.codes == [129]
 
 
-
-def test_force_kill_before_exit_when_cleanup_misses_budget(monkeypatch, patched, make_guard):
+def test_force_kill_before_exit_when_cleanup_misses_budget(
+    monkeypatch, patched, make_guard
+):
     # Уборка не уложилась в бюджет — последний рубеж добивает демонов ДО os._exit,
     # не дожидаясь её: гарантия «сирот нет» не зависит от того, что в уборке зависло.
     events: list[object] = []
-    monkeypatch.setattr(terminal_guard.os, "_exit", lambda code: events.append(("exit", code)))
+    monkeypatch.setattr(
+        terminal_guard.os, "_exit", lambda code: events.append(("exit", code))
+    )
     release = threading.Event()
-    guard = make_guard(lambda: release.wait(), force_kill=lambda: events.append("force"))
+    guard = make_guard(
+        lambda: release.wait(), force_kill=lambda: events.append("force")
+    )
     try:
         guard._emergency_exit()
         assert events == ["force", ("exit", 129)]
@@ -207,6 +219,7 @@ def test_no_force_kill_when_cleanup_finished(patched, make_guard):
     assert patched.exit.codes == [129]
     assert patched.hooked.wait(DEADLINE)
 
+
 def test_close_force_kills_when_cleanup_fails(make_guard):
     # Штатный выход — та же гарантия: упала уборка → добиваем, ошибка летит дальше.
     forced: list[bool] = []
@@ -232,7 +245,9 @@ def test_close_does_not_force_kill_after_cleanup(make_guard):
     assert forced == []
 
 
-def test_hanging_cleanup_holds_neither_exit_hooks_nor_exit(patched, make_guard):
+def test_hanging_cleanup_holds_neither_exit_hooks_nor_exit(
+    patched, make_guard
+):
     # Уборка и хуки идут рядом, с общим дедлайном: зависшая уборка не съедает
     # время хуков, а выход приходит по бюджету.
     release = threading.Event()
@@ -247,7 +262,9 @@ def test_hanging_cleanup_holds_neither_exit_hooks_nor_exit(patched, make_guard):
         patched.hooked.wait(DEADLINE)
 
 
-def test_failure_on_emergency_path_still_exits(monkeypatch, patched, make_guard):
+def test_failure_on_emergency_path_still_exits(
+    monkeypatch, patched, make_guard
+):
     # Исключение аварийного пути (поток не стартовал) не должно молча убить
     # поток-сторож: процесс снова висел бы.
     def silence_output() -> None:
@@ -262,7 +279,9 @@ def test_failure_on_emergency_path_still_exits(monkeypatch, patched, make_guard)
     assert patched.exit.codes == [129]
 
 
-def test_silence_failure_does_not_cancel_cleanup(monkeypatch, patched, make_guard):
+def test_silence_failure_does_not_cancel_cleanup(
+    monkeypatch, patched, make_guard
+):
     # Нет свободного fd на /dev/null — не повод бросить демонов: печать гашения
     # MCP мёртвый терминал терпит сама.
     def silence_output() -> None:
@@ -279,7 +298,9 @@ def test_silence_failure_does_not_cancel_cleanup(monkeypatch, patched, make_guar
     assert patched.exit.codes == [129]
 
 
-def test_failing_cleanup_does_not_prevent_exit(monkeypatch, patched, make_guard):
+def test_failing_cleanup_does_not_prevent_exit(
+    monkeypatch, patched, make_guard
+):
     # Исключение уборки ловим своим excepthook и ждём его: иначе при медленном
     # потоке оно всплыло бы предупреждением уже в чужом тесте.
     raised: list[type[BaseException]] = []
@@ -341,7 +362,10 @@ def test_sighup_exits_129(patched, make_guard):
     guard.install()
 
     # Без нашего обработчика SIGHUP с диспозицией по умолчанию убил бы pytest.
-    assert signal.getsignal(signal.SIGHUP) not in (signal.SIG_DFL, signal.SIG_IGN)
+    assert signal.getsignal(signal.SIGHUP) not in (
+        signal.SIG_DFL,
+        signal.SIG_IGN,
+    )
     signal.raise_signal(signal.SIGHUP)
 
     assert patched.exit.called.wait(DEADLINE)
@@ -457,7 +481,7 @@ def test_close_restores_previous_handler_and_wakeup_fd(make_guard):
         assert signal.set_wakeup_fd(previous_wakeup) == outer_w
         assert not watchers[0].is_alive()
     finally:
-        guard.close()   # повторный close безвреден; нужен, если тест упал до своего
+        guard.close()  # повторный close безвреден; нужен, если тест упал до своего
         signal.set_wakeup_fd(previous_wakeup)
         signal.signal(signal.SIGHUP, previous_hup)
         os.close(outer_r)
@@ -500,7 +524,10 @@ def test_cleanup_runs_once_across_sighup_and_close(patched, make_guard):
     guard.install()
 
     # Без нашего обработчика SIGHUP с диспозицией по умолчанию убил бы pytest.
-    assert signal.getsignal(signal.SIGHUP) not in (signal.SIG_DFL, signal.SIG_IGN)
+    assert signal.getsignal(signal.SIGHUP) not in (
+        signal.SIG_DFL,
+        signal.SIG_IGN,
+    )
     signal.raise_signal(signal.SIGHUP)
     assert patched.exit.called.wait(DEADLINE)
     assert cleanup.done.wait(DEADLINE)

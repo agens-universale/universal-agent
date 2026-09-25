@@ -28,16 +28,17 @@ import shutil
 import signal
 import subprocess
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict
 
 from gc_server.swarm import storage as storage
 
-
 logger = logging.getLogger(__name__)
 
 
-FINAL_STATUSES = frozenset({"completed", "failed", "timeout", "unknown_failed"})
+FINAL_STATUSES = frozenset(
+    {"completed", "failed", "timeout", "unknown_failed"}
+)
 
 # Grace-период между SIGTERM и SIGKILL для CLI-процесса (см. swarm_spec.md §6
 # про summary compaction). Перекрывается с GNU timeout --kill-after=30 в wrapper.
@@ -46,6 +47,7 @@ _KILL_GRACE_SECONDS = 3.0
 # Шаг 2.3+2.4 (AR-6): psutil — опциональная зависимость для memory/cpu monitoring.
 try:
     import psutil  # type: ignore[import-not-found]
+
     _PSUTIL_AVAILABLE = True
 except ImportError:
     psutil = None  # type: ignore[assignment]
@@ -70,7 +72,9 @@ def _is_pid_alive(pid: int) -> bool:
         return True
 
 
-def _kill_process_tree(pid: int, grace_period: float = _KILL_GRACE_SECONDS) -> None:
+def _kill_process_tree(
+    pid: int, grace_period: float = _KILL_GRACE_SECONDS
+) -> None:
     """Послать SIGTERM всей process group → подождать → SIGKILL если жив.
 
     Полагается на `start_new_session=True` в runner.py (шаг 1.6): PID == PGID,
@@ -83,7 +87,7 @@ def _kill_process_tree(pid: int, grace_period: float = _KILL_GRACE_SECONDS) -> N
         return
     try:
         os.killpg(pid, signal.SIGTERM)
-    except (ProcessLookupError, PermissionError, OSError):
+    except OSError:
         # Группа уже не существует (или нет прав) — выход без ошибки.
         return
 
@@ -97,12 +101,12 @@ def _kill_process_tree(pid: int, grace_period: float = _KILL_GRACE_SECONDS) -> N
     # Время вышло — добиваем.
     try:
         os.killpg(pid, signal.SIGKILL)
-    except (ProcessLookupError, PermissionError, OSError):
+    except OSError:
         pass
 
 
 def _now_utc() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _parse_iso_deadline(value: Any) -> datetime | None:
@@ -115,7 +119,7 @@ def _parse_iso_deadline(value: Any) -> datetime | None:
         return None
     # Если timezone-naive (на всякий случай) — считаем UTC.
     if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+        parsed = parsed.replace(tzinfo=UTC)
     return parsed
 
 
@@ -129,7 +133,7 @@ def _get_dir_size_mb(dir_path: str) -> float | None:
         return None
     # Сначала пробуем du -sb (GNU).
     try:
-        result = subprocess.run(  # noqa: S603, S607
+        result = subprocess.run(
             ["du", "-sb", dir_path],
             capture_output=True,
             text=True,
@@ -188,10 +192,11 @@ def _persist_agent_artifacts(
     try:
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         shutil.copytree(src, dst, dirs_exist_ok=True)
-    except OSError as e:  # noqa: BLE001
+    except OSError as e:
         logger.warning(
             "swarm %s: не удалось сохранить agent_logs из песочницы: %r",
-            swarm_id, e,
+            swarm_id,
+            e,
         )
 
 
@@ -233,7 +238,7 @@ def _finalize_with_resource_violation(
     """Зафиксировать violation (disk/memory/cpu) в meta + status=failed."""
     patch = {
         "status": "failed",
-        "finished_at": storage._utc_now_iso(),  # noqa: SLF001
+        "finished_at": storage._utc_now_iso(),
         "error_type": error_type,
         "error_message": error_message,
         "sandbox_status": "completed",
@@ -243,20 +248,148 @@ def _finalize_with_resource_violation(
         "task_id": meta.get("task_id"),
     }
     _persist_agent_artifacts(
-        threads_dir, swarm_id,
+        threads_dir,
+        swarm_id,
         str((meta.get("swarm_meta") or {}).get("sandbox_path") or ""),
         swarm_logs_dir=swarm_logs_dir,
     )
     storage.save_swarm_meta(
-        threads_dir, swarm_id,
-        base_meta=base_meta, swarm_meta_patch=patch,
+        threads_dir,
+        swarm_id,
+        base_meta=base_meta,
+        swarm_meta_patch=patch,
     )
     return storage.load_swarm_meta(threads_dir, swarm_id)
 
 
+def _enforce_disk_limit(
+    threads_dir: str,
+    swarm_id: str,
+    meta: Dict[str, Any],
+    limits: dict,
+    pid: Any,
+    sandbox_path: str,
+    swarm_logs_dir: str,
+) -> Dict[str, Any] | None:
+    # --- Disk quota (шаг 2.2) ---
+    disk_limit_mb = limits.get("disk_mb")
+    if (
+        isinstance(disk_limit_mb, (int, float))
+        and disk_limit_mb > 0
+        and sandbox_path
+    ):
+        actual_mb = _get_dir_size_mb(sandbox_path)
+        if actual_mb is not None and actual_mb > disk_limit_mb:
+            if isinstance(pid, int) and _is_pid_alive(pid):
+                _kill_process_tree(pid)
+            logger.warning(
+                "swarm %s killed by disk_limit (actual=%.1fMB, limit=%sMB)",
+                swarm_id,
+                actual_mb,
+                disk_limit_mb,
+            )
+            return _finalize_with_resource_violation(
+                threads_dir,
+                swarm_id,
+                meta,
+                swarm_logs_dir=swarm_logs_dir,
+                error_type="disk_limit",
+                error_message=(
+                    f"Sandbox disk usage ({actual_mb:.1f}MB) exceeds limit ({disk_limit_mb}MB)"
+                ),
+            )
+
+    return None
+
+
+def _enforce_memory_limit(
+    threads_dir: str,
+    swarm_id: str,
+    meta: Dict[str, Any],
+    limits: dict,
+    pid: Any,
+) -> Dict[str, Any] | None:
+    # --- Memory limit через psutil (шаг 2.3) ---
+    mem_limit_mb = limits.get("memory_mb")
+    if (
+        _PSUTIL_AVAILABLE
+        and isinstance(mem_limit_mb, (int, float))
+        and mem_limit_mb > 0
+        and isinstance(pid, int)
+        and _is_pid_alive(pid)
+    ):
+        try:
+            proc = psutil.Process(pid)
+            rss_mb = proc.memory_info().rss / (1024 * 1024)
+            if rss_mb > mem_limit_mb:
+                _kill_process_tree(pid)
+                logger.warning(
+                    "swarm %s killed by memory_limit (rss=%.1fMB, limit=%sMB)",
+                    swarm_id,
+                    rss_mb,
+                    mem_limit_mb,
+                )
+                return _finalize_with_resource_violation(
+                    threads_dir,
+                    swarm_id,
+                    meta,
+                    error_type="memory_limit",
+                    error_message=(
+                        f"RSS ({rss_mb:.1f}MB) exceeds limit ({mem_limit_mb}MB)"
+                    ),
+                )
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    return None
+
+
+def _enforce_cpu_limit(
+    threads_dir: str,
+    swarm_id: str,
+    meta: Dict[str, Any],
+    limits: dict,
+    pid: Any,
+) -> Dict[str, Any] | None:
+    # --- CPU limit через psutil (шаг 2.4) ---
+    cpu_limit = limits.get("cpu_percent")
+    if (
+        _PSUTIL_AVAILABLE
+        and isinstance(cpu_limit, (int, float))
+        and cpu_limit > 0
+        and isinstance(pid, int)
+        and _is_pid_alive(pid)
+    ):
+        try:
+            proc = psutil.Process(pid)
+            # interval=0.5 → блокировка на 500ms; нормально для monitor loop'а.
+            cpu_pct = proc.cpu_percent(interval=0.5)
+            if cpu_pct > cpu_limit:
+                _kill_process_tree(pid)
+                logger.warning(
+                    "swarm %s killed by cpu_limit (cpu=%.0f%%, limit=%s%%)",
+                    swarm_id,
+                    cpu_pct,
+                    cpu_limit,
+                )
+                return _finalize_with_resource_violation(
+                    threads_dir,
+                    swarm_id,
+                    meta,
+                    error_type="cpu_limit",
+                    error_message=(
+                        f"CPU ({cpu_pct:.0f}%) exceeds limit ({cpu_limit}%)"
+                    ),
+                )
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            pass
+
+    return None
+
+
 def _enforce_resource_limits(
     threads_dir: str,
-    sandbox_root_dir: str,
+    sandbox_root_dir: str,  # noqa: ARG001  # часть контракта: подпись менять нельзя
     swarm_id: str,
     meta: Dict[str, Any],
     swarm_meta: Dict[str, Any],
@@ -277,83 +410,63 @@ def _enforce_resource_limits(
     pid = swarm_meta.get("pid")
     sandbox_path = swarm_meta.get("sandbox_path") or ""
 
-    # --- Disk quota (шаг 2.2) ---
-    disk_limit_mb = limits.get("disk_mb")
-    if isinstance(disk_limit_mb, (int, float)) and disk_limit_mb > 0 and sandbox_path:
-        actual_mb = _get_dir_size_mb(sandbox_path)
-        if actual_mb is not None and actual_mb > disk_limit_mb:
-            if isinstance(pid, int) and _is_pid_alive(pid):
-                _kill_process_tree(pid)
+    disk_violation = _enforce_disk_limit(
+        threads_dir, swarm_id, meta, limits, pid, sandbox_path, swarm_logs_dir
+    )
+    if disk_violation is not None:
+        return disk_violation
+    memory_violation = _enforce_memory_limit(
+        threads_dir, swarm_id, meta, limits, pid
+    )
+    if memory_violation is not None:
+        return memory_violation
+    return _enforce_cpu_limit(threads_dir, swarm_id, meta, limits, pid)
+
+
+def _enforce_deadline(
+    threads_dir: str,
+    swarm_id: str,
+    meta: Dict[str, Any],
+    swarm_meta: Dict[str, Any],
+    swarm_logs_dir: str,
+) -> Dict[str, Any] | None:
+    deadline = _parse_iso_deadline(swarm_meta.get("deadline_at"))
+    if deadline is not None and _now_utc() > deadline:
+        pid = swarm_meta.get("pid")
+        if isinstance(pid, int) and _is_pid_alive(pid):
+            _kill_process_tree(pid)
             logger.warning(
-                "swarm %s killed by disk_limit (actual=%.1fMB, limit=%sMB)",
-                swarm_id, actual_mb, disk_limit_mb,
+                "swarm %s killed by Python-side timeout (deadline_at=%s)",
+                swarm_id,
+                swarm_meta.get("deadline_at"),
             )
-            return _finalize_with_resource_violation(
-                threads_dir, swarm_id, meta,
-                swarm_logs_dir=swarm_logs_dir,
-                error_type="disk_limit",
-                error_message=(
-                    f"Sandbox disk usage ({actual_mb:.1f}MB) exceeds "
-                    f"limit ({disk_limit_mb}MB)"
+            patch: Dict[str, Any] = {
+                "status": "timeout",
+                "finished_at": storage._utc_now_iso(),
+                "error_type": "timeout",
+                "error_message": (
+                    f"Killed by Python-side timeout after deadline {swarm_meta.get('deadline_at')}"
                 ),
+                "sandbox_status": "completed",
+            }
+            base_meta = {
+                "system": meta.get("system"),
+                "task_id": meta.get("task_id"),
+            }
+            _persist_agent_artifacts(
+                threads_dir,
+                swarm_id,
+                str(swarm_meta.get("sandbox_path") or ""),
+                swarm_logs_dir=swarm_logs_dir,
             )
-
-    # --- Memory limit через psutil (шаг 2.3) ---
-    mem_limit_mb = limits.get("memory_mb")
-    if (
-        _PSUTIL_AVAILABLE
-        and isinstance(mem_limit_mb, (int, float))
-        and mem_limit_mb > 0
-        and isinstance(pid, int)
-        and _is_pid_alive(pid)
-    ):
-        try:
-            proc = psutil.Process(pid)
-            rss_mb = proc.memory_info().rss / (1024 * 1024)
-            if rss_mb > mem_limit_mb:
-                _kill_process_tree(pid)
-                logger.warning(
-                    "swarm %s killed by memory_limit (rss=%.1fMB, limit=%sMB)",
-                    swarm_id, rss_mb, mem_limit_mb,
-                )
-                return _finalize_with_resource_violation(
-                    threads_dir, swarm_id, meta,
-                    error_type="memory_limit",
-                    error_message=(
-                        f"RSS ({rss_mb:.1f}MB) exceeds limit ({mem_limit_mb}MB)"
-                    ),
-                )
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
-
-    # --- CPU limit через psutil (шаг 2.4) ---
-    cpu_limit = limits.get("cpu_percent")
-    if (
-        _PSUTIL_AVAILABLE
-        and isinstance(cpu_limit, (int, float))
-        and cpu_limit > 0
-        and isinstance(pid, int)
-        and _is_pid_alive(pid)
-    ):
-        try:
-            proc = psutil.Process(pid)
-            # interval=0.5 → блокировка на 500ms; нормально для monitor loop'а.
-            cpu_pct = proc.cpu_percent(interval=0.5)
-            if cpu_pct > cpu_limit:
-                _kill_process_tree(pid)
-                logger.warning(
-                    "swarm %s killed by cpu_limit (cpu=%.0f%%, limit=%s%%)",
-                    swarm_id, cpu_pct, cpu_limit,
-                )
-                return _finalize_with_resource_violation(
-                    threads_dir, swarm_id, meta,
-                    error_type="cpu_limit",
-                    error_message=(
-                        f"CPU ({cpu_pct:.0f}%) exceeds limit ({cpu_limit}%)"
-                    ),
-                )
-        except (psutil.NoSuchProcess, psutil.AccessDenied):
-            pass
+            storage.save_swarm_meta(
+                threads_dir,
+                swarm_id,
+                base_meta=base_meta,
+                swarm_meta_patch=patch,
+            )
+            return storage.load_swarm_meta(threads_dir, swarm_id)
+        # Иначе — process уже сам завершился, fallthrough к completion.json.
 
     return None
 
@@ -398,48 +511,20 @@ def check_and_finalize(
     # Если deadline прошёл и процесс ещё жив — kill + status=timeout.
     # Это страховка поверх GNU timeout в wrapper'е (на минимальных
     # дистрибутивах timeout может отсутствовать).
-    deadline = _parse_iso_deadline(swarm_meta.get("deadline_at"))
-    if deadline is not None and _now_utc() > deadline:
-        pid = swarm_meta.get("pid")
-        if isinstance(pid, int) and _is_pid_alive(pid):
-            _kill_process_tree(pid)
-            logger.warning(
-                "swarm %s killed by Python-side timeout (deadline_at=%s)",
-                swarm_id,
-                swarm_meta.get("deadline_at"),
-            )
-            patch: Dict[str, Any] = {
-                "status": "timeout",
-                "finished_at": storage._utc_now_iso(),  # noqa: SLF001
-                "error_type": "timeout",
-                "error_message": (
-                    "Killed by Python-side timeout after deadline "
-                    f"{swarm_meta.get('deadline_at')}"
-                ),
-                "sandbox_status": "completed",
-            }
-            base_meta = {
-                "system": meta.get("system"),
-                "task_id": meta.get("task_id"),
-            }
-            _persist_agent_artifacts(
-                threads_dir, swarm_id,
-                str(swarm_meta.get("sandbox_path") or ""),
-                swarm_logs_dir=swarm_logs_dir,
-            )
-            storage.save_swarm_meta(
-                threads_dir,
-                swarm_id,
-                base_meta=base_meta,
-                swarm_meta_patch=patch,
-            )
-            return storage.load_swarm_meta(threads_dir, swarm_id)
-        # Иначе — process уже сам завершился, fallthrough к completion.json.
+    timeout_result = _enforce_deadline(
+        threads_dir, swarm_id, meta, swarm_meta, swarm_logs_dir
+    )
+    if timeout_result is not None:
+        return timeout_result
 
     # 2.5. Resource limits (только для heavy_checks=True, шаги 2.2-2.4).
     if heavy_checks:
         violation = _enforce_resource_limits(
-            threads_dir, sandbox_root_dir, swarm_id, meta, swarm_meta,
+            threads_dir,
+            sandbox_root_dir,
+            swarm_id,
+            meta,
+            swarm_meta,
             swarm_logs_dir=swarm_logs_dir,
         )
         if violation is not None:
@@ -463,7 +548,8 @@ def check_and_finalize(
             "task_id": meta.get("task_id"),
         }
         _persist_agent_artifacts(
-            threads_dir, swarm_id,
+            threads_dir,
+            swarm_id,
             str(swarm_meta.get("sandbox_path") or ""),
             swarm_logs_dir=swarm_logs_dir,
         )
@@ -484,7 +570,7 @@ def check_and_finalize(
     # PID мёртв и нет completion.json → процесс упал не отчитавшись.
     patch = {
         "status": "unknown_failed",
-        "finished_at": storage._utc_now_iso(),  # noqa: SLF001
+        "finished_at": storage._utc_now_iso(),
         "error_type": "process_crash",
         "error_message": "Process terminated without writing completion.json",
         "sandbox_status": "completed",
@@ -494,7 +580,8 @@ def check_and_finalize(
         "task_id": meta.get("task_id"),
     }
     _persist_agent_artifacts(
-        threads_dir, swarm_id,
+        threads_dir,
+        swarm_id,
         str(swarm_meta.get("sandbox_path") or ""),
         swarm_logs_dir=swarm_logs_dir,
     )
@@ -514,7 +601,7 @@ def check_and_finalize(
 
 __all__ = [
     "FINAL_STATUSES",
-    "check_and_finalize",
     "_is_pid_alive",
     "_kill_process_tree",
+    "check_and_finalize",
 ]

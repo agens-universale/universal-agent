@@ -47,14 +47,16 @@ def test_push_reset_clears_buffers():
 
 def test_format_unclosed_think_stripped():
     # Unclosed <think> still streaming → stripped, empty answer remainder.
-    assert format_stream_block(answer="<think>анализирую\nсмотрю agents/") == ""
+    assert (
+        format_stream_block(answer="<think>анализирую\nсмотрю agents/") == ""
+    )
 
 
 def test_sink_progress_units_counts_all_chars():
     s = StreamSink()
-    s.push("think", "abcd")     # 4 chars
-    s.push("answer", "efgh")    # +4 chars = 8
-    assert s.progress_units() == 2          # 8 // 4
+    s.push("think", "abcd")  # 4 chars
+    s.push("answer", "efgh")  # +4 chars = 8
+    assert s.progress_units() == 2  # 8 // 4
 
 
 def test_reasoning_state_none_when_no_think():
@@ -86,16 +88,22 @@ def test_reset_clears_progress_and_reasoning():
 
 def test_reasoning_line_short_unchanged():
     from gc_tui.services.stream_sink import format_reasoning_line
+
     assert format_reasoning_line(think="смотрю agents/") == "⠇ смотрю agents/"
 
 
 def test_reasoning_line_collapses_newlines():
     from gc_tui.services.stream_sink import format_reasoning_line
-    assert format_reasoning_line(think="строю план\nчитаю README") == "⠇ строю план читаю README"
+
+    assert (
+        format_reasoning_line(think="строю план\nчитаю README")
+        == "⠇ строю план читаю README"
+    )
 
 
 def test_reasoning_line_truncates_with_ellipsis():
     from gc_tui.services.stream_sink import format_reasoning_line
+
     # single long word (no spaces) → can't word-trim, keep last N chars
     out = format_reasoning_line(think="a" * 100, tail_len=10)
     assert out == "⠇ …" + "a" * 10
@@ -103,12 +111,17 @@ def test_reasoning_line_truncates_with_ellipsis():
 
 def test_reasoning_line_truncates_on_word_boundary():
     from gc_tui.services.stream_sink import format_reasoning_line
+
     # last 12 chars of "alpha beta gamma delta" = " gamma delta"; drop leading
     # partial word → start at the word boundary → "gamma delta"
-    assert format_reasoning_line(think="alpha beta gamma delta", tail_len=12) == "⠇ …gamma delta"
+    assert (
+        format_reasoning_line(think="alpha beta gamma delta", tail_len=12)
+        == "⠇ …gamma delta"
+    )
 
 
 def test_reasoning_line_empty():
     from gc_tui.services.stream_sink import format_reasoning_line
+
     assert format_reasoning_line(think="") == ""
     assert format_reasoning_line(think="   ") == ""

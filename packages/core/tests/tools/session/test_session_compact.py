@@ -1,17 +1,17 @@
 import json
-
-from gc_testkit.helpers.tool_ctx import CallableTool
 import types
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from gc_core.states import State
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.session import session_compact as session_compact_module
-from gc_core.tools.session.session_compact import SessionCompact, TRIGGER_REASON
+from gc_core.tools.session.session_compact import (
+    TRIGGER_REASON,
+    SessionCompact,
+)
 from gc_testkit import run_coro
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _state(*, backend_api_mode="chat_completions", messages=None):
@@ -29,7 +29,9 @@ def _state(*, backend_api_mode="chat_completions", messages=None):
 
 
 def test_registered_only_for_chat_completions():
-    assert "session_compact" not in get_builtin_tools_data({"backend_api_mode": "responses"})
+    assert "session_compact" not in get_builtin_tools_data(
+        {"backend_api_mode": "responses"}
+    )
     tools = get_builtin_tools_data({"backend_api_mode": "chat_completions"})
     assert "session_compact" in tools
     assert tools["session_compact"]["tool_fabric"] is SessionCompact
@@ -52,7 +54,9 @@ def test_session_compact_calls_arun_summary_compaction(monkeypatch):
             {"role": "user", "content": "summary body", "id": "sum"},
         ]
 
-    monkeypatch.setattr(session_compact_module, "arun_summary_compaction", fake_compact)
+    monkeypatch.setattr(
+        session_compact_module, "arun_summary_compaction", fake_compact
+    )
 
     tool = CallableTool(SessionCompact(ctx=ctx, state=state))
     res = json.loads(tool(reason="phase done"))
@@ -76,7 +80,9 @@ def test_session_compact_rejects_empty_reason():
 
 def test_session_compact_rejects_responses_backend():
     res = json.loads(
-        CallableTool(SessionCompact(state=_state(backend_api_mode="responses")))(reason="phase done")
+        CallableTool(
+            SessionCompact(state=_state(backend_api_mode="responses"))
+        )(reason="phase done")
     )
     assert res["ok"] is False
     assert res["error"]["type"] == "unsupported_backend"
@@ -84,7 +90,9 @@ def test_session_compact_rejects_responses_backend():
 
 def test_session_compact_rejects_empty_dialog():
     state = _state(messages=[{"role": "system", "content": "only sys"}])
-    res = json.loads(CallableTool(SessionCompact(state=state))(reason="cleanup"))
+    res = json.loads(
+        CallableTool(SessionCompact(state=state))(reason="cleanup")
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "nothing_to_compact"
 
@@ -96,9 +104,13 @@ def test_session_compact_reports_compaction_failure(monkeypatch):
     async def boom(**_kwargs):
         raise RuntimeError("llm down")
 
-    monkeypatch.setattr(session_compact_module, "arun_summary_compaction", boom)
+    monkeypatch.setattr(
+        session_compact_module, "arun_summary_compaction", boom
+    )
 
-    res = json.loads(CallableTool(SessionCompact(ctx=ctx, state=state))(reason="retry"))
+    res = json.loads(
+        CallableTool(SessionCompact(ctx=ctx, state=state))(reason="retry")
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "compaction_failed"
     assert "llm down" in res["error"]["message"]
@@ -129,28 +141,40 @@ def test_process_tool_calls_after_compact_uses_technical_user_not_orphan_output(
         use_server_subagents=False,
     )
     state.backend_api_mode = "chat_completions"
-    state.messages = [sys_m, {"role": "user", "content": "long history", "id": "u0"}]
+    state.messages = [
+        sys_m,
+        {"role": "user", "content": "long history", "id": "u0"},
+    ]
     state.session_compact_applied = False
 
     async def fake_apply_tool(**kwargs):
         if kwargs["tool_name"] == "session_compact":
-            state.messages = [sys_m, {"role": "user", "content": "summary", "id": "sum"}]
+            state.messages = [
+                sys_m,
+                {"role": "user", "content": "summary", "id": "sum"},
+            ]
             state.session_compact_applied = True
-            return json.dumps({"tool": "session_compact", "ok": True, "compacted": True})
+            return json.dumps(
+                {"tool": "session_compact", "ok": True, "compacted": True}
+            )
         return "{}"
 
-    monkeypatch.setattr("gc_core.processing_responses.aapply_tool", fake_apply_tool)
+    monkeypatch.setattr(
+        "gc_core.processing_responses.aapply_tool", fake_apply_tool
+    )
     monkeypatch.setattr(
         "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
         lambda tool_res, **_kw: tool_res,
     )
 
-    out = run_coro(aprocess_tool_calls(
-        batch,
-        state,
-        ctx=SimpleNamespace(config_dict={}),
-        run_agent_func=lambda *_a, **_k: None,
-    ))
+    out = run_coro(
+        aprocess_tool_calls(
+            batch,
+            state,
+            ctx=SimpleNamespace(config_dict={}),
+            run_agent_func=lambda *_a, **_k: None,
+        )
+    )
 
     assert len(out) == 1
     assert out[0]["role"] == "user"
@@ -189,28 +213,38 @@ def test_process_tool_calls_after_compact_keeps_other_tool_pairs(monkeypatch):
         use_server_subagents=False,
     )
     state.backend_api_mode = "chat_completions"
-    state.messages = [sys_m, {"role": "user", "content": "history", "id": "u0"}]
+    state.messages = [
+        sys_m,
+        {"role": "user", "content": "history", "id": "u0"},
+    ]
     state.session_compact_applied = False
 
     async def fake_apply_tool(**kwargs):
         if kwargs["tool_name"] == "session_compact":
-            state.messages = [sys_m, {"role": "user", "content": "summary", "id": "sum"}]
+            state.messages = [
+                sys_m,
+                {"role": "user", "content": "summary", "id": "sum"},
+            ]
             state.session_compact_applied = True
             return json.dumps({"tool": "session_compact", "ok": True})
         return json.dumps({"tool": "session_think", "ok": True})
 
-    monkeypatch.setattr("gc_core.processing_responses.aapply_tool", fake_apply_tool)
+    monkeypatch.setattr(
+        "gc_core.processing_responses.aapply_tool", fake_apply_tool
+    )
     monkeypatch.setattr(
         "gc_core.processing_responses.maybe_store_and_wrap_tool_output",
         lambda tool_res, **_kw: tool_res,
     )
 
-    out = run_coro(aprocess_tool_calls(
-        batch,
-        state,
-        ctx=SimpleNamespace(config_dict={}),
-        run_agent_func=lambda *_a, **_k: None,
-    ))
+    out = run_coro(
+        aprocess_tool_calls(
+            batch,
+            state,
+            ctx=SimpleNamespace(config_dict={}),
+            run_agent_func=lambda *_a, **_k: None,
+        )
+    )
 
     call_ids = [
         m.get("call_id")

@@ -1,9 +1,19 @@
 """_context_meter / compact-count читают только meta.runtime.live_*, не data_*."""
+
 import json
+
 import pytest
 
 
-def _write_task(tmp_path, tid, *, content="hello", runtime=None, tui=None, data_content=None):
+def _write_task(
+    tmp_path,
+    tid,
+    *,
+    content="hello",
+    runtime=None,
+    tui=None,
+    data_content=None,
+):
     meta = {"thread_id": tid, "system_id": "cli"}
     if runtime is not None:
         meta["runtime"] = runtime

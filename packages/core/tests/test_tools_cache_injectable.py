@@ -16,9 +16,8 @@
 скрытое время жизни, протечка между арендаторами сервера с разными наборами
 MCP-серверов, переживание между тестами.
 """
-from typing import Any, Dict
 
-import pytest
+from typing import Any, Dict
 
 from gc_core.tools.connect_mcp.registry import ToolsCache
 
@@ -41,9 +40,9 @@ def test_rebind_keeps_the_payload():
     cache = ToolsCache(_cfg(servers))
     cache._data = {"mcp_srv_tool": {"tool": {}, "metadata": {}}}
     cache._cache_key = cache._make_cache_key(servers)
-    cache._fetched_at = time.time()   # «только что», иначе TTL честно истёк
+    cache._fetched_at = time.time()  # «только что», иначе TTL честно истёк
 
-    cache.rebind(_cfg(dict(servers)))          # новый словарь, тот же набор
+    cache.rebind(_cfg(dict(servers)))  # новый словарь, тот же набор
 
     assert cache._data is not None, "rebind выбросил содержимое"
     assert cache._is_valid(cache._make_cache_key(servers), ttl=3600) is True
@@ -55,7 +54,9 @@ def test_changed_servers_invalidate_even_with_a_shared_cache():
 
     cache = ToolsCache(_cfg({"a": {"transport": "stdio", "command": "x"}}))
     cache._data = {}
-    cache._cache_key = cache._make_cache_key({"a": {"transport": "stdio", "command": "x"}})
+    cache._cache_key = cache._make_cache_key(
+        {"a": {"transport": "stdio", "command": "x"}}
+    )
     cache._fetched_at = time.time()
 
     other = {"b": {"transport": "stdio", "command": "y"}}
@@ -101,12 +102,15 @@ def test_subagents_take_the_cache_from_parent_ctx():
     # Имя асинхронное: сборки детей идут из уже работающего loop, поэтому
     # зовут abuild_tools_data (синхронная там подняла бы ещё один loop в потоке).
     builds = [
-        n for n in ast.walk(tree)
+        n
+        for n in ast.walk(tree)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Name)
         and n.func.id == "abuild_tools_data"
     ]
-    assert len(builds) == 2, f"ожидалось 2 вызова abuild_tools_data, нашлось {len(builds)}"
+    assert len(builds) == 2, (
+        f"ожидалось 2 вызова abuild_tools_data, нашлось {len(builds)}"
+    )
 
     for call in builds:
         assert any(kw.arg == "tools_cache" for kw in call.keywords), (
@@ -117,7 +121,9 @@ def test_subagents_take_the_cache_from_parent_ctx():
 
 async def test_default_is_unchanged_behaviour():
     """Без ``tools_cache`` всё как было: свой одноразовый кэш, полная дискавери."""
-    from gc_core.tools.connect_mcp.agent_tools import aget_mcp_tools_data_for_config
+    from gc_core.tools.connect_mcp.agent_tools import (
+        aget_mcp_tools_data_for_config,
+    )
 
     tools, status = await aget_mcp_tools_data_for_config({"mcp-servers": {}})
     assert tools == {} and status == {}

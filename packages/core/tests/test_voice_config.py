@@ -1,7 +1,11 @@
 """Секция voice: — дефолты, alias verify-ssl, wiring в AppConfig, enabled-критерий."""
-import pytest
 
-from gc_core.config_modules.voice import VoiceConfig, voice_enabled, voice_section_filled
+import pytest
+from gc_core.config_modules.voice import (
+    VoiceConfig,
+    voice_enabled,
+    voice_section_filled,
+)
 
 
 def test_voice_config_defaults():
@@ -23,13 +27,18 @@ def test_voice_config_verify_ssl_alias():
 
 def test_voice_in_app_config():
     from gc_core.config_modules.root import AppConfig
-    app_cfg = AppConfig.model_validate({"voice": {"url": "https://x", "token": "k"}})
+
+    app_cfg = AppConfig.model_validate(
+        {"voice": {"url": "https://x", "token": "k"}}
+    )
     assert app_cfg.voice.url == "https://x"
     assert app_cfg.voice.token == "k"
 
 
 def test_voice_enabled_rules():
-    assert voice_enabled({"provider": "openai", "url": "https://x", "token": "t"})
+    assert voice_enabled(
+        {"provider": "openai", "url": "https://x", "token": "t"}
+    )
     assert not voice_enabled({"provider": "openai", "url": "", "token": "t"})
 
 
@@ -37,16 +46,22 @@ def test_voice_enabled_openai_without_token():
     """Локальный сервис и открытые STT-эндпоинты авторизации не требуют — токен
     для openai опционален (транскрайбер шлёт пустой Bearer, сервис его игнорирует).
     Раньше гейт требовал token и гасил Ctrl+T на рабочей конфигурации."""
-    assert voice_enabled({"provider": "openai",
-                          "url": "http://127.0.0.1:8735/v1/audio/transcriptions",
-                          "token": ""})
+    assert voice_enabled(
+        {
+            "provider": "openai",
+            "url": "http://127.0.0.1:8735/v1/audio/transcriptions",
+            "token": "",
+        }
+    )
 
 
 def test_voice_section_filled():
     assert not voice_section_filled({"url": "", "token": ""})
     assert voice_section_filled({"url": "https://x", "token": ""})
     assert voice_section_filled({"url": "", "token": "k"})
-    assert not voice_section_filled({"provider": "openai", "url": "", "token": ""})
+    assert not voice_section_filled(
+        {"provider": "openai", "url": "", "token": ""}
+    )
 
 
 def test_voice_overridden_fact_computed(tmp_path, monkeypatch):
@@ -55,24 +70,28 @@ def test_voice_overridden_fact_computed(tmp_path, monkeypatch):
 
     base = tmp_path / "config.yml"
     base.write_text(
-        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n"
-        "  token: gsk\n",
+        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n  token: gsk\n",
         encoding="utf-8",
     )
     managed = tmp_path / "config.local.yml"
     managed.write_text(
-        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
-        "  token: local\n",
+        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n  token: local\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
+    )
     cfg = config_mod.load_config(str(base))
-    assert cfg["voice_overridden_by_managed"] == \
-        "https://api.groq.com/openai/v1/audio/transcriptions"
+    assert (
+        cfg["voice_overridden_by_managed"]
+        == "https://api.groq.com/openai/v1/audio/transcriptions"
+    )
     assert cfg["voice"]["url"].endswith(":8735/v1/audio/transcriptions")
 
 
-def test_voice_override_notice_is_silent_when_the_project_layer_wins(tmp_path, monkeypatch):
+def test_voice_override_notice_is_silent_when_the_project_layer_wins(
+    tmp_path, monkeypatch
+):
     """Project-слой поверх managed: адрес батарейки уже не действует — и notice молчит.
 
     Находка ревью коллеги: факт перекрытия считался МЕЖДУ managed и project-слоями,
@@ -82,14 +101,12 @@ def test_voice_override_notice_is_silent_when_the_project_layer_wins(tmp_path, m
 
     base = tmp_path / "config.yml"
     base.write_text(
-        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n"
-        "  token: gsk\n",
+        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n  token: gsk\n",
         encoding="utf-8",
     )
     managed = tmp_path / "config.local.yml"
     managed.write_text(
-        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
-        "  token: local\n",
+        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n  token: local\n",
         encoding="utf-8",
     )
     project = tmp_path / "project.yml"
@@ -97,41 +114,54 @@ def test_voice_override_notice_is_silent_when_the_project_layer_wins(tmp_path, m
         "voice:\n  url: https://project.example/v1/audio/transcriptions\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
-    monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path",
-                        lambda: str(project))
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
+    )
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.project_local_config_path",
+        lambda: str(project),
+    )
 
     cfg = config_mod.load_config(str(base))
-    assert cfg["voice"]["url"] == "https://project.example/v1/audio/transcriptions"
+    assert (
+        cfg["voice"]["url"]
+        == "https://project.example/v1/audio/transcriptions"
+    )
     assert cfg["voice_overridden_by_managed"] is None
 
 
-def test_voice_override_notice_survives_a_project_layer_about_other_keys(tmp_path, monkeypatch):
+def test_voice_override_notice_survives_a_project_layer_about_other_keys(
+    tmp_path, monkeypatch
+):
     """Project трогает не адрес, а язык — адрес батарейки действует, и notice остаётся."""
     from gc_core import config as config_mod
 
     base = tmp_path / "config.yml"
     base.write_text(
-        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n"
-        "  token: gsk\n",
+        "voice:\n  url: https://api.groq.com/openai/v1/audio/transcriptions\n  token: gsk\n",
         encoding="utf-8",
     )
     managed = tmp_path / "config.local.yml"
     managed.write_text(
-        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
-        "  token: local\n",
+        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n  token: local\n",
         encoding="utf-8",
     )
     project = tmp_path / "project.yml"
     project.write_text("voice:\n  language: en\n", encoding="utf-8")
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
-    monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path",
-                        lambda: str(project))
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
+    )
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.project_local_config_path",
+        lambda: str(project),
+    )
 
     cfg = config_mod.load_config(str(base))
     assert cfg["voice"]["language"] == "en"
-    assert cfg["voice_overridden_by_managed"] == \
-        "https://api.groq.com/openai/v1/audio/transcriptions"
+    assert (
+        cfg["voice_overridden_by_managed"]
+        == "https://api.groq.com/openai/v1/audio/transcriptions"
+    )
 
 
 def test_voice_overridden_fact_ignores_the_address_form(tmp_path, monkeypatch):
@@ -143,13 +173,16 @@ def test_voice_overridden_fact_ignores_the_address_form(tmp_path, monkeypatch):
     base = tmp_path / "config.yml"
     base.write_text(
         "voice:\n  url: http://localhost:8735/v1/audio/transcriptions\n",
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     managed = tmp_path / "config.local.yml"
     managed.write_text(
-        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
-        "  model: small\n",
-        encoding="utf-8")
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
+        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n  model: small\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
+    )
     cfg = config_mod.load_config(str(base))
     assert cfg["voice_overridden_by_managed"] is None
 
@@ -171,11 +204,12 @@ def test_voice_overridden_fact_token_only(tmp_path, monkeypatch):
     base.write_text("voice:\n  token: gsk\n", encoding="utf-8")
     managed = tmp_path / "config.local.yml"
     managed.write_text(
-        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n"
-        "  token: local\n",
+        "voice:\n  url: http://127.0.0.1:8735/v1/audio/transcriptions\n  token: local\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr("gc_core.config_modules.env_vars.managed_config_path", lambda: managed)
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
+    )
     cfg = config_mod.load_config(str(base))
     assert cfg["voice_overridden_by_managed"] == "<без url>"
 

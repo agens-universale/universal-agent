@@ -1,13 +1,16 @@
 """dialog_summary → kind=summary, видим, содержимое очищено от <think>/<technical>."""
+
 from gc_tui.services.trace_mapper import map_message
 
 
 def test_dialog_summary_maps_to_summary_kind():
     raw = (
         '<technical type="dialog_summary">Summarized context from previous dialogue.\n'
-        '<summary>User asked X. Agent did Y. Result: partial.</summary></technical>'
+        "<summary>User asked X. Agent did Y. Result: partial.</summary></technical>"
     )
-    ev = map_message({"role": "user", "content": raw, "id": "s1"}, no=1, ts="t")
+    ev = map_message(
+        {"role": "user", "content": raw, "id": "s1"}, no=1, ts="t"
+    )
     assert ev is not None
     assert ev.kind == "summary"
     assert ev.hidden is False
@@ -17,11 +20,10 @@ def test_dialog_summary_maps_to_summary_kind():
 
 
 def test_dialog_summary_strips_think():
-    raw = (
-        '<technical type="dialog_summary"><summary><think>secret reasoning</think>'
-        'User did Z.</summary></technical>'
+    raw = '<technical type="dialog_summary"><summary><think>secret reasoning</think>User did Z.</summary></technical>'
+    ev = map_message(
+        {"role": "user", "content": raw, "id": "s2"}, no=1, ts="t"
     )
-    ev = map_message({"role": "user", "content": raw, "id": "s2"}, no=1, ts="t")
     assert "secret reasoning" not in ev.summary_content
     assert "User did Z" in ev.summary_content
 
@@ -30,8 +32,10 @@ def test_dialog_summary_nested_section_tags_do_not_leak():
     """Реальный wire-form после summary-рефактора master (вложенные секционные теги
     внутри <summary>) не должен утекать сырым XML — секции разворачиваются в текст.
     Тело строится реальными core-функциями (не мок), чтобы тест ловил будущий дрейф."""
+    from gc_core.summarize.summary_message_body import (
+        build_dialog_summary_content,
+    )
     from gc_core.summarize.summary_spec import slice_summary
-    from gc_core.summarize.summary_message_body import build_dialog_summary_content
 
     raw_model_summary = (
         "<summary>\n"
@@ -52,11 +56,15 @@ def test_dialog_summary_nested_section_tags_do_not_leak():
         + body.strip()
         + "</technical>"
     )
-    ev = map_message({"role": "user", "content": content, "id": "s3"}, no=1, ts="t")
+    ev = map_message(
+        {"role": "user", "content": content, "id": "s3"}, no=1, ts="t"
+    )
     assert ev is not None
     assert ev.kind == "summary"
     # тела секций сохранены
-    assert "Migrate TUI summary detection to nested tags." in ev.summary_content
+    assert (
+        "Migrate TUI summary detection to nested tags." in ev.summary_content
+    )
     assert "[IN_PROGRESS] verify nested rendering" in ev.summary_content
     # сырые секционные теги НЕ утекают
     assert "<task_and_context>" not in ev.summary_content

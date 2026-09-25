@@ -14,6 +14,7 @@ persistence их сохраняет, а здесь они превращаютс
 
 Пустой чеклист рендерится в пустую строку: блока в промпте быть не должно.
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterable
@@ -40,12 +41,6 @@ def _rows(items: Any) -> list[str]:
 def format_todo_snapshot(items: Any) -> str:
     """Чеклист построчно, без обвязки. Пустой список → пустая строка."""
     return "\n".join(_rows(items))
-
-
-def _done_of_total(items: Any) -> tuple[int, int]:
-    rows = _rows(items)
-    done = sum(1 for row in rows if row.startswith(SNAPSHOT_MARKS["completed"]))
-    return done, len(rows)
 
 
 def render_todo_for_persistent_state(items: Any) -> str:

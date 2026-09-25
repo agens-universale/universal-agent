@@ -98,8 +98,12 @@ CRITIC HANDOFF ADDENDUM
     "evidence": "string"
   }
 """
-        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
-        return self.with_handoff_contract(self.agent_role, critic_notes), assignment
+        assignment = self.build_assignment_message(
+            {"task": self.task, "reason": self.reason}
+        )
+        return self.with_handoff_contract(
+            self.agent_role, critic_notes
+        ), assignment
 
     def get_agent_name(self):
         return self.agent_name

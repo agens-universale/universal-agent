@@ -2,6 +2,7 @@
 Tests: on_delta is wired from ctx.on_stream_delta into
 request_chat_completions_with_policy, gated by cfg["stream"].
 """
+
 import logging
 from types import SimpleNamespace
 
@@ -34,11 +35,20 @@ def _patch_policy(monkeypatch):
         seen["on_delta"] = on_delta
         seen["salvage_reasoning"] = salvage_reasoning
         return (
-            {"choices": [{"message": {"role": "assistant", "content": "x"}, "finish_reason": "stop"}]},
+            {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "x"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
             {"max_tokens": initial_max_tokens},
         )
 
-    monkeypatch.setattr(pr, "arequest_chat_completions_with_policy", fake_policy)
+    monkeypatch.setattr(
+        pr, "arequest_chat_completions_with_policy", fake_policy
+    )
     return seen
 
 
@@ -97,7 +107,9 @@ def test_on_delta_none_when_stream_off(monkeypatch, chat_state_ctx):
     assert seen["on_delta"] is None
 
 
-def test_on_delta_none_when_stream_on_but_no_callback(monkeypatch, chat_state_ctx):
+def test_on_delta_none_when_stream_on_but_no_callback(
+    monkeypatch, chat_state_ctx
+):
     """stream=True but ctx.on_stream_delta is None → on_delta must be None (headless mode)."""
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=True)

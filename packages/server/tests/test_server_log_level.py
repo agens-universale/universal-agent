@@ -11,7 +11,6 @@
 import logging
 
 import pytest
-
 from gc_server import server as server_mod
 
 
@@ -43,10 +42,10 @@ def test_every_normalized_level_is_accepted_by_uvicorn():
     """Список сверяется с настоящим uvicorn, а не с нашим представлением о нём."""
     from uvicorn.config import LOG_LEVELS
 
-    assert server_mod._UVICORN_LOG_LEVELS <= set(LOG_LEVELS), (
-        set(server_mod._UVICORN_LOG_LEVELS) - set(LOG_LEVELS)
-    )
+    assert set(LOG_LEVELS) >= server_mod._UVICORN_LOG_LEVELS, set(
+        server_mod._UVICORN_LOG_LEVELS
+    ) - set(LOG_LEVELS)
     # И обратно: молча растерять уровни, которые uvicorn умеет, тоже не хочется.
-    assert set(LOG_LEVELS) <= server_mod._UVICORN_LOG_LEVELS, (
-        set(LOG_LEVELS) - set(server_mod._UVICORN_LOG_LEVELS)
-    )
+    assert set(LOG_LEVELS) <= server_mod._UVICORN_LOG_LEVELS, set(
+        LOG_LEVELS
+    ) - set(server_mod._UVICORN_LOG_LEVELS)

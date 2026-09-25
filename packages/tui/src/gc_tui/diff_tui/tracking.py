@@ -3,20 +3,25 @@
 Тулы не импортируют diff_tui: обёртка перехватывает write/append/exec/run_python.
 Harbor / non-TUI — без этой обёртки.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any, Callable, Iterable, Optional
+
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+)
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    classify_content_from_sample,
+)
 
 from gc_tui.diff_tui import git_ops
 from gc_tui.diff_tui.mode import resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
-from gc_core.backends.protocol import (
-    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
-)
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
 _logger = logging.getLogger(__name__)
 
@@ -51,10 +56,14 @@ def _perimeter(ctx: Any) -> tuple[str, list, list[str], int]:
         root = getattr(workspace, "root", None)
         launch_root = str(root) if root else ""
     wg = config_dict.get("write_guard") or {}
-    extra_paths = list(wg.get("extra_paths") or []) if isinstance(wg, dict) else []
+    extra_paths = (
+        list(wg.get("extra_paths") or []) if isinstance(wg, dict) else []
+    )
     protected = config_dict.get("protected_paths") or {}
     protected_extra = (
-        list(protected.get("extra") or []) if isinstance(protected, dict) else []
+        list(protected.get("extra") or [])
+        if isinstance(protected, dict)
+        else []
     )
     diff_cfg = config_dict.get("diff_tui") or {}
     if not isinstance(diff_cfg, dict):
@@ -63,15 +72,20 @@ def _perimeter(ctx: Any) -> tuple[str, list, list[str], int]:
     return launch_root, extra_paths, protected_extra, cache_max_orig
 
 
-def _rel_for_check_ignore(path: str, launch_root: str, key: Optional[str]) -> str:
+def _rel_for_check_ignore(
+    path: str, launch_root: str, key: Optional[str]
+) -> str:
     from pathlib import Path
 
     if key is not None and not Path(key).is_absolute():
         return key
     try:
-        return Path(path).resolve().relative_to(
-            Path(launch_root).resolve()
-        ).as_posix()
+        return (
+            Path(path)
+            .resolve()
+            .relative_to(Path(launch_root).resolve())
+            .as_posix()
+        )
     except ValueError:
         return path
 
@@ -120,14 +134,19 @@ class TrackingFsBackend:
         self._inner = inner
         self._ctx = ctx
         self.is_sandbox = bool(getattr(inner, "is_sandbox", False))
-        self.default_exec_timeout = getattr(inner, "default_exec_timeout", None)
+        self.default_exec_timeout = getattr(
+            inner, "default_exec_timeout", None
+        )
         # Возможность фонового запуска — свойство ВНУТРЕННЕГО бэкенда, обёртка
         # её только повторяет. Без этой строки тул считал бы обёртку бэкендом
         # без фона и отказывал бы в TUI, хотя под ней обычный LocalFsBackend.
-        self.supports_background = bool(getattr(inner, "supports_background", False))
+        self.supports_background = bool(
+            getattr(inner, "supports_background", False)
+        )
 
-    async def aspawn_background(self, command: str, *, cwd: Any = None,
-                                env: Any = None) -> dict:
+    async def aspawn_background(
+        self, command: str, *, cwd: Any = None, env: Any = None
+    ) -> dict:
         """Фоновый запуск проксируем как есть, без дельты diff-журнала.
 
         Журнал снимает изменения ВОКРУГ вызова, а этот возвращается мгновенно:
@@ -174,9 +193,10 @@ class TrackingFsBackend:
         return self._inner
 
     def _active(self) -> bool:
-        return bool(getattr(self._ctx, "is_tui", False)) and _identity_from_ctx(
-            self._ctx
-        ) is not None
+        return (
+            bool(getattr(self._ctx, "is_tui", False))
+            and _identity_from_ctx(self._ctx) is not None
+        )
 
     def _journal(self) -> TouchedJournal | None:
         ident = _identity_from_ctx(self._ctx)
@@ -209,8 +229,8 @@ class TrackingFsBackend:
         if not self._active() or not isinstance(path, str) or not path:
             return
         try:
-            launch_root, extra_paths, protected_extra, cache_max_orig = _perimeter(
-                self._ctx
+            launch_root, extra_paths, protected_extra, cache_max_orig = (
+                _perimeter(self._ctx)
             )
             if not launch_root:
                 return
@@ -270,7 +290,9 @@ class TrackingFsBackend:
             try:
                 launch_root, _, _, _ = _perimeter(self._ctx)
                 if launch_root and resolve_mode(launch_root) == "git-mode":
-                    entries = await asyncio.to_thread(git_ops.git_status, launch_root)
+                    entries = await asyncio.to_thread(
+                        git_ops.git_status, launch_root
+                    )
                     before = {e.path for e in entries}
             except Exception:
                 _logger.warning(
@@ -280,7 +302,9 @@ class TrackingFsBackend:
         result = await run()
         if before is not None:
             try:
-                entries = await asyncio.to_thread(git_ops.git_status, launch_root)
+                entries = await asyncio.to_thread(
+                    git_ops.git_status, launch_root
+                )
                 after = {e.path for e in entries}
                 journal = self._journal()
                 if journal is not None:
@@ -378,16 +402,22 @@ class TrackingFsBackend:
             )
         )
 
-    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         await self._journal_mutation_off_loop(path)
         await self._inner.write(path, content, encoding=encoding)
 
     async def write_bytes(self, path: str, data: bytes) -> None:
-        if not classify_content_from_sample(path, data[:BINARY_SAMPLE_BYTES]).is_binary:
+        if not classify_content_from_sample(
+            path, data[:BINARY_SAMPLE_BYTES]
+        ).is_binary:
             await self._journal_mutation_off_loop(path)
         await self._inner.write_bytes(path, data)
 
-    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         await self._journal_mutation_off_loop(path)
         await self._inner.append(path, content, encoding=encoding)
 
@@ -430,8 +460,12 @@ class TrackingFsBackend:
     async def getsize(self, path: str) -> int:
         return await self._inner.getsize(path)
 
-    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
-        return await self._inner.stat_info(path, follow_symlinks=follow_symlinks)
+    async def stat_info(
+        self, path: str, follow_symlinks: bool = False
+    ) -> dict:
+        return await self._inner.stat_info(
+            path, follow_symlinks=follow_symlinks
+        )
 
     async def readable(self, path: str) -> bool:
         return await self._inner.readable(path)
@@ -473,10 +507,14 @@ class TrackingFsBackend:
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
-        async for item in self._inner.iter_walk(path, should_descend=should_descend):
+        async for item in self._inner.iter_walk(
+            path, should_descend=should_descend
+        ):
             yield item
 
-    async def walk_entries(self, path: str, *, prune_names=(), prune_dot_dirs: bool = False) -> list:
+    async def walk_entries(
+        self, path: str, *, prune_names=(), prune_dot_dirs: bool = False
+    ) -> list:
         return await self._inner.walk_entries(
             path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
         )
@@ -503,7 +541,9 @@ class TrackingFsBackend:
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[str]:
-        async for item in self._inner.iter_files(path, should_descend=should_descend):
+        async for item in self._inner.iter_files(
+            path, should_descend=should_descend
+        ):
             yield item
 
     def normpath(self, path: str) -> str:

@@ -1,7 +1,10 @@
 import json
 
 from gc_core.intent_guard.guard import FinishGateDecision
-from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state, patch_function_call_output
+from gc_core.intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
+    patch_function_call_output,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_core.tools.turn.submit_solution import SubmitSolution
@@ -22,11 +25,13 @@ def _make_state() -> State:
 
 
 def test_apply_finish_gate_decision_reject_marks_output_not_ok():
-    base = run_coro(SubmitSolution().acall(
-        solution_type="full_solution",
-        task_report="done",
-        handoff="{}",
-    ))
+    base = run_coro(
+        SubmitSolution().acall(
+            solution_type="full_solution",
+            task_report="done",
+            handoff="{}",
+        )
+    )
     validation = ValidationResult(
         ok=False,
         action="fix_report",

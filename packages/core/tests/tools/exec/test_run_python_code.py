@@ -3,12 +3,10 @@ import os
 import stat
 
 import pytest
-
 from gc_core.backends.local import _sanitize_env
 from gc_core.tools.exec.run_python_code import RunPythonCode
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_run_python_success_non_zero_and_timeout():
     tool = with_local_ctx(RunPythonCode)
@@ -25,12 +23,22 @@ def test_run_python_validation_and_truncation():
     assert json.loads(tool(code=""))["error"]["field"] == "code"
     trunc_tool = with_local_ctx(
         RunPythonCode,
-        config_dict={"exec_output_capture_max_chars": 10, "exec_output_preview_edge_chars": 5},
+        config_dict={
+            "exec_output_capture_max_chars": 10,
+            "exec_output_preview_edge_chars": 5,
+        },
     )
     # Байтами, а не print: на Windows print кончает строку \r\n.
-    trunc = json.loads(trunc_tool(code="import sys; sys.stdout.buffer.write(b'A'*100 + bytes([10]))"))
+    trunc = json.loads(
+        trunc_tool(
+            code="import sys; sys.stdout.buffer.write(b'A'*100 + bytes([10]))"
+        )
+    )
     assert trunc["truncated"] is True
-    assert trunc["stdout"]["head"] + trunc["stdout"]["tail"] == "A" * 5 + "A" * 4 + "\n"
+    assert (
+        trunc["stdout"]["head"] + trunc["stdout"]["tail"]
+        == "A" * 5 + "A" * 4 + "\n"
+    )
     assert trunc["stdout"]["omitted_chars"] == 91
     bad_cwd = json.loads(tool(code="print(1)", cwd=""))
     assert bad_cwd["ok"] is False and bad_cwd["error"]["field"] == "cwd"
@@ -56,11 +64,15 @@ def test_run_python_env_vars_validation(tmp_path):
     assert bad_not_list["ok"] is False
     assert bad_not_list["error"]["field"] == "env_vars"
 
-    bad_name = json.loads(tool(code="print(1)", env_vars=[{"name": "", "value": "1"}]))
+    bad_name = json.loads(
+        tool(code="print(1)", env_vars=[{"name": "", "value": "1"}])
+    )
     assert bad_name["ok"] is False
     assert bad_name["error"]["field"] == "env_vars[0].name"
 
-    bad_value = json.loads(tool(code="print(1)", env_vars=[{"name": "A", "value": 1}]))  # type: ignore[list-item]
+    bad_value = json.loads(
+        tool(code="print(1)", env_vars=[{"name": "A", "value": 1}])
+    )  # type: ignore[list-item]
     assert bad_value["ok"] is False
     assert bad_value["error"]["field"] == "env_vars[0].value"
 
@@ -86,9 +98,15 @@ def test_run_python_default_cwd_is_launch_root(tmp_path, monkeypatch):
     monkeypatch.chdir(work)
     project = tmp_path / "project"
     project.mkdir()
-    tool = with_local_ctx(RunPythonCode, config_dict=_allow_config(str(project)))
+    tool = with_local_ctx(
+        RunPythonCode, config_dict=_allow_config(str(project))
+    )
     marker = project / "from_root.txt"
-    r = json.loads(tool(code=f"from pathlib import Path; Path({str(marker.name)!r}).write_text('x')"))
+    r = json.loads(
+        tool(
+            code=f"from pathlib import Path; Path({str(marker.name)!r}).write_text('x')"
+        )
+    )
     assert r["ok"] is True
     assert marker.read_text() == "x"
 
@@ -98,11 +116,13 @@ def test_run_python_cwd_invalid_returns_allowed_paths(tmp_path):
     workspace.mkdir()
     extra = tmp_path / "extra_write"
     extra.mkdir()
-    tool = with_local_ctx(RunPythonCode, config_dict={
+    tool = with_local_ctx(
+        RunPythonCode,
+        config_dict={
             "launch_root": str(workspace),
             "command_moderation": {"mode": "allow"},
             "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
-        }
+        },
     )
     missing = str(workspace / "nope_missing")
     r = json.loads(tool(code="print(1)", cwd=missing))
@@ -114,7 +134,10 @@ def test_run_python_cwd_invalid_returns_allowed_paths(tmp_path):
     assert os.path.abspath(str(extra)) in paths
 
 
-@pytest.mark.skipif(os.name == "nt", reason="directory writability via chmod is POSIX-oriented here")
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="directory writability via chmod is POSIX-oriented here",
+)
 def test_run_python_cwd_invalid_omits_non_writable_launch_root(tmp_path):
     ro_launch = tmp_path / "ro_launch"
     ro_launch.mkdir()
@@ -123,11 +146,13 @@ def test_run_python_cwd_invalid_omits_non_writable_launch_root(tmp_path):
         ro_launch.chmod(0o555)
         extra = tmp_path / "writable_extra"
         extra.mkdir()
-        tool = with_local_ctx(RunPythonCode, config_dict={
+        tool = with_local_ctx(
+            RunPythonCode,
+            config_dict={
                 "launch_root": str(ro_launch),
                 "command_moderation": {"mode": "allow"},
                 "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
-            }
+            },
         )
         missing = str(ro_launch / "no_such_subdir")
         r = json.loads(tool(code="print(1)", cwd=missing))

@@ -15,6 +15,7 @@
 синхронного кода агента ведут своим ``asyncio.run`` — так делают TUI и
 Harbor-адаптер, каждый в своём рабочем потоке.
 """
+
 from gc_core.aio.agent import AsyncAgent
 
 __all__ = ["AsyncAgent"]

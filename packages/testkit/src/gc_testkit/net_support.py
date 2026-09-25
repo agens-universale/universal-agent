@@ -17,7 +17,9 @@ import ssl
 import httpx
 
 
-def tls_failure(message: str = "self-signed certificate in chain") -> httpx.ConnectError:
+def tls_failure(
+    message: str = "self-signed certificate in chain",
+) -> httpx.ConnectError:
     """TLS-отказ так, как его видит вызывающий httpx: причина — в цепочке."""
     err = httpx.ConnectError("[SSL: CERTIFICATE_VERIFY_FAILED]")
     err.__cause__ = ssl.SSLCertVerificationError(message)

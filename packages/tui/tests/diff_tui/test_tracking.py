@@ -2,6 +2,7 @@
 
 Тулы не импортируют diff_tui; только TUI + thread identity.
 """
+
 from __future__ import annotations
 
 import json
@@ -9,21 +10,19 @@ import subprocess
 from pathlib import Path
 
 import pytest
-
-from gc_core.config_modules import env_vars
-from gc_tui.diff_tui.paths import orig_key
-from gc_tui.diff_tui.store import DiffStore
-from gc_tui.diff_tui.touched import TouchedJournal
-from gc_tui.diff_tui.tracking import TrackingFsBackend, wrap_local_for_tui
-from gc_core.execution_workspace import build_execution_workspace
-from gc_testkit.helpers.tool_ctx import local_ctx
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
+from gc_core.config_modules import env_vars
+from gc_core.execution_workspace import build_execution_workspace
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
-from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.helpers.tool_ctx import CallableTool, local_ctx
+from gc_tui.diff_tui.paths import orig_key
+from gc_tui.diff_tui.store import DiffStore
+from gc_tui.diff_tui.touched import TouchedJournal
+from gc_tui.diff_tui.tracking import TrackingFsBackend, wrap_local_for_tui
 
 
 def _has_git() -> bool:
@@ -107,7 +106,9 @@ def test_t1_write_existing_creates_orig(launch_root):
 
     res = json.loads(tool(path=str(target), content="changed\n"))
     assert res["ok"] is True
-    assert _orig(root, "src/foo.py").read_text(encoding="utf-8") == "baseline\n"
+    assert (
+        _orig(root, "src/foo.py").read_text(encoding="utf-8") == "baseline\n"
+    )
     index = DiffStore(str(root)).load_index()
     assert index["src/foo.py"]["status"] == "modified"
     assert "src/foo.py" in TouchedJournal(str(threads), "tui", "t1").paths()
@@ -168,7 +169,9 @@ def test_search_and_replace_dry_run_does_not_track(launch_root):
     tool = CallableTool(SearchAndReplace(ctx=_tool_ctx(root, threads)))
 
     res = json.loads(
-        tool(path=str(target), search="foo = 1", replace="foo = 2", dry_run=True)
+        tool(
+            path=str(target), search="foo = 1", replace="foo = 2", dry_run=True
+        )
     )
     assert res["ok"] is True
     assert DiffStore(str(root)).load_index() == {}
@@ -267,10 +270,10 @@ def test_wrap_skips_non_local():
 
 
 def test_tools_do_not_import_diff_tui():
-    from gc_core.tools.fs import write_to_file_tool as w
     from gc_core.tools.fs import append_to_file as a
-    from gc_core.tools.fs import search_and_replace as s
     from gc_core.tools.fs import apply_file_edits as e
+    from gc_core.tools.fs import search_and_replace as s
+    from gc_core.tools.fs import write_to_file_tool as w
 
     for mod in (w, a, s, e):
         src = Path(mod.__file__).read_text(encoding="utf-8")
@@ -292,7 +295,12 @@ def test_tools_do_not_import_diff_tui():
 # Синхронные входы порта для ЧУЖИХ реализаций: обёртка их не проксирует, но
 # корутинную форму каждого (`a<имя>`) — обязана, это проверяет цикл ниже.
 # `exec_raw` приехал с develop вместе со вторым каналом запуска.
-TRACKING_NOT_FORWARDED: set[str] = {"exec", "exec_raw", "exec_argv", "run_python"}
+TRACKING_NOT_FORWARDED: set[str] = {
+    "exec",
+    "exec_raw",
+    "exec_argv",
+    "run_python",
+}
 
 
 def _fsbackend_public_members() -> set[str]:
@@ -311,15 +319,16 @@ def test_tracking_fs_backend_mirrors_fsbackend_public_surface():
     # Class dict covers methods/properties; instance dict covers attrs copied
     # in __init__ (is_sandbox, default_exec_timeout). Neither reads a property.
     exposed = set(dir(type(wrapper))) | set(vars(wrapper))
-    missing = sorted(_fsbackend_public_members() - exposed - TRACKING_NOT_FORWARDED)
+    missing = sorted(
+        _fsbackend_public_members() - exposed - TRACKING_NOT_FORWARDED
+    )
     assert missing == []
 
     # Исключение из списка выше не должно означать «форму потеряли»: у каждой
     # снятой синхронной операции обёртка обязана проксировать корутинную.
     for name in TRACKING_NOT_FORWARDED:
         assert hasattr(type(wrapper), f"a{name}"), (
-            f"обёртка не проксирует a{name} — операция потеряна целиком, "
-            "а не переведена в корутинную форму"
+            f"обёртка не проксирует a{name} — операция потеряна целиком, а не переведена в корутинную форму"
         )
 
 

@@ -3,7 +3,18 @@
 import json
 from types import SimpleNamespace
 
-from gc_core.summarize.summary_logging import SummaryCompactionLog, append_summary_trace_record, log_compaction_started, log_memory_patch_skipped_multi_batch, log_memory_patch_wm_unchanged, log_summary_message_body, log_summary_raw_text, log_summary_slice_fallback, resolve_summary_trace_path, trigger_reason_label
+from gc_core.summarize.summary_logging import (
+    SummaryCompactionLog,
+    append_summary_trace_record,
+    log_compaction_started,
+    log_memory_patch_skipped_multi_batch,
+    log_memory_patch_wm_unchanged,
+    log_summary_message_body,
+    log_summary_raw_text,
+    log_summary_slice_fallback,
+    resolve_summary_trace_path,
+    trigger_reason_label,
+)
 
 
 def test_summary_slice_fallback_logs_warning():
@@ -57,8 +68,14 @@ def test_memory_patch_skipped_multi_batch_logs_info():
 
 def test_trigger_reason_labels():
     assert trigger_reason_label("turn_end") == "конец хода после turn_finish"
-    assert trigger_reason_label("pre_backend") == "середина хода (окно переполнено)"
-    assert trigger_reason_label("session_compact") == "по запросу агента (session_compact)"
+    assert (
+        trigger_reason_label("pre_backend")
+        == "середина хода (окно переполнено)"
+    )
+    assert (
+        trigger_reason_label("session_compact")
+        == "по запросу агента (session_compact)"
+    )
 
 
 def test_cli_prints_full_summary_texts(capsys):
@@ -90,7 +107,10 @@ def test_resolve_summary_trace_path_prefers_ctx(tmp_path):
     custom = tmp_path / "custom_trace.jsonl"
     ctx = SimpleNamespace(
         summary_trace_path=str(custom),
-        config_dict={"save_logs": True, "logs_dump_dir": str(tmp_path / "ignored")},
+        config_dict={
+            "save_logs": True,
+            "logs_dump_dir": str(tmp_path / "ignored"),
+        },
     )
     assert resolve_summary_trace_path(ctx) == str(custom)
 

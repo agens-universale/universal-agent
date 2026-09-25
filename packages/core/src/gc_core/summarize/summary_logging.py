@@ -270,8 +270,7 @@ def log_compaction_completed(
             archive,
         )
         logger.info(
-            "summary_boundary phase=completed rule=%s rule_id=%s thread_id=%s "
-            "volume=%s%s%s",
+            "summary_boundary phase=completed rule=%s rule_id=%s thread_id=%s volume=%s%s%s",
             log_ctx.rule_label,
             log_ctx.trigger_reason,
             log_ctx.thread_id,
@@ -299,15 +298,16 @@ def log_compaction_completed(
                 "num_batches": num_batches,
                 "memory_delta_chars": memory_delta_chars,
                 "threshold": log_ctx.trigger_threshold_chars,
-                "archive_suffix": f"__pre_summary__{archive}" if archive else None,
+                "archive_suffix": f"__pre_summary__{archive}"
+                if archive
+                else None,
             },
         )
     if not log_ctx.is_cli_mode:
         return
     _cli_print(f"Сжатие завершено: {log_ctx.rule_label}")
     _cli_print(
-        f"  было={serialized_before} стало={serialized_after} "
-        f"коэффициент={compression_ratio}"
+        f"  было={serialized_before} стало={serialized_after} коэффициент={compression_ratio}"
     )
     if archive:
         _cli_print(f"  архив треда: __pre_summary__{archive}")
@@ -356,8 +356,7 @@ def log_summary_slice_fallback(
     if logger is None:
         return
     logger.warning(
-        "summary_slice_fallback rule_id=%s thread_id=%s slice_mode=%s "
-        "raw_summary_chars=%s agent_gets_full_raw=true",
+        "summary_slice_fallback rule_id=%s thread_id=%s slice_mode=%s raw_summary_chars=%s agent_gets_full_raw=true",
         log_ctx.trigger_reason,
         log_ctx.thread_id,
         slice_mode,
@@ -394,8 +393,7 @@ def log_memory_patch_skipped_multi_batch(
     if logger is None:
         return
     logger.info(
-        "summary_memory_patch_skipped_multi_batch batches=%s "
-        "working_memory_not_updated_from_summary=true",
+        "summary_memory_patch_skipped_multi_batch batches=%s working_memory_not_updated_from_summary=true",
         batches,
     )
 
@@ -454,6 +452,9 @@ def _normalize_archive_suffix(archive_suffix: str | None) -> str | None:
 
 def _started_cli_detail(log_ctx: SummaryCompactionLog) -> str:
     line = f"  thread={log_ctx.thread_id} объём={log_ctx.trigger_volume}"
-    if log_ctx.trigger_threshold_chars is not None and log_ctx.trigger_threshold_chars > 0:
+    if (
+        log_ctx.trigger_threshold_chars is not None
+        and log_ctx.trigger_threshold_chars > 0
+    ):
         line += f" порог={log_ctx.trigger_threshold_chars}"
     return line

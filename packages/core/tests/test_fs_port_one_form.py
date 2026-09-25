@@ -15,20 +15,38 @@
 * локальное чтение по-прежнему инлайн: поток дороже самой работы;
 * мостящий бэкенд ждёт НАТИВНО, не занимая ни поток, ни свой loop.
 """
+
 import asyncio
 import inspect
 import threading
-
-import pytest
 
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 
 IO_METHODS = (
-    "exists", "lexists", "is_file", "is_dir", "is_symlink", "getsize",
-    "stat_info", "readable", "writable", "realpath", "is_hidden", "read",
-    "read_bytes", "read_head_bytes", "sha256_bytes", "write", "write_bytes",
-    "append", "copy", "makedirs", "listdir", "walk", "walk_entries",
+    "exists",
+    "lexists",
+    "is_file",
+    "is_dir",
+    "is_symlink",
+    "getsize",
+    "stat_info",
+    "readable",
+    "writable",
+    "realpath",
+    "is_hidden",
+    "read",
+    "read_bytes",
+    "read_head_bytes",
+    "sha256_bytes",
+    "write",
+    "write_bytes",
+    "append",
+    "copy",
+    "makedirs",
+    "listdir",
+    "walk",
+    "walk_entries",
 )
 GENERATORS = ("iter_lines", "iter_walk", "iter_files", "iter_walk_entries")
 

@@ -7,6 +7,7 @@
 Показывает ровно то, ради чего делался переезд: пока агенты работают,
 приложение продолжает крутить свои задачи на том же event loop.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -35,11 +36,16 @@ async def main(config_path: str, prompts: list[str]) -> list[str]:
             return await agent.run(prompt, thread_id=f"embed-{i}")
 
     try:
-        answers = await asyncio.gather(*(ask(i, p) for i, p in enumerate(prompts)))
+        answers = await asyncio.gather(
+            *(ask(i, p) for i, p in enumerate(prompts))
+        )
     finally:
         stop.set()
         ticks = await ticker
-        print(f"[приложение] тиков за время работы агентов: {ticks}", file=sys.stderr)
+        print(
+            f"[приложение] тиков за время работы агентов: {ticks}",
+            file=sys.stderr,
+        )
     return list(answers)
 
 

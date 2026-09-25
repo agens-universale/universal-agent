@@ -1,15 +1,16 @@
 """Host implementation of FsBackend (os / open() / subprocess); the host-I/O
 details that used to live inline in the tools are concentrated here."""
+
 import asyncio
-import signal
 import codecs
 import hashlib
 import logging
 import os
+import signal
 import stat as stat_module
+import sys
 import threading
 import time
-import sys
 from typing import Any, Callable, Dict, Iterable, Optional, Sequence
 
 from gc_core.backends.capture import BoundedStreamAccumulator, CapturedStream
@@ -19,7 +20,11 @@ from gc_core.backends.protocol import (
     FsBackend,
 )
 from gc_core.backends.walk_util import WalkEntry, pruned_dir_predicate
-from gc_core.utils.file_text import encode_text_for_append, encode_text_for_write, read_text_for_edit
+from gc_core.utils.file_text import (
+    encode_text_for_append,
+    encode_text_for_write,
+    read_text_for_edit,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +79,9 @@ class LocalFsBackend(FsBackend):
     async def getsize(self, path: str) -> int:
         return os.path.getsize(path)
 
-    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
+    async def stat_info(
+        self, path: str, follow_symlinks: bool = False
+    ) -> dict:
         st = os.stat(path, follow_symlinks=follow_symlinks)
         return {
             "size": st.st_size,
@@ -139,7 +146,9 @@ class LocalFsBackend(FsBackend):
         return digest.hexdigest()
 
     # --- write ---
-    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         # Allowlist + strict encode → atomic bytes write (no errors=replace).
         await self.write_bytes(path, encode_text_for_write(content, encoding))
 
@@ -157,7 +166,9 @@ class LocalFsBackend(FsBackend):
                 pass
             raise
 
-    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         # Append payload WITHOUT a leading BOM: a second BOM in the middle of an
         # existing utf-16 file decodes as U+FEFF (ZERO WIDTH NO-BREAK SPACE).
         with open(path, "ab") as fd:
@@ -176,7 +187,9 @@ class LocalFsBackend(FsBackend):
         for name in sorted(os.listdir(path)):
             full = os.path.join(path, name)
             try:
-                st = os.lstat(full)  # lstat: symlink-to-dir counts as file (base parity)
+                st = os.lstat(
+                    full
+                )  # lstat: symlink-to-dir counts as file (base parity)
                 is_dir = stat_module.S_ISDIR(st.st_mode)
             except OSError:
                 is_dir = False
@@ -190,7 +203,9 @@ class LocalFsBackend(FsBackend):
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
         """``iter_walk_entries`` without sizes (dirs first, then files per level)."""
-        async for entry in self.iter_walk_entries(path, should_descend=should_descend):
+        async for entry in self.iter_walk_entries(
+            path, should_descend=should_descend
+        ):
             yield entry.rel, entry.is_dir
 
     async def iter_files(
@@ -204,13 +219,16 @@ class LocalFsBackend(FsBackend):
             dirnames.sort()
             filenames.sort()
             rel_dir = os.path.relpath(dirpath, path)
-            prefix = "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+            prefix = (
+                "" if rel_dir == "." else rel_dir.replace(os.sep, "/") + "/"
+            )
             for f in filenames:
                 yield prefix + f
 
             if should_descend is not None:
                 dirnames[:] = [
-                    d for d in dirnames
+                    d
+                    for d in dirnames
                     if should_descend(os.path.join(dirpath, d))
                 ]
 
@@ -234,30 +252,35 @@ class LocalFsBackend(FsBackend):
         Symlinks are never followed (``os.walk(followlinks=False)`` parity).
         """
         pruned = pruned_dir_predicate(prune_names, prune_dot_dirs)
-
-        def _level(abs_dir: str, prefix: str) -> Iterable[WalkEntry]:
-            try:
-                with os.scandir(abs_dir) as it:
-                    children = sorted(it, key=lambda e: e.name)
-            except OSError:
-                return
-            dirs = [e for e in children if _is_real_dir(e)]
-            files = [e for e in children if not _is_real_dir(e)]
-            for d in dirs:
-                yield WalkEntry(prefix + d.name, True)
-            for f in files:
-                yield WalkEntry(prefix + f.name, False, _size_without_following(f))
-            for d in dirs:
-                if pruned(d.name):
-                    continue
-                full = os.path.join(abs_dir, d.name)
-                if should_descend is not None and not should_descend(full):
-                    continue
-                for _item in _level(full, prefix + d.name + "/"):
-                    yield _item
-
-        for _item in _level(path, ""):
+        async for _item in self._walk_level(path, "", pruned, should_descend):
             yield _item
+
+    async def _walk_level(
+        self,
+        abs_dir: str,
+        prefix: str,
+        pruned: Callable[[str], bool],
+        should_descend: Optional[Callable[[str], bool]],
+    ) -> Iterable[WalkEntry]:
+        children = _scandir_sorted(abs_dir)
+        if children is None:
+            return
+        dirs = [e for e in children if _is_real_dir(e)]
+        files = [e for e in children if not _is_real_dir(e)]
+        for d in dirs:
+            yield WalkEntry(prefix + d.name, True)
+        for f in files:
+            yield WalkEntry(prefix + f.name, False, _size_without_following(f))
+        for d in dirs:
+            if pruned(d.name):
+                continue
+            full = os.path.join(abs_dir, d.name)
+            if should_descend is not None and not should_descend(full):
+                continue
+            async for _item in self._walk_level(
+                full, prefix + d.name + "/", pruned, should_descend
+            ):
+                yield _item
 
     async def walk_entries(
         self,
@@ -266,7 +289,12 @@ class LocalFsBackend(FsBackend):
         prune_names: Sequence[str] = (),
         prune_dot_dirs: bool = False,
     ) -> list:
-        return [_item async for _item in self.iter_walk_entries(path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs)]
+        return [
+            _item
+            async for _item in self.iter_walk_entries(
+                path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
+            )
+        ]
 
     # --- path semantics ---
     def normpath(self, path: str) -> str:
@@ -282,41 +310,81 @@ class LocalFsBackend(FsBackend):
 
     # --- exec ---
     # --- exec (async) ---
-    async def aexec(self, command: str, *, cwd: Optional[str] = None,
-                    timeout: Optional[int] = None,
-                    env: Optional[dict] = None,
-                    capture_max_chars: Optional[int] = None) -> ExecResult:
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+    async def aexec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        merged_env = (
+            {**os.environ, **{str(k): str(v) for k, v in env.items()}}
+            if env
+            else None
+        )
         return await _arun_bounded_process(
-            command, shell=True, cwd=cwd, timeout=timeout, env=merged_env,
+            command,
+            shell=True,
+            cwd=cwd,
+            timeout=timeout,
+            env=merged_env,
             stdin_text=None,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
-    async def aexec_argv(self, argv: list, *, stdin: Optional[str] = None,
-                         cwd: Optional[str] = None,
-                         timeout: Optional[int] = None,
-                         env: Optional[dict] = None,
-                         capture_max_chars: Optional[int] = None) -> ExecResult:
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+    async def aexec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
+        merged_env = (
+            {**os.environ, **{str(k): str(v) for k, v in env.items()}}
+            if env
+            else None
+        )
         return await _arun_bounded_process(
-            [str(a) for a in argv], shell=False, cwd=cwd, timeout=timeout,
-            env=merged_env, stdin_text=stdin,
+            [str(a) for a in argv],
+            shell=False,
+            cwd=cwd,
+            timeout=timeout,
+            env=merged_env,
+            stdin_text=stdin,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
-    async def arun_python(self, code: str, *, cwd: Optional[str] = None,
-                          timeout: Optional[int] = None,
-                          env: Optional[dict] = None,
-                          capture_max_chars: Optional[int] = None) -> ExecResult:
+    async def arun_python(
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         return await _arun_bounded_process(
-            [sys.executable, "-u", "-"], shell=False, cwd=cwd, timeout=timeout,
-            env=_sanitize_env(env), stdin_text=code,
+            [sys.executable, "-u", "-"],
+            shell=False,
+            cwd=cwd,
+            timeout=timeout,
+            env=_sanitize_env(env),
+            stdin_text=code,
             capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
-    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
-                                env: Optional[dict] = None) -> dict:
+    async def aspawn_background(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[dict] = None,
+    ) -> dict:
         """Запустить команду и НЕ ждать её: отдать pid сразу.
 
         Здесь нет ни труб, ни чтения, ни таймаута, и в этом весь смысл. Труба
@@ -333,7 +401,11 @@ class LocalFsBackend(FsBackend):
 
         from gc_core.utils.win_console import preserve_console_mode
 
-        merged_env = {**os.environ, **{str(k): str(v) for k, v in env.items()}} if env else None
+        merged_env = (
+            {**os.environ, **{str(k): str(v) for k, v in env.items()}}
+            if env
+            else None
+        )
         # Уступка loop. `Popen` её не делает сам, а на этом пути нет больше ни
         # одного `await`: пачка фоновых запусков шла бы одним неразрывным куском.
         # Замерено на 20 запусках: 26–32 мс худшего разрыва против 3 мс у
@@ -354,13 +426,14 @@ class LocalFsBackend(FsBackend):
             # фоновая команда погибала вместе с агентом; на macOS она выживала,
             # но в stderr сыпалось «Loop … is closed». Фоновому процессу loop
             # не нужен вовсе: мы его не ждём и не читаем.
-            proc = subprocess.Popen(                       # noqa: S602 — shell намеренно
+            proc = subprocess.Popen(  # shell намеренно
                 command,
                 shell=True,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                cwd=cwd, env=merged_env,
+                cwd=cwd,
+                env=merged_env,
                 **_background_detach_kwargs(),
             )
         # Команда, упавшая сразу (опечатка в имени, нет файла), — не «запущена».
@@ -435,7 +508,7 @@ def _kill_background_now(proc: Any) -> None:
     """
     try:
         if os.name == "posix":
-            os.killpg(proc.pid, signal.SIGKILL)        # своя сессия: pgid == pid
+            os.killpg(proc.pid, signal.SIGKILL)  # своя сессия: pgid == pid
         else:
             proc.kill()
     except OSError:
@@ -455,7 +528,7 @@ def _reap_finished_background() -> None:
         try:
             if proc.poll() is not None:
                 _BACKGROUND_PROCS.discard(proc)
-        except Exception:                      # noqa: BLE001 — учёт не критичен
+        except Exception:  # учёт не критичен
             _BACKGROUND_PROCS.discard(proc)
 
 
@@ -520,7 +593,7 @@ class _Capture:
     захваченное терялось. Держим его в объекте, переживающем отмену таски.
     """
 
-    __slots__ = ("stream", "acc")
+    __slots__ = ("acc", "stream")
 
     def __init__(self, capture_max_chars: int) -> None:
         #: Накопитель с ОГРАНИЧЕННОЙ памятью: настоящая голова, настоящий
@@ -548,6 +621,15 @@ class _Capture:
         каждый раз заново и с каждым чтением становится точнее.
         """
         self.stream = self.acc.result()
+
+
+def _scandir_sorted(abs_dir: str) -> "Optional[list]":
+    """Дети каталога по имени; None, если каталог не читается."""
+    try:
+        with os.scandir(abs_dir) as it:
+            return sorted(it, key=lambda e: e.name)
+    except OSError:
+        return None
 
 
 async def _adrain_stream(stream, sink: "_Capture") -> None:
@@ -594,13 +676,13 @@ async def _astop_process(proc) -> None:
     if _terminate_quietly(proc):
         try:
             await _await_process_exit(proc, _KILL_GRACE_SEC)
-            return                       # вышла сама, убивать некого
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+            return  # вышла сама, убивать некого
+        except (TimeoutError, asyncio.CancelledError):
             pass
     _kill_quietly(proc)
     try:
         await _await_process_exit(proc, _KILL_EXIT_GRACE_SEC)
-    except (asyncio.TimeoutError, asyncio.CancelledError):
+    except (TimeoutError, asyncio.CancelledError):
         pass
 
 
@@ -621,7 +703,7 @@ async def _await_process_exit(proc, timeout: Optional[float]):
     delay = 0.001
     while proc.returncode is None:
         if deadline is not None and time.monotonic() >= deadline:
-            raise asyncio.TimeoutError
+            raise TimeoutError
         await asyncio.sleep(delay)
         # Растим паузу: короткие команды ловим почти мгновенно, длинные не
         # заставляют loop просыпаться сотни раз в секунду.
@@ -643,7 +725,9 @@ async def _arun_bounded_process(
     from gc_core.utils.win_console import preserve_console_mode
 
     stdin_arg = (
-        asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL
+        asyncio.subprocess.PIPE
+        if stdin_text is not None
+        else asyncio.subprocess.DEVNULL
     )
     # Своя группа процессов. Без неё `proc.kill()` на таймауте убивал ТОЛЬКО
     # шелл: потомки `sh -c "a; b"` продолжали работать, унаследовав pipe'ы, и
@@ -657,7 +741,10 @@ async def _arun_bounded_process(
                 args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+                stdin=stdin_arg,
+                cwd=cwd,
+                env=env,
+                limit=_READ_CHUNK * 8,
                 **spawn_kwargs,
             )
         else:
@@ -665,7 +752,10 @@ async def _arun_bounded_process(
                 *args,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                stdin=stdin_arg, cwd=cwd, env=env, limit=_READ_CHUNK * 8,
+                stdin=stdin_arg,
+                cwd=cwd,
+                env=env,
+                limit=_READ_CHUNK * 8,
                 **spawn_kwargs,
             )
 
@@ -682,36 +772,18 @@ async def _arun_bounded_process(
     out_task = asyncio.ensure_future(_adrain_stream(proc.stdout, out_sink))
     err_task = asyncio.ensure_future(_adrain_stream(proc.stderr, err_sink))
 
-    async def _feed_stdin() -> None:
-        try:
-            proc.stdin.write(stdin_text.encode("utf-8"))
-            await proc.stdin.drain()
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            pass
-        finally:
-            try:
-                proc.stdin.close()
-            except Exception:
-                pass
-
     # Запись держим под ТЕМ ЖЕ дедлайном, что и сам процесс: ребёнок, который
     # не читает свой stdin вовсе, иначе снова подвесил бы шаг без предохранителя.
     stdin_task = (
-        asyncio.ensure_future(_feed_stdin())
+        asyncio.ensure_future(_afeed_stdin(proc, stdin_text))
         if stdin_text is not None and proc.stdin is not None
         else None
     )
 
-    timed_out = False
     cancelled = False
     try:
         try:
-            await _await_process_exit(proc, timeout)
-            return_code = proc.returncode
-        except asyncio.TimeoutError:
-            timed_out = True
-            return_code = None
-            await _astop_process(proc)
+            return_code, timed_out = await _await_exit_or_stop(proc, timeout)
         finally:
             # Ребёнок мёртв или дочитан — писать больше некому и незачем.
             if stdin_task is not None and not stdin_task.done():
@@ -720,32 +792,18 @@ async def _arun_bounded_process(
         # Потомок вышел — читателям пора дойти до EOF. Ждём ОГРАНИЧЕННО: EOF
         # наступает, когда трубу закрыл ПОСЛЕДНИЙ писатель, а фоновый внук с
         # унаследованным дескриптором может держать её сколько угодно долго.
-        await asyncio.wait({out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC)
+        await asyncio.wait(
+            {out_task, err_task}, timeout=_DRAIN_JOIN_TIMEOUT_SEC
+        )
     except asyncio.CancelledError:
         # Вызывающего сняли (сервер отменил прогон, упал сосед по TaskGroup).
         cancelled = True
         await _astop_process(proc)
         raise
     finally:
-        # Публикуем захваченное к этому моменту: даже на отмене вызывающий
-        # получает то, что команда успела напечатать.
-        out_sink.publish()
-        err_sink.publish()
-        pending = [t for t in (out_task, err_task) if not t.done()]
-        if cancelled or not pending:
-            for task in pending:
-                task.cancel()
-            _close_transport(proc)
-        else:
-            # Труба ещё открыта — её держит фоновый внук (команда с `&`, чужой
-            # скрипт с `nohup`, самодемонизация). Закрыть её сейчас значит
-            # выдать ему EPIPE на первой же записи: обычную программу это
-            # убивает SIGPIPE, питоновскую заваливает `BrokenPipeError` на
-            # каждой строке лога. Поэтому читаем дальше ФОНОМ и закрываем
-            # транспорт, когда внук закроет свой конец сам. Результат вызова
-            # это не трогает: он собран из снимков выше, а накопители
-            # ограничены — сколько бы внук ни писал, память не растёт.
-            _keep_draining(pending, proc)
+        _settle_drains(
+            proc, out_sink, err_sink, (out_task, err_task), cancelled=cancelled
+        )
 
     return ExecResult(
         return_code=return_code,
@@ -753,6 +811,31 @@ async def _arun_bounded_process(
         stdout_stream=out_sink.stream,
         stderr_stream=err_sink.stream,
     )
+
+
+def _settle_drains(
+    proc, out_sink: "_Capture", err_sink: "_Capture", tasks, *, cancelled: bool
+) -> None:
+    """Снять снимки вывода и решить судьбу дренажа: закрыть транспорт или дочитывать фоном."""
+    # Публикуем захваченное к этому моменту: даже на отмене вызывающий
+    # получает то, что команда успела напечатать.
+    out_sink.publish()
+    err_sink.publish()
+    pending = [t for t in tasks if not t.done()]
+    if cancelled or not pending:
+        for task in pending:
+            task.cancel()
+        _close_transport(proc)
+    else:
+        # Труба ещё открыта — её держит фоновый внук (команда с `&`, чужой
+        # скрипт с `nohup`, самодемонизация). Закрыть её сейчас значит
+        # выдать ему EPIPE на первой же записи: обычную программу это
+        # убивает SIGPIPE, питоновскую заваливает `BrokenPipeError` на
+        # каждой строке лога. Поэтому читаем дальше ФОНОМ и закрываем
+        # транспорт, когда внук закроет свой конец сам. Результат вызова
+        # это не трогает: он собран из снимков выше, а накопители
+        # ограничены — сколько бы внук ни писал, память не растёт.
+        _keep_draining(pending, proc)
 
 
 #: Дренажи, доигрывающие после возврата вызова. Держим ссылки: у asyncio на
@@ -769,6 +852,7 @@ def _keep_draining(tasks: list, proc) -> None:
     умрёт или завершится сам. До тех пор читаем — иначе закрытая труба выдаёт
     ему EPIPE на первой записи.
     """
+
     async def _finish() -> None:
         try:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -820,12 +904,15 @@ def _dup_pipe_ends(proc) -> list:
     ends: list = []
     for stream_fd in (1, 2):
         try:
-            pipe = transport.get_pipe_transport(stream_fd).get_extra_info("pipe")
+            pipe = transport.get_pipe_transport(stream_fd).get_extra_info(
+                "pipe"
+            )
             ends.append(_dup_pipe_end(pipe))
         except Exception as exc:
             logger.warning(
-                "exec: трубу %s команды не отдать потоку дренажа — фоновый "
-                "процесс команды получит ошибку записи: %r", stream_fd, exc,
+                "exec: трубу %s команды не отдать потоку дренажа — фоновый процесс команды получит ошибку записи: %r",
+                stream_fd,
+                exc,
             )
     return ends
 
@@ -842,7 +929,12 @@ def _dup_pipe_end(pipe):
 
         current = _winapi.GetCurrentProcess()
         return _winapi.DuplicateHandle(
-            current, pipe.handle, current, 0, False, _winapi.DUPLICATE_SAME_ACCESS
+            current,
+            pipe.handle,
+            current,
+            0,
+            False,
+            _winapi.DUPLICATE_SAME_ACCESS,
         )
     copy = os.dup(pipe.fileno())
     # Loop перевёл трубу в неблокирующий режим, и копия наследует его:
@@ -865,6 +957,7 @@ def _read_until_eof(end: int) -> None:
         return
     try:
         while os.read(end, _READ_CHUNK):
+            # Прочитанное выбрасываем намеренно: нужен сам факт чтения (см. докстроку).
             pass
     except OSError:
         pass
@@ -933,13 +1026,36 @@ def _terminate_quietly(proc) -> bool:
         try:
             os.killpg(os.getpgid(pid), signal.SIGTERM)
             return True
-        except (ProcessLookupError, PermissionError, OSError):
+        except OSError:
             return False
     try:
         proc.terminate()
         return True
     except Exception:
         return False
+
+
+async def _afeed_stdin(proc, stdin_text: str) -> None:
+    try:
+        proc.stdin.write(stdin_text.encode("utf-8"))
+        await proc.stdin.drain()
+    except OSError:
+        pass
+    finally:
+        try:
+            proc.stdin.close()
+        except Exception:
+            pass
+
+
+async def _await_exit_or_stop(proc, timeout: Optional[int]) -> tuple:
+    """Дождаться процесса; по таймауту — остановить (`_astop_process`). → (return_code, timed_out)."""
+    try:
+        await _await_process_exit(proc, timeout)
+        return proc.returncode, False
+    except TimeoutError:
+        await _astop_process(proc)
+        return None, True
 
 
 def _kill_quietly(proc) -> None:
@@ -955,8 +1071,8 @@ def _kill_quietly(proc) -> None:
         try:
             os.killpg(os.getpgid(pid), signal.SIGKILL)
             return
-        except (ProcessLookupError, PermissionError, OSError):
-            pass                      # группы уже нет либо она не наша
+        except OSError:
+            pass  # группы уже нет либо она не наша
     try:
         proc.kill()
     except Exception:

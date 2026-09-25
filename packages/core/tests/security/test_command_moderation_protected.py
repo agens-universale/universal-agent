@@ -7,13 +7,16 @@ C1 Часть 2: при недоступности судьи и mode != allow �
 Protected paths injection: build_judge_payload добавляет поле never_touch_paths
 с объединённым списком instruction + operational защищённых путей.
 """
+
 import json
 
-import pytest
-
 from gc_core.security import command_moderation as cm
-from gc_core.security.command_moderation import ModerationContext, build_judge_payload, decide_command_execution, moderate_command_execution
-
+from gc_core.security.command_moderation import (
+    ModerationContext,
+    build_judge_payload,
+    decide_command_execution,
+    moderate_command_execution,
+)
 
 # ---------------------------------------------------------------------------
 # C1 Часть 2: judge-unavailable → confirm-порт
@@ -58,8 +61,11 @@ def test_judge_unavailable_deny_mode_blocks_when_confirm_rejected(monkeypatch):
 
 def test_decision_never_asks_the_human_itself(monkeypatch):
     """Решение чистое: ожидание человека уходит в поток через драйвер гарда."""
+
     def _boom(**_k):
-        raise AssertionError("decide_command_execution сама спросила человека — на loop'е")
+        raise AssertionError(
+            "decide_command_execution сама спросила человека — на loop'е"
+        )
 
     monkeypatch.setattr(cm, "request_confirm", _boom)
     monkeypatch.setattr(cm, "confirm_available", lambda ctx: True)
@@ -70,7 +76,9 @@ def test_decision_never_asks_the_human_itself(monkeypatch):
 def test_judge_unavailable_allow_mode_skips_confirm(monkeypatch):
     """allow + судья недоступен → немедленно allow (confirm-порт не трогаем)."""
     called = []
-    monkeypatch.setattr(cm, "confirm_available", lambda ctx: called.append(1) or True)
+    monkeypatch.setattr(
+        cm, "confirm_available", lambda ctx: called.append(1) or True
+    )
     ctx = object()
     dec = decide_command_execution("allow", None, False, None, ctx=ctx)
     assert dec.allowed is True
@@ -91,7 +99,7 @@ def test_judge_unavailable_no_ctx_still_blocks(monkeypatch):
 
 def test_build_judge_payload_includes_never_touch_paths(monkeypatch, tmp_path):
     """build_judge_payload добавляет never_touch_paths из protected_paths."""
-    from pathlib import Path
+
     from gc_core.security.protected_paths import ProtectedSet
 
     instr = tmp_path / "instructions.md"
@@ -118,8 +126,11 @@ def test_build_judge_payload_includes_never_touch_paths(monkeypatch, tmp_path):
     assert str(oper) in paths_in_payload
 
 
-def test_build_judge_payload_never_touch_paths_empty_on_error(monkeypatch, tmp_path):
+def test_build_judge_payload_never_touch_paths_empty_on_error(
+    monkeypatch, tmp_path
+):
     """При ошибке protected_paths → never_touch_paths пустой список (не падаем)."""
+
     def bad_ps(cwd):
         raise RuntimeError("cannot load")
 
@@ -157,6 +168,7 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cm, "confirm_available", fake_confirm_available)
     monkeypatch.setattr(cm, "request_confirm", lambda **k: True)
+
     # Судья всегда недоступен — кидаем исключение.
     #
     # Подменять надо ШОВ, через который ходит ТЕЛО гварда. Здесь стояла
@@ -167,7 +179,9 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     async def _judge_is_down(_payload):
         raise cm.JudgeUnavailable("test")
 
-    monkeypatch.setattr(cm, "_default_judge_client", lambda *a, **k: _judge_is_down)
+    monkeypatch.setattr(
+        cm, "_default_judge_client", lambda *a, **k: _judge_is_down
+    )
 
     fake_ctx = SimpleNamespace(
         config_dict={
@@ -177,11 +191,15 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
         logger=None,
     )
 
-    @moderate_command_execution(payload_arg="command", tool_name="exec_command")
+    @moderate_command_execution(
+        payload_arg="command", tool_name="exec_command"
+    )
     def run(command: str, ctx=None) -> str:
         return json.dumps({"ok": True})
 
     result = json.loads(run("echo hello", ctx=fake_ctx))
 
     assert result["ok"] is True, "confirm-порт должен разрешить выполнение"
-    assert received_ctx and received_ctx[0] is fake_ctx, "ctx должен быть проброшен в confirm_available"
+    assert received_ctx and received_ctx[0] is fake_ctx, (
+        "ctx должен быть проброшен в confirm_available"
+    )

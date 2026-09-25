@@ -5,6 +5,7 @@ event="subagent_end")` шёл после него — запись о завер
 терялась. Сторож структурный: освобождение — только во внешнем `finally`, а
 записей о завершении там нет.
 """
+
 import ast
 import inspect
 import textwrap
@@ -13,7 +14,10 @@ from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _is_release(node) -> bool:
-    return isinstance(node, ast.Call) and getattr(node.func, "id", None) == "release_run_logger"
+    return (
+        isinstance(node, ast.Call)
+        and getattr(node.func, "id", None) == "release_run_logger"
+    )
 
 
 def _is_end_record(node) -> bool:
@@ -24,7 +28,9 @@ def _is_end_record(node) -> bool:
 
 
 def test_logger_is_released_after_every_subagent_end_record():
-    fn = ast.parse(textwrap.dedent(inspect.getsource(SubagentRunner._arun_internal))).body[0]
+    fn = ast.parse(
+        textwrap.dedent(inspect.getsource(SubagentRunner._arun_internal))
+    ).body[0]
     outer = [st for st in fn.body if isinstance(st, ast.Try)][-1]
     in_final = {id(n) for st in outer.finalbody for n in ast.walk(st)}
 

@@ -14,10 +14,8 @@
 ``trust_env=False`` при этом всё ещё значим: у httpx он отключает env-прокси и
 CA из окружения, а их мы передаём явно (см. ``resolve_proxies``).
 """
-import os
 
 import httpx
-
 from gc_core.utils.http_session import NO_NETRC_SESSION
 
 
@@ -77,7 +75,11 @@ def test_httpx_does_not_read_netrc_implicitly(tmp_path, monkeypatch):
         seen["auth"] = request.headers.get("Authorization")
         return httpx.Response(200, json={})
 
-    with httpx.Client(transport=httpx.MockTransport(handler), trust_env=True) as c:
+    with httpx.Client(
+        transport=httpx.MockTransport(handler), trust_env=True
+    ) as c:
         c.get("http://example.com/v1")
 
-    assert seen["auth"] is None, "httpx начал читать netrc сам — проверить ядро"
+    assert seen["auth"] is None, (
+        "httpx начал читать netrc сам — проверить ядро"
+    )

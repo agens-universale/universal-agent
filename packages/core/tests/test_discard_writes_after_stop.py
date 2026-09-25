@@ -1,6 +1,6 @@
 """State.discard_writes_after_stop — флаг для guard перед persist после стопа."""
+
 from gc_core.states import State
-from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -36,10 +36,12 @@ async def test_persist_callback_skipped_when_discard_and_stop():
     state.stop_requested = True
 
     persisted: list = []
+
     def callback(messages: list) -> None:
         persisted.append(messages)
 
     from gc_core.processing_responses import _maybe_persist
+
     await _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert persisted == []
@@ -48,13 +50,17 @@ async def test_persist_callback_skipped_when_discard_and_stop():
 async def test_persist_callback_called_when_not_discarding():
     """Если discard_writes_after_stop=False (default) — callback вызывается как обычно даже на stop."""
     state = _make_state()
-    state.stop_requested = True  # стоп есть, но discard False (CLI/server поведение)
+    state.stop_requested = (
+        True  # стоп есть, но discard False (CLI/server поведение)
+    )
 
     persisted: list = []
+
     def callback(messages: list) -> None:
         persisted.append(messages)
 
     from gc_core.processing_responses import _maybe_persist
+
     await _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert len(persisted) == 1
@@ -66,10 +72,12 @@ async def test_persist_callback_called_when_no_stop():
     state.discard_writes_after_stop = True  # флаг True, но стопа нет
 
     persisted: list = []
+
     def callback(messages: list) -> None:
         persisted.append(messages)
 
     from gc_core.processing_responses import _maybe_persist
+
     await _maybe_persist(callback, [{"role": "user", "content": "x"}], state)
 
     assert len(persisted) == 1
@@ -80,6 +88,7 @@ async def test_persist_callback_none_is_noop():
     state = _make_state()
     # Не должно бросать
     from gc_core.processing_responses import _maybe_persist
+
     await _maybe_persist(None, [], state)
 
 
@@ -96,8 +105,8 @@ def _make_executor_cfg(tmp_path):
 
 async def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     """executor.run(discard_writes_after_stop=True) выставляет state.discard_writes_after_stop=True."""
-    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
+    from gc_core.run_context import acreate_run_context
 
     cfg = _make_executor_cfg(tmp_path)
 
@@ -108,16 +117,20 @@ async def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
     ctx = await acreate_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    await ex.arun([{"role": "user", "content": "x"}],
-                  thread_id="t", start_new_thread=True, system="cli",
-                  discard_writes_after_stop=True)
+    await ex.arun(
+        [{"role": "user", "content": "x"}],
+        thread_id="t",
+        start_new_thread=True,
+        system="cli",
+        discard_writes_after_stop=True,
+    )
     assert ex._state.discard_writes_after_stop is True
 
 
 async def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     """Без kwarg — state.discard_writes_after_stop остаётся False."""
-    from gc_core.run_context import acreate_run_context
     from gc_core.agent_executor import AgentExecutor
+    from gc_core.run_context import acreate_run_context
 
     cfg = _make_executor_cfg(tmp_path)
 
@@ -127,6 +140,10 @@ async def test_run_default_kwarg_leaves_state_false(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_core.agent_executor.arun_agent", _fake_arun_agent)
     ctx = await acreate_run_context(cfg, auth_connector=None)
     ex = AgentExecutor(ctx)
-    await ex.arun([{"role": "user", "content": "x"}],
-                  thread_id="t", start_new_thread=True, system="cli")
+    await ex.arun(
+        [{"role": "user", "content": "x"}],
+        thread_id="t",
+        start_new_thread=True,
+        system="cli",
+    )
     assert ex._state.discard_writes_after_stop is False

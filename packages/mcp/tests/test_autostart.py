@@ -1,4 +1,5 @@
 """Тесты автозапуска MCP-daemon'ов по конфигу агента."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,9 +7,13 @@ from textwrap import dedent
 from unittest.mock import patch
 
 import pytest
-
-from recommended_mcp.runtime.manifest_resolve import resolve_agent_manifest_path
-from recommended_mcp.autostart import ensure_daemons_for_agent, wait_daemon_url_ready
+from recommended_mcp.autostart import (
+    ensure_daemons_for_agent,
+    wait_daemon_url_ready,
+)
+from recommended_mcp.runtime.manifest_resolve import (
+    resolve_agent_manifest_path,
+)
 
 
 def _write_manifest(tmp_path: Path, content: str) -> Path:
@@ -25,7 +30,9 @@ def test_resolve_manifest_from_gc_config(tmp_path: Path, monkeypatch) -> None:
     manifest.write_text("mcps: []\n", encoding="utf-8")
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_config_dir=gc_config))
+    monkeypatch.setattr(
+        env_vars, "env", env_vars.EnvVars(gc_config_dir=gc_config)
+    )
     path = resolve_agent_manifest_path({})
     assert path == manifest.resolve()
 
@@ -49,7 +56,10 @@ def test_ensure_starts_only_configured_http_mcp(tmp_path: Path) -> None:
     )
     config_dict = {
         "mcp-servers": {
-            "science": {"transport": "stream_http", "url": "http://127.0.0.1:8765/mcp"},
+            "science": {
+                "transport": "stream_http",
+                "url": "http://127.0.0.1:8765/mcp",
+            },
             "duckduckgo_search": {"transport": "stdio", "command": "ddgs-mcp"},
         },
     }
@@ -57,15 +67,22 @@ def test_ensure_starts_only_configured_http_mcp(tmp_path: Path) -> None:
         "recommended_mcp.runtime.manifest_resolve.resolve_agent_manifest_path",
         return_value=manifest,
     ):
-        with patch("recommended_mcp.autostart.run_entry", return_value=True) as run_entry:
-            with patch("recommended_mcp.autostart.wait_daemon_url_ready", return_value=True) as wait_ready:
+        with patch(
+            "recommended_mcp.autostart.run_entry", return_value=True
+        ) as run_entry:
+            with patch(
+                "recommended_mcp.autostart.wait_daemon_url_ready",
+                return_value=True,
+            ) as wait_ready:
                 ensure_daemons_for_agent(config_dict)
     run_entry.assert_called_once()
     assert run_entry.call_args.args[0].name == "science"
     wait_ready.assert_called_once_with("http://127.0.0.1:8765/mcp")
 
 
-def test_ensure_skips_ready_wait_when_daemon_already_running(tmp_path: Path) -> None:
+def test_ensure_skips_ready_wait_when_daemon_already_running(
+    tmp_path: Path,
+) -> None:
     manifest = _write_manifest(
         tmp_path,
         """
@@ -81,7 +98,10 @@ def test_ensure_skips_ready_wait_when_daemon_already_running(tmp_path: Path) -> 
     )
     config_dict = {
         "mcp-servers": {
-            "science": {"transport": "stream_http", "url": "http://127.0.0.1:8765/mcp"},
+            "science": {
+                "transport": "stream_http",
+                "url": "http://127.0.0.1:8765/mcp",
+            },
         },
     }
     with patch(
@@ -89,7 +109,9 @@ def test_ensure_skips_ready_wait_when_daemon_already_running(tmp_path: Path) -> 
         return_value=manifest,
     ):
         with patch("recommended_mcp.autostart.run_entry", return_value=False):
-            with patch("recommended_mcp.autostart.wait_daemon_url_ready") as wait_ready:
+            with patch(
+                "recommended_mcp.autostart.wait_daemon_url_ready"
+            ) as wait_ready:
                 ensure_daemons_for_agent(config_dict)
     wait_ready.assert_not_called()
 
@@ -110,12 +132,17 @@ def test_wait_daemon_url_ready_accepts_open_port() -> None:
     thread = Thread(target=_serve, daemon=True)
     thread.start()
     try:
-        assert wait_daemon_url_ready(f"http://{host}:{port}/mcp", timeout=2.0) is True
+        assert (
+            wait_daemon_url_ready(f"http://{host}:{port}/mcp", timeout=2.0)
+            is True
+        )
     finally:
         sock.close()
 
 
-def test_wired_but_not_installed_daemon_does_not_kill_the_frontend(tmp_path: Path) -> None:
+def test_wired_but_not_installed_daemon_does_not_kill_the_frontend(
+    tmp_path: Path,
+) -> None:
     """Подключённый, но не установленный рецепт — предупреждение, а не падение.
 
     Что случилось 01.09.2026. Рецепт `science` остался подключённым в
@@ -154,8 +181,14 @@ def test_wired_but_not_installed_daemon_does_not_kill_the_frontend(tmp_path: Pat
     )
     config = {
         "mcp-servers": {
-            "science": {"transport": "stream_http", "url": "http://127.0.0.1:8765/mcp"},
-            "other": {"transport": "stream_http", "url": "http://127.0.0.1:8766/mcp"},
+            "science": {
+                "transport": "stream_http",
+                "url": "http://127.0.0.1:8765/mcp",
+            },
+            "other": {
+                "transport": "stream_http",
+                "url": "http://127.0.0.1:8766/mcp",
+            },
         }
     }
 
@@ -165,7 +198,9 @@ def test_wired_but_not_installed_daemon_does_not_kill_the_frontend(tmp_path: Pat
     assert supervisor is not None
 
 
-def test_broken_daemon_does_not_block_its_healthy_neighbour(tmp_path: Path) -> None:
+def test_broken_daemon_does_not_block_its_healthy_neighbour(
+    tmp_path: Path,
+) -> None:
     """Один непоставленный рецепт не мешает подняться остальным.
 
     Раньше это следовало из падения: до соседа очередь просто не доходила.
@@ -195,8 +230,14 @@ def test_broken_daemon_does_not_block_its_healthy_neighbour(tmp_path: Path) -> N
     )
     config = {
         "mcp-servers": {
-            "broken": {"transport": "stream_http", "url": "http://127.0.0.1:8765/mcp"},
-            "healthy": {"transport": "stream_http", "url": "http://127.0.0.1:8766/mcp"},
+            "broken": {
+                "transport": "stream_http",
+                "url": "http://127.0.0.1:8765/mcp",
+            },
+            "healthy": {
+                "transport": "stream_http",
+                "url": "http://127.0.0.1:8766/mcp",
+            },
         }
     }
 
@@ -207,7 +248,9 @@ def test_broken_daemon_does_not_block_its_healthy_neighbour(tmp_path: Path) -> N
         if entry.name == "broken":
             from recommended_mcp.process_supervisor import SupervisorError
 
-            raise SupervisorError("mcp 'broken': failed to start: no such file")
+            raise SupervisorError(
+                "mcp 'broken': failed to start: no such file"
+            )
         return False
 
     with patch("recommended_mcp.autostart.run_entry", _fake_run_entry):
@@ -218,7 +261,9 @@ def test_broken_daemon_does_not_block_its_healthy_neighbour(tmp_path: Path) -> N
     )
 
 
-def test_bridge_never_prevents_the_frontend_from_starting(monkeypatch, capsys) -> None:
+def test_bridge_never_prevents_the_frontend_from_starting(
+    monkeypatch, capsys
+) -> None:
     """Любой сбой автозапуска — предупреждение, фронтенд стартует.
 
     Второй рубеж поверх поштучной защиты рецептов: ловит то, что случилось ДО
@@ -275,7 +320,9 @@ def test_bridge_does_not_mask_a_broken_recipes_package(monkeypatch) -> None:
     except ImportError:
         pass
     else:
-        raise AssertionError("ImportError из рецептов проглочен — поломка пакета скрыта")
+        raise AssertionError(
+            "ImportError из рецептов проглочен — поломка пакета скрыта"
+        )
 
 
 def _fail_one_recipe(tmp_path: Path):
@@ -310,12 +357,17 @@ def _raise_supervisor_error(entry, root, supervisor):
 
 _SCIENCE_CONFIG = {
     "mcp-servers": {
-        "science": {"transport": "stream_http", "url": "http://127.0.0.1:8765/mcp"}
+        "science": {
+            "transport": "stream_http",
+            "url": "http://127.0.0.1:8765/mcp",
+        }
     }
 }
 
 
-def test_disable_hint_comes_from_the_frontend_not_from_this_module(tmp_path, capsys):
+def test_disable_hint_comes_from_the_frontend_not_from_this_module(
+    tmp_path, capsys
+):
     """Как выключить автозапуск — знает команда, а не общий модуль.
 
     Модуль зовут оба фронтенда: `gc_tui/__init__.py` и `gc_cli/cli.py`. Флаг
@@ -329,13 +381,16 @@ def test_disable_hint_comes_from_the_frontend_not_from_this_module(tmp_path, cap
 
     with patch("recommended_mcp.autostart.run_entry", _raise_supervisor_error):
         ensure_daemons_for_agent(
-            _SCIENCE_CONFIG, manifest_path=manifest,
+            _SCIENCE_CONFIG,
+            manifest_path=manifest,
             disable_hint="отключить автозапуск: запустите без `-a`",
         )
 
     err = capsys.readouterr().err
     assert "запустите без `-a`" in err
-    assert "--no-auto-mcp" not in err, "имя флага TUI не должно течь в подсказку gc-cli"
+    assert "--no-auto-mcp" not in err, (
+        "имя флага TUI не должно течь в подсказку gc-cli"
+    )
 
 
 def test_autostart_warning_reaches_the_notices_channel(tmp_path, monkeypatch):
@@ -362,8 +417,9 @@ def test_autostart_warning_reaches_the_notices_channel(tmp_path, monkeypatch):
 
     codes = [n.code for n in runtime_notices._notices]
     assert "mcp_autostart_recipe" in codes, codes
-    notice = next(n for n in runtime_notices._notices
-                  if n.code == "mcp_autostart_recipe")
+    notice = next(
+        n for n in runtime_notices._notices if n.code == "mcp_autostart_recipe"
+    )
     assert notice.level == "warning"
     assert "gc-mcp install science" in notice.message
     # Имя рецепта помечено для подсветки — иначе карточка читается как сплошной
@@ -392,16 +448,29 @@ def test_no_frontend_flag_is_hardcoded_in_the_shared_module():
 
         docstrings = set()
         for node in ast.walk(tree):
-            if isinstance(node, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef,
-                                 ast.ClassDef)):
+            if isinstance(
+                node,
+                (
+                    ast.Module,
+                    ast.FunctionDef,
+                    ast.AsyncFunctionDef,
+                    ast.ClassDef,
+                ),
+            ):
                 doc = node.body[0] if node.body else None
-                if (isinstance(doc, ast.Expr) and isinstance(doc.value, ast.Constant)
-                        and isinstance(doc.value.value, str)):
+                if (
+                    isinstance(doc, ast.Expr)
+                    and isinstance(doc.value, ast.Constant)
+                    and isinstance(doc.value.value, str)
+                ):
                     docstrings.add(id(doc.value))
 
         for node in ast.walk(tree):
-            if (isinstance(node, ast.Constant) and isinstance(node.value, str)
-                    and id(node) not in docstrings):
+            if (
+                isinstance(node, ast.Constant)
+                and isinstance(node.value, str)
+                and id(node) not in docstrings
+            ):
                 assert "--no-auto-mcp" not in node.value, (
                     f"{rel}:{node.lineno}: имя флага gc-ua зашито в общий модуль "
                     "— у gc-cli его нет, подсказка увела бы половину пользователей"
@@ -430,7 +499,8 @@ def test_both_frontends_pass_their_own_disable_hint(rel):
 
     tree = ast.parse((REPO / rel).read_text(encoding="utf-8"), rel)
     calls = [
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.Call)
         and getattr(node.func, "id", getattr(node.func, "attr", None))
         == "ensure_mcp_daemons"
@@ -453,7 +523,9 @@ def test_kill_mcp_daemons_now_delegates_to_supervisor(monkeypatch) -> None:
 
     killed: list[bool] = []
     monkeypatch.setattr(
-        daemon_autostart, "_supervisor", SimpleNamespace(kill_managed_now=lambda: killed.append(True))
+        daemon_autostart,
+        "_supervisor",
+        SimpleNamespace(kill_managed_now=lambda: killed.append(True)),
     )
     daemon_autostart.kill_mcp_daemons_now()
     assert killed == [True]
@@ -478,7 +550,10 @@ def test_failed_shutdown_leaves_daemons_to_kill_now(monkeypatch) -> None:
     monkeypatch.setattr(
         daemon_autostart,
         "_supervisor",
-        SimpleNamespace(shutdown_managed=shutdown_managed, kill_managed_now=lambda: killed.append(True)),
+        SimpleNamespace(
+            shutdown_managed=shutdown_managed,
+            kill_managed_now=lambda: killed.append(True),
+        ),
     )
     with pytest.raises(RuntimeError):
         daemon_autostart.shutdown_mcp_daemons()

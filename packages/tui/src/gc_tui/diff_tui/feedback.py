@@ -2,12 +2,18 @@
 
 UX-строки для DiffScreen / trace — отдельно от technical message агенту.
 """
+
 from __future__ import annotations
 
 from typing import Optional, Sequence
 
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL, wrap_technical_user_content
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_TECHNICAL,
+    wrap_technical_user_content,
+)
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
 
 
 def files_word(n: int) -> str:
@@ -113,16 +119,11 @@ def build_undo_feedback_body(
     if restored:
         lines = "\n".join(f"- {k}" for k in restored)
         parts.append(
-            "Changes reverted — re-read these files from disk "
-            "before assuming their contents:\n"
-            f"{lines}"
+            f"Changes reverted — re-read these files from disk before assuming their contents:\n{lines}"
         )
     if deleted:
         lines = "\n".join(f"- {k}" for k in deleted)
-        parts.append(
-            "Deleted previously created files:\n"
-            f"{lines}"
-        )
+        parts.append(f"Deleted previously created files:\n{lines}")
     return "\n\n".join(parts) + "\n"
 
 

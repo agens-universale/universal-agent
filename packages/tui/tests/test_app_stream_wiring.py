@@ -1,4 +1,5 @@
 """TuiApp._stream_sink: app owns a StreamSink and wires it to the executor context."""
+
 from gc_tui.app import TuiApp
 
 

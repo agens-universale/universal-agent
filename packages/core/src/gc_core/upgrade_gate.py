@@ -4,6 +4,7 @@
 Презентации здесь нет. Стамп — <gc config dir>/agent_state.json; поле
 last_update_check_ts принадлежит update-flow (спека D) и пишется write_state().
 """
+
 from __future__ import annotations
 
 import json
@@ -42,7 +43,9 @@ def write_state(updates: Dict[str, Any], path: Optional[Path] = None) -> None:
     try:
         p.parent.mkdir(parents=True, exist_ok=True)
         tmp = p.with_suffix(p.suffix + ".tmp")
-        tmp.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+        tmp.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         atomic_replace(str(tmp), str(p))
     except OSError:
         pass  # стамп — best-effort: недоступный каталог не должен ломать запуск

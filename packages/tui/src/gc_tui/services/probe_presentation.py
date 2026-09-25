@@ -6,11 +6,15 @@
 результата уже давали противоречащие друг другу тексты на одном экране.
 
 Слой презентации: чистые функции над результатом, без Textual-виджетов."""
+
 from __future__ import annotations
 
 from rich.text import Text
 
 from gc_tui.palette import DEEP_DIM, ERR, OK, WARN
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_MSG_SERVER_OK = "✓ сервер доступен · "
 
 
 def plural_models(n: int) -> str:
@@ -47,20 +51,22 @@ def connection_line_text(result) -> Text:
         # Сырой config-probe (auth_state=None, без differential auth) «ок» читаем
         # нейтрально — токен не проверяли, утверждать «принят» нечестно.
         if result.auth_state == "accepted":
-            t = Text("✓ сервер доступен · ", style=OK)
+            t = Text(_MSG_SERVER_OK, style=OK)
             t.append("✓ токен принят", style=OK)
             return t
         if result.auth_state == "not_required":
-            return Text("✓ сервер доступен · авторизация не требуется", style=OK)
+            return Text(
+                "✓ сервер доступен · авторизация не требуется", style=OK
+            )
         return Text("✓ сервер доступен", style=OK)
     if result.verdict == "rejected" and result.http_status == 401:
         if result.auth_state == "required":
             # токена не было вовсе (сервер отклонил control-запрос без него) —
             # не «токен отклонён» (нечего было отклонять)
-            t = Text("✓ сервер доступен · ", style=OK)
+            t = Text(_MSG_SERVER_OK, style=OK)
             t.append(f"⚠ {result.detail}", style=WARN)
             return t
-        t = Text("✓ сервер доступен · ", style=OK)
+        t = Text(_MSG_SERVER_OK, style=OK)
         t.append("✗ токен отклонён (401)", style=WARN)
         return t
     if result.offline:
@@ -121,7 +127,7 @@ def token_accepted(result, *, has_token: bool):
     if result.http_status == 401:
         return False
     if result.models is not None:
-        return None             # отвечал справочник моделей — он токен не судит
+        return None  # отвечал справочник моделей — он токен не судит
     if not has_token:
         return True if result.verdict == "ok" else None
     if result.verdict == "unknown":

@@ -7,6 +7,7 @@
 отрисовки): около 0,6 МБ на тест, полный прогон в одном процессе рос до
 гигабайт и однажды был убит по нехватке памяти.
 """
+
 import asyncio
 import gc
 import logging
@@ -16,7 +17,6 @@ import weakref
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.utils.logging_module import create_run_logger
 from gc_tui.services.agent_runner import AgentRunner
 
@@ -69,7 +69,9 @@ def test_release_during_a_run_waits_for_the_worker(tmp_path):
     assert ex.running.wait(5.0)
 
     runner.release()
-    assert _registered(logger) and logger.handlers, "отняли хендлеры у живого прогона"
+    assert _registered(logger) and logger.handlers, (
+        "отняли хендлеры у живого прогона"
+    )
 
     ex.stop_run()
     runner.wait(5.0)
@@ -86,9 +88,13 @@ def test_exited_app_is_collected(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    cfg = {"model": "M", "agent_md_path": str(tmp_path / "agent.md"),
-           "threads_data_path": str(tmp_path / "threads"),
-           "logs_dump_dir": str(tmp_path / "logs"), "mcp-servers": {}}
+    cfg = {
+        "model": "M",
+        "agent_md_path": str(tmp_path / "agent.md"),
+        "threads_data_path": str(tmp_path / "threads"),
+        "logs_dump_dir": str(tmp_path / "logs"),
+        "mcp-servers": {},
+    }
 
     async def _session():
         app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
@@ -109,8 +115,10 @@ def test_exited_app_is_collected(tmp_path):
         if name not in logging.Logger.manager.loggerDict:
             break
         time.sleep(0.02)
-    assert name not in logging.Logger.manager.loggerDict, "логгер прогона пережил приложение"
+    assert name not in logging.Logger.manager.loggerDict, (
+        "логгер прогона пережил приложение"
+    )
 
     gc.collect()
-    alive = ref() is not None     # не держим App в кадре упавшего assert
+    alive = ref() is not None  # не держим App в кадре упавшего assert
     assert not alive, "приложение пережило выход — его что-то держит"

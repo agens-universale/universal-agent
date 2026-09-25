@@ -15,7 +15,10 @@ from gc_core.summarize.compaction import (
     exceeded_summary_triggers,
     history_exceeds_summary_trigger,
 )
-from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_started
+from gc_core.summarize.summary_logging import (
+    SummaryCompactionLog,
+    log_compaction_started,
+)
 from gc_core.thread_store import (
     ThreadSession,
     append_new_thread_messages,
@@ -57,9 +60,10 @@ def test_zero_thresholds_are_ignored():
 
 def test_char_comparison_unchanged_with_token_threshold():
     state = _state_with(_user("abcd", "1"), tokens=1, count=0)
-    assert history_exceeds_summary_trigger(
-        state=state, summary_trigger_chars=3
-    ) is True
+    assert (
+        history_exceeds_summary_trigger(state=state, summary_trigger_chars=3)
+        is True
+    )
     assert _hits(state, chars=3, tokens=0).chars is True
     assert _hits(state, chars=3, tokens=10_000).chars is True
     assert _hits(state, chars=4, tokens=10_000).chars is False
@@ -81,7 +85,9 @@ def test_token_estimate_is_number_plus_tail_half_and_excludes_counted_prefix():
     assert _hits(state, tokens=55).tokens is False
 
 
-def test_both_exceeded_is_one_compaction_and_log_names_both(monkeypatch, tmp_path):
+def test_both_exceeded_is_one_compaction_and_log_names_both(
+    monkeypatch, tmp_path
+):
     counted = _user("a" * 20, "1")
     tail = _user("b" * 20, "2")
     state = _state_with(counted, tail, tokens=100, count=1)
@@ -260,7 +266,10 @@ def test_compaction_clears_prompt_fields_in_state_and_meta():
 def test_resume_reads_null_and_missing_as_none_and_keeps_zero():
     assert ThreadMetaMapper.read_prompt_token_fields({}) == (None, None)
     assert ThreadMetaMapper.read_prompt_token_fields(
-        {"last_main_prompt_tokens": None, "last_main_prompt_message_count": None}
+        {
+            "last_main_prompt_tokens": None,
+            "last_main_prompt_message_count": None,
+        }
     ) == (None, None)
     assert ThreadMetaMapper.read_prompt_token_fields(
         {"last_main_prompt_tokens": 0, "last_main_prompt_message_count": 0}
@@ -350,7 +359,9 @@ def _step(coord, state, step, *, prompt_tokens):
     batch = [_user(f"step {step}", f"s{step}")]
     state.messages.extend(batch)
     run_coro(coord.apre_backend_compaction_hook(batch, "user_ask"))
-    usage = {"prompt_tokens": prompt_tokens} if prompt_tokens is not None else {}
+    usage = (
+        {"prompt_tokens": prompt_tokens} if prompt_tokens is not None else {}
+    )
     remember_main_prompt_tokens(
         state, usage, len(state.messages), backend_mode="chat_completions"
     )
@@ -369,14 +380,18 @@ def test_no_prompt_tokens_warns_once_when_history_over_threshold(caplog):
     caplog.set_level(logging.WARNING, logger="t-no-usage")
     for step in range(4):
         _step(coord, state, step, prompt_tokens=None)
-    assert len(_warnings(caplog, "summary_token_trigger_no_prompt_tokens")) == 1
+    assert (
+        len(_warnings(caplog, "summary_token_trigger_no_prompt_tokens")) == 1
+    )
 
 
 def test_no_prompt_tokens_small_history_is_silent(caplog):
     import logging
 
     state = _loop_state()
-    coord = _coordinator(state, logging.getLogger("t-no-usage-small"), tokens=10_000)
+    coord = _coordinator(
+        state, logging.getLogger("t-no-usage-small"), tokens=10_000
+    )
     caplog.set_level(logging.WARNING, logger="t-no-usage-small")
     for step in range(4):
         _step(coord, state, step, prompt_tokens=None)
@@ -390,7 +405,9 @@ def test_first_hook_of_run_without_number_is_silent(caplog):
     state = _loop_state(_user("x" * 1000, "big"))
     coord = _coordinator(state, logging.getLogger("t-first-hook"), tokens=100)
     caplog.set_level(logging.WARNING, logger="t-first-hook")
-    run_coro(coord.apre_backend_compaction_hook([state.messages[-1]], "user_ask"))
+    run_coro(
+        coord.apre_backend_compaction_hook([state.messages[-1]], "user_ask")
+    )
     assert caplog.records == []
 
 
@@ -405,7 +422,10 @@ def test_compaction_outside_coordinator_does_not_fake_missing_usage(caplog):
     caplog.set_level(logging.WARNING, logger="t-outside")
     _step(coord, state, 0, prompt_tokens=50)
     apply_summary_state_patch(
-        state=state, raw_summary="short", last_dialog_steps="", summarized_messages_count=1
+        state=state,
+        raw_summary="short",
+        last_dialog_steps="",
+        summarized_messages_count=1,
     )
     assert state.last_main_prompt_tokens is None
     _step(coord, state, 1, prompt_tokens=50)
@@ -432,4 +452,3 @@ def test_chars_only_config_never_warns_about_tokens(caplog):
     for step in range(3):
         _step(coord, state, step, prompt_tokens=None)
     assert caplog.records == []
-

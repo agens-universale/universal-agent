@@ -1,12 +1,13 @@
 """child_run_id в output meta (без path к логу)."""
+
 from __future__ import annotations
 
-from gc_testkit import as_coro
 import json
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.usage.account import UsageAccount
+from gc_testkit import as_coro
 
 
 class _FakeChildState:
@@ -34,7 +35,9 @@ def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", as_coro(lambda role: child))
+    monkeypatch.setattr(
+        runner, "_build_child_state", as_coro(lambda role: child)
+    )
     monkeypatch.setattr(
         runner,
         "_build_child_ctx",
@@ -50,14 +53,21 @@ def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
-    monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
+
     monkeypatch.setattr(
-        runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}
+        runner_mod, "init_subagent_open_turn", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "get_thread_memory_registers_from_shared",
+        lambda shared: {},
     )
     monkeypatch.setattr(
         runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
     )
-    monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
+    monkeypatch.setattr(
+        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+    )
 
     async def _create(*a, **k):
         return _Inst()
@@ -73,7 +83,9 @@ def _runner():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None, is_tui=False)
+    ctx = SimpleNamespace(
+        logger=None, run_id="r", auth_connector=None, is_tui=False
+    )
     return SubagentRunner(ctx, orch, {"use_local_subagents": True})
 
 
@@ -109,7 +121,9 @@ async def test_run_failed_error_includes_child_run_id(monkeypatch):
     async def boom(*a, **k):
         raise RuntimeError("boom")
 
-    out = await runner._arun_internal("subagent_worker", cls, {"task": "t"}, boom)
+    out = await runner._arun_internal(
+        "subagent_worker", cls, {"task": "t"}, boom
+    )
     payload = json.loads(out)
     assert payload["ok"] is False
     assert payload["meta"]["child_run_id"] == "child-guid-err"
@@ -125,7 +139,9 @@ async def test_early_error_without_ctx_has_no_child_run_id():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None, is_tui=False)
+    ctx = SimpleNamespace(
+        logger=None, run_id="r", auth_connector=None, is_tui=False
+    )
     runner = SubagentRunner(ctx, orch, {"use_local_subagents": True})
 
     async def _fake_run_agent(*a, **k):

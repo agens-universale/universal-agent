@@ -1,7 +1,6 @@
 """Diff-preview для trace: visual_diff → первые 3 строки (не tool-output)."""
-from __future__ import annotations
 
-import json
+from __future__ import annotations
 
 from gc_core.config_modules import env_vars
 from gc_tui.diff_tui.service import DiffService
@@ -16,7 +15,9 @@ def test_visual_diff_provides_preview_lines_for_pending(tmp_path, monkeypatch):
     target = root / "src" / "foo.py"
     target.write_text("line1\nline2\nline3\nline4\n", encoding="utf-8")
     DiffStore(str(root)).register_mutation(str(target))
-    target.write_text("line1\nCHANGED\nline3\nline4\nextra\n", encoding="utf-8")
+    target.write_text(
+        "line1\nCHANGED\nline3\nline4\nextra\n", encoding="utf-8"
+    )
 
     svc = DiffService(
         str(root),

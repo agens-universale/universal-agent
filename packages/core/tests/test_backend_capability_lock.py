@@ -12,7 +12,6 @@
 """
 
 import pytest
-
 from gc_core.backends import capabilities as capabilities
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import CapabilitiesNotWarmedError
@@ -58,7 +57,9 @@ async def test_sub_capabilities_are_skipped_when_grep_is_missing(monkeypatch):
     из возможных ответов.
     """
     calls: list[str] = []
-    monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(False, calls, "grep"))
+    monkeypatch.setattr(
+        capabilities, "aprobe_has_grep", _stub(False, calls, "grep")
+    )
     monkeypatch.setattr(
         capabilities, "aprobe_grep_include", _stub(True, calls, "include")
     )
@@ -77,7 +78,9 @@ async def test_sub_capabilities_are_skipped_when_grep_is_missing(monkeypatch):
 async def test_capability_values_are_cached_once(monkeypatch):
     """Второй прогрев проб не повторяет: кэш наполняется однократно."""
     calls: list[str] = []
-    monkeypatch.setattr(capabilities, "aprobe_has_grep", _stub(False, calls, "grep"))
+    monkeypatch.setattr(
+        capabilities, "aprobe_has_grep", _stub(False, calls, "grep")
+    )
     backend = LocalFsBackend()
 
     await backend.awarm_capabilities()
@@ -94,9 +97,11 @@ def test_a_cold_read_refuses_instead_of_probing(monkeypatch):
     вызывающего.
     """
     monkeypatch.setattr(
-        capabilities, "aprobe_has_grep", _stub(True),
+        capabilities,
+        "aprobe_has_grep",
+        _stub(True),
     )
     backend = LocalFsBackend()
 
     with pytest.raises(CapabilitiesNotWarmedError):
-        backend.grep_include
+        _ = backend.grep_include

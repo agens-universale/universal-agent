@@ -7,7 +7,6 @@ import functools
 import os
 import signal
 import subprocess
-import sys
 import threading
 import time
 from collections.abc import Callable, Iterable
@@ -15,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from gc_core.mcp_runtime.env import augment_process_env, resolve_mcp_command
+
 from recommended_mcp.manifest import RunSpec
 
 
@@ -75,7 +75,9 @@ def is_pid_alive(pid: int) -> bool:
     import ctypes
 
     PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-    handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    handle = ctypes.windll.kernel32.OpenProcess(
+        PROCESS_QUERY_LIMITED_INFORMATION, False, pid
+    )
     if handle:
         ctypes.windll.kernel32.CloseHandle(handle)
         return True
@@ -101,7 +103,7 @@ def _anyone_left(kill: Callable[[int], None]) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True                    # кто-то есть, но сигналить ему нам нельзя
+        return True  # кто-то есть, но сигналить ему нам нельзя
     return True
 
 
@@ -126,7 +128,25 @@ class _Target:
     killed: bool = False
 
 
-def _terminate_posix(targets: list[_Target], *, graceful_timeout: float) -> None:
+def _advance_termination(target: _Target, now: float) -> bool:
+    """Вернуть True, пока цель ещё требует ожидания или SIGKILL."""
+    if target.leader_gone() and not target.killed:
+        target.deadline = min(target.deadline, now + _ORPHAN_GRACE_S)
+    if not _anyone_left(target.kill):
+        return False
+    if now < target.deadline:
+        return True
+    if target.killed:
+        return False  # SIGKILL не снял — ждать дальше нечего
+    with contextlib.suppress(OSError):
+        target.kill(signal.SIGKILL)
+    target.deadline, target.killed = now + _KILL_WAIT_S, True
+    return True
+
+
+def _terminate_posix(
+    targets: list[_Target], *, graceful_timeout: float
+) -> None:
     """Погасить группы РАЗОМ: SIGTERM всем → одно общее ожидание до
     graceful_timeout → SIGKILL оставшимся → до `_KILL_WAIT_S` забрать убитых.
 
@@ -156,18 +176,9 @@ def _terminate_posix(targets: list[_Target], *, graceful_timeout: float) -> None
         pending.append(target)
     while pending:
         now = time.monotonic()
-        for target in list(pending):
-            if target.leader_gone() and not target.killed:
-                target.deadline = min(target.deadline, now + _ORPHAN_GRACE_S)
-            if not _anyone_left(target.kill):
-                pending.remove(target)
-            elif now >= target.deadline:
-                if target.killed:
-                    pending.remove(target)     # SIGKILL не снял — ждать дальше нечего
-                    continue
-                with contextlib.suppress(OSError):
-                    target.kill(signal.SIGKILL)
-                target.deadline, target.killed = now + _KILL_WAIT_S, True
+        pending = [
+            target for target in pending if _advance_termination(target, now)
+        ]
         if pending:
             time.sleep(0.1)
 
@@ -189,7 +200,9 @@ def _popen_kwargs(env: dict[str, str] | None, cwd: Path | None) -> dict:
     if os.name == "posix":
         kwargs["start_new_session"] = True
     else:
-        kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        kwargs["creationflags"] = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0
+        )
     return kwargs
 
 
@@ -209,11 +222,14 @@ def terminate_pid(pid: int, *, graceful_timeout: float = 5.0) -> None:
         except ProcessLookupError:
             return
         except OSError:
-            kill = functools.partial(os.kill, pid)      # группу не узнать — хотя бы сам процесс
+            kill = functools.partial(
+                os.kill, pid
+            )  # группу не узнать — хотя бы сам процесс
         else:
             kill = functools.partial(os.killpg, pgid)
         _terminate_posix(
-            [_Target(kill, lambda: _reap_child(pid))], graceful_timeout=graceful_timeout
+            [_Target(kill, lambda: _reap_child(pid))],
+            graceful_timeout=graceful_timeout,
         )
         return
     _terminate_windows([pid], graceful_timeout=graceful_timeout)
@@ -256,18 +272,24 @@ def terminate_processes(
         # группу гасим и при мёртвом лидере: живы могут быть дети. Забранный
         # раньше лидер номер освободил, он мог достаться чужой группе — не трогаем.
         targets = [
-            _Target(functools.partial(os.killpg, proc.pid), lambda proc=proc: proc.poll() is not None)
+            _Target(
+                functools.partial(os.killpg, proc.pid),
+                lambda proc=proc: proc.poll() is not None,
+            )
             for proc in procs
             if proc.returncode is None
         ]
         _terminate_posix(targets, graceful_timeout=graceful_timeout)
         return
     _terminate_windows(
-        [proc.pid for proc in procs if proc.poll() is None], graceful_timeout=graceful_timeout
+        [proc.pid for proc in procs if proc.poll() is None],
+        graceful_timeout=graceful_timeout,
     )
 
 
-def terminate_process(proc: subprocess.Popen, *, graceful_timeout: float = 5.0) -> None:
+def terminate_process(
+    proc: subprocess.Popen, *, graceful_timeout: float = 5.0
+) -> None:
     terminate_processes([proc], graceful_timeout=graceful_timeout)
 
 
@@ -311,7 +333,9 @@ class RunSupervisor:
         try:
             proc = subprocess.Popen(cmd, **_popen_kwargs(env, cwd or run.cwd))
         except OSError as exc:
-            raise SupervisorError(f"mcp {name!r}: failed to start {cmd!r}: {exc}") from exc
+            raise SupervisorError(
+                f"mcp {name!r}: failed to start {cmd!r}: {exc}"
+            ) from exc
 
         write_pid(name, proc.pid, self.pids_dir)
         self._managed.append((name, proc))
@@ -320,9 +344,13 @@ class RunSupervisor:
     def shutdown_managed(self) -> None:
         managed = list(reversed(self._managed))
         for name, proc in managed:
-            with contextlib.suppress(OSError):    # мёртвый терминал (EIO) не мешает гашению
+            with contextlib.suppress(
+                OSError
+            ):  # мёртвый терминал (EIO) не мешает гашению
                 print(f"[stop] {name}: pid {proc.pid}")
-        terminate_processes(proc for _, proc in managed)   # разом, а не по очереди
+        terminate_processes(
+            proc for _, proc in managed
+        )  # разом, а не по очереди
         for name, _ in managed:
             remove_pid(name, self.pids_dir)
         self._managed.clear()
@@ -341,30 +369,39 @@ class RunSupervisor:
             else:
                 _taskkill(proc.pid, force=True)
 
+    def _check_managed_processes(self) -> None:
+        for name, proc in list(self._managed):
+            if proc.poll() is not None:
+                code = proc.returncode
+                remove_pid(name, self.pids_dir)
+                self._managed = [(n, p) for n, p in self._managed if n != name]
+                raise SupervisorError(
+                    f"mcp {name!r} exited unexpectedly (code {code})"
+                )
+
     def wait_until_signal(self) -> None:
         if threading.current_thread() is not threading.main_thread():
-            raise SupervisorError("wait_until_signal must run on the main thread")
+            raise SupervisorError(
+                "wait_until_signal must run on the main thread"
+            )
 
         stop = threading.Event()
 
-        def _handler(signum: int, frame: object) -> None:
+        def _handler(signum: int, frame: object) -> None:  # noqa: ARG001  # signal callback signature
             stop.set()
 
         previous_int = signal.getsignal(signal.SIGINT)
-        previous_term = signal.getsignal(signal.SIGTERM) if hasattr(signal, "SIGTERM") else None
+        previous_term = (
+            signal.getsignal(signal.SIGTERM)
+            if hasattr(signal, "SIGTERM")
+            else None
+        )
         signal.signal(signal.SIGINT, _handler)
         if hasattr(signal, "SIGTERM"):
             signal.signal(signal.SIGTERM, _handler)
         try:
             while not stop.is_set():
-                for name, proc in list(self._managed):
-                    if proc.poll() is not None:
-                        code = proc.returncode
-                        remove_pid(name, self.pids_dir)
-                        self._managed = [(n, p) for n, p in self._managed if n != name]
-                        raise SupervisorError(
-                            f"mcp {name!r} exited unexpectedly (code {code})"
-                        )
+                self._check_managed_processes()
                 stop.wait(timeout=0.5)
         finally:
             signal.signal(signal.SIGINT, previous_int)
@@ -372,7 +409,9 @@ class RunSupervisor:
                 signal.signal(signal.SIGTERM, previous_term)
 
 
-def stop_command_daemons(names: list[str], pids_dir: Path | None = None) -> int:
+def stop_command_daemons(
+    names: list[str], pids_dir: Path | None = None
+) -> int:
     """Остановить daemon'ы по PID-файлам. Возвращает число остановленных."""
     root = pids_dir or default_pids_dir()
     stopped = 0

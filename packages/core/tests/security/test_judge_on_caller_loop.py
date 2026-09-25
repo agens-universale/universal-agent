@@ -11,9 +11,8 @@
 судью — через ``AwaitOnCaller`` (ждётся на loop вызывающего), ожидание
 человека — через ``OffLoop`` (у него асинхронной формы нет).
 """
-import asyncio
 
-import pytest
+import asyncio
 
 from gc_core.security import command_moderation as cm
 from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
@@ -25,7 +24,11 @@ async def test_async_judge_runs_on_the_callers_loop():
 
     async def _ajudge(_payload):
         seen.append(asyncio.get_running_loop())
-        return {"verdict": cm.SAFE_VERDICT, "confidence": 0.9, "risk_flags": []}
+        return {
+            "verdict": cm.SAFE_VERDICT,
+            "confidence": 0.9,
+            "risk_flags": [],
+        }
 
     def _flow(*_a, **_kw):
         result = yield from cm.judge_with_retry_flow(_ajudge, {}, retries=1)
@@ -51,7 +54,11 @@ async def test_sync_judge_still_goes_to_a_thread():
 
     def _judge(_payload):
         seen.append(threading.current_thread())
-        return {"verdict": cm.SAFE_VERDICT, "confidence": 0.9, "risk_flags": []}
+        return {
+            "verdict": cm.SAFE_VERDICT,
+            "confidence": 0.9,
+            "risk_flags": [],
+        }
 
     def _flow(*_a, **_kw):
         yield from cm.judge_with_retry_flow(_judge, {}, retries=1)
@@ -144,7 +151,11 @@ async def test_await_on_caller_is_not_a_second_call_point():
     calls: list = []
 
     async def _judge(_p):
-        return {"verdict": cm.SAFE_VERDICT, "confidence": 0.5, "risk_flags": []}
+        return {
+            "verdict": cm.SAFE_VERDICT,
+            "confidence": 0.5,
+            "risk_flags": [],
+        }
 
     def _flow(*_a, **_kw):
         yield AwaitOnCaller(lambda: _judge({}))

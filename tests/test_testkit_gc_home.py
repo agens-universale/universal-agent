@@ -23,5 +23,10 @@ def test_gc_home_is_an_empty_directory_of_the_session():
 
 
 def test_point_overrides_do_not_leak_past_gc_home():
-    for name in ("GC_STATE_DIR", "GC_CONFIG_DIR", "GC_CACHE_DIR", "GC_DATA_DIR"):
+    for name in (
+        "GC_STATE_DIR",
+        "GC_CONFIG_DIR",
+        "GC_CACHE_DIR",
+        "GC_DATA_DIR",
+    ):
         assert name not in os.environ, name

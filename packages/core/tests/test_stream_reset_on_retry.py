@@ -12,29 +12,54 @@ def test_on_delta_reset_between_retried_attempts(monkeypatch):
     events = []
     calls = {"n": 0}
 
-    async def _fake_request(payload, headers, url, verify, use_retry, logger, on_delta, cert=None, timeout=600, config_proxy=None):
+    async def _fake_request(
+        payload,
+        headers,
+        url,
+        verify,
+        use_retry,
+        logger,
+        on_delta,
+        cert=None,
+        timeout=600,
+        config_proxy=None,
+    ):
         calls["n"] += 1
-        on_delta("reset", "")               # каждая попытка сбрасывает дисплей
+        on_delta("reset", "")  # каждая попытка сбрасывает дисплей
         if calls["n"] == 1:
-            on_delta("answer", "частично")   # упавшая попытка успела эмитнуть
+            on_delta("answer", "частично")  # упавшая попытка успела эмитнуть
             raise BackendStreamError("boom", status_code=500)
         on_delta("answer", "готово")
-        return {"choices": [{"message": {"content": "готово"}, "finish_reason": "stop"}]}
+        return {
+            "choices": [
+                {"message": {"content": "готово"}, "finish_reason": "stop"}
+            ]
+        }
 
     def _on_delta(kind, text):
         events.append((kind, text))
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", _fake_request)
-    res, _ = run_coro(policy.arequest_chat_completions_with_policy(
-        payload_factory=lambda mt: {"max_tokens": mt},
-        initial_max_tokens=8192, min_response_tokens=1024,
-        headers={}, url="http://x", verify=True, use_retry=False,
-        on_delta=_on_delta,
-    ))
+    monkeypatch.setattr(
+        policy, "arequest_backend_chat_completions", _fake_request
+    )
+    res, _ = run_coro(
+        policy.arequest_chat_completions_with_policy(
+            payload_factory=lambda mt: {"max_tokens": mt},
+            initial_max_tokens=8192,
+            min_response_tokens=1024,
+            headers={},
+            url="http://x",
+            verify=True,
+            use_retry=False,
+            on_delta=_on_delta,
+        )
+    )
     assert res["choices"][0]["message"]["content"] == "готово"
     # перед финальным контентом был reset второй попытки → «частично» не «слипается»
     assert ("reset", "") in events
     assert events.index(("reset", "")) < len(events) - 1
     # второй reset идёт ПОСЛЕ первого частичного вывода
     resets = [i for i, e in enumerate(events) if e == ("reset", "")]
-    assert len(resets) == 2 and resets[1] > events.index(("answer", "частично"))
+    assert len(resets) == 2 and resets[1] > events.index(
+        ("answer", "частично")
+    )

@@ -5,6 +5,7 @@ import pytest
 
 def test_indicator_has_no_status_badge_api():
     from gc_tui.widgets.thinking_indicator import ThinkingIndicator
+
     ind = ThinkingIndicator(state="done", frozen_elapsed=5, clock=lambda: 0.0)
     assert not hasattr(ind, "set_status")
     assert not hasattr(ind, "_compose_status")

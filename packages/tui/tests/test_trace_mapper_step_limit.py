@@ -5,11 +5,15 @@ gc_tui.services.trace_mapper. Из-за неё утверждение «cd packa
 доказывает самодостаточность ядра» было неверным: набор проходил только потому,
 что gc-tui стоит в общем рабочем окружении. Переехала к предмету 18.08.2026.
 """
+
 import json
 
 
 def test_step_limit_trace_summary_not_success():
-    from gc_tui.services.trace_mapper import _looks_like_error, _summarize_output
+    from gc_tui.services.trace_mapper import (
+        _looks_like_error,
+        _summarize_output,
+    )
 
     out = json.dumps(
         {
@@ -17,7 +21,11 @@ def test_step_limit_trace_summary_not_success():
             "ok": False,
             "status": "step_limit",
             "message": "Subagent hit step limit.",
-            "error": {"code": "step_limit", "message": "Subagent hit step limit.", "retryable": True},
+            "error": {
+                "code": "step_limit",
+                "message": "Subagent hit step limit.",
+                "retryable": True,
+            },
             "meta": {"finish_reason": "step_limit", "steps": 50},
         }
     )

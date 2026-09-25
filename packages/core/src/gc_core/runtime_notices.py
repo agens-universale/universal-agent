@@ -3,6 +3,7 @@
 В отличие от startup_notices, живут только в памяти текущего процесса;
 не пишутся в meta/jsonl. TUI показывает их в карточке и на экране /notices.
 """
+
 from __future__ import annotations
 
 import json
@@ -117,7 +118,10 @@ def mark_runtime_notices_seen() -> None:
 def push_runtime_notice(notice: Notice) -> None:
     with _lock:
         for existing in _notices:
-            if existing.code == notice.code and existing.message == notice.message:
+            if (
+                existing.code == notice.code
+                and existing.message == notice.message
+            ):
                 return
         _notices.append(notice)
         if len(_notices) > _MAX_NOTICES:
@@ -135,8 +139,16 @@ def push_runtime_notice(notice: Notice) -> None:
 
 
 def _extract_http_detail(exc: BaseException) -> tuple[Optional[int], str]:
-    status: Optional[int] = None
-    body = ""
+    status, body = _http_status_and_body(exc)
+    detail = _detail_from_body(body) if body else ""
+    if not detail:
+        detail = str(exc).strip()
+    if len(detail) > 280:
+        detail = detail[:277] + "..."
+    return status, detail
+
+
+def _http_status_and_body(exc: BaseException) -> tuple[Optional[int], str]:
     # `httpx`, а не `requests`: ядро ходит в сеть только через него. У обоих
     # исключений форма одинаковая (`exc.response.status_code` / `.text`), но
     # вторая библиотека держалась в зависимостях ровно ради этой строки.
@@ -147,33 +159,26 @@ def _extract_http_detail(exc: BaseException) -> tuple[Optional[int], str]:
             body = (resp.text or "") if resp is not None else ""
         except Exception:
             body = ""
-    elif isinstance(exc, BackendStreamError):
-        status = exc.status_code
-        body = str(exc)
-    elif isinstance(exc, EmbeddedChoiceError):
-        status = exc.status_code
-        body = str(exc)
-    else:
-        body = str(exc)
+        return status, body
+    if isinstance(exc, (BackendStreamError, EmbeddedChoiceError)):
+        return exc.status_code, str(exc)
+    return None, str(exc)
 
-    detail = ""
-    if body:
-        try:
-            parsed = json.loads(body)
-            if isinstance(parsed, dict):
-                detail = str(
-                    parsed.get("message")
-                    or parsed.get("error")
-                    or parsed.get("detail")
-                    or ""
-                ).strip()
-        except json.JSONDecodeError:
-            detail = body.strip()
-    if not detail:
-        detail = str(exc).strip()
-    if len(detail) > 280:
-        detail = detail[:277] + "..."
-    return status, detail
+
+def _detail_from_body(body: str) -> str:
+    """message/error/detail из JSON-тела; не-JSON — как есть; JSON не-объект — пусто."""
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        return body.strip()
+    if not isinstance(parsed, dict):
+        return ""
+    return str(
+        parsed.get("message")
+        or parsed.get("error")
+        or parsed.get("detail")
+        or ""
+    ).strip()
 
 
 def notice_from_llm_failure(
@@ -246,6 +251,9 @@ def maybe_push_fallback_to_active_notice(
         return
     push_runtime_notice(
         notice_from_fallback_to_active(
-            who=who, failed_alias=failed_alias, active_model=active_model, mode=mode
+            who=who,
+            failed_alias=failed_alias,
+            active_model=active_model,
+            mode=mode,
         )
     )

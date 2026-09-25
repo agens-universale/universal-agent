@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-mcp"
-# Версии ВСЕХ манифестов обязаны совпадать: профили пинят друг друга точно.
+
 version = "0.3.1"
 description = "GigaCode Universal Agent — менеджер MCP-серверов и курируемые рецепты"
 readme = "readme.md"
@@ -14,10 +14,6 @@ dependencies = [
     "pyyaml>=6.0.3",
 ]
 
-# Команды объявляет тот дистрибутив, которому принадлежит код. Профили их НЕ
-# дублируют: uv владеет симлинком эксклюзивно, поэтому два профиля с одним
-# именем команды не ставятся рядом — второй падает с «Executables already
-# exist». Проверено установкой.
 [project.scripts]
 gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
@@ -25,38 +21,11 @@ gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/recommended_mcp"]
 
-# Исходники MCP-серверов лежат рядом с рецептами и в репозитории, и в колесе.
-# В манифесте стоит ИМЯ каталога, а не путь, и ищет его `_vendor_candidates`
-# (install.py) по фиксированному списку мест — цель ниже обязана попасть в один
-# из них. Раньше здесь было написано «повторять путь из манифеста»: пока
-# install.source был относительным путём, это совпадало, но после перехода на
-# имя посылка стала неверной, а вывод остался прежним.
-# Промах цели не заметен на глаз: локальных исходников просто не находится, и
-# установка тихо сваливается в git-метод — то есть требует сети там, где должна
-# была обойтись бандлом. Почему в колесо едет только ddgs-mcp — docs/packaging.md.
-#
-# Цель перечислена ПОФАЙЛОВО, а не каталогом. Каталогом hatchling забирает всё
-# подряд, включая то, чего нет под гитом: `build/lib/**`, `src/*.egg-info/**` и
-# `uv.lock` появляются у любого, кто хоть раз собирал ddgs-mcp локально. Из-за
-# этого состав колеса зависел от истории машины сборщика — 8 лишних записей из
-# 15. Здесь ровно то, что нужно `pip install <path>`: манифест и исходники.
-#
-# Цель — ВНУТРЬ пакета, `recommended_mcp/external/vendor/…`. Раньше вендоры
-# уезжали рядом с ним, и дистрибутив занимал в site-packages второе родовое имя
-# верхнего уровня — `external`. В Python 3 любой каталог на sys.path это
-# namespace-пакет, поэтому у проекта со своим `external/` пути склеивались
-# (`import external` давал обе портянки), а если его `external` — обычный пакет
-# с `__init__.py`, наш просто затирался. Проверено в чистом venv на обоих
-# вариантах. Ровно то же для ассетов ядра закрыто в packages/core/pyproject.toml.
 [tool.hatch.build.targets.wheel.force-include]
 "external/vendor/ddgs-mcp/pyproject.toml" = "recommended_mcp/external/vendor/ddgs-mcp/pyproject.toml"
 "external/vendor/ddgs-mcp/src/ddgs_mcp" = "recommended_mcp/external/vendor/ddgs-mcp/src/ddgs_mcp"
 
 [tool.pytest.ini_options]
-# Набор пакета гоняется отдельно: `cd packages/mcp && pytest`. Зелёный
-# автономный прогон изоляции НЕ доказывает: плагин тест-кита кладёт на
-# sys.path все шесть packages/*/src при любом нашем rootdir, поэтому чужой
-# импорт спокойно резолвится. Изоляцию доказывает статический сторож
-# tests/test_test_ownership.py — он смотрит на текст импортов.
+
 testpaths = ["tests"]
 asyncio_mode = "auto"

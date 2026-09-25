@@ -1,9 +1,11 @@
 import json
 
-import pytest
-
 from gc_core.constants.tool_names import READ_STORED_TOOL_OUTPUT_NAME
-from gc_core.tools.session.stored_outputs.envelope import build_stored_tool_output_payload, dumps_stored_tool_output_payload, utf8_byte_length
+from gc_core.tools.session.stored_outputs.envelope import (
+    build_stored_tool_output_payload,
+    dumps_stored_tool_output_payload,
+    utf8_byte_length,
+)
 
 
 def test_truncated_page_includes_required_metadata_fields():

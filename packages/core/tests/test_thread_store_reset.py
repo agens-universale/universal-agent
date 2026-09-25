@@ -4,7 +4,9 @@ from pathlib import Path
 from gc_core.thread_store import load_thread_messages, reset_thread_files
 
 
-def test_reset_thread_files_deletes_only_target_thread_files(tmp_path: Path) -> None:
+def test_reset_thread_files_deletes_only_target_thread_files(
+    tmp_path: Path,
+) -> None:
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
 
@@ -21,7 +23,9 @@ def test_reset_thread_files_deletes_only_target_thread_files(tmp_path: Path) -> 
     other_data.write_text("y\n", encoding="utf-8")
     other_meta.write_text("{}", encoding="utf-8")
 
-    deleted = reset_thread_files(str(threads_dir), system_id="cli", thread_id="demo-thread")
+    deleted = reset_thread_files(
+        str(threads_dir), system_id="cli", thread_id="demo-thread"
+    )
 
     assert str(target_data) in deleted
     assert str(target_meta) in deleted
@@ -33,7 +37,9 @@ def test_reset_thread_files_deletes_only_target_thread_files(tmp_path: Path) -> 
     assert other_meta.exists()
 
 
-def test_reset_thread_files_deletes_legacy_thread_files(tmp_path: Path) -> None:
+def test_reset_thread_files_deletes_legacy_thread_files(
+    tmp_path: Path,
+) -> None:
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
 
@@ -42,7 +48,9 @@ def test_reset_thread_files_deletes_legacy_thread_files(tmp_path: Path) -> None:
     legacy_data.write_text("x\n", encoding="utf-8")
     legacy_meta.write_text("{}", encoding="utf-8")
 
-    deleted = reset_thread_files(str(threads_dir), system_id="cli", thread_id="legacy-1")
+    deleted = reset_thread_files(
+        str(threads_dir), system_id="cli", thread_id="legacy-1"
+    )
 
     assert str(legacy_data) in deleted
     assert str(legacy_meta) in deleted
@@ -50,7 +58,9 @@ def test_reset_thread_files_deletes_legacy_thread_files(tmp_path: Path) -> None:
     assert not legacy_meta.exists()
 
 
-def test_load_thread_messages_accepts_double_encoded_jsonl_rows(tmp_path: Path) -> None:
+def test_load_thread_messages_accepts_double_encoded_jsonl_rows(
+    tmp_path: Path,
+) -> None:
     """Строка как json.dumps(json.dumps(record)) — нештатно, но загружаем без падения."""
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -62,10 +72,15 @@ def test_load_thread_messages_accepts_double_encoded_jsonl_rows(tmp_path: Path) 
         "ts": "2026-01-01T00:00:00+00:00",
         "payload": {"role": "user", "content": "hi", "id": "m1"},
     }
-    line = json.dumps(json.dumps(record, ensure_ascii=False), ensure_ascii=False) + "\n"
+    line = (
+        json.dumps(json.dumps(record, ensure_ascii=False), ensure_ascii=False)
+        + "\n"
+    )
     (threads_dir / "data_cli_t1.jsonl").write_text(line, encoding="utf-8")
 
-    messages, keys, max_seq = load_thread_messages(str(threads_dir), "cli", "t1")
+    messages, keys, max_seq = load_thread_messages(
+        str(threads_dir), "cli", "t1"
+    )
 
     assert len(messages) == 1
     assert messages[0]["role"] == "user"

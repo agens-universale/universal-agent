@@ -1,4 +1,5 @@
 """subagent_* args summary: preview reason/task text, not <N chars>."""
+
 import json
 
 from gc_tui.services.trace_mapper import map_message
@@ -14,7 +15,9 @@ def _fc(name, args, call_id="c1"):
 
 
 def test_subagent_long_reason_and_task_show_text_preview():
-    reason = "Investigate why the worker hangs on nested tool batches " * 3  # >80
+    reason = (
+        "Investigate why the worker hangs on nested tool batches " * 3
+    )  # >80
     task = "Read the skill layout and report structure findings " * 2  # >60
     assert len(reason) > 80
     assert len(task) > 60

@@ -1,20 +1,26 @@
-import pytest
-
-from gc_core.tools.skills.skill_arg_resolver import SkillCatalog, Resolved, Failed, resolve_skill_arg, FUZZY_CUTOFF
+from gc_core.tools.skills.skill_arg_resolver import (
+    FUZZY_CUTOFF,
+    Failed,
+    Resolved,
+    SkillCatalog,
+    resolve_skill_arg,
+)
 
 
 def _catalog():
     # supercoder pack (bootstrap using-supercoder) + a flat skill;
     # 'dup' is an inner name present in two packs (ambiguous bare).
     return SkillCatalog(
-        canonical_ids=frozenset({
-            "supercoder:using-supercoder",
-            "supercoder:brainstorming",
-            "supercoder:dup",
-            "otherpack:dup",
-            "otherpack:using-otherpack",
-            "project-overview",
-        }),
+        canonical_ids=frozenset(
+            {
+                "supercoder:using-supercoder",
+                "supercoder:brainstorming",
+                "supercoder:dup",
+                "otherpack:dup",
+                "otherpack:using-otherpack",
+                "project-overview",
+            }
+        ),
         bare_to_canonical={
             "using-supercoder": ("supercoder:using-supercoder",),
             "brainstorming": ("supercoder:brainstorming",),
@@ -30,9 +36,9 @@ def _catalog():
 
 
 def test_exact_canonical():
-    assert resolve_skill_arg("supercoder:brainstorming", _catalog()) == Resolved(
-        "supercoder:brainstorming", None
-    )
+    assert resolve_skill_arg(
+        "supercoder:brainstorming", _catalog()
+    ) == Resolved("supercoder:brainstorming", None)
 
 
 def test_exact_pack_id_to_bootstrap():
@@ -64,9 +70,9 @@ def test_empty():
 
 
 def test_underscore_normalization_canonical():
-    assert resolve_skill_arg("supercoder:using_supercoder", _catalog()) == Resolved(
-        "supercoder:using-supercoder", None
-    )
+    assert resolve_skill_arg(
+        "supercoder:using_supercoder", _catalog()
+    ) == Resolved("supercoder:using-supercoder", None)
 
 
 def test_cutoff_constant():
@@ -98,22 +104,30 @@ def test_fuzzy_lands_on_ambiguous_bare():
     # ~13-char id stays well above FUZZY_CUTOFF=0.8 (a 3-char fixture would
     # not: a single edit there is only ~0.67 ratio).
     cat = SkillCatalog(
-        canonical_ids=frozenset({"packa:brainstorming", "packb:brainstorming"}),
+        canonical_ids=frozenset(
+            {"packa:brainstorming", "packb:brainstorming"}
+        ),
         bare_to_canonical={
             "brainstorming": ("packa:brainstorming", "packb:brainstorming")
         },
         pack_bootstrap={},
     )
     r = resolve_skill_arg("brainstrming", cat)
-    assert r == Failed("ambiguous", ["packa:brainstorming", "packb:brainstorming"])
+    assert r == Failed(
+        "ambiguous", ["packa:brainstorming", "packb:brainstorming"]
+    )
 
 
 def test_fuzzy_ambiguous_tie():
     # Input equidistant from two long, equally-similar pack ids (~0.92 each,
     # both above cutoff) -> refuse to guess.
     cat = SkillCatalog(
-        canonical_ids=frozenset({"code-review-a:entry", "code-review-b:entry"}),
-        bare_to_canonical={"entry": ("code-review-a:entry", "code-review-b:entry")},
+        canonical_ids=frozenset(
+            {"code-review-a:entry", "code-review-b:entry"}
+        ),
+        bare_to_canonical={
+            "entry": ("code-review-a:entry", "code-review-b:entry")
+        },
         pack_bootstrap={
             "code-review-a": "code-review-a:entry",
             "code-review-b": "code-review-b:entry",
@@ -129,9 +143,13 @@ def test_precedence_pack_id_over_bare():
     # Exact name is both a pack id and a bare skill name -> pack id wins.
     cat = SkillCatalog(
         canonical_ids=frozenset({"shared:using-shared", "p:shared"}),
-        bare_to_canonical={"using-shared": ("shared:using-shared",), "shared": ("p:shared",)},
+        bare_to_canonical={
+            "using-shared": ("shared:using-shared",),
+            "shared": ("p:shared",),
+        },
         pack_bootstrap={"shared": "shared:using-shared"},
     )
     assert resolve_skill_arg("shared", cat) == Resolved(
-        "shared:using-shared", note="pack 'shared' -> bootstrap 'shared:using-shared'"
+        "shared:using-shared",
+        note="pack 'shared' -> bootstrap 'shared:using-shared'",
     )

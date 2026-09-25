@@ -1,13 +1,14 @@
 from typing import Any, Dict
 
-from gc_core.config_modules.chat_completions import subagent_role_max_tokens_from_ctx
+from gc_core.config_modules.chat_completions import (
+    subagent_role_max_tokens_from_ctx,
+)
 from gc_core.model_router import SUBAGENT_CONSUMER_PREFIX
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_completion_kwargs,
 )
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
-
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
 
@@ -168,16 +169,20 @@ class SpecialAgent(AbstractSubagent):
 
     @classmethod
     async def create_instance(
-        cls, role: str, role_description: str, task: str, model: str,
+        cls,
+        role: str,
+        role_description: str,
+        task: str,
+        model: str,
         reason: str = "",
-        config_dict: Dict[str, Any] | None = None, **kwargs,
+        config_dict: Dict[str, Any] | None = None,
+        **kwargs,
     ):
         # config_dict/runtime_notices_enabled: не используются больше здесь — роль
         # резолвится позже через finalize_role(ctx, state) (у ребёнка есть router/
         # сетевые параметры); принимаются для совместимости единого вызова
         # SubagentRunner._run_internal (тот же create_instance(**extra) для всех субагентов).
         return cls(role, role_description, task, reason, model)
-
 
     async def afinalize_role(self, ctx: Any, state: Any) -> None:
         """Нативная форма: LLM-вызов идёт на loop вызывающего, без потока.
@@ -190,10 +195,8 @@ class SpecialAgent(AbstractSubagent):
 
     def _role_request_kwargs(self, ctx: Any, state: Any) -> dict:
         """Аргументы aux-вызова генерации роли — один источник."""
-        prompt = (
-            _ROLE_GENERATE_PROMPT
-            .replace("{{role}}", self.role)
-            .replace("{{role_description}}", self.role_description)
+        prompt = _ROLE_GENERATE_PROMPT.replace("{{role}}", self.role).replace(
+            "{{role_description}}", self.role_description
         )
         return {
             "ctx": ctx,
@@ -224,8 +227,12 @@ SPECIAL AGENT HANDOFF ADDENDUM
 - `blockers` / `assumptions` / `next_actions` are base schema fields — fill them (or `[]`).
 - Keep the final payload machine-readable and avoid prose-only final handoff.
 """
-        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
-        return self.with_handoff_contract(role_prompt, special_notes), assignment
+        assignment = self.build_assignment_message(
+            {"task": self.task, "reason": self.reason}
+        )
+        return self.with_handoff_contract(
+            role_prompt, special_notes
+        ), assignment
 
     def get_agent_name(self):
         return self.agent_name

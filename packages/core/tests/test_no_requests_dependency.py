@@ -20,12 +20,11 @@
 requests всё равно стоит транзитивно (его тянут соседние пакеты), и
 динамическая проверка там ничего не поймала бы.
 """
+
 import ast
 import tomllib
-from pathlib import Path
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 _SRC = REPO / "packages" / "core" / "src" / "gc_core"
@@ -45,14 +44,17 @@ def test_manifest_declares_requests_only_while_the_list_is_not_empty():
     """
     manifest = tomllib.loads(_MANIFEST.read_text(encoding="utf-8"))
     deps = manifest["project"]["dependencies"]
-    declared = [d for d in deps if d.split("[")[0].strip().lower() == "requests"]
+    declared = [
+        d for d in deps if d.split("[")[0].strip().lower() == "requests"
+    ]
     if _REQUESTS_ALLOWED:
         assert declared, (
-            "модули из _REQUESTS_ALLOWED импортируют requests, а в зависимостях "
-            "его нет — установка развалится"
+            "модули из _REQUESTS_ALLOWED импортируют requests, а в зависимостях его нет — установка развалится"
         )
     else:
-        assert not declared, f"переводить нечего, а requests остался: {declared}"
+        assert not declared, (
+            f"переводить нечего, а requests остался: {declared}"
+        )
 
 
 def _modules_importing_requests() -> list[str]:
@@ -70,7 +72,9 @@ def _modules_importing_requests() -> list[str]:
                 names = [node.module or ""]
             else:
                 continue
-            if any(n == "requests" or n.startswith("requests.") for n in names):
+            if any(
+                n == "requests" or n.startswith("requests.") for n in names
+            ):
                 offenders.append(str(path.relative_to(_SRC)))
                 break
     return sorted(set(offenders))

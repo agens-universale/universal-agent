@@ -67,45 +67,45 @@ GUIDING PRINCIPLES
 Your plan is the single source of truth for execution. Make it precise, dependency-aware, and ready for handoff."""
 
     tool_specification = {
-    "type": "function",
-    "name": "subagent_planner",
-    "description": (
-        "An expert AI agent that decomposes complex, ambiguous, or multidisciplinary tasks "
-        "into clear, sequential, and actionable steps. Works across domains — software development, "
-        "research, analytics, content creation, strategy — to generate realistic, executable plans "
-        "suitable for delegation to specialized agents or humans."
-    ),
-    "parameters": {
-        "type": "object",
-        "properties": {
-            "reason": {
-                "type": "string",
-                "description": (
-                    "A clear and concise rationale for invoking the planner — "
-                    "what high-level goal this planning step serves, and why decomposition "
-                    "is needed at this point. Helps maintain traceability in multi-agent workflows."
-                ),
+        "type": "function",
+        "name": "subagent_planner",
+        "description": (
+            "An expert AI agent that decomposes complex, ambiguous, or multidisciplinary tasks "
+            "into clear, sequential, and actionable steps. Works across domains — software development, "
+            "research, analytics, content creation, strategy — to generate realistic, executable plans "
+            "suitable for delegation to specialized agents or humans."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "reason": {
+                    "type": "string",
+                    "description": (
+                        "A clear and concise rationale for invoking the planner — "
+                        "what high-level goal this planning step serves, and why decomposition "
+                        "is needed at this point. Helps maintain traceability in multi-agent workflows."
+                    ),
+                },
+                "task": {
+                    "type": "string",
+                    "description": (
+                        "A detailed description of the task to be planned, including:\n"
+                        "- Core objective: what needs to be achieved and why\n"
+                        "- Domain context: research, development, analysis, writing, strategy, etc.\n"
+                        "- Constraints: deadlines, resources, quality standards, stakeholder expectations\n"
+                        "- Success criteria: measurable or observable outcomes\n\n"
+                        "Recommended additions for higher plan quality:\n"
+                        "- Current state: existing materials, data, codebase, documents, or knowledge gaps\n"
+                        "- Known dependencies: external systems, approvals, data sources, or expert input\n"
+                        "- Preferred methodology: if specific frameworks, standards, or workflows should be followed\n\n"
+                    ),
+                },
             },
-            "task": {
-                "type": "string",
-                "description": (
-                    "A detailed description of the task to be planned, including:\n"
-                    "- Core objective: what needs to be achieved and why\n"
-                    "- Domain context: research, development, analysis, writing, strategy, etc.\n"
-                    "- Constraints: deadlines, resources, quality standards, stakeholder expectations\n"
-                    "- Success criteria: measurable or observable outcomes\n\n"
-                    "Recommended additions for higher plan quality:\n"
-                    "- Current state: existing materials, data, codebase, documents, or knowledge gaps\n"
-                    "- Known dependencies: external systems, approvals, data sources, or expert input\n"
-                    "- Preferred methodology: if specific frameworks, standards, or workflows should be followed\n\n"
-                ),
-            },
+            "required": ["reason", "task"],
+            "additionalProperties": False,
         },
-        "required": ["reason", "task"],
-        "additionalProperties": False,
-    },
-    "strict": True,
-}
+        "strict": True,
+    }
 
     def __init__(self, task, reason=""):
         self.task = task
@@ -122,8 +122,12 @@ PLANNER HANDOFF ADDENDUM
 - In `evidence`, include items confirming dependency ordering and success-criteria coverage.
 - If the plan is returned inline instead of file output, say so explicitly in `summary`/`details`.
 """
-        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
-        return self.with_handoff_contract(self.agent_role, planner_notes), assignment
+        assignment = self.build_assignment_message(
+            {"task": self.task, "reason": self.reason}
+        )
+        return self.with_handoff_contract(
+            self.agent_role, planner_notes
+        ), assignment
 
     def get_agent_name(self):
         return self.agent_name

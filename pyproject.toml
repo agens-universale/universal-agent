@@ -4,8 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "gc-ua"
-# Версии ВСЕХ манифестов обязаны совпадать: профили пинят друг друга точно.
-# 0.3.0 — разбиение на настоящие пакеты gc_core / gc_cli / gc_tui / gc_server.
+
 version = "0.3.1"
 description = "GigaCode Universal Agent — полный агент (ядро + CLI + TUI + server)"
 readme = "readme.md"
@@ -19,9 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Синоним полной установки. Extras умеют только добавлять, а база здесь уже
-# полная — профилей «поменьше» через extras не существует, их роль выполняют
-# отдельные дистрибутивы (см. docs/packaging.md).
+
 all = []
 
 [project.scripts]
@@ -32,11 +29,6 @@ gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 gc-voice = "gc_tui.voice_runtime.cli:main"
 
-# Мета — чисто метаданные: ни одного файла, только зависимости и точки входа.
-# Раньше здесь жил meta/gc_ua_launcher.py, каждая функция которого делала
-# `from X import main; return main()`. Он появился, когда цели точек входа были
-# в разных местах и hatchling (без bypass-selection) не собирал пустое колесо;
-# после того как цели стали прямыми, посредник осиротел.
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
 
@@ -45,31 +37,34 @@ dev = [
     "httpie>=3.2.4",
     "pytest-rerunfailures>=16.4",
     { include-group = "test" },
+
+    { include-group = "lint" },
+]
+lint = [
+    "complexipy>=4",
+    "ruff>=0.14",
+
+    "pre-commit>=4",
+    "pre-commit-hooks>=5",
+
+    "pylint>=3.3",
+
+    "vulture>=2.14",
 ]
 test = [
-    # Раньше жили в runtime-dependencies и приезжали каждому пользователю.
+
     "gc-testkit",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",
     "harbor>=0.16; python_version >= '3.12'",
-    # Тестовый набор гоняет и TUI, и server, и swarm — но сторонние пакеты
-    # перечислены НАПРЯМУЮ, а НЕ через "gc-ua[tui,server]". Иначе uv поставил бы
-    # соседей editable, скопировав tui/ и server.py в site-packages, а
-    # site-packages идёт в sys.path раньше пути на <repo>/src — и dev-цикл начал
-    # бы молча исполнять устаревшую копию.
+
     "textual>=0.55",
     "rich>=13",
-    # Снапшот-эталоны TUI: packages/tui/tests/test_snapshot_*.py — 16 тестовых
-    # функций и столько же .raw под гитом. Плагин снёс 502213be (17.08.2026)
-    # вместе с секцией [project.optional-dependencies] dev-tui, когда корень
-    # переписывали в мета-пакет; с тех пор все 16 молча пропускались через
-    # importorskip("pytest_textual_snapshot"), а .gitignore продолжал держать
-    # правило для их SVG — гейт был зелёным и пустым.
-    # Верхняя граница жёсткая, не «на всякий случай»: 1.1.0 пинит syrupy==4.8.0,
-    # тот требует pytest>=7,<9, и с нашим pytest>=9.0.3 uv отвечает «No solution
-    # found». На 1.0.0 приезжает syrupy 6.0.0, конфликта нет (проверено
-    # `uv pip install --dry-run` 28.08.2026).
+
+    # Версия 1.1.0 требует syrupy==4.8.0, а тот — pytest<9.
+    # С нашим pytest>=9.0.3 uv не разрешит зависимости: границу <1.1 не снимать
+    # без проверки совместимости. Версия 1.0.0 совместима с syrupy 6 / pytest 9.
     "pytest-textual-snapshot>=1.0,<1.1",
     "pygments>=2.13",
     "fastapi>=0.115.0",
@@ -84,23 +79,18 @@ default-groups = ["dev"]
 members = ["packages/*"]
 
 [tool.uv.sources]
-# uv читает эти sources и у git-зависимости, поэтому профили приезжают из ТОГО
-# ЖЕ коммита и по ТОМУ ЖЕ URL, который набрал пользователь.
+
 gc-core = { workspace = true }
 gc-cli = { workspace = true }
 gc-tui = { workspace = true }
 gc-server = { workspace = true }
 gc-mcp = { workspace = true }
-# Только для разработки: общая тестовая инфраструктура наборов. Ни в один
-# дистрибутив не входит и в колёса не попадает. Комментарий стоял строкой
-# выше и по виду относился к gc-mcp — а тот как раз настоящий поставляемый
-# дистрибутив со своими командами.
+
 gc-testkit = { workspace = true }
 office-mcp = { path = "packages/mcp/external/vendor/office-mcp", editable = true }
 
 [tool.pytest.ini_options]
-# Наборы живут при своих пакетах; в корне остаётся только то, что проверяет
-# репозиторий целиком (раскладка колёс, recommended_mcp).
+
 testpaths = [
     "tests",
     "external/litellm/tests",
@@ -112,11 +102,112 @@ testpaths = [
 ]
 asyncio_mode = "auto"
 
-# Забытый `await` — ошибка, а не предупреждение. Нужны ОБА фильтра: один ловит
-# корутину, освобождённую сборщиком мусора после теста, другой — по счётчику
-# ссылок внутри теста. Обоснование и замер — в `packages/core/pyproject.toml`.
 filterwarnings = [
     "error::pytest.PytestUnraisableExceptionWarning",
     "error::RuntimeWarning",
 ]
 
+[tool.ruff]
+target-version = "py311"
+line-length = 79
+extend-exclude = ["external", ".venv", "packages/*/external"]
+
+[tool.ruff.format]
+
+docstring-code-format = false
+
+[tool.ruff.lint]
+
+exclude = ["**/tests/**", "tests/**", "**/conftest.py"]
+select = [
+    "F", "E", "W",
+    "I",
+    "UP",
+    "B",
+    "SIM",
+    "C4",
+    "PIE",
+    "RUF",
+    "PLE", "PLW",
+    "T10",
+
+    "ARG001", "ARG004",
+    "A001",
+    "TRY002",
+    "ERA001",
+    "N815",
+    "S501", "S323",
+    "PLR0913",
+    "PLR1714", "PLR5501",
+]
+ignore = [
+
+    "E501",
+
+    "RUF001", "RUF002", "RUF003",
+
+    "UP006", "UP007", "UP035", "UP045",
+
+    "B008",
+
+    "B905",
+
+    "B904",
+
+    "SIM105", "SIM108",
+
+    "SIM117",
+
+    "C408", "RUF005", "RUF012", "RUF015", "RUF059",
+
+    "PLW0108", "PLW0603", "PLW1510", "PLW2901",
+
+    "E402", "E731", "E741",
+]
+
+[tool.ruff.lint.per-file-ignores]
+
+"scripts/dead_code_whitelist.py" = ["F821", "B018"]
+
+[tool.ruff.lint.pylint]
+
+max-args = 13
+
+[tool.complexipy]
+
+paths = [
+    "packages/cli/src",
+    "packages/core/src",
+    "packages/mcp/src",
+    "packages/server/src",
+    "packages/core/assets/skills",
+    "scripts",
+    "integrations",
+]
+max-complexity-allowed = 15
+
+exclude = [
+    "**/gc_tui/**",
+    "**/gc_testkit/**",
+    "**/tests/**",
+    "tests/**",
+    "**/conftest.py",
+    "external/**",
+    "**/external/**",
+]
+
+[tool.pylint.main]
+ignore-paths = [
+    ".*/tests/.*",
+    "^tests/.*",
+    ".*/conftest\\.py$",
+    "^external/.*",
+    ".*/external/.*",
+]
+
+[tool.pylint.similarities]
+min-similarity-lines = 10
+ignore-comments = true
+ignore-docstrings = true
+ignore-imports = true
+ignore-signatures = true

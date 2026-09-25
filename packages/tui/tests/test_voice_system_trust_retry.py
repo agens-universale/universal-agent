@@ -10,11 +10,11 @@
 и его контекст строится уже после инъекции. Поэтому проверка — на прямом
 подключении, без прокси.
 """
+
 import ssl
 
 import httpx
 import pytest
-
 from gc_tui.voice_runtime import net
 
 
@@ -40,7 +40,9 @@ def clean_trust():
     net.reset_for_tests()
 
 
-def test_retry_after_injection_asks_for_a_fresh_client(monkeypatch, clean_trust):
+def test_retry_after_injection_asks_for_a_fresh_client(
+    monkeypatch, clean_trust
+):
     """Первый заход — общим клиентом, повтор после инъекции — свежим."""
     recorder = _Recorder()
     injected = []
@@ -50,7 +52,9 @@ def test_retry_after_injection_asks_for_a_fresh_client(monkeypatch, clean_trust)
     )
 
     response = net.with_system_trust_retry(
-        lambda: net.post("https://stt.example/v1/audio/transcriptions", files={})
+        lambda: net.post(
+            "https://stt.example/v1/audio/transcriptions", files={}
+        )
     )
 
     assert response.status_code == 200
@@ -60,8 +64,7 @@ def test_retry_after_injection_asks_for_a_fresh_client(monkeypatch, clean_trust)
         "первый заход и так идёт общим клиентом — свежий там ни к чему"
     )
     assert recorder.calls[1].get("fresh_client") is True, (
-        "повтор пошёл тем же клиентом: его SSL-контекст создан до инъекции, "
-        "и системный траст на него не подействует"
+        "повтор пошёл тем же клиентом: его SSL-контекст создан до инъекции, и системный траст на него не подействует"
     )
 
 
@@ -75,5 +78,7 @@ def test_loopback_request_stays_on_the_shared_client(monkeypatch, clean_trust):
     with pytest.raises(httpx.ConnectError):
         net.post("http://127.0.0.1:8735/v1/audio/transcriptions", files={})
 
-    assert recorder.calls[0].get("proxies") is None, "к loopback пошли через прокси"
+    assert recorder.calls[0].get("proxies") is None, (
+        "к loopback пошли через прокси"
+    )
     assert not recorder.calls[0].get("fresh_client")

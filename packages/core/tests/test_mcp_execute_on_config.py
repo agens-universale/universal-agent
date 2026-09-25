@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.mcp import McpServerConfig
+from pydantic import ValidationError
 
 
 def test_execute_on_defaults_to_agent():
@@ -11,7 +10,9 @@ def test_execute_on_defaults_to_agent():
 
 def test_execute_on_accepts_os_backend():
     cfg = McpServerConfig(
-        transport="stream_http", url="http://x:8000/mcp", execute_on="os_backend"
+        transport="stream_http",
+        url="http://x:8000/mcp",
+        execute_on="os_backend",
     )
     assert cfg.execute_on == "os_backend"
 
@@ -19,7 +20,9 @@ def test_execute_on_accepts_os_backend():
 def test_execute_on_rejects_unknown_value():
     with pytest.raises(ValidationError):
         McpServerConfig(
-            transport="stream_http", url="http://x:8000/mcp", execute_on="container"
+            transport="stream_http",
+            url="http://x:8000/mcp",
+            execute_on="container",
         )
 
 

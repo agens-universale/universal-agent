@@ -2,6 +2,7 @@
 
 Отличие: фильтрацию/листинг делает экран (через file_index), сюда приходят
 готовые строки путей. Те же CSS-классы (.palette / .palette-row / .palette-hint)."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -22,10 +23,18 @@ _LISTING_CUT = "показано {shown} из {total} · допишите час
 class FilePicker(VerticalScroll):
     """Filtered overlay-список путей (строки; папки с хвостовым '/')."""
 
-    DEFAULT_CSS = ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    DEFAULT_CSS = (
+        ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    )
 
-    def __init__(self, entries: list[str], *, truncated: bool = False,
-                 searching: bool = False, total: Optional[int] = None) -> None:
+    def __init__(
+        self,
+        entries: list[str],
+        *,
+        truncated: bool = False,
+        searching: bool = False,
+        total: Optional[int] = None,
+    ) -> None:
         super().__init__(classes="palette")
         self._entries = list(entries)
         # Индекс путей упёрся в предохранитель (file_index.MAX_INDEX_PATHS): без
@@ -38,8 +47,10 @@ class FilePicker(VerticalScroll):
         # None — неизвестно/не листинг (поиск по индексу уже обрезает сам список).
         self._total = total
         self._selected = 0
-        self._stale = False   # данные сменились до конца монтирования: перестроить в on_mount
-        self._rows: list[Static] = []   # ссылки на строки-виджеты — для move_selection без пересоздания
+        self._stale = False  # данные сменились до конца монтирования: перестроить в on_mount
+        self._rows: list[
+            Static
+        ] = []  # ссылки на строки-виджеты — для move_selection без пересоздания
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
     def _empty_text(self) -> str:
@@ -52,17 +63,25 @@ class FilePicker(VerticalScroll):
         if self._truncated:
             return _TRUNCATED
         if self._total is not None and self._total > len(self._entries):
-            return _LISTING_CUT.format(shown=len(self._entries), total=self._total)
+            return _LISTING_CUT.format(
+                shown=len(self._entries), total=self._total
+            )
         return ""
 
     def compose(self) -> ComposeResult:
         if not self._entries:
             self._rows = []
-            yield Static(self._empty_text(), classes="palette-hint", markup=False)
+            yield Static(
+                self._empty_text(), classes="palette-hint", markup=False
+            )
         else:
             rows = []
             for i, entry in enumerate(self._entries):
-                classes = "palette-row selected" if i == self._selected else "palette-row"
+                classes = (
+                    "palette-row selected"
+                    if i == self._selected
+                    else "palette-row"
+                )
                 w = Static(f" {entry}", classes=classes, markup=False)
                 rows.append(w)
                 yield w
@@ -78,8 +97,12 @@ class FilePicker(VerticalScroll):
         note = self._note_text()
         if note:
             # Канон ArgPicker: динамическая строка — над клавишами, со своим воздухом.
-            children.append(Static(note, classes="palette-hint palette-keys", markup=False))
-        children.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
+            children.append(
+                Static(note, classes="palette-hint palette-keys", markup=False)
+            )
+        children.append(
+            Static(_HINT, classes="palette-hint palette-keys", markup=False)
+        )
         return Vertical(*children, classes="palette-footer")
 
     def _apply_size(self) -> None:
@@ -102,8 +125,14 @@ class FilePicker(VerticalScroll):
         footer = 2 + (2 if self._note_text() else 0)
         return flow + footer + 2
 
-    def set_entries(self, entries: list[str], *, truncated: bool = False,
-                     searching: bool = False, total: Optional[int] = None) -> None:
+    def set_entries(
+        self,
+        entries: list[str],
+        *,
+        truncated: bool = False,
+        searching: bool = False,
+        total: Optional[int] = None,
+    ) -> None:
         self._entries = list(entries)
         self._truncated = truncated
         self._searching = searching
@@ -117,7 +146,7 @@ class FilePicker(VerticalScroll):
         old = self._selected
         self._selected = (self._selected + delta) % len(self._entries)
         if len(self._rows) != len(self._entries):
-            self._rebuild()                     # строки ещё не те — старый путь
+            self._rebuild()  # строки ещё не те — старый путь
             return
         self._rows[old].remove_class("selected")
         row = self._rows[self._selected]
@@ -149,11 +178,19 @@ class FilePicker(VerticalScroll):
         selected_widget: Optional[Static] = None
         if not self._entries:
             self._rows = []
-            new_widgets.append(Static(self._empty_text(), classes="palette-hint", markup=False))
+            new_widgets.append(
+                Static(
+                    self._empty_text(), classes="palette-hint", markup=False
+                )
+            )
         else:
             rows = []
             for i, entry in enumerate(self._entries):
-                classes = "palette-row selected" if i == self._selected else "palette-row"
+                classes = (
+                    "palette-row selected"
+                    if i == self._selected
+                    else "palette-row"
+                )
                 w = Static(f" {entry}", classes=classes, markup=False)
                 if i == self._selected:
                     selected_widget = w
@@ -165,4 +202,6 @@ class FilePicker(VerticalScroll):
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+            self.call_after_refresh(
+                selected_widget.scroll_visible, animate=False
+            )

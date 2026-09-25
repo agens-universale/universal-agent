@@ -13,7 +13,13 @@ mouse/key-escapes) → ask_human виснет.
 хранится в threading.local() — у каждого потока свой. Глобальный sys.stdin при
 этом неизменен, гонки между потоками нет.
 """
+
 from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import queue
 
 import io
 import sys
@@ -22,13 +28,15 @@ from contextlib import contextmanager
 from typing import Iterator, Optional
 
 _tls = threading.local()
-_original_stdin: Optional[object] = None  # реальный stdin, захваченный при установке прокси
+_original_stdin: Optional[object] = (
+    None  # реальный stdin, захваченный при установке прокси
+)
 
 
 class QueueStdin(io.TextIOBase):
     """File-like; .readline() блокирующе читает строку из queue."""
 
-    def __init__(self, q: "queue.Queue[str]") -> None:
+    def __init__(self, q: queue.Queue[str]) -> None:
         super().__init__()
         self._q = q
         self._closed = False
@@ -72,7 +80,7 @@ def _install_proxy() -> None:
 
 
 @contextmanager
-def redirect_stdin(q: "queue.Queue[str]") -> Iterator[None]:
+def redirect_stdin(q: queue.Queue[str]) -> Iterator[None]:
     """На время блока назначает ТЕКУЩЕМУ потоку QueueStdin(q) как источник input().
 
     Не свапает глобальный sys.stdin (ставит один раз потоко-aware прокси) —

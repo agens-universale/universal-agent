@@ -1,4 +1,5 @@
 """Tests for public API wrappers in mcp_runtime.cli."""
+
 import os
 import subprocess
 import sys
@@ -10,7 +11,7 @@ def test_installable_names_from_bundled_manifest():
     """Check that installable_names() returns list of names from bundled manifest."""
     names = mcp.installable_names()
     assert isinstance(names, list)
-    assert "office" in names        # из recommended_mcp/config.yml
+    assert "office" in names  # из recommended_mcp/config.yml
 
 
 def test_install_delegates(monkeypatch):
@@ -47,8 +48,13 @@ def _import_probe(code: str) -> str:
     """Выполнить `code` в чистом интерпретаторе с тем же sys.path и вернуть stdout."""
     env = dict(os.environ)
     env["PYTHONPATH"] = os.pathsep.join(p for p in sys.path if p)
-    res = subprocess.run([sys.executable, "-c", code], capture_output=True,
-                         text=True, env=env, timeout=120)
+    res = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        env=env,
+        timeout=120,
+    )
     assert res.returncode == 0, res.stderr
     return res.stdout.strip()
 
@@ -64,8 +70,7 @@ def test_importing_cli_does_not_pull_install():
     Сетка краснеет на `from recommended_mcp import install` в шапке cli.py.
     """
     out = _import_probe(
-        "import sys; import recommended_mcp.runtime.cli;"
-        " print('recommended_mcp.install' in sys.modules)"
+        "import sys; import recommended_mcp.runtime.cli; print('recommended_mcp.install' in sys.modules)"
     )
     assert out == "False"
 
@@ -78,7 +83,6 @@ def test_install_does_not_import_cli_back():
     условие закреплено, а не оставлено на память.
     """
     out = _import_probe(
-        "import sys; import recommended_mcp.install;"
-        " print('recommended_mcp.runtime.cli' in sys.modules)"
+        "import sys; import recommended_mcp.install; print('recommended_mcp.runtime.cli' in sys.modules)"
     )
     assert out == "False"

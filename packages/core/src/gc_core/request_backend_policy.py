@@ -4,12 +4,12 @@ from typing import Any, Callable, Dict, Optional, Tuple
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
-from gc_core.utils.connect_backend import arequest_backend_chat_completions
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
     has_payload,
     is_retriable_backend_error,
 )
+from gc_core.utils.connect_backend import arequest_backend_chat_completions
 
 _CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC = 3.0
 _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR = 0.5
@@ -25,12 +25,33 @@ def _raise_embedded_from_error_dict(err: Dict[str, Any]) -> None:
     except (TypeError, ValueError):
         status = None
     raise EmbeddedChoiceError(
-        "provider returned embedded choice error: "
-        f"code={code!r} message={err.get('message')!r}",
+        f"provider returned embedded choice error: code={code!r} message={err.get('message')!r}",
         status_code=status,
         metadata=err.get("metadata"),
         raw_code=code,
     )
+
+
+def _raise_on_first_choice_error(
+    ch0: Dict[str, Any], *, salvage_reasoning: bool
+) -> None:
+    """Ошибка внутри ``choices[0]``: поле ``error`` или ``finish_reason="error"`` без payload."""
+    err = ch0.get("error")
+    if isinstance(err, dict):
+        _raise_embedded_from_error_dict(err)
+    fr = ch0.get("finish_reason")
+    if not (isinstance(fr, str) and fr.lower() == "error"):
+        return
+    msg = ch0.get("message") or {}
+    usable = (
+        has_payload(msg)
+        if salvage_reasoning
+        else bool(msg.get("content") or msg.get("tool_calls"))
+    )
+    if not usable:
+        raise EmbeddedChoiceError(
+            "provider returned finish_reason='error' with empty choice"
+        )
 
 
 def _raise_on_embedded_choice_error(
@@ -58,20 +79,9 @@ def _raise_on_embedded_choice_error(
         return
     choices = response.get("choices")
     if isinstance(choices, list) and choices and isinstance(choices[0], dict):
-        ch0 = choices[0]
-        err = ch0.get("error")
-        if isinstance(err, dict):
-            _raise_embedded_from_error_dict(err)
-        fr = ch0.get("finish_reason")
-        if isinstance(fr, str) and fr.lower() == "error":
-            msg = ch0.get("message") or {}
-            usable = has_payload(msg) if salvage_reasoning else bool(
-                msg.get("content") or msg.get("tool_calls")
-            )
-            if not usable:
-                raise EmbeddedChoiceError(
-                    "provider returned finish_reason='error' with empty choice"
-                )
+        _raise_on_first_choice_error(
+            choices[0], salvage_reasoning=salvage_reasoning
+        )
         return
     # Нет валидного choices — проверяем top-level error (вторая типовая форма).
     top_err = response.get("error")
@@ -79,12 +89,14 @@ def _raise_on_embedded_choice_error(
         _raise_embedded_from_error_dict(top_err)
 
 
-def _reduced_chat_completions_max_tokens(*, configured: int, minimum: int) -> int:
+def _reduced_chat_completions_max_tokens(
+    *, configured: int, minimum: int
+) -> int:
     reduced = int(configured * _CHAT_COMPLETIONS_HTTP_RETRY_FACTOR)
     return max(int(minimum), reduced)
 
 
-async def arequest_chat_completions_with_policy(
+async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     *,
     payload_factory: Callable[[int], Dict[str, Any]],
     initial_max_tokens: int,
@@ -136,7 +148,9 @@ async def arequest_chat_completions_with_policy(
         return response, payload
 
     try:
-        return await _send_once(initial_max_tokens, transport_use_retry=use_retry)
+        return await _send_once(
+            initial_max_tokens, transport_use_retry=use_retry
+        )
     except Exception as first_exc:
         if not is_retriable_backend_error(first_exc):
             maybe_push_llm_failure_notice(
@@ -156,8 +170,7 @@ async def arequest_chat_completions_with_policy(
             )
 
             run_logger.warning(
-                "chat/completions backend error; adaptive retry %s/%s "
-                "(max_tokens %s -> %s)",
+                "chat/completions backend error; adaptive retry %s/%s (max_tokens %s -> %s)",
                 step,
                 _CHAT_COMPLETIONS_ADAPTIVE_MAX_TOKEN_STEPS,
                 current_max_tokens,
@@ -167,15 +180,16 @@ async def arequest_chat_completions_with_policy(
             # Пауза кооперативная: time.sleep заморозил бы весь loop.
             await asyncio.sleep(_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC)
             try:
-                return await _send_once(reduced_max_tokens, transport_use_retry=False)
+                return await _send_once(
+                    reduced_max_tokens, transport_use_retry=False
+                )
             except Exception as retry_exc:
                 current_max_tokens = reduced_max_tokens
                 if not is_retriable_backend_error(retry_exc):
                     break
 
         run_logger.error(
-            "chat/completions adaptive max_tokens retries failed; "
-            "raising original backend error",
+            "chat/completions adaptive max_tokens retries failed; raising original backend error",
             exc_info=True,
         )
         maybe_push_llm_failure_notice(
@@ -185,5 +199,3 @@ async def arequest_chat_completions_with_policy(
             enabled=runtime_notices_enabled,
         )
         raise first_exc
-
-

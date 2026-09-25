@@ -23,13 +23,12 @@
 Тот же приём уже применён к ``skills_run_script``
 (``test_skills_run_script_native.py``).
 """
+
 import asyncio
 import json
-import threading
 import time
 
 import pytest
-
 from gc_core.tools.exec.sleep_tool import Sleep
 from gc_core.tools.turn.ask_human import AskHuman
 from gc_testkit.helpers.tool_ctx import local_ctx
@@ -91,7 +90,10 @@ async def test_sleep_does_not_occupy_a_pool_thread():
     """
     tool = Sleep(ctx=None)
 
-    hogs = [asyncio.create_task(asyncio.to_thread(time.sleep, 1.0)) for _ in range(24)]
+    hogs = [
+        asyncio.create_task(asyncio.to_thread(time.sleep, 1.0))
+        for _ in range(24)
+    ]
     await asyncio.sleep(0.05)  # даём им занять все места
 
     started = time.perf_counter()
@@ -228,7 +230,9 @@ async def test_find_in_files_runs_grep_through_the_async_backend(tmp_path):
     backend.aexec, backend.aexec_argv = _aexec, _aexec_argv
     backend.exec, backend.exec_argv = _sync_trap, _sync_trap
     try:
-        out = await tool.acall(path=str(tmp_path), pattern="TOKEN", query_mode="text")
+        out = await tool.acall(
+            path=str(tmp_path), pattern="TOKEN", query_mode="text"
+        )
     finally:
         for name in ("aexec", "aexec_argv", "exec", "exec_argv"):
             try:

@@ -8,12 +8,16 @@ def parse_summary_trigger_chars(config_dict: Dict[str, Any]) -> int:
     Берётся из config_dict['summary_params']['chat_completions_summary_trigger_chars'].
     При ошибке приведения или отсутствии секции возвращает 0 (compaction отключён).
     """
-    return _parse_summary_int(config_dict, "chat_completions_summary_trigger_chars")
+    return _parse_summary_int(
+        config_dict, "chat_completions_summary_trigger_chars"
+    )
 
 
 def parse_summary_trigger_tokens(config_dict: Dict[str, Any]) -> int:
     """Порог input-токенов для mid-turn / pre-run. 0 — плечо выключено."""
-    return _parse_summary_int(config_dict, "chat_completions_summary_trigger_tokens")
+    return _parse_summary_int(
+        config_dict, "chat_completions_summary_trigger_tokens"
+    )
 
 
 def parse_summary_turn_end_trigger_chars(config_dict: Dict[str, Any]) -> int:

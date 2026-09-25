@@ -29,6 +29,7 @@ diff-журнала с тех пор ставит сам TUI (``attach_to_contex
 в headless-установке, либо (как здесь) тихую деградацию, когда ветка спрятана
 за ``except ImportError`` и просто не срабатывает.
 """
+
 import ast
 import pathlib
 
@@ -45,9 +46,15 @@ def _frontend_imports(path: pathlib.Path) -> list[str]:
             for alias in node.names:
                 if alias.name.split(".")[0] in FRONTENDS:
                     found.append(f"{path}:{node.lineno}: import {alias.name}")
-        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+        elif (
+            isinstance(node, ast.ImportFrom)
+            and node.level == 0
+            and node.module
+        ):
             if node.module.split(".")[0] in FRONTENDS:
-                found.append(f"{path}:{node.lineno}: from {node.module} import ...")
+                found.append(
+                    f"{path}:{node.lineno}: from {node.module} import ..."
+                )
     return found
 
 

@@ -3,6 +3,7 @@
 Роль в файле пишет оператор, а не продукт: промпт предупреждает модель, что роль
 прав не выдаёт и может расходиться с фактическим набором инструментов.
 """
+
 from types import SimpleNamespace
 
 from gc_core.run_context import acreate_run_context
@@ -66,7 +67,9 @@ class TestPromptSelection:
 
     async def test_specific_role_placeholder_survives(self, tmp_path):
         # Без него роль из файла молча никуда не подставится.
-        assert "<specific_role>" in _prompt_for(await _runner(tmp_path), "subagent_alpha")
+        assert "<specific_role>" in _prompt_for(
+            await _runner(tmp_path), "subagent_alpha"
+        )
 
 
 class TestOverride:
@@ -91,6 +94,8 @@ class TestOverride:
     async def test_missing_override_falls_back_to_bundled(self, tmp_path):
         runner = await _runner(
             tmp_path,
-            chat_completions_custom_subagent_system_prompt_path=str(tmp_path / "нет.md"),
+            chat_completions_custom_subagent_system_prompt_path=str(
+                tmp_path / "нет.md"
+            ),
         )
         assert CUSTOM_MARKER in _prompt_for(runner, "subagent_alpha")

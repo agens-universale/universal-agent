@@ -1,8 +1,10 @@
 import unittest
-
 from types import SimpleNamespace
 
-from gc_core.utils.connect_backend import normalize_chat_completions_tools, create_call_data_completions
+from gc_core.utils.connect_backend import (
+    create_call_data_completions,
+    normalize_chat_completions_tools,
+)
 
 
 class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
@@ -32,7 +34,10 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
 
     def test_keeps_already_nested_function_tool_spec(self):
         tools = [
-            {"type": "function", "function": {"name": "x", "parameters": {"type": "object"}}}
+            {
+                "type": "function",
+                "function": {"name": "x", "parameters": {"type": "object"}},
+            }
         ]
         normalized = normalize_chat_completions_tools(tools)
         self.assertEqual(normalized, tools)
@@ -50,7 +55,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(len(data["messages"]), 2)
         self.assertEqual(data["model"], "test-model")
 
-    def test_create_call_data_completions_deduplicates_without_id_by_payload(self):
+    def test_create_call_data_completions_deduplicates_without_id_by_payload(
+        self,
+    ):
         state = SimpleNamespace(
             messages=[{"role": "user", "content": "same message"}],
             tools=[],
@@ -62,7 +69,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertIn("messages", data)
         self.assertEqual(len(data["messages"]), 1)
 
-    def test_create_call_data_completions_keeps_message_mapping_without_business_sanitization(self):
+    def test_create_call_data_completions_keeps_message_mapping_without_business_sanitization(
+        self,
+    ):
         state = SimpleNamespace(
             messages=[],
             tools=[],
@@ -89,7 +98,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
             '{"path": "/tmp/demo.md"',
         )
 
-    def test_create_call_data_completions_coalesces_parallel_function_calls(self):
+    def test_create_call_data_completions_coalesces_parallel_function_calls(
+        self,
+    ):
         state = SimpleNamespace(
             messages=[
                 {"role": "user", "content": "task"},
@@ -144,7 +155,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
                 "type": "function_call",
                 "call_id": "call_2",
                 "name": "fs_write_file",
-                "arguments": "{\"path\": \"/tmp/demo.md\", \"content\": \"x\"}",
+                "arguments": '{"path": "/tmp/demo.md", "content": "x"}',
                 "status": "completed",
             }
         ]
@@ -156,13 +167,19 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertIn("tool_calls", data["messages"][0])
         self.assertEqual(len(data["messages"][0]["tool_calls"]), 1)
 
-    def test_create_call_data_completions_explicit_max_tokens_uses_max_completion_tokens_by_default(self):
+    def test_create_call_data_completions_explicit_max_tokens_uses_max_completion_tokens_by_default(
+        self,
+    ):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
-        data = create_call_data_completions([{"role": "user", "content": "hi"}], state=state, max_tokens=12000)
+        data = create_call_data_completions(
+            [{"role": "user", "content": "hi"}], state=state, max_tokens=12000
+        )
         self.assertEqual(data["max_completion_tokens"], 12000)
         self.assertNotIn("max_tokens", data)
 
-    def test_create_call_data_completions_explicit_max_tokens_uses_max_tokens_with_flag(self):
+    def test_create_call_data_completions_explicit_max_tokens_uses_max_tokens_with_flag(
+        self,
+    ):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
@@ -173,7 +190,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(data["max_tokens"], 12000)
         self.assertNotIn("max_completion_tokens", data)
 
-    def test_create_call_data_completions_uses_max_completion_tokens_by_default(self):
+    def test_create_call_data_completions_uses_max_completion_tokens_by_default(
+        self,
+    ):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
@@ -183,7 +202,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(data["max_completion_tokens"], 7777)
         self.assertNotIn("max_tokens", data)
 
-    def test_create_call_data_completions_honors_use_max_tokens_param_flag(self):
+    def test_create_call_data_completions_honors_use_max_tokens_param_flag(
+        self,
+    ):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
@@ -196,7 +217,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(data["max_tokens"], 5555)
         self.assertNotIn("max_completion_tokens", data)
 
-    def test_create_call_data_completions_merges_chat_completion_kwargs_safely(self):
+    def test_create_call_data_completions_merges_chat_completion_kwargs_safely(
+        self,
+    ):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
@@ -219,7 +242,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(data["tool_choice"], "required")
         self.assertNotEqual(data.get("max_tokens"), 1)
 
-    def test_create_call_data_completions_omits_unconfigured_generation_kwargs(self):
+    def test_create_call_data_completions_omits_unconfigured_generation_kwargs(
+        self,
+    ):
         state = SimpleNamespace(messages=[], tools=[], default_model="m")
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],

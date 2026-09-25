@@ -1,14 +1,16 @@
 """Каноничное текстовое представление сообщений треда для LLM-промптов и метрик длины."""
 
-import json
 import re
 from typing import Any, Dict, List, Sequence
 
-from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
+from gc_core.message_policy.user_message_policy import (
+    is_dialog_summary_user_message_text,
+    user_content_to_text,
+)
 from gc_core.message_projection import project_assistant_text
 
 _ORIGINAL_USER_MESSAGES_BLOCK_RE = re.compile(
-    r"<original_user_messages>.*?</original_user_messages>\s*",
+    r"<original_user_messages>.*?</original_user_messages>\s*",  # NOSONAR: внутри блока бывают '<'
     re.IGNORECASE | re.DOTALL,
 )
 
@@ -52,24 +54,10 @@ def history_has_dialog_summary_message(messages: List[Dict[str, Any]]) -> bool:
     return False
 
 
-def _message_content_to_text(content: Any) -> str:
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        parts: List[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                text = item.get("text")
-                if isinstance(text, str):
-                    parts.append(text)
-                    continue
-            parts.append(json.dumps(item, ensure_ascii=False, sort_keys=True))
-        return "\n".join(parts)
-    if isinstance(content, dict):
-        return json.dumps(content, ensure_ascii=False, sort_keys=True)
-    if content is None:
-        return ""
-    return str(content)
+# Контент любого сообщения (arguments/output/content) сводится к тексту по тем же правилам, что и
+# user-контент: строка как есть, у элементов списка — поле ``text`` либо канонический JSON.
+# Единственная реализация живёт в ``user_message_policy``; здесь — локальное имя для читаемости.
+_message_content_to_text = user_content_to_text
 
 
 def message_text_for_summary(
@@ -92,7 +80,11 @@ def message_text_for_summary(
         arguments = message.get("arguments")
         return f"[{label}] {name}\n{_message_content_to_text(arguments)}"
     if msg_type in ("function_call_output", "tool_call_output"):
-        label = "function_call_output" if msg_type == "function_call_output" else "tool_call_output"
+        label = (
+            "function_call_output"
+            if msg_type == "function_call_output"
+            else "tool_call_output"
+        )
         output = message.get("output")
         return f"[{label}]\n{_message_content_to_text(output)}"
     role = str(message.get("role") or "")
@@ -146,7 +138,9 @@ def calc_history_chars_for_trigger(
 ) -> int:
     """Суммарный объём истории в «сырых» символах для ``chat_completions_summary_trigger_chars``."""
     return sum(
-        message_raw_payload_chars_for_trigger(m, tags=tags, strip_think=strip_think)
+        message_raw_payload_chars_for_trigger(
+            m, tags=tags, strip_think=strip_think
+        )
         for m in messages
     )
 
@@ -160,5 +154,9 @@ def calc_messages_chars_total(
     """Суммарная длина сериализованного треда (каноничный вид для промпта LLM)."""
     total = 0
     for message in messages:
-        total += len(message_text_for_summary(message, tags=tags, strip_think=strip_think))
+        total += len(
+            message_text_for_summary(
+                message, tags=tags, strip_think=strip_think
+            )
+        )
     return total

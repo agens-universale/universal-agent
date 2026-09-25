@@ -1,11 +1,17 @@
 import json
-
-from gc_testkit.helpers.tool_ctx import CallableTool
 from types import SimpleNamespace
 
 from gc_core.states import SharedStateData
 from gc_core.tools.registry import get_builtin_tools_data
-from gc_core.tools.session.working_memory import DEFAULT_TOTAL_BUDGET_CHARS, REGISTER_CONSTRAINTS, REGISTER_GOAL, REGISTER_KNOWLEDGE, REGISTER_STATE, WorkingMemory
+from gc_core.tools.session.working_memory import (
+    DEFAULT_TOTAL_BUDGET_CHARS,
+    REGISTER_CONSTRAINTS,
+    REGISTER_GOAL,
+    REGISTER_KNOWLEDGE,
+    REGISTER_STATE,
+    WorkingMemory,
+)
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _make_state(working_memory=None):
@@ -164,7 +170,9 @@ def test_empty_register_missing_register():
 
 
 def test_register_limit_exceeded():
-    ctx = SimpleNamespace(config_dict={"working_memory_params": {"max_chars_goal": 10}})
+    ctx = SimpleNamespace(
+        config_dict={"working_memory_params": {"max_chars_goal": 10}}
+    )
     tool = CallableTool(WorkingMemory(ctx=ctx, state=_make_state()))
     res = json.loads(
         tool(
@@ -181,10 +189,16 @@ def test_register_limit_exceeded():
 def test_total_budget_limit_exceeded():
     state = _make_state({REGISTER_GOAL: "a" * 49})
     assert DEFAULT_TOTAL_BUDGET_CHARS == 20_000
-    tool = CallableTool(WorkingMemory(
-        ctx=SimpleNamespace(config_dict={"working_memory_params": {"total_budget_chars": 50}}),
-        state=state,
-    ))
+    tool = CallableTool(
+        WorkingMemory(
+            ctx=SimpleNamespace(
+                config_dict={
+                    "working_memory_params": {"total_budget_chars": 50}
+                }
+            ),
+            state=state,
+        )
+    )
     res = json.loads(
         tool(
             action="append",

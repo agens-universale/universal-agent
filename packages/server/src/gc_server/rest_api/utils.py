@@ -50,5 +50,4 @@ def ensure_task_id(payload: Dict[str, Any]) -> str:
     return task_id
 
 
-__all__ = ["normalize_system", "ensure_task_id"]
-
+__all__ = ["ensure_task_id", "normalize_system"]

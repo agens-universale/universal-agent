@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pytest
-
 from gc_core.thread_store import append_subagent_trace_record
 from gc_tui.services.subagent_sidecar_mapper import CHILD_SUMMARY_LABEL
 from gc_tui.widgets.tool_call_row import ToolCallRow
@@ -125,8 +124,7 @@ def _sum_msg(text: str) -> dict:
         "role": "user",
         "id": "m_s",
         "content": (
-            '<technical type="dialog_summary">Summarized context.\n'
-            f"<summary>{text}</summary></technical>"
+            f'<technical type="dialog_summary">Summarized context.\n<summary>{text}</summary></technical>'
         ),
     }
 
@@ -176,7 +174,9 @@ def _write_archived_subagent_thread(tmp_path: Path, tid: str) -> None:
             },
         },
     ]
-    (tmp_path / f"data_cli_{tid}__pre_summary__20260718_120000.jsonl").write_text(
+    (
+        tmp_path / f"data_cli_{tid}__pre_summary__20260718_120000.jsonl"
+    ).write_text(
         "\n".join(json.dumps(x, ensure_ascii=False) for x in archive) + "\n",
         encoding="utf-8",
     )
@@ -236,7 +236,9 @@ async def test_reopen_merges_nested_under_archived_subagent(tmp_path):
     tid = "reopen_arch"
     _write_archived_subagent_thread(tmp_path, tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         assert scr.attach_active_task(tid, is_resume=True) is True
@@ -258,7 +260,9 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
     _write_parent_thread(tmp_path, tid)
     _write_sidecar(tmp_path, tid)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         assert scr.attach_active_task(tid, is_resume=True) is True
@@ -276,7 +280,9 @@ async def test_reopen_merges_nested_under_finished_subagent(tmp_path):
 
         widgets = scr._nested_widgets_by_parent.get("call_sub_1", [])
         prose_texts = [
-            getattr(w, "_content", "") for w in widgets if isinstance(w, TraceRow)
+            getattr(w, "_content", "")
+            for w in widgets
+            if isinstance(w, TraceRow)
         ]
         assert CHILD_SUMMARY_LABEL in prose_texts
         assert "проверю дальше" in prose_texts

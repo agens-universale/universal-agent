@@ -8,13 +8,11 @@ from collections import Counter
 from pathlib import Path
 
 import pytest
-
 from gc_core.utils.find_in_files_scan_mode import (
     PatternMode,
     classify_scan_pattern,
     is_literal_string,
 )
-
 
 # ---------------------------------------------------------------------------
 # is_literal_string
@@ -153,16 +151,18 @@ def test_or_with_anchor_branch_is_complex():
 )
 def test_affix_or(pattern, req, ors):
     sp = classify_scan_pattern(pattern)
-    assert sp.mode is PatternMode.AFFIX_OR, (sp.mode, sp.required_literal, sp.or_group)
+    assert sp.mode is PatternMode.AFFIX_OR, (
+        sp.mode,
+        sp.required_literal,
+        sp.or_group,
+    )
     assert sp.required_literal == req
     assert set(sp.or_group) == set(ors)
 
 
 def test_common_prefix_or_is_or_simple_not_pref():
     sp = classify_scan_pattern(
-        "request_auxiliary_completion_text|"
-        "request_chat_completion_text|"
-        "request_summary_text"
+        "request_auxiliary_completion_text|request_chat_completion_text|request_summary_text"
     )
     assert sp.mode is PatternMode.OR_SIMPLE
     assert sp.required_literal is None
@@ -409,7 +409,9 @@ def test_corpus_scan_modes():
 
     total = sum(counts.values())
     assert total >= 800
-    print(f"\n=== scan mode corpus === total={total} fails={fails} counts={dict(counts)}")
+    print(
+        f"\n=== scan mode corpus === total={total} fails={fails} counts={dict(counts)}"
+    )
     assert counts["like"] >= 100
     assert counts["or_simple"] >= 100
     assert counts["complex"] >= 200

@@ -14,12 +14,11 @@
 (``backends/local.py:220-230``). То есть подмена не меняет реализацию, а
 убирает с пути поток и лишний event loop.
 """
+
 import json
 import threading
-from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.tools.skills.registry import get_skills_registry
@@ -58,7 +57,9 @@ def _tool(registry):
 async def test_acall_runs_the_script_and_returns_its_output(skill_with_script):
     """Базовое: нативный вход делает ту же работу, что и синхронный."""
     out = json.loads(
-        await _tool(skill_with_script).acall(skill_id="sleeper", script_name="nap.py")
+        await _tool(skill_with_script).acall(
+            skill_id="sleeper", script_name="nap.py"
+        )
     )
 
     assert out["ok"] is True, out
@@ -88,10 +89,11 @@ async def test_loop_stays_responsive_while_the_script_runs(skill_with_script):
                 skill_id="sleeper", script_name="nap.py"
             )
 
-    assert len(pulse.gaps) > 10, f"пульс почти не тикал: {len(pulse.gaps)} тиков"
+    assert len(pulse.gaps) > 10, (
+        f"пульс почти не тикал: {len(pulse.gaps)} тиков"
+    )
     assert pulse.worst() < SCRIPT_SLEEP / 2, (
-        f"loop залипал на {pulse.worst():.3f}с, пока шёл скрипт — "
-        f"запуск не асинхронный ({pulse.report()})"
+        f"loop залипал на {pulse.worst():.3f}с, пока шёл скрипт — запуск не асинхронный ({pulse.report()})"
     )
 
 
@@ -108,8 +110,7 @@ async def test_no_helper_thread_is_spawned(skill_with_script):
     before = threading.active_count()
     await tool.acall(skill_id="sleeper", script_name="nap.py")
     assert threading.active_count() == before, (
-        "на вызов появился поток — значит запуск уехал в пул, а не в "
-        "asyncio.create_subprocess_exec"
+        "на вызов появился поток — значит запуск уехал в пул, а не в asyncio.create_subprocess_exec"
     )
 
 
@@ -120,7 +121,9 @@ def test_no_sync_entry(skill_with_script):
     assert not callable(tool), "у тула скиллов снова появился синхронный вход"
 
 
-async def test_bad_json_args_return_an_error_not_a_broken_await(skill_with_script):
+async def test_bad_json_args_return_an_error_not_a_broken_await(
+    skill_with_script,
+):
     """Отказ разбора аргументов приходит значением, а не ломает ``await``.
 
     ``acall`` обёрнут ``parse_json_object_argument``, и на ошибочной ветке тот
@@ -129,7 +132,9 @@ async def test_bad_json_args_return_an_error_not_a_broken_await(skill_with_scrip
     """
     out = json.loads(
         await _tool(skill_with_script).acall(
-            skill_id="sleeper", script_name="nap.py", args="не json",
+            skill_id="sleeper",
+            script_name="nap.py",
+            args="не json",
         )
     )
 

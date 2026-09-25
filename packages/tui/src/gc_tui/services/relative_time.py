@@ -1,12 +1,23 @@
 """Локальное относительное время для списка сессий (Spec 1, Rule A)."""
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Optional
 
 _MONTHS_GEN = [
-    "января", "февраля", "марта", "апреля", "мая", "июня",
-    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+    "января",
+    "февраля",
+    "марта",
+    "апреля",
+    "мая",
+    "июня",
+    "июля",
+    "августа",
+    "сентября",
+    "октября",
+    "ноября",
+    "декабря",
 ]
 
 
@@ -18,10 +29,12 @@ def parse_iso_utc(value) -> Optional[datetime]:
         dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
     except ValueError:
         return None
-    return dt if dt.tzinfo is not None else dt.replace(tzinfo=timezone.utc)
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
-def format_relative_local(iso_utc: str, *, now: Optional[datetime] = None) -> str:
+def format_relative_local(
+    iso_utc: str, *, now: Optional[datetime] = None
+) -> str:
     """ISO-время (UTC) → русская относительная локальная строка.
 
     <1м «только что»; <60м «N мин назад»; <24ч «N ч назад»; далее по
@@ -32,9 +45,9 @@ def format_relative_local(iso_utc: str, *, now: Optional[datetime] = None) -> st
     except (ValueError, TypeError):
         return iso_utc or ""
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     dt = dt.astimezone()  # в локальную зону
-    now = (now or datetime.now().astimezone())
+    now = now or datetime.now().astimezone()
     if now.tzinfo is None:
         now = now.astimezone()
 

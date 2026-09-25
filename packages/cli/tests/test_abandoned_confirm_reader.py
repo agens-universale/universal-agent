@@ -8,6 +8,7 @@
 Проверяется на настоящем терминале (pty): только там `input()` и `select`
 ведут себя так, как у человека за клавиатурой.
 """
+
 import asyncio
 import os
 import signal
@@ -19,7 +20,10 @@ import pytest
 pty = pytest.importorskip("pty")
 
 from gc_cli.ask_human_port import make_cli_ask_human_port
-from gc_core.security.confirm_port import CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER
+from gc_core.security.confirm_port import (
+    CONFIRM_ALLOW_ONCE,
+    CONFIRM_ALLOW_REMEMBER,
+)
 from gc_core.security.path_policy import prompt_user_confirmation_choice
 
 _THREAD = "test-abandoned-yn"
@@ -36,11 +40,16 @@ def _ask_yes_no():
     # краснел в полном прогоне, хотя код верен.
     from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
-    return asyncio.ensure_future(run_abandonable_in(
-        threading.BoundedSemaphore(1), prompt_user_confirmation_choice,
-        title="Запись", fields=[("path", "/etc/SECRET")], question="Разрешить?",
-        _thread_name=_THREAD,
-    ))
+    return asyncio.ensure_future(
+        run_abandonable_in(
+            threading.BoundedSemaphore(1),
+            prompt_user_confirmation_choice,
+            title="Запись",
+            fields=[("path", "/etc/SECRET")],
+            question="Разрешить?",
+            _thread_name=_THREAD,
+        )
+    )
 
 
 @pytest.fixture
@@ -87,19 +96,21 @@ def terminal(monkeypatch):
 
 async def test_an_abandoned_yes_no_prompt_leaves_the_next_line_alone(terminal):
     waiting = _ask_yes_no()
-    await asyncio.sleep(0.3)                    # вопрос y/n показан и ждёт
-    waiting.cancel()                            # Ctrl+C: вопрос брошен
+    await asyncio.sleep(0.3)  # вопрос y/n показан и ждёт
+    waiting.cancel()  # Ctrl+C: вопрос брошен
     with pytest.raises(asyncio.CancelledError):
         await waiting
-    await asyncio.sleep(0.3)                    # брошенному — время заметить
+    await asyncio.sleep(0.3)  # брошенному — время заметить
 
     # Человек отвечает уже на СЛЕДУЮЩИЙ вопрос агента — печатая, пока тот ещё
     # не начал читать. Пауза и есть жизненный порядок: без неё следующий
     # читатель успевал раньше брошенного, и тест проходил даже без метки
     # «брошен».
-    os.write(terminal, "ответ-на-второй\n\n".encode("utf-8"))
+    os.write(terminal, "ответ-на-второй\n\n".encode())
     await asyncio.sleep(0.4)
-    answer = await asyncio.wait_for(make_cli_ask_human_port()("второй вопрос?"), 5)
+    answer = await asyncio.wait_for(
+        make_cli_ask_human_port()("второй вопрос?"), 5
+    )
 
     assert answer == "ответ-на-второй", (
         f"строку забрал брошенный вопрос y/n, следующему досталось {answer!r}"
@@ -107,7 +118,8 @@ async def test_an_abandoned_yes_no_prompt_leaves_the_next_line_alone(terminal):
 
 
 async def test_a_line_for_a_cancelled_question_does_not_answer_the_confirmation(
-    terminal, safety_net,
+    terminal,
+    safety_net,
 ):
     """Строка к отменённому вопросу не отвечает за человека на подтверждении.
 
@@ -116,11 +128,12 @@ async def test_a_line_for_a_cancelled_question_does_not_answer_the_confirmation(
     гарда: оно отвечало само и записывало разрешение на путь, о котором человека
     не спрашивали.
     """
+
     async def _human() -> None:
         await asyncio.sleep(0.2)
-        os.write(terminal, b"y\n")             # начал отвечать…
-        await asyncio.sleep(0.3)               # …порт уже прочитал строку в буфер
-        os.kill(os.getpid(), signal.SIGINT)    # …и передумал
+        os.write(terminal, b"y\n")  # начал отвечать…
+        await asyncio.sleep(0.3)  # …порт уже прочитал строку в буфер
+        os.kill(os.getpid(), signal.SIGINT)  # …и передумал
 
     fire = asyncio.ensure_future(_human())
     with pytest.raises(KeyboardInterrupt):
@@ -130,12 +143,16 @@ async def test_a_line_for_a_cancelled_question_does_not_answer_the_confirmation(
 
     confirm = _ask_yes_no()
     await asyncio.sleep(0.5)
-    assert not confirm.done(), f"подтверждение ответило само: {confirm.result()!r}"
-    os.write(terminal, b"n\n")                 # отвечает человек — уже сам
+    assert not confirm.done(), (
+        f"подтверждение ответило само: {confirm.result()!r}"
+    )
+    os.write(terminal, b"n\n")  # отвечает человек — уже сам
     assert await asyncio.wait_for(confirm, 5) not in _ALLOWED
 
 
-async def test_input_typed_before_the_confirmation_does_not_answer_it(terminal):
+async def test_input_typed_before_the_confirmation_does_not_answer_it(
+    terminal,
+):
     """Набранное заранее — пока вопроса y/n ещё не было — на него не отвечает.
 
     Подтверждение безопасности принимает только ввод, сделанный ПОСЛЕ того, как
@@ -147,6 +164,8 @@ async def test_input_typed_before_the_confirmation_does_not_answer_it(terminal):
 
     confirm = _ask_yes_no()
     await asyncio.sleep(0.5)
-    assert not confirm.done(), f"подтверждение ответило само: {confirm.result()!r}"
+    assert not confirm.done(), (
+        f"подтверждение ответило само: {confirm.result()!r}"
+    )
     os.write(terminal, b"n\n")
     assert await asyncio.wait_for(confirm, 5) not in _ALLOWED

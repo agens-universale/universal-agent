@@ -9,7 +9,9 @@ from gc_core.intent_guard.validation_result import ValidationResult
 _logger = logging.getLogger(__name__)
 
 
-def validation_result_to_log_dict(result: ValidationResult | None) -> dict[str, Any]:
+def validation_result_to_log_dict(
+    result: ValidationResult | None,
+) -> dict[str, Any]:
     if result is None:
         return {}
     return {
@@ -34,7 +36,9 @@ def _emit(logger: Any, level: int, event: str, **fields: Any) -> None:
     log.log(level, "finish_gate event=%s %s", event, payload)
 
 
-def log_finish_gate_skipped(logger: Any, *, reason: str, backend_api_mode: str) -> None:
+def log_finish_gate_skipped(
+    logger: Any, *, reason: str, backend_api_mode: str
+) -> None:
     _emit(
         logger,
         logging.INFO,

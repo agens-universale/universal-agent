@@ -4,11 +4,15 @@
 Конфиг agent.inject_tool_fields: имя поля → description (строка в JSON Schema).
 Если секции нет или dict пустой — инжект не выполняется.
 """
+
 import copy
 import logging
 from typing import Any, Dict, List
 
-from gc_core.tools.schema_optional import X_SUPPRESS_OPTIONAL_HINT, mark_property_optional
+from gc_core.tools.schema_optional import (
+    X_SUPPRESS_OPTIONAL_HINT,
+    mark_property_optional,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +80,9 @@ def inject_property_into_spec(
 
     params = spec.get("parameters")
     if not isinstance(params, dict):
-        spec["parameters"] = _new_object_parameters_with_field(field_name, property_schema)
+        spec["parameters"] = _new_object_parameters_with_field(
+            field_name, property_schema
+        )
         return [field_name]
 
     if _is_combinator_only_parameters(params):
@@ -93,7 +99,9 @@ def inject_property_into_spec(
 
     if params.get("type") != "object":
         if not isinstance(props, dict):
-            spec["parameters"] = _new_object_parameters_with_field(field_name, property_schema)
+            spec["parameters"] = _new_object_parameters_with_field(
+                field_name, property_schema
+            )
             return [field_name]
         params["type"] = "object"
 
@@ -162,4 +170,6 @@ def _is_combinator_only_parameters(params: Dict[str, Any]) -> bool:
     props = params.get("properties")
     if isinstance(props, dict) and props:
         return False
-    return bool(params.get("anyOf") or params.get("oneOf") or params.get("allOf"))
+    return bool(
+        params.get("anyOf") or params.get("oneOf") or params.get("allOf")
+    )

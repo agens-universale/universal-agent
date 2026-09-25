@@ -13,11 +13,17 @@ GENERIC_PROFILE = {"consecutive": 3, "in_window": 4}
 _T = TypeVar("_T")
 
 
-def loop_warn_on_repeat(*, consecutive: int, in_window: int) -> Callable[[_T], _T]:
+def loop_warn_on_repeat(
+    *, consecutive: int, in_window: int
+) -> Callable[[_T], _T]:
     """Opt-in class decorator: thresholds only, no window memory."""
 
     def deco(cls: _T) -> _T:
-        setattr(cls, LOOP_WARN_ATTR, {"consecutive": consecutive, "in_window": in_window})
+        setattr(
+            cls,
+            LOOP_WARN_ATTR,
+            {"consecutive": consecutive, "in_window": in_window},
+        )
         return cls
 
     return deco

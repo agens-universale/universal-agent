@@ -15,6 +15,7 @@ get_selection()->None — при text_select_all(), который потомк�
 Тело таблицы зависит от ширины, поэтому пересобирается на resize; тело кода —
 нет (перенос выключен через CSS text-wrap: nowrap).
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -60,7 +61,7 @@ class BlockPanel(ClickModelMixin, Vertical):
     шапки и payload кнопки. Прямой конструктор не используется.
     """
 
-    ALLOW_SELECT = False   # выделяется тело, а не панель целиком
+    ALLOW_SELECT = False  # выделяется тело, а не панель целиком
 
     # Отступы задаются ОДНИМ shorthand-правилом на селектор: Textual не мёржит
     # margin-*/padding-* из разных правил — второе затирает весь box.
@@ -74,8 +75,15 @@ class BlockPanel(ClickModelMixin, Vertical):
     BlockPanel .block-body { width: 1fr; height: auto; text-wrap: nowrap; text-overflow: clip; }
     """
 
-    def __init__(self, *, label: str, copy_payload: str, event_no: int,
-                 focusable: bool, classes: str) -> None:
+    def __init__(
+        self,
+        *,
+        label: str,
+        copy_payload: str,
+        event_no: int,
+        focusable: bool,
+        classes: str,
+    ) -> None:
         super().__init__(classes=classes)
         self._label = label
         self._copy_payload = copy_payload
@@ -86,32 +94,56 @@ class BlockPanel(ClickModelMixin, Vertical):
     # --- фабрики -----------------------------------------------------------
 
     @classmethod
-    def for_code(cls, content: str, lang: str | None, *, event_no: int,
-                 focusable: bool = False, indent: bool = False) -> "BlockPanel":
+    def for_code(
+        cls,
+        content: str,
+        lang: str | None,
+        *,
+        event_no: int,
+        focusable: bool = False,
+        indent: bool = False,
+    ) -> BlockPanel:
         """Код: метка — язык (если известен), копия — чистый код без обрамления."""
         from gc_tui.services.code_render import highlight_code, normalize_code
 
         classes = "block-panel code-block-panel"
         if indent:
             classes += " code-indent"
-        panel = cls(label=lang or "", copy_payload=normalize_code(content),
-                    event_no=event_no, focusable=focusable, classes=classes)
+        panel = cls(
+            label=lang or "",
+            copy_payload=normalize_code(content),
+            event_no=event_no,
+            focusable=focusable,
+            classes=classes,
+        )
         panel._body_text = highlight_code(content, lang)
         panel._table_source = None
         return panel
 
     @classmethod
-    def for_table(cls, headers: list[str], rows: list[list[str]], aligns: list[str],
-                  *, event_no: int, focusable: bool = False,
-                  indent: bool = False) -> "BlockPanel":
+    def for_table(
+        cls,
+        headers: list[str],
+        rows: list[list[str]],
+        aligns: list[str],
+        *,
+        event_no: int,
+        focusable: bool = False,
+        indent: bool = False,
+    ) -> BlockPanel:
         """Таблица: метка пустая, копия — markdown (его и вставляют, не рамки)."""
         from gc_tui.services.markdown_render import table_block_to_markdown
 
         classes = "block-panel table-block"
         if indent:
             classes += " table-indent"
-        panel = cls(label="", copy_payload=table_block_to_markdown(headers, rows, aligns),
-                    event_no=event_no, focusable=focusable, classes=classes)
+        panel = cls(
+            label="",
+            copy_payload=table_block_to_markdown(headers, rows, aligns),
+            event_no=event_no,
+            focusable=focusable,
+            classes=classes,
+        )
         panel._body_text = None
         panel._table_source = (headers, rows, aligns)
         return panel
@@ -146,7 +178,7 @@ class BlockPanel(ClickModelMixin, Vertical):
             from gc_tui.services.table_render import table_to_text
 
             headers, rows, aligns = self._table_source
-            width = max(self.size.width - 2, 10)   # padding панели
+            width = max(self.size.width - 2, 10)  # padding панели
             self._body_text = table_to_text(headers, rows, aligns, width=width)
         body.update(self._body_text)
 
@@ -163,7 +195,7 @@ class BlockPanel(ClickModelMixin, Vertical):
         if not label_query:
             return
         label = label_query.first(Static)
-        available = max(self.size.width - 2, 0)   # минус padding панели (0 1)
+        available = max(self.size.width - 2, 0)  # минус padding панели (0 1)
         fits = available >= len(self._label) + 2  # метка + пробел перед ❐
         label.update(self._label if fits else "")
 
@@ -176,7 +208,11 @@ class BlockPanel(ClickModelMixin, Vertical):
         события по Ctrl+клику с любой точки блока, а не только копирование.
         """
         widget = getattr(event, "widget", None)
-        if not event.ctrl and widget is not None and widget.has_class("block-copy"):
+        if (
+            not event.ctrl
+            and widget is not None
+            and widget.has_class("block-copy")
+        ):
             event.stop()
             self._copy_block()
             return
@@ -194,22 +230,26 @@ class BlockPanel(ClickModelMixin, Vertical):
         self.query_one(".block-copy", Static).update(DONE_GLYPH)
         if self._restore_timer is not None:
             self._restore_timer.stop()
-        self._restore_timer = self.set_timer(COPY_FEEDBACK_S, self._restore_copy_glyph)
+        self._restore_timer = self.set_timer(
+            COPY_FEEDBACK_S, self._restore_copy_glyph
+        )
 
     def _restore_copy_glyph(self) -> None:
         self._restore_timer = None
         try:
             self.query_one(".block-copy", Static).update(copy_glyph())
         except Exception:
-            pass   # панель уже размонтирована — восстанавливать нечего
+            pass  # панель уже размонтирована — восстанавливать нечего
 
     def _open_request(self) -> Optional[Message]:
         if not self._event_no:
             return None
         from gc_tui.messages import OpenEventRequest
+
         return OpenEventRequest(self._event_no)
 
 
 def _copy_request(payload: str) -> Message:
     from gc_tui.messages import CopyBlockRequest
+
     return CopyBlockRequest(payload)

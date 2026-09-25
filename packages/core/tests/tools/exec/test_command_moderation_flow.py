@@ -4,10 +4,9 @@ import sys
 from gc_core.security import command_moderation as command_moderation
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
-
-
 from gc_testkit import run_coro
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def _config(tmp_path, mode):
     return {
@@ -34,7 +33,9 @@ def test_exec_command_allow_mode_skips_judge(tmp_path, monkeypatch):
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("judge should not be called in allow mode")
 
-    monkeypatch.setattr(command_moderation, "_default_judge_client", fail_if_called)
+    monkeypatch.setattr(
+        command_moderation, "_default_judge_client", fail_if_called
+    )
 
     result = json.loads(
         with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "allow"))(
@@ -63,7 +64,9 @@ def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
     assert result["stdout"]["content"].rstrip("\r\n") == "456"
 
 
-def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
+def test_exec_command_deny_mode_blocks_dangerous_verdict(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         command_moderation,
         "_default_judge_client",
@@ -87,7 +90,9 @@ def test_exec_command_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
     assert result["stdout"]["content"] == ""
 
 
-def test_run_python_code_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatch):
+def test_run_python_code_deny_mode_blocks_dangerous_verdict(
+    tmp_path, monkeypatch
+):
     monkeypatch.setattr(
         command_moderation,
         "_default_judge_client",
@@ -99,7 +104,11 @@ def test_run_python_code_deny_mode_blocks_dangerous_verdict(tmp_path, monkeypatc
 
     target = tmp_path / "outside.txt"
     code = f"from pathlib import Path; Path({str(target)!r}).write_text('bad')"
-    result = json.loads(with_local_ctx(RunPythonCode, config_dict=_config(tmp_path, "deny"))(code=code))
+    result = json.loads(
+        with_local_ctx(RunPythonCode, config_dict=_config(tmp_path, "deny"))(
+            code=code
+        )
+    )
 
     assert result["ok"] is False
     assert result["return_code"] is None
@@ -155,7 +164,9 @@ def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
     assert not marker.exists()
 
 
-def test_command_moderation_fail_closed_when_judge_unavailable_in_deny(tmp_path):
+def test_command_moderation_fail_closed_when_judge_unavailable_in_deny(
+    tmp_path,
+):
     """Fail-CLOSED в deny: при недоступности судьи выполнение блокируется."""
     result = json.loads(
         with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
@@ -168,7 +179,9 @@ def test_command_moderation_fail_closed_when_judge_unavailable_in_deny(tmp_path)
     assert result["error"]["mode"] == "deny"
 
 
-def test_command_moderation_asks_when_judge_unavailable_in_ask(tmp_path, monkeypatch):
+def test_command_moderation_asks_when_judge_unavailable_in_ask(
+    tmp_path, monkeypatch
+):
     """В ask при недоступности судьи запрашиваем подтверждение у пользователя."""
     marker = tmp_path / "judge_unavailable.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'

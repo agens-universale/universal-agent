@@ -68,17 +68,19 @@ class ChildInputScope:
 
 
 @contextmanager
-def activate_child_input(ctx: Any, *, parent_call_id: str) -> Iterator[ChildInputScope]:
+def activate_child_input(
+    ctx: Any, *, parent_call_id: str
+) -> Iterator[ChildInputScope]:
     """Зарегистрировать этого ребёнка как адресата ввода ДЛЯ ЭТОГО прогона."""
     scope = ChildInputScope(parent_call_id=parent_call_id)
-    setattr(ctx, "child_input_scope", scope)
+    ctx.child_input_scope = scope
     try:
         yield scope
     finally:
         # Снимаем только СВОЮ регистрацию: если поверх успел встать другой
         # скоуп, затирать его нельзя — иначе его сообщения уйдут родителю.
         if getattr(ctx, "child_input_scope", None) is scope:
-            setattr(ctx, "child_input_scope", None)
+            ctx.child_input_scope = None
 
 
 def try_enqueue_user_message(ctx: Any, message: Dict[str, Any]) -> bool:

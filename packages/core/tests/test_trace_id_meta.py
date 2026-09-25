@@ -26,19 +26,27 @@ class _SessionStub:
 
 async def test_appends_first_trace(tmp_path):
     session = _SessionStub(tmp_path)
-    save_thread_meta(session.threads_dir, session.system_id, session.thread_id, {})
+    save_thread_meta(
+        session.threads_dir, session.system_id, session.thread_id, {}
+    )
     await _aappend_trace_id_to_meta(session, "wf-1")
-    meta = load_thread_meta(session.threads_dir, session.system_id, session.thread_id)
+    meta = load_thread_meta(
+        session.threads_dir, session.system_id, session.thread_id
+    )
     assert meta["runtime"]["trace_ids"] == ["wf-1"]
 
 
 async def test_appends_in_order_and_dedups(tmp_path):
     session = _SessionStub(tmp_path)
-    save_thread_meta(session.threads_dir, session.system_id, session.thread_id, {})
+    save_thread_meta(
+        session.threads_dir, session.system_id, session.thread_id, {}
+    )
     await _aappend_trace_id_to_meta(session, "wf-1")
     await _aappend_trace_id_to_meta(session, "wf-2")
     await _aappend_trace_id_to_meta(session, "wf-1")
-    meta = load_thread_meta(session.threads_dir, session.system_id, session.thread_id)
+    meta = load_thread_meta(
+        session.threads_dir, session.system_id, session.thread_id
+    )
     assert meta["runtime"]["trace_ids"] == ["wf-1", "wf-2"]
 
 

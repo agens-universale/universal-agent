@@ -7,14 +7,18 @@
 заводит каждый агент и каждый субагент: рост линейный, а вместе с логгерами
 живут ОТКРЫТЫЕ ``FlushFileHandler``, то есть файловые дескрипторы.
 """
+
 import logging
 
 from gc_core.utils.logging_module import create_run_logger, release_run_logger
 
 
 def _cfg(tmp_path):
-    return {"save_logs": True, "console_trace": False,
-            "logs_dump_dir": str(tmp_path)}
+    return {
+        "save_logs": True,
+        "console_trace": False,
+        "logs_dump_dir": str(tmp_path),
+    }
 
 
 def test_release_removes_the_logger_from_the_registry(tmp_path):
@@ -60,12 +64,18 @@ def test_foreign_handlers_are_left_alone(tmp_path):
             super().close()
 
     mine = _Mine()
-    logger, _p, _t = create_run_logger(_cfg(tmp_path), run_id="r3", log_handlers=[mine])
-    assert mine in logger.handlers, "проверка пустая: чужой хендлер не прицепился"
+    logger, _p, _t = create_run_logger(
+        _cfg(tmp_path), run_id="r3", log_handlers=[mine]
+    )
+    assert mine in logger.handlers, (
+        "проверка пустая: чужой хендлер не прицепился"
+    )
 
     release_run_logger(logger)
 
-    assert not closed, "закрыли чужой хендлер — его жизнь принадлежит вызывающему"
+    assert not closed, (
+        "закрыли чужой хендлер — его жизнь принадлежит вызывающему"
+    )
 
 
 def test_release_ignores_a_foreign_logger():

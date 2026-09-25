@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from gc_core.utils.aio_compat import await_callback
 import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
@@ -8,11 +7,14 @@ from typing import Any, Callable, Dict, List, Optional
 from gc_core.intent_guard.agent_logging import log_finish_gate_output_patched
 from gc_core.intent_guard.guard import FinishGateDecision
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_core.utils.aio_compat import await_callback
 
 _logger = logging.getLogger(__name__)
 
 
-def get_function_call_output_text(messages: List[Dict], call_id: str) -> Optional[str]:
+def get_function_call_output_text(
+    messages: List[Dict], call_id: str
+) -> Optional[str]:
     for message in reversed(messages):
         if not isinstance(message, dict):
             continue
@@ -63,7 +65,9 @@ async def apply_finish_gate_to_turn_finish_output_in_state(
         )
         return False
 
-    patched_output = SubmitSolution.apply_finish_gate_decision(raw_output, decision)
+    patched_output = SubmitSolution.apply_finish_gate_decision(
+        raw_output, decision
+    )
     updated_message = patch_function_call_output(
         state.messages,
         call_id=finish_call_id,
@@ -81,7 +85,11 @@ async def apply_finish_gate_to_turn_finish_output_in_state(
     try:
         payload = json.loads(patched_output)
         if isinstance(payload, dict):
-            output_ok = payload.get("ok") if isinstance(payload.get("ok"), bool) else None
+            output_ok = (
+                payload.get("ok")
+                if isinstance(payload.get("ok"), bool)
+                else None
+            )
             status_raw = payload.get("status")
             output_status = status_raw if isinstance(status_raw, str) else None
     except json.JSONDecodeError:

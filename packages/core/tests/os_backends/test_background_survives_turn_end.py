@@ -16,6 +16,7 @@
 поведение мы сознательно больше не обещаем: у команды переднего плана труба
 закрывается вместе с вызовом. Свойство целиком переехало сюда, в фоновый режим.
 """
+
 import asyncio
 import gc
 import time
@@ -41,11 +42,15 @@ def test_background_writer_survives_the_end_of_the_turn(tmp_path):
         started = await LocalFsBackend().aspawn_background(cmd)
         assert started["pid"] > 0
 
-    asyncio.run(turn())        # конец хода: loop закрыт, его задачи отменены
-    gc.collect()               # транспорты хода собраны
+    asyncio.run(turn())  # конец хода: loop закрыт, его задачи отменены
+    gc.collect()  # транспорты хода собраны
 
-    early = log.read_text(encoding="utf-8").count("tick") if log.exists() else 0
-    assert early < 20, f"потомок успел всё ({early}) внутри хода — тест холостой"
+    early = (
+        log.read_text(encoding="utf-8").count("tick") if log.exists() else 0
+    )
+    assert early < 20, (
+        f"потомок успел всё ({early}) внутри хода — тест холостой"
+    )
 
     deadline = time.monotonic() + 15
     text = ""

@@ -4,17 +4,17 @@
 цель переезда: event loop встраивающего приложения остаётся живым, пока агент
 ходит в сеть и исполняет тулы.
 """
+
 import asyncio
-import pytest
 import json
 import os
 import subprocess
 import sys
 import time
 
+import pytest
 from gc_core.aio import AsyncAgent
 from gc_testkit.paths import package_src_dirs
-
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
@@ -56,9 +56,15 @@ def _stub_turn_finish(monkeypatch):
 #: Ход 2 — финализатор. Ход 3 — вердикт судьи finish-gate.
 TURNS = [
     assistant_tool_call("exec_sleep", {"seconds": 0.3}, call_id="c1"),
-    assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer", "task_report": "поспал", "handoff": "{}",
-    }, call_id="c2"),
+    assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": "поспал",
+            "handoff": "{}",
+        },
+        call_id="c2",
+    ),
     judge_accept(),
 ]
 
@@ -68,7 +74,11 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
-    from gc_testkit import LoopPulse, assert_loop_was_free, quiet_gc_for_loop_timing
+    from gc_testkit import (
+        LoopPulse,
+        assert_loop_was_free,
+        quiet_gc_for_loop_timing,
+    )
 
     # Сборщик глушится на окне замера: замерено зондом, что в полном наборе в
     # это окно попадает до 872 мс пауз stop-the-world при собственной работе
@@ -84,7 +94,9 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
                 answer = await agent.run("поспи 0.3 секунды", thread_id="t1")
 
     assert answer
-    assert len(pulse.gaps) > 10, f"хартбит почти не тикал: {len(pulse.gaps)} тиков"
+    assert len(pulse.gaps) > 10, (
+        f"хартбит почти не тикал: {len(pulse.gaps)} тиков"
+    )
     # Два пропуска, а не один по умолчанию. У хода два куска без уступки —
     # от начала `run` до первого `await` и хвост после последнего, — и
     # файловое хранилище тредов пишет и читает в них инлайн, как и задумано
@@ -117,10 +129,13 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
         # параллельность.
         cfg_a = parity_config(tmp_path / "a", monkeypatch, model="агент-а")
         cfg_b = parity_config(tmp_path / "b", monkeypatch, model="агент-б")
-        install_many(monkeypatch, {
-            "агент-а": ScriptedBackend(list(TURNS)),
-            "агент-б": ScriptedBackend(list(TURNS)),
-        })
+        install_many(
+            monkeypatch,
+            {
+                "агент-а": ScriptedBackend(list(TURNS)),
+                "агент-б": ScriptedBackend(list(TURNS)),
+            },
+        )
         a = await AsyncAgent.create(cfg_a)
         b = await AsyncAgent.create(cfg_b)
         started = time.monotonic()
@@ -132,8 +147,7 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
 
     assert r1 and r2
     assert pair < single * 1.6, (
-        f"два агента заняли {pair:.2f}с при одиночном {single:.2f}с — "
-        f"похоже, шли последовательно"
+        f"два агента заняли {pair:.2f}с при одиночном {single:.2f}с — похоже, шли последовательно"
     )
 
 
@@ -148,17 +162,17 @@ import asyncio, json, sys
 from gc_core.aio import AsyncAgent
 
 async def main():
-    agent = await AsyncAgent.create({
+    agent = await AsyncAgent.create({{
         "backend_api_mode": "chat_completions",
         "completions_url": "http://acceptance.invalid/v1/chat/completions",
         "model": "acceptance-model",
-        "threads_data_path": %(threads)r,
-        "logs_dump_dir": %(logs)r,
+        "threads_data_path": {threads!r},
+        "logs_dump_dir": {logs!r},
         "save_logs": False,
-        "launch_root": %(root)r,
+        "launch_root": {root!r},
         "backend_request_timeout_sec": 60,
         "max_steps": 1,
-    })
+    }})
     await agent.aclose()
 
 try:
@@ -167,11 +181,11 @@ except Exception:
     pass    # цель теста — импорты, а не успешность сборки контекста
 leaked = [m for m in ("gc_cli", "gc_tui", "gc_server") if m in sys.modules]
 print(json.dumps(leaked))
-""" % {
-        "threads": str(tmp_path / "threads"),
-        "logs": str(tmp_path / "logs"),
-        "root": str(tmp_path),
-    }
+""".format(
+        threads=str(tmp_path / "threads"),
+        logs=str(tmp_path / "logs"),
+        root=str(tmp_path),
+    )
 
     # PYTHONPATH исходников: без него дочерний процесс берёт УСТАНОВЛЕННУЮ копию
     # gc_core, а не ту, которую гоняет набор, — и меряет чужое дерево. Здесь это

@@ -172,10 +172,12 @@ def assert_loop_was_free(gaps, *, tick, allowed_stalls=1, label=""):
     ordered = sorted(gaps)
     p50 = statistics.median(ordered)
     stalls = [g for g in gaps if g >= tick + 0.010]
-    detail = (f"{label}p50={p50 * 1000:.1f}мс p95={_p95(ordered) * 1000:.1f}мс "
-              f"max={ordered[-1] * 1000:.1f}мс "
-              f"пропусков={len(stalls)} из {len(gaps)}, "
-              f"допустимо {allowed_stalls}")
+    detail = (
+        f"{label}p50={p50 * 1000:.1f}мс p95={_p95(ordered) * 1000:.1f}мс "
+        f"max={ordered[-1] * 1000:.1f}мс "
+        f"пропусков={len(stalls)} из {len(gaps)}, "
+        f"допустимо {allowed_stalls}"
+    )
     assert p50 < tick * 1.5, f"loop занят ПОСТОЯННО: {detail}"
     # Потолок ПЕРЕД правилом пропусков: одна настоящая блокировка даёт и
     # выброс, и один-два пропуска, и без этого порядка она диагностировалась

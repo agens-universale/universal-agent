@@ -1,11 +1,10 @@
 import json
 import logging
-import pytest
 
-from gc_core.states import SharedStateData
-from gc_core.states import State
-from gc_testkit.helpers.tool_ctx import local_ctx
+import pytest
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.helpers.tool_ctx import local_ctx
 
 
 def _make_orchestrator_state():
@@ -53,7 +52,9 @@ def _parent_ctx(tmp_path, *, is_tui: bool = False, is_cli_mode: bool = False):
     ctx.auth_connector = None
     ctx.logger = None
     ctx.logging_path = str(tmp_path / "agent_main_parent_run_1.log")
-    ctx.summary_trace_path = str(tmp_path / "summary_trace_main_parent_run_1.jsonl")
+    ctx.summary_trace_path = str(
+        tmp_path / "summary_trace_main_parent_run_1.jsonl"
+    )
     ctx.tools_data = {}
     ctx.tools_spec = []
     ctx.tools_description = []
@@ -99,7 +100,9 @@ async def test_build_child_ctx_inherits_is_cli_mode_from_parent(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_build_child_ctx_cli_mode_defaults_false_when_parent_unset(tmp_path):
+async def test_build_child_ctx_cli_mode_defaults_false_when_parent_unset(
+    tmp_path,
+):
     orch = _make_orchestrator_state()
     parent_ctx, cfg = _parent_ctx(tmp_path)
     if hasattr(parent_ctx, "is_cli_mode"):

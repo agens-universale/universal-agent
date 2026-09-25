@@ -5,7 +5,7 @@ import os
 import sys
 import time
 import uuid
-from typing import Tuple, Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from gc_core.trace_id import trace_id_from_config, trace_id_slug
 
@@ -17,10 +17,29 @@ class FlushFileHandler(logging.FileHandler):
 
 
 _RESERVED_LOGRECORD_KEYS = {
-    "name", "msg", "args", "levelname", "levelno", "pathname", "filename",
-    "module", "exc_info", "exc_text", "stack_info", "lineno", "funcName",
-    "created", "msecs", "relativeCreated", "thread", "threadName",
-    "processName", "process", "taskName", "message", "asctime",
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "taskName",
+    "message",
+    "asctime",
 }
 
 
@@ -32,7 +51,9 @@ class RunContextFilter(logging.Filter):
     должно означать отсутствие ключа, а не пустую строку.
     """
 
-    def __init__(self, run_id: str, agent_kind: str, trace_id: str = "") -> None:
+    def __init__(
+        self, run_id: str, agent_kind: str, trace_id: str = ""
+    ) -> None:
         super().__init__()
         self._run_id = run_id
         self._agent_kind = agent_kind
@@ -59,7 +80,7 @@ class JsonlFormatter(logging.Formatter):
         self._redactor = redactor
 
     def format(self, record: logging.LogRecord) -> str:
-        dt = datetime.datetime.fromtimestamp(record.created, datetime.timezone.utc)
+        dt = datetime.datetime.fromtimestamp(record.created, datetime.UTC)
         ts = dt.strftime("%Y-%m-%dT%H:%M:%S.") + f"{int(record.msecs):03d}Z"
         payload: Dict[str, Any] = {
             "ts": ts,
@@ -86,7 +107,9 @@ class RedactingTextFormatter(logging.Formatter):
     ``redactor is None`` → поведение идентично stdlib ``logging.Formatter``.
     """
 
-    def __init__(self, fmt: Optional[str] = None, redactor: Any = None) -> None:
+    def __init__(
+        self, fmt: Optional[str] = None, redactor: Any = None
+    ) -> None:
         super().__init__(fmt)
         self._redactor = redactor
 
@@ -124,7 +147,10 @@ def human_console_enabled(config_dict: Dict[str, Any]) -> bool:
     """
     if not config_dict.get("console_trace", True):
         return False
-    return str(config_dict.get("logging_format", "text")).strip().lower() != "jsonl"
+    return (
+        str(config_dict.get("logging_format", "text")).strip().lower()
+        != "jsonl"
+    )
 
 
 def _normalize_agent_kind(agent_kind: Optional[str]) -> str:
@@ -132,8 +158,10 @@ def _normalize_agent_kind(agent_kind: Optional[str]) -> str:
     if not value:
         return "main"
     if value.startswith("subagent_"):
-        value = value[len("subagent_"):]
-    normalized = "".join(ch if ch.isalnum() else "_" for ch in value).strip("_")
+        value = value[len("subagent_") :]
+    normalized = "".join(ch if ch.isalnum() else "_" for ch in value).strip(
+        "_"
+    )
     return normalized or "main"
 
 
@@ -150,8 +178,7 @@ def build_run_log_paths(
     base_dir = config_dict.get("logs_dump_dir")
     if not isinstance(base_dir, str) or not base_dir.strip():
         raise ValueError(
-            "logs_dump_dir пуст; "
-            "config_modules.root.resolve_paths() должен был его заполнить"
+            "logs_dump_dir пуст; config_modules.root.resolve_paths() должен был его заполнить"
         )
     suffix = run_id or generate_run_id()
     kind = _normalize_agent_kind(agent_kind)
@@ -164,13 +191,13 @@ def build_run_log_paths(
         # открывается в mode="a" — без run_id раны слиплись бы в один файл.
         suffix = f"{trace_id_slug(trace)}_{suffix}"
     logging_path = os.path.join(base_dir, f"agent_{kind}_{suffix}.{log_ext}")
-    summary_trace_path = os.path.join(base_dir, f"summary_trace_{kind}_{suffix}.jsonl")
+    summary_trace_path = os.path.join(
+        base_dir, f"summary_trace_{kind}_{suffix}.jsonl"
+    )
     return logging_path, summary_trace_path
 
 
-_DISABLED_LOG_PATH = (
-    "Null. Логи отключены. Включите логи в файле config.yml если они необходимы"
-)
+_DISABLED_LOG_PATH = "Null. Логи отключены. Включите логи в файле config.yml если они необходимы"
 _TEXT_FMT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 # Отдельная строка формата, а не условная подстановка: '%(trace_id)s' падает на
 # любой записи без атрибута, и строка теряется через handleError. Поэтому формат
@@ -195,21 +222,27 @@ def _build_text_logger(logger, config_dict, run_id, kind, redactor):
         )
         os.makedirs(os.path.dirname(logging_path), exist_ok=True)
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
-        handler.setFormatter(RedactingTextFormatter(text_fmt, redactor=redactor))
+        handler.setFormatter(
+            RedactingTextFormatter(text_fmt, redactor=redactor)
+        )
         logger.addHandler(handler)
     else:
         logging_path = _DISABLED_LOG_PATH
         summary_trace_path = ""
     err_handler = logging.StreamHandler()
     err_handler.setLevel(logging.ERROR)
-    err_handler.setFormatter(RedactingTextFormatter(text_fmt, redactor=redactor))
+    err_handler.setFormatter(
+        RedactingTextFormatter(text_fmt, redactor=redactor)
+    )
     logger.addHandler(err_handler)
     return logger, logging_path, summary_trace_path
 
 
 def _build_jsonl_logger(logger, config_dict, run_id, kind, redactor):
     logger.setLevel(resolve_log_level(config_dict.get("log_level")))
-    logger.addFilter(RunContextFilter(run_id, kind, trace_id_from_config(config_dict)))
+    logger.addFilter(
+        RunContextFilter(run_id, kind, trace_id_from_config(config_dict))
+    )
     formatter = JsonlFormatter(redactor=redactor)
     logging_path = _DISABLED_LOG_PATH
     summary_trace_path = ""
@@ -218,7 +251,9 @@ def _build_jsonl_logger(logger, config_dict, run_id, kind, redactor):
             config_dict, run_id=run_id, agent_kind=kind, log_ext="jsonl"
         )
         os.makedirs(os.path.dirname(logging_path), exist_ok=True)
-        file_handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
+        file_handler = FlushFileHandler(
+            logging_path, encoding="utf-8", mode="a"
+        )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     if config_dict.get("console_trace", True):
@@ -271,13 +306,18 @@ def create_run_logger(
 
     # Ленивый импорт: security тяжёлый, а logging грузится очень рано (run_context).
     from gc_core.security.log_redaction import build_redactor
+
     redactor = build_redactor(config_dict.get("redact_secrets"))
 
     fmt = str(config_dict.get("logging_format", "text")).strip().lower()
     if fmt == "jsonl":
-        built = _build_jsonl_logger(logger, config_dict, effective_run_id, kind, redactor)
+        built = _build_jsonl_logger(
+            logger, config_dict, effective_run_id, kind, redactor
+        )
     else:
-        built = _build_text_logger(logger, config_dict, effective_run_id, kind, redactor)
+        built = _build_text_logger(
+            logger, config_dict, effective_run_id, kind, redactor
+        )
 
     # Хендлеры вызывающего — ПОСЛЕ сборки: handlers.clear() выше стёр бы их.
     # Их мы запоминаем как ЧУЖИЕ: закрывать чужое хозяйство не наше дело.
@@ -311,7 +351,7 @@ def release_run_logger(logger: Any) -> None:
         return
     name = getattr(logger, "name", None)
     if not name or not str(name).startswith("agent_run_"):
-        return                       # не наш логгер — не наше дело
+        return  # не наш логгер — не наше дело
     foreign = _FOREIGN_HANDLERS.pop(name, set())
     for handler in list(getattr(logger, "handlers", ())):
         logger.removeHandler(handler)
@@ -325,14 +365,14 @@ def release_run_logger(logger: Any) -> None:
 
 
 __all__ = [
-    "create_run_logger",
-    "release_run_logger",
     "FlushFileHandler",
     "JsonlFormatter",
-    "RunContextFilter",
     "RedactingTextFormatter",
+    "RunContextFilter",
     "build_run_log_paths",
+    "create_run_logger",
     "generate_run_id",
-    "resolve_log_level",
     "human_console_enabled",
+    "release_run_logger",
+    "resolve_log_level",
 ]

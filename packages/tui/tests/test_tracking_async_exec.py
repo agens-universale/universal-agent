@@ -10,10 +10,10 @@
 подпроцесса не доходил, а `asyncio.run` хода на выходе ждёт
 `shutdown_default_executor`. После Esc поток жил до таймаута команды.
 """
+
 import asyncio
 
 import pytest
-
 from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
 from gc_tui.diff_tui.tracking import TrackingFsBackend
 

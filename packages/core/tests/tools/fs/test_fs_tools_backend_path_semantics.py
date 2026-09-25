@@ -12,10 +12,10 @@
 
 import json
 
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
-from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.tools.fs.find_files_by_name import FindFilesByName
+from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.tools.fs.list_files import ListFiles
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
 _FILES = {
     "/work/app.py": "needle here\n",
@@ -25,7 +25,9 @@ _FILES = {
 
 def _tool(cls, files=None):
     tool = cls.__new__(cls)
-    return bind_os_backend(tool, FakeBackend(files if files is not None else _FILES))
+    return bind_os_backend(
+        tool, FakeBackend(files if files is not None else _FILES)
+    )
 
 
 def _error_type(raw):
@@ -84,7 +86,9 @@ def test_refuse_breakdown_reports_backend_paths():
     tool = bind_os_backend(
         FindInFiles.__new__(FindInFiles),
         FakeBackend(files),
-        config_dict={"fs_tools": {"find_in_files": {"max_candidates_like": 1}}},
+        config_dict={
+            "fs_tools": {"find_in_files": {"max_candidates_like": 1}}
+        },
     )
     data = json.loads(tool(path="/work", pattern="needle", query_mode="text"))
 

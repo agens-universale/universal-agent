@@ -10,6 +10,7 @@
 - stored_tool_output envelope (gc-cli оборачивает большие outputs >20000 chars):
   inner JSON-string распаковываем; если truncated — generic partial-JSON parser.
 """
+
 from __future__ import annotations
 
 import json
@@ -63,10 +64,9 @@ def _try_parse_truncated_json(s: str) -> Any:
             continue
         if c in "{[":
             stack.append(c)
-        elif c == "}" and stack and stack[-1] == "{":
-            stack.pop()
-            last_value_end = i + 1
-        elif c == "]" and stack and stack[-1] == "[":
+        elif (c == "}" and stack and stack[-1] == "{") or (
+            c == "]" and stack and stack[-1] == "["
+        ):
             stack.pop()
             last_value_end = i + 1
 
@@ -94,15 +94,15 @@ def _try_parse_truncated_json(s: str) -> Any:
             continue
         if c in "{[":
             stack2.append(c)
-        elif c == "}" and stack2 and stack2[-1] == "{":
-            stack2.pop()
-        elif c == "]" and stack2 and stack2[-1] == "[":
+        elif (c == "}" and stack2 and stack2[-1] == "{") or (
+            c == "]" and stack2 and stack2[-1] == "["
+        ):
             stack2.pop()
 
     closing = "".join("]" if c == "[" else "}" for c in reversed(stack2))
     try:
         return json.loads(sub + closing)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
 
@@ -123,14 +123,14 @@ def unwrap_tool_output_dict(raw_output: str) -> Optional[dict]:
         return None
     try:
         parsed = json.loads(raw_output)
-    except (json.JSONDecodeError, ValueError):
+    except ValueError:
         return None
 
     # Двойная JSON-кодировка: некоторые pipeline'ы делают json.dumps дважды.
     if isinstance(parsed, str):
         try:
             parsed = json.loads(parsed)
-        except (json.JSONDecodeError, ValueError):
+        except ValueError:
             return None
 
     # List-обёртка: некоторые тулы возвращают [{ok, content, ...}].
@@ -148,7 +148,7 @@ def unwrap_tool_output_dict(raw_output: str) -> Optional[dict]:
                 inner = json.loads(inner_str)
                 if isinstance(inner, dict):
                     return inner
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 partial = _try_parse_truncated_json(inner_str)
                 if isinstance(partial, dict):
                     return partial

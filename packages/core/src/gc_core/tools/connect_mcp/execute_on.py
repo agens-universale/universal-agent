@@ -3,10 +3,14 @@
 The single place that knows the mapping. Neither client implementation is aware
 of the other, and no transport helper is aware of the locus.
 """
+
 import logging
 from typing import Any, Dict, Optional
 
-from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient, McpClientPort
+from gc_core.tools.connect_mcp.client_port import (
+    AgentRuntimeClient,
+    McpClientPort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +60,7 @@ def resolve_mcp_client(
     locus = str(cfg.get("execute_on") or "agent")
     if locus not in _LOCI:
         raise McpExecuteOnError(
-            f"MCP server '{server_name}': unknown execute_on {locus!r} "
-            f"(expected one of {', '.join(_LOCI)})"
+            f"MCP server '{server_name}': unknown execute_on {locus!r} (expected one of {', '.join(_LOCI)})"
         )
 
     if locus == "agent":
@@ -69,8 +72,7 @@ def resolve_mcp_client(
         # exec would buy nothing and only add a shell round-trip. Not an error:
         # one config is meant to work in both modes.
         logger.debug(
-            "MCP server '%s': execute_on=os_backend on a non-sandbox backend, "
-            "running in the agent runtime",
+            "MCP server '%s': execute_on=os_backend on a non-sandbox backend, running in the agent runtime",
             server_name,
         )
         return AgentRuntimeClient(server_name, cfg)
@@ -97,14 +99,16 @@ def resolve_mcp_client(
             f"execute_on: agent."
         )
 
-    from gc_core.tools.connect_mcp.os_backend_client import OsBackendStatelessClient
+    from gc_core.tools.connect_mcp.os_backend_client import (
+        OsBackendStatelessClient,
+    )
 
     return OsBackendStatelessClient(server_name, cfg, os_backend=os_backend)
 
 
 __all__ = [
-    "McpExecuteOnError",
     "OS_BACKEND_TRANSPORTS",
+    "McpExecuteOnError",
     "resolve_mcp_client",
     "runs_in_agent_runtime",
 ]

@@ -1,4 +1,5 @@
 """ConfirmScreen: title в border, цветной hint, message."""
+
 import pytest
 
 
@@ -7,12 +8,15 @@ async def test_confirm_title_in_border_and_content():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.confirm import ConfirmScreen
+
     async with TuiApp().run_test() as pilot:
-        pilot.app.push_screen(ConfirmScreen(
-            title="Новая задача",
-            message="Активная задача в процессе.",
-            hint="[Y] да, прервать   [N] нет, продолжить",
-        ))
+        pilot.app.push_screen(
+            ConfirmScreen(
+                title="Новая задача",
+                message="Активная задача в процессе.",
+                hint="[Y] да, прервать   [N] нет, продолжить",
+            )
+        )
         await pilot.pause()
         dlg = pilot.app.screen.query_one("#confirm-dialog")
         assert dlg.border_title == "Новая задача"
@@ -28,6 +32,7 @@ async def test_confirm_without_title_has_no_border_title():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.confirm import ConfirmScreen
+
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(ConfirmScreen(message="Удалить?"))
         await pilot.pause()
@@ -40,9 +45,12 @@ async def test_confirm_y_returns_true_n_returns_false():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.confirm import ConfirmScreen
+
     async with TuiApp().run_test() as pilot:
         results = []
-        pilot.app.push_screen(ConfirmScreen(message="ok?"), lambda v: results.append(v))
+        pilot.app.push_screen(
+            ConfirmScreen(message="ok?"), lambda v: results.append(v)
+        )
         await pilot.pause()
         await pilot.press("y")
         await pilot.pause()
@@ -55,6 +63,7 @@ async def test_confirm_default_selection_left_and_enter_confirms():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.confirm import ConfirmScreen
+
     async with TuiApp().run_test() as pilot:
         results = []
         scr = ConfirmScreen(message="ok?", hint="[Y] да  [N] нет")
@@ -72,6 +81,7 @@ async def test_confirm_right_arrow_then_enter_returns_false():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.confirm import ConfirmScreen
+
     async with TuiApp().run_test() as pilot:
         results = []
         scr = ConfirmScreen(message="ok?", hint="[Y] да  [N] нет")
@@ -91,6 +101,7 @@ async def test_confirm_left_arrow_clamps_at_zero():
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.confirm import ConfirmScreen
+
     async with TuiApp().run_test() as pilot:
         scr = ConfirmScreen(message="ok?", hint="[Y] да  [N] нет")
         pilot.app.push_screen(scr, lambda v: None)

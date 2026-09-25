@@ -16,6 +16,7 @@ CPU. Штатный выход Textual отсюда невозможен — о�
 - сигнал не дошёл (лидер сессии его игнорирует, обёртка не пробрасывает): раз в
   POLL_S проверяем, жив ли терминал, в который рисует Textual (stderr).
 """
+
 from __future__ import annotations
 
 import atexit
@@ -28,8 +29,8 @@ import threading
 import time
 from typing import Callable
 
-EXIT_CODE = 128 + 1           # как у процесса, убитого SIGHUP
-POLL_S = 1.0                  # период проверки терминала
+EXIT_CODE = 128 + 1  # как у процесса, убитого SIGHUP
+POLL_S = 1.0  # период проверки терминала
 # Уборка идёт шагами, и каждый ограничен graceful-таймаутом супервизора (5 с)
 # независимо от числа демонов: все MCP-демоны разом, затем голос. Параллельно
 # хуки atexit закрывают stdio-MCP-серверы (браузер) — до ~15 с на сессию. Бюджет
@@ -65,7 +66,10 @@ class TerminalGuard:
     """Сторож терминала: при его смерти — уборка и выход процесса."""
 
     def __init__(
-        self, cleanup: Callable[[], None], *, force_kill: Callable[[], None] | None = None
+        self,
+        cleanup: Callable[[], None],
+        *,
+        force_kill: Callable[[], None] | None = None,
     ) -> None:
         """`force_kill` — последний рубеж: если уборка не завершилась (на аварийном
         выходе — зависла, упала или не стартовала; на штатном — упала), он добивает
@@ -79,7 +83,9 @@ class TerminalGuard:
         self._wake_r = self._wake_w = -1
         self._previous_hup = None
         self._previous_wakeup = -1
-        self.trigger: str | None = None   # "signal" | "tty" — какой путь сработал
+        self.trigger: str | None = (
+            None  # "signal" | "tty" — какой путь сработал
+        )
 
     def install(self) -> None:
         """Поставить сторожа — из главного потока. На Windows нет ни SIGHUP, ни
@@ -93,12 +99,17 @@ class TerminalGuard:
         # Унаследованный SIG_IGN (nohup) перекрываем осознанно: TUI без терминала
         # бесполезен.
         self._previous_hup = signal.signal(signal.SIGHUP, lambda *_: None)
-        self._previous_wakeup = signal.set_wakeup_fd(self._wake_w, warn_on_full_buffer=False)
+        self._previous_wakeup = signal.set_wakeup_fd(
+            self._wake_w, warn_on_full_buffer=False
+        )
         # Опрос — терминала вывода (stderr: туда рисует Textual, и зависание
         # начинается с записи в него), и только если он был терминалом на старте:
         # пайпы, run_test и headless сторож не трогает.
         self._watcher = threading.Thread(
-            target=self._watch, args=(os.isatty(2),), name="gc-terminal-guard", daemon=True,
+            target=self._watch,
+            args=(os.isatty(2),),
+            name="gc-terminal-guard",
+            daemon=True,
         )
         self._watcher.start()
 
@@ -181,7 +192,7 @@ class TerminalGuard:
         try:
             os.write(self._wake_w, b"\0")
         except BlockingIOError:
-            pass   # канал полон — значит, сторожу и так есть что читать, он проснётся
+            pass  # канал полон — значит, сторожу и так есть что читать, он проснётся
         self._watcher.join()
         self._watcher = None
         try:
@@ -189,7 +200,9 @@ class TerminalGuard:
         finally:
             signal.signal(
                 signal.SIGHUP,
-                signal.SIG_DFL if self._previous_hup is None else self._previous_hup,
+                signal.SIG_DFL
+                if self._previous_hup is None
+                else self._previous_hup,
             )
             signal.set_wakeup_fd(self._previous_wakeup)
             os.close(self._wake_r)

@@ -77,7 +77,9 @@ def _coerce_pricing(raw: Any) -> PricingConfig:
 coerce_pricing = _coerce_pricing
 
 
-def pricing_from_config_dict(config_dict: dict[str, Any] | None) -> PricingConfig:
+def pricing_from_config_dict(
+    config_dict: dict[str, Any] | None,
+) -> PricingConfig:
     """Достать ``PricingConfig`` из плоского config_dict (ключ ``pricing``)."""
     cfg = config_dict if isinstance(config_dict, dict) else {}
     return _coerce_pricing(cfg.get("pricing"))
@@ -124,7 +126,11 @@ def resolve_model_tariff(
         # и верхнеуровневого cache_read, если в модели он не задан).
         inp = float(tariff.input)
         out = float(tariff.output)
-        cache = tariff.cache_read if tariff.cache_read is not None else pricing.cache_read
+        cache = (
+            tariff.cache_read
+            if tariff.cache_read is not None
+            else pricing.cache_read
+        )
         if tariff.currency is not None:
             currency = tariff.currency
         if tariff.per_tokens is not None:

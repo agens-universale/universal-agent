@@ -1,4 +1,10 @@
-from gc_core.config_modules.pricing import DEFAULT_CURRENCY, DEFAULT_PER_TOKENS, PricingConfig, pricing_from_config_dict, resolve_model_tariff
+from gc_core.config_modules.pricing import (
+    DEFAULT_CURRENCY,
+    DEFAULT_PER_TOKENS,
+    PricingConfig,
+    pricing_from_config_dict,
+    resolve_model_tariff,
+)
 
 
 def _pricing(**kw) -> dict:
@@ -42,7 +48,10 @@ def test_resolve_per_model_override():
 
 
 def test_resolve_disabled_returns_none():
-    assert resolve_model_tariff(_pricing(enabled=False), "MiniMaxAI/MiniMax-M2.7") is None
+    assert (
+        resolve_model_tariff(_pricing(enabled=False), "MiniMaxAI/MiniMax-M2.7")
+        is None
+    )
 
 
 def test_resolve_missing_model_returns_none():
@@ -129,15 +138,25 @@ def test_pricing_from_config_dict_defaults():
 
 def test_zero_rates_mean_not_configured():
     # config.default.yml идёт с нулями — это «ставки не заданы», а не «бесплатно».
-    pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
-               "input": 0, "output": 0}
+    pricing = {
+        "enabled": True,
+        "currency": "₽",
+        "per_tokens": 1_000_000,
+        "input": 0,
+        "output": 0,
+    }
     assert resolve_model_tariff(pricing, "any/model") is None
 
 
 def test_single_zero_rate_is_valid():
     # Ноль в одной из двух ставок осмыслен (например, бесплатный вход).
-    pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
-               "input": 0, "output": 5}
+    pricing = {
+        "enabled": True,
+        "currency": "₽",
+        "per_tokens": 1_000_000,
+        "input": 0,
+        "output": 5,
+    }
     t = resolve_model_tariff(pricing, "any/model")
     assert t is not None
     assert t.input == 0
@@ -145,16 +164,27 @@ def test_single_zero_rate_is_valid():
 
 
 def test_zero_model_entry_falls_back_to_toplevel():
-    pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
-               "input": 59, "output": 118,
-               "models": {"m": {"input": 0, "output": 0}}}
+    pricing = {
+        "enabled": True,
+        "currency": "₽",
+        "per_tokens": 1_000_000,
+        "input": 59,
+        "output": 118,
+        "models": {"m": {"input": 0, "output": 0}},
+    }
     t = resolve_model_tariff(pricing, "m")
     assert t is not None
     assert (t.input, t.output) == (59, 118)
 
 
 def test_zero_cache_read_is_a_valid_rate():
-    pricing = {"enabled": True, "currency": "₽", "per_tokens": 1_000_000,
-               "input": 59, "output": 118, "cache_read": 0}
+    pricing = {
+        "enabled": True,
+        "currency": "₽",
+        "per_tokens": 1_000_000,
+        "input": 59,
+        "output": 118,
+        "cache_read": 0,
+    }
     t = resolve_model_tariff(pricing, "any/model")
     assert t.cache_read == 0

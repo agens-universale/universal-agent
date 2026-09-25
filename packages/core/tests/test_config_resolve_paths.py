@@ -1,8 +1,6 @@
-import sys
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars, project_slug
 from gc_core.config_modules.root import AppConfig, resolve_paths
@@ -21,6 +19,7 @@ def isolated_env(monkeypatch, tmp_path):
 def test_default_config_path_is_normalized():
     """Дефолтный bundled-конфиг без '..' — путь показывается пользователю в /config."""
     from gc_core.config import _default_config_path
+
     p = _default_config_path()
     assert ".." not in p
     assert p.endswith("config.default.yml")
@@ -36,7 +35,9 @@ def test_resolve_paths_threads_default_under_state_projects_slug(
     assert threads_path == tmp_path / "projects" / project_slug() / "threads"
 
 
-def test_resolve_paths_logs_default_under_state_projects_slug(isolated_env, tmp_path):
+def test_resolve_paths_logs_default_under_state_projects_slug(
+    isolated_env, tmp_path
+):
     cfg = AppConfig()
     resolve_paths(cfg, str(tmp_path))
     logs_path = Path(cfg.paths.logs_dump_dir)
@@ -57,7 +58,9 @@ def test_explicit_logs_absolute_used_as_is(isolated_env, tmp_path):
     assert Path(cfg.paths.logs_dump_dir) == explicit
 
 
-def test_explicit_threads_relative_resolves_from_config_dir(isolated_env, tmp_path):
+def test_explicit_threads_relative_resolves_from_config_dir(
+    isolated_env, tmp_path
+):
     config_dir = tmp_path / "cfg"
     config_dir.mkdir()
     cfg = AppConfig(paths={"threads_data_path": "rel/threads"})

@@ -72,7 +72,7 @@ def _multiline_suggestions(
 
     scored: list[tuple[float, int, str]] = []
     window_size = len(search_lines)
-    for start_idx in range(0, len(limited_lines) - window_size + 1):
+    for start_idx in range(len(limited_lines) - window_size + 1):
         window_lines = limited_lines[start_idx : start_idx + window_size]
         normalized_window = "\n".join(
             _normalize_spaces(line).lower().strip() for line in window_lines

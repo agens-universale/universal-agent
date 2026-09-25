@@ -13,6 +13,7 @@
 Сервер здесь настоящий процесс, дискавери — настоящая: свойство «сервер
 закрыт» проверяется по его смерти, а не по вызову подменённого закрытия.
 """
+
 import asyncio
 import logging
 import os
@@ -22,11 +23,11 @@ import time
 import uuid
 
 import pytest
-
 from gc_core import run_context
 
 pytestmark = pytest.mark.skipif(
-    os.name != "posix", reason="жизнь процесса проверяется через kill(pid, 0) — POSIX"
+    os.name != "posix",
+    reason="жизнь процесса проверяется через kill(pid, 0) — POSIX",
 )
 
 _SERVER_NAME = "leaky"
@@ -34,7 +35,7 @@ _SERVER_NAME = "leaky"
 #: MCP-сервер-двойник. Сообщает свой pid и то, что у него спросили список
 #: тулов; с ``GC_TEST_HANG_ON_LIST=1`` на этот вопрос не отвечает — дискавери
 #: висит, пока её не снимут.
-_SERVER = r'''
+_SERVER = r"""
 import json, os, sys
 
 with open(os.environ["GC_TEST_PID_FILE"], "w") as f:
@@ -59,7 +60,7 @@ for line in sys.stdin:
         result = {}
     sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": result}) + "\n")
     sys.stdout.flush()
-'''
+"""
 
 
 def _config(tmp_path, *, hang: bool) -> dict:
@@ -117,7 +118,9 @@ def _registry():
     ``gc_core.tools.*`` из ``sys.modules``, и копия, взятая при импорте
     модуля, могла бы оказаться не той, в которую дискавери положила сессию.
     """
-    from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+    from gc_core.tools.connect_mcp.persistent_stdio import (
+        PersistentStdioRegistry,
+    )
 
     return PersistentStdioRegistry.instance()
 
@@ -149,7 +152,9 @@ async def _until(path, timeout: float = 15.0) -> None:
     deadline = time.monotonic() + timeout
     while not path.exists():
         if time.monotonic() >= deadline:
-            raise AssertionError(f"не дождались {path.name}: дискавери не дошла до сервера")
+            raise AssertionError(
+                f"не дождались {path.name}: дискавери не дошла до сервера"
+            )
         await asyncio.sleep(0.02)
 
 
@@ -178,7 +183,9 @@ async def _cleanup(tmp_path) -> None:
 
 
 def _assert_logger_released(made: list) -> None:
-    assert len(made) == 1, f"проверка пустая: сборка создала логгеров — {len(made)}"
+    assert len(made) == 1, (
+        f"проверка пустая: сборка создала логгеров — {len(made)}"
+    )
     logger, handlers = made[0]
     files = [h for h in handlers if isinstance(h, logging.FileHandler)]
     assert files, "проверка пустая: у логгера прогона нет файла"
@@ -190,7 +197,9 @@ def _assert_logger_released(made: list) -> None:
     )
 
 
-async def test_a_cancelled_discovery_leaves_neither_logger_nor_server(tmp_path, run_loggers):
+async def test_a_cancelled_discovery_leaves_neither_logger_nor_server(
+    tmp_path, run_loggers
+):
     """Отмена посреди дискавери: логгер отдан, сервер владельца закрыт.
 
     Самый жизненный путь утечки: сборку снимают (стоп пользователя, дедлайн
@@ -198,10 +207,12 @@ async def test_a_cancelled_discovery_leaves_neither_logger_nor_server(tmp_path, 
     уже поднят под токеном владельца контекста, которого не будет.
     """
     building = asyncio.create_task(
-        run_context.acreate_run_context(_config(tmp_path, hang=True), run_id=_run_id())
+        run_context.acreate_run_context(
+            _config(tmp_path, hang=True), run_id=_run_id()
+        )
     )
     try:
-        await _until(tmp_path / "asked")          # дискавери ждёт ответа сервера
+        await _until(tmp_path / "asked")  # дискавери ждёт ответа сервера
         pid = int((tmp_path / "server.pid").read_text())
         building.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -210,7 +221,9 @@ async def test_a_cancelled_discovery_leaves_neither_logger_nor_server(tmp_path, 
         assert _gone_within(pid, 2.0), (
             "сервер, поднятый дискавери, пережил отменённую сборку контекста"
         )
-        assert _sessions_left() == [], "сессия несостоявшегося контекста осталась в реестре"
+        assert _sessions_left() == [], (
+            "сессия несостоявшегося контекста осталась в реестре"
+        )
         _assert_logger_released(run_loggers)
     finally:
         if not building.done():
@@ -236,8 +249,11 @@ async def test_a_failed_build_leaves_neither_logger_nor_server(
             await real(*args, **kwargs)
             raise RuntimeError("сборка тулов упала после дискавери")
 
-        monkeypatch.setattr(run_context, "abuild_tools_data", _discover_then_fail)
+        monkeypatch.setattr(
+            run_context, "abuild_tools_data", _discover_then_fail
+        )
     else:
+
         def _finish_fails(*args, **kwargs):
             raise RuntimeError("досборка контекста упала")
 
@@ -249,12 +265,16 @@ async def test_a_failed_build_leaves_neither_logger_nor_server(
                 _config(tmp_path, hang=False), run_id=_run_id()
             )
 
-        assert (tmp_path / "asked").exists(), "проверка пустая: дискавери до сервера не дошла"
+        assert (tmp_path / "asked").exists(), (
+            "проверка пустая: дискавери до сервера не дошла"
+        )
         pid = int((tmp_path / "server.pid").read_text())
         assert _gone_within(pid, 2.0), (
             "сервер, поднятый дискавери, пережил упавшую сборку контекста"
         )
-        assert _sessions_left() == [], "сессия несостоявшегося контекста осталась в реестре"
+        assert _sessions_left() == [], (
+            "сессия несостоявшегося контекста осталась в реестре"
+        )
         _assert_logger_released(run_loggers)
     finally:
         await _cleanup(tmp_path)

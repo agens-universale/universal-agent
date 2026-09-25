@@ -1,6 +1,9 @@
 """Префильтр по needle: исход не молчит — (paths, None) при успехе, (None, причина) при отказе."""
 
-from gc_core.utils.native_fs_search import PREFILTER_TIMEOUT_SEC, anative_prefilter_candidates
+from gc_core.utils.native_fs_search import (
+    PREFILTER_TIMEOUT_SEC,
+    anative_prefilter_candidates,
+)
 
 
 class _Res:
@@ -54,11 +57,17 @@ async def test_timeout_is_named():
 
 
 async def test_capped_listing_is_named():
-    assert await _run(_Backend(_Res("/work/a.py\n", capped=True))) == (None, "capped")
+    assert await _run(_Backend(_Res("/work/a.py\n", capped=True))) == (
+        None,
+        "capped",
+    )
 
 
 async def test_exec_error_and_bad_exit_are_named():
-    assert await _run(_Backend(raise_exc=RuntimeError("boom"))) == (None, "failed")
+    assert await _run(_Backend(raise_exc=RuntimeError("boom"))) == (
+        None,
+        "failed",
+    )
     assert await _run(_Backend(_Res(rc=2))) == (None, "failed")
 
 

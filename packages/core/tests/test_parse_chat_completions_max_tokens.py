@@ -19,11 +19,18 @@ class ParseChatCompletionsMaxTokensTest(unittest.TestCase):
 
     def test_invalid_falls_back(self):
         self.assertEqual(
-            parse_chat_completions_max_tokens("not-a-number", default=8096), 8096
+            parse_chat_completions_max_tokens("not-a-number", default=8096),
+            8096,
         )
-        self.assertEqual(parse_chat_completions_max_tokens(True, default=8096), 8096)
-        self.assertEqual(parse_chat_completions_max_tokens(0, default=8096), 8096)
-        self.assertEqual(parse_chat_completions_max_tokens(-3, default=8096), 8096)
+        self.assertEqual(
+            parse_chat_completions_max_tokens(True, default=8096), 8096
+        )
+        self.assertEqual(
+            parse_chat_completions_max_tokens(0, default=8096), 8096
+        )
+        self.assertEqual(
+            parse_chat_completions_max_tokens(-3, default=8096), 8096
+        )
 
 
 if __name__ == "__main__":

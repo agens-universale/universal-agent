@@ -1,15 +1,16 @@
 import importlib
+import json
 import logging
 import os
 import sys
 import tempfile
 import types
 import unittest
-import json
 from collections import deque
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
 from gc_testkit.paths import module_dir
 
 
@@ -45,7 +46,9 @@ def setup_module(_module) -> None:
     from gc_core import processing_responses as pr
 
     pr.aapply_tool = tools_pkg.aapply_tool
-    pr.WrongFunctionArgumentsException = tools_pkg.WrongFunctionArgumentsException
+    pr.WrongFunctionArgumentsException = (
+        tools_pkg.WrongFunctionArgumentsException
+    )
 
     for mod in ("gc_core.agent_executor", "gc_core.run_summary_coordinator"):
         sys.modules.pop(mod, None)
@@ -75,7 +78,9 @@ def _stub_tools_modules() -> None:
 
     tools_pkg.aapply_tool = _apply_tool
     tools_pkg.abuild_tools_data = _build_tools_data
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.WrongFunctionArgumentsException = (
+        _WrongFunctionArgumentsException
+    )
     tools_dir = module_dir("tools")
     # `processing_responses` импортирует эти имена на уровне модуля. Без них
     # подмена пакета даёт ImportError, и файл падает целиком — но только
@@ -94,7 +99,9 @@ def _stub_tools_modules() -> None:
     sys.modules["gc_core.tools.skills"] = skills_pkg
 
     registry_mod = types.ModuleType("gc_core.tools.skills.registry")
-    registry_mod.get_skills_registry = lambda _cfg, **_kw: _SkillsRegistryStub()
+    registry_mod.get_skills_registry = lambda _cfg, **_kw: (
+        _SkillsRegistryStub()
+    )
     # `run_context` импортирует и сам класс — без него подмена даёт ImportError.
     registry_mod.SkillsRegistry = _SkillsRegistryStub
     sys.modules["gc_core.tools.skills.registry"] = registry_mod
@@ -108,8 +115,12 @@ class _SkillsRegistryStub:
 class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
     # Корутинные тесты: `unittest.TestCase` их не запускает — метод
     # просто возвращает корутину, и проверка молча не выполняется.
-    async def _make_ctx(self, tmp_dir: str, backend_api_mode: str) -> SimpleNamespace:
-        prompt_path = os.path.join(tmp_dir, "chat_completions_system_prompt.md")
+    async def _make_ctx(
+        self, tmp_dir: str, backend_api_mode: str
+    ) -> SimpleNamespace:
+        prompt_path = os.path.join(
+            tmp_dir, "chat_completions_system_prompt.md"
+        )
         with open(prompt_path, "w", encoding="utf-8") as fd:
             fd.write("SYSTEM PROMPT")
         return SimpleNamespace(
@@ -148,9 +159,13 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
             skills_registry=_SkillsRegistryStub(),
         )
 
-    async def test_chat_completions_calls_pre_run_and_pre_backend_summary(self):
+    async def test_chat_completions_calls_pre_run_and_pre_backend_summary(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(
+                tmp_dir, backend_api_mode="chat_completions"
+            )
             call_order: list[str] = []
             truth = deque([True, False, True])
 
@@ -184,28 +199,40 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 )
                 st.messages = [sys_m] if sys_m else []
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "exceeded_summary_triggers",
-                side_effect=_hist_exceeds,
-            ), patch.object(
-                run_summary_coordinator_module,
-                "arun_summary_compaction",
-                side_effect=_record_summary_call,
+            with (
+                patch.object(
+                    agent_executor_module,
+                    "arun_agent",
+                    side_effect=_fake_run_agent,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "exceeded_summary_triggers",
+                    side_effect=_hist_exceeds,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "arun_summary_compaction",
+                    side_effect=_record_summary_call,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
+                result = await executor.arun(
+                    ["hello"], thread_id="thr1", system="cli", verbose=False
+                )
                 self.assertEqual(result, "ok")
 
             self.assertEqual(call_order[0], "summary:pre_run")
             self.assertIn("run_agent", call_order)
             self.assertIn("summary:pre_backend", call_order)
 
-    async def test_chat_completions_in_memory_calls_pre_run_and_pre_backend_summary(self):
+    async def test_chat_completions_in_memory_calls_pre_run_and_pre_backend_summary(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(
+                tmp_dir, backend_api_mode="chat_completions"
+            )
             calls: list[str] = []
             truth = deque([True, False, True])
 
@@ -236,19 +263,27 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 )
                 st.messages = [sys_m] if sys_m else []
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "exceeded_summary_triggers",
-                side_effect=_hist_exceeds,
-            ), patch.object(
-                run_summary_coordinator_module,
-                "arun_summary_compaction",
-                side_effect=_record,
+            with (
+                patch.object(
+                    agent_executor_module,
+                    "arun_agent",
+                    side_effect=_fake_run_agent,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "exceeded_summary_triggers",
+                    side_effect=_hist_exceeds,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "arun_summary_compaction",
+                    side_effect=_record,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = await executor.arun(["hello"], system="cli", verbose=False)
+                result = await executor.arun(
+                    ["hello"], system="cli", verbose=False
+                )
                 self.assertEqual(result, "ok")
 
             self.assertEqual(calls, ["pre_run", "pre_backend"])
@@ -257,13 +292,18 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as tmp_dir:
             ctx = await self._make_ctx(tmp_dir, backend_api_mode="responses")
 
-            with patch.object(
-                agent_executor_module, "arun_agent", return_value="ok"
-            ), patch.object(
-                run_summary_coordinator_module, "arun_summary_compaction"
-            ) as compaction_mock:
+            with (
+                patch.object(
+                    agent_executor_module, "arun_agent", return_value="ok"
+                ),
+                patch.object(
+                    run_summary_coordinator_module, "arun_summary_compaction"
+                ) as compaction_mock,
+            ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = await executor.arun(["hello"], thread_id="thr1", system="cli", verbose=False)
+                result = await executor.arun(
+                    ["hello"], thread_id="thr1", system="cli", verbose=False
+                )
                 self.assertEqual(result, "ok")
 
             compaction_mock.assert_not_called()
@@ -271,22 +311,31 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
     async def test_chat_completions_passes_pre_backend_hook_to_run_agent(self):
         """Wiring: chat/completions должен передавать pre_backend_compaction_hook в run_agent (spec Step 0)."""
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(
+                tmp_dir, backend_api_mode="chat_completions"
+            )
             captured: dict = {}
 
             async def _fake_run_agent(messages, state, _ctx, **kwargs):
                 captured.update(kwargs)
                 return "ok"
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "exceeded_summary_triggers",
-                return_value=False,
+            with (
+                patch.object(
+                    agent_executor_module,
+                    "arun_agent",
+                    side_effect=_fake_run_agent,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "exceeded_summary_triggers",
+                    return_value=False,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
-                result = await executor.arun(["hello"], system="cli", verbose=False)
+                result = await executor.arun(
+                    ["hello"], system="cli", verbose=False
+                )
                 self.assertEqual(result, "ok")
 
             hook = captured.get("pre_backend_compaction_hook")
@@ -296,15 +345,27 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
 
     async def test_thread_history_not_readded_into_current_user_intent(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
-            ctx = await self._make_ctx(tmp_dir, backend_api_mode="chat_completions")
+            ctx = await self._make_ctx(
+                tmp_dir, backend_api_mode="chat_completions"
+            )
             thread_id = "thr_hist"
             data_path = os.path.join(tmp_dir, f"data_cli_{thread_id}.jsonl")
             meta_path = os.path.join(tmp_dir, f"meta_cli_{thread_id}.json")
 
-            old_user_1 = {"role": "user", "content": "старый вопрос 1", "id": "m_old_1"}
-            old_user_2 = {"role": "user", "content": "старый вопрос 2", "id": "m_old_2"}
+            old_user_1 = {
+                "role": "user",
+                "content": "старый вопрос 1",
+                "id": "m_old_1",
+            }
+            old_user_2 = {
+                "role": "user",
+                "content": "старый вопрос 2",
+                "id": "m_old_2",
+            }
             with open(data_path, "w", encoding="utf-8") as fd:
-                for idx, payload in enumerate([old_user_1, old_user_2], start=1):
+                for idx, payload in enumerate(
+                    [old_user_1, old_user_2], start=1
+                ):
                     fd.write(
                         json.dumps(
                             {
@@ -331,7 +392,10 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                         "backend_api_mode": "chat_completions",
                         "previous_response_id": None,
                         "state_schema_version": "v2",
-                        "user_intent_log": ["старый вопрос 1", "старый вопрос 2"],
+                        "user_intent_log": [
+                            "старый вопрос 1",
+                            "старый вопрос 2",
+                        ],
                         "current_user_intent": [],
                     },
                     fd,
@@ -353,12 +417,17 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                     await await_callback(persist_cb(messages))
                 return "ok"
 
-            with patch.object(
-                agent_executor_module, "arun_agent", side_effect=_fake_run_agent
-            ), patch.object(
-                run_summary_coordinator_module,
-                "exceeded_summary_triggers",
-                return_value=False,
+            with (
+                patch.object(
+                    agent_executor_module,
+                    "arun_agent",
+                    side_effect=_fake_run_agent,
+                ),
+                patch.object(
+                    run_summary_coordinator_module,
+                    "exceeded_summary_triggers",
+                    return_value=False,
+                ),
             ):
                 executor = agent_executor_module.AgentExecutor(ctx)
                 result = await executor.arun(
@@ -369,10 +438,10 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 )
                 self.assertEqual(result, "ok")
 
-            from gc_testkit.intent_fixtures import intent_user_ask_texts
             from gc_core.intent_log import deserialize_list
+            from gc_testkit.intent_fixtures import intent_user_ask_texts
 
-            with open(meta_path, "r", encoding="utf-8") as fd:
+            with open(meta_path, encoding="utf-8") as fd:
                 saved_meta = json.load(fd)
             self.assertEqual(
                 intent_user_ask_texts(

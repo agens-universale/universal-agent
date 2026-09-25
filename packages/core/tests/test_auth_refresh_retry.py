@@ -1,10 +1,10 @@
 """_request_backend_canonical: на 401 (истёкший токен) пере-выпускает токен и
 повторяет запрос ровно один раз; прочие ошибки — наверх без ретрая."""
+
 import types
 
-import pytest
 import httpx
-
+import pytest
 from gc_core import processing_responses as pr
 from gc_testkit import run_coro
 
@@ -20,14 +20,18 @@ class _FakeAuth:
 
 
 def _ctx(auth):
-    return types.SimpleNamespace(config_dict={}, auth_connector=auth, logger=None)
+    return types.SimpleNamespace(
+        config_dict={}, auth_connector=auth, logger=None
+    )
 
 
 def _http_401():
     """401 в форме httpx: requests ушёл из зависимостей ядра."""
     request = httpx.Request("POST", "http://backend.invalid/v1")
     resp = httpx.Response(401, request=request)
-    return httpx.HTTPStatusError("unauthorized", request=request, response=resp)
+    return httpx.HTTPStatusError(
+        "unauthorized", request=request, response=resp
+    )
 
 
 def test_retry_once_on_401_refreshes_and_succeeds(monkeypatch):
@@ -71,7 +75,9 @@ def test_second_401_after_refresh_propagates(monkeypatch):
     monkeypatch.setattr(pr, "_arequest_backend_canonical_once", _once)
     with pytest.raises(httpx.HTTPStatusError):
         run_coro(pr._arequest_backend_canonical([], object(), _ctx(auth)))
-    assert calls["n"] == 2 and auth.force_calls == 1  # ровно 1 refresh, потом наверх
+    assert (
+        calls["n"] == 2 and auth.force_calls == 1
+    )  # ровно 1 refresh, потом наверх
 
 
 def test_no_auth_connector_no_retry(monkeypatch):

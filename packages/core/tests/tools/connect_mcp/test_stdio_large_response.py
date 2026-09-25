@@ -13,15 +13,15 @@ found, and chunk exceed the limit``, теряя буфер. Транспорт �
 Сервер здесь настоящий (отдельный процесс на stdin/stdout), а не подмена:
 дефект живёт ровно в чтении трубы, и мок его бы не показал.
 """
+
 import json
 import sys
 
 import pytest
-
 from gc_core.tools.connect_mcp import transport
 
 # Одной строкой, длиннее 64 КиБ: столько инструментов и отдаёт болтливый сервер.
-_SERVER = r'''
+_SERVER = r"""
 import json, sys
 
 for line in sys.stdin:
@@ -46,14 +46,18 @@ for line in sys.stdin:
         body = {"content": [{"type": "text", "text": "ok"}]}
     sys.stdout.write(json.dumps({"jsonrpc": "2.0", "id": rid, "result": body}) + "\n")
     sys.stdout.flush()
-'''
+"""
 
 
 @pytest.fixture
 def big_server_cfg(tmp_path):
     script = tmp_path / "big_stdio_server.py"
     script.write_text(_SERVER, encoding="utf-8")
-    return {"transport": "stdio", "command": sys.executable, "args": [str(script)]}
+    return {
+        "transport": "stdio",
+        "command": sys.executable,
+        "args": [str(script)],
+    }
 
 
 def test_the_response_really_is_over_the_default_limit(big_server_cfg):
@@ -63,8 +67,11 @@ def test_the_response_really_is_over_the_default_limit(big_server_cfg):
     и тест станет зелёным при вернувшемся дефекте, ничего не сказав.
     """
     tools = [
-        {"name": f"tool_{i:04d}", "description": "x" * 120,
-         "inputSchema": {"type": "object", "properties": {}}}
+        {
+            "name": f"tool_{i:04d}",
+            "description": "x" * 120,
+            "inputSchema": {"type": "object", "properties": {}},
+        }
         for i in range(600)
     ]
     line = json.dumps({"jsonrpc": "2.0", "id": 1, "result": {"tools": tools}})
@@ -81,7 +88,9 @@ async def test_tools_list_longer_than_64k_is_read(big_server_cfg):
     _, body = await arequest("", {}, dict(_LIST_CALL), 30.0)
 
     tools = (body.get("result") or {}).get("tools") or []
-    assert len(tools) == 600, f"прочитано {len(tools)} инструментов: {str(body)[:200]}"
+    assert len(tools) == 600, (
+        f"прочитано {len(tools)} инструментов: {str(body)[:200]}"
+    )
 
 
 def test_no_sync_exchange_remains():

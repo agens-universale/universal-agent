@@ -17,18 +17,17 @@ SIGTERM/SIGKILL. То есть ломалось ровно то, ради чег
 не видит — поэтому здесь отдельный файл с сервером, который на close-тул
 ОТВЕЧАЕТ.
 """
-import asyncio
+
 import json
 import sys
 import time
 
 import pytest
-
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 
 #: Отвечает на всё мгновенно и по id — как настоящий сервер. Ответ на
 #: close-тул помечает, чтобы отличить «прочитали» от «дождались таймаута».
-_RESPONSIVE = r'''
+_RESPONSIVE = r"""
 import json, sys
 
 for line in sys.stdin:
@@ -48,7 +47,7 @@ for line in sys.stdin:
         "result": {"content": [{"type": "text", "text": f"done:{name}"}]},
     }) + "\n")
     sys.stdout.flush()
-'''
+"""
 
 #: Заведомо меньше десятисекундного таймаута close-тула и заведомо больше
 #: любого честного обмена по трубе на живой машине.
@@ -83,12 +82,13 @@ def test_sync_close_with_close_tool_does_not_wait_out_the_timeout(session_cfg):
     spent = time.perf_counter() - started
 
     assert spent < _BUDGET_SEC, (
-        f"закрытие заняло {spent:.2f}с — ответ close-тула снова уходит "
-        f"дублирующему читателю, и мы ждём полный таймаут"
+        f"закрытие заняло {spent:.2f}с — ответ close-тула снова уходит дублирующему читателю, и мы ждём полный таймаут"
     )
 
 
-async def test_async_close_with_close_tool_does_not_wait_out_the_timeout(session_cfg):
+async def test_async_close_with_close_tool_does_not_wait_out_the_timeout(
+    session_cfg,
+):
     """То же для асинхронного входа — его и зовёт `arun` в своём finally."""
     session = _started(session_cfg)
 
@@ -120,7 +120,8 @@ def test_close_tool_answer_is_actually_read(session_cfg, monkeypatch):
     session.close()
 
     answered = [
-        b for b in seen.values()
+        b
+        for b in seen.values()
         if "browser_close_all" in json.dumps(b, ensure_ascii=False)
     ]
     assert answered, f"ответ close-тула не прочитан, видели: {seen}"

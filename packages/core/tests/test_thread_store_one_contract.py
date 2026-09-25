@@ -11,8 +11,8 @@
 протокола НЕ закрыло утиный путь: диспетчер по-прежнему смотрит на имена, а не
 на наследование.
 """
-import pytest
 
+import pytest
 from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_base import (
     ASYNC_CONTRACT_METHODS,
@@ -27,7 +27,9 @@ def test_the_contract_is_derived_from_the_abc():
     assert set(CONTRACT_METHODS) == set(ThreadStoreBase.__abstractmethods__), (
         "список методов разошёлся с ABC — значит его снова написали руками"
     )
-    assert len(CONTRACT_METHODS) == len(set(CONTRACT_METHODS)), "дубликаты в списке"
+    assert len(CONTRACT_METHODS) == len(set(CONTRACT_METHODS)), (
+        "дубликаты в списке"
+    )
     assert CONTRACT_METHODS, "контракт пуст — вывод сломался"
 
 
@@ -39,7 +41,8 @@ def test_the_order_is_the_declaration_order():
     мешает сравнивать два прогона глазами.
     """
     declared = [
-        name for name, attr in ThreadStoreBase.__dict__.items()
+        name
+        for name, attr in ThreadStoreBase.__dict__.items()
         if getattr(attr, "__isabstractmethod__", False)
     ]
     assert list(CONTRACT_METHODS) == declared
@@ -47,8 +50,12 @@ def test_the_order_is_the_declaration_order():
 
 def test_the_async_side_mirrors_the_sync_one():
     """Асинхронный контракт — те же имена с приставкой ``a``, без исключений."""
-    assert set(ASYNC_CONTRACT_METHODS) == {f"a{name}" for name in CONTRACT_METHODS}
-    assert set(ASYNC_CONTRACT_METHODS) == set(AsyncThreadStoreBase.__abstractmethods__)
+    assert set(ASYNC_CONTRACT_METHODS) == {
+        f"a{name}" for name in CONTRACT_METHODS
+    }
+    assert set(ASYNC_CONTRACT_METHODS) == set(
+        AsyncThreadStoreBase.__abstractmethods__
+    )
 
 
 def test_the_protocol_is_gone():
@@ -81,7 +88,9 @@ def test_removing_the_protocol_did_not_close_the_duck_path():
             return getattr(inner, name)
 
     proxy = _Proxy()
-    assert not isinstance(proxy, ThreadStoreBase), "проверка пустая: прокси наследует"
+    assert not isinstance(proxy, ThreadStoreBase), (
+        "проверка пустая: прокси наследует"
+    )
 
     assert athread_store(proxy) is not None, (
         "утиное хранилище перестало приниматься — ABC стал гейтом"
@@ -108,7 +117,10 @@ def test_a_store_missing_one_method_is_still_refused():
 
 # --- дрейф умолчаний: два драйвера над одним порядком ввода-вывода ----------
 
-def _io_sequences_of_bases() -> "tuple[dict[str, list[str]], dict[str, list[str]]]":
+
+def _io_sequences_of_bases() -> (
+    "tuple[dict[str, list[str]], dict[str, list[str]]]"
+):
     """Последовательность обращений к хранилищу у каждого умолчания — по AST.
 
     Читается ИСХОДНИК, а не объекты: сравнивать надо именно порядок операций в
@@ -131,11 +143,15 @@ def _io_sequences_of_bases() -> "tuple[dict[str, list[str]], dict[str, list[str]
 
     def methods(class_name):
         cls = next(
-            n for n in tree.body
+            n
+            for n in tree.body
             if isinstance(n, ast.ClassDef) and n.name == class_name
         )
-        return [m for m in cls.body
-                if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        return [
+            m
+            for m in cls.body
+            if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+        ]
 
     sync_methods = methods("ThreadStoreBase")
     sync_names = {m.name for m in sync_methods}
@@ -155,9 +171,11 @@ def _io_sequences_of_bases() -> "tuple[dict[str, list[str]], dict[str, list[str]
                 if not isinstance(node, ast.Call):
                     continue
                 fn = node.func
-                if not (isinstance(fn, ast.Attribute)
-                        and isinstance(fn.value, ast.Name)
-                        and fn.value.id == "self"):
+                if not (
+                    isinstance(fn, ast.Attribute)
+                    and isinstance(fn.value, ast.Name)
+                    and fn.value.id == "self"
+                ):
                     continue
                 name = unprefix(fn.attr)
                 if name in sync_names:

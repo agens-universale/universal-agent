@@ -5,11 +5,11 @@
 Сервер ведёт прогоны без счёта, и без освобождения каждый запрос оставлял по
 логгеру и дескриптору.
 """
+
 import logging
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.utils.logging_module import create_run_logger
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
 
@@ -36,8 +36,11 @@ async def test_finished_run_releases_its_logger(tmp_path, executor_cls):
     )
     registry = AgentRunRegistry()
     run = await registry.astart_if_absent(
-        system="s", task_id="t", executor_factory=executor_cls,
-        ctx=SimpleNamespace(logger=logger), initial_user_message="hi",
+        system="s",
+        task_id="t",
+        executor_factory=executor_cls,
+        ctx=SimpleNamespace(logger=logger),
+        initial_user_message="hi",
     )
     await run.thread
 

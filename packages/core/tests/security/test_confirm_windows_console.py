@@ -9,6 +9,7 @@
 `readline` делает то же, что `input()` в потоке, — ждёт Enter и забирает
 нажатия, — поэтому прежний путь краснеет по-настоящему, а не на заглушке.
 """
+
 import asyncio
 import collections
 import concurrent.futures
@@ -18,7 +19,6 @@ import threading
 import time
 
 import pytest
-
 from gc_core.security import path_policy
 from gc_core.security.confirm_port import (
     CONFIRM_ALLOW_ONCE,
@@ -28,7 +28,9 @@ from gc_core.security.confirm_port import (
 
 _THREAD = "test-windows-confirm"
 _ALLOWED = (CONFIRM_ALLOW_ONCE, CONFIRM_ALLOW_REMEMBER)
-_QUESTION = dict(title="Запись", fields=[("path", "C:/SECRET")], question="Разрешить?")
+_QUESTION = dict(
+    title="Запись", fields=[("path", "C:/SECRET")], question="Разрешить?"
+)
 
 
 class _Console:
@@ -103,10 +105,14 @@ class _Console:
 def console(monkeypatch):
     fake = _Console()
     monkeypatch.setattr(sys, "stdin", fake)
-    monkeypatch.setattr(path_policy, "_polling_console", lambda: fake, raising=False)
+    monkeypatch.setattr(
+        path_policy, "_polling_console", lambda: fake, raising=False
+    )
     yield fake
-    fake.close()                        # выпустить читателя, если он всё-таки ждёт
-    for thread in [t for t in threading.enumerate() if t.name.startswith(_THREAD)]:
+    fake.close()  # выпустить читателя, если он всё-таки ждёт
+    for thread in [
+        t for t in threading.enumerate() if t.name.startswith(_THREAD)
+    ]:
         thread.join(5)
 
 
@@ -114,7 +120,9 @@ def console(monkeypatch):
 def ask():
     """Подтверждение в своём потоке, как его и ждёт гард."""
     pool = concurrent.futures.ThreadPoolExecutor(1, thread_name_prefix=_THREAD)
-    yield lambda: pool.submit(path_policy.prompt_user_confirmation_choice, **_QUESTION)
+    yield lambda: pool.submit(
+        path_policy.prompt_user_confirmation_choice, **_QUESTION
+    )
     pool.shutdown(wait=False, cancel_futures=True)
 
 
@@ -123,9 +131,11 @@ def test_keys_typed_before_the_question_do_not_answer_it(console, ask):
     console.type("y\r")
 
     answer = ask()
-    console.reading.wait(5)          # не дождались — значит, ответ взят сразу
+    console.reading.wait(5)  # не дождались — значит, ответ взят сразу
     time.sleep(0.3)
-    assert not answer.done(), f"подтверждение ответило само: {answer.result()!r}"
+    assert not answer.done(), (
+        f"подтверждение ответило само: {answer.result()!r}"
+    )
     console.type("n\r")
     assert answer.result(timeout=5) not in _ALLOWED
 
@@ -138,22 +148,28 @@ def test_an_abandoned_question_leaves_the_keys_to_the_next_reader(console):
     from gc_core.tools.connect_mcp.abandonable import run_abandonable_in
 
     async def _scenario() -> None:
-        waiting = asyncio.ensure_future(run_abandonable_in(
-            threading.BoundedSemaphore(1), path_policy.prompt_user_confirmation_choice,
-            _thread_name=_THREAD, **_QUESTION,
-        ))
-        while not console.reading.is_set():     # вопрос показан и ждёт
+        waiting = asyncio.ensure_future(
+            run_abandonable_in(
+                threading.BoundedSemaphore(1),
+                path_policy.prompt_user_confirmation_choice,
+                _thread_name=_THREAD,
+                **_QUESTION,
+            )
+        )
+        while not console.reading.is_set():  # вопрос показан и ждёт
             await asyncio.sleep(0.01)
-        waiting.cancel()                        # Ctrl+C: вопрос брошен
+        waiting.cancel()  # Ctrl+C: вопрос брошен
         with pytest.raises(asyncio.CancelledError):
             await waiting
-        await asyncio.sleep(0.3)                # брошенному — время заметить
+        await asyncio.sleep(0.3)  # брошенному — время заметить
 
     asyncio.run(_scenario())
-    console.type("ответ\r")                     # это уже для следующего вопроса
+    console.type("ответ\r")  # это уже для следующего вопроса
     time.sleep(0.4)
 
-    assert console.remaining() == "ответ\r", "нажатия забрал брошенный вопрос y/n"
+    assert console.remaining() == "ответ\r", (
+        "нажатия забрал брошенный вопрос y/n"
+    )
 
 
 def test_the_answer_is_edited_like_a_line(console, ask):

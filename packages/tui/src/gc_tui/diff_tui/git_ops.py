@@ -1,4 +1,5 @@
 """Тонкие обёртки git для Diff-TUI (cwd=launch_root, timeout). Без UX."""
+
 from __future__ import annotations
 
 import subprocess
@@ -54,7 +55,7 @@ def _run_git(launch_root: PathLike, args: Sequence[str]) -> GitRunResult:
 def _kind_from_xy(x: str, y: str) -> GitStatusKind:
     if x == "D" or y == "D":
         return "deleted"
-    if x == "A" or x == "?" or y == "?":
+    if x in {"A", "?"} or y == "?":
         return "created"
     return "modified"
 
@@ -113,7 +114,6 @@ def git_add(launch_root: PathLike, path: str) -> GitRunResult:
 def git_restore_worktree(launch_root: PathLike, path: str) -> GitRunResult:
     """``git restore --worktree -- <path>`` — worktree ← index; staging не трогаем."""
     return _run_git(launch_root, ["restore", "--worktree", "--", path])
-
 
 
 def git_show_index(launch_root: PathLike, path: str) -> GitRunResult:

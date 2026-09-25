@@ -5,12 +5,16 @@ Intentionally never reveals the file path, the tool name, or any internal mechan
 to the model. The agent learns *that* a memory exists and *roughly how big it is*;
 *how to access it* is conveyed via the tool registry, not via this string.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Optional
 
-from gc_core.config_modules.project_memory import DEFAULT_PROJECT_MEMORY_MAX_CHARS, project_memory_limits_from_config_dict
+from gc_core.config_modules.project_memory import (
+    DEFAULT_PROJECT_MEMORY_MAX_CHARS,
+    project_memory_limits_from_config_dict,
+)
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.project_memory import storage
 
@@ -21,6 +25,7 @@ def fill_percent(length: int, max_chars: int) -> int:
     if max_chars <= 0:
         return 0
     return min(100, round(length * 100 / max_chars))
+
 
 _EMPTY_STATUS = (
     "project doesn't have long memory yet. "
@@ -84,16 +89,10 @@ def build_project_memory_status(
     """
     info = storage.stat(path)
     if not info.exists or info.chars == 0:
-        return (
-            f"{_EMPTY_STATUS}\n"
-            f"Limit: {max_chars} chars (0% filled)."
-        )
+        return f"{_EMPTY_STATUS}\nLimit: {max_chars} chars (0% filled)."
     text = storage.read(path)
     if not text.strip():
-        return (
-            f"{_EMPTY_STATUS}\n"
-            f"Limit: {max_chars} chars (0% filled)."
-        )
+        return f"{_EMPTY_STATUS}\nLimit: {max_chars} chars (0% filled)."
     usage_pct = fill_percent(info.chars, max_chars)
     return (
         f"project has long memory — {info.chars}/{max_chars} chars "

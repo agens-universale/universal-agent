@@ -7,31 +7,35 @@
 непустым arg_options. 2-tuple — простое value+описание (`/export` и т.п.); 3-tuple
 добавляет status-колонку справа (`/profiles`, задача 10 — активный профиль,
 цветом OK; ✗-статус отказа — цветом ERR)."""
+
 from __future__ import annotations
 
 import textwrap
 from typing import Callable, Optional
 
 from rich.text import Text
-from textual.app import ComposeResult
 from textual.containers import Vertical, VerticalScroll
 from textual.widgets import Static
 
 from gc_tui import palette as _pal
-
+from gc_tui.widgets.palette_rows import PaletteRowsMixin
 
 _HINT = "↑↓ выбрать · Tab дополнить · Enter выполнить · Esc закрыть"
-_NO_MATCH = "(нет совпадений)"
 
 
-class ArgPicker(VerticalScroll):
-    """Filtered overlay-список значений аргумента."""
+class ArgPicker(PaletteRowsMixin, VerticalScroll):
+    """Filtered overlay-список значений аргумента.
 
-    DEFAULT_CSS = ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    Навигация (`set_filter` / `move_selection`), `compose` и `_rebuild` — общие
+    с `SkillPicker`, в `PaletteRowsMixin`."""
+
+    DEFAULT_CSS = (
+        ""  # стили — .palette / .palette-row / .palette-hint в styles.tcss
+    )
 
     def __init__(
         self,
-        options: "list[tuple[str, str] | tuple[str, str, str]]",
+        options: list[tuple[str, str] | tuple[str, str, str]],
         initial_filter: str = "",
         hint_provider: Optional[Callable[[Optional[str]], str]] = None,
     ) -> None:
@@ -51,16 +55,6 @@ class ArgPicker(VerticalScroll):
         self._hint_cache: Optional[tuple] = None
         self._apply_size()  # честная высота с самого первого layout-прохода (см. _apply_size)
 
-    def compose(self) -> ComposeResult:
-        rows = self._visible_rows()
-        if not rows:
-            yield Static(_NO_MATCH, classes="palette-hint", markup=False)
-        else:
-            for i, opt in enumerate(rows):
-                classes = "palette-row selected" if i == self._selected else "palette-row"
-                yield Static(self._format_row(opt), classes=classes, markup=False)
-        yield self._build_footer()
-
     def _build_footer(self) -> Vertical:
         """Докнутый подвал (паттерн CommandPalette._build_footer): hint — ПОСЛЕДНИЙ
         FLOW-ребёнок в старой раскладке упирался в max-height-клэмп длинного списка
@@ -70,9 +64,16 @@ class ArgPicker(VerticalScroll):
         if self._hint_provider is not None:
             # palette-keys и у динамического хинта: воздух над ним, отделяющий
             # хинт от строк списка (ревизия 2026-07-28 по живому смоку).
-            children.append(Static(self._hint_text(self.selected_value()),
-                                   classes="palette-hint palette-keys", markup=False))
-        children.append(Static(_HINT, classes="palette-hint palette-keys", markup=False))
+            children.append(
+                Static(
+                    self._hint_text(self.selected_value()),
+                    classes="palette-hint palette-keys",
+                    markup=False,
+                )
+            )
+        children.append(
+            Static(_HINT, classes="palette-hint palette-keys", markup=False)
+        )
         return Vertical(*children, classes="palette-footer")
 
     def _value_col_w(self) -> int:
@@ -94,7 +95,7 @@ class ArgPicker(VerticalScroll):
             return 0
         return max(len(d) for d in descs) + 3
 
-    def _format_row(self, opt: tuple) -> "str | Text":
+    def _format_row(self, opt: tuple) -> str | Text:
         """Строка списка: `(value, desc)` — как раньше, простой `str` (другие
         пикеры — /export и т.п. — не должны заметить правку). `(value, desc,
         status)` — опции со статус-колонкой (`/profiles`, задача 10): `Text` с
@@ -105,20 +106,25 @@ class ArgPicker(VerticalScroll):
             value, desc, status = opt
             if not desc and not status:
                 return Text(f" {value}")
-            t = Text(f" {value.ljust(self._value_col_w())}{desc.ljust(self._desc_col_w())}")
+            t = Text(
+                f" {value.ljust(self._value_col_w())}{desc.ljust(self._desc_col_w())}"
+            )
             if status:
                 # Цвет — по смыслу статуса: ✗-отказ («не применится») зелёным
                 # цветом достижения читался бы как «всё в порядке». Правило по
                 # глифу, а не по литералу: пикер не знает ни про профили, ни про
                 # их тексты.
-                t.append(status, style=_pal.ERR if status.startswith("✗") else _pal.OK)
+                t.append(
+                    status,
+                    style=_pal.ERR if status.startswith("✗") else _pal.OK,
+                )
             return t
         value, desc = opt
         if not desc:
             return f" {value}"
         return f" {value.ljust(self._value_col_w())}{desc}"
 
-    def _visible_rows(self) -> "list[tuple[str, str] | tuple[str, str, str]]":
+    def _visible_rows(self) -> list[tuple[str, str] | tuple[str, str, str]]:
         f = self._filter.strip().lower()
         if not f:
             return list(self._options)
@@ -180,46 +186,13 @@ class ArgPicker(VerticalScroll):
         flow = len(rows) if rows else 1
         footer = 1 + self._footer_line_count(_HINT)
         if self._hint_provider is not None:
-            footer += 1 + self._footer_line_count(self._hint_text(self.selected_value()))
+            footer += 1 + self._footer_line_count(
+                self._hint_text(self.selected_value())
+            )
         return flow + 2 + footer
 
-    def set_filter(self, prefix: str) -> None:
-        self._filter = prefix
-        self._selected = 0
-        self._rebuild()
-
-    def move_selection(self, delta: int) -> None:
-        rows = self._visible_rows()
-        if not rows:
-            return
-        self._selected = (self._selected + delta) % len(rows)
-        self._rebuild()
-
     def selected_value(self) -> Optional[str]:
-        rows = self._visible_rows()
-        if not rows:
+        row = self._selected_row()
+        if row is None:
             return None
-        idx = max(0, min(self._selected, len(rows) - 1))
-        return rows[idx][0]
-
-    def _rebuild(self) -> None:
-        if not self.is_mounted:
-            return
-        rows = self._visible_rows()
-        new_widgets: list = []
-        selected_widget: Optional[Static] = None
-        if not rows:
-            new_widgets.append(Static(_NO_MATCH, classes="palette-hint", markup=False))
-        else:
-            for i, opt in enumerate(rows):
-                classes = "palette-row selected" if i == self._selected else "palette-row"
-                w = Static(self._format_row(opt), classes=classes, markup=False)
-                if i == self._selected:
-                    selected_widget = w
-                new_widgets.append(w)
-        new_widgets.append(self._build_footer())
-        self._apply_size()
-        self.remove_children()
-        self.mount_all(new_widgets)
-        if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+        return row[0]

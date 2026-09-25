@@ -18,14 +18,19 @@
 Реализации на базе конверт нужен ровно так же: ``seq`` — это ordering key
 хвостового читателя TUI, а не деталь формата файла.
 """
+
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set
 
-from gc_core.thread_store_types import MessageKey, SubagentTraceRecord, ThreadState
 from gc_core.thread_store_base import ThreadStoreBase
+from gc_core.thread_store_types import (
+    MessageKey,
+    SubagentTraceRecord,
+    ThreadState,
+)
 
 
 class MemoryThreadStore(ThreadStoreBase):
@@ -60,9 +65,13 @@ class MemoryThreadStore(ThreadStoreBase):
 
     # --- чтение ------------------------------------------------------------
 
-    def load_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
+    def load_messages(
+        self, system_id: str, thread_id: str
+    ) -> List[Dict[str, Any]]:
         self._hit("load_messages")
-        return self._payloads(self._messages.get(self._key(system_id, thread_id), []))
+        return self._payloads(
+            self._messages.get(self._key(system_id, thread_id), [])
+        )
 
     def load_thread_state(self, system_id: str, thread_id: str) -> ThreadState:
         self._hit("load_thread_state")
@@ -83,7 +92,9 @@ class MemoryThreadStore(ThreadStoreBase):
 
     def load_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
         self._hit("load_meta")
-        return copy.deepcopy(self._meta.get(self._key(system_id, thread_id), {}))
+        return copy.deepcopy(
+            self._meta.get(self._key(system_id, thread_id), {})
+        )
 
     # --- запись ------------------------------------------------------------
 
@@ -116,7 +127,7 @@ class MemoryThreadStore(ThreadStoreBase):
         for message in messages:
             key = make_message_key(message)
             if key in known:
-                continue          # идемпотентность: батч персистится дважды
+                continue  # идемпотентность: батч персистится дважды
             seq += 1
             # Пополняем ТОЛЬКО фактически записанным. Досыпать заодно всё, что
             # уже лежит в хранилище, нельзя: снимок вызывающего перестанет
@@ -126,7 +137,9 @@ class MemoryThreadStore(ThreadStoreBase):
             written += 1
         return written
 
-    def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
+    def save_meta(
+        self, system_id: str, thread_id: str, meta: Dict[str, Any]
+    ) -> None:
         self._hit("save_meta")
         # Штамп записи — обязанность ХРАНИЛИЩА, а не вызывающего, и он один
         # на все реализации: ``ThreadStoreBase.stamp_meta``.
@@ -158,7 +171,9 @@ class MemoryThreadStore(ThreadStoreBase):
         meta = self.merge_runtime_meta(self._meta.setdefault(key, {}), patch)
         self._meta[key] = self.stamp_meta(meta)
 
-    def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
+    def discard_message(
+        self, system_id: str, thread_id: str, message_id: str
+    ) -> bool:
         self._hit("discard_message")
         bucket = self._messages.get(self._key(system_id, thread_id), [])
         for i, envelope in enumerate(bucket):
@@ -193,7 +208,9 @@ class MemoryThreadStore(ThreadStoreBase):
         синхронное — ядро приходит сюда адаптером, по синхронному имени.
         """
         self._hit("_restore_subagent_trace")
-        self._traces[self._key(system_id, thread_id)] = [dict(r) for r in records]
+        self._traces[self._key(system_id, thread_id)] = [
+            dict(r) for r in records
+        ]
 
     def append_subagent_trace(
         self,
@@ -211,7 +228,7 @@ class MemoryThreadStore(ThreadStoreBase):
         # первая редакция их не писала, а конформанс смотрел только на ``kind``
         # и потому оставался зелёным при разъехавшихся реализациях.
         record: SubagentTraceRecord = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "seq": len(trace) + 1,
             "parent_call_id": parent_call_id,
             "child_run_id": child_run_id,
@@ -225,7 +242,9 @@ class MemoryThreadStore(ThreadStoreBase):
         self, system_id: str, thread_id: str
     ) -> List[SubagentTraceRecord]:
         self._hit("read_subagent_trace")
-        return copy.deepcopy(self._traces.get(self._key(system_id, thread_id), []))
+        return copy.deepcopy(
+            self._traces.get(self._key(system_id, thread_id), [])
+        )
 
 
 __all__ = ["MemoryThreadStore"]

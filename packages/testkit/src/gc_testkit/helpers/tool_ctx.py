@@ -5,7 +5,9 @@ from __future__ import annotations
 from types import SimpleNamespace
 from typing import Any, Optional, Type, TypeVar
 
-from gc_core.config_modules.agent import exec_output_capture_max_chars_from_config_dict
+from gc_core.config_modules.agent import (
+    exec_output_capture_max_chars_from_config_dict,
+)
 from gc_core.execution_workspace import build_execution_workspace
 
 T = TypeVar("T")
@@ -22,7 +24,9 @@ def local_ctx(config_dict: Optional[dict] = None) -> SimpleNamespace:
 
     cfg = dict(config_dict or {})
     backend = LocalFsBackend(
-        exec_output_capture_max_chars=exec_output_capture_max_chars_from_config_dict(cfg)
+        exec_output_capture_max_chars=exec_output_capture_max_chars_from_config_dict(
+            cfg
+        )
     )
     return SimpleNamespace(
         config_dict=cfg,
@@ -70,7 +74,9 @@ class CallableTool:
         return f"<callable {self._tool!r}>"
 
 
-def with_local_ctx(tool_cls: Type[T], *, config_dict: Optional[dict] = None, **kwargs: Any) -> T:
+def with_local_ctx(
+    tool_cls: Type[T], *, config_dict: Optional[dict] = None, **kwargs: Any
+) -> T:
     """Instantiate ``tool_cls`` with a local ctx (and optional config_dict).
 
     Возвращает тул, обёрнутый в :class:`CallableTool`: его можно и звать как

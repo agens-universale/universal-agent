@@ -1,4 +1,5 @@
 """UserReplyContainer — три состояния (normal/pending/failed): классы и инлайн-маркер."""
+
 import pytest
 
 

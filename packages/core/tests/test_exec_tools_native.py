@@ -34,12 +34,11 @@
 ожидание человека — в потоке. Флаг остался для тел, у которых блокирующее
 неотделимо; его и стережёт тест ниже.
 """
+
 import asyncio
 import json
 import sys
 import time
-
-import pytest
 
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
@@ -59,17 +58,23 @@ TICK = 0.02
 
 
 def _cmd(config_dict=None):
-    return ExecuteCommand(ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS))
+    return ExecuteCommand(
+        ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS)
+    )
 
 
 def _py(config_dict=None):
-    return RunPythonCode(ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS))
+    return RunPythonCode(
+        ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS)
+    )
 
 
 def _sleep_command(sec) -> str:
     """Команда «поспать sec секунд» в синтаксисе оболочки ОС: `python3` и
     одинарных кавычек в cmd.exe нет."""
-    return shell_command([sys.executable, "-c", f"import time; time.sleep({sec})"])
+    return shell_command(
+        [sys.executable, "-c", f"import time; time.sleep({sec})"]
+    )
 
 
 async def _worst_gap(coro_factory):
@@ -135,14 +140,13 @@ async def test_command_does_not_hold_a_pool_slot_for_its_whole_duration():
     hog_sec = 1.2
     cmd_sec = 1.0
     hogs = [
-        asyncio.create_task(asyncio.to_thread(time.sleep, hog_sec)) for _ in range(24)
+        asyncio.create_task(asyncio.to_thread(time.sleep, hog_sec))
+        for _ in range(24)
     ]
     await asyncio.sleep(0.05)
 
     started = time.perf_counter()
-    out = json.loads(
-        await _cmd().acall(command=_sleep_command(cmd_sec))
-    )
+    out = json.loads(await _cmd().acall(command=_sleep_command(cmd_sec)))
     spent = time.perf_counter() - started
 
     for h in hogs:
@@ -151,8 +155,7 @@ async def test_command_does_not_hold_a_pool_slot_for_its_whole_duration():
 
     assert out["ok"] is True, out
     assert spent < hog_sec + cmd_sec * 0.5, (
-        f"команда заняла {spent:.2f}с при забитом пуле — похоже, она всё ещё "
-        f"ждёт слот и держит его на весь запуск"
+        f"команда заняла {spent:.2f}с при забитом пуле — похоже, она всё ещё ждёт слот и держит его на весь запуск"
     )
 
 
@@ -172,11 +175,7 @@ async def test_command_validation_rejects_bad_arguments():
 
 async def test_command_reports_a_timeout_the_same_way():
     """Таймаут — общий путь разбора результата, а не отдельная ветка."""
-    out = json.loads(
-        await _cmd().acall(
-            command=_sleep_command(5), timeout=1
-        )
-    )
+    out = json.loads(await _cmd().acall(command=_sleep_command(5), timeout=1))
 
     assert out["ok"] is False, out
     assert out["timed_out"] is True, out
@@ -189,7 +188,9 @@ async def test_command_has_no_sync_entry():
     Он был вторым способом позвать то же самое и держался ради `apply_tool`,
     которого тоже не стало: звать через него было некого.
     """
-    assert not callable(_cmd()), "у exec_command снова появился синхронный вход"
+    assert not callable(_cmd()), (
+        "у exec_command снова появился синхронный вход"
+    )
 
 
 # --- exec_python -----------------------------------------------------------

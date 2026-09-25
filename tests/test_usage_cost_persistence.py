@@ -1,20 +1,22 @@
 """Фактическая стоимость переживает сохранение и чтение meta треда."""
+
 import threading
 import types
-
-from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_file import FileThreadStore
 
 import gc_core.agent_executor as ae
 import gc_core.manual_compaction as mc
 from gc_core.thread_store import load_thread_meta
+from gc_core.thread_store_async import athread_store
+from gc_core.thread_store_file import FileThreadStore
 from gc_core.usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
 from gc_testkit import run_coro
 
 
 def test_cost_survives_meta_write_and_read():
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
+    acc.add(
+        CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$"
+    )
 
     meta = {"token_usage": acc.to_meta()}
     restored = UsageAccount.from_meta(meta["token_usage"])
@@ -41,10 +43,17 @@ class _UsageState:
         self.dialog_steps_offset = 0
         self.usage = UsageAccount()
 
-    def init_user_intent_log(self, v): pass
-    def init_current_user_intent(self, v): pass
-    def init_user_turn_seq(self, v): pass
-    def infer_user_turn_seq_if_missing(self): pass
+    def init_user_intent_log(self, v):
+        pass
+
+    def init_current_user_intent(self, v):
+        pass
+
+    def init_user_turn_seq(self, v):
+        pass
+
+    def infer_user_turn_seq_if_missing(self):
+        pass
 
 
 class _Coord:
@@ -71,14 +80,18 @@ class _Coord:
 def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     """Ручной /compact: фактическая цена и billed_calls доживают до записанной meta."""
     baseline = UsageAccount()
-    baseline.add(CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$")
+    baseline.add(
+        CATEGORY_MAIN, 1000, 100, 0, cost=0.0058, billed=True, currency="$"
+    )
 
     _store = FileThreadStore(str(tmp_path))
 
     async def _afrom_config(**kw):
         return types.SimpleNamespace(
             history_messages=[{"role": "user", "content": "hi", "id": "u1"}],
-            meta={"token_usage": baseline.to_meta()}, thread_id="t1", system_id="cli",
+            meta={"token_usage": baseline.to_meta()},
+            thread_id="t1",
+            system_id="cli",
             threads_dir=str(tmp_path),
             # Ручная компакция пишет token_usage через хранилище сессии — и
             # ходит туда через асинхронный порт: тред может лежать в базе.
@@ -87,7 +100,9 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
         )
 
     monkeypatch.setattr(
-        mc, "ThreadSession", types.SimpleNamespace(afrom_config=_afrom_config),
+        mc,
+        "ThreadSession",
+        types.SimpleNamespace(afrom_config=_afrom_config),
     )
     monkeypatch.setattr(mc, "repair_tool_call_pairing", lambda m, **kw: m)
     monkeypatch.setattr(mc, "RunSummaryCoordinator", _Coord)
@@ -96,9 +111,14 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = types.SimpleNamespace(
-        config_dict={"model": "M", "max_steps": 30, "system_prompt_id": "x",
-                     "backend_api_mode": "chat_completions"},
-        tools_spec=[], tools_description=[],
+        config_dict={
+            "model": "M",
+            "max_steps": 30,
+            "system_prompt_id": "x",
+            "backend_api_mode": "chat_completions",
+        },
+        tools_spec=[],
+        tools_description=[],
     )
     ex._lock = threading.Lock()
     ex._state = None

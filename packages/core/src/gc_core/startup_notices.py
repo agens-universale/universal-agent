@@ -4,6 +4,7 @@
 зовут collect_startup_notices() и рендерят по-своему. Онбординг (готовность
 конфига) — отдельно (onboarding.py); здесь — не-блокирующие замечания.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
@@ -12,10 +13,12 @@ from gc_core.config_modules.pricing import resolve_model_tariff
 
 
 class Notice(NamedTuple):
-    level: str    # "warning" | "info"
-    code: str     # стабильный id (для дедупа/тестов)
+    level: str  # "warning" | "info"
+    code: str  # стабильный id (для дедупа/тестов)
     message: str  # человекочитаемо, по-русски
-    highlights: Tuple[str, ...] = ()  # тех. имена в message (тулы/сервера/ключи) для выделения в TUI
+    highlights: Tuple[
+        str, ...
+    ] = ()  # тех. имена в message (тулы/сервера/ключи) для выделения в TUI
 
 
 _DEPRECATED_KEYS = {"backend.stream": "tui.stream"}
@@ -41,28 +44,34 @@ def _stop_tools_unknown(
     unknown = sorted(stop - known)
     if not unknown:
         return []
-    return [Notice(
-        "warning", "stop_tools_unknown",
-        "stop_tools: имена не совпали ни с одним тулом и "
-        f"проигнорированы: {', '.join(unknown)}.",
-        highlights=("stop_tools", *unknown),
-    )]
+    return [
+        Notice(
+            "warning",
+            "stop_tools_unknown",
+            f"stop_tools: имена не совпали ни с одним тулом и проигнорированы: {', '.join(unknown)}.",
+            highlights=("stop_tools", *unknown),
+        )
+    ]
 
 
 def _mcp_failed(mcp_status: Optional[Dict[str, Any]]) -> List[Notice]:
     if not isinstance(mcp_status, dict):
         return []
     failed = sorted(
-        name for name, st in mcp_status.items()
+        name
+        for name, st in mcp_status.items()
         if isinstance(st, dict) and st.get("status") == "failed"
     )
     if not failed:
         return []
-    return [Notice(
-        "warning", "mcp_failed",
-        f"MCP не подключились: {', '.join(failed)}. Проверьте конфиг/доступность (/mcp).",
-        highlights=tuple(failed),
-    )]
+    return [
+        Notice(
+            "warning",
+            "mcp_failed",
+            f"MCP не подключились: {', '.join(failed)}. Проверьте конфиг/доступность (/mcp).",
+            highlights=tuple(failed),
+        )
+    ]
 
 
 def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
@@ -70,9 +79,14 @@ def _deprecated(deprecated_keys_used: Optional[List[str]]) -> List[Notice]:
     for key in deprecated_keys_used or []:
         repl = _DEPRECATED_KEYS.get(key)
         if repl:
-            out.append(Notice("info", "deprecated_key",
-                              f"{key} устарел — используйте {repl}.",
-                              highlights=(key, repl)))
+            out.append(
+                Notice(
+                    "info",
+                    "deprecated_key",
+                    f"{key} устарел — используйте {repl}.",
+                    highlights=(key, repl),
+                )
+            )
     return out
 
 
@@ -83,13 +97,16 @@ def _pricing_no_rates(config_dict: Dict[str, Any]) -> List[Notice]:
         return []
     if resolve_model_tariff(pricing, config_dict.get("model")) is not None:
         return []
-    return [Notice(
-        "info", "pricing_no_rates",
-        "pricing: ставки не заданы. Провайдеры, которые сообщают фактическую стоимость "
-        "(например, OpenRouter), всё равно будут показаны; для остальных стоимость "
-        "останется скрытой — задайте цены в секции pricing (см. /config).",
-        highlights=("pricing", "input", "output"),
-    )]
+    return [
+        Notice(
+            "info",
+            "pricing_no_rates",
+            "pricing: ставки не заданы. Провайдеры, которые сообщают фактическую стоимость "
+            "(например, OpenRouter), всё равно будут показаны; для остальных стоимость "
+            "останется скрытой — задайте цены в секции pricing (см. /config).",
+            highlights=("pricing", "input", "output"),
+        )
+    ]
 
 
 def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
@@ -98,21 +115,32 @@ def _agentsmd(config_dict: Dict[str, Any], *, is_tui: bool) -> List[Notice]:
         return []
     if not is_tui:
         # Вне TUI слои L1–L3 не грузятся → флаг no-op (при любом agent_md_path).
-        return [Notice("warning", "agentsmd_override_cli_noop",
-                       "--agentsmd-override задан, но не действует вне TUI-режима.",
-                       highlights=("--agentsmd-override",))]
+        return [
+            Notice(
+                "warning",
+                "agentsmd_override_cli_noop",
+                "--agentsmd-override задан, но не действует вне TUI-режима.",
+                highlights=("--agentsmd-override",),
+            )
+        ]
     if config_dict.get("agent_md_path"):
         # В TUI при заданном пути: путь главнее флага → override не применён.
         # Эквивалент warning из build_instructions (условие: is_tui and agentsmd_override).
-        return [Notice("warning", "agentsmd_override_ignored",
-                       "agentsmd_override задан, но не применён: задан agent_md_path "
-                       "(путь главнее флага).",
-                       highlights=("agentsmd_override", "agent_md_path"))]
+        return [
+            Notice(
+                "warning",
+                "agentsmd_override_ignored",
+                "agentsmd_override задан, но не применён: задан agent_md_path (путь главнее флага).",
+                highlights=("agentsmd_override", "agent_md_path"),
+            )
+        ]
     return []
 
 
 def _compat(compat_notices: Optional[List[str]]) -> List[Notice]:
-    return [Notice("warning", "config_compat", msg) for msg in compat_notices or []]
+    return [
+        Notice("warning", "config_compat", msg) for msg in compat_notices or []
+    ]
 
 
 def _upgrade(upgrade_info) -> List[Notice]:
@@ -122,9 +150,14 @@ def _upgrade(upgrade_info) -> List[Notice]:
     old = getattr(upgrade_info, "old_version", None)
     new = getattr(upgrade_info, "new_version", "")
     frm = f" {old} →" if old else ""
-    return [Notice("info", "agent_upgraded",
-                   f"Агент обновлён:{frm} {new}.",
-                   highlights=(new,))]
+    return [
+        Notice(
+            "info",
+            "agent_upgraded",
+            f"Агент обновлён:{frm} {new}.",
+            highlights=(new,),
+        )
+    ]
 
 
 def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
@@ -142,66 +175,97 @@ def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
     if not str(config_dict.get("subagents_dir") or "").strip():
         return []
     try:
-        from gc_core.tools.subagents.registry import SUBAGENT_DIAGNOSTICS_KEY, resolve_subagent_definitions
+        from gc_core.tools.subagents.registry import (
+            SUBAGENT_DIAGNOSTICS_KEY,
+            resolve_subagent_definitions,
+        )
 
         resolve_subagent_definitions(config_dict)
         records = config_dict.get(SUBAGENT_DIAGNOSTICS_KEY) or []
-    except Exception:  # noqa: BLE001 — уведомления не должны ронять старт
+    except Exception:  # уведомления не должны ронять старт
         return []
 
     out: List[Notice] = []
     for rec in records:
-        code = str(rec.get("code") or "")
-        if code == "subagent_definition_invalid":
-            name = _basename(rec.get("path"))
-            out.append(Notice(
-                "warning", code,
-                f"Файл сабагента пропущен: {name} — {rec.get('reason')}",
-                highlights=(name,),
-            ))
-        elif code == "subagent_name_collision":
-            name = _basename(rec.get("path"))
-            taken = str(rec.get("subagent_name") or "")
-            winner = rec.get("winner")
-            by = "встроенным" if winner == "builtin" else f"файлом {_basename(winner)}"
-            out.append(Notice(
-                "warning", code,
-                f"Имя {taken} уже занято {by} — файл {name} пропущен.",
-                highlights=(taken, name),
-            ))
-        elif code == "use_local_subagents_unknown":
-            names = [str(x) for x in (rec.get("names") or [])]
-            out.append(Notice(
-                "warning", code,
-                "use_local_subagents: имена не найдены ни среди встроенных, ни в папке "
-                f"и проигнорированы: {', '.join(names)}.",
-                highlights=("use_local_subagents", *names),
-            ))
-        elif code == "subagents_max_count_exceeded":
-            dropped = [str(x) for x in (rec.get("dropped") or [])]
-            out.append(Notice(
-                "warning", code,
-                f"Превышен subagents_max_count={rec.get('limit')} — не загружены: "
-                f"{', '.join(dropped)}.",
-                highlights=("subagents_max_count", *dropped),
-            ))
-        elif code == "subagent_required_tools_kept":
-            name = _basename(rec.get("path"))
-            names = [str(x) for x in (rec.get("names") or [])]
-            out.append(Notice(
-                "warning", code,
-                f"{name}: служебные инструменты выдаются всегда, stop_tools их не "
-                f"отбирает — запрет проигнорирован: {', '.join(names)}.",
-                highlights=(name, *names),
-            ))
-        elif code in ("subagents_dir_missing", "subagents_dir_unreadable"):
-            out.append(Notice(
-                "warning", code,
-                f"Папка кастомных сабагентов недоступна: {rec.get('dir')} — "
-                "загружены только встроенные.",
-                highlights=("subagents_dir",),
-            ))
+        build = _SUBAGENT_NOTICE_BUILDERS.get(str(rec.get("code") or ""))
+        if build is not None:
+            out.append(build(rec))
     return out
+
+
+def _notice_definition_invalid(rec: Dict[str, Any]) -> Notice:
+    name = _basename(rec.get("path"))
+    return Notice(
+        "warning",
+        "subagent_definition_invalid",
+        f"Файл сабагента пропущен: {name} — {rec.get('reason')}",
+        highlights=(name,),
+    )
+
+
+def _notice_name_collision(rec: Dict[str, Any]) -> Notice:
+    name = _basename(rec.get("path"))
+    taken = str(rec.get("subagent_name") or "")
+    winner = rec.get("winner")
+    by = "встроенным" if winner == "builtin" else f"файлом {_basename(winner)}"
+    return Notice(
+        "warning",
+        "subagent_name_collision",
+        f"Имя {taken} уже занято {by} — файл {name} пропущен.",
+        highlights=(taken, name),
+    )
+
+
+def _notice_unknown_names(rec: Dict[str, Any]) -> Notice:
+    names = [str(x) for x in (rec.get("names") or [])]
+    return Notice(
+        "warning",
+        "use_local_subagents_unknown",
+        f"use_local_subagents: имена не найдены ни среди встроенных, ни в папке и проигнорированы: {', '.join(names)}.",
+        highlights=("use_local_subagents", *names),
+    )
+
+
+def _notice_max_count(rec: Dict[str, Any]) -> Notice:
+    dropped = [str(x) for x in (rec.get("dropped") or [])]
+    return Notice(
+        "warning",
+        "subagents_max_count_exceeded",
+        f"Превышен subagents_max_count={rec.get('limit')} — не загружены: {', '.join(dropped)}.",
+        highlights=("subagents_max_count", *dropped),
+    )
+
+
+def _notice_required_tools_kept(rec: Dict[str, Any]) -> Notice:
+    name = _basename(rec.get("path"))
+    names = [str(x) for x in (rec.get("names") or [])]
+    return Notice(
+        "warning",
+        "subagent_required_tools_kept",
+        f"{name}: служебные инструменты выдаются всегда, stop_tools их не "
+        f"отбирает — запрет проигнорирован: {', '.join(names)}.",
+        highlights=(name, *names),
+    )
+
+
+def _notice_dir_unavailable(rec: Dict[str, Any]) -> Notice:
+    return Notice(
+        "warning",
+        str(rec.get("code") or ""),
+        f"Папка кастомных сабагентов недоступна: {rec.get('dir')} — загружены только встроенные.",
+        highlights=("subagents_dir",),
+    )
+
+
+_SUBAGENT_NOTICE_BUILDERS = {
+    "subagent_definition_invalid": _notice_definition_invalid,
+    "subagent_name_collision": _notice_name_collision,
+    "use_local_subagents_unknown": _notice_unknown_names,
+    "subagents_max_count_exceeded": _notice_max_count,
+    "subagent_required_tools_kept": _notice_required_tools_kept,
+    "subagents_dir_missing": _notice_dir_unavailable,
+    "subagents_dir_unreadable": _notice_dir_unavailable,
+}
 
 
 def _basename(path: Any) -> str:
@@ -255,7 +319,9 @@ def render_notices_for_cli(notices: List[Notice]) -> str:
     return "\n".join(f"{glyph.get(n.level, '·')} {n.message}" for n in notices)
 
 
-def warning_toasts(notices: List[Notice], *, cap: int = 3) -> "Tuple[List[str], Optional[str], frozenset]":
+def warning_toasts(
+    notices: List[Notice], *, cap: int = 3
+) -> Tuple[List[str], Optional[str], frozenset]:
     """Warning-уведомления для тоста при старте: до `cap` сообщений + сводный «+N ещё»
     (info НЕ тостим — только карточка/notices). Третий элемент — frozenset warning-кодов
     для сравнения «набор изменился» (тост показываем только on-change, см. вызывающего)."""

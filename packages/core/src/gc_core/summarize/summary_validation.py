@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from gc_core.summarize.summary_spec import assemble_summary_xml, extract_summary_bodies, merge_summary_bodies, primary_section_tag, section_tags
+from gc_core.summarize.summary_spec import (
+    assemble_summary_xml,
+    extract_summary_bodies,
+    merge_summary_bodies,
+    primary_section_tag,
+    section_tags,
+)
 
 _FALLBACK_MSG = (
     "Automatic summarization produced no valid output. "
@@ -21,7 +27,7 @@ def has_nonempty_summary_body(text: str) -> bool:
 
 def fallback_summary_xml() -> str:
     filler = "- n/a"
-    bodies = {tag: filler for tag in section_tags()}
+    bodies = dict.fromkeys(section_tags(), filler)
     bodies[primary_section_tag()] = (
         f"- {_FALLBACK_MSG}\n- Continue from dialog_history and session memory."
     )
@@ -59,7 +65,9 @@ def merge_repaired_summary(*, invalid_text: str, repaired_text: str) -> str:
     """
     preserved = extract_summary_bodies(invalid_text)
     repaired = extract_summary_bodies(repaired_text)
-    return assemble_summary_xml(merge_summary_bodies(preserved=preserved, repaired=repaired))
+    return assemble_summary_xml(
+        merge_summary_bodies(preserved=preserved, repaired=repaired)
+    )
 
 
 def resolve_after_repair_failure(

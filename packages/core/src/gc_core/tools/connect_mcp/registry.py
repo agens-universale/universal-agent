@@ -1,21 +1,11 @@
-from typing import Any, Dict, Optional
-
 import asyncio
 import json
-import time
-
-
 import logging
+import time
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
-from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
-from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry, is_persistent_stdio
-from gc_core.tools.connect_mcp.stream_client import (
-    alist_tools_stream_http,
-    alist_tools_stream_sse,
-    alist_tools_stream_stdio,
-)
-from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client, runs_in_agent_runtime
+from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 
 
 def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
@@ -31,7 +21,11 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     if isinstance(exc, TimeoutError):
         return "таймаут подключения"
     name = exc.__class__.__name__
-    if "Connection" in name or "ConnectError" in name or isinstance(exc, OSError):
+    if (
+        "Connection" in name
+        or "ConnectError" in name
+        or isinstance(exc, OSError)
+    ):
         target = server_cfg.get("url") or server_cfg.get("command") or "?"
         return f"нет соединения с {target}"
     msg = str(exc).strip()
@@ -68,7 +62,11 @@ def _normalize_tool(
     if server_description:
         extra_desc += f"\nServer description: {server_description}"
 
-    full_description = (base_description + extra_desc) if base_description else extra_desc.lstrip()
+    full_description = (
+        (base_description + extra_desc)
+        if base_description
+        else extra_desc.lstrip()
+    )
 
     parameters_schema = (
         tool.get("inputSchema")
@@ -116,7 +114,11 @@ def _registry_entry(
 
     cfg = server_cfg if isinstance(server_cfg, dict) else {}
     transport = cfg.get("transport") or ""
-    url = "" if transport in ("stdio", "stream_stdio") else (cfg.get("url") or "")
+    url = (
+        ""
+        if transport in ("stdio", "stream_stdio")
+        else (cfg.get("url") or "")
+    )
     server_display_name = (
         cfg.get("server-name") or cfg.get("serever-name") or server_name
     )
@@ -142,9 +144,7 @@ def _apply_tools_whitelist(
     allowed = {
         str(t).strip() for t in (wl.get("tools") or []) if str(t).strip()
     }
-    present = {
-        str(t.get("name")) for t in tools_raw if isinstance(t, dict)
-    }
+    present = {str(t.get("name")) for t in tools_raw if isinstance(t, dict)}
     missing = sorted(allowed - present)
     if missing:
         logger.warning(
@@ -165,31 +165,6 @@ def _apply_tools_whitelist(
             len(tools_raw),
         )
     return filtered
-
-
-async def _afetch_tools_sdk(
-    effective_transport: str,
-    *,
-    url: Optional[str],
-    server_cfg: Dict[str, Any],
-    token: Optional[str],
-    timeout: float,
-) -> list:
-    """Список тулов по SDK-транспорту, нативно, без потока.
-
-    Синхронных имён ``list_tools_stream_*`` больше нет: они были шимами через
-    ``run_coro_blocking`` и из уже асинхронного контекста заводили лишний loop
-    в отдельном потоке. Здесь — асинхронные точки напрямую.
-    """
-    if effective_transport == "stream_sse":
-        return await alist_tools_stream_sse(
-            url=url, server_cfg=server_cfg, token=token, timeout=timeout
-        )
-    if effective_transport == "stream_http":
-        return await alist_tools_stream_http(
-            url=url, server_cfg=server_cfg, token=token, timeout=timeout
-        )
-    return await alist_tools_stream_stdio(server_cfg=server_cfg, timeout=timeout)
 
 
 async def _adiscover_one(
@@ -224,7 +199,12 @@ async def _adiscover_one(
         url = server_cfg.get("url")
         transport = server_cfg.get("transport")
         if transport not in (
-            "http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"
+            "http",
+            "sse",
+            "stdio",
+            "stream_sse",
+            "stream_http",
+            "stream_stdio",
         ):
             raise ValueError(f"неподдерживаемый transport: {transport!r}")
         if transport in ("stdio", "stream_stdio"):
@@ -234,13 +214,17 @@ async def _adiscover_one(
         elif not url:
             raise ValueError("не задан url")
 
-        client = resolve_mcp_client(server_name, server_cfg, os_backend=os_backend)
+        client = resolve_mcp_client(
+            server_name, server_cfg, os_backend=os_backend
+        )
         tools_raw = await client.alist_tools(timeout=timeout)
         tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
 
         server_display_name = (
             server_cfg.get("server-name")
-            or server_cfg.get("serever-name")  # поддержку опечатки в конфиге оставим
+            or server_cfg.get(
+                "serever-name"
+            )  # поддержку опечатки в конфиге оставим
             or server_name
         )
         tools: list = []
@@ -262,7 +246,7 @@ async def _adiscover_one(
             "tool_count": len(tools),
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
-    except Exception as exc:  # noqa: BLE001 — дискавери никогда не бросает наверх
+    except Exception as exc:  # дискавери никогда не бросает наверх
         reason = _humanize_discovery_error(
             exc, server_cfg if isinstance(server_cfg, dict) else {}
         )
@@ -274,6 +258,48 @@ async def _adiscover_one(
             "tool_count": 0,
             "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
+
+
+def _discovery_timeout_status(discovery_timeout_sec: float) -> Dict[str, Any]:
+    return {
+        "status": "failed",
+        "reason": "таймаут подключения",
+        "tool_count": 0,
+        "elapsed_ms": int(discovery_timeout_sec * 1000),
+    }
+
+
+async def _adiscover_all(
+    items: list,
+    *,
+    timeout: float,
+    on_progress,
+    os_backend: Any,
+) -> Dict[str, tuple]:
+    """Параллельный дискавери всех серверов под общим дедлайном; не успевших в результате нет."""
+    results: Dict[str, tuple] = {}
+
+    async def _one(name: str, cfg: Dict[str, Any]) -> None:
+        # Нужен ли поток, решает КЛИЕНТ, а не дискавери: у долгоживущего
+        # stdio обмен блокирующий, и он сам уводит вызов в брошенный поток.
+        result = await _adiscover_one(
+            name, cfg, timeout=timeout, os_backend=os_backend
+        )
+        results[name] = result
+        if on_progress is not None:
+            on_progress(name, result[1])
+
+    # Общий дедлайн на весь веер — как и был. Не успевшие попадают в ветку
+    # «таймаут подключения» у вызывающего: их просто нет в results.
+    try:
+        async with asyncio.timeout(timeout):
+            await asyncio.gather(
+                *(_one(name, cfg) for name, cfg in items),
+                return_exceptions=True,
+            )
+    except TimeoutError:
+        pass
+    return results
 
 
 async def _abuild_tools_registry(
@@ -303,48 +329,27 @@ async def _abuild_tools_registry(
         ...
     }
     """
-    items = [(n, c) for n, c in servers_cfg.items()]
+    items = list(servers_cfg.items())
     all_tools: Dict[str, Dict[str, Any]] = {}
     status_map: Dict[str, Dict[str, Any]] = {}
     if not items:
         return all_tools, status_map
 
-    results: Dict[str, tuple] = {}
-
-    async def _one(name: str, cfg: Dict[str, Any]) -> None:
-        # Нужен ли поток, решает КЛИЕНТ, а не дискавери: у долгоживущего
-        # stdio обмен блокирующий, и он сам уводит вызов в брошенный поток.
-        result = await _adiscover_one(
-            name, cfg, timeout=discovery_timeout_sec, os_backend=os_backend
-        )
-        results[name] = result
-        if on_progress is not None:
-            on_progress(name, result[1])
-
-    async def _all() -> None:
-        # Общий дедлайн на весь веер — как и был. Не успевшие попадают в ветку
-        # «таймаут подключения» ниже: их просто нет в results.
-        try:
-            async with asyncio.timeout(discovery_timeout_sec):
-                await asyncio.gather(
-                    *(_one(name, cfg) for name, cfg in items),
-                    return_exceptions=True,
-                )
-        except TimeoutError:
-            pass
-
-    await _all()
+    results = await _adiscover_all(
+        items,
+        timeout=discovery_timeout_sec,
+        on_progress=on_progress,
+        os_backend=os_backend,
+    )
 
     for name, cfg in items:
         if name in results:
             tools, status = results[name]
         else:
-            tools, status = [], {
-                "status": "failed",
-                "reason": "таймаут подключения",
-                "tool_count": 0,
-                "elapsed_ms": int(discovery_timeout_sec * 1000),
-            }
+            tools, status = (
+                [],
+                _discovery_timeout_status(discovery_timeout_sec),
+            )
             if on_progress is not None:
                 on_progress(name, status)
         status_map[name] = status
@@ -419,7 +424,11 @@ class ToolsCache:
 
     def _discovery_timeout(self) -> int:
         meta = self._config.get("mcp-meta")
-        v = meta.get("discovery_timeout_sec") if isinstance(meta, dict) else None
+        v = (
+            meta.get("discovery_timeout_sec")
+            if isinstance(meta, dict)
+            else None
+        )
         try:
             return int(v) if v else 8
         except (TypeError, ValueError):
@@ -430,13 +439,19 @@ class ToolsCache:
 
     def _get_ttl(self) -> int:
         mcp_meta = self._config.get("mcp-meta")
-        ttl_cfg = mcp_meta.get("tools-cache-ttl") if isinstance(mcp_meta, dict) else None
+        ttl_cfg = (
+            mcp_meta.get("tools-cache-ttl")
+            if isinstance(mcp_meta, dict)
+            else None
+        )
         try:
             return int(ttl_cfg) if ttl_cfg is not None else self._ttl_default
         except (TypeError, ValueError):
             return self._ttl_default
 
-    def _make_cache_key(self, servers_cfg: Dict[str, Dict[str, Any]]) -> Optional[str]:
+    def _make_cache_key(
+        self, servers_cfg: Dict[str, Dict[str, Any]]
+    ) -> Optional[str]:
         """
         Построить ключ кэша на основе текущей конфигурации MCP-серверов.
         Если сериализация не удалась — возвращаем None и кэш не используем.
@@ -457,7 +472,9 @@ class ToolsCache:
 
         return (time.time() - self._fetched_at) < ttl
 
-    async def aget_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
+    async def aget_tools(
+        self, *, on_progress=None
+    ) -> Dict[str, Dict[str, Any]]:
         """Объединённый словарь тулов с учётом TTL и кэша, без потока.
 
         Попадание в кэш вообще не трогает сеть, поэтому дешёвый путь остаётся
@@ -488,6 +505,6 @@ class ToolsCache:
 
 
 __all__ = [
-    "_abuild_tools_registry",
     "ToolsCache",
+    "_abuild_tools_registry",
 ]

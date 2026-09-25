@@ -16,7 +16,9 @@ class ProtectedSet:
     skills_exceptions: frozenset[Path]
 
 
-def protected_paths(*, cwd: str | None = None, extra: list[str] | None = None) -> ProtectedSet:
+def protected_paths(
+    *, cwd: str | None = None, extra: list[str] | None = None
+) -> ProtectedSet:
     proj = Path(cwd) if cwd else Path(os.getcwd())
     paths = gc_paths()
     instr = set(instruction_file_paths(cwd=str(proj)).values())
@@ -39,7 +41,9 @@ def protected_paths(*, cwd: str | None = None, extra: list[str] | None = None) -
 def classify_path(path, ps: ProtectedSet) -> str:
     p = os.path.abspath(os.fspath(path))
     ci = os.name == "nt"
-    if any(is_within_root(p, r, case_insensitive=ci) for r in ps.skills_exceptions):
+    if any(
+        is_within_root(p, r, case_insensitive=ci) for r in ps.skills_exceptions
+    ):
         return "skills"
     if any(is_within_root(p, r, case_insensitive=ci) for r in ps.instructions):
         return "instructions"

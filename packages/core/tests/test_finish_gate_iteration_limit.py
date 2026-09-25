@@ -5,7 +5,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.intent_guard import guard as intent_guard_guard_module
-from gc_core.intent_guard.guard import FinishGateGuard, resolve_finish_gate_max_rejections
+from gc_core.intent_guard.guard import (
+    FinishGateGuard,
+    resolve_finish_gate_max_rejections,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit import run_coro
 
@@ -65,9 +68,15 @@ class FinishGateIterationLimitTest(unittest.TestCase):
             _counting_reject,
         ):
             guard = FinishGateGuard(ctx=ctx, state=state)
-            d1 = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
-            d2 = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
-            d3 = run_coro(guard.aevaluate_turn_finish(finish_handoff_arguments={}))
+            d1 = run_coro(
+                guard.aevaluate_turn_finish(finish_handoff_arguments={})
+            )
+            d2 = run_coro(
+                guard.aevaluate_turn_finish(finish_handoff_arguments={})
+            )
+            d3 = run_coro(
+                guard.aevaluate_turn_finish(finish_handoff_arguments={})
+            )
 
         self.assertEqual(d1.outcome, "reject")
         self.assertEqual(d2.outcome, "reject")

@@ -6,6 +6,7 @@
 (пусто ИЛИ всё закрыто) — мягкое «если задача того стоит, заведи», один раз.
 Вызывается из ``apply_tool_usage_notice_before_llm`` (chat_completions-only).
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -14,7 +15,10 @@ from gc_core.config_modules.todo import todo_reminder_steps_from_config
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.message_policy.todo_context import format_todo_snapshot
 from gc_core.message_policy.tool_availability import tool_is_available
-from gc_core.message_policy.tool_usage_notice.policy import batch_used_tool, wrap_thread_memory_technical_user_message
+from gc_core.message_policy.tool_usage_notice.policy import (
+    batch_used_tool,
+    wrap_thread_memory_technical_user_message,
+)
 
 _OPEN_STATUSES = ("pending", "in_progress")
 
@@ -58,7 +62,11 @@ def build_todo_reminder_text(items: list) -> str:
 
 
 def _stopped(config_dict: Any) -> bool:
-    stop = config_dict.get("stop_tools") if isinstance(config_dict, dict) else None
+    stop = (
+        config_dict.get("stop_tools")
+        if isinstance(config_dict, dict)
+        else None
+    )
     if not isinstance(stop, list):
         return False
     return SESSION_TODO_TOOL_NAME in {
@@ -95,7 +103,9 @@ def apply_todo_reminder(
         state.todo_reminder_cnt = 0
         return messages
 
-    state.todo_reminder_cnt = int(getattr(state, "todo_reminder_cnt", 0) or 0) + 1
+    state.todo_reminder_cnt = (
+        int(getattr(state, "todo_reminder_cnt", 0) or 0) + 1
+    )
     if state.todo_reminder_cnt < steps_limit:
         return messages
 

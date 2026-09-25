@@ -1,10 +1,10 @@
 """Tests for SubagentRunner._build_initial_messages."""
-import pytest
 
 from types import SimpleNamespace
 
+import pytest
 from gc_core.intent_log.user_turn import init_subagent_open_turn
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
@@ -106,7 +106,9 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("Do the task"))
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("Do the task")
+        )
 
         # При отсутствии промпта в State подставляется дефолтный файл субагента.
         assert len(messages) == 2
@@ -120,7 +122,9 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("task text"))
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("task text")
+        )
 
         assert len(messages) == 2
         assert messages[0]["role"] == "system"
@@ -133,10 +137,16 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("task"))
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("task")
+        )
 
         for msg in messages:
-            assert "id" in msg and isinstance(msg["id"], str) and len(msg["id"]) > 0
+            assert (
+                "id" in msg
+                and isinstance(msg["id"], str)
+                and len(msg["id"]) > 0
+            )
 
     @pytest.mark.asyncio
     async def test_child_state_messages_updated_with_system(self):
@@ -145,7 +155,9 @@ class TestBuildInitialMessages:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("role")
-        messages = runner._build_initial_messages(child, "role", _user_msg("task"))
+        messages = runner._build_initial_messages(
+            child, "role", _user_msg("task")
+        )
 
         assert len(child.messages) >= 1
         assert child.messages[0]["role"] == "system"

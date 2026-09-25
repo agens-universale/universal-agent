@@ -1,4 +1,5 @@
 """Cache-mode store: ``.gc/diffs/`` — ``.orig`` + ``index.json``."""
+
 from __future__ import annotations
 
 import json
@@ -9,9 +10,10 @@ from typing import Any, Optional, Sequence, Union
 
 from gc_core.config_modules.diff_tui import DEFAULT_CACHE_MAX_ORIG
 from gc_core.config_modules.env_vars import project_gc_dir
-from gc_tui.diff_tui.paths import canonical_path_key, orig_key
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.file_text import classify_file_content
+
+from gc_tui.diff_tui.paths import canonical_path_key, orig_key
 
 PathLike = Union[str, os.PathLike[str]]
 
@@ -97,7 +99,8 @@ class DiffStore:
         self._ensure_dir()
         tmp = self.index_path.with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
             encoding="utf-8",
         )
         atomic_replace(tmp, self.index_path)
@@ -150,14 +153,13 @@ class DiffStore:
                 # Не вытесняем только что созданный .orig: сразу после snapshot
                 # disk == .orig (clean), иначе LRU съест свежий baseline.
                 self._maybe_evict(index, protect_key=key)
-        else:
-            # Новый файл: .orig не создаём.
-            if key not in index:
-                index[key] = {
-                    "status": STATUS_CREATED,
-                    "baseline_exists": False,
-                }
-                self.save_index(index)
+        # Новый файл: .orig не создаём.
+        elif key not in index:
+            index[key] = {
+                "status": STATUS_CREATED,
+                "baseline_exists": False,
+            }
+            self.save_index(index)
 
         return key
 
@@ -206,7 +208,9 @@ class DiffStore:
             return UndoResult(ok=False, reason="not_in_index")
 
         status = entry.get("status")
-        if status == STATUS_CREATED and not entry.get("baseline_exists", False):
+        if status == STATUS_CREATED and not entry.get(
+            "baseline_exists", False
+        ):
             # Новый файл без baseline → undo = удалить с диска и из index.
             disk = self._disk_path(key)
             if disk.is_file() or disk.is_symlink():
@@ -258,7 +262,10 @@ class DiffStore:
                 continue
             status = meta.get("status")
             baseline = bool(meta.get("baseline_exists", False))
-            needs_orig = baseline or status in (STATUS_MODIFIED, STATUS_DELETED)
+            needs_orig = baseline or status in (
+                STATUS_MODIFIED,
+                STATUS_DELETED,
+            )
             if needs_orig and not self._orig_path(key).is_file():
                 changed = True
                 continue

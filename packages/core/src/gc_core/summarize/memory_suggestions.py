@@ -4,18 +4,21 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
+from gc_core.bundled_assets import bundled_root
 from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.prompt_loading import load_memory_patch_replace_prompt
-from gc_core.summarize.working_memory_gateway import MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL, build_memory_deltas_format_repair_messages
-from gc_core.bundled_assets import bundled_root
+from gc_core.summarize.working_memory_gateway import (
+    MEMORY_DELTAS_FORMAT_REPAIR_REQUEST_LABEL,
+    build_memory_deltas_format_repair_messages,
+)
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
 _PROJECT_ROOT = str(bundled_root())
 DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
-    os.path.join(_PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md")
+    os.path.join(
+        _PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md"
+    )
 )
-
-
 
 
 @dataclass
@@ -32,8 +35,14 @@ class MemoryPatchLlmResult:
 
 def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
     cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = cfg.get("summary_params") if isinstance(cfg.get("summary_params"), dict) else {}
-    prompt_path_raw = str(summary_params.get(config_key) or default_path).strip()
+    summary_params = (
+        cfg.get("summary_params")
+        if isinstance(cfg.get("summary_params"), dict)
+        else {}
+    )
+    prompt_path_raw = str(
+        summary_params.get(config_key) or default_path
+    ).strip()
     if not prompt_path_raw:
         raise ValueError(f"summary_params.{config_key} is empty")
     if os.path.isabs(prompt_path_raw):

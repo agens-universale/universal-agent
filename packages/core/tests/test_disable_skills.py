@@ -9,7 +9,6 @@ Covers four cases (spec section 7, step 7):
 """
 
 import pytest
-
 from gc_core.config_modules.merge import deep_merge
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 
@@ -43,7 +42,9 @@ async def test_disable_pack_removes_bootstrap_and_inner() -> None:
     baseline = SkillsRegistry()
     cat_baseline = await baseline.skill_catalog()
     # Sanity: pack and at least one inner are in baseline.
-    assert cat_baseline.pack_bootstrap.get(pack_id) == "articles:using-articles"
+    assert (
+        cat_baseline.pack_bootstrap.get(pack_id) == "articles:using-articles"
+    )
     assert "articles:article-creator" in cat_baseline.canonical_ids
     assert "articles:check-article" in cat_baseline.canonical_ids
 
@@ -76,11 +77,18 @@ async def test_get_skills_registry_reads_disable_from_config_dict() -> None:
     assert "topic-research" in cat.canonical_ids
 
 
-async def test_get_skills_registry_reads_pack_disable_from_config_dict() -> None:
+async def test_get_skills_registry_reads_pack_disable_from_config_dict() -> (
+    None
+):
     config_dict = {"disable_skills": ["science-article-creator"]}
     reg = get_skills_registry(config_dict)
     cat = await reg.skill_catalog()
     # The new science pack must not be visible when listed in disable_skills.
     assert "science-article-creator" not in cat.pack_bootstrap
-    assert "science-article-creator:scientific-research" not in cat.canonical_ids
-    assert "science-article-creator:using-science-article-creator" not in cat.canonical_ids
+    assert (
+        "science-article-creator:scientific-research" not in cat.canonical_ids
+    )
+    assert (
+        "science-article-creator:using-science-article-creator"
+        not in cat.canonical_ids
+    )

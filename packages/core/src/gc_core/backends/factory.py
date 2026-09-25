@@ -1,12 +1,13 @@
 """Resolve ``FsBackend`` from config and runtime dependencies."""
+
 from __future__ import annotations
 
 import asyncio
 from typing import Any, Optional
 
-from gc_core.backends.protocol import FsBackend
-from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.harbor import HarborBackend
+from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.agent import (
     exec_output_capture_max_chars_from_config_dict,
     harbor_exec_init_from_config_dict,
@@ -24,7 +25,9 @@ def parse_os_backend_kind(config_dict: dict) -> str:
     else:
         kind = raw.strip().lower()
     if kind not in _SUPPORTED:
-        raise ValueError(f"unsupported os_backend: {raw!r} (expected local or harbor)")
+        raise ValueError(
+            f"unsupported os_backend: {raw!r} (expected local or harbor)"
+        )
     return kind
 
 
@@ -57,7 +60,9 @@ def resolve_os_backend(
             environment,
             loop,
             exec_output_capture_max_chars=cap,
-            walk_output_max_chars=walk_output_max_chars_from_config_dict(config_dict),
+            walk_output_max_chars=walk_output_max_chars_from_config_dict(
+                config_dict
+            ),
             exec_init=harbor_exec_init_from_config_dict(config_dict),
         )
 

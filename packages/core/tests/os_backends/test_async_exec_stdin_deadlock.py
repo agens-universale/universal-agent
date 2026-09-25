@@ -15,12 +15,12 @@ stdin, `arun_python` — код. Таймаут тула здесь единст
 Числа в тесте подобраны с запасом за оба порога. При 200 КБ вывода дефект
 скрыт предбуфером asyncio — тест на таких числах был бы зелёным всегда.
 """
+
 import asyncio
 import sys
 import time
 
 import pytest
-
 from gc_core.backends.local import LocalFsBackend
 
 #: Ребёнок сначала ЗАЛИВАЕТ stdout, и только потом читает stdin — так и
@@ -45,7 +45,9 @@ def backend():
     return LocalFsBackend()
 
 
-async def test_large_stdin_with_flooding_child_does_not_hang(backend, tmp_path):
+async def test_large_stdin_with_flooding_child_does_not_hang(
+    backend, tmp_path
+):
     """Шаг обязан завершиться — сам или по таймауту, но не висеть."""
     script = tmp_path / "flood.py"
     script.write_text(_FLOOD_THEN_READ, encoding="utf-8")
@@ -60,7 +62,7 @@ async def test_large_stdin_with_flooding_child_does_not_hang(backend, tmp_path):
             ),
             timeout=_OUTER_BUDGET,
         )
-    except (asyncio.TimeoutError, TimeoutError):
+    except TimeoutError:
         spent = time.perf_counter() - started
         pytest.fail(
             f"aexec_argv висел больше {spent:.1f}с при таймауте тула "
@@ -77,9 +79,7 @@ async def test_child_actually_receives_the_whole_stdin(backend, tmp_path):
     """Читатели вперёд — но stdin обязан доехать целиком, а не потеряться."""
     script = tmp_path / "echo_len.py"
     script.write_text(
-        "import sys\n"
-        "data = sys.stdin.read()\n"
-        "sys.stdout.write(str(len(data)))\n",
+        "import sys\ndata = sys.stdin.read()\nsys.stdout.write(str(len(data)))\n",
         encoding="utf-8",
     )
 

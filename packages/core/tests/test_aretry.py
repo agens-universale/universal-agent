@@ -3,11 +3,11 @@
 Главное утверждение — паритет с синхронным двойником: политика ретраев не
 должна зависеть от того, каким транспортом ушёл запрос.
 """
+
 import asyncio
 import logging
 
 import pytest
-
 from gc_core.utils.aretry import retry_with_backoff_async
 from gc_core.utils.retry import retry_with_backoff
 
@@ -21,7 +21,9 @@ async def test_retries_until_success_without_real_sleep(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", fake_sleep)
     calls = {"n": 0}
 
-    @retry_with_backoff_async(max_attempts=3, initial_delay_sec=1.0, backoff_factor=2.0)
+    @retry_with_backoff_async(
+        max_attempts=3, initial_delay_sec=1.0, backoff_factor=2.0
+    )
     async def flaky():
         calls["n"] += 1
         if calls["n"] < 3:
@@ -38,7 +40,9 @@ async def test_sleep_is_asyncio_not_time(monkeypatch):
     ровно то, ради чего затевался переезд."""
     import time
 
-    monkeypatch.setattr(time, "sleep", lambda *_: pytest.fail("использован time.sleep"))
+    monkeypatch.setattr(
+        time, "sleep", lambda *_: pytest.fail("использован time.sleep")
+    )
 
     async def fake_sleep(_d):
         return None
@@ -88,6 +92,7 @@ async def test_unknown_kwargs_are_filtered_like_in_sync_twin(monkeypatch):
     Тот же приём, что в синхронном retry: вызывающие транспорта передают общий
     мешок параметров, часть которых конкретной функции не нужна.
     """
+
     async def fake_sleep(_d):
         return None
 
@@ -100,7 +105,9 @@ async def test_unknown_kwargs_are_filtered_like_in_sync_twin(monkeypatch):
     assert await f(url="http://x", use_retry=True, лишний="ключ") == "http://x"
 
 
-async def test_logger_is_reinjected_when_function_accepts_it(monkeypatch, caplog):
+async def test_logger_is_reinjected_when_function_accepts_it(
+    monkeypatch, caplog
+):
     """logger достаётся декоратору, но возвращается функции, если та его принимает.
 
     Без ре-инъекции вызываемая функция получала бы logger=None и переставала

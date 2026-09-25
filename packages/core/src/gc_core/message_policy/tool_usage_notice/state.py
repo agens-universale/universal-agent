@@ -38,7 +38,9 @@ def _coerce_tool_usage_notice_counters(value: Any) -> dict[str, int]:
     return out
 
 
-def hydrate_tool_usage_notice_state(state: Any, meta: dict[str, Any] | None) -> None:
+def hydrate_tool_usage_notice_state(
+    state: Any, meta: dict[str, Any] | None
+) -> None:
     """Восстановить поля State и meta-only ключи из thread/child meta."""
     session = meta if isinstance(meta, dict) else {}
     raw_hash = session.get(META_PROJECT_MEMORY_CONTENT_HASH)
@@ -47,9 +49,13 @@ def hydrate_tool_usage_notice_state(state: Any, meta: dict[str, Any] | None) -> 
     else:
         state.project_memory_content_hash = None
 
-    counters = _coerce_tool_usage_notice_counters(session.get(META_TOOL_USAGE_NOTICE_CNT))
+    counters = _coerce_tool_usage_notice_counters(
+        session.get(META_TOOL_USAGE_NOTICE_CNT)
+    )
     if not counters and META_MEMORY_NOTICE_CNT in session:
-        legacy = _coerce_non_negative_int(session.get(META_MEMORY_NOTICE_CNT, 0))
+        legacy = _coerce_non_negative_int(
+            session.get(META_MEMORY_NOTICE_CNT, 0)
+        )
         if legacy > 0:
             counters = {"session_memory": legacy}
     state.tool_usage_notice_cnt = counters

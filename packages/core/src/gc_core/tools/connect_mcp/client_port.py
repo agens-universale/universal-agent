@@ -4,23 +4,23 @@
 this is the behaviour gc-cli has always had, moved behind an interface so a
 second locus can exist beside it without either knowing about the other.
 """
+
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
 import httpx
 
+from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.tools.connect_mcp.client import (
-    _MCP_SESSIONS,
-    forget_session,
     _acall_mcp_tool,
     _aget_or_init_session_id,
     _atools_list_request,
+    forget_session,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
     is_persistent_stdio,
 )
-from gc_core.tools.connect_mcp.abandonable import run_abandonable
 from gc_core.tools.connect_mcp.stream_client import (
     acall_tool_stream_http,
     acall_tool_stream_sse,
@@ -98,7 +98,9 @@ def _effective_transport(server_cfg: Dict[str, Any]) -> str:
 
     Единственный источник правил — ``transport_policy.resolve_effective_transport``.
     """
-    from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
+    from gc_core.tools.connect_mcp.transport_policy import (
+        resolve_effective_transport,
+    )
 
     return resolve_effective_transport(server_cfg)
 
@@ -169,11 +171,17 @@ class AgentRuntimeClient(McpClientPort):
 
         if effective == "stream_sse":
             return await alist_tools_stream_sse(
-                url=url, server_cfg=self.server_cfg, token=token, timeout=timeout
+                url=url,
+                server_cfg=self.server_cfg,
+                token=token,
+                timeout=timeout,
             )
         if effective == "stream_http":
             return await alist_tools_stream_http(
-                url=url, server_cfg=self.server_cfg, token=token, timeout=timeout
+                url=url,
+                server_cfg=self.server_cfg,
+                token=token,
+                timeout=timeout,
             )
         if transport == "stream_stdio":
             return await alist_tools_stream_stdio(
@@ -195,7 +203,10 @@ class AgentRuntimeClient(McpClientPort):
             )
         try:
             return await _atools_list_request(
-                url, session_id=session_id, server_cfg=self.server_cfg, token=token
+                url,
+                session_id=session_id,
+                server_cfg=self.server_cfg,
+                token=token,
             )
         except httpx.HTTPStatusError:
             forget_session(self.server_name)
@@ -204,11 +215,13 @@ class AgentRuntimeClient(McpClientPort):
             )
             if not session_id:
                 raise RuntimeError(
-                    f"Failed to re-initialize MCP session for server "
-                    f"'{self.server_name}'"
+                    f"Failed to re-initialize MCP session for server '{self.server_name}'"
                 )
             return await _atools_list_request(
-                url, session_id=session_id, server_cfg=self.server_cfg, token=token
+                url,
+                session_id=session_id,
+                server_cfg=self.server_cfg,
+                token=token,
             )
 
     async def acall_tool(
@@ -251,7 +264,11 @@ class AgentRuntimeClient(McpClientPort):
             )
 
         session_id = await _aget_or_init_session_id(
-            self.server_name, url, self.server_cfg, token=token, timeout=timeout
+            self.server_name,
+            url,
+            self.server_cfg,
+            token=token,
+            timeout=timeout,
         )
         if not session_id:
             raise RuntimeError(
@@ -275,23 +292,30 @@ class AgentRuntimeClient(McpClientPort):
         except httpx.HTTPStatusError:
             forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
-                self.server_name, url, self.server_cfg, token=token, timeout=timeout
+                self.server_name,
+                url,
+                self.server_cfg,
+                token=token,
+                timeout=timeout,
             )
             if not session_id:
                 raise RuntimeError(
-                    f"Failed to re-initialize MCP session for server "
-                    f"'{self.server_name}'"
+                    f"Failed to re-initialize MCP session for server '{self.server_name}'"
                 )
             data = await ado_call(session_id)
 
         if data == {} and transport == "sse":
             forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
-                self.server_name, url, self.server_cfg, token=token, timeout=timeout
+                self.server_name,
+                url,
+                self.server_cfg,
+                token=token,
+                timeout=timeout,
             )
             if session_id:
                 data = await ado_call(session_id)
         return data
 
 
-__all__ = ["McpClientPort", "AgentRuntimeClient"]
+__all__ = ["AgentRuntimeClient", "McpClientPort"]

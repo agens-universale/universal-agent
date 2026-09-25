@@ -1,4 +1,5 @@
 """Empty-state — каноничный вид при запуске без задачи."""
+
 import pytest
 
 pytest.importorskip("textual")
@@ -7,6 +8,7 @@ pytest.importorskip("pytest_textual_snapshot")
 
 def test_empty_state_snapshot(snap_compare, tmp_path):
     from gc_tui.app import TuiApp
+
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",

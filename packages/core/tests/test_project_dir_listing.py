@@ -9,12 +9,17 @@ Covers:
 - D5: level markers + one final hint only on truncation
 - D7: get_listing and get_listing_from_backend agree
 """
-from gc_core.utils.project_data import cut_second, get_listing, get_listing_from_backend
 
+from gc_core.utils.project_data import (
+    cut_second,
+    get_listing,
+    get_listing_from_backend,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class _FakeBackend:
     """Stand-in FsBackend: returns a predefined listdir, no real FS."""
@@ -65,6 +70,7 @@ def _children_of(listing: str, dirname: str) -> list[str]:
 # D4 — cut_second default
 # ---------------------------------------------------------------------------
 
+
 def test_cut_second_at_least_120():
     assert cut_second >= 120, f"cut_second={cut_second}, expected >= 120"
 
@@ -85,6 +91,7 @@ async def test_gc_dir_excluded_from_listing(tmp_path):
 # ---------------------------------------------------------------------------
 # D2 — stable sort: dirs first, casefold, repeatable
 # ---------------------------------------------------------------------------
+
 
 async def test_get_listing_stable_order_repeatable(tmp_path):
     """Multiple calls return the same order."""
@@ -115,9 +122,15 @@ async def test_get_listing_sort_order_dirs_first_then_alpha(tmp_path):
     root_names = _root_names(listing)
 
     dirs = [n for n in root_names if n.endswith("/")]
-    files = [n for n in root_names if not n.endswith("/") and not n.startswith("...")]
+    files = [
+        n
+        for n in root_names
+        if not n.endswith("/") and not n.startswith("...")
+    ]
     assert dirs and files
-    assert max(root_names.index(d) for d in dirs) < min(root_names.index(f) for f in files)
+    assert max(root_names.index(d) for d in dirs) < min(
+        root_names.index(f) for f in files
+    )
     assert dirs == sorted(dirs, key=lambda n: n.casefold())
     assert files == sorted(files, key=lambda n: n.casefold())
 
@@ -148,7 +161,10 @@ async def test_backend_listing_agrees_with_filesystem_listing(tmp_path):
 # D3 — limit counts shown names, not raw index
 # ---------------------------------------------------------------------------
 
-async def test_truncation_ignores_stop_folders_in_counter(tmp_path, monkeypatch):
+
+async def test_truncation_ignores_stop_folders_in_counter(
+    tmp_path, monkeypatch
+):
     """
     Classic as-is bug: stop_folders early in listdir inflate enumerate index,
     so truncate fires before any (or enough) visible names are shown.
@@ -166,14 +182,20 @@ async def test_truncation_ignores_stop_folders_in_counter(tmp_path, monkeypatch)
     monkeypatch.setattr(project_data, "cut_first", 2)
     listing = await get_listing(str(tmp_path))
 
-    assert "(truncated 2/4)" in listing, f"Expected shown/total over visible only:\n{listing}"
+    assert "(truncated 2/4)" in listing, (
+        f"Expected shown/total over visible only:\n{listing}"
+    )
     root = _root_names(listing)
     visible = [n for n in root if not n.startswith("...")]
-    assert visible == ["a.txt", "b.txt"], f"Expected first 2 sorted visible:\n{listing}"
+    assert visible == ["a.txt", "b.txt"], (
+        f"Expected first 2 sorted visible:\n{listing}"
+    )
     assert "projectDirListing truncated" in listing
 
 
-async def test_truncation_uses_shown_count_not_raw_index(tmp_path, monkeypatch):
+async def test_truncation_uses_shown_count_not_raw_index(
+    tmp_path, monkeypatch
+):
     """Marker reflects filtered total, not raw listdir length."""
     from gc_core.utils import project_data
 
@@ -186,13 +208,16 @@ async def test_truncation_uses_shown_count_not_raw_index(tmp_path, monkeypatch):
     monkeypatch.setattr(project_data, "cut_first", 1)
     listing = await get_listing(str(tmp_path))
 
-    assert "(truncated 1/3)" in listing, f"Expected 1/3 over filtered names:\n{listing}"
+    assert "(truncated 1/3)" in listing, (
+        f"Expected 1/3 over filtered names:\n{listing}"
+    )
     assert "(truncated 1/5)" not in listing
 
 
 # ---------------------------------------------------------------------------
 # D5 — truncate markers
 # ---------------------------------------------------------------------------
+
 
 async def test_no_truncation_marker_when_under_limit(tmp_path, monkeypatch):
     """When no truncation occurs, no level markers and no final hint."""
@@ -216,18 +241,30 @@ async def test_level_truncation_marker_shown_total(tmp_path, monkeypatch):
     """Truncated level shows ``...(truncated N/total)``, not bare ``...``."""
     from gc_core.utils import project_data
 
-    for name in ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt", "f.txt", "g.txt"]:
+    for name in [
+        "a.txt",
+        "b.txt",
+        "c.txt",
+        "d.txt",
+        "e.txt",
+        "f.txt",
+        "g.txt",
+    ]:
         (tmp_path / name).touch()
 
     monkeypatch.setattr(project_data, "cut_first", 3)
     listing = await get_listing(str(tmp_path))
 
     assert "(truncated 3/7)" in listing
-    orphan_dots = [l for l in listing.split("\n") if l.strip() in ("...", "...(truncated")]
+    orphan_dots = [
+        l for l in listing.split("\n") if l.strip() in ("...", "...(truncated")
+    ]
     assert not orphan_dots
 
 
-async def test_final_hint_appears_only_when_truncation_occurred(tmp_path, monkeypatch):
+async def test_final_hint_appears_only_when_truncation_occurred(
+    tmp_path, monkeypatch
+):
     """Final hint only when at least one level was truncated; then last line."""
     from gc_core.utils import project_data
 
@@ -245,7 +282,9 @@ async def test_final_hint_appears_only_when_truncation_occurred(tmp_path, monkey
     assert sum(1 for l in lines if "listing truncated" in l.lower()) == 1
 
 
-async def test_final_hint_once_even_with_multiple_truncations(tmp_path, monkeypatch):
+async def test_final_hint_once_even_with_multiple_truncations(
+    tmp_path, monkeypatch
+):
     """Root + child truncation → still exactly one final hint."""
     from gc_core.utils import project_data
 
@@ -261,11 +300,15 @@ async def test_final_hint_once_even_with_multiple_truncations(tmp_path, monkeypa
     monkeypatch.setattr(project_data, "cut_second", 5)
     listing = await get_listing(str(tmp_path))
 
-    hint_lines = [l for l in listing.split("\n") if "listing truncated" in l.lower()]
+    hint_lines = [
+        l for l in listing.split("\n") if "listing truncated" in l.lower()
+    ]
     assert len(hint_lines) == 1
 
 
-async def test_backend_and_fs_agree_on_truncation_markers(tmp_path, monkeypatch):
+async def test_backend_and_fs_agree_on_truncation_markers(
+    tmp_path, monkeypatch
+):
     """D7: both entrypoints emit the same markers when truncating."""
     from gc_core.utils import project_data
 
@@ -285,6 +328,7 @@ async def test_backend_and_fs_agree_on_truncation_markers(tmp_path, monkeypatch)
 # Integration: children of src/ under cut_second (the original bug surface)
 # ---------------------------------------------------------------------------
 
+
 async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     """
     Acceptance §6: project root listing must show both ``tui/`` and ``diff_tui/``
@@ -297,7 +341,11 @@ async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
 
     # Intentionally bad creation order: tui/diff_tui last, modules reverse.
     # 50 modules + core + tui + diff_tui = 53 (matches typical src/).
-    child_names = [f"module{i}" for i in range(49, -1, -1)] + ["tui", "diff_tui", "core"]
+    child_names = [f"module{i}" for i in range(49, -1, -1)] + [
+        "tui",
+        "diff_tui",
+        "core",
+    ]
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     for name in child_names:
@@ -310,7 +358,9 @@ async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     src_children = _children_of(listing, "src/")
 
     assert "tui/" in src_children, f"tui/ missing under src/:\n{listing}"
-    assert "diff_tui/" in src_children, f"diff_tui/ missing under src/:\n{listing}"
+    assert "diff_tui/" in src_children, (
+        f"diff_tui/ missing under src/:\n{listing}"
+    )
     assert not any("(truncated" in c for c in src_children), (
         f"src/ children must not be truncated at cut_second={cut_second}:\n{listing}"
     )
@@ -322,4 +372,6 @@ async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     assert "tui/" not in old_children, (
         "fixture invalid: cut_second=30 should hide tui/ so the 120 case is meaningful"
     )
-    assert any("30/53" in c for c in old_children), f"Expected level marker:\n{listing_old}"
+    assert any("30/53" in c for c in old_children), (
+        f"Expected level marker:\n{listing_old}"
+    )

@@ -1,13 +1,15 @@
 import logging
 from typing import Any, Dict, Optional
 
-from gc_core.config_modules.stored_outputs import get_tool_output_inline_max_chars
+from gc_core.config_modules.stored_outputs import (
+    get_tool_output_inline_max_chars,
+)
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.session.stored_outputs.envelope import (
     PAGINATION_EOF_MARKER_DOC,
     dumps_stored_tool_output_payload,
     utf8_byte_length,
 )
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _TOOL_NAME = "session_read_stored_tool_output"
@@ -28,7 +30,9 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         return _fallback_logger
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": _TOOL_NAME,
@@ -66,7 +70,9 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: session_read_stored_tool_output
 Tool description: Read paginated chunks from stored large tool output using output_ref.
 
@@ -97,43 +103,13 @@ Behavior:
         return get_tool_output_inline_max_chars(self._config_dict or {})
 
     @classmethod
-    def _payload(
-        cls,
-        *,
-        ok: bool,
-        stored: bool,
-        output_ref: str,
-        source_tool: Optional[str],
-        from_original_call_id: Optional[str],
-        offset: int,
-        limit: int,
-        total_chars: Optional[int] = None,
-        total_bytes: Optional[int] = None,
-        truncated: bool,
-        next_offset: int,
-        content: str,
-        error: Optional[Dict[str, Any]],
-        hint: str,
-    ) -> str:
+    def _payload(cls, **fields: Any) -> str:
+        """Конверт stored-output с полями этого тула; набор полей — см. envelope."""
         return dumps_stored_tool_output_payload(
-            ok=ok,
-            stored=stored,
-            output_ref=output_ref,
-            from_original_call_id=from_original_call_id,
-            source_tool=source_tool,
-            offset=offset,
-            limit=limit,
-            total_chars=total_chars,
-            total_bytes=total_bytes,
-            truncated=truncated,
-            next_offset=next_offset,
-            content=content,
-            error=error,
-            hint=hint,
+            **fields,
             tool=cls.registered_tool_name(),
             read_via=cls.registered_tool_name(),
         )
-
 
     async def acall(
         self,
@@ -160,7 +136,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "output_ref", "message": "output_ref must be a non-empty string."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "output_ref",
+                    "message": "output_ref must be a non-empty string.",
+                },
                 hint="Invalid output_ref argument.",
             )
 
@@ -177,7 +157,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "offset", "message": "offset must be an integer >= 0."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "offset",
+                    "message": "offset must be an integer >= 0.",
+                },
                 hint="Invalid offset argument.",
             )
 
@@ -188,13 +172,17 @@ Behavior:
                 output_ref=output_ref,
                 source_tool=None,
                 from_original_call_id=None,
-                offset=max(0, offset) if isinstance(offset, int) else 0,
+                offset=max(0, offset),
                 limit=inline_limit,
                 total_chars=None,
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "limit", "message": "limit must be an integer >= 1."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "limit",
+                    "message": "limit must be an integer >= 1.",
+                },
                 hint="Invalid limit argument.",
             )
 
@@ -211,7 +199,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "offset", "message": "offset must be >= 0."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "offset",
+                    "message": "offset must be >= 0.",
+                },
                 hint="Invalid offset argument.",
             )
 
@@ -228,7 +220,11 @@ Behavior:
                 truncated=False,
                 next_offset=0,
                 content="",
-                error={"type": "invalid_argument", "field": "limit", "message": "limit must be >= 1."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "limit",
+                    "message": "limit must be >= 1.",
+                },
                 hint="Invalid limit argument.",
             )
 
@@ -306,10 +302,7 @@ Behavior:
                 "If record is gone (LRU), re-invoke source_tool."
             )
         else:
-            hint = (
-                "Last page of stored tool output (EOF). "
-                f"{PAGINATION_EOF_MARKER_DOC}"
-            )
+            hint = f"Last page of stored tool output (EOF). {PAGINATION_EOF_MARKER_DOC}"
         return self._payload(
             ok=True,
             stored=True,

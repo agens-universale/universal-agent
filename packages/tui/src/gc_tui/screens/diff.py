@@ -1,9 +1,14 @@
 """DiffScreen — список pending-диффов, approve/undo, Enter → viewer."""
+
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
+from gc_core.config_modules.diff_tui import (
+    DEFAULT_FULL_FILE_MAX_LINES,
+    DEFAULT_PREVIEW_CONTEXT_LINES,
+)
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -11,27 +16,33 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_tui.diff_tui.feedback import format_approve_ack, format_bulk_approve_ack, format_bulk_undo_ack, format_undo_ack, format_undo_noop_ack
-from gc_core.config_modules.diff_tui import DEFAULT_FULL_FILE_MAX_LINES, DEFAULT_PREVIEW_CONTEXT_LINES
+from gc_tui.diff_tui.feedback import (
+    format_approve_ack,
+    format_bulk_approve_ack,
+    format_bulk_undo_ack,
+    format_undo_ack,
+    format_undo_noop_ack,
+)
 from gc_tui.diff_tui.service import DiffFileEntry, DiffService, OpResult
 from gc_tui.diff_tui.visual import VISUAL_MODES, build_created_file_diff
-from gc_tui.palette import ACCENT, ERR, OK, MUTED, INK
+from gc_tui.palette import ACCENT, ERR, INK, MUTED, OK
 from gc_tui.services.diff_render import render_unified_diff_widget
 
-_FOOTER = (
-    "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  "
-    "[Ctrl+a] принять все  [Ctrl+r] откатить все  [Esc] назад"
-)
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_KEY_CTRL_A = "ctrl+a"
+_KEY_CTRL_R = "ctrl+r"
+
+
+_FOOTER = "[↑↓] выбрать  [Enter] дифф  [a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  [Esc] назад"
 _VIEWER_FOOTER_ADAPTIVE = (
     "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  "
     "[f] файл целиком  [↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 )
-_VIEWER_FOOTER_FULL = (
-    "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  "
-    "[↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
-)
+_VIEWER_FOOTER_FULL = "[a] принять  [r] откатить  [Ctrl+a] принять все  [Ctrl+r] откатить все  [↑↓ / PgUp PgDn] прокрутка  [Esc] назад"
 
-UndoFeedbackFn = Callable[[Sequence[str], Sequence[str]], None]  # restored, deleted
+UndoFeedbackFn = Callable[
+    [Sequence[str], Sequence[str]], None
+]  # restored, deleted
 UiAckFn = Callable[[str], None]
 ActionFn = Callable[[], None]
 
@@ -46,14 +57,14 @@ _KEY_ALIASES = {
     "R": "r",
     "к": "r",
     "К": "r",
-    "ctrl+a": "ctrl+a",
-    "ctrl+A": "ctrl+a",
-    "ctrl+ф": "ctrl+a",
-    "ctrl+Ф": "ctrl+a",
-    "ctrl+r": "ctrl+r",
-    "ctrl+R": "ctrl+r",
-    "ctrl+к": "ctrl+r",
-    "ctrl+К": "ctrl+r",
+    _KEY_CTRL_A: _KEY_CTRL_A,
+    "ctrl+A": _KEY_CTRL_A,
+    "ctrl+ф": _KEY_CTRL_A,
+    "ctrl+Ф": _KEY_CTRL_A,
+    _KEY_CTRL_R: _KEY_CTRL_R,
+    "ctrl+R": _KEY_CTRL_R,
+    "ctrl+к": _KEY_CTRL_R,
+    "ctrl+К": _KEY_CTRL_R,
     # `f` — полный файл; ЙЦУКЕН-псевдоним «а» (физическая клавиша F в RU-раскладке).
     "f": "f",
     "F": "f",
@@ -102,8 +113,12 @@ def _service_from_config(
         extra_paths=list(wg.get("extra_paths") or []),
         protected_extra=list(protected.get("extra") or []),
         cache_max_orig=int(dt.get("cache_max_orig", 500)),
-        preview_context_lines=int(dt.get("preview_context_lines", DEFAULT_PREVIEW_CONTEXT_LINES)),
-        full_file_max_lines=int(dt.get("full_file_max_lines", DEFAULT_FULL_FILE_MAX_LINES)),
+        preview_context_lines=int(
+            dt.get("preview_context_lines", DEFAULT_PREVIEW_CONTEXT_LINES)
+        ),
+        full_file_max_lines=int(
+            dt.get("full_file_max_lines", DEFAULT_FULL_FILE_MAX_LINES)
+        ),
         max_diff_chars=int(dt.get("max_diff_chars", 100_000)),
         emit_notices=True,
         threads_dir=threads_dir,
@@ -161,12 +176,16 @@ class DiffViewerScreen(Screen):
                 yield Static(self._title, id="header-left", markup=False)
             with VerticalScroll(id="trace"):
                 body = render_unified_diff_widget(
-                    self._content if isinstance(self._content, str) else str(self._content)
+                    self._content
+                    if isinstance(self._content, str)
+                    else str(self._content)
                 )
                 body.add_class("viewer-body")
                 yield body
             footer = (
-                _VIEWER_FOOTER_FULL if self._mode == "full" else _VIEWER_FOOTER_ADAPTIVE
+                _VIEWER_FOOTER_FULL
+                if self._mode == "full"
+                else _VIEWER_FOOTER_ADAPTIVE
             )
             yield Static(footer, id="footer", markup=False)
 
@@ -178,10 +197,10 @@ class DiffViewerScreen(Screen):
         elif key == "r":
             self._on_undo()
             event.stop()
-        elif key == "ctrl+a":
+        elif key == _KEY_CTRL_A:
             self._on_approve_all()
             event.stop()
-        elif key == "ctrl+r":
+        elif key == _KEY_CTRL_R:
             self._on_undo_all()
             event.stop()
         elif key == "f":
@@ -259,7 +278,9 @@ class DiffScreen(Screen):
     def _reload(self) -> None:
         self._entries = self._svc.list_entries(pending_only=True)
         if self._entries:
-            if self._selected_idx < 0 or self._selected_idx >= len(self._entries):
+            if self._selected_idx < 0 or self._selected_idx >= len(
+                self._entries
+            ):
                 self._selected_idx = 0
         else:
             self._selected_idx = -1
@@ -321,17 +342,23 @@ class DiffScreen(Screen):
         key = _norm_key(event.key)
         if key == "up":
             if self._entries:
-                self._selected_idx = (self._selected_idx - 1) % len(self._entries)
+                self._selected_idx = (self._selected_idx - 1) % len(
+                    self._entries
+                )
                 self._render_list()
             event.stop()
         elif key == "down":
             if self._entries:
-                self._selected_idx = (self._selected_idx + 1) % len(self._entries)
+                self._selected_idx = (self._selected_idx + 1) % len(
+                    self._entries
+                )
                 self._render_list()
             event.stop()
         elif key in ("home", "end"):
             if self._entries:
-                self._selected_idx = 0 if key == "home" else len(self._entries) - 1
+                self._selected_idx = (
+                    0 if key == "home" else len(self._entries) - 1
+                )
                 self._render_list()
             event.stop()
         elif key == "enter":
@@ -343,10 +370,10 @@ class DiffScreen(Screen):
         elif key == "r":
             self._undo_selected()
             event.stop()
-        elif key == "ctrl+a":
+        elif key == _KEY_CTRL_A:
             self._approve_all()
             event.stop()
-        elif key == "ctrl+r":
+        elif key == _KEY_CTRL_R:
             self._undo_all()
             event.stop()
         elif key == "escape":
@@ -355,7 +382,9 @@ class DiffScreen(Screen):
             self.app.pop_screen()
 
     def _selected(self) -> Optional[DiffFileEntry]:
-        if not self._entries or not (0 <= self._selected_idx < len(self._entries)):
+        if not self._entries or not (
+            0 <= self._selected_idx < len(self._entries)
+        ):
             return None
         return self._entries[self._selected_idx]
 
@@ -421,7 +450,9 @@ class DiffScreen(Screen):
             if ack:
                 self._emit_ui_ack(ack)
             if self._on_undo_feedback is not None:
-                self._on_undo_feedback(result.restored_keys, result.deleted_keys)
+                self._on_undo_feedback(
+                    result.restored_keys, result.deleted_keys
+                )
         elif result.undone_keys:
             self._emit_undo_feedback(result)
         elif not result.ok:
@@ -489,7 +520,9 @@ class DiffScreen(Screen):
                 on_undo=lambda: self._run_from_viewer(
                     lambda: self._apply_undo_result(self._svc.undo(key))
                 ),
-                on_approve_all=lambda: self._run_from_viewer(self._approve_all),
+                on_approve_all=lambda: self._run_from_viewer(
+                    self._approve_all
+                ),
                 on_undo_all=lambda: self._run_from_viewer(self._undo_all),
             )
         )

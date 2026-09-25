@@ -10,6 +10,7 @@
 только цикл агента (записывает батчи) и снос MCP (двойник выполняет шаг теста
 ровно в окне сноса).
 """
+
 import asyncio
 import contextlib
 import importlib
@@ -18,7 +19,6 @@ import types
 
 import httpx
 import pytest
-
 from gc_server import server
 from gc_server.rest_api import agent_execution_registry as registry_module
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
@@ -54,10 +54,14 @@ async def env(monkeypatch, tmp_path):
     ae = importlib.import_module("gc_core.agent_executor")
     monkeypatch.setattr(ae, "gc", types.SimpleNamespace(collect=lambda: None))
     # `turn_steps`: номер хода → шаг теста внутри цикла агента этого хода.
-    h = types.SimpleNamespace(batches=[], teardown_steps=[], turn_steps={}, fail=False)
+    h = types.SimpleNamespace(
+        batches=[], teardown_steps=[], turn_steps={}, fail=False
+    )
 
     async def _loop(messages, state, ctx, **kw):
-        batch = [m.get("content") if isinstance(m, dict) else m for m in messages]
+        batch = [
+            m.get("content") if isinstance(m, dict) else m for m in messages
+        ]
         h.batches.append(batch)
         step = h.turn_steps.get(len(h.batches))
         if step is not None:
@@ -83,13 +87,18 @@ async def env(monkeypatch, tmp_path):
 
 async def _start(env, executor_factory=None):
     return await env.registry.astart_if_absent(
-        system="s", task_id="t",
+        system="s",
+        task_id="t",
         executor_factory=executor_factory or env.executor_cls,
-        ctx=env.ctx, initial_user_message="первый", thread_id="t",
+        ctx=env.ctx,
+        initial_user_message="первый",
+        thread_id="t",
     )
 
 
-async def test_message_arriving_during_teardown_is_delivered_by_the_next_run(env):
+async def test_message_arriving_during_teardown_is_delivered_by_the_next_run(
+    env,
+):
     entered, release = asyncio.Event(), asyncio.Event()
 
     async def _slow_teardown():
@@ -106,10 +115,11 @@ async def test_message_arriving_during_teardown_is_delivered_by_the_next_run(env
     release.set()
     await _within(run.thread)
 
-    assert accepted is True, "прогон в окне сноса ещё жив — сообщение принимается"
+    assert accepted is True, (
+        "прогон в окне сноса ещё жив — сообщение принимается"
+    )
     assert env.batches == [["первый"], ["вдогонку"]], (
-        f"принятое как queued сообщение не дошло до агента отдельным ходом: "
-        f"{env.batches}"
+        f"принятое как queued сообщение не дошло до агента отдельным ходом: {env.batches}"
     )
     assert run.done and run.error is None
 
@@ -125,9 +135,11 @@ async def test_run_is_closed_in_the_same_step_that_finds_no_tail(env):
     late: list = []
 
     def _late_webhook():
-        late.append(env.registry.add_user_message(
-            system="s", task_id="t", make_message=_msg, content="в щель"
-        ))
+        late.append(
+            env.registry.add_user_message(
+                system="s", task_id="t", make_message=_msg, content="в щель"
+            )
+        )
 
     def _factory(ctx):
         executor = env.executor_cls(ctx)
@@ -154,7 +166,9 @@ async def test_run_is_closed_in_the_same_step_that_finds_no_tail(env):
 
 
 @pytest.mark.parametrize("ending", ["stop", "failure"])
-async def test_stopped_or_failed_run_does_not_replay_its_tail(env, caplog, ending):
+async def test_stopped_or_failed_run_does_not_replay_its_tail(
+    env, caplog, ending
+):
     """Остановленный или упавший прогон хвост не доигрывает — но и не молчит.
 
     Доиграть хвост после `stop` значило бы проигнорировать остановку; после
@@ -177,8 +191,12 @@ async def test_stopped_or_failed_run_does_not_replay_its_tail(env, caplog, endin
         run = await _start(env)
         await _within(run.thread)
 
-    assert env.batches == [["первый"]], f"хвост доигран после {ending}: {env.batches}"
-    assert "run_tail_dropped" in caplog.text, "сообщение, принятое как queued, исчезло молча"
+    assert env.batches == [["первый"]], (
+        f"хвост доигран после {ending}: {env.batches}"
+    )
+    assert "run_tail_dropped" in caplog.text, (
+        "сообщение, принятое как queued, исчезло молча"
+    )
     assert (run.error is not None) is (ending == "failure")
 
 
@@ -278,7 +296,9 @@ async def test_tail_turn_moves_last_activity(env, monkeypatch):
     env.teardown_steps.append(_message_then_teardown_goes_on)
     env.turn_steps[2] = _tail_turn
     transport = httpx.ASGITransport(app=server.app)
-    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+    async with httpx.AsyncClient(
+        transport=transport, base_url="http://test"
+    ) as client:
         run = await _start(env)
         try:
             await _within(in_tail.wait())

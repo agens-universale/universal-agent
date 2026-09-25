@@ -1,8 +1,7 @@
 from types import SimpleNamespace
 
 from gc_core.utils import llm_chat_client
-from gc_testkit import run_coro
-from gc_testkit import as_coro
+from gc_testkit import as_coro, run_coro
 
 
 def _cfg(**overrides):
@@ -30,12 +29,16 @@ def _patch_policy(monkeypatch):
         _fake_policy,
     )
     monkeypatch.setattr(
-        llm_chat_client, "acreate_call_headers", as_coro(lambda _s, _c, resolved=None: {})
+        llm_chat_client,
+        "acreate_call_headers",
+        as_coro(lambda _s, _c, resolved=None: {}),
     )
     return captured
 
 
-def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypatch):
+def test_request_chat_completion_text_raw_logging_controlled_by_config(
+    monkeypatch,
+):
     logs = []
 
     class _Log:
@@ -50,14 +53,16 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
         config_dict=_cfg(),
         logger=_Log(),
     )
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx_no_raw,
-        state=state,
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        request_label="summary_batch_1",
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx_no_raw,
+            state=state,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            request_label="summary_batch_1",
+            consumer="summary",
+        )
+    )
 
     raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
     assert len(raw_entries) == 0
@@ -66,14 +71,16 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
         config_dict=_cfg(logging_params={"full_log_backend": True}),
         logger=_Log(),
     )
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx_raw,
-        state=state,
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        request_label="summary_batch_2",
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx_raw,
+            state=state,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            request_label="summary_batch_2",
+            consumer="summary",
+        )
+    )
 
     raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
     assert len(raw_entries) == 1
@@ -82,7 +89,9 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(monkeypat
     assert '"content": "ok"' in args[1]
 
 
-def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs(monkeypatch):
+def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs(
+    monkeypatch,
+):
     captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
@@ -97,13 +106,15 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
     )
     state = SimpleNamespace(default_model="test-model")
 
-    result = run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=state,
-        messages=[{"role": "user", "content": "hello"}],
-        max_tokens=321,
-        consumer="summary",
-    ))
+    result = run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=321,
+            consumer="summary",
+        )
+    )
 
     assert result == "ok"
     assert captured["initial_max_tokens"] == 321
@@ -113,7 +124,9 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
     assert captured["payload"]["temperature"] == 0.3
 
 
-def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypatch):
+def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(
+    monkeypatch,
+):
     captured = _patch_policy(monkeypatch)
 
     ctx = SimpleNamespace(
@@ -122,13 +135,15 @@ def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(monkeypa
     )
     state = SimpleNamespace(default_model="test-model")
 
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=state,
-        messages=[{"role": "user", "content": "hello"}],
-        max_tokens=444,
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=[{"role": "user", "content": "hello"}],
+            max_tokens=444,
+            consumer="summary",
+        )
+    )
 
     assert captured["payload"]["max_tokens"] == 444
     assert "max_completion_tokens" not in captured["payload"]
@@ -145,13 +160,15 @@ def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
     )
     state = SimpleNamespace(default_model="test-model")
 
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=state,
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="summary",
+        )
+    )
 
     assert "tools" not in captured["payload"]
 
@@ -160,11 +177,13 @@ def test_request_chat_completion_text_does_not_salvage_reasoning(monkeypatch):
     captured = _patch_policy(monkeypatch)
     ctx = SimpleNamespace(config_dict=_cfg(), logger=None)
     state = SimpleNamespace(default_model="test-model")
-    run_coro(llm_chat_client.arequest_chat_completion_text(
-        ctx=ctx,
-        state=state,
-        messages=[{"role": "user", "content": "hi"}],
-        max_tokens=10,
-        consumer="summary",
-    ))
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=10,
+            consumer="summary",
+        )
+    )
     assert captured["kwargs"]["salvage_reasoning"] is False

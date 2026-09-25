@@ -3,6 +3,7 @@
 Файл: ``threads_dir/touched_<system>_<thread_id>.json``.
 Формат: ``{"paths": {key: {"ts": float}}}``. Контент файлов не хранит.
 """
+
 from __future__ import annotations
 
 import json
@@ -26,7 +27,9 @@ except ImportError:  # pragma: no cover — Windows
 class TouchedJournal:
     """Журнал путей, которые агентский трейс ещё не принял/не откатил."""
 
-    def __init__(self, threads_dir: str, system_id: str, thread_id: str) -> None:
+    def __init__(
+        self, threads_dir: str, system_id: str, thread_id: str
+    ) -> None:
         self.path = touched_journal_path(threads_dir, system_id, thread_id)
         self._file = Path(self.path)
 
@@ -38,7 +41,7 @@ class TouchedJournal:
             return self._empty()
         try:
             raw = json.loads(self._file.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+        except (OSError, ValueError, TypeError):
             return self._empty()
         if not isinstance(raw, dict) or not isinstance(raw.get("paths"), dict):
             return self._empty()
@@ -58,7 +61,9 @@ class TouchedJournal:
             )
             atomic_replace(str(tmp), str(self._file))
         except OSError as exc:
-            _logger.warning("touched journal write failed path=%s: %s", self.path, exc)
+            _logger.warning(
+                "touched journal write failed path=%s: %s", self.path, exc
+            )
 
     @contextmanager
     def _locked(self):
@@ -70,11 +75,13 @@ class TouchedJournal:
         lock_path.parent.mkdir(parents=True, exist_ok=True)
         fd = None
         try:
-            fd = open(lock_path, "a+", encoding="utf-8")
+            fd = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115  # дескриптор держит блокировку
             fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
             yield
         except OSError as exc:
-            _logger.warning("touched journal lock failed path=%s: %s", self.path, exc)
+            _logger.warning(
+                "touched journal lock failed path=%s: %s", self.path, exc
+            )
             yield
         finally:
             if fd is not None:

@@ -36,11 +36,12 @@
 Асинхронный близнец — :class:`AsyncThreadStoreBase`: те же одиннадцать методов
 с приставкой ``a``. Смешивать формы нельзя, об этом ``thread_store_async``.
 """
+
 from __future__ import annotations
 
 import copy
 from abc import ABC, abstractmethod
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set
 
 from gc_core.thread_store_types import (
@@ -74,7 +75,7 @@ class _ThreadStoreInvariants:
         from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 
         stamped = ThreadMetaMapper.ensure_v2_meta(meta)
-        stamped["updated_at"] = datetime.now(timezone.utc).isoformat()
+        stamped["updated_at"] = datetime.now(UTC).isoformat()
         if not stamped.get("created_at"):
             stamped["created_at"] = stamped["updated_at"]
         return stamped
@@ -91,7 +92,9 @@ class _ThreadStoreInvariants:
         Имя флага валидируется здесь же: опечатка иначе прошла бы молча и
         завела бы флаг, которого никто не снимет.
         """
-        from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
+        from gc_core.persistence.meta_ownership import (
+            resolve_runtime_flag_name,
+        )
 
         flag = resolve_runtime_flag_name(flag)
         runtime = meta.setdefault("runtime", {})
@@ -146,7 +149,10 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
     """
 
     def replace_messages(
-        self, system_id: str, thread_id: str, messages: Sequence[Dict[str, Any]]
+        self,
+        system_id: str,
+        thread_id: str,
+        messages: Sequence[Dict[str, Any]],
     ) -> None:
         """Заместить историю треда, НЕ трогая meta и трассу субагентов.
 
@@ -211,7 +217,9 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
     # --- чтение ------------------------------------------------------------
 
     @abstractmethod
-    def load_messages(self, system_id: str, thread_id: str) -> List[Dict[str, Any]]:
+    def load_messages(
+        self, system_id: str, thread_id: str
+    ) -> List[Dict[str, Any]]:
         """История треда в порядке записи. Нет треда — пустой список, не ошибка."""
 
     @abstractmethod
@@ -248,7 +256,9 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
         """
 
     @abstractmethod
-    def save_meta(self, system_id: str, thread_id: str, meta: Dict[str, Any]) -> None:
+    def save_meta(
+        self, system_id: str, thread_id: str, meta: Dict[str, Any]
+    ) -> None:
         """Записать meta целиком. Штампы ставит ХРАНИЛИЩЕ — см. ``stamp_meta``."""
 
     @abstractmethod
@@ -270,7 +280,9 @@ class ThreadStoreBase(_ThreadStoreInvariants, ABC):
         """Долить значения в ``runtime`` — см. ``merge_runtime_meta``."""
 
     @abstractmethod
-    def discard_message(self, system_id: str, thread_id: str, message_id: str) -> bool:
+    def discard_message(
+        self, system_id: str, thread_id: str, message_id: str
+    ) -> bool:
         """Удалить сообщение по ``id``; ``False``, если такого не было."""
 
     @abstractmethod
@@ -314,7 +326,10 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
     """
 
     async def areplace_messages(
-        self, system_id: str, thread_id: str, messages: Sequence[Dict[str, Any]]
+        self,
+        system_id: str,
+        thread_id: str,
+        messages: Sequence[Dict[str, Any]],
     ) -> None:
         """См. :meth:`ThreadStoreBase.replace_messages`."""
         trace = await self.aread_subagent_trace(system_id, thread_id)
@@ -350,11 +365,15 @@ class AsyncThreadStoreBase(_ThreadStoreInvariants, ABC):
         """См. :meth:`ThreadStoreBase.load_messages`."""
 
     @abstractmethod
-    async def aload_thread_state(self, system_id: str, thread_id: str) -> ThreadState:
+    async def aload_thread_state(
+        self, system_id: str, thread_id: str
+    ) -> ThreadState:
         """См. :meth:`ThreadStoreBase.load_thread_state`."""
 
     @abstractmethod
-    async def aload_meta(self, system_id: str, thread_id: str) -> Dict[str, Any]:
+    async def aload_meta(
+        self, system_id: str, thread_id: str
+    ) -> Dict[str, Any]:
         """См. :meth:`ThreadStoreBase.load_meta`."""
 
     @abstractmethod
@@ -431,7 +450,8 @@ def _abstract_names(cls: type) -> tuple:
     сравнивать два запуска глазами. ``__dict__`` порядок определения хранит.
     """
     return tuple(
-        name for name, attr in cls.__dict__.items()
+        name
+        for name, attr in cls.__dict__.items()
         if getattr(attr, "__isabstractmethod__", False)
     )
 
@@ -457,7 +477,7 @@ ASYNC_CONTRACT_METHODS = _abstract_names(AsyncThreadStoreBase)
 
 __all__ = [
     "ASYNC_CONTRACT_METHODS",
-    "AsyncThreadStoreBase",
     "CONTRACT_METHODS",
+    "AsyncThreadStoreBase",
     "ThreadStoreBase",
 ]

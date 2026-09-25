@@ -25,7 +25,7 @@ FS_READ_FILE_NAME = "fs_read_file"
 FS_WRITE_FILE_NAME = "fs_write_file"
 FS_APPEND_FILE_NAME = "fs_append_file"
 
-# Exec (representative)
+# Exec (representative)  # noqa: ERA001  # описание формата, не выключенный код
 EXEC_COMMAND_NAME = "exec_command"
 EXEC_PYTHON_NAME = "exec_python"
 EXEC_FETCH_URL_NAME = "exec_fetch_url"

@@ -4,12 +4,18 @@ import logging
 import os
 from typing import Any, List
 
-from gc_core.intent_scope.agent_logging import log_intent_scope_summary_done, log_intent_scope_summary_start
+from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.intent_scope import IntentScopeConfig
-from gc_core.intent_log.serialize import deserialize_list, records_to_jsonl_lines
+from gc_core.intent_log.serialize import (
+    deserialize_list,
+    records_to_jsonl_lines,
+)
+from gc_core.intent_scope.agent_logging import (
+    log_intent_scope_summary_done,
+    log_intent_scope_summary_start,
+)
 from gc_core.message_format.dialog_history import truncate_text
 from gc_core.summarize.llm import arequest_summary_text
-from gc_core.bundled_assets import bundled_root
 from gc_core.utils.user_text import read_user_text
 
 _logger = logging.getLogger(__name__)
@@ -22,8 +28,6 @@ _DEFAULT_PROMPT_PATH = os.path.join(
 _DEFAULT_FINAL_ANSWER_PROMPT_PATH = os.path.join(
     _PROJECT_ROOT, "prompts", "intent_scope_final_answer_summary_prompt.md"
 )
-
-
 
 
 def _resolve_final_answer_prompt_path(ctx: Any) -> str:
@@ -161,7 +165,9 @@ async def asummarize_tool_intent_line(
         return ""
 
     if not line:
-        log_intent_scope_summary_done(log, tool_name=tool_name, summary_chars=0)
+        log_intent_scope_summary_done(
+            log, tool_name=tool_name, summary_chars=0
+        )
         return ""
     if scope_cfg.max_summary_chars > 0:
         line = truncate_text(line, scope_cfg.max_summary_chars)
@@ -169,8 +175,6 @@ async def asummarize_tool_intent_line(
         log, tool_name=tool_name, summary_chars=len(line)
     )
     return line
-
-
 
 
 def build_fallback_aggregated_content(
@@ -211,19 +215,25 @@ async def asummarize_final_answer_line(
     if not text:
         return ""
 
-    log_intent_scope_summary_start(log, tool_name="final_answer", output_chars=len(text))
+    log_intent_scope_summary_start(
+        log, tool_name="final_answer", output_chars=len(text)
+    )
 
     prior = list(getattr(state, "current_user_intent", []) or [])
     body = truncate_text(text, scope_cfg.max_tool_output_chars)
     request_label = "intent_scope:final_answer"
     try:
         request_messages = [
-            {"role": "system", "content": _load_prompt_file(_resolve_final_answer_prompt_path(ctx))},
+            {
+                "role": "system",
+                "content": _load_prompt_file(
+                    _resolve_final_answer_prompt_path(ctx)
+                ),
+            },
             {
                 "role": "user",
                 "content": (
-                    f"final_answer:\n{body}\n\n"
-                    f"prior_intent:\n{_format_prior_intent(prior)}\n"
+                    f"final_answer:\n{body}\n\nprior_intent:\n{_format_prior_intent(prior)}\n"
                 ),
             },
         ]
@@ -237,16 +247,20 @@ async def asummarize_final_answer_line(
         )
     except Exception as exc:
         log.warning(
-            "intent_scope summary_failed tool=final_answer error=%s", exc, exc_info=True
+            "intent_scope summary_failed tool=final_answer error=%s",
+            exc,
+            exc_info=True,
         )
         return ""
 
     if not line:
-        log_intent_scope_summary_done(log, tool_name="final_answer", summary_chars=0)
+        log_intent_scope_summary_done(
+            log, tool_name="final_answer", summary_chars=0
+        )
         return ""
     if scope_cfg.max_summary_chars > 0:
         line = truncate_text(line, scope_cfg.max_summary_chars)
-    log_intent_scope_summary_done(log, tool_name="final_answer", summary_chars=len(line))
+    log_intent_scope_summary_done(
+        log, tool_name="final_answer", summary_chars=len(line)
+    )
     return line
-
-

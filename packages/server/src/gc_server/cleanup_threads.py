@@ -5,6 +5,9 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_EXT_JSON = ".json"
+
 
 def _parse_datetime_maybe(value: Any) -> Optional[datetime]:
     if not isinstance(value, str) or not value.strip():
@@ -23,12 +26,62 @@ def _meta_to_data_path(meta_path: str) -> str:
       threads/meta_<tail>.json -> threads/data_<tail>.jsonl
     """
     base = os.path.basename(meta_path)
-    if base.startswith("meta_") and base.endswith(".json"):
-        tail = base[len("meta_") : -len(".json")]
+    if base.startswith("meta_") and base.endswith(_EXT_JSON):
+        tail = base[len("meta_") : -len(_EXT_JSON)]
         return os.path.join(os.path.dirname(meta_path), f"data_{tail}.jsonl")
 
     # На случай неожиданного формата оставим "как есть".
     return meta_path + ".l"
+
+
+def _cleanup_thread(
+    meta_path: str,
+    now: datetime,
+    cutoff: datetime,
+    dry_run: bool,
+    result: dict,
+) -> None:
+    with open(meta_path, encoding="utf-8") as f:
+        meta = json.load(f)
+    if not isinstance(meta, dict):
+        result["skipped"] += 1
+        return
+
+    dt = _parse_datetime_maybe(meta.get("updated_at"))
+    if dt is None:
+        dt = _parse_datetime_maybe(meta.get("created_at"))
+    if dt is None:
+        result["skipped"] += 1
+        return
+
+    # Приведём к timezone-aware: naive-значение считаем локальным.
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=now.tzinfo)
+
+    if dt >= cutoff:
+        result["skipped"] += 1
+        return
+
+    data_path = _meta_to_data_path(meta_path)
+
+    if dry_run:
+        result["removed_meta"] += 1
+        if os.path.exists(data_path):
+            result["removed_data"] += 1
+        return
+
+    try:
+        os.remove(meta_path)
+        result["removed_meta"] += 1
+    except FileNotFoundError:
+        pass
+
+    try:
+        if os.path.exists(data_path):
+            os.remove(data_path)
+            result["removed_data"] += 1
+    except FileNotFoundError:
+        pass
 
 
 def cleanup_threads(
@@ -64,54 +117,14 @@ def cleanup_threads(
     meta_paths = [
         os.path.join(threads_dir, name)
         for name in os.listdir(threads_dir)
-        if name.startswith("meta_") and name.endswith(".json")
+        if name.startswith("meta_") and name.endswith(_EXT_JSON)
     ]
 
     for meta_path in sorted(meta_paths):
         result["scanned"] += 1
         try:
-            with open(meta_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
-            if not isinstance(meta, dict):
-                result["skipped"] += 1
-                continue
-
-            dt = _parse_datetime_maybe(meta.get("updated_at"))
-            if dt is None:
-                dt = _parse_datetime_maybe(meta.get("created_at"))
-            if dt is None:
-                result["skipped"] += 1
-                continue
-
-            # Приведём к timezone-aware: naive-значение считаем локальным.
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=now.tzinfo)
-
-            if dt >= cutoff:
-                result["skipped"] += 1
-                continue
-
-            data_path = _meta_to_data_path(meta_path)
-
-            if dry_run:
-                result["removed_meta"] += 1
-                if os.path.exists(data_path):
-                    result["removed_data"] += 1
-                continue
-
-            try:
-                os.remove(meta_path)
-                result["removed_meta"] += 1
-            except FileNotFoundError:
-                pass
-
-            try:
-                if os.path.exists(data_path):
-                    os.remove(data_path)
-                    result["removed_data"] += 1
-            except FileNotFoundError:
-                pass
-        except Exception as e:  # noqa: BLE001
+            _cleanup_thread(meta_path, now, cutoff, dry_run, result)
+        except Exception as e:
             result["errors"] += 1
             print(f"[cleanup] error for {meta_path}: {e!r}")
 
@@ -126,12 +139,15 @@ def _default_threads_dir() -> str:
     задан явно.
     """
     from gc_core.thread_store import resolve_threads_dir
+
     from gc_server.rest_api.server_config import (
         build_agent_config_for_server,
         load_server_config,
     )
 
-    return resolve_threads_dir(build_agent_config_for_server(load_server_config()))
+    return resolve_threads_dir(
+        build_agent_config_for_server(load_server_config())
+    )
 
 
 def main() -> int:
@@ -162,8 +178,7 @@ def main() -> int:
         "--threads-dir",
         default=None,
         help=(
-            "Каталог с файлами threads (meta_*.json / data_*.jsonl). "
-            "По умолчанию — тот же, что чистит janitor сервера."
+            "Каталог с файлами threads (meta_*.json / data_*.jsonl). По умолчанию — тот же, что чистит janitor сервера."
         ),
     )
     parser.add_argument(
@@ -182,7 +197,9 @@ def main() -> int:
     # Абсолютный путь в любом случае: раньше в статистику уходил аргумент как
     # есть, и по строке «threads» нельзя было понять, какой каталог смотрели.
     threads_dir = (
-        os.path.abspath(args.threads_dir) if args.threads_dir else _default_threads_dir()
+        os.path.abspath(args.threads_dir)
+        if args.threads_dir
+        else _default_threads_dir()
     )
     stats = cleanup_threads(threads_dir, args.ttl_days, dry_run=args.dry_run)
     if stats.get("missing_dir"):
@@ -194,4 +211,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -1,4 +1,5 @@
 """Smoke-tests for skills/skill-creator/."""
+
 from __future__ import annotations
 
 import json
@@ -9,9 +10,9 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from gc_testkit.paths import ASSETS
+from gc_testkit.paths import ASSETS, PACKAGE_SRC_DIRS
+from gc_testkit.paths import REPO as PROJECT_ROOT
 
-from gc_testkit.paths import PACKAGE_SRC_DIRS, REPO as PROJECT_ROOT
 SKILL_DIR = ASSETS / "skills" / "skill-creator"
 
 
@@ -29,13 +30,23 @@ def _make_complete_dev_dir(skill_dir: Path) -> Path:
     dev_dir = skill_dir / "_dev"
     dev_dir.mkdir(exist_ok=True)
     (dev_dir / "intent_brief.md").write_text("# intent\n", encoding="utf-8")
-    (dev_dir / "completion_report.md").write_text("# completion\n", encoding="utf-8")
+    (dev_dir / "completion_report.md").write_text(
+        "# completion\n", encoding="utf-8"
+    )
     examples_dir = dev_dir / "examples"
     examples_dir.mkdir(exist_ok=True)
-    (examples_dir / "prompt_01.md").write_text("# prompt 1\n", encoding="utf-8")
-    (examples_dir / "prompt_01_output.md").write_text("# output 1\n", encoding="utf-8")
-    (examples_dir / "prompt_02.md").write_text("# prompt 2\n", encoding="utf-8")
-    (examples_dir / "prompt_02_output.md").write_text("# output 2\n", encoding="utf-8")
+    (examples_dir / "prompt_01.md").write_text(
+        "# prompt 1\n", encoding="utf-8"
+    )
+    (examples_dir / "prompt_01_output.md").write_text(
+        "# output 1\n", encoding="utf-8"
+    )
+    (examples_dir / "prompt_02.md").write_text(
+        "# prompt 2\n", encoding="utf-8"
+    )
+    (examples_dir / "prompt_02_output.md").write_text(
+        "# output 2\n", encoding="utf-8"
+    )
     return dev_dir
 
 
@@ -77,7 +88,7 @@ def _sample_skill() -> tuple[Path, str]:
     consistent with the script regardless of flat-vs-pack layout.
     """
     sys.path.insert(0, str(SKILL_DIR / "scripts"))
-    import package_skill as _ps  # noqa: E402
+    import package_skill as _ps
 
     for cand in sorted((ASSETS / "skills").glob("**/SKILL.md")):
         skill_dir = cand.parent
@@ -110,7 +121,12 @@ def test_quick_validate_runs_on_existing_skill():
     assert sample_dir.is_dir()
 
     result = subprocess.run(
-        [sys.executable, "-m", "scripts.quick_validate", str(sample_dir.resolve())],
+        [
+            sys.executable,
+            "-m",
+            "scripts.quick_validate",
+            str(sample_dir.resolve()),
+        ],
         capture_output=True,
         encoding="utf-8",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
@@ -150,6 +166,7 @@ def test_package_skill_produces_zip_with_correct_structure(tmp_path):
     assert skill_zip.name == f"skill-{sample_id}.zip", skill_zip.name
 
     import zipfile
+
     with zipfile.ZipFile(skill_zip) as zf:
         names = zf.namelist()
         assert f"{sample_id}/SKILL.md" in names, names
@@ -178,6 +195,7 @@ def test_package_skill_includes_readme_with_metadata(tmp_path):
     skill_zip = next(tmp_path.glob("skill-*.zip"))
 
     import zipfile
+
     with zipfile.ZipFile(skill_zip) as zf:
         assert "README.md" in zf.namelist()
         readme_content = zf.read("README.md").decode("utf-8")
@@ -196,8 +214,10 @@ def test_package_skill_explicit_source_layer(tmp_path):
             "-m",
             "scripts.package_skill",
             str(sample_dir.resolve()),
-            "--source-layer", "user",
-            "--output-dir", str(tmp_path),
+            "--source-layer",
+            "user",
+            "--output-dir",
+            str(tmp_path),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -209,19 +229,25 @@ def test_package_skill_explicit_source_layer(tmp_path):
 
     skill_zip = next(tmp_path.glob("skill-*.zip"))
     import zipfile
+
     with zipfile.ZipFile(skill_zip) as zf:
         readme = zf.read("README.md").decode("utf-8")
         assert "**Слой-источник:** user" in readme, readme[:500]
 
 
-@pytest.mark.parametrize("base, skill_subpath, expected_layer", [
-    # Project layer: under <cwd>/.gc/skills/
-    ("repo", ".gc/skills/test-skill", "project"),
-    # System layer: под каталогом скиллов ДИСТРИБУТИВА. До разбиения на пакеты
-    # это был <repo>/skills/, теперь ассеты принадлежат gc-core.
-    ("assets", "skills/test-skill", "system"),
-])
-def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, expected_layer):
+@pytest.mark.parametrize(
+    "base, skill_subpath, expected_layer",
+    [
+        # Project layer: under <cwd>/.gc/skills/
+        ("repo", ".gc/skills/test-skill", "project"),
+        # System layer: под каталогом скиллов ДИСТРИБУТИВА. До разбиения на пакеты
+        # это был <repo>/skills/, теперь ассеты принадлежат gc-core.
+        ("assets", "skills/test-skill", "system"),
+    ],
+)
+def test_package_skill_auto_detects_source_layer(
+    tmp_path, base, skill_subpath, expected_layer
+):
     """Without --source-layer, README should auto-detect from path."""
     root = PROJECT_ROOT if base == "repo" else ASSETS
     skill_dir = root / skill_subpath
@@ -247,7 +273,8 @@ def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, 
                 "-m",
                 "scripts.package_skill",
                 str(skill_dir.resolve()),
-                "--output-dir", str(tmp_path),
+                "--output-dir",
+                str(tmp_path),
             ],
             capture_output=True,
             encoding="utf-8",
@@ -259,12 +286,16 @@ def test_package_skill_auto_detects_source_layer(tmp_path, base, skill_subpath, 
 
         skill_zip = next(tmp_path.glob("skill-*.zip"))
         import zipfile
+
         with zipfile.ZipFile(skill_zip) as zf:
             readme = zf.read("README.md").decode("utf-8")
-            assert f"**Слой-источник:** {expected_layer}" in readme, readme[:500]
+            assert f"**Слой-источник:** {expected_layer}" in readme, readme[
+                :500
+            ]
     finally:
         if cleanup_needed:
             import shutil
+
             shutil.rmtree(created_root, ignore_errors=True)
 
 
@@ -286,7 +317,8 @@ def test_package_skill_unknown_source_layer(tmp_path):
             "-m",
             "scripts.package_skill",
             str(skill_dir.resolve()),
-            "--output-dir", str(out_dir),
+            "--output-dir",
+            str(out_dir),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -298,6 +330,7 @@ def test_package_skill_unknown_source_layer(tmp_path):
 
     skill_zip = next(out_dir.glob("skill-*.zip"))
     import zipfile
+
     with zipfile.ZipFile(skill_zip) as zf:
         readme = zf.read("README.md").decode("utf-8")
         assert "**Слой-источник:** unknown" in readme
@@ -324,7 +357,8 @@ def test_package_skill_with_dev_folder_puts_into_demo(tmp_path):
             "-m",
             "scripts.package_skill",
             str(skill_dir.resolve()),
-            "--output-dir", str(out_dir),
+            "--output-dir",
+            str(out_dir),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -336,6 +370,7 @@ def test_package_skill_with_dev_folder_puts_into_demo(tmp_path):
 
     skill_zip = next(out_dir.glob("skill-*.zip"))
     import zipfile
+
     with zipfile.ZipFile(skill_zip) as zf:
         names = zf.namelist()
         # demo/ contents from _dev/
@@ -365,7 +400,8 @@ def test_package_skill_cleans_up_dev_folder_after_success(tmp_path):
             "-m",
             "scripts.package_skill",
             str(skill_dir.resolve()),
-            "--output-dir", str(out_dir),
+            "--output-dir",
+            str(out_dir),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -381,7 +417,9 @@ def test_package_skill_cleans_up_dev_folder_after_success(tmp_path):
     assert (skill_dir / "SKILL.md").exists()
 
 
-def test_package_skill_cleanup_permission_error_does_not_block(tmp_path, monkeypatch):
+def test_package_skill_cleanup_permission_error_does_not_block(
+    tmp_path, monkeypatch
+):
     """If _dev/ cleanup raises OSError, archive should still be created and exit 0."""
     skill_dir = tmp_path / "test-skill"
     skill_dir.mkdir()
@@ -397,11 +435,13 @@ def test_package_skill_cleanup_permission_error_does_not_block(tmp_path, monkeyp
     # Direct import approach (subprocess can't be easily monkeypatched):
     sys.path.insert(0, str(ASSETS / "skills" / "skill-creator" / "scripts"))
     import importlib
+
     if "package_skill" in sys.modules:
         importlib.reload(sys.modules["package_skill"])
+    import shutil as _shutil
+
     import package_skill as ps
 
-    import shutil as _shutil
     original_rmtree = _shutil.rmtree
 
     def fake_rmtree(path, *args, **kwargs):
@@ -439,7 +479,8 @@ def test_package_skill_without_dev_folder(tmp_path):
             "-m",
             "scripts.package_skill",
             str(skill_dir.resolve()),
-            "--output-dir", str(out_dir),
+            "--output-dir",
+            str(out_dir),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -451,13 +492,17 @@ def test_package_skill_without_dev_folder(tmp_path):
 
     skill_zip = next(out_dir.glob("skill-*.zip"))
     import zipfile
+
     with zipfile.ZipFile(skill_zip) as zf:
         names = zf.namelist()
         # No demo/ at all
         assert not any(n.startswith("demo/") for n in names), names
         # README без секции demo
         readme = zf.read("README.md").decode("utf-8")
-        assert "demo/" not in readme or "Что в архиве" not in readme.split("demo/")[0]
+        assert (
+            "demo/" not in readme
+            or "Что в архиве" not in readme.split("demo/")[0]
+        )
         # (allow mention only in absence)
 
 
@@ -483,7 +528,8 @@ def test_package_skill_refuses_incomplete_dev(tmp_path):
             "-m",
             "scripts.package_skill",
             str(skill_dir.resolve()),
-            "--output-dir", str(out_dir),
+            "--output-dir",
+            str(out_dir),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -493,12 +539,13 @@ def test_package_skill_refuses_incomplete_dev(tmp_path):
     )
     # Должен fail с понятным сообщением
     assert result.returncode != 0, (
-        f"Expected non-zero exit, got {result.returncode}. "
-        f"stdout={result.stdout!r} stderr={result.stderr!r}"
+        f"Expected non-zero exit, got {result.returncode}. stdout={result.stdout!r} stderr={result.stderr!r}"
     )
     combined = (result.stderr or "") + (result.stdout or "")
     assert "completion_report.md" in combined, combined
-    assert "examples/prompt_01.md" in combined or "prompt_01" in combined, combined
+    assert "examples/prompt_01.md" in combined or "prompt_01" in combined, (
+        combined
+    )
     # Архив НЕ должен быть создан
     assert not list(out_dir.glob("skill-*.zip")), "archive should NOT exist"
 
@@ -522,7 +569,8 @@ def test_package_skill_passes_with_complete_dev(tmp_path):
             "-m",
             "scripts.package_skill",
             str(skill_dir.resolve()),
-            "--output-dir", str(out_dir),
+            "--output-dir",
+            str(out_dir),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -533,6 +581,7 @@ def test_package_skill_passes_with_complete_dev(tmp_path):
     assert result.returncode == 0, (result.stdout, result.stderr)
     skill_zip = next(out_dir.glob("skill-*.zip"))
     import zipfile
+
     with zipfile.ZipFile(skill_zip) as zf:
         names = zf.namelist()
         assert "demo/intent_brief.md" in names, names
@@ -563,7 +612,8 @@ def test_package_skill_no_intent_brief_skips_validation(tmp_path):
             "-m",
             "scripts.package_skill",
             str(skill_dir.resolve()),
-            "--output-dir", str(out_dir),
+            "--output-dir",
+            str(out_dir),
         ],
         capture_output=True,
         encoding="utf-8",
@@ -595,21 +645,29 @@ def _fake_embedding(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "foreign-repo"
     (root / ".git").mkdir(parents=True)
     (root / "packages" / "other" / "src").mkdir(parents=True)
-    (root / "packages" / "other" / "src" / "sentinel_foreign_pkg.py").write_text(
-        "VALUE = 'foreign'\n", encoding="utf-8")
+    (
+        root / "packages" / "other" / "src" / "sentinel_foreign_pkg.py"
+    ).write_text("VALUE = 'foreign'\n", encoding="utf-8")
     (root / "packages" / "core").mkdir(parents=True)
     (root / "packages" / "core" / "pyproject.toml").write_text(
-        '[project]\nname = "someone-else"\nversion = "1.0"\n', encoding="utf-8")
+        '[project]\nname = "someone-else"\nversion = "1.0"\n', encoding="utf-8"
+    )
     (root / "pyproject.toml").write_text(
-        '[project]\nname = "someone-else-meta"\n', encoding="utf-8")
+        '[project]\nname = "someone-else-meta"\n', encoding="utf-8"
+    )
 
     wheel_skill = (
         root / ".venv" / "lib" / f"python{sys.version_info.major}."
-        f"{sys.version_info.minor}" / "site-packages" / "gc_core" / "assets"
-        / "skills" / "skill-creator"
+        f"{sys.version_info.minor}"
+        / "site-packages"
+        / "gc_core"
+        / "assets"
+        / "skills"
+        / "skill-creator"
     )
     wheel_skill.mkdir(parents=True)
     import shutil
+
     shutil.copytree(
         SKILL_DIR / "scripts",
         wheel_skill / "scripts",
@@ -656,8 +714,14 @@ def test_foreign_repo_is_not_taken_for_our_working_copy(tmp_path):
     (cwd / "some-skill").mkdir(parents=True)
 
     result = subprocess.run(
-        [sys.executable, "-c", _FOREIGN_PROBE, str(scripts), str(foreign),
-         str(cwd / "some-skill")],
+        [
+            sys.executable,
+            "-c",
+            _FOREIGN_PROBE,
+            str(scripts),
+            str(foreign),
+            str(cwd / "some-skill"),
+        ],
         capture_output=True,
         encoding="utf-8",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},

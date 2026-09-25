@@ -1,8 +1,9 @@
 import inspect
-import sys
 import json
 import logging
-from typing import Optional, Dict, Any
+import sys
+from typing import Any, Dict, Optional
+
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _logger = logging.getLogger(__name__)
@@ -36,8 +37,6 @@ _TOOL_DESCRIPTION = (
     "When a finite choice set fits, prefer explicit options (A/B/C, numbered list, yes/no). "
     "After each call, follow the hint field in the tool result to classify and act on the reply."
 )
-
-
 
 
 async def _aread_human_response(ctx: "Any", question: str) -> str:
@@ -114,7 +113,9 @@ class AskHuman(AbstractSimpleTool):
     """
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_ask_human",
@@ -132,16 +133,18 @@ class AskHuman(AbstractSimpleTool):
                     }
                 },
                 "required": ["question"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         # Legacy channel (tools_descr); not wired to API today — reserved for a future
         # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
-        description = '''Tool name: turn_ask_human
+        description = """Tool name: turn_ask_human
 
 Overview:
 Finalizes turn: no. Ask the human user and wait for a free-form textual reply. Use for clarification,
@@ -212,9 +215,8 @@ User: "you decide"
   "question": "Given the tradeoffs above, I propose **B (direct wiring)** for this repo size: less indirection, easier debugging.\\n\\nConfirm B, or prefer A/C?"
 }
 Do not implement until they confirm.
-'''
+"""
         return description
-
 
     async def acall(self, question: str, **kwargs) -> str:
         """Асинхронный вход. Вопрос виден ДО того, как ждём ответ.
@@ -231,13 +233,13 @@ Do not implement until they confirm.
         """
         prepared = self._begin_ask(question)
         if isinstance(prepared, str):
-            return prepared                       # проверка не прошла — ждать нечего
+            return prepared  # проверка не прошла — ждать нечего
         question, via_name = prepared
         try:
             response = await _aread_human_response(self._ctx, question)
         except KeyboardInterrupt:
             return self._ask_interrupted(question, via_name)
-        except Exception as exc:                  # EOFError, отказ порта встраивающего
+        except Exception as exc:  # EOFError, отказ порта встраивающего
             return self._ask_failed(question, via_name, exc)
         except BaseException:
             # `CancelledError` — не `Exception`, и проходила мимо: событие
@@ -247,8 +249,11 @@ Do not implement until they confirm.
             from gc_core.tools.subagents.progress import emit_progress
 
             emit_progress(
-                self._ctx, self._state, "ask_human_done",
-                tool_name=via_name, ok=False,
+                self._ctx,
+                self._state,
+                "ask_human_done",
+                tool_name=via_name,
+                ok=False,
             )
             raise
         return self._ask_answered(question, via_name, response)
@@ -266,7 +271,7 @@ Do not implement until they confirm.
                 error={
                     "type": "invalid_argument",
                     "field": "question",
-                    "message": f"Argument 'question' must be a string. Got: {type(question)} ({repr(question)})",
+                    "message": f"Argument 'question' must be a string. Got: {type(question)} ({question!r})",
                 },
             )
         if not question.strip():
@@ -305,25 +310,30 @@ Do not implement until they confirm.
             prose=question,
             tool_name=via_name,
         )
-        print("\n" + "="*60, file=sys.stderr)
+        print("\n" + "=" * 60, file=sys.stderr)
         print("AI ASKS HUMAN:", file=sys.stderr)
-        print("-"*60, file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
         print(question, file=sys.stderr)
-        print("-"*60, file=sys.stderr)
-        print("Please enter your response (end with EOF or empty line):", file=sys.stderr)
+        print("-" * 60, file=sys.stderr)
+        print(
+            "Please enter your response (end with EOF or empty line):",
+            file=sys.stderr,
+        )
         self._run_logger().info(
             "ask_human_question",
             extra={"event": "ask_human_question", "question": question},
         )
         return question, via_name
 
-    def _ask_answered(self, question: str, via_name: Optional[str], response: str) -> str:
+    def _ask_answered(
+        self, question: str, via_name: Optional[str], response: str
+    ) -> str:
         from gc_core.tools.subagents.progress import emit_progress
 
         if response == "":
             response = "(empty response)"
-        print(f"Human responded: {repr(response)}", file=sys.stderr)
-        print("="*60 + "\n", file=sys.stderr)
+        print(f"Human responded: {response!r}", file=sys.stderr)
+        print("=" * 60 + "\n", file=sys.stderr)
         self._run_logger().info(
             "ask_human_response",
             extra={"event": "ask_human_response", "response": response},
@@ -363,13 +373,18 @@ Do not implement until they confirm.
             ok=False,
             question=question,
             response="(user interrupted)",
-            error={"type": "interrupted", "message": "Interaction interrupted by user."},
+            error={
+                "type": "interrupted",
+                "message": "Interaction interrupted by user.",
+            },
         )
 
-    def _ask_failed(self, question: str, via_name: Optional[str], exc: Exception) -> str:
+    def _ask_failed(
+        self, question: str, via_name: Optional[str], exc: Exception
+    ) -> str:
         from gc_core.tools.subagents.progress import emit_progress
 
-        error_msg = f"(error reading input: {str(exc)})"
+        error_msg = f"(error reading input: {exc!s})"
         print(f"[turn_ask_human error]: {error_msg}", file=sys.stderr)
         self._run_logger().warning(
             "ask_human_error",
@@ -393,12 +408,12 @@ Do not implement until they confirm.
     def _normalize_text(self, text: str) -> str:
         """Normalize line endings and clean up extra whitespace."""
         # Convert all line breaks to \n
-        text = text.replace('\r\n', '\n').replace('\r', '\n')
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
         # Strip leading/trailing whitespace per line, but preserve internal structure
-        lines = [line.rstrip() for line in text.split('\n')]
+        lines = [line.rstrip() for line in text.split("\n")]
         # Remove trailing empty lines
-        while lines and lines[-1] == '':
+        while lines and lines[-1] == "":
             lines.pop()
-        while lines and lines[0] == '':
+        while lines and lines[0] == "":
             lines.pop(0)
-        return '\n'.join(lines)
+        return "\n".join(lines)

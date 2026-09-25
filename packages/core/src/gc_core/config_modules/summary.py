@@ -26,5 +26,7 @@ class SummaryConfig(BaseModel):
     max_dialogue_chars: int = DEFAULT_MAX_DIALOGUE_CHARS
     max_accumulated_summary_chars: int = DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS
     last_dialog_steps_count: int = DEFAULT_LAST_DIALOG_STEPS_COUNT
-    last_dialog_step_message_max_chars: int = DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+    last_dialog_step_message_max_chars: int = (
+        DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
+    )
     intent_log_preview_chars: int = DEFAULT_INTENT_LOG_PREVIEW_CHARS

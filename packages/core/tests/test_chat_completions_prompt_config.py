@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 from gc_core.config import load_config
 
 
@@ -17,19 +16,27 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             # prompts/ рядом с конфигом → дефолты резолвятся config_dir-relative
             prompts_dir = os.path.join(tmp_dir, "prompts")
             os.makedirs(prompts_dir, exist_ok=True)
-            for name in ("chat_completions_system_prompt.md",
-                         "chat_completions_summary_prompt.md"):
-                with open(os.path.join(prompts_dir, name), "w", encoding="utf-8") as fd:
+            for name in (
+                "chat_completions_system_prompt.md",
+                "chat_completions_summary_prompt.md",
+            ):
+                with open(
+                    os.path.join(prompts_dir, name), "w", encoding="utf-8"
+                ) as fd:
                     fd.write("x")
 
             cfg = load_config(cfg_path)
             self.assertEqual(
                 cfg["chat_completions_system_prompt_path"],
-                os.path.join(tmp_dir, "prompts", "chat_completions_system_prompt.md"),
+                os.path.join(
+                    tmp_dir, "prompts", "chat_completions_system_prompt.md"
+                ),
             )
             self.assertEqual(
                 cfg["summary_params"]["chat_completions_summary_prompt_path"],
-                os.path.join(tmp_dir, "prompts", "chat_completions_summary_prompt.md"),
+                os.path.join(
+                    tmp_dir, "prompts", "chat_completions_summary_prompt.md"
+                ),
             )
 
     def test_relative_prompt_path_resolved_from_config_dir(self):
@@ -60,20 +67,32 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 fd.write("backend:\n  api_mode: chat_completions\n")
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_trigger_chars"], 0
-            )
-            self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_trigger_tokens"], 0
-            )
-            self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_tokens"],
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_chars"
+                ],
                 0,
             )
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
                 0,
             )
-            self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 0)
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
+                0,
+            )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_chars"
+                ],
+                0,
+            )
+            self.assertEqual(
+                cfg["summary_params"]["incremental_batch_chars"], 0
+            )
             self.assertFalse(cfg["logging_params"]["full_log_backend"])
             self.assertTrue(cfg["logging_params"]["console_trace"])
             self.assertTrue(cfg["logging_params"]["save_logs"])
@@ -89,11 +108,18 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_trigger_chars"], 123
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_chars"
+                ],
+                123,
             )
-            self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 172)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                cfg["summary_params"]["incremental_batch_chars"], 172
+            )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_chars"
+                ],
                 73,
             )
 
@@ -103,33 +129,52 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write("backend:\n  api_mode: chat_completions\n")
             cfg = load_config(cfg_path)
-            self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 5)
+            self.assertEqual(
+                cfg["summary_params"]["last_dialog_steps_count"], 5
+            )
             self.assertEqual(
                 cfg["summary_params"]["last_dialog_step_message_max_chars"],
                 1500,
             )
             self.assertEqual(cfg["summary_params"]["max_message_chars"], 50000)
-            self.assertEqual(cfg["summary_params"]["max_dialogue_chars"], 1000000)
+            self.assertEqual(
+                cfg["summary_params"]["max_dialogue_chars"], 1000000
+            )
             self.assertEqual(
                 cfg["summary_params"]["max_accumulated_summary_chars"], 20000
             )
-            self.assertEqual(cfg["summary_params"]["intent_log_preview_chars"], 10000)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                cfg["summary_params"]["intent_log_preview_chars"], 10000
+            )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_chars"
+                ],
                 0,
             )
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_trigger_tokens"], 0
-            )
-            self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_tokens"],
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
                 0,
             )
-            self.assertNotIn("original_user_messages_max_chars", cfg["summary_params"])
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
+                0,
+            )
+            self.assertNotIn(
+                "original_user_messages_max_chars", cfg["summary_params"]
+            )
             self.assertTrue(
-                Path(cfg["summary_params"][
-                    "chat_completions_memory_patch_replace_prompt_path"
-                ]).as_posix().endswith("prompts/chat_completions_memory_patch_replace.md")
+                Path(
+                    cfg["summary_params"][
+                        "chat_completions_memory_patch_replace_prompt_path"
+                    ]
+                )
+                .as_posix()
+                .endswith("prompts/chat_completions_memory_patch_replace.md")
             )
             self.assertNotIn("llm", cfg["summary_params"])
             from gc_core.config_modules.chat_completions import (
@@ -164,13 +209,16 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             )
 
             self.assertEqual(cfg["auxiliary_llm_params"]["max_tokens"], 4096)
-            self.assertEqual(cfg["auxiliary_llm_params"]["judge_max_tokens"], 5000)
+            self.assertEqual(
+                cfg["auxiliary_llm_params"]["judge_max_tokens"], 5000
+            )
             self.assertEqual(
                 cfg["auxiliary_llm_params"]["completion_kwargs"],
                 {"enable_thinking": False},
             )
             self.assertEqual(
-                cfg["chat_completions_params"]["auxiliary_llm"]["max_tokens"], 4096
+                cfg["chat_completions_params"]["auxiliary_llm"]["max_tokens"],
+                4096,
             )
             aux = auxiliary_llm_from_config_dict(cfg)
             self.assertEqual(aux.max_tokens, 4096)
@@ -182,10 +230,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend:\n  api_mode: chat_completions\n"
-                    "chat_completions:\n"
-                    "  llm:\n"
-                    "    max_tokens: 1111\n"
+                    "backend:\n  api_mode: chat_completions\nchat_completions:\n  llm:\n    max_tokens: 1111\n"
                 )
             cfg = load_config(cfg_path)
             from gc_core.config_modules.chat_completions import (
@@ -193,7 +238,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             )
 
             self.assertEqual(cfg["auxiliary_llm_params"]["max_tokens"], 1111)
-            self.assertEqual(auxiliary_llm_from_config_dict(cfg).max_tokens, 1111)
+            self.assertEqual(
+                auxiliary_llm_from_config_dict(cfg).max_tokens, 1111
+            )
             self.assertIn("auxiliary_llm", cfg["chat_completions_params"])
             self.assertNotIn("llm", cfg["chat_completions_params"])
 
@@ -219,15 +266,24 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 os.path.join(tmp_dir, "prompts", "summary.md"),
             )
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_trigger_chars"], 200
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_chars"
+                ],
+                200,
             )
-            self.assertEqual(cfg["summary_params"]["incremental_batch_chars"], 260)
+            self.assertEqual(
+                cfg["summary_params"]["incremental_batch_chars"], 260
+            )
             self.assertEqual(cfg["summary_params"]["max_message_chars"], 45000)
-            self.assertEqual(cfg["summary_params"]["max_dialogue_chars"], 900000)
+            self.assertEqual(
+                cfg["summary_params"]["max_dialogue_chars"], 900000
+            )
             self.assertEqual(
                 cfg["summary_params"]["max_accumulated_summary_chars"], 15000
             )
-            self.assertEqual(cfg["summary_params"]["last_dialog_steps_count"], 7)
+            self.assertEqual(
+                cfg["summary_params"]["last_dialog_steps_count"], 7
+            )
             self.assertEqual(
                 cfg["summary_params"]["last_dialog_step_message_max_chars"],
                 2500,
@@ -247,7 +303,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 cfg["summary_params"]["incremental_batch_chars"], 70000
             )
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_chars"
+                ],
                 30000,
             )
 
@@ -263,7 +321,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_chars"
+                ],
                 80000,
             )
 
@@ -278,7 +338,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_chars"],
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_chars"
+                ],
                 0,
             )
 
@@ -293,10 +355,15 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_trigger_tokens"], 0
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
+                0,
             )
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_tokens"],
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
                 0,
             )
 
@@ -311,11 +378,15 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_trigger_tokens"],
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
                 100000,
             )
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_summary_turn_end_trigger_tokens"],
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
                 0,
             )
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -333,14 +404,14 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 "Bearer sk-or-v1-test-token",
             )
 
-    def test_summary_original_user_messages_max_chars_in_yaml_is_rejected(self):
+    def test_summary_original_user_messages_max_chars_in_yaml_is_rejected(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend:\n  api_mode: chat_completions\n"
-                    "summary:\n"
-                    "  original_user_messages_max_chars: 12000\n"
+                    "backend:\n  api_mode: chat_completions\nsummary:\n  original_user_messages_max_chars: 12000\n"
                 )
             # отказ схемы приходит завёрнутым (без pydantic-дампа), ключ назван
             with self.assertRaisesRegex(ValueError, "summary"):
@@ -351,16 +422,15 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend:\n  api_mode: chat_completions\n"
-                    "summary:\n"
-                    "  llm:\n"
-                    "    max_tokens: 4096\n"
+                    "backend:\n  api_mode: chat_completions\nsummary:\n  llm:\n    max_tokens: 4096\n"
                 )
             # отказ схемы приходит завёрнутым (без pydantic-дампа), ключ назван
             with self.assertRaisesRegex(ValueError, "summary"):
                 load_config(cfg_path)
 
-    def test_chat_completion_kwargs_and_flags_loaded_from_backend_section(self):
+    def test_chat_completion_kwargs_and_flags_loaded_from_backend_section(
+        self,
+    ):
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
@@ -419,10 +489,14 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["chat_completions_memory_patch_replace_prompt_path"],
+                cfg["summary_params"][
+                    "chat_completions_memory_patch_replace_prompt_path"
+                ],
                 os.path.join(tmp_dir, "prompts", "patch_replace.md"),
             )
-            self.assertEqual(cfg["summary_params"]["intent_log_preview_chars"], 8000)
+            self.assertEqual(
+                cfg["summary_params"]["intent_log_preview_chars"], 8000
+            )
 
     def test_intent_scope_tools_map_loaded_from_yaml(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
@@ -442,7 +516,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             self.assertEqual(tools["turn_ask_human"]["record"], "aggregated")
             self.assertEqual(tools["turn_finish"]["record"], "raw")
 
-    def test_auxiliary_llm_params_survives_deep_merge_over_schema_defaults(self):
+    def test_auxiliary_llm_params_survives_deep_merge_over_schema_defaults(
+        self,
+    ):
         """Бенч: overlay пишет auxiliary_llm_params — typed профиль не остаётся дефолтным."""
         from gc_core.config import flatten_app_config
         from gc_core.config_modules.chat_completions import (
@@ -481,7 +557,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         )
         self.assertEqual(aux.max_tokens, 8192)
 
-    def test_stale_legacy_chat_completions_llm_object_ignored_when_params_present(self):
+    def test_stale_legacy_chat_completions_llm_object_ignored_when_params_present(
+        self,
+    ):
         """Дефолтный объект-близнец не должен перебивать auxiliary_llm_params."""
         from gc_core.config_modules.chat_completions import (
             ChatCompletionsLlmConfig,
@@ -526,7 +604,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             },
         )
         # flat остаётся schema default после такого оверлея
-        self.assertEqual(merged["auxiliary_llm_params"]["completion_kwargs"], {})
+        self.assertEqual(
+            merged["auxiliary_llm_params"]["completion_kwargs"], {}
+        )
         self.assertEqual(merged["auxiliary_llm_params"]["max_tokens"], 24576)
         aux = auxiliary_llm_from_config_dict(merged)
         self.assertEqual(aux.max_tokens, 4096)
@@ -564,14 +644,17 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
     def test_empty_aux_overlay_does_not_inject_vendor_keys(self):
         """Schema/default ``{}`` не шлёт chat_template_kwargs на OpenAI-like агента."""
+        from types import SimpleNamespace
+
         from gc_core.config import flatten_app_config
         from gc_core.config_modules.chat_completions import (
             auxiliary_llm_from_config_dict,
         )
         from gc_core.config_modules.merge import deep_merge
         from gc_core.config_modules.root import AppConfig
-        from gc_core.utils.llm_chat_client import _build_chat_completion_payload
-        from types import SimpleNamespace
+        from gc_core.utils.llm_chat_client import (
+            _build_chat_completion_payload,
+        )
 
         base = flatten_app_config(AppConfig.model_validate({}))
         merged = deep_merge(
@@ -588,7 +671,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 },
             },
         )
-        self.assertEqual(merged["auxiliary_llm_params"]["completion_kwargs"], {})
+        self.assertEqual(
+            merged["auxiliary_llm_params"]["completion_kwargs"], {}
+        )
         aux = auxiliary_llm_from_config_dict(merged)
         self.assertEqual(aux.completion_kwargs, {})
         payload = _build_chat_completion_payload(
@@ -605,12 +690,17 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
     def test_dsv4_style_agent_thinking_does_not_leak_into_aux_payload(self):
         """DeepSeek-style: aux overlay гасит thinking/reasoning_effort агента."""
+        from types import SimpleNamespace
+
         from gc_core.config import flatten_app_config
-        from gc_core.config_modules.chat_completions import auxiliary_llm_from_config_dict
+        from gc_core.config_modules.chat_completions import (
+            auxiliary_llm_from_config_dict,
+        )
         from gc_core.config_modules.merge import deep_merge
         from gc_core.config_modules.root import AppConfig
-        from gc_core.utils.llm_chat_client import _build_chat_completion_payload
-        from types import SimpleNamespace
+        from gc_core.utils.llm_chat_client import (
+            _build_chat_completion_payload,
+        )
 
         base = flatten_app_config(AppConfig.model_validate({}))
         merged = deep_merge(
@@ -644,7 +734,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             payload_overrides=dict(aux.completion_kwargs),
         )
         self.assertEqual(payload["chat_template_kwargs"]["thinking"], False)
-        self.assertEqual(payload["chat_template_kwargs"]["reasoning_effort"], "none")
+        self.assertEqual(
+            payload["chat_template_kwargs"]["reasoning_effort"], "none"
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

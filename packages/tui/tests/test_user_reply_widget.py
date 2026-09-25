@@ -1,12 +1,13 @@
 """UserReplyContainer — band-фон + 2px teal кромка слева, `>` на первой строке."""
+
 import pytest
 
 
 @pytest.mark.asyncio
 async def test_user_reply_single_line():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.user_reply import UserReplyContainer
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -23,8 +24,8 @@ async def test_user_reply_single_line():
 @pytest.mark.asyncio
 async def test_user_reply_multiline_marker_first_line_only():
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.user_reply import UserReplyContainer
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:
@@ -44,8 +45,8 @@ async def test_user_reply_multiline_marker_first_line_only():
 async def test_user_reply_brackets_not_interpreted_as_markup():
     """User text с квадратными скобками НЕ должен парситься как Textual markup."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.user_reply import UserReplyContainer
+    from textual.app import App, ComposeResult
 
     class _App(App):
         def compose(self) -> ComposeResult:

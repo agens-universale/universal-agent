@@ -16,6 +16,7 @@ requests объявили в gc-tui, но это лечило симптом: PO
 считается — он и подвёл с requests. Импорты внутри функций сторож не судит:
 такой отказ приходит при вызове, а не на загрузке пакета.
 """
+
 import ast
 import pathlib
 import re
@@ -23,7 +24,10 @@ import sys
 import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-VOICE_DIRS = (ROOT / "src" / "gc_tui" / "voice", ROOT / "src" / "gc_tui" / "voice_runtime")
+VOICE_DIRS = (
+    ROOT / "src" / "gc_tui" / "voice",
+    ROOT / "src" / "gc_tui" / "voice_runtime",
+)
 
 #: Модуль → дистрибутив, который его привозит: имя модуля и имя пакета
 #: совпадают не всегда (`recommended_mcp` едет в gc-mcp). ``None`` — свой код.
@@ -41,7 +45,9 @@ def _canon(name: str) -> str:
 
 
 def _declared() -> set:
-    deps = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["dependencies"]
+    deps = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["dependencies"]
     out = set()
     for d in deps:
         name = d
@@ -75,12 +81,20 @@ def _module_level_imports(path: pathlib.Path) -> set:
         for node in body:
             if isinstance(node, ast.Import):
                 names.update(a.name.split(".")[0] for a in node.names)
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module
+            ):
                 names.add(node.module.split(".")[0])
             elif isinstance(node, (ast.If, ast.Try, ast.With)):
                 for attr in ("body", "orelse", "finalbody", "handlers"):
                     for item in getattr(node, attr, []) or []:
-                        walk(item.body if isinstance(item, ast.ExceptHandler) else [item])
+                        walk(
+                            item.body
+                            if isinstance(item, ast.ExceptHandler)
+                            else [item]
+                        )
 
     walk(ast.parse(path.read_text(encoding="utf-8")).body)
     return names
@@ -91,7 +105,9 @@ def _voice_files() -> list:
 
 
 def test_voice_does_not_import_requests():
-    importers = [p for p in _voice_files() if "requests" in _top_level_imports(p)]
+    importers = [
+        p for p in _voice_files() if "requests" in _top_level_imports(p)
+    ]
     assert not importers, (
         "голос снова импортирует requests: "
         + ", ".join(str(p.relative_to(ROOT)) for p in importers)
@@ -125,13 +141,18 @@ def test_what_voice_imports_at_module_level_is_declared():
                 dist = OWN_DISTRIBUTION[name]
                 if dist is None or _canon(dist) in declared:
                     continue
-                missing.setdefault(f"{name} (дистрибутив {dist})", []).append(path.name)
+                missing.setdefault(f"{name} (дистрибутив {dist})", []).append(
+                    path.name
+                )
                 continue
             if _canon(name) not in declared:
                 missing.setdefault(name, []).append(path.name)
     assert not missing, (
         "голос импортирует на уровне модуля то, чего нет в зависимостях gc-tui: "
-        + "; ".join(f"{name} — {', '.join(sorted(files))}" for name, files in sorted(missing.items()))
+        + "; ".join(
+            f"{name} — {', '.join(sorted(files))}"
+            for name, files in sorted(missing.items())
+        )
         + ". Объявите пакет в packages/tui/pyproject.toml — транзит из чужого "
-          "дистрибутива не гарантия"
+        "дистрибутива не гарантия"
     )

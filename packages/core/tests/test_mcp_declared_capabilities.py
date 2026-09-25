@@ -22,6 +22,7 @@
 клиента есть обработчик входящих запросов. Появится реализация — снять
 соответствующее имя из ``_UNIMPLEMENTED``, а не править список вслепую.
 """
+
 from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD
 
 #: Возможности, требующие от КЛИЕНТА отвечать на запросы сервера.
@@ -49,10 +50,12 @@ def test_every_init_source_declares_the_same():
     """
     from gc_core.tools.connect_mcp.client import MCP_INIT_PARAMS
 
-    assert MCP_INIT_PARAMS == _INIT_PAYLOAD["params"], (
+    assert _INIT_PAYLOAD["params"] == MCP_INIT_PARAMS, (
         "параметры initialize разъехались между локусами"
     )
-    offenders = sorted(set(MCP_INIT_PARAMS["capabilities"]) & set(_UNIMPLEMENTED))
+    offenders = sorted(
+        set(MCP_INIT_PARAMS["capabilities"]) & set(_UNIMPLEMENTED)
+    )
     assert offenders == [], f"легаси-путь объявляет {offenders}"
 
 
@@ -67,15 +70,16 @@ def test_client_has_no_incoming_request_handler():
     for module in (transport, persistent_stdio):
         src = module.__doc__ or ""
         assert "roots/list" not in src, (
-            f"{module.__name__}: похоже, обработчик roots появился — "
-            f"пересмотреть _UNIMPLEMENTED"
+            f"{module.__name__}: похоже, обработчик roots появился — пересмотреть _UNIMPLEMENTED"
         )
 
     # Читатель ответов отбирает строки по совпадению id и молча пропускает
     # всё остальное — то есть входящий запрос сервера просто теряется.
     import inspect
 
-    body = inspect.getsource(persistent_stdio.PersistentStdioSession._read_matching)
+    body = inspect.getsource(
+        persistent_stdio.PersistentStdioSession._read_matching
+    )
     assert 'if "id" not in obj' in body and "continue" in body, (
         "_read_matching изменился — проверить, не появилась ли обработка "
         "серверных запросов (тогда capabilities можно расширять)"

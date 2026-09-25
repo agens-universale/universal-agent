@@ -20,6 +20,7 @@ httpx умеет ``NO_PROXY`` только сам, при ``trust_env=True``. Н
 сверяется с ``requests.utils.should_bypass_proxies`` напрямую, пока requests
 ещё есть в окружении разработки.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -32,6 +33,29 @@ def _is_ipv4(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _ipv4_bypassed(hostname: str, entries: list[str]) -> bool:
+    for entry in entries:
+        if "/" not in entry:
+            if hostname == entry:
+                return True
+            continue
+        try:
+            network = ipaddress.IPv4Network(entry, strict=False)
+        except ValueError:
+            continue
+        if ipaddress.IPv4Address(hostname) in network:
+            return True
+    return False
+
+
+def _host_matches(hostname: str, host_with_port: str, entry: str) -> bool:
+    entry = entry.lstrip(".")
+    if entry in (hostname, host_with_port):
+        return True
+    dotted = "." + entry
+    return hostname.endswith(dotted) or host_with_port.endswith(dotted)
 
 
 def should_bypass_proxies(url: str, no_proxy: str | None) -> bool:
@@ -49,30 +73,13 @@ def should_bypass_proxies(url: str, no_proxy: str | None) -> bool:
         return True
 
     if _is_ipv4(hostname):
-        for entry in entries:
-            if "/" in entry:
-                try:
-                    network = ipaddress.IPv4Network(entry, strict=False)
-                except ValueError:
-                    continue
-                if ipaddress.IPv4Address(hostname) in network:
-                    return True
-            elif hostname == entry:
-                return True
-        return False
-
+        return _ipv4_bypassed(hostname, entries)
     host_with_port = hostname
     if parsed.port:
         host_with_port += f":{parsed.port}"
-
-    for entry in entries:
-        entry = entry.lstrip(".")
-        if hostname == entry or host_with_port == entry:
-            return True
-        dotted = "." + entry
-        if hostname.endswith(dotted) or host_with_port.endswith(dotted):
-            return True
-    return False
+    return any(
+        _host_matches(hostname, host_with_port, entry) for entry in entries
+    )
 
 
 __all__ = ["should_bypass_proxies"]

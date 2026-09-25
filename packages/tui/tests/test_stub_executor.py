@@ -1,4 +1,5 @@
 """StubExecutor генерирует детерминированную последовательность событий в data_*.jsonl."""
+
 import json
 
 from gc_testkit.tui_fixtures.stub_executor import StubExecutor
@@ -19,6 +20,7 @@ def test_stub_executor_writes_full_dialog(tmp_path):
     assert lines[0]["payload"]["content"] == "расскажи об этом проекте"
     # function_call read_file присутствует
     assert any(
-        l["payload"].get("type") == "function_call" and l["payload"].get("name") == "read_file"
+        l["payload"].get("type") == "function_call"
+        and l["payload"].get("name") == "read_file"
         for l in lines
     )

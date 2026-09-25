@@ -1,4 +1,5 @@
 """compact_now: off-thread форс-сжатие, отказ если worker занят."""
+
 import time
 
 from gc_tui.services.agent_runner import AgentRunner

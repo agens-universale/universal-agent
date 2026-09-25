@@ -1,14 +1,19 @@
 """Physical I/O port for the tool layer: LocalFsBackend (host) and HarborBackend
 (task container). Tools keep validation/envelopes; backends only answer "where
 does this byte live / where does this command run"."""
+
 import os
 import shlex
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Callable, Iterable, Optional, Sequence
+from typing import Any, AsyncIterator, Callable, Optional, Sequence
 
 from gc_core.backends.capture import CapturedStream, captured_stream_from_text
-from gc_core.backends.walk_util import WalkEntry, iter_walk_entries_from_flat, prune_flat_entries
+from gc_core.backends.walk_util import (
+    WalkEntry,
+    iter_walk_entries_from_flat,
+    prune_flat_entries,
+)
 
 # Потолок captured-буфера на поток (decoded UTF-8 chars): L = head H + tail T,
 # H = floor(L / 2), T = L - H. По умолчанию 40k на поток = 20k + 20k.
@@ -49,7 +54,9 @@ class WalkOutputTooLargeError(OSError):
 class _Missing:
     """Отличает «не передали return_code» от осознанного ``None`` (timeout)."""
 
-    def __repr__(self) -> str:  # pragma: no cover - только для сообщений об ошибке
+    def __repr__(
+        self,
+    ) -> str:  # pragma: no cover - только для сообщений об ошибке
         return "<missing>"
 
 
@@ -81,7 +88,9 @@ class ExecResult:
         if isinstance(self.return_code, _Missing):
             # Молчаливый None превратил бы успешную команду в non_zero_exit
             # "exited with status None" — падаем на конструировании, как раньше.
-            raise TypeError("ExecResult: return_code обязателен (None означает timeout)")
+            raise TypeError(
+                "ExecResult: return_code обязателен (None означает timeout)"
+            )
         if self.stdout_stream is None:
             self.stdout_stream = CapturedStream(
                 head=self.stdout or "", total_chars=len(self.stdout or "")
@@ -108,7 +117,9 @@ def bound_captured_stream(text: str, max_chars: int) -> tuple[str, bool]:
     return cs.text, cs.truncated
 
 
-def _rebound(stream: Optional[CapturedStream], text: str, max_chars: int) -> CapturedStream:
+def _rebound(
+    stream: Optional[CapturedStream], text: str, max_chars: int
+) -> CapturedStream:
     # Поток из accumulator с отброшенной серединой пересобирать нельзя: его
     # плоский текст — уже склейка краёв, total_chars восстановить неоткуда.
     if stream is not None and stream.truncated:
@@ -132,7 +143,6 @@ def bound_exec_result(result: ExecResult, max_chars: int) -> ExecResult:
     )
 
 
-
 def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
     """``argv`` (плюс необязательный ``stdin``) → строка для POSIX-шелла.
 
@@ -145,6 +155,7 @@ def argv_to_posix_command(argv: list, *, stdin: Optional[str] = None) -> str:
     if stdin is not None:
         command = f"printf '%s' {shlex.quote(stdin)} | {command}"
     return command
+
 
 def _sync_exec_message(backend: object, name: str) -> str:
     return (
@@ -222,8 +233,13 @@ class FsBackend(ABC):
     # Потолок RAM-буфера stdout/stderr на поток (spec D2/D8).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
 
-    async def aspawn_background(self, command: str, *, cwd: Optional[str] = None,
-                                env: Optional[dict] = None) -> dict:
+    async def aspawn_background(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        env: Optional[dict] = None,
+    ) -> dict:
         """Запустить команду фоном и НЕ ждать её: вернуть как минимум ``pid``.
 
         Вывод команды не сохраняется: у фонового процесса не должно быть ни
@@ -376,7 +392,9 @@ class FsBackend(ABC):
     @abstractmethod
     async def getsize(self, path: str) -> int: ...
     @abstractmethod
-    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict: ...
+    async def stat_info(
+        self, path: str, follow_symlinks: bool = False
+    ) -> dict: ...
     @abstractmethod
     async def readable(self, path: str) -> bool: ...
     @abstractmethod
@@ -403,11 +421,15 @@ class FsBackend(ABC):
 
     # --- write ---
     @abstractmethod
-    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
+    async def write(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None: ...
     @abstractmethod
     async def write_bytes(self, path: str, data: bytes) -> None: ...
     @abstractmethod
-    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None: ...
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None: ...
     @abstractmethod
     async def copy(self, src: str, dst: str) -> None: ...
     @abstractmethod
@@ -448,7 +470,9 @@ class FsBackend(ABC):
         Default: from ``walk()`` — no sizes (tools fall back to ``getsize``) and
         host-side prune, so every backend yields the same tree for the same rules.
         """
-        entries = [WalkEntry(rel, is_dir) for rel, is_dir in await self.walk(path)]
+        entries = [
+            WalkEntry(rel, is_dir) for rel, is_dir in await self.walk(path)
+        ]
         return prune_flat_entries(
             entries, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
         )
@@ -502,16 +526,26 @@ class FsBackend(ABC):
     # форму: их синхронные двойники были обёртками ``run_coro_blocking``, то
     # есть заводили второй loop, а из-под живого — морозили поток вызывающего
     # на всё время команды (минуты). Умолчание ниже поэтому отказывает громко.
-    def exec(self, command: str, *, cwd: Optional[str] = None,
-             timeout: Optional[int] = None,
-             env: Optional[dict] = None,
-             capture_max_chars: Optional[int] = None) -> ExecResult:
+    def exec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         raise SyncExecNotSupportedError(_sync_exec_message(self, "exec"))
 
-    def exec_raw(self, command: str, *, cwd: Optional[str] = None,
-                 timeout: Optional[int] = None,
-                 env: Optional[dict] = None,
-                 capture_max_chars: Optional[int] = None) -> ExecResult:
+    def exec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """Механический POSIX: без инициализации окружения образа.
 
         Вход для ЧУЖИХ синхронных реализаций, как и ``exec``. Канал модели
@@ -524,11 +558,16 @@ class FsBackend(ABC):
             kwargs["capture_max_chars"] = capture_max_chars
         return self.exec(command, **kwargs)
 
-    def exec_argv(self, argv: list, *, stdin: Optional[str] = None,
-                  cwd: Optional[str] = None,
-                  timeout: Optional[int] = None,
-                  env: Optional[dict] = None,
-                  capture_max_chars: Optional[int] = None) -> ExecResult:
+    def exec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """Run a program from an argv list, optionally feeding ``stdin``.
 
         Default builds a POSIX shell string (valid for sandbox backends whose
@@ -554,11 +593,17 @@ class FsBackend(ABC):
             fn = self.exec
         return fn(command, **kwargs)
 
-    def run_python(self, code: str, *, cwd: Optional[str] = None,
-                   timeout: Optional[int] = None,
-                   env: Optional[dict] = None,
-                   capture_max_chars: Optional[int] = None) -> ExecResult:
+    def run_python(
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """См. ``exec``: синхронная форма — вход для чужих реализаций."""
         raise SyncExecNotSupportedError(_sync_exec_message(self, "run_python"))
+
     @abstractmethod
     def default_cwd(self) -> Optional[str]: ...

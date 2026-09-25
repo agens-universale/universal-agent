@@ -22,13 +22,12 @@
 ложноположительных — для гейта это правильный перекос: он не поднимает
 ложных тревог.
 """
-import re
-from pathlib import Path
 
-from pydantic import BaseModel
+import re
 
 from gc_core.config_modules.root import AppConfig
 from gc_testkit.paths import REPO
+from pydantic import BaseModel
 
 #: Ключи схемы, у которых сегодня нет ни одного читателя.
 #:
@@ -43,10 +42,8 @@ KNOWN_UNREAD: dict = {
     "security.read_guard.binary_read_policy": "forward-compat, вне v1",
     "security.read_guard.binary_allowed_types": "forward-compat, вне v1",
     "security.read_guard.binary_allowed_extensions": "forward-compat, вне v1",
-
     # --- объявлено вне v1 ---
     "agent.finish_gate_use_rule_hints": "rule-layer без LLM, вне v1",
-
     # --- спроецированы в плоский словарь, но не читаются ---
     # Выглядят подключёнными: config.py кладёт их в config_dict рядом с
     # рабочими ключами. Описаны в demo-конфигах, то есть обещаны пользователю.
@@ -54,11 +51,9 @@ KNOWN_UNREAD: dict = {
     "agent.model_steering": "",
     "agent.stored_tool_outputs_max_entries": "",
     "project_memory.enable_project_memory_notice": "",
-
     # --- не спроецированы и не читаются ---
     "todo.reminder_steps": "",
     "tui.stream_display": "",
-
     # --- не упомянуты нигде, даже в demo-конфигах ---
     "mcp.meta.recommended_mcp_manifest": "",
     "mcp.meta.tools_cache_ttl": "",
@@ -83,7 +78,9 @@ def _source_text() -> str:
     chunks: list[str] = []
     for path in (REPO / "packages").glob("*/src/**/*.py"):
         text = path.as_posix()
-        if "gc_core/config_modules/" in text or text.endswith("gc_core/config.py"):
+        if "gc_core/config_modules/" in text or text.endswith(
+            "gc_core/config.py"
+        ):
             continue
         try:
             chunks.append(path.read_text(encoding="utf-8"))
@@ -108,10 +105,13 @@ def _unread_leaves() -> list[str]:
     """
     source = _source_text()
     return [
-        leaf for leaf in _schema_leaves(AppConfig)
+        leaf
+        for leaf in _schema_leaves(AppConfig)
         if not re.search(
-            r"\b" + re.escape(leaf.rsplit(".", 1)[-1])
-            + r"(_from_ctx|_from_config_dict)?\b", source
+            r"\b"
+            + re.escape(leaf.rsplit(".", 1)[-1])
+            + r"(_from_ctx|_from_config_dict)?\b",
+            source,
         )
     ]
 

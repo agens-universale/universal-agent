@@ -8,7 +8,9 @@
 после сжатия ПОСРЕДИ хода показывал устаревшее состояние (ревью 2026-08-01).
 """
 
-from gc_core.message_policy.todo_context import render_todo_for_persistent_state
+from gc_core.message_policy.todo_context import (
+    render_todo_for_persistent_state,
+)
 
 ITEMS = [
     {"content": "Спроектировать CLI", "status": "completed"},
@@ -29,10 +31,17 @@ def test_no_static_checklist_snapshot_in_system_prompt():
     # Сборка системного промпта живёт в run() — чек-листа там быть не должно.
     # Раньше срез по ПЕРВОМУ вхождению «render_system_prompt» попадал в строку
     # импорта, и проверка не смотрела на реальный вызов вовсе.
-    # Тело прогона живёт в arun; run — трёхстрочный шим через портал.
+    # Тело прогона живёт в arun; сборка state и рендер промпта вынесены
+    # в _abuild_run_state.
     run_src = inspect.getsource(agent_executor.AgentExecutor.arun)
-    assert "render_system_prompt(" in run_src, "сборка промпта уехала — обновить тест"
+    state_src = inspect.getsource(
+        agent_executor.AgentExecutor._abuild_run_state
+    )
+    assert "render_system_prompt(" in state_src, (
+        "сборка промпта уехала — обновить тест"
+    )
     assert "todo" not in run_src.lower()
+    assert "todo" not in state_src.lower()
 
 
 def test_persistent_state_block_empty_when_no_checklist():
@@ -50,9 +59,14 @@ def test_persistent_state_block_is_tagged_and_carries_items():
 def test_persistent_state_prompt_includes_checklist():
     """B: блок <persistent_state> суммаризации несёт чеклист, чтобы сводка
     передала план дальше через сжатие."""
-    from gc_core.summarize.working_memory_gateway import WorkingMemorySnapshot, render_persistent_state_for_prompt
+    from gc_core.summarize.working_memory_gateway import (
+        WorkingMemorySnapshot,
+        render_persistent_state_for_prompt,
+    )
 
-    snapshot = WorkingMemorySnapshot(goal="цель", constraints="", state="", knowledge="")
+    snapshot = WorkingMemorySnapshot(
+        goal="цель", constraints="", state="", knowledge=""
+    )
     block = render_persistent_state_for_prompt(snapshot, session_todo=ITEMS)
     assert "<persistent_state>" in block
     assert "<session_memory>" in block
@@ -61,9 +75,14 @@ def test_persistent_state_prompt_includes_checklist():
 
 
 def test_persistent_state_prompt_without_checklist_has_no_todo_tag():
-    from gc_core.summarize.working_memory_gateway import WorkingMemorySnapshot, render_persistent_state_for_prompt
+    from gc_core.summarize.working_memory_gateway import (
+        WorkingMemorySnapshot,
+        render_persistent_state_for_prompt,
+    )
 
-    snapshot = WorkingMemorySnapshot(goal="цель", constraints="", state="", knowledge="")
+    snapshot = WorkingMemorySnapshot(
+        goal="цель", constraints="", state="", knowledge=""
+    )
     block = render_persistent_state_for_prompt(snapshot, session_todo=[])
     assert "<session_todo>" not in block
     assert "<session_memory>" in block
@@ -83,8 +102,12 @@ def test_summary_message_carries_checklist_verbatim():
 
     Это единственный канал после сжатия: система-промпт больше снимок не несёт,
     а вызовы session_todo компакция вырезает."""
-    from gc_core.summarize.summary_message_body import build_dialog_summary_content
-    from gc_core.message_policy.todo_context import render_todo_for_persistent_state
+    from gc_core.message_policy.todo_context import (
+        render_todo_for_persistent_state,
+    )
+    from gc_core.summarize.summary_message_body import (
+        build_dialog_summary_content,
+    )
 
     body = build_dialog_summary_content(
         summary_text="пересказ диалога",
@@ -99,8 +122,12 @@ def test_summary_message_carries_checklist_verbatim():
 
 
 def test_summary_message_without_checklist_has_no_block():
-    from gc_core.summarize.summary_message_body import build_dialog_summary_content
-    from gc_core.message_policy.todo_context import render_todo_for_persistent_state
+    from gc_core.message_policy.todo_context import (
+        render_todo_for_persistent_state,
+    )
+    from gc_core.summarize.summary_message_body import (
+        build_dialog_summary_content,
+    )
 
     body = build_dialog_summary_content(
         summary_text="пересказ",
@@ -113,7 +140,9 @@ def test_summary_message_without_checklist_has_no_block():
 def test_compaction_puts_checklist_into_summary_message():
     """Сквозная проверка: после сжатия сообщение-baseline несёт актуальный список."""
     import inspect
+
     from gc_core.summarize import compaction
+
     src = inspect.getsource(compaction)
     assert "session_todo_block=" in src, (
         "compaction обязана передавать чек-лист в build_dialog_summary_content"

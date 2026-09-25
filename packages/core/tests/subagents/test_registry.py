@@ -1,12 +1,17 @@
 """Tests for tools.subagents.registry"""
 
-from gc_core.tools.subagents.registry import SUBAGENT_CLASSES, get_subagent_class, get_subagents_tools_data, is_subagent_tool
-from gc_core.tools.subagents.worker import Worker
-from gc_core.tools.subagents.coder import CodeGenerator
-from gc_core.tools.subagents.planner import Planner
-from gc_core.tools.subagents.critic import Critic
 from gc_core.tools.subagents.code_reviewer import CodeReviewer
+from gc_core.tools.subagents.coder import CodeGenerator
+from gc_core.tools.subagents.critic import Critic
+from gc_core.tools.subagents.planner import Planner
+from gc_core.tools.subagents.registry import (
+    SUBAGENT_CLASSES,
+    get_subagent_class,
+    get_subagents_tools_data,
+    is_subagent_tool,
+)
 from gc_core.tools.subagents.special_agent import SpecialAgent
+from gc_core.tools.subagents.worker import Worker
 
 
 class TestIsSubagentTool:

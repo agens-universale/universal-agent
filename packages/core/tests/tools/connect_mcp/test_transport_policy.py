@@ -3,12 +3,14 @@
 Правило одно на два вызывающих (``api.call_mcp_tool`` и
 ``registry._discover_one``) — раньше оно было продублировано и разъезжалось.
 """
+
 import logging
 
 import pytest
-
 from gc_core.tools.connect_mcp import transport_policy
-from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
+from gc_core.tools.connect_mcp.transport_policy import (
+    resolve_effective_transport,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -43,26 +45,39 @@ def test_other_transports_pass_through():
 
 def test_persistent_session_routes_http_to_sdk():
     """Правило persistent_session сохранено: у легаси нет своего пула."""
-    assert resolve_effective_transport(
-        {"transport": "http", "persistent_session": True}
-    ) == "stream_http"
+    assert (
+        resolve_effective_transport(
+            {"transport": "http", "persistent_session": True}
+        )
+        == "stream_http"
+    )
 
 
 def test_persistent_session_does_not_break_stdio():
-    assert resolve_effective_transport(
-        {"transport": "stdio", "persistent_session": True}
-    ) == "stdio"
+    assert (
+        resolve_effective_transport(
+            {"transport": "stdio", "persistent_session": True}
+        )
+        == "stdio"
+    )
 
 
 def test_both_callers_use_the_same_helper():
-    """Гейт против повторного расхождения: своей копии правила быть не должно."""
+    """Гейт против повторного расхождения: своей копии правила быть не должно.
+
+    Резолв зовёт `api`; `registry` получает готовый `effective_transport`
+    параметром и хелпер не вызывает — его имя там держалось на НЕиспользуемом
+    импорте, то есть проверка «имя есть в исходнике» для него была холостой
+    (снят вместе с остальными F401). Поэтому наличие вызова спрашиваем у того,
+    кто резолвит, а у обоих — отсутствие своей копии правила.
+    """
     import inspect
 
     from gc_core.tools.connect_mcp import api, registry
 
+    assert "resolve_effective_transport(" in inspect.getsource(api)
     for mod in (api, registry):
         src = inspect.getsource(mod)
-        assert "resolve_effective_transport" in src, mod.__name__
         assert 'effective_transport = "stream_sse"' not in src, (
             f"{mod.__name__}: правило снова продублировано"
         )

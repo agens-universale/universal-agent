@@ -1,11 +1,21 @@
 """Unit-тесты tui.services.session_lock (SPEC session-lock)."""
+
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from gc_tui.services.session_lock import TTL_SECONDS, heartbeat, is_fresh, is_held_by_other, lock_path, read_lock, release, try_acquire
+from gc_tui.services.session_lock import (
+    TTL_SECONDS,
+    heartbeat,
+    is_fresh,
+    is_held_by_other,
+    lock_path,
+    read_lock,
+    release,
+    try_acquire,
+)
 
 
 def _write_raw(path: Path, payload) -> None:
@@ -28,7 +38,9 @@ def test_acquire_when_absent(tmp_path):
 def test_acquire_denies_fresh_other(tmp_path):
     assert try_acquire(str(tmp_path), "cli", "t1", "holder") is True
     assert try_acquire(str(tmp_path), "cli", "t1", "other") is False
-    assert read_lock(lock_path(str(tmp_path), "cli", "t1"))["tui_id"] == "holder"
+    assert (
+        read_lock(lock_path(str(tmp_path), "cli", "t1"))["tui_id"] == "holder"
+    )
 
 
 def test_acquire_allows_own_tui_id(tmp_path):
@@ -39,7 +51,9 @@ def test_acquire_allows_own_tui_id(tmp_path):
 def test_acquire_stale_after_ttl(tmp_path):
     path = Path(lock_path(str(tmp_path), "cli", "t1"))
     path.parent.mkdir(parents=True, exist_ok=True)
-    stale_at = (datetime.now(timezone.utc) - timedelta(seconds=TTL_SECONDS + 1)).isoformat()
+    stale_at = (
+        datetime.now(UTC) - timedelta(seconds=TTL_SECONDS + 1)
+    ).isoformat()
     _write_raw(path, {"tui_id": "old", "heartbeat_at": stale_at})
     assert try_acquire(str(tmp_path), "cli", "t1", "new") is True
     assert read_lock(str(path))["tui_id"] == "new"
@@ -74,18 +88,22 @@ def test_acquire_lost_race(tmp_path, monkeypatch):
 
     monkeypatch.setattr(mod, "_write_lock", poisoned)
     assert try_acquire(str(tmp_path), "cli", "t1", "loser") is False
-    assert read_lock(lock_path(str(tmp_path), "cli", "t1"))["tui_id"] == "winner"
+    assert (
+        read_lock(lock_path(str(tmp_path), "cli", "t1"))["tui_id"] == "winner"
+    )
 
 
 def test_is_fresh_boundary():
-    now = datetime(2026, 7, 15, 12, 0, 0, tzinfo=timezone.utc)
+    now = datetime(2026, 7, 15, 12, 0, 0, tzinfo=UTC)
     fresh = {
         "tui_id": "x",
         "heartbeat_at": (now - timedelta(seconds=TTL_SECONDS)).isoformat(),
     }
     stale = {
         "tui_id": "x",
-        "heartbeat_at": (now - timedelta(seconds=TTL_SECONDS + 0.01)).isoformat(),
+        "heartbeat_at": (
+            now - timedelta(seconds=TTL_SECONDS + 0.01)
+        ).isoformat(),
     }
     assert is_fresh(fresh, now=now) is True
     assert is_fresh(stale, now=now) is False
@@ -102,10 +120,14 @@ def test_heartbeat_throttled(tmp_path):
     assert try_acquire(str(tmp_path), "cli", "t1", "me") is True
     path = lock_path(str(tmp_path), "cli", "t1")
     first = read_lock(path)["heartbeat_at"]
-    last = heartbeat(str(tmp_path), "cli", "t1", "me", last_mono=100.0, mono=100.5)
+    last = heartbeat(
+        str(tmp_path), "cli", "t1", "me", last_mono=100.0, mono=100.5
+    )
     assert last == 100.0
     assert read_lock(path)["heartbeat_at"] == first
-    last = heartbeat(str(tmp_path), "cli", "t1", "me", last_mono=100.0, mono=101.0)
+    last = heartbeat(
+        str(tmp_path), "cli", "t1", "me", last_mono=100.0, mono=101.0
+    )
     assert last == 101.0
     assert read_lock(path)["heartbeat_at"] != first
 

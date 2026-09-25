@@ -21,7 +21,9 @@ class ProjectMemoryConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enable_project_memory_notice: bool = False
-    check_interval_messages: int = DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES
+    check_interval_messages: int = (
+        DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES
+    )
     max_chars: int = DEFAULT_PROJECT_MEMORY_MAX_CHARS
     max_append_chars: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
     compaction_max_tokens: int = DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
@@ -34,7 +36,9 @@ def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
             cfg.check_interval_messages,
             DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES,
         )
-        cfg.check_interval_messages = DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES
+        cfg.check_interval_messages = (
+            DEFAULT_PROJECT_MEMORY_CHECK_INTERVAL_MESSAGES
+        )
     if cfg.max_chars <= 0:
         _logger.warning(
             "project_memory.max_chars=%s must be > 0; using default %s",
@@ -55,7 +59,9 @@ def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
             cfg.compaction_max_tokens,
             DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS,
         )
-        cfg.compaction_max_tokens = DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
+        cfg.compaction_max_tokens = (
+            DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
+        )
 
 
 def project_memory_from_config_dict(
@@ -84,4 +90,6 @@ def project_memory_notice_enabled(config_dict: dict[str, Any] | None) -> bool:
     """Project memory exists/changed hints: только явный флаг в ``project_memory``."""
     if (config_dict or {}).get("enable_project_memory_notice") is True:
         return True
-    return project_memory_from_config_dict(config_dict).enable_project_memory_notice
+    return project_memory_from_config_dict(
+        config_dict
+    ).enable_project_memory_notice

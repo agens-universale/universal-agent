@@ -7,11 +7,11 @@
 
 Путь ``chat/completions`` тело читал. Асимметрия и была дефектом.
 """
+
 import logging
 
 import httpx
 import pytest
-
 from gc_core.utils import connect_backend
 
 
@@ -31,7 +31,9 @@ async def test_responses_error_carries_the_body(monkeypatch):
         return httpx.Response(404, text=body)
 
     client = httpx.AsyncClient(transport=httpx.MockTransport(_dispatch))
-    monkeypatch.setattr(connect_backend, "get_async_client", lambda **kw: client)
+    monkeypatch.setattr(
+        connect_backend, "get_async_client", lambda **kw: client
+    )
     logger = _Logger()
 
     with pytest.raises(httpx.HTTPStatusError):

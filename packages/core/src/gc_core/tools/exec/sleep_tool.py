@@ -1,6 +1,5 @@
-import json
 import asyncio
-import time
+import json
 from typing import Any, Dict, Optional
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -53,14 +52,14 @@ class Sleep(AbstractSimpleTool):
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        return f'''Tool name: exec_sleep
+        return f"""Tool name: exec_sleep
 Tool description: Pauses execution for the given number of seconds. Use when waiting for external processes, rate limits, or delayed availability.
 Input schema: {{"type":"object","properties":{{"seconds":{{"type":"number","description":"Sleep duration in seconds (0 to {cls.max_seconds})."}}}},"required":["seconds"],"additionalProperties":false}}
 Maximum sleep duration: {cls.max_seconds} seconds (3 minutes).
 
 Return format (JSON string):
 {{"tool":"exec_sleep","ok":true|false,"seconds":<requested>|null,"slept_seconds":<actual>|null,"error":null|{{"type":"...","message":"..."}}}}
-'''
+"""
 
     async def acall(self, seconds: float | int | None = None, **kwargs) -> str:
         """Нативный сон: ни loop, ни поток из пула не заняты.
@@ -73,8 +72,9 @@ Return format (JSON string):
         if rejection is not None:
             return rejection
         await asyncio.sleep(seconds)
-        return self._result(ok=True, seconds=seconds, slept_seconds=seconds, error=None)
-
+        return self._result(
+            ok=True, seconds=seconds, slept_seconds=seconds, error=None
+        )
 
     def _reject_bad_seconds(self, seconds: float | int | None) -> "str | None":
         """Готовый отказ, если аргумент негоден. Общий для обоих входов.
@@ -88,7 +88,11 @@ Return format (JSON string):
                 ok=False,
                 seconds=None,
                 slept_seconds=None,
-                error={"type": "invalid_argument", "field": "seconds", "message": "seconds is required"},
+                error={
+                    "type": "invalid_argument",
+                    "field": "seconds",
+                    "message": "seconds is required",
+                },
             )
 
         if isinstance(seconds, bool) or not isinstance(seconds, (int, float)):
@@ -104,7 +108,10 @@ Return format (JSON string):
                 ok=False,
                 seconds=seconds,
                 slept_seconds=None,
-                error={"type": "invalid_argument", "message": "seconds must be >= 0"},
+                error={
+                    "type": "invalid_argument",
+                    "message": "seconds must be >= 0",
+                },
             )
 
         if seconds > self.max_seconds:

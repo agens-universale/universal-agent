@@ -16,6 +16,7 @@
 `docs/server.md` при этом обещает обратное: «любые ротации/очистки рекомендуется
 настраивать отдельно … вне этого приложения».
 """
+
 from __future__ import annotations
 
 import json
@@ -23,12 +24,13 @@ import logging
 import os
 import time
 
+import gc_server.server_cleanup_threads as janitor
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-
-import gc_server.server_cleanup_threads as janitor
-from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup
+from gc_server.server_cleanup_threads import (
+    register_cleanup_threads_on_startup,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -44,7 +46,8 @@ def _store_with_old_thread(tmp_path) -> tuple[str, str]:
     threads.mkdir()
     meta = threads / "meta_generic_old.json"
     meta.write_text(
-        json.dumps({"updated_at": "2026-07-01T00:00:00+00:00"}), encoding="utf-8"
+        json.dumps({"updated_at": "2026-07-01T00:00:00+00:00"}),
+        encoding="utf-8",
     )
     (threads / "data_generic_old.jsonl").write_text("", encoding="utf-8")
     return str(threads), str(meta)
@@ -58,7 +61,9 @@ def _run(server_config, threads_dir, caplog):
         base_agent_config={"threads_data_path": threads_dir},
         logger=logging.getLogger("gc_server.server_cleanup_threads"),
     )
-    with caplog.at_level(logging.INFO, logger="gc_server.server_cleanup_threads"):
+    with caplog.at_level(
+        logging.INFO, logger="gc_server.server_cleanup_threads"
+    ):
         with TestClient(app):
             # Поток чистит ДО первого sleep; ждём, пока он отработает.
             time.sleep(0.4)
@@ -72,7 +77,9 @@ def _run(server_config, threads_dir, caplog):
         ({"server": {"host": "0.0.0.0"}}, "конфиг есть, секции нет"),
     ],
 )
-def test_janitor_stays_off_without_explicit_enable(tmp_path, caplog, server_config, case):
+def test_janitor_stays_off_without_explicit_enable(
+    tmp_path, caplog, server_config, case
+):
     """Оба случая, а не только «файла нет».
 
     Полумера «выключать только при отсутствии конфига» отвергнута сознательно:
@@ -101,9 +108,15 @@ def test_janitor_announces_directory_and_ttl(tmp_path, caplog):
     """
     threads_dir, meta = _store_with_old_thread(tmp_path)
 
-    text = _run({"threads_cleanup": {"enabled": True, "ttl_days": 7}}, threads_dir, caplog)
+    text = _run(
+        {"threads_cleanup": {"enabled": True, "ttl_days": 7}},
+        threads_dir,
+        caplog,
+    )
 
-    assert not os.path.exists(meta), "включённая чистка обязана удалить старый тред"
+    assert not os.path.exists(meta), (
+        "включённая чистка обязана удалить старый тред"
+    )
     assert threads_dir in text, "в логе нет каталога, который чистится"
     assert "ttl" in text.lower(), "в логе нет срока хранения"
     assert "удалено 1" in text, "факт удаления не залогирован"

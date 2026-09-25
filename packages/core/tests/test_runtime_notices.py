@@ -1,23 +1,26 @@
 """Runtime notices: LLM failures → ephemeral Notice list."""
+
 from __future__ import annotations
-from gc_testkit import as_coro
 
-import json
-from types import SimpleNamespace
-
-import pytest
 import httpx
-
+import pytest
 from gc_core import request_backend_policy as policy
-from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices, notice_from_llm_failure, push_runtime_notice
+from gc_core.runtime_notices import (
+    clear_runtime_notices,
+    collect_runtime_notices,
+    notice_from_llm_failure,
+    push_runtime_notice,
+)
 from gc_core.startup_notices import Notice
 from gc_core.utils.backend_errors import EmbeddedChoiceError
-from gc_testkit import run_coro
+from gc_testkit import as_coro, run_coro
 
 
 def _http_error(status: int, body: dict) -> httpx.HTTPStatusError:
     """Ошибка ровно того типа, который летит из ядра: оно ходит через httpx."""
-    request = httpx.Request("POST", "http://backend.invalid/v1/chat/completions")
+    request = httpx.Request(
+        "POST", "http://backend.invalid/v1/chat/completions"
+    )
     resp = httpx.Response(status, json=body, request=request)
     return httpx.HTTPStatusError("http error", request=request, response=resp)
 
@@ -39,7 +42,9 @@ def test_notice_from_http_error_includes_status_and_detail():
         {"message": "Input should be 'low', 'medium' or 'high'"},
     )
     n = notice_from_llm_failure(
-        exc, request_label="intent_guard_finish_gate", url="http://x/v1/chat/completions",
+        exc,
+        request_label="intent_guard_finish_gate",
+        url="http://x/v1/chat/completions",
     )
     assert n.level == "warning"
     assert n.code == "llm_error_400"
@@ -52,12 +57,13 @@ def test_notice_from_embedded_choice_error_shows_http_status():
     """EmbeddedChoiceError несёт status_code (напр. 504) — в TUI должен попасть
     «HTTP 504», а не обезличенное «Ошибка LLM»."""
     exc = EmbeddedChoiceError(
-        "provider returned embedded choice error: code=504 "
-        "message='Upstream idle timeout exceeded'",
+        "provider returned embedded choice error: code=504 message='Upstream idle timeout exceeded'",
         status_code=504,
         raw_code=504,
     )
-    n = notice_from_llm_failure(exc, request_label="main_agent", url="http://x/v1/chat/completions")
+    n = notice_from_llm_failure(
+        exc, request_label="main_agent", url="http://x/v1/chat/completions"
+    )
     assert n.code == "llm_error_504"
     assert "HTTP 504" in n.message
 
@@ -75,21 +81,25 @@ def test_policy_pushes_notice_on_final_failure(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(400, {"message": "bad request"})
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
+    monkeypatch.setattr(
+        policy, "arequest_backend_chat_completions", as_coro(boom)
+    )
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_coro(policy.arequest_chat_completions_with_policy(
-            payload_factory=lambda mt: {"model": "m", "messages": []},
-            initial_max_tokens=1400,
-            min_response_tokens=1024,
-            headers={},
-            url="http://test/v1/chat/completions",
-            verify=False,
-            use_retry=False,
-            request_label="intent_guard_finish_gate",
-            runtime_notices_enabled=True,
-            notice_url="http://test/v1/chat/completions",
-        ))
+        run_coro(
+            policy.arequest_chat_completions_with_policy(
+                payload_factory=lambda mt: {"model": "m", "messages": []},
+                initial_max_tokens=1400,
+                min_response_tokens=1024,
+                headers={},
+                url="http://test/v1/chat/completions",
+                verify=False,
+                use_retry=False,
+                request_label="intent_guard_finish_gate",
+                runtime_notices_enabled=True,
+                notice_url="http://test/v1/chat/completions",
+            )
+        )
 
     notices = collect_runtime_notices()
     assert len(notices) == 1
@@ -102,19 +112,23 @@ def test_policy_skips_notice_when_disabled(monkeypatch):
     def boom(*args, **kwargs):
         raise _http_error(500, {"message": "fail"})
 
-    monkeypatch.setattr(policy, "arequest_backend_chat_completions", as_coro(boom))
+    monkeypatch.setattr(
+        policy, "arequest_backend_chat_completions", as_coro(boom)
+    )
 
     with pytest.raises(httpx.HTTPStatusError):
-        run_coro(policy.arequest_chat_completions_with_policy(
-            payload_factory=lambda mt: {"model": "m", "messages": []},
-            initial_max_tokens=1400,
-            min_response_tokens=1024,
-            headers={},
-            url="http://test/v1/chat/completions",
-            verify=False,
-            use_retry=False,
-            runtime_notices_enabled=False,
-        ))
+        run_coro(
+            policy.arequest_chat_completions_with_policy(
+                payload_factory=lambda mt: {"model": "m", "messages": []},
+                initial_max_tokens=1400,
+                min_response_tokens=1024,
+                headers={},
+                url="http://test/v1/chat/completions",
+                verify=False,
+                use_retry=False,
+                runtime_notices_enabled=False,
+            )
+        )
 
     assert collect_runtime_notices() == []
 
@@ -146,7 +160,7 @@ def test_unregistered_listener_is_dropped():
 
     register_runtime_notices_listener(listener)
     unregister_runtime_notices_listener(listener)
-    unregister_runtime_notices_listener(listener)   # повтор — не ошибка
+    unregister_runtime_notices_listener(listener)  # повтор — не ошибка
     push_runtime_notice(Notice("info", "y", "msg"))
 
     assert seen == []

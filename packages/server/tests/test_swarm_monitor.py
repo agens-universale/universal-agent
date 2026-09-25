@@ -8,17 +8,10 @@
 - start_in_background + stop.
 """
 
-import os
-import sys
 import threading
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
-
-
-from gc_server.swarm import monitor as monitor_mod
 from gc_server.swarm.monitor import SwarmMonitor
-
 
 # ---------------------------------------------------------------------------
 # Active set API
@@ -129,7 +122,9 @@ def test_check_one_swarm_swallows_exceptions(monkeypatch, caplog):
     def boom(*a, **kw):
         raise RuntimeError("simulated")
 
-    monkeypatch.setattr("gc_server.swarm.monitor.lifecycle.check_and_finalize", boom)
+    monkeypatch.setattr(
+        "gc_server.swarm.monitor.lifecycle.check_and_finalize", boom
+    )
     # Не должно бросить наверх.
     m._check_one_swarm("err")
     # active_count не изменился (ошибка → ранний return).
@@ -144,11 +139,18 @@ def test_check_one_swarm_passes_correct_args(monkeypatch):
     """
     m = SwarmMonitor("/threads", "/sandbox")
     m.register_active("xxx")
-    mock_finalize = MagicMock(return_value={"swarm_meta": {"status": "running"}})
-    monkeypatch.setattr("gc_server.swarm.monitor.lifecycle.check_and_finalize", mock_finalize)
+    mock_finalize = MagicMock(
+        return_value={"swarm_meta": {"status": "running"}}
+    )
+    monkeypatch.setattr(
+        "gc_server.swarm.monitor.lifecycle.check_and_finalize", mock_finalize
+    )
     m._check_one_swarm("xxx")
     mock_finalize.assert_called_once_with(
-        "/threads", "/sandbox", "xxx", heavy_checks=True,
+        "/threads",
+        "/sandbox",
+        "xxx",
+        heavy_checks=True,
         swarm_logs_dir="",
     )
 
@@ -167,6 +169,7 @@ def test_run_loop_exits_on_stop_event(monkeypatch):
     m.start_in_background()
     # Дать loop'у возможность стартовать
     import time
+
     time.sleep(0.05)
     t0 = time.time()
     m.stop()
@@ -189,6 +192,7 @@ def test_run_loop_invokes_check_for_each_active(monkeypatch):
     t.start()
 
     import time
+
     # check_interval_seconds=0 → wait(0) сразу возвращает False, loop крутится.
     # Дадим 100ms на несколько итераций.
     time.sleep(0.1)

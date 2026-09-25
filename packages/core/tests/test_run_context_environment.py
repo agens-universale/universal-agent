@@ -1,6 +1,5 @@
-from gc_core.run_context import RunContext, acreate_run_context
-
 from gc_core.backends.local import LocalFsBackend
+from gc_core.run_context import RunContext, acreate_run_context
 
 
 def test_runcontext_has_environment_and_os_backend_fields():
@@ -11,7 +10,9 @@ def test_runcontext_has_environment_and_os_backend_fields():
     assert "harbor_backend" not in fields
 
 
-async def test_create_run_context_accepts_environment_and_builds_backend(tmp_path, monkeypatch):
+async def test_create_run_context_accepts_environment_and_builds_backend(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     sentinel_env = object()
     cfg = {"backend_api_mode": "chat_completions", "save_logs": False}

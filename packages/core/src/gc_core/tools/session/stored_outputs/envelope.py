@@ -23,7 +23,7 @@ def utf8_byte_length(text: str) -> int:
     return len(text.encode("utf-8"))
 
 
-def build_stored_tool_output_payload(
+def build_stored_tool_output_payload(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     *,
     ok: bool,
     stored: bool,
@@ -74,4 +74,6 @@ def build_stored_tool_output_payload(
 
 
 def dumps_stored_tool_output_payload(**kwargs: Any) -> str:
-    return json.dumps(build_stored_tool_output_payload(**kwargs), ensure_ascii=False)
+    return json.dumps(
+        build_stored_tool_output_payload(**kwargs), ensure_ascii=False
+    )

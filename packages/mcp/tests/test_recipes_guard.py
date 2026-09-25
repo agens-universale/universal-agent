@@ -33,7 +33,9 @@ def test_real_import_error_is_not_masked(monkeypatch):
     """
     from recommended_mcp.runtime.daemon_autostart import ensure_mcp_daemons
 
-    for name in [n for n in sys.modules if n.startswith("recommended_mcp.autostart")]:
+    for name in [
+        n for n in sys.modules if n.startswith("recommended_mcp.autostart")
+    ]:
         monkeypatch.delitem(sys.modules, name, raising=False)
 
     class _BrokenDep:
@@ -46,10 +48,14 @@ def test_real_import_error_is_not_masked(monkeypatch):
 
         def find_spec(self, fullname, path=None, target=None):
             if fullname == "recommended_mcp.autostart":
-                raise ModuleNotFoundError("No module named 'yaml'", name="yaml")
+                raise ModuleNotFoundError(
+                    "No module named 'yaml'", name="yaml"
+                )
             return None
 
     monkeypatch.setattr(sys, "meta_path", [_BrokenDep(), *sys.meta_path])
     with pytest.raises(ModuleNotFoundError) as e:
         ensure_mcp_daemons({})
-    assert e.value.name == "yaml", "чужая ошибка импорта не должна маскироваться"
+    assert e.value.name == "yaml", (
+        "чужая ошибка импорта не должна маскироваться"
+    )

@@ -1,14 +1,16 @@
 """upgrade_gate: стамп agent_state.json + детект «меня обновили»."""
-from gc_core import app_version
-from gc_core import upgrade_gate
+
+from gc_core import app_version, upgrade_gate
 
 
 def _fake_versions(monkeypatch, version="0.2.0", commit="abc"):
     monkeypatch.setattr(app_version, "agent_version", lambda: version)
     monkeypatch.setattr(
-        app_version, "install_source",
+        app_version,
+        "install_source",
         lambda _read=None: app_version.InstallSource(
-            url="u", ref=None, commit=commit, editable=False),
+            url="u", ref=None, commit=commit, editable=False
+        ),
     )
 
 
@@ -32,10 +34,14 @@ def test_version_change_detected(monkeypatch, tmp_path):
     upgrade_gate.mark_current_run(path=p)
     _fake_versions(monkeypatch, version="0.3.0")
     info = upgrade_gate.detect_upgrade(path=p)
-    assert info == upgrade_gate.UpgradeInfo(old_version="0.2.0", new_version="0.3.0")
+    assert info == upgrade_gate.UpgradeInfo(
+        old_version="0.2.0", new_version="0.3.0"
+    )
 
 
-def test_commit_change_detected_even_without_version_bump(monkeypatch, tmp_path):
+def test_commit_change_detected_even_without_version_bump(
+    monkeypatch, tmp_path
+):
     # страховка от забытого бампа pyproject: релиз без бампа всё равно ловится
     p = tmp_path / "agent_state.json"
     _fake_versions(monkeypatch, commit="abc")

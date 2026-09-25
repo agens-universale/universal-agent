@@ -1,7 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
-import pytest
 
+import pytest
 from gc_core.run_context import acreate_run_context
 from gc_core.tools.subagents.runner import SubagentRunner
 

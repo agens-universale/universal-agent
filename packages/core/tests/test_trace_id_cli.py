@@ -1,5 +1,4 @@
 import pytest
-
 from gc_core.config import apply_cli_overrides
 
 
@@ -33,7 +32,9 @@ class TestApplyCliOverridesTraceId:
     def test_flag_wins_over_generic_override(self):
         cfg = {}
         apply_cli_overrides(
-            cfg, extra_overrides={"trace_id": "from-generic"}, trace_id="from-flag"
+            cfg,
+            extra_overrides={"trace_id": "from-generic"},
+            trace_id="from-flag",
         )
         assert cfg["trace_id"] == "from-flag"
 

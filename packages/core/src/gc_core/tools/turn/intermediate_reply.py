@@ -16,7 +16,7 @@ _TOOL_DESCRIPTION = (
     "Do NOT use for the final report of a multi-step task or to end the current user turn. "
     "Do NOT use when you need the user's answer — this tool does not wait for a reply. "
     "Keep `answer` concise; for long material use a separate artifact and put only summary + path in `answer`. "
-    "Omit `artifact_path` when there is no artifact; if the tool schema requires every key (strict mode), pass \"\" instead. When set, path must be non-empty."
+    'Omit `artifact_path` when there is no artifact; if the tool schema requires every key (strict mode), pass "" instead. When set, path must be non-empty.'
 )
 
 
@@ -46,7 +46,9 @@ class IntermediateReply(AbstractSimpleTool):
         return logger or _logger
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_intermediate_reply",
@@ -75,7 +77,9 @@ class IntermediateReply(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: turn_intermediate_reply
 
 Overview:
@@ -93,17 +97,20 @@ Usage:
 - Hard limit: 4096 characters in `answer`.
 """
 
-
-    async def acall(self, answer: str, artifact_path: str | None = None, **kwargs) -> str:
+    async def acall(
+        self, answer: str, artifact_path: str | None = None, **kwargs
+    ) -> str:
         if not isinstance(answer, str):
             return self._result(
                 ok=False,
                 answer=str(answer),
-                artifact_path=artifact_path if isinstance(artifact_path, str) else None,
+                artifact_path=artifact_path
+                if isinstance(artifact_path, str)
+                else None,
                 error={
                     "type": "invalid_argument",
                     "field": "answer",
-                    "message": f"Argument 'answer' must be a string. Got: {type(answer)} ({repr(answer)})",
+                    "message": f"Argument 'answer' must be a string. Got: {type(answer)} ({answer!r})",
                 },
             )
 
@@ -112,7 +119,9 @@ Usage:
             return self._result(
                 ok=False,
                 answer="",
-                artifact_path=artifact_path if isinstance(artifact_path, str) else None,
+                artifact_path=artifact_path
+                if isinstance(artifact_path, str)
+                else None,
                 error={
                     "type": "invalid_argument",
                     "field": "answer",
@@ -124,7 +133,9 @@ Usage:
             return self._result(
                 ok=False,
                 answer=answer,
-                artifact_path=artifact_path if isinstance(artifact_path, str) else None,
+                artifact_path=artifact_path
+                if isinstance(artifact_path, str)
+                else None,
                 error={
                     "type": "invalid_argument",
                     "field": "answer",
@@ -146,7 +157,7 @@ Usage:
                         "field": "artifact_path",
                         "message": (
                             f"Argument 'artifact_path' must be a string when provided. "
-                            f"Got: {type(artifact_path)} ({repr(artifact_path)})"
+                            f"Got: {type(artifact_path)} ({artifact_path!r})"
                         ),
                     },
                 )
@@ -159,7 +170,9 @@ Usage:
         print("-" * 60, file=sys.stderr)
         print(answer, file=sys.stderr)
         if normalized_artifact:
-            print(f"\nDetailed artifact: {normalized_artifact}", file=sys.stderr)
+            print(
+                f"\nDetailed artifact: {normalized_artifact}", file=sys.stderr
+            )
         print("=" * 60 + "\n", file=sys.stderr)
 
         self._run_logger().info(

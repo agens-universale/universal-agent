@@ -1,18 +1,24 @@
 # tests/test_bench_profiles.py
-import importlib.util, sys
+import importlib.util
+import sys
 from pathlib import Path
-import yaml
 
-from gc_testkit.paths import HARBOR, REPO
+import yaml
+from gc_testkit.paths import HARBOR
+
 PROFILES = HARBOR / "profiles"
+
 
 def _build(gc_cli_config):
     # tests/harbor/ (a test-fixture package) shadows the real harbor framework.
     # Reorder sys.path so the real site-packages entry comes first, then evict
     # cached shadow modules — mirrors the same fix in test_harbor_adapter_bundled_paths.py.
     _harbor_sp = next(
-        (p for p in sys.path
-         if (Path(p) / "harbor" / "agents" / "base.py").exists()),
+        (
+            p
+            for p in sys.path
+            if (Path(p) / "harbor" / "agents" / "base.py").exists()
+        ),
         None,
     )
     if _harbor_sp:
@@ -25,21 +31,31 @@ def _build(gc_cli_config):
     # каталог harbor/, а не исходники: единого <repo>/src больше нет.
     sys.path.insert(0, str(HARBOR))
     spec = importlib.util.spec_from_file_location(
-        "adapters.gc_cli_external", HARBOR / "adapters" / "gc_cli_external.py")
-    mod = importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
+        "adapters.gc_cli_external", HARBOR / "adapters" / "gc_cli_external.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
     from gc_core.summarize.config import parse_summary_trigger_chars
+
     # completions_url: the adapter has no hardcoded default (fail-fast) — supply one.
-    cfg = {"completions_url": "http://test/v1/chat/completions", **gc_cli_config}
-    a = mod.GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg)
+    cfg = {
+        "completions_url": "http://test/v1/chat/completions",
+        **gc_cli_config,
+    }
+    a = mod.GcCliExternal(
+        logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg
+    )
     c = a._build_config()
     return c, parse_summary_trigger_chars(c)
 
+
 EXPECT = {
     "bench_01_no_summary_no_subagents.yaml": (False, 0),
-    "bench_02_summary_no_subagents.yaml":    (False, 150000),
-    "bench_03_no_summary_subagents.yaml":    (True, 0),
-    "bench_04_summary_subagents.yaml":       (True, 150000),
+    "bench_02_summary_no_subagents.yaml": (False, 150000),
+    "bench_03_no_summary_subagents.yaml": (True, 0),
+    "bench_04_summary_subagents.yaml": (True, 150000),
 }
+
 
 def test_each_profile_toggles_match():
     for fname, (subagents, trigger) in EXPECT.items():

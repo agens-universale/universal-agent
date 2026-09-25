@@ -23,6 +23,7 @@ exec: дедлайн процесса, лимит на дожатие дрена
 вывод (`echo`), либо намеренно МЕДЛЕННЫЙ писатель (`test_async_exec.py`,
 300 КиБ за 6 с) — ровно тот случай, где дефекта не видно.
 """
+
 import sys
 
 from gc_core.backends.local import LocalFsBackend

@@ -1,4 +1,5 @@
 """TuiApp поднимается, рисует empty-state (бренд) и принимает /quit."""
+
 import pytest
 
 

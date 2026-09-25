@@ -14,10 +14,11 @@ from gc_testkit import run_coro
 
 def _async_noop(fn):
     """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def _state():
@@ -61,8 +62,14 @@ def _patch_process(monkeypatch, *, apply_return):
         return apply_return
 
     monkeypatch.setattr(pr, "aapply_tool", _fake_aapply_tool)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "amaybe_update_intent_scope_from_tool", _async_noop(lambda **kw: None))
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
     return pr
 
@@ -106,26 +113,34 @@ def _runner_cfg(tmp_path, *, trigger=0):
 
 
 class TestSidecarIntermediateReply:
-    def test_persists_intermediate_reply_without_sink(self, tmp_path, monkeypatch):
+    def test_persists_intermediate_reply_without_sink(
+        self, tmp_path, monkeypatch
+    ):
         answer = "Сейчас проверю структуру"
         pr = _patch_process(
             monkeypatch,
             apply_return=json.dumps(
-                {"tool": "turn_intermediate_reply", "ok": True, "answer": answer}
+                {
+                    "tool": "turn_intermediate_reply",
+                    "ok": True,
+                    "answer": answer,
+                }
             ),
         )
-        run_coro(pr.aprocess_tool_calls(
-            messages=[
-                _fc(
-                    "turn_intermediate_reply",
-                    "ir1",
-                    json.dumps({"answer": answer}),
-                )
-            ],
-            state=_state(),
-            ctx=_child_ctx(tmp_path),
-            run_agent_func=None,
-        ))
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc(
+                        "turn_intermediate_reply",
+                        "ir1",
+                        json.dumps({"answer": answer}),
+                    )
+                ],
+                state=_state(),
+                ctx=_child_ctx(tmp_path),
+                run_agent_func=None,
+            )
+        )
         rows = read_subagent_trace(str(tmp_path), "cli", "task-1")
         assert [r["kind"] for r in rows] == ["intermediate_reply"]
         assert rows[0]["payload"]["prose"] == answer
@@ -134,9 +149,9 @@ class TestSidecarIntermediateReply:
 
 class TestSidecarFinished:
     async def test_finished_on_success(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -178,9 +193,9 @@ class TestSidecarFinished:
         assert finished[0]["parent_call_id"] == "call_sub_1"
 
     async def test_finished_on_user_stop(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -219,10 +234,10 @@ class TestSidecarFinished:
 
 class TestSidecarChildSummary:
     async def test_child_summary_on_compaction_applied(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
+        from gc_core import run_summary_coordinator as rsc
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
-        from gc_core import run_summary_coordinator as rsc
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path, trigger=10)
         parent = local_ctx(cfg)
@@ -249,18 +264,22 @@ class TestSidecarChildSummary:
 
             on_applied = kwargs.get("on_summary_applied")
             assert on_applied is not None
-            await await_callback(on_applied(
-                {
-                    "trigger_reason": "subagent_pre_backend",
-                    "summary_payload": {
-                        "summary_message_content": "wrapped",
-                    },
-                    "summary_trace": {
-                        "final_output": {"agent_summary_text": "сжатый контекст"},
-                    },
-                    "newly_summarized_message_id": "m1",
-                }
-            ))
+            await await_callback(
+                on_applied(
+                    {
+                        "trigger_reason": "subagent_pre_backend",
+                        "summary_payload": {
+                            "summary_message_content": "wrapped",
+                        },
+                        "summary_trace": {
+                            "final_output": {
+                                "agent_summary_text": "сжатый контекст"
+                            },
+                        },
+                        "newly_summarized_message_id": "m1",
+                    }
+                )
+            )
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.messages = [
@@ -288,7 +307,9 @@ class TestSidecarChildSummary:
         with (
             patch.object(rsc, "exceeded_summary_triggers", return_value=True),
             patch.object(
-                rsc, "arun_summary_compaction", side_effect=fake_run_summary_compaction
+                rsc,
+                "arun_summary_compaction",
+                side_effect=fake_run_summary_compaction,
             ),
         ):
             await runner.arun(

@@ -8,6 +8,7 @@
 
 Только POSIX: на Windows нет ни pty, ни SIGHUP.
 """
+
 from __future__ import annotations
 
 import os
@@ -21,7 +22,9 @@ from pathlib import Path
 
 import pytest
 
-termios = pytest.importorskip("termios", reason="только POSIX: нужен настоящий pty")
+termios = pytest.importorskip(
+    "termios", reason="только POSIX: нужен настоящий pty"
+)
 # Только после importorskip: на Windows `import pty` падает на импорте.
 import fcntl
 import pty
@@ -36,7 +39,7 @@ STOP_TIMEOUT_S = 10.0
 # Приложение под pty. Файл `ready` — смонтировалось; файл `cleanup` — уборка
 # прошла, внутри — путь, которым пришёл выход; файл `atexit` — отработали хуки
 # выхода процесса.
-APP = '''
+APP = """
 import atexit, os, sys
 from gc_tui.services import terminal_guard
 from gc_tui.services.terminal_guard import TerminalGuard
@@ -70,7 +73,7 @@ try:
     Spin().run()
 finally:
     guard.close()
-'''
+"""
 
 # Лидер сессии — sh, который игнорирует HUP и не пробрасывает его. Вторая команда
 # (`exit $?`) не даёт sh заменить себя приложением через exec и возвращает его код.
@@ -85,7 +88,9 @@ def _child_env() -> dict[str, str]:
     previous = os.environ.get("PYTHONPATH")
     if previous:
         sources.append(previous)
-    return dict(os.environ, TERM="xterm-256color", PYTHONPATH=os.pathsep.join(sources))
+    return dict(
+        os.environ, TERM="xterm-256color", PYTHONPATH=os.pathsep.join(sources)
+    )
 
 
 def _describe(status: int) -> str:
@@ -101,14 +106,16 @@ class _PtyApp:
 
     def __init__(self, argv: list[str], work: Path) -> None:
         self.work = work
-        env = _child_env()   # до fork: ребёнок лишь зовёт execve
+        env = _child_env()  # до fork: ребёнок лишь зовёт execve
         self.pid, self.master = pty.fork()
         if self.pid == 0:
             try:
-                fcntl.ioctl(1, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
+                fcntl.ioctl(
+                    1, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0)
+                )
                 os.execve(argv[0], argv, env)
             finally:
-                os._exit(127)   # ребёнок никогда не возвращается в pytest
+                os._exit(127)  # ребёнок никогда не возвращается в pytest
         self._output = bytearray()
         self._stop = threading.Event()
         self._reader = threading.Thread(target=self._drain, daemon=True)
@@ -141,7 +148,9 @@ class _PtyApp:
                     f"хвост вывода:\n{self._tail()}"
                 )
             if time.monotonic() > deadline:
-                pytest.fail(f"приложение не поднялось за {READY_TIMEOUT_S:.0f} с")
+                pytest.fail(
+                    f"приложение не поднялось за {READY_TIMEOUT_S:.0f} с"
+                )
             time.sleep(0.05)
 
     def kill_terminal(self) -> None:
@@ -158,7 +167,9 @@ class _PtyApp:
             if pid:
                 return status
             time.sleep(0.05)
-        pytest.fail(f"процесс не вышел за {EXIT_TIMEOUT_S:.0f} с после смерти терминала — завис")
+        pytest.fail(
+            f"процесс не вышел за {EXIT_TIMEOUT_S:.0f} с после смерти терминала — завис"
+        )
 
     def wait_stopped(self) -> int:
         deadline = time.monotonic() + STOP_TIMEOUT_S
@@ -167,7 +178,9 @@ class _PtyApp:
             if pid:
                 return status
             time.sleep(0.05)
-        pytest.fail(f"процесс не остановился по SIGTSTP за {STOP_TIMEOUT_S:.0f} с")
+        pytest.fail(
+            f"процесс не остановился по SIGTSTP за {STOP_TIMEOUT_S:.0f} с"
+        )
 
     def dispose(self) -> None:
         # Лидер сессии — он же лидер группы; внук-приложение варианта с sh в той же
@@ -192,7 +205,9 @@ def launch(tmp_path):
 
     def _launch(*, sh_swallows_hup: bool = False) -> _PtyApp:
         argv = [sys.executable, "-c", APP, str(tmp_path)]
-        app = _PtyApp(SH_SWALLOWS_HUP + argv if sh_swallows_hup else argv, tmp_path)
+        app = _PtyApp(
+            SH_SWALLOWS_HUP + argv if sh_swallows_hup else argv, tmp_path
+        )
         started.append(app)
         app.wait_ready()
         return app
@@ -241,7 +256,7 @@ def test_suspend_and_resume_do_not_trigger_exit(launch):
     status = app.wait_stopped()
     assert os.WIFSTOPPED(status), _describe(status)
     os.kill(app.pid, signal.SIGCONT)
-    time.sleep(1.0)   # пять периодов опроса сторожа (POLL_S = 0.2 в APP)
+    time.sleep(1.0)  # пять периодов опроса сторожа (POLL_S = 0.2 в APP)
 
     assert os.waitpid(app.pid, os.WNOHANG) == (0, 0)
     assert not (app.work / "cleanup").exists()

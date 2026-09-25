@@ -14,7 +14,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 #: Что cmd.exe не передаст программе как есть: режет по `&|<>`, съедает `^`,
 #: раскрывает `%VAR%` даже в кавычках, а `\"` из list2cmdline сбивает ему счёт
 #: кавычек.
@@ -39,7 +38,9 @@ def shell_command(argv) -> str:
             f"cmd.exe не передаст как есть {unsafe!r}: символы {''.join(sorted(_CMD_UNSAFE))} "
             "в аргументах запрещены — код кладите в скрипт через python_command"
         )
-    return subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    return (
+        subprocess.list2cmdline(argv) if os.name == "nt" else shlex.join(argv)
+    )
 
 
 def python_command(tmp_path, script: str, *args) -> str:

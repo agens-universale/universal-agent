@@ -6,7 +6,6 @@ import pytest
 import yaml
 from gc_testkit.paths import ASSETS
 
-
 PACK_DIR = ASSETS / "skills" / "default-coworker"
 
 EXPECTED_SKILL_IDS = {
@@ -59,7 +58,9 @@ def test_skill_md_present_with_valid_frontmatter(skill_id):
 
 
 def test_bootstrap_mentions_all_inner_skill_ids():
-    body = (PACK_DIR / "using-default-coworker" / "SKILL.md").read_text(encoding="utf-8")
+    body = (PACK_DIR / "using-default-coworker" / "SKILL.md").read_text(
+        encoding="utf-8"
+    )
     missing = [
         sid for sid in INNER_SKILL_IDS if f"default-coworker:{sid}" not in body
     ]
@@ -89,7 +90,9 @@ async def test_registry_default_list_returns_only_bootstrap(tmp_path):
         project_root=str(tmp_path / "p_empty"),
     )
     items = {
-        i["id"]: i for i in await reg.list_skills() if i.get("pack_id") == "default-coworker"
+        i["id"]: i
+        for i in await reg.list_skills()
+        if i.get("pack_id") == "default-coworker"
     }
     assert set(items.keys()) == {"default-coworker:using-default-coworker"}
     bootstrap = items["default-coworker:using-default-coworker"]

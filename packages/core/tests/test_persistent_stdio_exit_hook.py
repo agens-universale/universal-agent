@@ -13,12 +13,11 @@
 Держатель сидит на том же ридере, ответ close-тула ушёл бы в его очередь, и мы
 прождали бы десять секунд впустую, чтобы всё равно перейти к терминации.
 """
+
 import threading
 import time
-from types import SimpleNamespace
 
 import pytest
-
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 
 
@@ -120,15 +119,19 @@ def test_prologue_is_skipped_when_the_lock_is_busy(monkeypatch):
     sess = _session(monkeypatch, close_tool="browser_close_all")
     wrote: list = []
     monkeypatch.setattr(
-        ps.PersistentStdioSession, "_write_close_tool",
+        ps.PersistentStdioSession,
+        "_write_close_tool",
         lambda self, proc, tool: wrote.append(tool) or "req-1",
     )
     monkeypatch.setattr(
-        ps.PersistentStdioSession, "_read_matching_on",
+        ps.PersistentStdioSession,
+        "_read_matching_on",
         lambda self, proc, req_id, timeout: pytest.fail("читали чужой ридер"),
     )
     monkeypatch.setattr(
-        ps.PersistentStdioSession, "_close_prologue_tail", lambda self, proc: None
+        ps.PersistentStdioSession,
+        "_close_prologue_tail",
+        lambda self, proc: None,
     )
 
     holder_in = threading.Event()
@@ -159,15 +162,19 @@ def test_prologue_still_runs_when_the_lock_is_free(monkeypatch):
     sess = _session(monkeypatch, close_tool="browser_close_all")
     wrote: list = []
     monkeypatch.setattr(
-        ps.PersistentStdioSession, "_write_close_tool",
+        ps.PersistentStdioSession,
+        "_write_close_tool",
         lambda self, proc, tool: wrote.append(tool) or "req-1",
     )
     monkeypatch.setattr(
-        ps.PersistentStdioSession, "_read_matching_on",
+        ps.PersistentStdioSession,
+        "_read_matching_on",
         lambda self, proc, req_id, timeout: {"id": req_id},
     )
     monkeypatch.setattr(
-        ps.PersistentStdioSession, "_close_prologue_tail", lambda self, proc: None
+        ps.PersistentStdioSession,
+        "_close_prologue_tail",
+        lambda self, proc: None,
     )
 
     sess.close()

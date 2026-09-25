@@ -9,6 +9,7 @@ trace_id приходит извне (оркестратор pdlc) и попад
 Модуль намеренно без зависимостей от остального кода: его импортирует
 ``utils/logging_module``, который грузится очень рано.
 """
+
 from typing import Any, Dict, Optional
 
 # Предел длины сырого значения. Заголовок он не ломает, но защищает имя файла
@@ -39,8 +40,7 @@ def normalize_trace_id(value: Any) -> Optional[str]:
         code = ord(ch)
         if code < 0x20 or code == 0x7F:
             raise ValueError(
-                "trace_id не должен содержать управляющие символы "
-                "(включая CR, LF и tab)"
+                "trace_id не должен содержать управляющие символы (включая CR, LF и tab)"
             )
     # HTTP-заголовки кодируются latin-1 (RFC 7230), поэтому кириллица, эмодзи и
     # прочее вне 0-255 роняют КАЖДЫЙ запрос к модели с UnicodeEncodeError. Хуже
@@ -51,7 +51,7 @@ def normalize_trace_id(value: Any) -> Optional[str]:
     except UnicodeEncodeError as exc:
         raise ValueError(
             "trace_id должен кодироваться в latin-1 (ограничение HTTP-заголовков): "
-            f"недопустимый символ {text[exc.start:exc.end]!r} в позиции {exc.start}"
+            f"недопустимый символ {text[exc.start : exc.end]!r} в позиции {exc.start}"
         ) from exc
     return text
 
@@ -82,7 +82,9 @@ def trace_id_from_config(config_dict: Optional[Dict[str, Any]]) -> str:
     return str(raw).strip()
 
 
-def trace_header_name(config_dict: Optional[Dict[str, Any]], default: str) -> str:
+def trace_header_name(
+    config_dict: Optional[Dict[str, Any]], default: str
+) -> str:
     """Имя заголовка для trace_id: ``agent.trace_id_header_name`` или ``default``.
 
     Дефолты разные по назначению: для бэкенда модели — ``x_trace_id``, для MCP —

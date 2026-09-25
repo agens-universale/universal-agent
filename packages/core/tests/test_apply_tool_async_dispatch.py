@@ -3,12 +3,11 @@
 Смысл — совместимость: у встраивающих SDK свои тулы с синхронным ``__call__``,
 и переезд ядра на asyncio не имеет права требовать от них переписывания.
 """
+
 import asyncio
 import json
-import threading
 
 import pytest
-
 from gc_core.tools import aapply_tool
 
 
@@ -48,12 +47,23 @@ class _AsyncTool(_SyncTool):
 
 
 def _data(cls, name):
-    return {name: {"tool_fabric": cls, "spec": cls.tool_description(), "description": ""}}
+    return {
+        name: {
+            "tool_fabric": cls,
+            "spec": cls.tool_description(),
+            "description": "",
+        }
+    }
 
 
 async def test_aapply_tool_awaits_async_tool():
-    out = await aapply_tool("t_async", {"x": "1"}, _data(_AsyncTool, "t_async"),
-                            ctx=None, config_dict={})
+    out = await aapply_tool(
+        "t_async",
+        {"x": "1"},
+        _data(_AsyncTool, "t_async"),
+        ctx=None,
+        config_dict={},
+    )
     assert out == "async:1"
 
 
@@ -69,14 +79,20 @@ async def test_aapply_tool_rejects_a_tool_without_acall():
 
     Точка расширения для тулов — MCP, и она асинхронна насквозь.
     """
+
     class _NoAcall(_SyncTool):
         """Вся обвязка тула на месте, а `acall` нет — ошибка проводки."""
 
         acall = None
 
     with pytest.raises(TypeError, match="has no acall"):
-        await aapply_tool("t_sync", {"x": "1"}, _data(_NoAcall, "t_sync"),
-                          ctx=None, config_dict={})
+        await aapply_tool(
+            "t_sync",
+            {"x": "1"},
+            _data(_NoAcall, "t_sync"),
+            ctx=None,
+            config_dict={},
+        )
 
 
 async def test_async_tool_exception_becomes_agent_visible_text():
@@ -89,12 +105,18 @@ async def test_async_tool_exception_becomes_agent_visible_text():
     не уезжает. Проверка «тот же контракт» — в
     `test_internal_tool_error.py::test_async_entry_gives_the_same_slim_envelope`.
     """
+
     class _Boom(_SyncTool):
         async def acall(self, x: str) -> str:
             raise ValueError("тул сломался")
 
-    out = await aapply_tool("t_async", {"x": "1"}, _data(_Boom, "t_async"),
-                            ctx=None, config_dict={})
+    out = await aapply_tool(
+        "t_async",
+        {"x": "1"},
+        _data(_Boom, "t_async"),
+        ctx=None,
+        config_dict={},
+    )
     assert "тул сломался" in out
     payload = json.loads(out)
     assert payload["ok"] is False
@@ -104,12 +126,14 @@ async def test_async_tool_exception_becomes_agent_visible_text():
 
 async def test_sync_tool_exception_via_async_dispatch():
     """Исключение синхронного тула, поднятое в потоке, тоже становится текстом."""
+
     class _Boom(_SyncTool):
         async def acall(self, x: str) -> str:
             raise RuntimeError("и этот сломался")
 
-    out = await aapply_tool("t_sync", {"x": "1"}, _data(_Boom, "t_sync"),
-                            ctx=None, config_dict={})
+    out = await aapply_tool(
+        "t_sync", {"x": "1"}, _data(_Boom, "t_sync"), ctx=None, config_dict={}
+    )
     assert "и этот сломался" in out
 
 
@@ -126,10 +150,13 @@ async def test_unknown_tool_returns_an_actionable_envelope():
 
 async def test_non_string_result_is_serialized_the_same_way():
     """dict/list от тула сериализуются в JSON, а не в repr."""
+
     class _Dict(_SyncTool):
         async def acall(self, x: str):
             return {"ok": True, "x": x}
 
     data = _data(_Dict, "t_sync")
-    out = await aapply_tool("t_sync", {"x": "1"}, data, ctx=None, config_dict={})
+    out = await aapply_tool(
+        "t_sync", {"x": "1"}, data, ctx=None, config_dict={}
+    )
     assert out == '{"ok": true, "x": "1"}'

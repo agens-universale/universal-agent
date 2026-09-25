@@ -1,4 +1,5 @@
 """Кроссплатформенное чтение системного буфера обмена."""
+
 from __future__ import annotations
 
 import subprocess
@@ -9,9 +10,12 @@ def _run_capture(cmd: list[str]) -> str:
     """Запустить команду, вернуть stdout (utf-8) или '' при любой ошибке."""
     try:
         out = subprocess.run(
-            cmd, check=False, capture_output=True, timeout=2.0,
+            cmd,
+            check=False,
+            capture_output=True,
+            timeout=2.0,
         ).stdout
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return ""
     return out.decode("utf-8", errors="replace")
 
@@ -20,10 +24,13 @@ def _run_feed(cmd: list[str], text: str) -> bool:
     """Передать text в stdin команды (utf-8). True при успехе, False при ошибке."""
     try:
         result = subprocess.run(
-            cmd, input=text.encode("utf-8"),
-            check=False, capture_output=True, timeout=2.0,
+            cmd,
+            input=text.encode("utf-8"),
+            check=False,
+            capture_output=True,
+            timeout=2.0,
         )
-    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+    except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0
 
@@ -101,7 +108,9 @@ def _win_write_clipboard(text: str) -> bool:
             if not u32.SetClipboardData(_CF_UNICODETEXT, h):
                 k32.GlobalFree(h)
                 return False
-            return True  # на успехе владение h переходит буферу — не освобождаем
+            return (
+                True  # на успехе владение h переходит буферу — не освобождаем
+            )
         finally:
             u32.CloseClipboard()
     except Exception:

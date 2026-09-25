@@ -4,9 +4,12 @@ gigacode/vLLM может вернуть HTTP 200 + SSE-событие ошибк
 вместо HTTP-статуса. Раньше такой чанк (без `choices`) молча пропускался →
 сборка пустая → downstream «Unknown finish reason» (маскировка реальной причины).
 Теперь error-событие поднимается с сообщением провайдера."""
-import pytest
 
-from gc_core.utils.chat_completions_stream import assemble_streamed_completion, BackendStreamError
+import pytest
+from gc_core.utils.chat_completions_stream import (
+    BackendStreamError,
+    assemble_streamed_completion,
+)
 
 
 def test_sse_error_event_is_surfaced():
@@ -17,8 +20,10 @@ def test_sse_error_event_is_surfaced():
         assemble_streamed_completion(payloads)
     msg = str(ei.value)
     assert "Backend stream error" in msg
-    assert "content filter" in msg          # реальная причина провайдера видна
-    assert ei.value.status_code == "content_filter"   # код из error-события несётся
+    assert "content filter" in msg  # реальная причина провайдера видна
+    assert (
+        ei.value.status_code == "content_filter"
+    )  # код из error-события несётся
 
 
 def test_normal_content_stream_still_assembles():
