@@ -118,6 +118,19 @@ def _read_earlier(*paths: Path) -> Optional[bytes]:
         return None
 
 
+def _turn_taken(entry: Dict[str, Any], index_key: str, turn_id: str) -> bool:
+    """Базу хода ``turn_id`` уже снимали — ещё одна не пишется.
+
+    Точная база хода не ложится и поверх счётной того же хода — по той же
+    причине, что у ``capture_session``: это состояние после команды.
+    """
+    if entry.get(index_key) == turn_id:
+        return True
+    return index_key == _TURN_INDEX_KEYS[".turn"] and (
+        entry.get(_TURN_INDEX_KEYS[".gitturn"]) == turn_id
+    )
+
+
 def _drop_quietly(path: Path) -> None:
     """Удалить свой файл, не подменяя причину отказа, если удалить не вышло."""
     try:
@@ -309,6 +322,36 @@ class SnapshotStore:
             _drop_quietly(tmp)
             raise
 
+    def _publish_once(self, dest: Path, content: bytes) -> bool:
+        """Записать снимок, только если его ещё нет, — АТОМАРНО. ``True`` — записали.
+
+        Проверка «снимка нет» и запись по отдельности оставляли окно: двое
+        писателей одного пути (субагенты, TUI вместе с `gc-cli`) оба видели
+        пустоту, и опоздавший затирал исходное состояние своим — состоянием
+        ПОСЛЕ чужой правки; откат «к началу» возвращал бы не туда. Жёсткая
+        ссылка на готовый временный файл публикует байты целиком и не
+        перезаписывает существующее: занятое имя — проигрыш, а не замена.
+
+        Файловая система без жёстких ссылок (FAT, часть сетевых дисков) — та же
+        проверка и замена, что прежде: окно остаётся, но снимок пишется.
+        """
+        if dest.is_file():
+            return False
+        tmp = self._stage_bytes(dest, content)
+        try:
+            try:
+                os.link(tmp, dest)
+                return True
+            except FileExistsError:
+                return False
+            except OSError:
+                if dest.is_file():
+                    return False
+                atomic_replace(tmp, dest)
+                return True
+        finally:
+            _drop_quietly(tmp)
+
     def _stage_bytes(self, dest: Path, content: bytes) -> Path:
         """Байты снимка — во временный файл рядом с ``dest`` (имя — см. ``_write_bytes``).
 
@@ -431,9 +474,10 @@ class SnapshotStore:
         одно для рекордера и для шелл-канала.
         """
         dest = self._session_path(path_key)
-        if dest.is_file() or self._shell_session_path(path_key).is_file():
+        if self._shell_session_path(path_key).is_file():
             return False
-        self._write_bytes(dest, content)
+        if not self._publish_once(dest, content):
+            return False
         self._write_session_head_rev(path_key, head_rev)
         return True
 
@@ -491,11 +535,7 @@ class SnapshotStore:
         Порода отдельная (см. докстринг модуля): откату эта база не подаётся
         никогда, поэтому и живёт в своём пространстве имён.
         """
-        dest = self._shell_session_path(path_key)
-        if dest.is_file():
-            return False
-        self._write_bytes(dest, content)
-        return True
+        return self._publish_once(self._shell_session_path(path_key), content)
 
     def capture_shell_turn(self, path_key: str, content: bytes, turn_id: str) -> None:
         """Записать СЧЁТНУЮ turn-базу, если для ``turn_id`` она ещё не записана."""
@@ -511,14 +551,24 @@ class SnapshotStore:
         turn_id: str,
     ) -> None:
         index_key = _TURN_INDEX_KEYS[dest.suffix]
-        entry = self._index_entry(path_key)
-        if entry.get(index_key) == turn_id:
+        if self._pending is None:
+            # Проверка отметки и запись — под ОДНИМ замком индекса: файл хода
+            # перезаписывается каждым новым ходом, и «без перезаписи» тут не
+            # годится. Порознь двое писателей одного пути видели бы оба «ещё
+            # не снят», и опоздавший затёр бы базу хода состоянием после чужой
+            # правки. Внутри `deferred_index` (пакет шелл-канала) замок на путь
+            # вернул бы квадратичную цену — там однократность держит пакет.
+            stem = self._stem(path_key)
+            with file_lock(self.index_path, timeout=5.0):
+                index = self._load_index()
+                entry = index.get(stem)
+                if _turn_taken(entry if isinstance(entry, dict) else {}, index_key, turn_id):
+                    return
+                self._write_bytes(dest, content)
+                if _apply_marks(index, stem, {index_key: turn_id}):
+                    self._save_index(index)
             return
-        if index_key == _TURN_INDEX_KEYS[".turn"] and (
-            entry.get(_TURN_INDEX_KEYS[".gitturn"]) == turn_id
-        ):
-            # Точная база хода не ложится поверх счётной того же хода — по той же
-            # причине, что у `capture_session`: это состояние после команды.
+        if _turn_taken(self._index_entry(path_key), index_key, turn_id):
             return
         self._write_bytes(dest, content)
         self._mark(path_key, {index_key: turn_id})

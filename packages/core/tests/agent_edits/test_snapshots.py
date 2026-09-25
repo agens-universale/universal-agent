@@ -707,20 +707,18 @@ def test_second_writer_does_not_steal_the_first_writers_tmp(tmp_path, monkeypatc
 _TMP_NAME_BUDGET = 16
 
 
-def test_tmp_name_stays_within_the_path_budget(tmp_path, monkeypatch):
+def test_tmp_name_stays_within_the_path_budget(tmp_path):
     """Уникальность временного имени не имеет права съедать бюджет пути."""
-    from gc_core.agent_edits import snapshots
-
     seen: list[str] = []
-    real_replace = snapshots.atomic_replace
-
-    def spying_replace(src, dst):
-        seen.append(Path(src).name)
-        real_replace(src, dst)
-
-    monkeypatch.setattr(snapshots, "atomic_replace", spying_replace)
-
     store = SnapshotStore(tmp_path / "diffs", "cli_a-very-real-thread-id")
+    real_stage = store._stage_bytes
+
+    def spying_stage(dest, content):
+        tmp = real_stage(dest, content)
+        seen.append(tmp.name)
+        return tmp
+
+    store._stage_bytes = spying_stage
     store.capture_session("pkg/module.py", b"x")
 
     orig = next(p for p in store.root.iterdir() if p.suffix == ".orig")
@@ -895,3 +893,53 @@ def test_a_failed_byte_replace_keeps_the_previous_acceptance(tmp_path, monkeypat
     state = _store(tmp_path).accepted_state("a.py")
     assert state is not None and state.content is None and state.head_oid == "old"
     assert not list((tmp_path / "diffs").glob("*.tmp"))    # временный файл убран
+
+
+def _race_on_first_capture(tmp_path, capture: str) -> tuple:
+    """Два писателя одного пути: второй проверил «снимка нет» и готовит байты, а
+    первый в это окно успевает записать свой снимок целиком."""
+    first, second = _store(tmp_path), _store(tmp_path)
+    real_stage = second._stage_bytes
+
+    def stage_after_the_first_wins(dest, content):
+        getattr(first, capture)("a.py", b"original\n")
+        return real_stage(dest, content)
+
+    second._stage_bytes = stage_after_the_first_wins
+    won = getattr(second, capture)("a.py", b"later-state\n")
+    return first, won
+
+
+def test_session_snapshot_is_not_overwritten_by_a_late_writer(tmp_path):
+    """Проверка «снимка нет» и запись не атомарны: опоздавший писатель затирал
+    исходное состояние своим — состоянием ПОСЛЕ чужой правки, — и откат «к
+    началу сессии» возвращал не туда (ревью PR, находка 4). Публикация теперь
+    без перезаписи: опоздавший проигрывает."""
+    store, won = _race_on_first_capture(tmp_path, "capture_session")
+
+    assert won is False
+    assert store.session_baseline("a.py") == b"original\n"
+
+
+def test_counting_session_base_is_not_overwritten_by_a_late_writer(tmp_path):
+    """Та же гонка у счётной базы шелл-канала."""
+    store, won = _race_on_first_capture(tmp_path, "capture_shell_session")
+
+    assert won is False
+    assert store.counting_session_baseline("a.py") == b"original\n"
+
+
+def test_turn_snapshot_is_claimed_under_the_index_lock(tmp_path):
+    """Снимок хода проверяется и пишется под замком индекса.
+
+    Файл хода перезаписывается каждым новым ходом, поэтому «без перезаписи»
+    тут не годится: однократность держит отметка хода в индексе. Второй
+    писатель, чьё чтение отметки устарело (прочитано до того, как первый
+    записал снимок), затирал базу хода своим — состоянием после чужой правки."""
+    first, second = _store(tmp_path), _store(tmp_path)
+    second._index_entry = lambda path_key: {}      # чтение до записи первого
+
+    first.capture_turn("a.py", b"original\n", "t1")
+    second.capture_turn("a.py", b"later-state\n", "t1")
+
+    assert first.turn_baseline("a.py", "t1") == b"original\n"
