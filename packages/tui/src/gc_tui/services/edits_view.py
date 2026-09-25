@@ -38,6 +38,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -468,7 +469,24 @@ class _LadderGitFacts:
         if key not in self._absent_cache:
             tree = git_ops.head_tree(self._launch_root, [rel])
             self._absent_cache[key] = tree is not None and rel not in tree
-        return self._absent_cache[key]
+        return self._absent_cache[key] and not self._under_other_case(rel)
+
+    def _under_other_case(self, rel: str) -> bool:
+        """На диске лежит тот же файл, но в другом регистре имени.
+
+        `ls-tree` сравнивает регистр строго: после закоммиченного `git mv
+        Readme.md README.md` путь `Readme.md` в HEAD «отсутствует». А файловая
+        система macOS и Windows регистр не различает — файл на месте, и откат
+        по ступени «файла нет» удалил бы закоммиченный `README.md`. Сомнение —
+        в сторону сохранения: отсутствие такого пути не считается доказанным.
+        """
+        path = abs_path_for_key(self._launch_root, rel)
+        try:
+            names = os.listdir(path.parent)
+        except OSError:
+            return False
+        folded = path.name.casefold()
+        return any(name != path.name and name.casefold() == folded for name in names)
 
     def note_head_tree(self, rels: Sequence[str], tree: Optional[Dict[str, str]]) -> None:
         """Ответ ``ls-tree`` по ``rels``, уже полученный сборкой, — в кэш отсутствия.

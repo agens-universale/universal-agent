@@ -2709,3 +2709,29 @@ def test_a_file_recreated_after_its_committed_deletion_is_reverted_by_deleting(t
 
     ws.view.revert(SOURCE_SESSION, ["a.py"])
     assert not (ws.root / "a.py").exists()
+
+
+def test_a_committed_case_only_rename_is_not_a_deletion(tmp_path):
+    """Закоммиченное переименование, меняющее только регистр, — не удаление.
+
+    `ls-tree` сравнивает регистр строго и не находит `Readme.md` после
+    `git mv Readme.md README.md`, а файловая система macOS и Windows регистр не
+    различает: файл «на месте», в разобранные не уходит, и `r` по ступени
+    «файла нет» УДАЛЯЛ закоммиченный `README.md` (ревью починок, находка 2)."""
+    ws = _Workspace(tmp_path, git=True)
+    ws.write("Readme.md", "orig\n")
+    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+    ws.session_base("Readme.md", "orig\n")
+    ws.write("Readme.md", "orig\nnew\n")
+    ws.journal.append(_rec("Readme.md", ts=1.0, add=1, del_=0))
+    subprocess.run(["git", "mv", "Readme.md", "README.md"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+    subprocess.run(["git", "commit", "-qm", "rename"], cwd=str(ws.root), check=True,
+                   capture_output=True)
+
+    ws.view.session_view(SOURCE_SESSION)
+    targets = ws.view.revert_targets(SOURCE_SESSION, ["Readme.md"])
+
+    assert all(target.kind != "delete" for target in targets)
