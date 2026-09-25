@@ -738,6 +738,23 @@ class EditsView:
         records, _turn_id = self._records(source)
         return _records_for_path(records, path_key)
 
+    def disk_state(self, path_keys: Sequence[str]) -> Tuple:
+        """Подписи файлов на диске (размер, время изменения) — снимок «что показали».
+
+        Подтверждение отката берёт его при показе превью и сверяет перед
+        записью: файл, поправленный при открытом окне, откат затёр бы базой
+        поверх того, чего пользователь не видел.
+        """
+        state = []
+        for key in path_keys:
+            try:
+                st = abs_path_for_key(self._launch_root, key).stat()
+            except OSError:
+                state.append((key, None))
+            else:
+                state.append((key, st.st_size, st.st_mtime_ns))
+        return tuple(state)
+
     def revert_targets(self, source: str, path_keys: Sequence[str]) -> List[RevertTarget]:
         """Куда вернёт `r` каждый путь — превью словами, до самого отката (§4.4 спеки).
 

@@ -1885,6 +1885,44 @@ async def test_list_refreshes_after_revert(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_confirm_does_not_overwrite_an_edit_made_after_the_preview(tmp_path):
+    """Файл поправили, пока открыто подтверждение, — `Enter` его не затирает.
+
+    Превью показывало одно, а откат записал бы базу поверх того, чего
+    пользователь не видел: правка в редакторе, сделанная при открытом окне,
+    пропадала молча (ревью PR, находка 6). Подтверждение сверяет файлы с тем,
+    что было при показе, и при расхождении не пишет ничего."""
+    import os
+
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.diff import REVERT_STALE
+
+    ws = _Workspace(tmp_path)
+    ws.base("a.py", "original\n")
+    ws.write("a.py", "agent\n")
+    disk = ws.root / "a.py"
+    ws.journal.append(_rec("a.py"))
+
+    async with TuiApp(
+        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+    ).run_test() as pilot:
+        scr = await _open(pilot, ws.screen())
+        await pilot.press("r")
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, RevertConfirmScreen)
+
+        disk.write_text("manual-after-preview\n", encoding="utf-8")
+        st = disk.stat()
+        os.utime(disk, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert disk.read_text(encoding="utf-8") == "manual-after-preview\n"
+        assert any(REVERT_STALE in n.message for n in pilot.app._notifications)
+        assert pilot.app.screen is scr
+
+
+@pytest.mark.asyncio
 async def test_revert_from_viewer_returns_to_list(tmp_path):
     from gc_tui.app import TuiApp
 

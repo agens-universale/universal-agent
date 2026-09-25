@@ -362,6 +362,9 @@ _REASON_TEXTS = {
 REVERT_UNAVAILABLE = f"откат недоступен: {NOT_REVERTABLE}"
 # Живой прогон пишет те же файлы: откат в это время — гонка, а не откат.
 BUSY_REVERT = "идёт прогон — откат недоступен"
+# Файлы поменялись, пока было открыто подтверждение: откат записал бы базу
+# поверх того, чего пользователь не видел в превью (ревью PR, находка 6).
+REVERT_STALE = "файлы изменились после показа — откат не выполнен, откройте подтверждение заново"
 # Тот же гейт для принятия/сброса (`a`/`Ctrl+A`/`u`/`Ctrl+U`) — текст один на
 # все четыре: конкретное действие уже назвал сам жест, а причина отказа одна.
 BUSY_ACTION = "идёт прогон"
@@ -2508,9 +2511,17 @@ class DiffScreen(_ActionFlash, Screen):
         external = [entry.path for entry in targets if entry.external]
         path_keys = [entry.path for entry in entries]
 
+        # Состояние файлов — ДО расчёта превью: правка, пришедшая, пока оно
+        # считалось, тоже расходится с показанным.
+        target_paths = [entry.path for entry in targets]
+        shown_state = self._edits.disk_state(target_paths)
+
         def _on_result(confirmed: bool) -> None:
             if confirmed:
-                self._apply_revert(path_keys, from_viewer=from_viewer)
+                self._apply_revert(
+                    path_keys, from_viewer=from_viewer,
+                    shown_state=(target_paths, shown_state),
+                )
 
         # Числа и превью — ИЗ ОДНОГО расчёта, и того самого, которым откат
         # пишет: счётчики строки списка идут от счётной базы и обещали бы
@@ -2518,7 +2529,6 @@ class DiffScreen(_ActionFlash, Screen):
         # ЦЕЛИКОМ: там показывается весь набор (Р22) — с диффом каждого файла,
         # а выше порога компактного вида без тел, — и счётчики каждой дельты
         # становятся заголовком её файла.
-        target_paths = [entry.path for entry in targets]
         deltas = list(zip(
             target_paths, self._edits.revert_deltas(self._source, target_paths)
         ))
@@ -2544,8 +2554,20 @@ class DiffScreen(_ActionFlash, Screen):
         )
 
     @_survives_unreadable_edits
-    def _apply_revert(self, path_keys: Sequence[str], *, from_viewer: bool) -> None:
-        """Откатить пути и рассказать об этом всем, кого это касается."""
+    def _apply_revert(
+        self,
+        path_keys: Sequence[str],
+        *,
+        from_viewer: bool,
+        shown_state: Optional[Tuple[Sequence[str], Tuple]] = None,
+    ) -> None:
+        """Откатить пути и рассказать об этом всем, кого это касается.
+
+        ``shown_state`` — пути и подписи их файлов на момент показа превью.
+        Разошлись — откат не пишет ничего: он затёр бы правку, которой в превью
+        не было (ревью PR, находка 6). Список перечитывается, чтобы новое
+        подтверждение показало то, что на диске сейчас.
+        """
         # Проверка ПОВТОРЯЕТСЯ здесь, а не только перед вопросом: окно
         # подтверждения и есть та щель, ради которой она заводилась — пока
         # пользователь читает, ход мог начаться и писать файлы.
@@ -2555,6 +2577,12 @@ class DiffScreen(_ActionFlash, Screen):
             # от того, был ли диалог подтверждения.
             self.app.notify(BUSY_REVERT, severity="warning")
             return
+        if shown_state is not None:
+            shown_paths, state = shown_state
+            if self._edits.disk_state(shown_paths) != state:
+                self.app.notify(REVERT_STALE, severity="warning")
+                self._reload()
+                return
         outcome = self._edits.revert(self._source, path_keys)
         changed = bool(outcome.restored or outcome.deleted)
         with self._after_the_change():
