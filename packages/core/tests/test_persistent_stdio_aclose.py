@@ -60,6 +60,10 @@ def obedient():
 
 @pytest.fixture
 def stubborn():
+    if sys.platform == "win32":
+        # terminate на Windows — это TerminateProcess: процесс умирает сразу,
+        # игнорировать его нельзя, и дорогой путь с дожиманием не воспроизвести.
+        pytest.skip("игнорировать SIGTERM можно только в POSIX")
     proc = _spawn(_STUBBORN)
     # Даём ему поставить обработчик, иначе SIGTERM прилетит до SIG_IGN.
     time.sleep(0.3)

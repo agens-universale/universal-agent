@@ -90,6 +90,12 @@ def _fresh_reader(monkeypatch) -> None:
 
 @pytest.fixture
 def pipe_stdin(monkeypatch):
+    if os.name == "nt":
+        # На Windows трубу stdin не опросить: порт читает её потоком (запасной
+        # путь), а эти тесты проверяют именно путь опроса. Заодно здесь не
+        # доходим до `os.kill(SIGINT)`: на Windows это TerminateProcess всего
+        # pytest.
+        pytest.skip("путь опроса stdin есть только на POSIX")
     _fresh_reader(monkeypatch)
     fake = _PipeStdin()
     monkeypatch.setattr(sys, "stdin", fake)

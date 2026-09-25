@@ -4,6 +4,7 @@
 нельзя не читать — заполненный буфер блокирует запись в дочернем процессе.
 """
 import asyncio
+import os
 import pytest
 import sys
 import threading
@@ -147,6 +148,11 @@ async def test_native_and_adapted_paths_agree():
 # оставляла все 205 тестов exec зелёными.
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="синтаксис sh `(cmd &)`; на Windows то же свойство стережёт "
+           "test_grandchild_pipes_stay_open (`start /b`)",
+)
 async def test_captured_survives_drain_timeout():
     """Захваченное отдаётся, даже если дренаж не успел дойти до EOF.
 
@@ -179,6 +185,11 @@ async def test_captured_survives_drain_timeout():
     )
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="синтаксис sh `(cmd &)`; на Windows то же свойство стережёт "
+           "test_grandchild_pipes_stay_open (`start /b`)",
+)
 async def test_background_child_is_not_a_timeout():
     """Фоновый потомок, унаследовавший stdout, — не повод объявлять таймаут.
 
@@ -194,32 +205,37 @@ async def test_background_child_is_not_a_timeout():
     assert res.stdout.split() == ["раз", "два"]
 
 
-async def test_cancel_kills_the_child():
-    """Отмена прогона не оставляет процесс-сироту."""
-    import os
-    import subprocess
+async def test_cancel_kills_the_child(tmp_path):
+    """Отмена прогона не оставляет процесс-сироту.
 
-    mark = f"gcexecprobe{os.getpid()}"
-    code = f"import time; _={mark!r}; time.sleep(30)"
-
-    def alive() -> list:
-        out = subprocess.run(["pgrep", "-f", mark], capture_output=True, text=True).stdout
-        return [p for p in out.split() if p and int(p) != os.getpid()]
+    Жизнь потомка видна по его пульсу в файле: так проверка одинакова на любой
+    ОС — `pgrep`, которым она шла раньше, на Windows нет, а обещание то же.
+    Пульс ограничен 30 секундами, чтобы сирота при поломке не жил вечно.
+    """
+    beat = tmp_path / "beat"
+    code = (
+        "import sys, time\n"
+        "for _ in range(600):\n"
+        "    with open(sys.argv[1], 'a') as f:\n"
+        "        f.write('.')\n"
+        "    time.sleep(0.05)\n"
+    )
 
     backend = LocalFsBackend()
-    task = asyncio.create_task(backend.aexec_argv([sys.executable, "-c", code]))
-    await asyncio.sleep(0.8)
-    assert len(alive()) == 1, "процесс не стартовал — тест ничего не проверяет"
+    task = asyncio.create_task(backend.aexec_argv([sys.executable, "-c", code, str(beat)]))
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (beat.exists() and beat.stat().st_size):
+        await asyncio.sleep(0.05)
+    assert beat.exists(), "процесс не стартовал — тест ничего не проверяет"
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(0.3)
 
-    survivors = alive()
-    for pid in survivors:
-        subprocess.run(["kill", "-9", pid])
-    assert survivors == [], "после отмены остался процесс-сирота"
+    size = beat.stat().st_size
+    await asyncio.sleep(0.5)
+    assert beat.stat().st_size == size, "после отмены остался процесс-сирота"
 
 
 # --- судьба фонового потомка -----------------------------------------------
