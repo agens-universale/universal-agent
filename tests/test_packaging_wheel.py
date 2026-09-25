@@ -11,6 +11,7 @@ tui/styles.tcss. Потом tui, cli, server и менеджер MCP уехал�
 test_versions_are_pinned_together).
 """
 import itertools
+import os
 import re
 import shutil
 import subprocess
@@ -243,6 +244,11 @@ def test_server_wheel_ships_the_sandbox_wrapper(wheels, wheel_infos):
         "поднимется: runner зовёт этот файл через Popen"
     )
 
+    if os.name == "nt":
+        # Бит +x hatchling берёт с диска, а у файлов на Windows его нет: колесо,
+        # собранное здесь, едет без него. Swarm на Windows не работает вовсе, а
+        # пользователь на Linux собирает колесо у себя, из своего клона.
+        pytest.skip("бит +x на Windows не хранится — проверка только на POSIX")
     mode = wheel_infos["gc_server"][wrapper].external_attr >> 16
     assert mode & 0o111, (
         f"{wrapper} едет без исполняемого бита (режим {oct(mode)}) — "
