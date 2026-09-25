@@ -16,6 +16,7 @@ from gc_core.agent_edits.revert import (
     REASON_NO_BASELINE,
     REASON_NOTHING_TO_DELETE,
     REASON_NOT_REVERTABLE,
+    REASON_THROUGH_LINK,
     REASON_WRITE_FAILED,
     revert_paths,
 )
@@ -248,3 +249,87 @@ def test_restore_keeps_file_mode(tmp_path):
     assert out.restored == ["deploy.sh"]
     assert disk.read_bytes() == b"old\n"
     assert stat.S_IMODE(disk.stat().st_mode) == 0o755
+
+
+# --- ссылки: откат не пишет и не удаляет за пределами проекта ----------------
+
+
+def _link_dir(link: Path, target: Path) -> None:
+    """Ссылка на каталог без прав администратора: junction на Windows, иначе symlink."""
+    try:
+        if os.name == "nt":
+            import _winapi
+
+            _winapi.CreateJunction(str(target), str(link))
+        else:
+            link.symlink_to(target, target_is_directory=True)
+    except (OSError, ImportError, NotImplementedError, AttributeError):
+        pytest.skip("среда не даёт создать ссылку на каталог")
+
+
+def _link_file(link: Path, target: Path) -> None:
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("среда не даёт создать symlink на файл")
+
+
+def test_planted_tmp_link_does_not_redirect_the_restore(tmp_path):
+    """Временный файл отката — свой, а не `<файл>.revert.tmp`, подложенный заранее.
+
+    С предсказуемым именем запись шла по заранее подложенной ссылке во
+    внешний файл, а замена ставила саму ссылку на место файла проекта."""
+    root = tmp_path / "proj"
+    disk = _write(root / "a.py", b"new\n")
+    secret = _write(tmp_path / "outside" / "secret", b"private\n")
+    _link_file(root / "a.py.revert.tmp", secret)
+
+    out = revert_paths(["a.py"], {"a.py": _entry()}, lambda k: b"old\n", str(root))
+
+    assert out.restored == ["a.py"]
+    assert secret.read_bytes() == b"private\n"
+    assert not disk.is_symlink() and disk.read_bytes() == b"old\n"
+
+
+def test_restore_through_a_directory_link_is_skipped(tmp_path):
+    """Каталог пути после правки заменили ссылкой наружу — откат туда не пишет."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    outside = _write(tmp_path / "outside" / "a.py", b"theirs\n")
+    _link_dir(root / "pkg", outside.parent)
+
+    out = revert_paths(
+        ["pkg/a.py"], {"pkg/a.py": _entry("pkg/a.py")}, lambda k: b"old\n", str(root)
+    )
+
+    assert out.skipped == [("pkg/a.py", REASON_THROUGH_LINK)]
+    assert outside.read_bytes() == b"theirs\n"
+
+
+def test_delete_of_created_through_a_directory_link_is_skipped(tmp_path):
+    """Удаление созданного файла тоже не идёт по ссылке — иначе ушёл бы чужой файл."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    outside = _write(tmp_path / "outside" / "new.py", b"theirs\n")
+    _link_dir(root / "pkg", outside.parent)
+
+    out = revert_paths(
+        ["pkg/new.py"], {"pkg/new.py": _entry("pkg/new.py", kind="created")},
+        lambda k: None, str(root),
+    )
+
+    assert out.skipped == [("pkg/new.py", REASON_THROUGH_LINK)]
+    assert outside.exists()
+
+
+def test_file_replaced_by_a_link_is_skipped(tmp_path):
+    """Сам файл стал ссылкой — откат его не трогает: ни цель, ни саму ссылку."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    outside = _write(tmp_path / "outside" / "a.py", b"theirs\n")
+    _link_file(root / "a.py", outside)
+
+    out = revert_paths(["a.py"], {"a.py": _entry()}, lambda k: b"old\n", str(root))
+
+    assert out.skipped == [("a.py", REASON_THROUGH_LINK)]
+    assert outside.read_bytes() == b"theirs\n" and (root / "a.py").is_symlink()

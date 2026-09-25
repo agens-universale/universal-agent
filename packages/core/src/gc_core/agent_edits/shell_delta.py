@@ -60,7 +60,7 @@ from gc_core.agent_edits import git_ops
 from gc_core.agent_edits.deltas import truncate_hunks, abs_path_for_key, build_diff, decode_edit_text
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.mode import resolve_mode
-from gc_core.agent_edits.paths import canonical_path_key, is_external_key
+from gc_core.agent_edits.paths import canonical_path_key, goes_through_link, is_external_key
 
 # Приватные хелперы рекордера переиспользуются намеренно: периметр правки и
 # thread-identity обязаны считаться в обоих каналах записи одинаково.
@@ -164,22 +164,6 @@ class _FileFacts:
     is_file: bool
     binary: bool
     size: int
-
-
-def _through_symlink(launch_root: str, rel: str) -> bool:
-    """Идёт ли путь из ``git status`` через симлинк — в любом звене, включая последнее.
-
-    По ``lstat`` на звено: несколько системных вызовов на путь против процессов
-    git, которые запись и так запускает. Junction на Windows — та же ссылка на
-    папку, но ``is_symlink()`` для него отдаёт ``False``.
-    """
-    isjunction = getattr(os.path, "isjunction", lambda _p: False)
-    node = Path(launch_root)
-    for part in Path(rel).parts:
-        node = node / part
-        if node.is_symlink() or isjunction(node):
-            return True
-    return False
 
 
 def _file_facts(path: Path) -> _FileFacts:
@@ -654,7 +638,7 @@ class ShellDelta:
         `other/a.txt` — и откат затёр бы чужой файл базой из `d/a.txt`. Цель,
         если её правили, видит карманный подканал — он читает её по ключу.
 
-        Проверяется каждое звено пути (``_through_symlink``), а не совпадение
+        Проверяется каждое звено пути (``paths.goes_through_link``), а не совпадение
         ключа с путём из ``git status``: на Windows ``resolve()`` отдаёт регистр
         с диска, а git — из индекса, и сравнение выкидывало бы все правки файла,
         чей регистр разошёлся (обычное дело при core.ignorecase).
@@ -664,7 +648,7 @@ class ShellDelta:
         for rel in part:
             abs_path = self._abs(rel)
             key = canonical_path_key(str(abs_path), self._launch_root, protected_extra=extra)
-            if key is None or is_external_key(key) or _through_symlink(self._launch_root, rel):
+            if key is None or is_external_key(key) or goes_through_link(self._launch_root, rel):
                 continue
             planned.append((rel, key, _file_facts(abs_path)))
         return planned

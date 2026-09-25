@@ -88,3 +88,28 @@ def test_protection_outranks_being_outside_the_project(launch_root, monkeypatch)
     operational.write_text("x", encoding="utf-8")
     assert not operational.resolve().is_relative_to(launch_root.resolve())
     assert canonical_path_key(str(operational), str(launch_root)) is None
+
+
+def test_a_junction_is_recognised_by_its_reparse_tag(monkeypatch, tmp_path):
+    """Junction ловится по тегу из ``lstat``, а не ``os.path.isjunction``: той нет
+    до Python 3.12, и на 3.11 под Windows путь через junction прошёл бы как
+    обычный. Заглушка облачного файла — тоже точка повторной обработки, но не
+    ссылка: путь через неё законен."""
+    import os
+    import stat as stat_mod
+    from types import SimpleNamespace
+
+    from gc_core.agent_edits import paths as paths_mod
+
+    tags = {"j": 0xA0000003, "cloud": 0x9000001A}
+
+    def fake_lstat(node):
+        tag = tags.get(os.path.basename(node))
+        if tag is None:
+            raise FileNotFoundError(node)
+        return SimpleNamespace(st_mode=stat_mod.S_IFDIR, st_reparse_tag=tag)
+
+    monkeypatch.setattr(paths_mod.os, "lstat", fake_lstat)
+
+    assert paths_mod.goes_through_link(str(tmp_path), "j/a.py")
+    assert not paths_mod.goes_through_link(str(tmp_path), "cloud/a.py")

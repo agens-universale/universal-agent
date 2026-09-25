@@ -2052,8 +2052,9 @@ def test_a_path_whose_key_differs_only_by_case_is_still_recorded(repo, monkeypat
 def test_a_path_through_a_junction_is_not_recorded(repo, monkeypatch):
     """Junction на Windows — та же ссылка на папку, но ``is_symlink()`` для него
     отдаёт ``False``; ставится без прав (`mklink /J`), так что это обычный путь
-    агента. Здесь junction изображён подменой ``os.path.isjunction``: настоящий
-    создаётся только на Windows."""
+    агента. Здесь junction изображён подменой проверки звена
+    (``paths._is_link``): настоящий создаётся только на Windows, а распознавание
+    по тегу из ``lstat`` проверяет ``test_paths``."""
     launch_root, threads_dir = repo
     (launch_root / "d").mkdir()
     (launch_root / "d" / "a.txt").write_bytes(b"old\n")
@@ -2064,7 +2065,10 @@ def test_a_path_through_a_junction_is_not_recorded(repo, monkeypatch):
     shutil.rmtree(launch_root / "d")
     junction = launch_root / "d"
     junction.mkdir()
-    monkeypatch.setattr(os.path, "isjunction", lambda p: Path(p) == junction, raising=False)
+    from gc_core.agent_edits import paths as paths_mod
+
+    real_is_link = paths_mod._is_link
+    monkeypatch.setattr(paths_mod, "_is_link", lambda n: Path(n) == junction or real_is_link(n))
     delta.after_and_record()
 
     assert "d/a.txt" not in [r.path for r in _records(threads_dir)]

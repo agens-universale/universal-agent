@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import os
+import stat
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
@@ -91,3 +92,43 @@ def is_external_key(path_key: str) -> bool:
     скачивания файла целиком миновал журнал, — а форму ключа забыть нельзя.
     """
     return Path(path_key).is_absolute()
+
+
+# Теги точек повторной обработки Windows, которые ведут в ДРУГОЕ место: junction
+# (mount point) и symlink. Прочие теги — например, заглушки облачных файлов —
+# ссылками не являются, и путь через них законен.
+_LINK_REPARSE_TAGS = frozenset({
+    getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003),
+    getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C),
+})
+
+
+def _is_link(node: Path) -> bool:
+    """Звено пути — ссылка: symlink везде, на Windows ещё и junction.
+
+    Junction ловится по тегу из ``lstat``, а не ``os.path.isjunction``: той нет
+    до Python 3.12, а поддерживаем 3.11 — на нём проверка молча отдавала бы
+    ``False``.
+    """
+    try:
+        st = os.lstat(node)
+    except OSError:
+        return False
+    if stat.S_ISLNK(st.st_mode):
+        return True
+    return getattr(st, "st_reparse_tag", 0) in _LINK_REPARSE_TAGS
+
+
+def goes_through_link(launch_root: str, rel: str) -> bool:
+    """Идёт ли относительный путь проекта через ссылку — в любом звене, включая последнее.
+
+    По ``lstat`` на звено. Нужна всем, кто пишет или удаляет по пути из
+    журнала: ключ записан раньше, и каталог пути с тех пор могли заменить
+    ссылкой наружу — запись по нему ушла бы за пределы проекта.
+    """
+    node = Path(launch_root)
+    for part in Path(rel).parts:
+        node = node / part
+        if _is_link(node):
+            return True
+    return False

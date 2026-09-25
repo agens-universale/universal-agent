@@ -23,11 +23,13 @@ from __future__ import annotations
 
 import os
 import stat
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Mapping, Optional, Sequence
 
 from gc_core.agent_edits.deltas import FileEntry, abs_path_for_key
+from gc_core.agent_edits.paths import goes_through_link, is_external_key
 from gc_core.utils.atomic_io import atomic_replace
 
 # Причины, по которым путь не откачен. Машинные коды: слой данных не знает UI.
@@ -36,6 +38,7 @@ REASON_NOTHING_TO_DELETE = "nothing_to_delete"  # созданный файл у
 REASON_NO_BASELINE = "no_baseline"             # снимка «до» нет (или он пропал)
 REASON_WRITE_FAILED = "write_failed"           # запись/удаление не удались
 REASON_UNKNOWN_PATH = "unknown_path"           # пути нет в наборе представления
+REASON_THROUGH_LINK = "through_link"           # путь идёт через ссылку — писать по нему нельзя
 
 _TMP_SUFFIX = ".revert.tmp"
 
@@ -62,6 +65,8 @@ def revert_paths(
 
     1. ``entry.revertable is False`` → сразу в ``skipped``: достоверного «до»
        нет (правка командой, «создан и удалён в наборе»);
+       путь проекта идёт через ссылку (``paths.goes_through_link``) → тоже
+       ``skipped``: ни запись, ни удаление по нему не уходят за пределы проекта;
     2. ``entry.kind == "created"`` → удаление файла, база НЕ спрашивается вовсе;
        файла на диске уже нет — ``skipped`` как noop;
     3. иначе — точная база поверх файла через ``atomic_replace``.
@@ -80,6 +85,13 @@ def revert_paths(
             outcome.skipped.append((key, REASON_NOT_REVERTABLE))
             continue
 
+        # Ключ записан раньше, и каталог пути с тех пор могли заменить ссылкой
+        # наружу: запись или удаление по нему ушли бы за пределы проекта. Во
+        # время прогона откат запрещён, так что между проверкой и записью путь
+        # никто не подменит.
+        if not is_external_key(key) and goes_through_link(launch_root, key):
+            outcome.skipped.append((key, REASON_THROUGH_LINK))
+            continue
         abs_path = abs_path_for_key(launch_root, key)
         if entry.kind == "created":
             _delete_created(key, abs_path, outcome)
@@ -115,10 +127,16 @@ def _restore(
         outcome.skipped.append((key, REASON_NO_BASELINE))
         return
 
-    tmp = abs_path.with_name(abs_path.name + _TMP_SUFFIX)
+    # Имя временного файла — СВОЁ, и создаётся он эксклюзивно: с предсказуемым
+    # `<файл>.revert.tmp` запись шла по заранее подложенной на этом месте
+    # ссылке во внешний файл, а замена ставила саму ссылку на место файла.
+    # `O_EXCL` не идёт по ссылке — занятое имя просто отказ.
+    tmp = abs_path.with_name(f"{abs_path.name}.{uuid.uuid4().hex[:8]}{_TMP_SUFFIX}")
     try:
         abs_path.parent.mkdir(parents=True, exist_ok=True)   # файл мог быть удалён
-        tmp.write_bytes(baseline)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(baseline)
         _carry_mode(abs_path, tmp)
         atomic_replace(tmp, abs_path)
     except OSError:

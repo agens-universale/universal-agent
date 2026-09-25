@@ -111,6 +111,7 @@ from gc_core.agent_edits.revert import (
     REASON_NO_BASELINE,
     REASON_NOT_REVERTABLE,
     REASON_NOTHING_TO_DELETE,
+    REASON_THROUGH_LINK,
     REASON_UNKNOWN_PATH,
     REASON_WRITE_FAILED,
     RevertOutcome,
@@ -355,6 +356,7 @@ _REASON_TEXTS = {
     REASON_NO_BASELINE: "снимок правки не найден",
     REASON_WRITE_FAILED: "записать не удалось",
     REASON_UNKNOWN_PATH: "файла нет в этом представлении",
+    REASON_THROUGH_LINK: "путь теперь идёт через ссылку — откат туда не пишет",
 }
 
 REVERT_UNAVAILABLE = f"откат недоступен: {NOT_REVERTABLE}"
