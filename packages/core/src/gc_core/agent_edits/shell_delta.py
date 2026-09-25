@@ -564,11 +564,12 @@ class ShellDelta:
         """
         planned = self._plan(part)
         diffs = self._diffs_for(planned, before, after)
+        created_rels = self._created_rels(planned, before, after)
         needs_base: list[tuple[str, str, bool]] = []
         for rel, key, file in planned:
             entry = after.get(rel)
             clean_before = rel not in before
-            created = self._created_by_command(rel, entry, before)
+            created = rel in created_rels
             try:
                 record = self._build_record(
                     rel, entry, turn_id, created=created, clean_before=clean_before,
@@ -879,6 +880,30 @@ class ShellDelta:
         if turn_id and store.counting_turn_baseline(key, turn_id) is None:
             store.capture_turn(key, before_bytes, turn_id)
         return wrote
+
+    def _created_rels(
+        self,
+        planned: list[tuple[str, str, _FileFacts]],
+        before: dict[str, _StatusEntry],
+        after: dict[str, _StatusEntry],
+    ) -> set[str]:
+        """Пути куска, созданные командой, — ``_created_by_command`` за вычетом игнорируемых.
+
+        Игнорируемого пути в ``git status`` нет никогда, поэтому «пути не было
+        до команды» для него ничего не доказывает: файл пользователя, который
+        команда поправила и принудительно проиндексировала (``git add -f``),
+        выглядит добавленным и свежим — и откат удалил бы его вместе с
+        содержимым. Правила игнорирования спрашиваются одним запуском на кусок
+        и только у кандидатов. Остаётся щель: команда в том же запуске убрала
+        правило из ``.gitignore`` — «до» таких правил уже не прочитать.
+        """
+        candidates = [
+            rel for rel, _key, _file in planned
+            if self._created_by_command(rel, after.get(rel), before)
+        ]
+        if not candidates:
+            return set()
+        return set(candidates) - git_ops.ignored_paths(self._launch_root, candidates)
 
     def _created_by_command(
         self,

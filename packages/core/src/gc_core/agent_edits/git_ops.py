@@ -408,6 +408,34 @@ def custom_filter_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
     return filtered
 
 
+def ignored_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
+    """Какие из ``rels`` подпадают под правила игнорирования — независимо от индекса.
+
+    ``--no-index``: принудительно проиндексированный путь (``git add -f``) без
+    него ответом «не игнорируется» выдавал бы себя за обычный. Один запуск на
+    кусок (``_STDIN_CHUNK_PATHS``). Git отказал — весь кусок считается
+    игнорируемым: вызывающему это безопасная сторона (путь не выдаётся за
+    созданный, и откат его не удаляет).
+    """
+    rels = list(rels)
+    ignored: set[str] = set()
+    for start in range(0, len(rels), _STDIN_CHUNK_PATHS):
+        chunk = rels[start:start + _STDIN_CHUNK_PATHS]
+        stdin = _stdin_paths(f"{rel}\x00" for rel in chunk)
+        code, out = run_git(
+            launch_root, ["check-ignore", "--no-index", "-z", "--stdin"], stdin=stdin
+        )
+        # Код 1 — «ничего не игнорируется», штатный ответ, а не отказ.
+        if code not in (0, 1):
+            ignored.update(chunk)
+            continue
+        ignored.update(
+            name for name in out.decode("utf-8", errors="surrogateescape").split("\x00")
+            if name
+        )
+    return ignored
+
+
 def blobs_at(
     launch_root: str, rels: Sequence[str], *, rev: str = "HEAD"
 ) -> dict[str, bytes | None]:

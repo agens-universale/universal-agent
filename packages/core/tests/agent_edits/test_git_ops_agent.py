@@ -829,3 +829,26 @@ def test_last_commits_across_a_merge_still_answer_in_parallel(tmp_git_repo, monk
     assert {rel: commit_label(*found[rel]) for rel in found} == {
         rel: head_commit_label(str(root), rel) for rel in ("a.txt", "b.txt")
     }
+
+
+def test_ignored_paths_sees_the_rules_even_for_a_force_added_path(tmp_git_repo):
+    """Правила игнорирования — независимо от индекса: `git add -f` путь из них не
+    выводит (`--no-index`), а неигнорируемые и несуществующие не отвечаются."""
+    from gc_core.agent_edits.git_ops import ignored_paths
+
+    root = tmp_git_repo
+    (root / ".gitignore").write_text("*.log\nsecret.txt\n", encoding="utf-8")
+    (root / "secret.txt").write_text("s\n", encoding="utf-8")
+    (root / "плохо имя.log").write_text("l\n", encoding="utf-8")
+    _git(root, "add", "-f", "secret.txt")
+
+    got = ignored_paths(str(root), ["secret.txt", "плохо имя.log", "ok.py", "nope/x.py"])
+
+    assert got == {"secret.txt", "плохо имя.log"}
+
+
+def test_ignored_paths_treats_a_git_failure_as_ignored(tmp_path):
+    """Git отказал (не репозиторий) — весь кусок «игнорируемый»: безопасная сторона."""
+    from gc_core.agent_edits.git_ops import ignored_paths
+
+    assert ignored_paths(str(tmp_path), ["a.py", "b.py"]) == {"a.py", "b.py"}

@@ -1122,6 +1122,33 @@ def test_git_rm_cached_is_not_treated_as_created(repo):
     assert _snapshot_names(launch_root, ".gitorig") == []
 
 
+def test_an_ignored_file_that_existed_is_not_treated_as_created(repo):
+    """Игнорируемый файл, лежавший до команды, — не «созданный», даже если его
+    поправили и принудительно проиндексировали.
+
+    Игнорируемых путей в `git status` нет никогда, поэтому «пути не было до
+    команды» для них ничего не доказывает, а после `git add -f` путь выглядит
+    добавленным. Ложное op="create" отдавало его откату на УДАЛЕНИЕ — вместе с
+    содержимым пользователя (ревью PR, находка 3).
+    """
+    launch_root, threads_dir = repo
+    (launch_root / ".gitignore").write_text("secret.txt\n", encoding="utf-8")
+    _git(launch_root, "add", ".gitignore")
+    _git(launch_root, "commit", "-qm", "ignore")
+    (launch_root / "secret.txt").write_bytes(b"users data\n")
+    _age_file(launch_root / "secret.txt")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import subprocess, pathlib; pathlib.Path('secret.txt').write_bytes(b'changed\\n');"
+        " subprocess.run(['git','add','-f','secret.txt'], check=True, capture_output=True)",
+    )
+    delta.after_and_record()
+
+    recs = [r for r in _records(threads_dir) if r.path == "secret.txt"]
+    assert recs and all(r.op != "create" for r in recs)
+
+
 def test_git_reset_mixed_is_not_treated_as_created(repo):
     """`git reset --mixed HEAD~1`: закоммиченный файл стал `??`, но не создан."""
     launch_root, threads_dir = repo
