@@ -40,16 +40,25 @@ _DOCS = ("docs/tui.md", "readme.md")
 
 
 def test_diff_tui_package_no_longer_exists():
-    """Пакета нет ни целиком, ни модулями — включая namespace-каталог."""
-    assert not (module_dir("tui") / "diff_tui").exists()
+    """Исходников пакета нет, и ни один его модуль не импортируется.
+
+    Проверяются ИСХОДНИКИ, а не каталог: в рабочей копии после смены ветки
+    остаётся игнорируемый `__pycache__`, и тест падал на пустом месте (ревью
+    PR, находка 9). Байткод без исходника Python из `__pycache__` не
+    импортирует, так что модули пакета недостижимы и при нём.
+
+    Имена — полные, с `gc_tui.`: голое `diff_tui.service` не существует в
+    принципе, и проверка импорта проходила всегда, ничего не проверяя.
+    """
+    package = module_dir("tui") / "diff_tui"
+    assert sorted(package.rglob("*.py")) == []
     for name in (
-        "diff_tui",
-        "diff_tui.service",
-        "diff_tui.store",
-        "diff_tui.feedback",
-        "diff_tui.visual",
-        "diff_tui.touched",
-        "diff_tui.git_ops",
+        "gc_tui.diff_tui.service",
+        "gc_tui.diff_tui.store",
+        "gc_tui.diff_tui.feedback",
+        "gc_tui.diff_tui.visual",
+        "gc_tui.diff_tui.touched",
+        "gc_tui.diff_tui.git_ops",
     ):
         with pytest.raises(ModuleNotFoundError):
             importlib.import_module(name)
