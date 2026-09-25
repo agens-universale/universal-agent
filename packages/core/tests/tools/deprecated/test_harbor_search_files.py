@@ -37,7 +37,7 @@ def _make_real_tree(tmp_path):
     for relpath, content in TREE.items():
         full = tmp_path / relpath
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content, encoding="utf-8")
+        full.write_text(content, encoding="utf-8", newline="")
     return str(tmp_path)
 
 
@@ -57,8 +57,12 @@ def _shim_tool():
 
 
 def _normalize_file(path: str, root: str) -> str:
-    """Strip root prefix from a file path, returning a relpath."""
-    root = root.rstrip("/")
+    """Strip root prefix from a file path, returning a relpath.
+
+    Разделители — к прямому слешу: на Windows локальный бэкенд отдаёт `\\`.
+    """
+    path = path.replace("\\", "/")
+    root = root.replace("\\", "/").rstrip("/")
     if path.startswith(root + "/"):
         return path[len(root) + 1:]
     if path.startswith(root):
@@ -198,7 +202,7 @@ def test_long_line_truncation(tmp_path):
 
     # Override the tree with a special file
     special_file = tmp_path / "long.txt"
-    special_file.write_text(content, encoding="utf-8")
+    special_file.write_text(content, encoding="utf-8", newline="")
 
     # Run base on the single file's parent
     base = _base_tool()
@@ -269,7 +273,7 @@ def test_invalid_regex_empty_tree(tmp_path):
 def test_search_single_file_path(tmp_path):
     """Passing a file path searches that file (local + harbor shim)."""
     f = tmp_path / "file.txt"
-    f.write_text("hello content\nother\n", encoding="utf-8")
+    f.write_text("hello content\nother\n", encoding="utf-8", newline="")
 
     base = _base_tool()
     base_env = json.loads(base(path=str(f), regex="content"))
@@ -324,7 +328,7 @@ def _make_real_branching_tree(tmp_path):
     for relpath, content in BRANCHING_TREE.items():
         full = tmp_path / relpath
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_text(content, encoding="utf-8")
+        full.write_text(content, encoding="utf-8", newline="")
     return str(tmp_path)
 
 

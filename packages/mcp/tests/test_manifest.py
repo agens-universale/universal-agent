@@ -299,7 +299,8 @@ def test_load_agent_dep_dir_explicit_override(tmp_path: Path) -> None:
         mcps: []
         """,
     )
-    assert load_agent_dep_dir(f) == Path("/opt/my-node")
+    # resolve(): на Windows «/opt/my-node» — путь от корня текущего диска.
+    assert load_agent_dep_dir(f) == Path("/opt/my-node").resolve()
 
 
 def test_default_agent_dep_dir_matches_gc_paths(

@@ -167,6 +167,11 @@ def _compare_results(base_raw: str, harbor_raw: str, case_id: str):
         )
 
 
+def _rel(path: str, root: str) -> str:
+    # Хост на Windows отдаёт пути с обратным слешем; сверяем относительный путь в POSIX-виде.
+    return path.replace(root, "").replace(os.sep, "/").lstrip("/")
+
+
 def _compare_results_with_relpath(
     base_raw: str,
     base_root: str,
@@ -198,13 +203,13 @@ def _compare_results_with_relpath(
         f"harbor: {[e.get('path','?') for e in h_entries]}"
     )
     for i, (be, he) in enumerate(zip(b_entries, h_entries)):
-        b_rel = be["path"].replace(base_root, "").lstrip("/")
-        h_rel = he["path"].replace(harbor_root, "").lstrip("/")
+        b_rel = _rel(be["path"], base_root)
+        h_rel = _rel(he["path"], harbor_root)
         assert b_rel == h_rel, (
             f"{case_id}: entry[{i}] relative-path mismatch: base {b_rel!r} vs harbor {h_rel!r}\n"
             f"  (DFS expects {b_rel!r} at this position, BFS places {h_rel!r} here)\n"
-            f"base  order: {[e['path'].replace(base_root,'').lstrip('/') for e in b_entries]}\n"
-            f"harbor order: {[e['path'].replace(harbor_root,'').lstrip('/') for e in h_entries]}"
+            f"base  order: {[_rel(e['path'], base_root) for e in b_entries]}\n"
+            f"harbor order: {[_rel(e['path'], harbor_root) for e in h_entries]}"
         )
         assert be["type"] == he["type"], f"{case_id}: entry[{i}] type mismatch"
         assert be["is_hidden"] == he["is_hidden"], f"{case_id}: entry[{i}] is_hidden mismatch"

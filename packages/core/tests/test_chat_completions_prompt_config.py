@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 
 from gc_core.config import load_config
@@ -112,9 +113,9 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             )
             self.assertNotIn("original_user_messages_max_chars", cfg["summary_params"])
             self.assertTrue(
-                cfg["summary_params"][
+                Path(cfg["summary_params"][
                     "chat_completions_memory_patch_replace_prompt_path"
-                ].endswith("prompts/chat_completions_memory_patch_replace.md")
+                ]).as_posix().endswith("prompts/chat_completions_memory_patch_replace.md")
             )
             self.assertNotIn("llm", cfg["summary_params"])
             from gc_core.config_modules.chat_completions import (

@@ -36,11 +36,11 @@ def _run_both(tmp_path, existing_content, **kwargs):
     f = tmp_path / "f.txt"
     files = {}
     if existing_content is not None:
-        f.write_text(existing_content, encoding="utf-8")
+        f.write_text(existing_content, encoding="utf-8", newline="")
         files["/work/f.txt"] = existing_content
 
     base_env = json.loads(_base()(path=str(f), **kwargs))
-    base_content = f.read_text(encoding="utf-8") if f.exists() else None
+    base_content = f.read_bytes().decode("utf-8") if f.exists() else None
 
     h = _harbor(files)
     harbor_env = json.loads(h(path="/work/f.txt", **kwargs))
@@ -120,7 +120,7 @@ def test_identical_to_base(tmp_path, case):
         files = {"/work/.keep": ""}  # sentinel: makes is_dir("/work") == True
 
         base_env = json.loads(_base()(path=str(f), **kw))
-        base_content = f.read_text(encoding="utf-8") if f.exists() else None
+        base_content = f.read_bytes().decode("utf-8") if f.exists() else None
 
         h = _harbor(files)
         harbor_env = json.loads(h(path="/work/f.txt", **kw))
@@ -138,7 +138,7 @@ def test_identical_to_base(tmp_path, case):
 
         t_base = _base()
         base_env = json.loads(t_base(path=base_path, **kw))
-        base_content = open(base_path, encoding="utf-8").read() if os.path.exists(base_path) else None
+        base_content = open(base_path, "rb").read().decode("utf-8") if os.path.exists(base_path) else None
 
         h = _harbor({})
         harbor_env = json.loads(h(path=harbor_path, **kw))

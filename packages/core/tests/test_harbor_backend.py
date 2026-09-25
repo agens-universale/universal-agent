@@ -1,9 +1,24 @@
 import asyncio
+import os
+import shlex
 import subprocess
 import threading
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
 from gc_core.backends.protocol import FsBackend
+
+
+def _bash_runs(probe: str) -> bool:
+    """Хостовый bash реально исполняет `probe`.
+
+    Наличия имени мало: на Windows «bash» бывает заглушкой WSL без
+    дистрибутива — имя есть, а запуск падает на execvpe(/bin/bash).
+    """
+    try:
+        proc = subprocess.run(["bash", "-c", probe], capture_output=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
 
 
 def _user_shell(command, *, cwd=None, env=None):
@@ -236,10 +251,14 @@ async def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path
         env={"FOO": "bar baz"},
     )
     script = env.calls[0]
-    assert script.startswith(f"cd {work} && env FOO='bar baz' bash -c ")
+    assert script.startswith(f"cd {shlex.quote(str(work))} && env FOO='bar baz' bash -c ")
     # cwd снаружи, скрипт агента — один закавыченный аргумент, не префикс env.
     assert "cd sub &&" in script.split("bash -c ", 1)[1]
 
+    # Дальше путь хоста играет роль cwd POSIX-контейнера: на Windows bash
+    # вернёт из pwd /c/… вместо C:\…, сверять не с чем.
+    if os.name == "nt":
+        pytest.skip("исполнение скрипта с путём хоста как cwd контейнера — только POSIX-хост")
     (work / "sub").mkdir()
     proc = subprocess.run(
         ["bash", "-c", script],
@@ -253,6 +272,8 @@ async def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path
 
 async def test_run_python_env_survives_bash_c_wrap(loop_in_thread):
     """Heredoc of run_python must still run after the env prefix is quoted."""
+    if not _bash_runs("python3 -c pass"):
+        pytest.skip("нет рабочего bash с python3 на хосте")
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
     await backend.arun_python("import os\nprint(os.environ['FOO'])\n", env={"FOO": "it's"})
