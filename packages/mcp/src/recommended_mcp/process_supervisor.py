@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import os
 import signal
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from gc_core.mcp_runtime.env import augment_process_env, resolve_mcp_command
@@ -78,6 +82,96 @@ def is_pid_alive(pid: int) -> bool:
     return False
 
 
+def _reap_child(pid: int) -> bool:
+    """Забрать своего ребёнка-зомби и ответить, вышел ли процесс: `kill(…, 0)`
+    видит зомби живым и членом группы, и гашение ждало бы весь graceful-таймаут у
+    давно умершего процесса. Не наш ребёнок (`ChildProcessError`) — забирать
+    нечего, выход видно по самому pid."""
+    try:
+        reaped, _ = os.waitpid(pid, os.WNOHANG)
+    except ChildProcessError:
+        return not is_pid_alive(pid)
+    return reaped == pid
+
+
+def _anyone_left(kill: Callable[[int], None]) -> bool:
+    """Есть ли кто-нибудь у цели сигнала, живой или не пожатый."""
+    try:
+        kill(0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True                    # кто-то есть, но сигналить ему нам нельзя
+    return True
+
+
+# Сколько ждать тех, кто пережил вышедшего лидера. Лидер — обёртка демона, и
+# раз он уже вышел, оставшиеся — то, что сама обёртка не погасила; весь
+# graceful-таймаут на них не тратим: аварийный выход TUI ограничен общим бюджетом.
+_ORPHAN_GRACE_S = 1.0
+# После SIGKILL: дождаться, пока ядро снимет процессы, и забрать своих — иначе
+# убитый ребёнок остаётся зомби и числится живым.
+_KILL_WAIT_S = 1.0
+
+
+@dataclass
+class _Target:
+    """Цель гашения: `kill(sig)` сигналит группе (`os.killpg`), а в откате —
+    одному процессу; `leader_gone()` забирает своего лидера-зомби и отвечает,
+    вышел ли он."""
+
+    kill: Callable[[int], None]
+    leader_gone: Callable[[], bool]
+    deadline: float = 0.0
+    killed: bool = False
+
+
+def _terminate_posix(targets: list[_Target], *, graceful_timeout: float) -> None:
+    """Погасить группы РАЗОМ: SIGTERM всем → одно общее ожидание до
+    graceful_timeout → SIGKILL оставшимся → до `_KILL_WAIT_S` забрать убитых.
+
+    Разом, а не по очереди: по очереди каждый демон, глухой к SIGTERM, стоил весь
+    graceful-таймаут, время гашения росло с числом демонов, и аварийный выход TUI
+    с общим бюджетом обрывал его — последние демоны оставались жить.
+
+    Ждём ГРУППУ, а не лидера. Лидер — обёртка демона, а тяжёлое у него в детях:
+    лидер по SIGTERM выходит сразу, Chromium в той же группе SIGTERM игнорирует.
+    Пока ожидание смотрело на лидера, его смерть засчитывалась за смерть всех, и
+    SIGKILL группе не уходил. Лидера забираем на каждом шаге: пока он зомби, он
+    числится в группе, и `killpg(pgid, 0)` не ответил бы «никого» до таймаута.
+    Как только лидер вышел, остальным в его группе остаётся не больше
+    `_ORPHAN_GRACE_S`.
+    """
+    pending: list[_Target] = []
+    deadline = time.monotonic() + graceful_timeout
+    for target in targets:
+        try:
+            target.kill(signal.SIGTERM)
+        except ProcessLookupError:
+            target.leader_gone()
+            continue
+        except OSError:
+            pass
+        target.deadline = deadline
+        pending.append(target)
+    while pending:
+        now = time.monotonic()
+        for target in list(pending):
+            if target.leader_gone() and not target.killed:
+                target.deadline = min(target.deadline, now + _ORPHAN_GRACE_S)
+            if not _anyone_left(target.kill):
+                pending.remove(target)
+            elif now >= target.deadline:
+                if target.killed:
+                    pending.remove(target)     # SIGKILL не снял — ждать дальше нечего
+                    continue
+                with contextlib.suppress(OSError):
+                    target.kill(signal.SIGKILL)
+                target.deadline, target.killed = now + _KILL_WAIT_S, True
+        if pending:
+            time.sleep(0.1)
+
+
 def build_command_argv(run: RunSpec) -> list[str]:
     if not run.command:
         raise SupervisorError("run.type=command requires run.command")
@@ -100,54 +194,81 @@ def _popen_kwargs(env: dict[str, str] | None, cwd: Path | None) -> dict:
 
 
 def terminate_pid(pid: int, *, graceful_timeout: float = 5.0) -> None:
-    """Остановить процесс и его группу/дерево по PID."""
+    """Остановить процесс и его группу/дерево по PID.
+
+    Мёртвый лидер — выход без гашения, даже если его группа жива: номер из
+    pid-файла мог достаться чужому процессу, а шелл — сам лидер своей группы, и
+    сигнал группе по такому номеру погасил бы чужой терминал."""
     if not is_pid_alive(pid):
         return
-    try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
-        else:
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T"],
-                check=False,
-                capture_output=True,
-            )
-    except ProcessLookupError:
-        return
-    except Exception:
+    if os.name == "posix":
+        # Номер группы — до сигнала: после смерти лидера `getpgid` уже падает,
+        # а группа (его дети) ещё жива и как раз нужна.
         try:
-            if os.name == "posix":
-                os.kill(pid, signal.SIGTERM)
-        except Exception:
-            pass
-
-    deadline = time.monotonic() + graceful_timeout
-    while time.monotonic() < deadline:
-        if not is_pid_alive(pid):
+            pgid = os.getpgid(pid)
+        except ProcessLookupError:
             return
-        time.sleep(0.1)
-
-    try:
-        if os.name == "posix":
-            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        except OSError:
+            kill = functools.partial(os.kill, pid)      # группу не узнать — хотя бы сам процесс
         else:
-            subprocess.run(
-                ["taskkill", "/PID", str(pid), "/T", "/F"],
-                check=False,
-                capture_output=True,
-            )
+            kill = functools.partial(os.killpg, pgid)
+        _terminate_posix(
+            [_Target(kill, lambda: _reap_child(pid))], graceful_timeout=graceful_timeout
+        )
+        return
+    _terminate_windows([pid], graceful_timeout=graceful_timeout)
+
+
+def _taskkill(pid: int, *, force: bool) -> None:
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(pid), "/T", *(["/F"] if force else [])],
+            check=False,
+            capture_output=True,
+        )
     except Exception:
-        try:
-            if os.name == "posix":
-                os.kill(pid, signal.SIGKILL)
-        except Exception:
-            pass
+        pass
+
+
+def _terminate_windows(pids: list[int], *, graceful_timeout: float) -> None:
+    """Тот же порядок на Windows: вежливый taskkill всем деревьям разом → общее
+    ожидание → принудительный оставшимся. Групп POSIX там нет, живость — по pid."""
+    for pid in pids:
+        _taskkill(pid, force=False)
+    deadline = time.monotonic() + graceful_timeout
+    alive = [pid for pid in pids if is_pid_alive(pid)]
+    while alive and time.monotonic() < deadline:
+        time.sleep(0.1)
+        alive = [pid for pid in alive if is_pid_alive(pid)]
+    for pid in alive:
+        _taskkill(pid, force=True)
+
+
+def terminate_processes(
+    procs: Iterable[subprocess.Popen], *, graceful_timeout: float = 5.0
+) -> None:
+    """Погасить своих демонов разом — время не растёт с их числом
+    (см. `_terminate_posix`)."""
+    procs = list(procs)
+    if os.name == "posix":
+        # Демон — лидер своей сессии (`start_new_session`), номер группы равен
+        # его pid. Пока лидер не забран — жив или зомби, — номер занят им, и
+        # группу гасим и при мёртвом лидере: живы могут быть дети. Забранный
+        # раньше лидер номер освободил, он мог достаться чужой группе — не трогаем.
+        targets = [
+            _Target(functools.partial(os.killpg, proc.pid), lambda proc=proc: proc.poll() is not None)
+            for proc in procs
+            if proc.returncode is None
+        ]
+        _terminate_posix(targets, graceful_timeout=graceful_timeout)
+        return
+    _terminate_windows(
+        [proc.pid for proc in procs if proc.poll() is None], graceful_timeout=graceful_timeout
+    )
 
 
 def terminate_process(proc: subprocess.Popen, *, graceful_timeout: float = 5.0) -> None:
-    if proc.poll() is not None:
-        return
-    terminate_pid(proc.pid, graceful_timeout=graceful_timeout)
+    terminate_processes([proc], graceful_timeout=graceful_timeout)
 
 
 class RunSupervisor:
@@ -197,11 +318,28 @@ class RunSupervisor:
         return True
 
     def shutdown_managed(self) -> None:
-        for name, proc in reversed(self._managed):
-            print(f"[stop] {name}: pid {proc.pid}")
-            terminate_process(proc)
+        managed = list(reversed(self._managed))
+        for name, proc in managed:
+            with contextlib.suppress(OSError):    # мёртвый терминал (EIO) не мешает гашению
+                print(f"[stop] {name}: pid {proc.pid}")
+        terminate_processes(proc for _, proc in managed)   # разом, а не по очереди
+        for name, _ in managed:
             remove_pid(name, self.pids_dir)
         self._managed.clear()
+
+    def kill_managed_now(self) -> None:
+        """Последний рубеж аварийного выхода: SIGKILL всем своим демонам сразу, без
+        ожидания и печати. Штатное гашение могло не уложиться в бюджет выхода —
+        живыми их всё равно не оставляем. Группу уже забранного лидера не трогаем:
+        его номер мог достаться чужому процессу."""
+        for _, proc in list(self._managed):
+            if proc.returncode is not None:
+                continue
+            if os.name == "posix":
+                with contextlib.suppress(OSError):
+                    os.killpg(proc.pid, signal.SIGKILL)
+            else:
+                _taskkill(proc.pid, force=True)
 
     def wait_until_signal(self) -> None:
         if threading.current_thread() is not threading.main_thread():
