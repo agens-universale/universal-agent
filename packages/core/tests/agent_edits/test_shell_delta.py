@@ -1322,6 +1322,30 @@ def test_git_restore_over_user_work_is_recorded_and_revertable(repo):
     assert base == "НЕСОХРАН\n".encode("utf-8")
 
 
+def test_git_reset_hard_over_staged_work_is_recorded_and_revertable(repo):
+    """`git reset --hard` по файлу с изменениями ТОЛЬКО в индексе — работа уцелеет.
+
+    Путь `M ` снимком не брали: считалось, что индекс и есть правда о
+    содержимом дерева. Но команда сбрасывает и индекс: база, прочитанная из
+    индекса после неё, совпадала с диском, дифф выходил пустым, и
+    проиндексированная работа пропадала без записи и без отката (ревью PR,
+    второй коллега, находка 2)."""
+    launch_root, threads_dir = repo
+    (launch_root / "tracked.txt").write_bytes("В ИНДЕКСЕ\n".encode("utf-8"))
+    _git(launch_root, "add", "tracked.txt")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import subprocess; subprocess.run(['git','reset','--hard'], check=True, capture_output=True)",
+    )
+    delta.after_and_record()
+
+    recs = [r for r in _records(threads_dir) if r.path == "tracked.txt"]
+    assert recs, "правка обязана попасть в журнал"
+    base = _snapshot_store(launch_root).session_baseline("tracked.txt")
+    assert base == "В ИНДЕКСЕ\n".encode("utf-8")
+
+
 def test_command_that_commits_falls_back_to_counting(repo):
     """Команда сама сдвинула HEAD (add+commit) — точная база недоказуема: HEAD,
     прочитанный ПОСЛЕ команды, мог оказаться уже промежуточным результатом её
