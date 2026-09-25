@@ -500,8 +500,14 @@ def test_docs_never_offer_bare_pip_for_our_distributions():
     который по ней ставит сервер, упирается в ошибку резолва и не понимает,
     он что-то сделал не так или инструкция врёт.
     """
+    # Только файлы под гитом: документация — то, что в репозитории. Черновики в
+    # рабочей копии (неотслеживаемые заметки) красили тест у их владельца.
+    tracked = subprocess.run(
+        ["git", "ls-files", "-z", "--", "docs/*.md", "readme.md"],
+        cwd=REPO, capture_output=True, check=True,
+    ).stdout.decode("utf-8").split("\0")
     offenders = []
-    for doc in sorted((REPO / "docs").rglob("*.md")) + [REPO / "readme.md"]:
+    for doc in (REPO / rel for rel in sorted(filter(None, tracked))):
         if not doc.is_file():
             continue
         for num, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1):
