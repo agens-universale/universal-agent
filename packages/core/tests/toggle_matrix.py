@@ -343,6 +343,16 @@ SINGLE += [
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
+    # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв
+    # эталон на этой же ветке. Паритет async/sync того же координатора уже
+    # смотрят символьные случаи summary/trigger_*. Сам рычаг покрыт
+    # test_summary_token_trigger.py и test_context_meter_threshold.py.
+    "summary.chat_completions_summary_trigger_tokens":
+        "новый рычаг; эталон develop его не содержит, покрытие в test_summary_token_trigger",
+    "summary.chat_completions_summary_turn_end_trigger_tokens":
+        "новый рычаг; эталон develop его не содержит, покрытие в test_summary_token_trigger",
+
     # --- приехало с develop при вливании 09.09.2026 (PR #97, #99, #100) -------
     #
     # Оба ключа меняют ФОРМУ вывода, а не путь исполнения: preview-края режут

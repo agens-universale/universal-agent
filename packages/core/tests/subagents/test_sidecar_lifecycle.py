@@ -286,7 +286,7 @@ class TestSidecarChildSummary:
             return "ok"
 
         with (
-            patch.object(rsc, "history_exceeds_summary_trigger", return_value=True),
+            patch.object(rsc, "exceeded_summary_triggers", return_value=True),
             patch.object(
                 rsc, "arun_summary_compaction", side_effect=fake_run_summary_compaction
             ),

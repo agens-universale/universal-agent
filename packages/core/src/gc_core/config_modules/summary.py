@@ -8,6 +8,9 @@ DEFAULT_MAX_ACCUMULATED_SUMMARY_CHARS = 20000
 DEFAULT_INCREMENTAL_BATCH_MULTIPLIER = 1.4
 DEFAULT_INTENT_LOG_PREVIEW_CHARS = 10000
 DEFAULT_TURN_END_TRIGGER_RATIO = 0.6
+# Грубый курс символов истории к токенам: оценка хвоста токенного порога и
+# батч суммаризации, когда задан только токенный порог.
+SUMMARY_CHARS_PER_TOKEN = 2
 
 
 class SummaryConfig(BaseModel):
@@ -16,6 +19,8 @@ class SummaryConfig(BaseModel):
     chat_completions_memory_patch_replace_prompt_path: str | None = None
     chat_completions_summary_trigger_chars: int = 0
     chat_completions_summary_turn_end_trigger_chars: int | None = None
+    chat_completions_summary_trigger_tokens: int = 0
+    chat_completions_summary_turn_end_trigger_tokens: int | None = None
     incremental_batch_chars: int | None = None
     max_message_chars: int = DEFAULT_MAX_MESSAGE_CHARS
     max_dialogue_chars: int = DEFAULT_MAX_DIALOGUE_CHARS

@@ -6,10 +6,10 @@
 1. Контроллер (до вызова суммаризации)
    - Быстрая, дешёвая проверка объёма: **как сообщения есть в истории**, без
      форматирования под промпт (без обёрток, склейки в текст и т.п.).
-     Реализация: ``compaction.history_exceeds_summary_trigger`` →
+     Реализация: ``compaction.exceeded_summary_triggers`` →
      ``message_format.serialization.calc_history_chars_for_trigger`` (сумма длин
      полезной нагрузки полей, без ``[role]`` и тегов вызова).
-   - Если порог по длине **превышен** — вызывается ``compaction.run_summary_compaction``
+   - Если превышен символьный или токенный порог — один вызов ``compaction.run_summary_compaction``
      (см. ``agent_executor``). В логах рядом пишется ``serialized_chars`` для сравнения
      с каноничным видом промпта.
    - ``compaction.maybe_run_summary_compaction`` остаётся обёрткой «проверка + запуск»
@@ -54,7 +54,7 @@
 
 Подмодули (текущая раскладка кода)
 ----------------------------------
-- ``compaction`` — ``history_exceeds_summary_trigger``, ``run_summary_compaction``,
+- ``compaction`` — ``exceeded_summary_triggers``, ``run_summary_compaction``,
   ``maybe_run_summary_compaction``, ``apply_summary_state_patch``;
 - ``thread_summarizer`` — сценарий батчей LLM и сборка результата;
 - ``message_format`` (отдельный пакет) — такты, батчи, сериализация сообщений для промпта;

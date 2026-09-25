@@ -70,6 +70,7 @@ from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_MAIN as USAGE_CATEGORY_MAIN
 from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import usage_scope
+from gc_core.usage.normalize import prompt_input_tokens
 from typing import List, Dict, Union, Tuple, Any, Callable, Optional
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
@@ -503,6 +504,7 @@ async def _arequest_backend_canonical_once(
 
     _stream_on = resolve_tui_stream_enabled(cfg)
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
+    prompt_message_count = len(getattr(state, "messages", []) or [])
 
     with usage_scope(getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode):
         res, call_data = await arequest_chat_completions_with_policy(
@@ -561,7 +563,36 @@ async def _arequest_backend_canonical_once(
     response_id = str(canonical.get("id") or res.get("id") or "")
     if not response_id:
         raise ValueError("chat/completions response id is empty")
+    remember_main_prompt_tokens(
+        state,
+        res.get("usage"),
+        prompt_message_count,
+        backend_mode=backend_mode,
+    )
     return resp_messages, response_id, {}
+
+
+def remember_main_prompt_tokens(
+    state: Any,
+    usage_raw: Any,
+    message_count: int,
+    *,
+    backend_mode: str,
+) -> None:
+    """Записать input последнего главного prompt этого State.
+
+    Только успешный ``chat_completions``. Нет ``prompt_tokens`` / ``input_tokens`` —
+    поля не трогаем. Ветка ``responses`` и любой другой вызов число не меняют.
+    """
+    if backend_mode != "chat_completions":
+        return
+    tokens = prompt_input_tokens(usage_raw)
+    if tokens is None:
+        return
+    if isinstance(message_count, bool) or not isinstance(message_count, int) or message_count < 0:
+        return
+    state.last_main_prompt_tokens = tokens
+    state.last_main_prompt_message_count = message_count
 
 
 def check_mode(messages, logger) -> Union[str, None]:
