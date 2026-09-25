@@ -53,7 +53,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from gc_core.agent_edits import git_ops
@@ -221,6 +221,47 @@ def _literal(rel: str) -> str:
 _STAGED_ADD_XY = frozenset({"A ", "AM", "AT", "AD"})
 
 
+def _loosened_ignore_scopes(
+    launch_root: str,
+    changed: list[str],
+    before: dict[str, "_StatusEntry"],
+    after: dict[str, "_StatusEntry"],
+) -> list[str]:
+    """Каталоги, где команда могла ОСЛАБИТЬ правила игнорирования: ``"sub/"``, ``""`` — весь проект.
+
+    Правило ``.gitignore`` действует на свой каталог и всё ниже. Ослабить
+    правила мог изменённый или удалённый ``.gitignore`` — и новый, только если
+    в нём есть исключения ``!``: без них новый файл лишь добавляет
+    игнорирование, и генерация проекта вместе с ``.gitignore`` не теряет
+    отката созданных файлов. Новый файл не прочитался — считаем ослаблением.
+    """
+    scopes: list[str] = []
+    for rel in changed:
+        path = PurePosixPath(rel)
+        if path.name != ".gitignore":
+            continue
+        scope = "" if str(path.parent) == "." else f"{path.parent}/"
+        entry = after.get(rel)
+        new = (
+            rel not in before
+            and entry is not None
+            and (entry.xy == "??" or entry.xy in _STAGED_ADD_XY)
+        )
+        if new and not _has_negation(Path(launch_root) / rel):
+            continue
+        scopes.append(scope)
+    return scopes
+
+
+def _has_negation(path: Path) -> bool:
+    """В файле правил есть исключение ``!…`` — или прочитать его не удалось."""
+    try:
+        text = path.read_bytes()
+    except OSError:
+        return True
+    return any(line.lstrip().startswith(b"!") for line in text.splitlines())
+
+
 class _GitFailed(RuntimeError):
     """git-вызов не удался. «Пусто» вместо снимка считать нельзя: пустой снимок
     «до» превращает всю чужую незакоммиченную грязь репозитория в правки этой
@@ -271,6 +312,10 @@ class ShellDelta:
         self._pocket_cache = pocket_cache if pocket_cache is not None else {}
         self._before: dict[str, _StatusEntry] | None = None
         self._before_ts_ns = 0
+        # Где команда могла ослабить правила игнорирования (`_loosened_ignore_scopes`).
+        self._loosened_scopes: list[str] = []
+        # Подпись `info/exclude` до команды: правило там в статусе не видно.
+        self._info_exclude_before: object = None
         self._head_before: str | None = None
         self._head_after: str | None = None
         self._pocket: dict[str, _PocketEntry] = {}
@@ -325,6 +370,7 @@ class ShellDelta:
             self._forget_stale()
             self._before = self._snapshot()
             self._head_before = git_ops.head_rev_from_files(self._launch_root)
+            self._info_exclude_before = self._info_exclude_signature()
         except Exception:
             self._before = None
             self._head_before = None
@@ -505,6 +551,11 @@ class ShellDelta:
         )
         if not changed:
             return
+        # По ВСЕМ путям команды, до потолка: правило, ослабленное в `.gitignore`
+        # за потолком записи, ослаблено всё равно.
+        self._loosened_scopes = _loosened_ignore_scopes(
+            self._launch_root, changed, before, after
+        )
         command_paths = None
         if len(changed) > MAX_PATHS_PER_COMMAND:
             _logger.warning(
@@ -894,8 +945,15 @@ class ShellDelta:
         команда поправила и принудительно проиндексировала (``git add -f``),
         выглядит добавленным и свежим — и откат удалил бы его вместе с
         содержимым. Правила игнорирования спрашиваются одним запуском на кусок
-        и только у кандидатов. Остаётся щель: команда в том же запуске убрала
-        правило из ``.gitignore`` — «до» таких правил уже не прочитать.
+        и только у кандидатов.
+
+        Правила после команды — не те, что были до неё: команда могла сама
+        убрать правило («перестань игнорировать config и поправь его»), и файл
+        пользователя проходил бы проверку как неигнорируемый. Прочитать
+        правила «как было» git не умеет, поэтому там, где команда могла их
+        ослабить (``_loosened_ignore_scopes``, ``info/exclude``), созданных нет
+        вовсе. Остаётся глобальный файл исключений пользователя — его команда
+        правит разве что нарочно.
         """
         candidates = [
             rel for rel, _key, _file in planned
@@ -903,7 +961,40 @@ class ShellDelta:
         ]
         if not candidates:
             return set()
+        scopes = list(self._loosened_scopes)
+        if self._info_exclude_changed():
+            scopes.append("")
+        candidates = [
+            rel for rel in candidates
+            if not any(scope == "" or rel.startswith(scope) for scope in scopes)
+        ]
+        if not candidates:
+            return set()
         return set(candidates) - git_ops.ignored_paths(self._launch_root, candidates)
+
+    def _info_exclude_signature(self) -> object:
+        """Подпись ``info/exclude`` (размер, время, номер файла); ``"missing"`` — файла нет."""
+        path = git_ops.info_exclude_path(self._launch_root)
+        if path is None:
+            return "missing"
+        try:
+            st = path.stat()
+        except FileNotFoundError:
+            return "missing"
+        except OSError:
+            return None
+        return (st.st_size, st.st_mtime_ns, st.st_ino)
+
+    def _info_exclude_changed(self) -> bool:
+        """Команда меняла ``info/exclude`` — в статусе его не видно, сверяем подпись до и после.
+
+        Подпись, а не «время свежее начала команды»: репозиторий, созданный за
+        миг до команды, дал бы свежее время без всякой правки правил. Не
+        прочитали подпись — считаем, что меняла: ошибка в эту сторону лишает
+        отката удалением, а не удаляет файл пользователя.
+        """
+        now = self._info_exclude_signature()
+        return now is None or self._info_exclude_before is None or now != self._info_exclude_before
 
     def _created_by_command(
         self,

@@ -1149,6 +1149,108 @@ def test_an_ignored_file_that_existed_is_not_treated_as_created(repo):
     assert recs and all(r.op != "create" for r in recs)
 
 
+def _ignored_existing_file(launch_root, rule_file=".gitignore", rel="secret.txt"):
+    """Файл пользователя, лежавший ДО команды и скрытый правилом игнорирования."""
+    rule = launch_root / rule_file
+    rule.parent.mkdir(parents=True, exist_ok=True)
+    rule.write_text(f"{rel}\n", encoding="utf-8")
+    if rule_file == ".gitignore":
+        _git(launch_root, "add", ".gitignore")
+        _git(launch_root, "commit", "-qm", "ignore")
+    (launch_root / rel).parent.mkdir(parents=True, exist_ok=True)
+    (launch_root / rel).write_bytes(b"users data\n")
+    _age_file(launch_root / rel)
+
+
+def _op_of(threads_dir, rel):
+    return [r.op for r in _records(threads_dir) if r.path == rel]
+
+
+@pytest.mark.parametrize("force_add", [False, True])
+def test_a_file_unignored_by_the_same_command_is_not_treated_as_created(repo, force_add):
+    """Команда сама убрала правило из `.gitignore` и поправила файл — не «создан».
+
+    Проверка правил после команды видит уже ослабленные правила: файл выглядел
+    новым и свежим, и откат удалял его вместе с содержимым пользователя. Обычная
+    просьба «перестань игнорировать config и поправь его» — без всякого
+    `git add -f` (ревью PR, повторная находка 1)."""
+    launch_root, threads_dir = repo
+    _ignored_existing_file(launch_root)
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    add = " subprocess.run(['git','add','-f','secret.txt'], check=True);" if force_add else ""
+    _run_command(
+        launch_root,
+        "import subprocess, pathlib; pathlib.Path('.gitignore').write_text('');"
+        " pathlib.Path('secret.txt').write_bytes(b'changed\\n');" + add,
+    )
+    delta.after_and_record()
+
+    assert _op_of(threads_dir, "secret.txt") and "create" not in _op_of(threads_dir, "secret.txt")
+
+
+def test_a_negation_in_a_new_gitignore_is_a_loosened_rule(repo):
+    """Новый `.gitignore` с исключением `!` снимает игнорирование — тоже ослабление."""
+    launch_root, threads_dir = repo
+    _ignored_existing_file(launch_root, rel="sub/secret.txt")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import pathlib; pathlib.Path('sub/.gitignore').write_text('!secret.txt\\n');"
+        " pathlib.Path('sub/secret.txt').write_bytes(b'changed\\n')",
+    )
+    delta.after_and_record()
+
+    assert "create" not in _op_of(threads_dir, "sub/secret.txt")
+
+
+def test_a_rule_removed_from_info_exclude_is_a_loosened_rule(repo):
+    """Правило в `.git/info/exclude` в статусе не видно — ловится по времени изменения."""
+    launch_root, threads_dir = repo
+    _ignored_existing_file(launch_root, rule_file=".git/info/exclude")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import pathlib; pathlib.Path('.git/info/exclude').write_text('');"
+        " pathlib.Path('secret.txt').write_bytes(b'changed\\n')",
+    )
+    delta.after_and_record()
+
+    assert "create" not in _op_of(threads_dir, "secret.txt")
+
+
+def test_a_new_gitignore_without_negations_keeps_created_files_created(repo):
+    """Генерация проекта: новый `.gitignore` без `!` лишь добавляет игнорирование и
+    не снимает его — созданные той же командой файлы остаются созданными, и откат
+    их удаляет."""
+    launch_root, threads_dir = repo
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import pathlib; pathlib.Path('.gitignore').write_text('*.log\\n');"
+        " pathlib.Path('main.py').write_text('print(1)\\n')",
+    )
+    delta.after_and_record()
+
+    assert _op_of(threads_dir, "main.py") == ["create"]
+
+
+def test_a_changed_nested_gitignore_does_not_touch_files_outside_its_folder(repo):
+    """Правило каталога действует только ниже него: созданное рядом — созданное."""
+    launch_root, threads_dir = repo
+    _ignored_existing_file(launch_root, rule_file="sub/.gitignore", rel="sub/secret.txt")
+    _git(launch_root, "add", "sub/.gitignore")
+    _git(launch_root, "commit", "-qm", "nested ignore")
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import pathlib; pathlib.Path('sub/.gitignore').write_text('');"
+        " pathlib.Path('top.py').write_text('x\\n')",
+    )
+    delta.after_and_record()
+
+    assert _op_of(threads_dir, "top.py") == ["create"]
+
+
 def test_git_reset_mixed_is_not_treated_as_created(repo):
     """`git reset --mixed HEAD~1`: закоммиченный файл стал `??`, но не создан."""
     launch_root, threads_dir = repo

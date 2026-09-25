@@ -721,6 +721,17 @@ def head_rev_from_files(launch_root: str) -> str | None:
         return None
 
 
+def info_exclude_path(launch_root: str) -> Optional[Path]:
+    """Файл правил ``info/exclude`` репозитория — ``None``, если каталога git нет.
+
+    Лежит в ОБЩЕМ каталоге: у связанного worktree правила одни на всех.
+    """
+    git_dir = _git_dir(Path(launch_root))
+    if git_dir is None:
+        return None
+    return _common_dir(git_dir) / "info" / "exclude"
+
+
 def _git_dir(root: Path) -> Optional[Path]:
     """``<root>/.git``: каталог, либо файл ``gitdir: <путь>`` (submodule/worktree)."""
     dot = root / ".git"
