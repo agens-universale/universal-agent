@@ -31,6 +31,8 @@ from gc_server.rest_api.server_config import (
 )
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
 from gc_server.server_cleanup_threads import (
+    attach_shutdown,
+    attach_startup,
     register_cleanup_threads_on_startup,
     register_swarm_cleanup_on_startup,
 )
@@ -108,7 +110,6 @@ register_swarm_cleanup_on_startup(
 )
 
 
-@app.on_event("startup")
 async def _startup_swarm_monitor() -> None:
     """
     Инициализировать фоновый монитор сворм-процессов, если режим включён.
@@ -179,7 +180,6 @@ def _terminate_swarm_groups(
     return pids_to_kill
 
 
-@app.on_event("shutdown")
 async def _shutdown_swarm_processes() -> None:
     """Graceful shutdown: убить все живые sworm-процессы (шаг 3.3).
 
@@ -194,8 +194,6 @@ async def _shutdown_swarm_processes() -> None:
     4. Кто остался жив — SIGKILL.
     5. Обновляем meta: status=unknown_failed, error_type=server_shutdown.
     """
-    import asyncio
-    import os
     import signal
 
     monitor = _swarm_monitor
@@ -229,6 +227,20 @@ async def _shutdown_swarm_processes() -> None:
 
     # Останавливаем фоновой loop.
     monitor.stop()
+
+
+# Lifespan вместо deprecated @app.on_event("startup"/"shutdown").
+# Lookup имён при вызове — чтобы тесты могли monkeypatch'ить хуки.
+async def _lifespan_startup() -> None:
+    await _startup_swarm_monitor()
+
+
+async def _lifespan_shutdown() -> None:
+    await _shutdown_swarm_processes()
+
+
+attach_startup(app, _lifespan_startup)
+attach_shutdown(app, _lifespan_shutdown)
 
 
 @app.middleware("http")

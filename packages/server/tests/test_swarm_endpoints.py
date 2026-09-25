@@ -356,7 +356,7 @@ def test_run_400_invalid_json(make_server):
 
     client = TestClient(server_mod.app)
 
-    resp = client.post("/swarm/run", data="not json")
+    resp = client.post("/swarm/run", content="not json")
     assert resp.status_code == 400
 
 
@@ -734,7 +734,10 @@ def test_shutdown_kills_active_sworms(make_server, monkeypatch):
     monkeypatch.setattr("asyncio.sleep", fast_sleep)
 
     # Monitor уже подставлен; startup не должен создавать настоящий поток.
-    monkeypatch.setattr(server_mod.app.router, "on_startup", [])
+    async def _noop_startup() -> None:
+        return None
+
+    monkeypatch.setattr(server_mod, "_startup_swarm_monitor", _noop_startup)
 
     async def shutdown_app():
         async with server_mod.app.router.lifespan_context(server_mod.app):

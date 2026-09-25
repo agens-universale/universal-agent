@@ -1,6 +1,8 @@
 import logging
 import threading
 import time
+from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from typing import Any, Dict
 
 from fastapi import FastAPI
@@ -18,6 +20,36 @@ _swarm_cleanup_thread_started = False
 # возврата никто не смотрел, исключения не было. Чистка тредов не работала
 # вообще, молча. Вдобавок scripts/ не попадал НИ В ОДНО колесо, поэтому в
 # установленном профиле её и не могло быть.
+
+
+def attach_startup(
+    app: FastAPI, startup: Callable[[], Awaitable[None]]
+) -> None:
+    """Добавить startup-хук через lifespan (вместо deprecated on_event)."""
+    previous = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(app_: FastAPI):
+        await startup()
+        async with previous(app_):
+            yield
+
+    app.router.lifespan_context = lifespan
+
+
+def attach_shutdown(
+    app: FastAPI, shutdown: Callable[[], Awaitable[None]]
+) -> None:
+    """Добавить shutdown-хук через lifespan (вместо deprecated on_event)."""
+    previous = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def lifespan(app_: FastAPI):
+        async with previous(app_):
+            yield
+        await shutdown()
+
+    app.router.lifespan_context = lifespan
 
 
 def _cleanup_threads_loop(
@@ -66,7 +98,7 @@ def register_cleanup_threads_on_startup(
     logger: logging.Logger,
 ) -> None:
     """
-    Подключает обработчик `startup`, который запускает поток чистки threads-файлов.
+    Подключает startup-хук, который запускает поток чистки threads-файлов.
 
     Без lock-ов (предполагается 1 worker).
     """
@@ -103,7 +135,6 @@ def register_cleanup_threads_on_startup(
             ttl_days = 7
         return (interval_seconds, ttl_days)
 
-    @app.on_event("startup")
     async def _startup_cleanup_threads() -> None:
         global _cleanup_thread_started
 
@@ -139,6 +170,8 @@ def register_cleanup_threads_on_startup(
             },
             daemon=True,
         ).start()
+
+    attach_startup(app, _startup_cleanup_threads)
 
 
 def _swarm_cleanup_loop(
@@ -184,7 +217,6 @@ def register_swarm_cleanup_on_startup(
     # Чистим раз в час максимум — TTL обычно сутки, чаще не нужно.
     interval_seconds = max(min(int(ttl_seconds / 10), 3600), 60)
 
-    @app.on_event("startup")
     async def _startup_swarm_cleanup() -> None:
         global _swarm_cleanup_thread_started
 
@@ -211,3 +243,5 @@ def register_swarm_cleanup_on_startup(
             interval_seconds,
             ttl_hours,
         )
+
+    attach_startup(app, _startup_swarm_cleanup)
