@@ -1346,6 +1346,37 @@ def test_git_reset_hard_over_staged_work_is_recorded_and_revertable(repo):
     assert base == "В ИНДЕКСЕ\n".encode("utf-8")
 
 
+def test_unsaved_work_keeps_its_place_in_the_pocket_ahead_of_staged_files(repo):
+    """Проиндексированные файлы не вытесняют из кармана несохранённую работу.
+
+    Карман обрезается потолком путей, а статус идёт по алфавиту: 150
+    проиндексированных файлов в `a_vendor/` отодвигали правку `src/x.py` за
+    потолок, и `git restore` командой снова терял её молча (ревью починок,
+    находка 1). Разошедшиеся с индексом — первыми: индекс их «до» не знает
+    вовсе, а проиндексированные хотя бы лежат в объектах git."""
+    launch_root, threads_dir = repo
+    (launch_root / "src").mkdir()
+    (launch_root / "src" / "x.py").write_text("committed\n", encoding="utf-8")
+    _git(launch_root, "add", "src/x.py")
+    _git(launch_root, "commit", "-qm", "x")
+    vendor = launch_root / "a_vendor"
+    vendor.mkdir()
+    for i in range(150):
+        (vendor / f"f{i:03d}.txt").write_text(f"{i}\n", encoding="utf-8")
+    _git(launch_root, "add", "a_vendor")
+    (launch_root / "src" / "x.py").write_text("НЕСОХРАН\n", encoding="utf-8")
+
+    delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
+    _run_command(
+        launch_root,
+        "import subprocess; subprocess.run(['git','restore','src/x.py'], check=True)",
+    )
+    delta.after_and_record()
+
+    base = _snapshot_store(launch_root).session_baseline("src/x.py")
+    assert base == "НЕСОХРАН\n".encode("utf-8")
+
+
 def test_command_that_commits_falls_back_to_counting(repo):
     """Команда сама сдвинула HEAD (add+commit) — точная база недоказуема: HEAD,
     прочитанный ПОСЛЕ команды, мог оказаться уже промежуточным результатом её
