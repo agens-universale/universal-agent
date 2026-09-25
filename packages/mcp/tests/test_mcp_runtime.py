@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from gc_core.config_modules import env_vars
@@ -52,14 +53,15 @@ def test_resolve_command_prefers_mcp_bin(tmp_path: Path, monkeypatch) -> None:
     )
     bin_dir = mcp_bin_dir()
     bin_dir.mkdir(parents=True)
-    script = bin_dir / (
-        "office-mcp.cmd" if __import__("os").name == "nt" else "office-mcp"
-    )
+    script = bin_dir / ("office-mcp.cmd" if os.name == "nt" else "office-mcp")
     script.write_text("", encoding="utf-8")
-    if __import__("os").name != "nt":
+    if os.name != "nt":
         script.chmod(0o755)
     save_runtime_state(manifest_path=None)
-    assert resolve_mcp_command("office-mcp").endswith("office-mcp")
+    # normcase: на Windows `which` добавляет расширение из PATHEXT в своём
+    # регистре (`office-mcp.CMD`).
+    resolved = resolve_mcp_command("office-mcp")
+    assert os.path.normcase(resolved) == os.path.normcase(str(script))
 
 
 def test_augment_process_env_prepends_bin(tmp_path: Path, monkeypatch) -> None:

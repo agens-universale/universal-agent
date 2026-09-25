@@ -85,9 +85,7 @@ def test_pre_run_compact_swallows_exceptions(monkeypatch, coordinator_ctx):
         logger=None,
     )
 
-    monkeypatch.setattr(
-        rsc, "history_exceeds_summary_trigger", lambda **_k: True
-    )
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
     monkeypatch.setattr(
         rsc,
         "arun_summary_compaction",

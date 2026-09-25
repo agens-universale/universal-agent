@@ -1,6 +1,7 @@
 """_context_meter нормирует бар на ЖЁСТКИЙ порог (summary_trigger), а не turn-end."""
 
 import json
+import re
 
 import pytest
 
@@ -31,6 +32,12 @@ def _write_task(tmp_path, tid, content):
     (tmp_path / f"data_cli_{tid}.jsonl").write_text(
         json.dumps(rec) + "\n", encoding="utf-8"
     )
+
+
+def _meter_percent(meter) -> int:
+    match = re.search(r"(\d+)%", meter.plain)
+    assert match is not None
+    return int(match.group(1))
 
 
 def _cfg(trigger, turn_end):
@@ -88,3 +95,92 @@ async def test_meter_falls_back_to_turn_end_when_no_hard_threshold(tmp_path):
             meter is not None
         )  # fallback на turn_end (иначе порог 0 → None/скрыт)
         assert "%" in meter.plain
+
+
+def _cfg_tokens(trigger, turn_end, *, chars=0, chars_end=0):
+    return {
+        "model": "M",
+        "backend_api_mode": "chat_completions",
+        "summary_params": {
+            "chat_completions_summary_trigger_chars": chars,
+            "chat_completions_summary_turn_end_trigger_chars": chars_end,
+            "chat_completions_summary_trigger_tokens": trigger,
+            "chat_completions_summary_turn_end_trigger_tokens": turn_end,
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_meter_uses_saved_prompt_tokens_without_tail(tmp_path):
+    """Положительное число и включённый токенный порог — доля от числа, без хвоста."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    tid = "ctxm0000000000000000000000000005a"
+    meta = {
+        "thread_id": tid,
+        "system_id": "cli",
+        "last_main_prompt_tokens": 500,
+        "runtime": {"live_history_chars": 9_000, "live_msg_count": 1},
+    }
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config=_cfg_tokens(trigger=1000, turn_end=1),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        meter = scr._context_meter()
+        assert _meter_percent(meter) == 50
+
+
+@pytest.mark.asyncio
+async def test_meter_falls_back_to_chars_without_saved_tokens(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    tid = "ctxm0000000000000000000000000006a"
+    _write_task(tmp_path, tid, "hello")
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config=_cfg_tokens(trigger=1000, turn_end=1, chars=1000, chars_end=1),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        meter = scr._context_meter()
+        assert _meter_percent(meter) == 0
+
+
+@pytest.mark.asyncio
+async def test_meter_token_mid_turn_not_replaced_by_turn_end(tmp_path):
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    tid = "ctxm0000000000000000000000000007a"
+    meta = {
+        "thread_id": tid,
+        "system_id": "cli",
+        "last_main_prompt_tokens": 100,
+        "runtime": {"live_history_chars": 1},
+    }
+    (tmp_path / f"meta_cli_{tid}.json").write_text(
+        json.dumps(meta), encoding="utf-8"
+    )
+    (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config=_cfg_tokens(trigger=10_000_000, turn_end=1),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        meter = scr._context_meter()
+        assert _meter_percent(meter) == 0

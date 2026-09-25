@@ -29,6 +29,13 @@ def setup_function():
     clear_runtime_notices(listeners=True)
 
 
+@pytest.fixture(autouse=True)
+def _no_retry_pause(monkeypatch):
+    """Пауза между адаптивными повторами — настоящие 3 с на шаг: без подмены два
+    теста провала ждали по 15 с, ничего не проверяя в это время."""
+    monkeypatch.setattr(policy, "_CHAT_COMPLETIONS_HTTP_RETRY_DELAY_SEC", 0)
+
+
 def test_notice_from_http_error_includes_status_and_detail():
     exc = _http_error(
         400,

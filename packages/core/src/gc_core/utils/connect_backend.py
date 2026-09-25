@@ -858,7 +858,6 @@ def _apply_chat_completion_kwargs(
         "model",
         "messages",
         "tools",
-        "tool_choice",
         "max_tokens",
         "max_completion_tokens",
     }
@@ -920,7 +919,6 @@ def create_call_data_completions(
         "model": effective_model,
         "messages": to_send_messages_formatted,
         "tools": to_send_tools,
-        "tool_choice": "auto",
     }
     _use_max_tokens_param = _config_value(
         resolved, cfg, "use_max_tokens_param", False

@@ -1,8 +1,10 @@
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
 
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
+from gc_core.config_modules.summary import SUMMARY_CHARS_PER_TOKEN
 from gc_core.intent_log import serialize, serialize_for_meta, tail_preview
 from gc_core.loop_detector.detector import clear as clear_loop_detector
 from gc_core.message_format.serialization import (
@@ -211,6 +213,9 @@ def apply_summary_state_patch(
         0, int(summarized_messages_count or 0)
     )
     state.previous_response_id = None
+    # Старое число провайдера сразу снова перешагнуло бы порог.
+    state.last_main_prompt_tokens = None
+    state.last_main_prompt_message_count = None
 
     summary_message = {
         "role": "user",
@@ -231,6 +236,75 @@ def apply_summary_state_patch(
     else:
         state.messages = [summary_message]
     return summary_message_content
+
+
+@dataclass(frozen=True)
+class SummaryTriggerHits:
+    """Какие включённые пороги точки превышены. Пустой результат — не сжимать."""
+
+    chars: bool = False
+    tokens: bool = False
+
+    def __bool__(self) -> bool:
+        return self.chars or self.tokens
+
+
+def _prompt_token_estimate(
+    state: Any,
+    *,
+    tags: Sequence[str],
+    strip_think: bool,
+) -> int | None:
+    """Input последнего главного prompt плюс хвост по курсу ``SUMMARY_CHARS_PER_TOKEN``.
+
+    Числа или границы нет — None, токенное плечо молчит. Хвост — сообщения
+    после уже посчитанного prompt; всю историю второй раз не считаем.
+    """
+    # Цикл: persistence → states → tools → session_compact → этот модуль.
+    from gc_core.persistence.thread_meta_mapper import read_optional_nonneg_int
+
+    tokens = read_optional_nonneg_int(
+        getattr(state, "last_main_prompt_tokens", None)
+    )
+    boundary = read_optional_nonneg_int(
+        getattr(state, "last_main_prompt_message_count", None)
+    )
+    if tokens is None or boundary is None:
+        return None
+    messages = getattr(state, "messages", None)
+    history = list(messages) if isinstance(messages, list) else []
+    tail = without_system_messages(history[boundary:])
+    tail_chars = calc_history_chars_for_trigger(
+        tail, tags=tags, strip_think=strip_think
+    )
+    return tokens + tail_chars // SUMMARY_CHARS_PER_TOKEN
+
+
+def exceeded_summary_triggers(
+    *,
+    state: Any,
+    summary_trigger_chars: int,
+    summary_trigger_tokens: int = 0,
+    tags: Sequence[str] = (),
+    strip_think: bool = True,
+) -> SummaryTriggerHits:
+    """Какие пороги точки превышены. Порог <= 0 в проверку не входит.
+
+    Один вызов на точку: оба превышены — всё равно один проход сжатия.
+    """
+    chars_hit = history_exceeds_summary_trigger(
+        state=state,
+        summary_trigger_chars=summary_trigger_chars,
+        tags=tags,
+        strip_think=strip_think,
+    )
+    tokens_hit = False
+    if summary_trigger_tokens > 0:
+        estimate = _prompt_token_estimate(
+            state, tags=tags, strip_think=strip_think
+        )
+        tokens_hit = estimate is not None and estimate > summary_trigger_tokens
+    return SummaryTriggerHits(chars=chars_hit, tokens=tokens_hit)
 
 
 def history_exceeds_summary_trigger(
@@ -283,6 +357,12 @@ def _build_summary_payload(
         "current_user_intent": serialize_for_meta(
             list(getattr(state, "current_user_intent", []) or [])
         ),
+        "last_main_prompt_tokens": getattr(
+            state, "last_main_prompt_tokens", None
+        ),
+        "last_main_prompt_message_count": getattr(
+            state, "last_main_prompt_message_count", None
+        ),
         "user_turn_seq": int(getattr(state, "user_turn_seq", 0) or 0),
         "dialog_steps_offset": int(
             getattr(state, "dialog_steps_offset", 0) or 0
@@ -298,6 +378,8 @@ async def arun_summary_compaction(
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
     trigger_threshold_chars: int | None = None,
+    exceeded_chars: bool = False,
+    exceeded_tokens: bool = False,
 ) -> None:
     """Сжать историю треда: суммаризация, патч состояния, событие хосту.
 
@@ -323,6 +405,8 @@ async def arun_summary_compaction(
         trigger_volume=trigger_volume,
         trigger_threshold_chars=trigger_threshold_chars,
         is_cli_mode=is_cli_mode,
+        exceeded_chars=exceeded_chars,
+        exceeded_tokens=exceeded_tokens,
     )
     log_compaction_started(
         logger,
@@ -454,13 +538,21 @@ async def amaybe_run_summary_compaction(
     trigger_reason: str,
     is_cli_mode: bool,
     on_summary_applied: Optional[Callable[[Dict[str, Any]], None]] = None,
+    summary_trigger_tokens: int = 0,
 ) -> bool:
-    """Проверка порога плюс запуск сжатия. Основная реализация — эта."""
+    """Проверка порогов плюс один запуск сжатия. Основная реализация — эта."""
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
-    if summary_trigger_chars <= 0:
+    if summary_trigger_chars <= 0 and summary_trigger_tokens <= 0:
         return False
     tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    hits = exceeded_summary_triggers(
+        state=state,
+        summary_trigger_chars=summary_trigger_chars,
+        summary_trigger_tokens=summary_trigger_tokens,
+        tags=tags,
+        strip_think=True,
+    )
     full_messages = without_system_messages(getattr(state, "messages", []))
     trigger_volume = calc_history_chars_for_trigger(
         full_messages, tags=tags, strip_think=True
@@ -476,8 +568,10 @@ async def amaybe_run_summary_compaction(
         trigger_volume=trigger_volume,
         serialized_chars=serialized_chars,
         threshold=summary_trigger_chars,
+        exceeded_chars=hits.chars,
+        exceeded_tokens=hits.tokens,
     )
-    if trigger_volume <= summary_trigger_chars:
+    if not hits:
         return False
 
     await arun_summary_compaction(
@@ -487,5 +581,7 @@ async def amaybe_run_summary_compaction(
         is_cli_mode=is_cli_mode,
         on_summary_applied=on_summary_applied,
         trigger_threshold_chars=summary_trigger_chars,
+        exceeded_chars=hits.chars,
+        exceeded_tokens=hits.tokens,
     )
     return True

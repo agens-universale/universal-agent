@@ -19,7 +19,6 @@ daemon-поток, переживавший конец хода, — но тол
 import asyncio
 import os
 import pathlib
-import shlex
 import subprocess
 import sys
 import time
@@ -27,6 +26,8 @@ import time
 import pytest
 from gc_core.backends import local as local_backend
 from gc_core.backends.local import LocalFsBackend
+from gc_testkit import LOOP_TIMER_QUANTUM
+from gc_testkit.helpers.crossplatform import python_command, shell_command
 
 #: Корень исходников ядра: `.../packages/core/src`. Его и кладём на путь
 #: подпроцессу, иначе он не найдёт `gc_core`.
@@ -52,7 +53,7 @@ _CHILD = (
 
 
 def _child_command(ticks) -> str:
-    return f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} {shlex.quote(str(ticks))}"
+    return python_command(ticks.parent, _CHILD, ticks)
 
 
 async def _read_when_written(path, timeout: float = 15.0) -> str:
@@ -107,7 +108,7 @@ async def test_child_streams_are_the_null_device(tmp_path):
         "same = [os.path.samestat(os.fstat(fd), null) for fd in (0, 1, 2)]\n"
         "open(sys.argv[1], 'w').write(repr(same))\n"
     )
-    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} {shlex.quote(str(marker))}"
+    command = python_command(tmp_path, child, marker)
 
     await LocalFsBackend().aspawn_background(command)
 
@@ -134,7 +135,7 @@ async def test_chatty_child_is_not_blocked(tmp_path):
         "sys.stderr.flush()\n"
         f"open({str(marker)!r}, 'w').write('ok')\n"
     )
-    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(child)}"
+    command = python_command(tmp_path, child)
 
     await LocalFsBackend().aspawn_background(command)
 
@@ -157,7 +158,7 @@ async def test_posix_child_leaves_our_session(tmp_path):
     """
     marker = tmp_path / "sid"
     child = "import os, sys\nopen(sys.argv[1], 'w').write(str(os.getsid(0)))\n"
-    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} {shlex.quote(str(marker))}"
+    command = python_command(tmp_path, child, marker)
 
     await LocalFsBackend().aspawn_background(command)
 
@@ -271,10 +272,11 @@ async def test_background_spawns_keep_the_loop_breathing():
     stamped: list = []
 
     async def pulse() -> None:
-        previous = time.monotonic()
+        # perf_counter: monotonic на Windows шагает по 15,6 мс (см. LoopPulse).
+        previous = time.perf_counter()
         while not stop.is_set():
             await asyncio.sleep(tick)
-            now = time.monotonic()
+            now = time.perf_counter()
             stamped.append((now, now - previous))
             previous = now
 
@@ -282,12 +284,13 @@ async def test_background_spawns_keep_the_loop_breathing():
     await asyncio.sleep(0.25)  # дать пульсу устояться
     # Разделяем базу и замер: тики прогрева судить нельзя — там ничего не
     # происходит, и они только разбавили бы статистику пачки.
-    split = started = time.monotonic()
+    split = started = time.perf_counter()
     try:
         for _ in range(spawns):
-            await backend.aspawn_background("true")
+            # Встроенная команда и sh, и cmd.exe: процесс оболочки без программы.
+            await backend.aspawn_background("exit 0")
     finally:
-        batch = time.monotonic() - started
+        batch = time.perf_counter() - started
         stop.set()
         await beat
 
@@ -315,7 +318,7 @@ async def test_background_spawns_keep_the_loop_breathing():
     )
     # Медиана по всей выборке: ловит случай «loop занят ПОСТОЯННО», когда тики
     # есть, но редкие.
-    assert statistics.median(base) < tick * 1.5, (
+    assert statistics.median(base) < max(tick, LOOP_TIMER_QUANTUM) * 1.5, (
         f"loop занят ПОСТОЯННО ещё до пачки: медиана прогрева "
         f"{statistics.median(base) * 1000:.1f} мс при шаге {tick * 1000:.0f} мс"
     )
@@ -334,7 +337,7 @@ async def test_cancelled_launch_does_not_lose_a_started_process():
     before = set(_BACKGROUND_PROCS)
     task = asyncio.ensure_future(
         LocalFsBackend().aspawn_background(
-            f"{shlex.quote(sys.executable)} -c pass"
+            shell_command([sys.executable, "-c", "pass"])
         )
     )
     await asyncio.sleep(0)  # задача дошла до своей уступки и стоит на ней
@@ -402,7 +405,9 @@ async def test_a_launch_cancelled_after_the_start_leaves_no_process(
         return proc
 
     monkeypatch.setattr(subprocess, "Popen", _recording_popen)
-    sleeper = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+    sleeper = shell_command(
+        [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
 
     task = asyncio.ensure_future(LocalFsBackend().aspawn_background(sleeper))
     try:
@@ -485,7 +490,7 @@ async def test_finished_background_children_leave_the_registry(tmp_path):
     # Живёт дольше проверки мгновенного отказа: вышедшую за неё команду запуск
     # дожимает сам, и в учёт она не попадает вовсе.
     await backend.aspawn_background(
-        f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(0.5)')}"
+        shell_command([sys.executable, "-c", "import time; time.sleep(0.5)"])
     )
     short_lived = set(_BACKGROUND_PROCS) - before
     assert short_lived, "запущенный процесс не попал в учёт"
@@ -511,15 +516,11 @@ def test_background_child_survives_the_whole_agent_process(tmp_path):
     """
     ticks = tmp_path / "ticks.log"
     agent = (
-        "import asyncio, shlex, sys\n"
+        "import asyncio, sys\n"
         f"sys.path.insert(0, {str(_SRC_ROOT)!r})\n"
         "from gc_core.backends.local import LocalFsBackend\n"
-        f"child = {_CHILD!r}\n"
-        f"ticks = {str(ticks)!r}\n"
         "async def turn():\n"
-        "    await LocalFsBackend().aspawn_background(\n"
-        "        f'{shlex.quote(sys.executable)} -c {shlex.quote(child)} {shlex.quote(ticks)}',\n"
-        "    )\n"
+        f"    await LocalFsBackend().aspawn_background({_child_command(ticks)!r})\n"
         "asyncio.run(turn())\n"
     )
 

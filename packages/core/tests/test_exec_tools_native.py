@@ -37,10 +37,12 @@
 
 import asyncio
 import json
+import sys
 import time
 
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_testkit.helpers.crossplatform import shell_command
 from gc_testkit.helpers.tool_ctx import local_ctx
 
 #: Конфиг без судьи и без tripwire: тесты про СПОСОБ запуска, а не про политику.
@@ -64,6 +66,14 @@ def _cmd(config_dict=None):
 def _py(config_dict=None):
     return RunPythonCode(
         ctx=local_ctx(), config_dict=config_dict or dict(_NO_GUARDS)
+    )
+
+
+def _sleep_command(sec) -> str:
+    """Команда «поспать sec секунд» в синтаксисе оболочки ОС: `python3` и
+    одинарных кавычек в cmd.exe нет."""
+    return shell_command(
+        [sys.executable, "-c", f"import time; time.sleep({sec})"]
     )
 
 
@@ -109,9 +119,7 @@ async def test_command_acall_runs_and_returns_output():
 async def test_command_does_not_hold_the_loop():
     """Пока команда идёт, loop продолжает тикать."""
     _, gap = await _worst_gap(
-        lambda: _cmd().acall(
-            command=f"python3 -c 'import time; time.sleep({NAP})'"
-        )
+        lambda: _cmd().acall(command=_sleep_command(NAP))
     )
 
     assert gap < NAP / 2, f"loop залипал на {gap:.3f}с — запуск не асинхронный"
@@ -138,11 +146,7 @@ async def test_command_does_not_hold_a_pool_slot_for_its_whole_duration():
     await asyncio.sleep(0.05)
 
     started = time.perf_counter()
-    out = json.loads(
-        await _cmd().acall(
-            command=f"python3 -c 'import time; time.sleep({cmd_sec})'"
-        )
-    )
+    out = json.loads(await _cmd().acall(command=_sleep_command(cmd_sec)))
     spent = time.perf_counter() - started
 
     for h in hogs:
@@ -171,11 +175,7 @@ async def test_command_validation_rejects_bad_arguments():
 
 async def test_command_reports_a_timeout_the_same_way():
     """Таймаут — общий путь разбора результата, а не отдельная ветка."""
-    out = json.loads(
-        await _cmd().acall(
-            command="python3 -c 'import time; time.sleep(5)'", timeout=1
-        )
-    )
+    out = json.loads(await _cmd().acall(command=_sleep_command(5), timeout=1))
 
     assert out["ok"] is False, out
     assert out["timed_out"] is True, out

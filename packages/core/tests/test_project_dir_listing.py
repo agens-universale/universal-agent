@@ -149,7 +149,8 @@ async def test_backend_listing_agrees_with_filesystem_listing(tmp_path):
     tree = {str(tmp_path): [(n, (tmp_path / n).is_dir()) for n in names]}
     for name in names:
         if name.endswith("_dir"):
-            tree[str(tmp_path / name)] = [("nested.txt", False)]
+            # Ключ — как склеит join фейка (всегда «/»), а не Path хоста.
+            tree[f"{tmp_path}/{name}"] = [("nested.txt", False)]
     backend = _FakeBackend(tree)
     be_listing = await get_listing_from_backend(backend, str(tmp_path))
 

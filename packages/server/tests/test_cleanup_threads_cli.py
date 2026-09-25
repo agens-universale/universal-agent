@@ -80,8 +80,10 @@ def test_explicit_relative_dir_becomes_absolute_in_stats(
     rc = _run(monkeypatch, "--threads-dir", "threads")
 
     assert rc == 0
+    # Статистика печатается словарём, то есть repr: на Windows слеши в нём
+    # удвоены, поэтому ищем repr пути, а не сам путь.
     assert (
-        os.path.realpath(str(tmp_path / "threads")) in capsys.readouterr().out
+        repr(os.path.join(os.getcwd(), "threads")) in capsys.readouterr().out
     )
 
 

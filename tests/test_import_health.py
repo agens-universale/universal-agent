@@ -297,7 +297,7 @@ def test_litellm_is_judged_like_its_neighbour():
     Подмена: убрать `"external/litellm"` из `_SCAN_ROOTS` либо дописать туда
     `"external"` целиком.
     """
-    scanned = {str(p) for p in ih._python_files()}
+    scanned = {p.as_posix() for p in ih._python_files()}
 
     assert any("external/litellm" in p for p in scanned), "litellm вне обхода"
     assert not any("external/vendor" in p for p in scanned), (

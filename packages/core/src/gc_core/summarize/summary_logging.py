@@ -82,6 +82,8 @@ class SummaryCompactionLog:
     trigger_volume: int = 0
     trigger_threshold_chars: int | None = None
     is_cli_mode: bool = False
+    exceeded_chars: bool = False
+    exceeded_tokens: bool = False
 
     @property
     def rule_label(self) -> str:
@@ -105,12 +107,15 @@ def log_compaction_started(
 ) -> None:
     if logger is not None:
         logger.info(
-            "summary_triggered reason=%s thread_id=%s trigger_volume=%s serialized_chars=%s history_messages=%s",
+            "summary_triggered reason=%s thread_id=%s trigger_volume=%s "
+            "serialized_chars=%s history_messages=%s exceeded_chars=%s exceeded_tokens=%s",
             log_ctx.trigger_reason,
             log_ctx.thread_id,
             log_ctx.trigger_volume,
             serialized_chars,
             history_messages_count,
+            log_ctx.exceeded_chars,
+            log_ctx.exceeded_tokens,
         )
         logger.info(
             "summary_boundary phase=started rule=%s rule_id=%s thread_id=%s volume=%s%s",
@@ -131,6 +136,8 @@ def log_compaction_started(
                 "serialized_chars": serialized_chars,
                 "history_messages": history_messages_count,
                 "threshold": log_ctx.trigger_threshold_chars,
+                "exceeded_chars": log_ctx.exceeded_chars,
+                "exceeded_tokens": log_ctx.exceeded_tokens,
             },
         )
     if not log_ctx.is_cli_mode:
@@ -150,6 +157,8 @@ def log_compaction_precheck(
     trigger_volume: int,
     serialized_chars: int,
     threshold: int,
+    exceeded_chars: bool = False,
+    exceeded_tokens: bool = False,
 ) -> None:
     if logger is None:
         return
@@ -173,6 +182,8 @@ def log_compaction_precheck(
             "trigger_volume": trigger_volume,
             "serialized_chars": serialized_chars,
             "threshold": threshold,
+            "exceeded_chars": exceeded_chars,
+            "exceeded_tokens": exceeded_tokens,
         },
     )
 
@@ -399,6 +410,23 @@ def log_pre_run_max_rounds(
         "summary_pre_run_max_rounds thread_id=%s rounds=%s",
         thread_id,
         max_rounds,
+    )
+
+
+def log_token_trigger_no_prompt_tokens(
+    logger: Any | None,
+    *,
+    thread_id: Any,
+    threshold: int,
+) -> None:
+    if logger is None:
+        return
+    logger.warning(
+        "summary_token_trigger_no_prompt_tokens thread_id=%s threshold=%s: "
+        "нет prompt_tokens от провайдера, а история по символам уже выше порога — "
+        "сжатие по токенам не срабатывает",
+        thread_id,
+        threshold,
     )
 
 

@@ -59,7 +59,7 @@ def test_relative_path_resolves_against_launch_root(lab, cfg_default):
     result = check_read_path_allowed(
         "./sub/file.txt", launch_root=lab, cfg=cfg_default
     )
-    assert result.endswith("/sub/file.txt")
+    assert result == os.path.realpath(os.path.join(lab, "sub", "file.txt"))
 
 
 def test_outside_launch_root_blocked(lab, cfg_default):
@@ -81,7 +81,7 @@ def test_gc_dir_blocked_in_launch_root(lab, cfg_default):
 def test_gc_skills_exception_allowed(lab, cfg_default):
     target = os.path.join(lab, ".gc", "skills", "foo.md")
     result = check_read_path_allowed(target, launch_root=lab, cfg=cfg_default)
-    assert result.endswith("/.gc/skills/foo.md")
+    assert result == os.path.realpath(target)
 
 
 def test_dotenv_pattern_blocked(lab, cfg_default):
@@ -126,7 +126,7 @@ def test_wildcard_root_allow_by_default(lab):
     )
     # Files outside launch_root теперь разрешены.
     result = check_read_path_allowed("/etc/hostname", launch_root=lab, cfg=cfg)
-    assert "etc/hostname" in result
+    assert result == os.path.realpath("/etc/hostname")
 
 
 def test_wildcard_root_denied_still_blocks(lab):

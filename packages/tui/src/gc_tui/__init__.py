@@ -254,6 +254,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     from recommended_mcp.runtime.daemon_autostart import (
         ensure_mcp_daemons,
+        kill_mcp_daemons_now,
         shutdown_mcp_daemons,
     )
 
@@ -322,9 +323,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Если апгрейд ЕСТЬ — стамп откладывается до закрытия PostUpdateScreen
     # (спека D, Task 10): иначе крэш до показа экрана «съедает» уведомление
     # об апгрейде на следующем запуске.
-    try:
-        app.run()
-    finally:
+
+    def _shutdown_runtime() -> None:
         # Процессы индекса путей (git ls-files) — первыми: поток сборки индекса — демон
         # и умрёт вместе с процессом, а сам git пережил бы программу, дочитывая
         # репозиторий без хозяина. Быстро и не бросает: ошибки гашения глотаются внутри.
@@ -335,16 +335,37 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         # (lease-файлы, гасит последний живой клиент, безопасно при N TUI);
         # MCP — per-process («гашу только то, что сам поднял»). Не унифицировано:
         # lease-модель для MCP — кандидат в апстрим (develop).
-        # release всегда (не только при voice_ok): прибирает «опоздавший» сервис,
-        # поднявшийся после таймаута, и мёртвые lease прошлых запусков. Безусловность
-        # безопасна ровно потому, что гасит он только ПОМЕЧЕННЫЙ агентский сервис
-        # (`leases.is_agent_owned`): форграундный `gc-voice serve` человека переживёт
-        # выход из TUI, который голоса и не касался.
-        if _release_voice is not None:
-            try:
-                _release_voice()
-            except Exception:
-                pass
-        if auto_mcp:
-            shutdown_mcp_daemons()
+        # MCP раньше голоса: зависни голосовой шаг, демоны уже получили бы SIGTERM и
+        # свой SIGKILL — аварийный выход ограничен бюджетом, и шаги после зависшего
+        # не наступают. Голос — в finally: упавшее гашение MCP его не отменяет.
+        try:
+            if auto_mcp:
+                shutdown_mcp_daemons()
+        finally:
+            # release всегда (не только при voice_ok): прибирает «опоздавший» сервис,
+            # поднявшийся после таймаута, и мёртвые lease прошлых запусков.
+            # Безусловность безопасна ровно потому, что гасит он только ПОМЕЧЕННЫЙ
+            # агентский сервис (`leases.is_agent_owned`): форграундный `gc-voice serve`
+            # человека переживёт выход из TUI, который голоса и не касался.
+            if _release_voice is not None:
+                try:
+                    _release_voice()
+                except Exception:
+                    pass
+
+    # Уборка одна на оба выхода: штатный и аварийный — когда терминал умер, а
+    # Textual навсегда встал на записи в него (см. gc_tui.services.terminal_guard).
+    # Не успеет аварийная уборка в бюджет — сторож добьёт MCP-демонов этого запуска
+    # перед выходом. Голос сюда не входит: сервис общий для нескольких TUI.
+    from gc_tui.services.terminal_guard import TerminalGuard
+
+    guard = TerminalGuard(
+        _shutdown_runtime,
+        force_kill=kill_mcp_daemons_now if auto_mcp else None,
+    )
+    try:
+        guard.install()
+        app.run()
+    finally:
+        guard.close()
     return 0

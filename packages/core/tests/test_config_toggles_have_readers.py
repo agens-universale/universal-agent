@@ -77,7 +77,7 @@ def _source_text() -> str:
     """Исходники вне схемы и вне проекции — то есть места, где ключом ПОЛЬЗУЮТСЯ."""
     chunks: list[str] = []
     for path in (REPO / "packages").glob("*/src/**/*.py"):
-        text = str(path)
+        text = path.as_posix()
         if "gc_core/config_modules/" in text or text.endswith(
             "gc_core/config.py"
         ):

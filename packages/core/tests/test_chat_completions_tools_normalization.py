@@ -239,8 +239,21 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         self.assertEqual(data["top_p"], 0.9)
         self.assertEqual(data["model"], "m")
         self.assertEqual(len(data["messages"]), 1)
-        self.assertEqual(data["tool_choice"], "auto")
+        self.assertEqual(data["tool_choice"], "required")
         self.assertNotEqual(data.get("max_tokens"), 1)
+
+    def test_create_call_data_completions_omits_unconfigured_generation_kwargs(
+        self,
+    ):
+        state = SimpleNamespace(messages=[], tools=[], default_model="m")
+        data = create_call_data_completions(
+            [{"role": "user", "content": "hi"}],
+            state=state,
+            config_dict={"chat_completion_kwargs": {}},
+        )
+
+        self.assertNotIn("tool_choice", data)
+        self.assertNotIn("chat_template_kwargs", data)
 
 
 if __name__ == "__main__":

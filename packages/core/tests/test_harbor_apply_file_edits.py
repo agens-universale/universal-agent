@@ -63,11 +63,12 @@ def _run_both(tmp_path, content, edits, **kwargs):
     f = tmp_path / "f.txt"
     files = {}
     if content is not None:
-        f.write_text(content, encoding="utf-8")
+        f.write_text(content, encoding="utf-8", newline="")
         files["/work/f.txt"] = content
 
     base_env = json.loads(_base()(path=str(f), edits=edits, **kwargs))
-    base_content = f.read_text(encoding="utf-8") if f.exists() else None
+    # Байты как есть: read_text сгладил бы CRLF и спрятал расхождение концов строк.
+    base_content = f.read_bytes().decode("utf-8") if f.exists() else None
 
     h = _harbor(files)
     harbor_env = json.loads(h(path="/work/f.txt", edits=edits, **kwargs))
@@ -166,9 +167,9 @@ def test_harbor_matches_base_envelope_and_content(tmp_path):
     edits = [_edit("beta", "BETA"), _edit("gamma", "GAMMA")]
 
     f = tmp_path / "x.txt"
-    f.write_text(CONTENT, encoding="utf-8")
+    f.write_text(CONTENT, encoding="utf-8", newline="")
     base_env = json.loads(_base()(path=str(f), edits=edits))
-    base_content = f.read_text(encoding="utf-8")
+    base_content = f.read_bytes().decode("utf-8")
 
     h = _harbor({"/work/x.txt": CONTENT})
     harbor_env = json.loads(h(path="/work/x.txt", edits=edits))

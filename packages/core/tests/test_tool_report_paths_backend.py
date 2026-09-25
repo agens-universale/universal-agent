@@ -1,4 +1,4 @@
-import os
+import posixpath
 
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.utils.tool_report_paths import tool_report_abspath
@@ -14,7 +14,8 @@ class FakeSandbox:
         return base.rstrip("/") + "/" + name
 
     def normpath(self, path: str) -> str:
-        return os.path.normpath(path)
+        # Как у HarborBackend: пути песочницы всегда POSIX, на любом хосте.
+        return posixpath.normpath(path)
 
 
 def _ws() -> ExecutionWorkspace:

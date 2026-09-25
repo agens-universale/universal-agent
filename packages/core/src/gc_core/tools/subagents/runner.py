@@ -50,7 +50,11 @@ from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
 from gc_core.states import State
-from gc_core.summarize.config import parse_summary_trigger_chars
+from gc_core.summarize.config import (
+    parse_summary_trigger_chars,
+    parse_summary_trigger_tokens,
+    summary_mid_turn_enabled,
+)
 from gc_core.tools import (
     SUBAGENT_TOOLS_ALLOW_KEY,
     SUBAGENT_TOOLS_STOP_KEY,
@@ -234,7 +238,7 @@ class SubagentRunner:
         summary_trigger_chars = parse_summary_trigger_chars(self._config)
         should_enable_summary = (
             child_state.backend_api_mode == "chat_completions"
-            and summary_trigger_chars > 0
+            and summary_mid_turn_enabled(self._config)
         )
         if not should_enable_summary:
             return None
@@ -243,6 +247,7 @@ class SubagentRunner:
             state=child_state,
             thread_session=None,
             summary_trigger_chars=summary_trigger_chars,
+            summary_trigger_tokens=parse_summary_trigger_tokens(self._config),
             is_cli_mode=False,
             pre_backend_trigger_reason="subagent_pre_backend",
             logger=_log,

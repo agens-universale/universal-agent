@@ -110,7 +110,7 @@ class TestRunnerSummary:
             ),
             patch.object(
                 run_summary_coordinator_module,
-                "history_exceeds_summary_trigger",
+                "exceeded_summary_triggers",
                 return_value=True,
             ),
             patch.object(
@@ -147,3 +147,26 @@ class TestRunnerSummary:
         assert captured.get("pre_backend_compaction_hook") is None
         assert captured.get("session_meta") == {}
         assert "post_step_hook" not in captured
+
+    async def test_summary_enabled_when_only_token_trigger(self):
+        orch = _make_orchestrator_state()
+        cfg = _make_config(trigger=0)
+        cfg["summary_params"]["chat_completions_summary_trigger_tokens"] = 1000
+        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        captured = {}
+
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+            captured.update(kwargs)
+            assert child_state.last_main_prompt_tokens is None
+            assert child_state.last_main_prompt_message_count is None
+            return "ok"
+
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "task"}, fake_run_agent
+            )
+
+        assert captured.get("pre_backend_compaction_hook") is not None
+        assert captured.get("turn_end_compaction_hook") is None

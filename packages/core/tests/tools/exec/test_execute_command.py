@@ -23,7 +23,7 @@ def test_execute_env_timeout_and_truncation(tmp_path):
             env_vars=[{"name": "X", "value": "v"}],
         )
     )
-    assert env["ok"] is True and env["stdout"]["content"].rstrip("\n") == "v"
+    assert env["ok"] is True and env["stdout"]["content"].rstrip("\r\n") == "v"
     timeout = json.loads(
         tool(
             command=f'"{sys.executable}" -c "import time; time.sleep(2)"',
@@ -38,8 +38,12 @@ def test_execute_env_timeout_and_truncation(tmp_path):
             "exec_output_preview_edge_chars": 5,
         },
     )
+    # Байтами, а не print: на Windows print кончает строку \r\n, и хвост со
+    # счётчиком пропущенного зависели бы от ОС.
     trunc = json.loads(
-        trunc_tool(command=f'"{sys.executable}" -c "print(\'A\'*100)"')
+        trunc_tool(
+            command=f'"{sys.executable}" -c "import sys; sys.stdout.buffer.write(b\'A\'*100 + bytes([10]))"'
+        )
     )
     assert trunc["truncated"] is True
     assert (
@@ -72,7 +76,7 @@ def test_execute_cwd_and_env_conversion(tmp_path):
     in_cwd = json.loads(tool(command=cmd, cwd=str(tmp_path)))
     assert (
         in_cwd["ok"] is True
-        and in_cwd["stdout"]["content"].rstrip("\n") == "True"
+        and in_cwd["stdout"]["content"].rstrip("\r\n") == "True"
     )
 
     env_casted = json.loads(

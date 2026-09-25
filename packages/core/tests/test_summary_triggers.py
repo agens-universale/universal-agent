@@ -207,7 +207,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     run_summary_coordinator_module,
-                    "history_exceeds_summary_trigger",
+                    "exceeded_summary_triggers",
                     side_effect=_hist_exceeds,
                 ),
                 patch.object(
@@ -271,7 +271,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     run_summary_coordinator_module,
-                    "history_exceeds_summary_trigger",
+                    "exceeded_summary_triggers",
                     side_effect=_hist_exceeds,
                 ),
                 patch.object(
@@ -328,7 +328,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     run_summary_coordinator_module,
-                    "history_exceeds_summary_trigger",
+                    "exceeded_summary_triggers",
                     return_value=False,
                 ),
             ):
@@ -425,7 +425,7 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
                 ),
                 patch.object(
                     run_summary_coordinator_module,
-                    "history_exceeds_summary_trigger",
+                    "exceeded_summary_triggers",
                     return_value=False,
                 ),
             ):

@@ -11,9 +11,19 @@ import json
 import pytest
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.utils import native_fs_search as native_fs_search
+from gc_testkit.helpers.native_search import requires_native_search
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 MARKER = "sk-MUST-NOT-LEAK"
+
+
+# Подмена has_grep лишь открывает ветку: grep и find всё равно запускаются по-настоящему.
+# Где рецепта нет (на Windows смоук-проба grep не проходит), движок честно уходит
+# в Python, и проверять search_backend == "grep" там не о чем.
+_HAS_GREP_CASES = [
+    pytest.param(False, id="python-path"),
+    pytest.param(True, id="native-grep", marks=requires_native_search),
+]
 
 
 def _cfg(root):
@@ -60,9 +70,7 @@ def tree(tmp_path):
     return tmp_path
 
 
-@pytest.mark.parametrize(
-    "has_grep", [False, True], ids=["python-path", "native-grep"]
-)
+@pytest.mark.parametrize("has_grep", _HAS_GREP_CASES)
 def test_denied_files_never_reach_the_payload(tree, monkeypatch, has_grep):
     tool = with_local_ctx(FindInFiles, config_dict=_cfg(tree))
     monkeypatch.setattr(
@@ -79,9 +87,7 @@ def test_denied_files_never_reach_the_payload(tree, monkeypatch, has_grep):
         assert data.get("search_backend") == "grep"
 
 
-@pytest.mark.parametrize(
-    "has_grep", [False, True], ids=["python-path", "native-grep"]
-)
+@pytest.mark.parametrize("has_grep", _HAS_GREP_CASES)
 def test_denied_files_text_mode_never_reach_the_payload(
     tree, monkeypatch, has_grep
 ):
@@ -98,6 +104,7 @@ def test_denied_files_text_mode_never_reach_the_payload(
         assert data.get("search_backend") == "grep"
 
 
+@requires_native_search
 def test_native_denied_hits_first_allowed_still_visible_or_incomplete(
     tmp_path, monkeypatch
 ):
@@ -127,6 +134,7 @@ def test_native_denied_hits_first_allowed_still_visible_or_incomplete(
         assert data.get("stop_reason") != "match_limit"
 
 
+@requires_native_search
 def test_native_only_denied_matches_scan_complete(tmp_path, monkeypatch):
     """Grep не упёрся в лимит, совпали только denied — пусто и scan_complete."""
     (tmp_path / ".env").write_text(f"KEY={MARKER}\n", encoding="utf-8")

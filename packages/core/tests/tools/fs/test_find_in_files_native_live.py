@@ -11,7 +11,6 @@ skips the whole module.
 
 from __future__ import annotations
 
-import asyncio
 import json
 
 import pytest
@@ -19,42 +18,11 @@ from gc_core.backends.local import LocalFsBackend
 from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.utils.native_fs_search import arun_native_grep
 from gc_core.utils.pattern_native_gate import NativeGrepPlan
+from gc_testkit.helpers.native_search import (
+    requires_grep,
+    requires_native_search,
+)
 from gc_testkit.helpers.tool_ctx import with_local_ctx
-
-
-def _host_caps():
-    """Возможности хоста — ОДИН прогрев, потом чтение кэша.
-
-    Прежняя версия читала свойства напрямую и глотала исключение в ``False``.
-    После того как пробы стали корутинными (свойство отвечает только из кэша
-    и до прогрева отказывает), это молча превратило ВСЕ тесты модуля в
-    пропуски: тринадцать живых проверок нативного grep исчезли из прогона, а
-    сводка осталась зелёной. Ровно та тихая деградация, от которой этот
-    модуль и сторожит.
-
-    Свой ``asyncio.run``: функция зовётся на сборе тестов, где loop'а нет.
-    """
-    backend = LocalFsBackend()
-    try:
-        asyncio.run(backend.awarm_capabilities())
-        return bool(backend.has_grep), bool(backend.has_find)
-    except Exception:
-        # Отказ ЗДЕСЬ — это «на хосте нет grep/find», и пропуск честен.
-        return False, False
-
-
-_HOST_HAS_GREP, _HOST_HAS_FIND = _host_caps()
-
-requires_grep = pytest.mark.skipif(
-    not _HOST_HAS_GREP, reason="host grep recipe is not usable"
-)
-# Пайплайн find | xargs | grep требует ОБА бинаря: тесты ниже утверждают
-# search_backend == "grep", поэтому без grep они не «падают», а не применимы
-# (на Windows find из Git Bash есть, GNU grep нет — движок честно уходит в Python).
-requires_native_search = pytest.mark.skipif(
-    not (_HOST_HAS_FIND and _HOST_HAS_GREP),
-    reason="host find | xargs | grep pipeline is not usable",
-)
 
 PLAN = NativeGrepPlan(fixed=True, pattern="TOKEN", case_insensitive=False)
 

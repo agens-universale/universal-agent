@@ -1240,7 +1240,7 @@ def test_create_call_data_completions_marks_claude_model_system_and_tail():
     assert data["messages"][1]["content"] == [
         {"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}
     ]
-    assert data["tool_choice"] == "auto"
+    assert "tool_choice" not in data
 
 
 def test_create_call_data_completions_leaves_non_claude_payload_untouched():

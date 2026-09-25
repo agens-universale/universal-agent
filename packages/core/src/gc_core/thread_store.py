@@ -26,7 +26,10 @@ from gc_core.persistence.live_volume import (
     merge_tui_into_meta,
 )
 from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+from gc_core.persistence.thread_meta_mapper import (
+    ThreadMetaMapper,
+    read_optional_nonneg_int,
+)
 from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.generate_message_id import (
@@ -1023,6 +1026,14 @@ class ThreadSession:
             base_meta["dialog_steps_offset"] = int(
                 self.meta.get("dialog_steps_offset") or 0
             )
+        for prompt_key in (
+            "last_main_prompt_tokens",
+            "last_main_prompt_message_count",
+        ):
+            if prompt_key in self.meta:
+                base_meta[prompt_key] = read_optional_nonneg_int(
+                    self.meta.get(prompt_key)
+                )
         if isinstance(self.meta.get("token_usage"), dict):
             base_meta["token_usage"] = self.meta["token_usage"]
 
@@ -1118,6 +1129,12 @@ class ThreadSession:
                 existing_meta.get("dialog_steps_offset", 0) or 0
             )
         new_meta["dialog_steps_offset"] = max(0, effective_steps_offset)
+        new_meta["last_main_prompt_tokens"] = read_optional_nonneg_int(
+            summary_payload.get("last_main_prompt_tokens")
+        )
+        new_meta["last_main_prompt_message_count"] = read_optional_nonneg_int(
+            summary_payload.get("last_main_prompt_message_count")
+        )
         self._carry_intent_fields(
             new_meta,
             existing_meta,

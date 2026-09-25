@@ -3,6 +3,7 @@ import json
 from gc_core.tools.fs.file_info import FileInfo
 from gc_core.tools.fs.read_file import DEFAULT_READ_FILE_MAX_BYTES, ReadFile
 from gc_core.utils.file_text import sha256_hex_of_bytes
+from gc_testkit.helpers.crossplatform import require_symlinks
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 _CHAR_PAGING_KEYS = (
@@ -15,14 +16,16 @@ _CHAR_PAGING_KEYS = (
 
 def _read(tmp_path, text, **kwargs):
     p = tmp_path / "f.txt"
-    p.write_text(text, encoding="utf-8")
+    p.write_text(
+        text, encoding="utf-8", newline=""
+    )  # иначе на Windows на диске CRLF
     return json.loads(with_local_ctx(ReadFile)(path=str(p), **kwargs)), p
 
 
 def test_read_returns_sha256_for_full_file(tmp_path):
     text = "hello\nworld\n"
     p = tmp_path / "h.txt"
-    p.write_text(text, encoding="utf-8")
+    p.write_text(text, encoding="utf-8", newline="")
     res = json.loads(with_local_ctx(ReadFile)(path=str(p), offset=1, limit=1))
     assert res["sha256"] == sha256_hex_of_bytes(text.encode("utf-8"))
     info = json.loads(with_local_ctx(FileInfo)(path=str(p), include_hash=True))
@@ -50,7 +53,7 @@ def test_read_utf16_le_bom_returns_text_and_encoding_used(tmp_path):
 
 def test_read_utf8_returns_encoding_used(tmp_path):
     p = tmp_path / "a.txt"
-    p.write_text("hello\n", encoding="utf-8")
+    p.write_text("hello\n", encoding="utf-8", newline="")
     res = json.loads(with_local_ctx(ReadFile)(path=str(p)))
     assert res["ok"] is True
     assert res["encoding_used"] == "utf-8"
@@ -138,7 +141,7 @@ def test_read_offset_without_limit_reads_to_eof(tmp_path):
 
 def test_explicit_line_slice_unchanged(tmp_path):
     p = tmp_path / "f.txt"
-    p.write_text("a\nb\nc\nd\ne\n", encoding="utf-8")
+    p.write_text("a\nb\nc\nd\ne\n", encoding="utf-8", newline="")
     by_page = json.loads(
         with_local_ctx(ReadFile)(path=str(p), offset=2, limit=2)
     )
@@ -256,6 +259,7 @@ def test_file_size_bytes_on_not_found_and_success(tmp_path):
 
 
 def test_read_file_via_symlink(tmp_path):
+    require_symlinks(tmp_path)
     real = tmp_path / "real.txt"
     real.write_text("hello via link", encoding="utf-8")
     link = tmp_path / "link.txt"

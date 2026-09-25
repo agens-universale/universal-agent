@@ -105,6 +105,16 @@ def _pick_cost(raw: dict) -> Optional[float]:
     return float(value)
 
 
+def prompt_input_tokens(raw: Any) -> Optional[int]:
+    """Input последнего prompt: ``prompt_tokens`` или ``input_tokens``.
+
+    Ключа нет — None, не 0. Ноль в ответе провайдера остаётся нулём.
+    """
+    if not isinstance(raw, dict):
+        return None
+    return _pick(raw, _INPUT_KEYS)
+
+
 def normalize_usage(raw: Any) -> Optional[UsageSample]:
     """Вернуть ``UsageSample`` с токенами и стоимостью или None, если usage не пришёл.
 

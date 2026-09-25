@@ -31,9 +31,14 @@
   - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
   - параметры суммаризации в `chat_completions` задаются в секции `summary_params`:
     - `summary_params.chat_completions_summary_trigger_chars`:
-      - `<= 0` (или отсутствует) — суммаризация выключена (дефолт в коде: `0`); рекомендуемое значение для моделей с контекстом ~131k — `180000`;
+      - `<= 0` (или отсутствует) — символьный порог выключен (дефолт в коде: `0`); если выключен и токенный порог, суммаризация не работает; рекомендуемое значение для моделей с контекстом ~131k — `180000`;
       - `> 0` — при достижении/превышении порога тред архивируется (`data_*`/`meta_*` с суффиксом `__summarized_<YYYYMMDD_HHMMSS>`) и продолжается от compact summary;
-    - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.4)`;
+    - `summary_params.chat_completions_summary_trigger_tokens` — токенный порог рядом с символьным (дефолт `0` — выключен). Оценка — `prompt_tokens` (или `input_tokens`) последнего главного запроса плюс сообщения, добавленные после него, по курсу два символа на токен. Сработал любой из двух порогов — один проход сжатия. Ограничения:
+      - число провайдера включает системный промпт, схемы тулов (вместе с MCP) и сводку — и основной, и turn-end порог держать заметно выше этой постоянной части, иначе сжатие повторяется каждый шаг или каждый ход — рантайм это не отслеживает;
+      - без `usage` в ответе провайдера порог не срабатывает; когда история по символам уже выше порога, а числа нет, в лог уходит предупреждение `summary_token_trigger_no_prompt_tokens`;
+      - порог рассчитан как дополнение к символьному: в пользовательских конфигах символьный держать включённым, режим «только токены» — для бенчей;
+    - `summary_params.chat_completions_summary_turn_end_trigger_chars` и `summary_params.chat_completions_summary_turn_end_trigger_tokens` — пороги уборки после принятого `turn_finish`; нет ключа — 60% от mid-turn порога той же шкалы, явный `0` выключает;
+    - `summary_params.incremental_batch_chars` — размер батча для кумулятивной суммаризации; если не задан, используется `int(summary_params.chat_completions_summary_trigger_chars * 1.4)`, а при выключенном символьном пороге — `int(summary_params.chat_completions_summary_trigger_tokens * 2 * 1.4)`;
     - `summary_params.chat_completions_summary_prompt_path` (опционально), по умолчанию `prompts/chat_completions_summary_prompt.md`;
     - `summary_params.max_message_chars` — максимум символов на одно сообщение при подготовке истории к суммаризации (по умолчанию `50000`);
     - `summary_params.max_dialogue_chars` — максимум символов на весь диалог для суммаризации (по умолчанию `1000000`, берется хвост целыми сообщениями);
@@ -41,7 +46,7 @@
     - `summary_params.original_user_messages_max_chars` — лимит символов для `meta.user_messages_log` (единственный источник user-запросов для суммаризации); сохраняются последние сообщения целиком (по умолчанию `20000`);
     - `summary_params.last_dialog_steps_count` — сколько последних сообщений включать;
     - `summary_params.last_dialog_step_message_max_chars` — максимум символов на одно сообщение (лишнее обрезается).
-  - **Поток суммаризации** (только при `backend_api_mode: chat_completions` и положительном `summary_params.chat_completions_summary_trigger_chars`):
+  - **Поток суммаризации** (только при `backend_api_mode: chat_completions` и положительном `summary_params.chat_completions_summary_trigger_chars` или `summary_params.chat_completions_summary_trigger_tokens`):
     - перед стартом цикла агента выполняется **pre-run** compaction (если объём диалога в `state.messages` уже достиг порога);
     - после шага с исходящим результатом инструмента (**post-step**, сразу после обработки `function_call_output`) снова проверяется порог и при необходимости запускается compaction;
     - источник данных для решения «суммаризировать или нет» — только текущие сообщения сессии (`state.messages`); при запуске с `-t` после успешного compaction дополнительно обновляются файлы треда через `thread_store` (архив старых `data_*/meta_*` и запись compact-истории).

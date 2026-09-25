@@ -48,7 +48,9 @@ from gc_core.security.permission_store import PermissionStore
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.config import (
     parse_summary_trigger_chars,
+    parse_summary_trigger_tokens,
     parse_summary_turn_end_trigger_chars,
+    parse_summary_turn_end_trigger_tokens,
 )
 from gc_core.thread_store import (
     ThreadSession,
@@ -449,6 +451,10 @@ class AgentExecutor:
             state.dialog_steps_offset = int(
                 meta.get("dialog_steps_offset", 0) or 0
             )
+            (
+                state.last_main_prompt_tokens,
+                state.last_main_prompt_message_count,
+            ) = ThreadMetaMapper.read_prompt_token_fields(meta)
             state.usage = UsageAccount.from_meta(meta.get("token_usage"))
         rendered_system_prompt: str | None = None
         if (
@@ -582,6 +588,7 @@ class AgentExecutor:
         previous_response_id,
         new_user_messages,
         summary_trigger_chars: int,
+        summary_trigger_tokens: int,
     ) -> tuple:
         """(messages для run_agent, persist_messages_callback, get_full_history_messages)."""
         messages = list(new_user_messages)
@@ -615,9 +622,8 @@ class AgentExecutor:
                 rendered_system_prompt=rendered_system_prompt,
             )
             return messages, persist, thread_session.get_full_history_messages
-        if (
-            backend_api_mode == "chat_completions"
-            and summary_trigger_chars > 0
+        if backend_api_mode == "chat_completions" and (
+            summary_trigger_chars > 0 or summary_trigger_tokens > 0
         ):
 
             def _persist_runtime_batch(step_messages: list[dict]) -> None:
@@ -765,6 +771,10 @@ class AgentExecutor:
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
         summary_trigger_chars = parse_summary_trigger_chars(config_dict)
+        summary_trigger_tokens = parse_summary_trigger_tokens(config_dict)
+        turn_end_trigger_tokens = parse_summary_turn_end_trigger_tokens(
+            config_dict
+        )
         turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(
             config_dict
         )
@@ -819,6 +829,8 @@ class AgentExecutor:
             thread_session=thread_session,
             summary_trigger_chars=summary_trigger_chars,
             turn_end_trigger_chars=turn_end_trigger_chars,
+            summary_trigger_tokens=summary_trigger_tokens,
+            turn_end_trigger_tokens=turn_end_trigger_tokens,
             is_cli_mode=is_cli_mode,
             pre_backend_trigger_reason="pre_backend",
             logger=logger,
@@ -857,6 +869,7 @@ class AgentExecutor:
                 previous_response_id=previous_response_id,
                 new_user_messages=new_user_messages,
                 summary_trigger_chars=summary_trigger_chars,
+                summary_trigger_tokens=summary_trigger_tokens,
             )
         )
 

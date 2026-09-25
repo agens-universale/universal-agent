@@ -47,7 +47,7 @@ def _run_both(tmp_path, initial_content, path_name, call_kwargs):
 
     files = {}
     if initial_content is not None:
-        real_file.write_text(initial_content, encoding="utf-8")
+        real_file.write_text(initial_content, encoding="utf-8", newline="")
         files[harbor_path] = initial_content
 
     base_env = json.loads(_base()(path=str(real_file), **call_kwargs))

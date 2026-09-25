@@ -55,8 +55,10 @@ def test_adapter_points_dependency_paths_to_existing_files(monkeypatch):
     a = _agent(GcCliExternal)
     c = a._build_config()
     # system prompt is the BASE prompt, and exists
-    assert c["chat_completions_system_prompt_path"].endswith(
-        "prompts/chat_completions_system_prompt.md"
+    assert (
+        Path(c["chat_completions_system_prompt_path"])
+        .as_posix()
+        .endswith("prompts/chat_completions_system_prompt.md")
     )
     assert os.path.isfile(c["chat_completions_system_prompt_path"])
     # skills dir set + exists
@@ -70,8 +72,10 @@ def test_adapter_points_dependency_paths_to_existing_files(monkeypatch):
         assert os.path.isfile(sp[k]), k
     # intent_guard prompt path is bundled + exists (activates the finish gate in the
     # image; without it the gate fail-opens because its default path is source-only)
-    assert c["chat_completions_intent_guard_prompt_path"].endswith(
-        "prompts/chat_completions_intent_guard_prompt.md"
+    assert (
+        Path(c["chat_completions_intent_guard_prompt_path"])
+        .as_posix()
+        .endswith("prompts/chat_completions_intent_guard_prompt.md")
     )
     assert os.path.isfile(c["chat_completions_intent_guard_prompt_path"])
 

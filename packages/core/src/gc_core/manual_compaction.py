@@ -75,6 +75,10 @@ async def acompact_thread(
     state.backend_api_mode = "chat_completions"
     state.usage = UsageAccount.from_meta(meta.get("token_usage"))
     state.dialog_steps_offset = int(meta.get("dialog_steps_offset", 0) or 0)
+    (
+        state.last_main_prompt_tokens,
+        state.last_main_prompt_message_count,
+    ) = ThreadMetaMapper.read_prompt_token_fields(meta)
     state.init_user_intent_log(meta.get("user_intent_log"))
     state.init_current_user_intent(meta.get("current_user_intent"))
     state.init_user_turn_seq(meta.get("user_turn_seq"))
@@ -120,4 +124,6 @@ async def acompact_thread(
     ):
         with _lock:
             self_state.usage = UsageAccount.from_meta(state.usage.to_meta())
+            self_state.last_main_prompt_tokens = None
+            self_state.last_main_prompt_message_count = None
     return True

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from pathlib import Path
 
 from gc_core.config import load_config
 
@@ -73,6 +74,18 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
             )
             self.assertEqual(
                 cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
+                0,
+            )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
+                0,
+            )
+            self.assertEqual(
+                cfg["summary_params"][
                     "chat_completions_summary_turn_end_trigger_chars"
                 ],
                 0,
@@ -139,13 +152,29 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 ],
                 0,
             )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
+                0,
+            )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
+                0,
+            )
             self.assertNotIn(
                 "original_user_messages_max_chars", cfg["summary_params"]
             )
             self.assertTrue(
-                cfg["summary_params"][
-                    "chat_completions_memory_patch_replace_prompt_path"
-                ].endswith("prompts/chat_completions_memory_patch_replace.md")
+                Path(
+                    cfg["summary_params"][
+                        "chat_completions_memory_patch_replace_prompt_path"
+                    ]
+                )
+                .as_posix()
+                .endswith("prompts/chat_completions_memory_patch_replace.md")
             )
             self.assertNotIn("llm", cfg["summary_params"])
             from gc_core.config_modules.chat_completions import (
@@ -315,9 +344,51 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 0,
             )
 
-    def test_chat_completion_authorization_header_loaded_from_backend_section(
-        self,
-    ):
+    def test_summary_trigger_tokens_negative_and_explicit_turn_end_zero(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
+                    "  chat_completions_summary_trigger_tokens: -40\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
+                0,
+            )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
+                0,
+            )
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            cfg_path = os.path.join(tmp_dir, "config.yml")
+            with open(cfg_path, "w", encoding="utf-8") as fd:
+                fd.write(
+                    "backend:\n  api_mode: chat_completions\n"
+                    "summary:\n"
+                    "  chat_completions_summary_trigger_tokens: 100000\n"
+                    "  chat_completions_summary_turn_end_trigger_tokens: 0\n"
+                )
+            cfg = load_config(cfg_path)
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_trigger_tokens"
+                ],
+                100000,
+            )
+            self.assertEqual(
+                cfg["summary_params"][
+                    "chat_completions_summary_turn_end_trigger_tokens"
+                ],
+                0,
+            )
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:

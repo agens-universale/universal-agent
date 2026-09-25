@@ -30,7 +30,7 @@ def _run_both(tmp_path, content, **kwargs):
     f = tmp_path / "f.txt"
     files = {}
     if content is not None:
-        f.write_text(content, encoding="utf-8")
+        f.write_text(content, encoding="utf-8", newline="")
         files["/work/f.txt"] = content
     base_env = json.loads(_base()(path=str(f), **kwargs))
     h = _harbor(files)

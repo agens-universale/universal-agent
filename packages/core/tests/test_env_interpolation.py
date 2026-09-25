@@ -118,6 +118,8 @@ def test_file_marker_empty_file_no_warning(tmp_path, caplog):
 
 def test_file_marker_expanduser(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
+    # На Windows expanduser берёт домашний каталог из USERPROFILE, а не HOME.
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     f = tmp_path / "tok"
     f.write_text("home-secret\n")
     assert resolve_env_placeholders("${FILE:~/tok}") == "home-secret"

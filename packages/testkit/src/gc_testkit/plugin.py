@@ -285,6 +285,33 @@ def ensure_real_tools_package() -> None:
     importlib.import_module(_MOD_TOOLS)
 
 
+def _isolate_gc_home() -> None:
+    """GC_HOME набора — пустой каталог сессии, а не ``~/.gc`` запускающего.
+
+    Изоляция слоёв в ``_isolated_config_layers`` закрывает managed и проектный
+    слой, но базовый ``config.yml`` и данные читались из домашнего каталога: у
+    того, кто пользуется агентом, набор краснел на личных ключах. Ставим до
+    импорта conftest'ов — ``env_vars.env`` читает окружение один раз, на импорте.
+    Точечные ``GC_*_DIR`` сильнее GC_HOME, поэтому снимаются. Подпроцессы тестов
+    наследуют то же окружение.
+    """
+    import atexit
+    import os
+    import shutil
+    import tempfile
+
+    home = tempfile.mkdtemp(prefix="gc-test-home-")
+    atexit.register(shutil.rmtree, home, ignore_errors=True)
+    for name in (
+        "GC_STATE_DIR",
+        "GC_CONFIG_DIR",
+        "GC_CACHE_DIR",
+        "GC_DATA_DIR",
+    ):
+        os.environ.pop(name, None)
+    os.environ["GC_HOME"] = home
+
+
 def pytest_load_initial_conftests(early_config) -> None:
     """Бутстрап нашего набора: ``sys.path`` и, без mcp, заглушка ``tools``.
 
@@ -331,6 +358,7 @@ def pytest_load_initial_conftests(early_config) -> None:
     use_repo_root(suite_root)
 
     _OUR_SUITE = True
+    _isolate_gc_home()
     ensure_sources_on_path()
     if not _mcp_runtime_available():
         preload_minimal_tools_package()

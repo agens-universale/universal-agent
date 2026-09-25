@@ -83,6 +83,9 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     elif not isinstance(last_run_raw, UsageAccount):
         state.last_run_usage = None
 
+    state.__dict__.setdefault("last_main_prompt_tokens", None)
+    state.__dict__.setdefault("last_main_prompt_message_count", None)
+
     state.user_intent_log = deserialize_list(
         state.__dict__.get("user_intent_log")
     )

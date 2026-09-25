@@ -16,6 +16,18 @@ from gc_core.persistence.schema import (
 from gc_core.states import SharedStateData, State
 
 
+def read_optional_nonneg_int(value: Any) -> Optional[int]:
+    """Число есть — неотрицательный int. null, отсутствие и не-число — None.
+
+    Не ``int(value or 0)``: ноль и «числа нет» здесь разные.
+    """
+    if value is None or isinstance(value, bool) or not isinstance(value, int):
+        return None
+    if value < 0:
+        return None
+    return value
+
+
 class ThreadMetaMapper:
     @staticmethod
     def shared_from_meta(meta: Mapping[str, Any]) -> Optional[SharedStateData]:
@@ -57,12 +69,30 @@ class ThreadMetaMapper:
         out["dialog_steps_offset"] = int(
             getattr(state, "dialog_steps_offset", 0) or 0
         )
+        out["last_main_prompt_tokens"] = read_optional_nonneg_int(
+            getattr(state, "last_main_prompt_tokens", None)
+        )
+        out["last_main_prompt_message_count"] = read_optional_nonneg_int(
+            getattr(state, "last_main_prompt_message_count", None)
+        )
         usage = getattr(state, "usage", None)
         if usage is not None and hasattr(usage, "to_meta"):
             out["token_usage"] = usage.to_meta()
         out["state_schema_version"] = STATE_SCHEMA_VERSION
         reject_legacy_memory_keys(out)
         return out
+
+    @staticmethod
+    def read_prompt_token_fields(
+        meta: Mapping[str, Any],
+    ) -> tuple[Optional[int], Optional[int]]:
+        """null и отсутствие ключа — None. 0 остаётся 0."""
+        return (
+            read_optional_nonneg_int(meta.get("last_main_prompt_tokens")),
+            read_optional_nonneg_int(
+                meta.get("last_main_prompt_message_count")
+            ),
+        )
 
     @staticmethod
     def merge_shared_into_meta(
