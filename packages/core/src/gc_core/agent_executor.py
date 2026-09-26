@@ -214,6 +214,9 @@ class AgentExecutor:
         #: `take_undelivered_messages`, вместе с пришедшим после.
         self._undelivered_messages: list[dict] = []
         self._state: State | None = None
+        # Сессия последнего arun. Её мету пишет aclose_run_accounting, один раз.
+        self._thread_session: Any = None
+        self._accounting_closed: bool = False
         # stop_run() до создания state (run() ещё в setup-фазе): запоминаем, и
         # run() применит флаг сразу при создании state, до первого persist.
         self._stop_pending: bool = False
@@ -660,8 +663,11 @@ class AgentExecutor:
                 thread_session, _run_trace_id, logger
             )
 
-    def _report_run_usage(self, state, run_start_usage, logger) -> None:
+    def _report_run_usage(
+        self, state, run_start_usage, logger, *, console: bool = True
+    ) -> None:
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
+        # ``console=False`` — тот же отчёт только в лог, без таблицы в stdout.
         config_dict = self._ctx.config_dict
         try:
             run_usage = state.usage.delta_from(run_start_usage)
@@ -678,7 +684,7 @@ class AgentExecutor:
                     logger.info(
                         "\n<run_usage>\n%s\n</run_usage>\n", usage_text
                     )
-                if human_console_enabled(config_dict):
+                if console and human_console_enabled(config_dict):
                     print(f"\n{usage_text}\n")
             if logger is not None:
                 usage_dict = build_run_usage_dict(
@@ -698,6 +704,35 @@ class AgentExecutor:
                     "run usage report failed: %s", usage_exc, exc_info=True
                 )
 
+    async def aclose_run_accounting(self, *, console: bool = True) -> None:
+        """Закрыть прогон: один раз записать мету треда и отчёт usage.
+
+        К этому моменту цикл и все шаги после него уже прошли. Повторный
+        вызов ничего не пишет. ``arun`` зовёт метод сам. Кто после цикла ещё
+        работает, передаёт ``account_run=False`` и зовёт его после своих шагов.
+        """
+        if self._accounting_closed:
+            return
+        state = self.get_state()
+        if state is None:
+            return
+        logger = getattr(self._ctx, "logger", None)
+        try:
+            await self._afinalize_thread(self._thread_session, state, logger)
+            baseline = UsageAccount.from_meta(
+                getattr(state, "run_start_usage_meta", None)
+            )
+            self._report_run_usage(state, baseline, logger, console=console)
+        except Exception as usage_exc:
+            if logger is not None:
+                logger.warning(
+                    "run accounting close failed: %s",
+                    usage_exc,
+                    exc_info=True,
+                )
+            return
+        self._accounting_closed = True
+
     async def arun(
         self,
         messages: list[str],
@@ -710,6 +745,7 @@ class AgentExecutor:
         message_ids: list[str] | None = None,
         display_contents: list[str | None] | None = None,
         skills_loaded: list[str | None] | None = None,
+        account_run: bool = True,
     ) -> Any:
         """Прогон агента, не блокирующий вызывающий loop.
 
@@ -719,6 +755,9 @@ class AgentExecutor:
         Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
         ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
         harbor-адаптер.
+
+        ``account_run=False`` — не закрывать учёт внутри. Вызывающий ещё
+        добавит шаги после цикла и сам вызовет ``aclose_run_accounting``.
         """
         with self._lock:
             # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
@@ -734,6 +773,7 @@ class AgentExecutor:
             # прогону (ход кончился, ничего не идёт) обязан пропасть, иначе он
             # молча погасил бы следующий запрос человека.
             self._state = None
+            self._accounting_closed = False
         config_dict = self._ctx.config_dict
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
@@ -759,6 +799,7 @@ class AgentExecutor:
             backend_api_mode=backend_api_mode,
             logger=logger,
         )
+        self._thread_session = thread_session
         is_cli_mode = system_id == "cli"
 
         # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
@@ -938,7 +979,6 @@ class AgentExecutor:
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
             )
-            await self._afinalize_thread(thread_session, state, logger)
         finally:
             # Несъеденное циклом откладываем в сторону: оно не должно молча
             # уехать следующему прогону позади его запроса. Это НЕ граница
@@ -958,7 +998,9 @@ class AgentExecutor:
             # и разбор отмены — в самой `_aclose_mcp_and_release`.
             await _aclose_mcp_and_release(_owner_reset)
 
-        self._report_run_usage(state, run_start_usage, logger)
+        # Учёт — одна точка. Кто продолжит прогон после возврата, закроет её сам.
+        if account_run:
+            await self.aclose_run_accounting()
 
         if human_console_enabled(config_dict):
             print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")

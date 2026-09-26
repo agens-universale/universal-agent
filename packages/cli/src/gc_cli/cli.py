@@ -643,13 +643,19 @@ async def arun_cli() -> int:
 
     executor = AgentExecutor(ctx)
     structured_exit: int | None = None
+    # Учёт закрывается один раз, после всего, что ещё прибавится к прогону.
+    # Сейчас это перефраз. Следующий такой шаг встаёт перед той же точкой.
+    close_accounting_after = format_text is not None
+    ran = False
     try:
         response = await executor.arun(
             user_parts,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,
+            account_run=not close_accounting_after,
         )
+        ran = True
         structured_exit = await _emit_structured_if_requested(
             format_text=format_text,
             response=response,
@@ -658,6 +664,8 @@ async def arun_cli() -> int:
             executor=executor,
         )
     finally:
+        if ran and close_accounting_after:
+            await executor.aclose_run_accounting(console=False)
         # Пул httpx привязан к этому loop — закрыть его надо до его остановки,
         # иначе на выходе получим «Event loop is closed» из деструктора.
         from gc_core.utils.async_http import aclose_clients
