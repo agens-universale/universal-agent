@@ -30,6 +30,11 @@ from recommended_mcp.runtime.daemon_autostart import (
 )
 
 from gc_cli import arg_parser
+from gc_cli.structured_output import (
+    StructuredOutputError,
+    aemit_structured_result,
+    read_format_description,
+)
 
 
 def _ensure_project_gc_dir() -> None:
@@ -445,6 +450,56 @@ async def _run_service_command() -> int | None:
     return None
 
 
+def _load_structured_format() -> tuple[str | None, int | None]:
+    """Текст формы и код раннего выхода.
+
+    Второе значение не ``None`` — файл формы не годится, агент не стартует.
+    """
+    format_path = getattr(
+        arg_parser.run_args, "structured_output_format", None
+    )
+    if format_path is None:
+        return None, None
+    try:
+        return read_format_description(format_path), None
+    except StructuredOutputError as exc:
+        print(f"[gc] {exc}", file=sys.stderr)
+        return None, 1
+
+
+def _print_agent_response(
+    response: Any, config_dict: dict, ctx: RunContext
+) -> None:
+    formatted = format_json_for_display(response)
+    if human_console_enabled(config_dict) and formatted:
+        print(formatted)
+    if formatted:
+        ctx.logger.info(
+            "final_answer",
+            extra={"event": "final_answer", "answer": formatted},
+        )
+
+
+async def _emit_structured_if_requested(
+    *,
+    format_text: str | None,
+    response: Any,
+    config_dict: dict,
+    ctx: RunContext,
+    executor: AgentExecutor,
+) -> int | None:
+    if format_text is None:
+        return None
+    return await aemit_structured_result(
+        response=response,
+        config_dict=config_dict,
+        ctx=ctx,
+        state=executor.get_state(),
+        terminal_outcome=executor.last_terminal_outcome,
+        format_text=format_text,
+    )
+
+
 async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -452,6 +507,8 @@ async def arun_cli() -> int:
 
     Возвращает код выхода (0). Финальный ответ агента печатается в stdout
     при ``console_trace: true``; сырое значение доступно через ``cli.run()``.
+    С ``--structured-output-format`` наружу уходит перефраз ``turn_finish``,
+    и эта печать не зависит от ``console_trace`` (кроме ``logging_format: jsonl``).
     """
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
@@ -459,6 +516,10 @@ async def arun_cli() -> int:
     service_exit = await _run_service_command()
     if service_exit is not None:
         return service_exit
+
+    format_text, format_exit = _load_structured_format()
+    if format_exit is not None:
+        return format_exit
 
     config_arg = arg_parser.run_args.config
     profile_arg = getattr(arg_parser.run_args, "profile", None)
@@ -581,12 +642,20 @@ async def arun_cli() -> int:
     start_new_thread = arg_parser.run_args.new
 
     executor = AgentExecutor(ctx)
+    structured_exit: int | None = None
     try:
         response = await executor.arun(
             user_parts,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,
+        )
+        structured_exit = await _emit_structured_if_requested(
+            format_text=format_text,
+            response=response,
+            config_dict=config_dict,
+            ctx=ctx,
+            executor=executor,
         )
     finally:
         # Пул httpx привязан к этому loop — закрыть его надо до его остановки,
@@ -596,14 +665,9 @@ async def arun_cli() -> int:
         await aclose_clients()
         if auto_mcp:
             shutdown_mcp_daemons()
-    formatted = format_json_for_display(response)
-    if human_console_enabled(config_dict) and formatted:
-        print(formatted)
-    if formatted:
-        ctx.logger.info(
-            "final_answer",
-            extra={"event": "final_answer", "answer": formatted},
-        )
+    if structured_exit is not None:
+        return structured_exit
+    _print_agent_response(response, config_dict, ctx)
     return 0
 
 

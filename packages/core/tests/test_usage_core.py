@@ -1,6 +1,7 @@
 from gc_core.usage.account import (
     CATEGORY_FINISH_GATE,
     CATEGORY_MAIN,
+    CATEGORY_STRUCTURED_OUTPUT,
     CATEGORY_SUBAGENT,
     CATEGORY_SUMMARY,
     LEGACY_CURRENCY,
@@ -412,6 +413,10 @@ def test_label_to_category():
     assert category_for_request_label("intent_scope_summary") == "intent_scope"
     assert category_for_request_label("") == CATEGORY_MAIN
     assert category_for_request_label("whatever") == CATEGORY_MAIN
+    assert (
+        category_for_request_label("structured_output")
+        == CATEGORY_STRUCTURED_OUTPUT
+    )
 
 
 def test_label_to_category_subagent_prefix():
