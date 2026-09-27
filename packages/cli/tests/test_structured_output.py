@@ -55,8 +55,8 @@ class _Logger:
     def info(self, msg, extra=None):
         self.infos.append((msg, extra))
 
-    def warning(self, msg, *args):
-        self.warnings.append(msg % args if args else msg)
+    def warning(self, msg, *args, extra=None):
+        self.warnings.append((msg % args if args else msg, extra))
 
 
 class _Ctx:
@@ -339,5 +339,47 @@ async def test_emit_failure_leaves_stdout_empty(capsys):
     assert "без итога" in err
     assert "tool_errors" in err
     assert err.startswith("[gc] ")
-    assert ctx.logger.infos == []
-    assert ctx.logger.warnings
+    assert ctx.logger.infos[0] == (
+        "final_answer",
+        {"event": "final_answer", "answer": "не итог"},
+    )
+    message, extra = ctx.logger.warnings[0]
+    assert extra["event"] == "structured_output_failed"
+    assert message == extra["error"]
+    assert "tool_errors" in extra["error"]
+
+
+@pytest.mark.asyncio
+async def test_emit_failure_logs_raw_answer_then_rephrase_error(
+    monkeypatch, capsys
+):
+    """Сбой запроса не гасит итог хода: сначала final_answer, потом отказ."""
+
+    async def _boom(**_kwargs):
+        raise RuntimeError("backend down")
+
+    monkeypatch.setattr(
+        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        _boom,
+    )
+    ctx = _Ctx()
+    raw = _finish()
+    code = await aemit_structured_result(
+        response=raw,
+        config_dict={"logging_format": "text"},
+        ctx=ctx,
+        state=object(),
+        terminal_outcome=None,
+        format_text="json",
+    )
+    assert code == 1
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.startswith("[gc] ")
+    assert "backend down" in err
+    answer = ctx.logger.infos[0][1]["answer"]
+    assert ctx.logger.infos[0][1]["event"] == "final_answer"
+    assert '"task_report": "Ответ 4."' in answer
+    message, extra = ctx.logger.warnings[0]
+    assert extra["event"] == "structured_output_failed"
+    assert "backend down" in message

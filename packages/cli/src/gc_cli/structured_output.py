@@ -17,6 +17,7 @@ from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_completion_kwargs,
 )
+from gc_core.utils.json_text import format_json_for_display
 
 REQUEST_LABEL = "structured_output"
 _CONSUMER = "summary"
@@ -134,9 +135,13 @@ async def aemit_structured_result(
 ) -> int:
     """Напечатать перефраз и записать ``final_answer``. 0 или 1.
 
-    Текст всегда попадает в stdout. Если туда уже пишет jsonl-хендлер,
+    Успешный текст попадает в stdout. Если туда уже пишет jsonl-хендлер,
     сырая строка сломала бы разбор по строкам: хватает события
-    ``final_answer``. Иначе печатается сам текст.
+    ``final_answer`` с перефразом. Иначе печатается сам текст.
+
+    Отказ перефраза ``final_answer`` не отменяет: в лог сначала уходит итог
+    хода, затем ``structured_output_failed``. Формы в stdout нет. Причина
+    пишется в stderr, код выхода — 1.
     """
     logger = getattr(ctx, "logger", None)
     try:
@@ -148,18 +153,36 @@ async def aemit_structured_result(
             terminal_outcome=terminal_outcome,
         )
     except StructuredOutputError as exc:
+        _log_final_answer(logger, format_json_for_display(response))
+        _log_structured_output_failed(logger, exc)
         print(f"[gc] {exc}", file=sys.stderr)
-        if logger is not None:
-            logger.warning("%s", exc)
         return 1
     if not _stdout_is_jsonl_stream(config_dict):
         print(rendered)
-    if logger is not None:
-        logger.info(
-            "final_answer",
-            extra={"event": "final_answer", "answer": rendered},
-        )
+    _log_final_answer(logger, rendered)
     return 0
+
+
+def _log_final_answer(logger: Any, answer: str) -> None:
+    """Итог хода в лог. Пустая строка — не ответ, событие не пишется."""
+    if logger is None or not answer:
+        return
+    logger.info(
+        "final_answer",
+        extra={"event": "final_answer", "answer": answer},
+    )
+
+
+def _log_structured_output_failed(
+    logger: Any, exc: StructuredOutputError
+) -> None:
+    if logger is None:
+        return
+    logger.warning(
+        "%s",
+        exc,
+        extra={"event": "structured_output_failed", "error": str(exc)},
+    )
 
 
 def _auxiliary_max_tokens(ctx: Any) -> int:
