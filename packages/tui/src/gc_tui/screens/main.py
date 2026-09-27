@@ -95,6 +95,16 @@ from gc_tui.services.trace_render import (
     NESTED_USER_PREFIX,
     build_compaction_label,
 )
+from gc_tui.services.trace_retention import (
+    RETENTION_DETAIL_HINT,
+    apply_payload_retention,
+    filter_sidecar_to_parents,
+    is_light_payload,
+    nested_call_parent_id,
+    parent_outside_retention,
+    retention_window_start_index,
+    subagent_parent_ids_from_events,
+)
 from gc_tui.services.usage_meter import (
     compose_adaptive_footer_right,
     usage_segments,
@@ -1820,7 +1830,9 @@ class TraceScreen(Screen):
             if isinstance(rec, dict)
         )
         seen_ids: set[str] = set()
+        window_start = retention_window_start_index(len(segments))
         for i, seg in enumerate(segments):
+            in_window = i >= window_start
             for rec in seg["messages"]:
                 payload = rec.get("payload")
                 mid = payload.get("id") if isinstance(payload, dict) else None
@@ -1828,7 +1840,9 @@ class TraceScreen(Screen):
                     if mid in seen_ids:
                         continue
                     seen_ids.add(mid)
-                self._render_record(rec, skipped_call_ids=skipped)
+                self._render_record(
+                    rec, skipped_call_ids=skipped, in_window=in_window
+                )
             comp = seg["compacted_by"]
             if comp is not None:
                 ev = TraceEvent(
@@ -1859,6 +1873,7 @@ class TraceScreen(Screen):
         *,
         live: bool = False,
         skipped_call_ids: set | None = None,
+        in_window: bool = True,
     ) -> None:
         payload = rec.get("payload")
         if not isinstance(payload, dict):
@@ -1869,6 +1884,8 @@ class TraceScreen(Screen):
             ts=rec.get("ts", ""),
             skipped_call_ids=skipped_call_ids,
         )
+        if ev is not None:
+            apply_payload_retention(ev, seg_in_window=in_window)
         # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
         # даёт ev=None, но маркер [skill] всё равно нужен на resume-пути.
         sk = payload.get("skill_loaded")
@@ -2724,16 +2741,31 @@ class TraceScreen(Screen):
         )
 
     def _nested_parent_row(self, parent_call_id: str):
-        """Parent ToolCallRow for nested mount: active or durable subagent_*."""
+        """Parent ToolCallRow for nested mount: active or durable subagent_*.
+
+        Parent вне окна retention (light payload) — nested не монтируем.
+        Нет call-события в ленте — якорь оставляем (live до записи сегментов).
+        """
+        if parent_outside_retention(self._task_events, parent_call_id):
+            return None
         return self._active_calls.get(
             parent_call_id
         ) or self._subagent_parent_rows.get(parent_call_id)
 
     def _merge_sidecar_nested(self, task_id: str) -> None:
-        """После rebuild parent-трейса: смонтировать nested из data_subagents_*."""
+        """После rebuild parent-трейса: nested только для parent'ов из окна.
+
+        read_subagent_trace читает файл целиком (разовый spike). В поля экрана
+        полный список не кладём: фильтр и локальные actions умирают с вызовом.
+        """
         if self._store is None or not task_id:
             return
         records = self._store.read_subagent_trace(task_id)
+        if not records:
+            return
+        records = filter_sidecar_to_parents(
+            records, subagent_parent_ids_from_events(self._task_events)
+        )
         if not records:
             return
         actions = plan_sidecar_nested_actions(records)
@@ -6406,6 +6438,9 @@ class TraceScreen(Screen):
                 call_ev = ev
             elif ev.kind in ("result", "error"):
                 result_ev = ev
+        if call_ev is not None and is_light_payload(call_ev):
+            self._show_footer_hint(RETENTION_DETAIL_HINT, seconds=5.0)
+            return
         if call_ev is None:
             call_ev, result_ev = self._resolve_nested_detail_events(
                 message.call_id
@@ -6430,6 +6465,9 @@ class TraceScreen(Screen):
         records = None
         if self._store is not None and self._active_task_id:
             records = self._store.read_subagent_trace(self._active_task_id)
+        parent = nested_call_parent_id(records or [], call_id)
+        if parent and parent_outside_retention(self._task_events, parent):
+            return None, None
         detail = resolve_nested_tool_detail(call_id, sidecar_records=records)
         if not detail or not isinstance(detail.get("call"), dict):
             return None, None
