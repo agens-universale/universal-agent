@@ -16,6 +16,7 @@ from gc_tui.services.duration_format import format_compact_int
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
     filter_sidecar_to_parents,
+    message_ids_in_retention_window,
     retention_window_start_index,
 )
 
@@ -445,12 +446,14 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
         for rec in seg.get("messages", [])
         if isinstance(rec, dict)
     )
-    # Дедуп по id: preserved last-user-message лежит в двух соседних сегментах
-    # (архив + live) — иначе реплика дублируется вокруг маркера сжатия.
+    # Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
+    # файле с тем же id. Рисуем первое вхождение. Payload full, пока id есть
+    # в окне segments[-2:].
     seen_ids: set = set()
     window_start = retention_window_start_index(len(segments))
+    window_ids = message_ids_in_retention_window(segments)
     for i, seg in enumerate(segments):
-        in_window = i >= window_start
+        seg_in_window = i >= window_start
         for rec in seg.get("messages", []):
             payload = rec.get("payload") if isinstance(rec, dict) else None
             mid = payload.get("id") if isinstance(payload, dict) else None
@@ -458,6 +461,9 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
                 if mid in seen_ids:
                     continue
                 seen_ids.add(mid)
+            in_window = seg_in_window or (
+                mid is not None and mid in window_ids
+            )
             no = _render_record_readonly(
                 mount_target,
                 rec,

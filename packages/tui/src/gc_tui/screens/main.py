@@ -100,6 +100,7 @@ from gc_tui.services.trace_retention import (
     apply_payload_retention,
     filter_sidecar_to_parents,
     is_light_payload,
+    message_ids_in_retention_window,
     nested_call_parent_id,
     parent_outside_retention,
     retention_window_start_index,
@@ -1818,9 +1819,10 @@ class TraceScreen(Screen):
         сегментов в маркер. Маркер сжатия сегмента i = его compacted_by (ставится
         между сегментами, чтобы было видно, где прошла компакция).
 
-        Дедуп по id: последнее user-сообщение переносится в новый компакт-файл
-        (build_preserved_batch), поэтому лежит и в архивном сегменте, и в live —
-        в соседних сегментах это дало бы дубль реплики вокруг маркера."""
+        Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
+        файле с тем же id. Рисуем первое вхождение, чтобы не дублировать строку
+        вокруг маркера. Payload остаётся full, пока этот id есть в окне
+        segments[-2:]."""
         from gc_tui.models import TraceEvent
 
         skipped = collect_skipped_call_ids(
@@ -1831,8 +1833,9 @@ class TraceScreen(Screen):
         )
         seen_ids: set[str] = set()
         window_start = retention_window_start_index(len(segments))
+        window_ids = message_ids_in_retention_window(segments)
         for i, seg in enumerate(segments):
-            in_window = i >= window_start
+            seg_in_window = i >= window_start
             for rec in seg["messages"]:
                 payload = rec.get("payload")
                 mid = payload.get("id") if isinstance(payload, dict) else None
@@ -1840,6 +1843,9 @@ class TraceScreen(Screen):
                     if mid in seen_ids:
                         continue
                     seen_ids.add(mid)
+                in_window = seg_in_window or (
+                    mid is not None and mid in window_ids
+                )
                 self._render_record(
                     rec, skipped_call_ids=skipped, in_window=in_window
                 )

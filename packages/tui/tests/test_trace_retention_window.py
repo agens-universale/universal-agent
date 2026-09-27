@@ -11,6 +11,7 @@ import pytest
 from gc_tui.services.trace_retention import (
     RETENTION_DETAIL_HINT,
     filter_sidecar_to_parents,
+    message_ids_in_retention_window,
     parent_outside_retention,
     payload_mode,
     retention_window_start_index,
@@ -43,6 +44,32 @@ def test_payload_mode_lights_only_tools_outside_window():
     for kind in ("call", "result", "error"):
         assert payload_mode(kind, False) == "light"
         assert payload_mode(kind, True) == "full"
+
+
+def test_message_ids_in_retention_window_sees_preserved_copy():
+    call = _call("read_file", "kept", {"path": "a.py"})
+    out = _output("kept", "body")
+    segments = [
+        _seg([call], compacted=True, index=0),
+        _seg(
+            [_call("read_file", "kept", {"path": "a.py"}), out],
+            compacted=True,
+            index=1,
+        ),
+        _seg([_user("live", "u-live")], index=2),
+    ]
+    ids = message_ids_in_retention_window(segments)
+    assert ids == {"id_kept", "out_kept", "u-live"}
+    only_old = [
+        _seg(
+            [_call("read_file", "old", {"path": "o"})],
+            compacted=True,
+            index=0,
+        ),
+        _seg([_user("m", "u-mid")], compacted=True, index=1),
+        _seg([_user("l", "u-live2")], index=2),
+    ]
+    assert "id_old" not in message_ids_in_retention_window(only_old)
 
 
 def test_subagent_parent_ids_only_last_two_segments():
@@ -461,3 +488,131 @@ async def test_preview_same_retention_and_drops_sidecar_list(tmp_path):
         parents = {r.call_id for r in scr.query(ToolCallRow) if not r._nested}
         assert "call_sub_old" in parents
         assert "call_old" in parents
+
+
+def _preserved_subagent_segments(*, copy_in_window: bool):
+    """Тот же id вызова в старом сегменте и в копии.
+
+    copy_in_window: копия в segments[-2:] (3 сегмента).
+    Иначе копия тоже вне окна (4 сегмента, окно — последние два).
+    """
+    call = _call(
+        "subagent_worker",
+        "call_sub_kept",
+        {"task": "задача " + _HEAVY, "reason": "потому что"},
+    )
+    out = _output("call_sub_kept", '{"ok": true, "result": "' + _HEAVY + '"}')
+    copy_call = _call(
+        "subagent_worker",
+        "call_sub_kept",
+        {"task": "задача " + _HEAVY, "reason": "потому что"},
+    )
+    copy_out = _output(
+        "call_sub_kept", '{"ok": true, "result": "' + _HEAVY + '"}'
+    )
+    old = _seg([call, out], compacted=True, index=0)
+    if copy_in_window:
+        mid = _seg(
+            [copy_call, copy_out, _user(_MID_USER, "u-mid")],
+            compacted=True,
+            index=1,
+        )
+        live = _seg([_user(_LIVE_USER, "u-live")], index=2)
+        return [old, mid, live]
+    aged = _seg([copy_call, copy_out], compacted=True, index=1)
+    window = _seg(
+        [_user(_MID_USER, "u-mid")],
+        compacted=True,
+        index=2,
+    )
+    live = _seg([_user(_LIVE_USER, "u-live")], index=3)
+    return [old, aged, window, live]
+
+
+def _sidecar_kept():
+    return [
+        {
+            "parent_call_id": "call_sub_kept",
+            "kind": "call",
+            "seq": 1,
+            "payload": {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "arguments": json.dumps({"path": "kept.py"}),
+                "call_id": "child_kept",
+            },
+        },
+        {
+            "parent_call_id": "call_sub_kept",
+            "kind": "intermediate_reply",
+            "seq": 2,
+            "payload": {"prose": "NESTED_KEPT", "call_id": "ir_child_kept"},
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_preserved_id_in_window_keeps_first_row_full(tmp_path):
+    """Первая строка одна, но full, пока копия с тем же id в окне."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.messages import OpenToolCallDetailRequest
+    from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._store = _SidecarStore(_sidecar_kept())
+        scr._render_segments(_preserved_subagent_segments(copy_in_window=True))
+        scr._merge_sidecar_nested("t")
+        await pilot.pause()
+
+        rows = [
+            r for r in scr.query(ToolCallRow) if r.call_id == "call_sub_kept"
+        ]
+        assert len(rows) == 1
+        assert not rows[0]._nested
+        kept = _event(scr, "call_sub_kept", "call")
+        _assert_tool_full(kept)
+        _assert_tool_full(_event(scr, "call_sub_kept", "result"))
+        nested = {r.call_id for r in scr.query(ToolCallRow) if r._nested}
+        assert nested == {"child_kept"}
+
+        scr.on_open_tool_call_detail_request(
+            OpenToolCallDetailRequest("call_sub_kept")
+        )
+        await pilot.pause()
+        assert isinstance(pilot.app.screen, ToolCallDetailScreen)
+
+
+@pytest.mark.asyncio
+async def test_preserved_id_outside_window_stays_light(tmp_path):
+    """Обе копии вне segments[-2:] — строка light, nested нет."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._store = _SidecarStore(_sidecar_kept())
+        scr._render_segments(
+            _preserved_subagent_segments(copy_in_window=False)
+        )
+        scr._merge_sidecar_nested("t")
+        await pilot.pause()
+
+        rows = [
+            r for r in scr.query(ToolCallRow) if r.call_id == "call_sub_kept"
+        ]
+        assert len(rows) == 1
+        _assert_tool_light(_event(scr, "call_sub_kept", "call"))
+        _assert_tool_light(_event(scr, "call_sub_kept", "result"))
+        assert "child_kept" not in {
+            r.call_id for r in scr.query(ToolCallRow) if r._nested
+        }

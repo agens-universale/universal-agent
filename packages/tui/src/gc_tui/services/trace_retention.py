@@ -30,6 +30,28 @@ def retention_window_start_index(n: int, keep: int = 2) -> int:
     return max(0, n - keep)
 
 
+def message_ids_in_retention_window(segments: list, *, keep: int = 2) -> set:
+    """id сообщений из `segments[-keep:]`.
+
+    Дедуп рисует первое вхождение. Preserved-копия call/output несёт тот же
+    id в более новом сегменте: пока она в окне, первая строка остаётся full.
+    """
+    start = retention_window_start_index(len(segments), keep)
+    ids: set = set()
+    for seg in segments[start:]:
+        messages = seg.get("messages") if isinstance(seg, dict) else None
+        if not messages:
+            continue
+        for rec in messages:
+            payload = rec.get("payload") if isinstance(rec, dict) else None
+            if not isinstance(payload, dict):
+                continue
+            mid = payload.get("id")
+            if mid is not None:
+                ids.add(mid)
+    return ids
+
+
 def payload_mode(kind: str, seg_in_window: bool) -> str:
     """`full` | `light`. Light — только tool call/result/error вне окна."""
     if seg_in_window or kind not in _LIGHT_KINDS:
