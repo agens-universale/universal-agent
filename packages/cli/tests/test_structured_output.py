@@ -259,7 +259,16 @@ async def test_rephrase_transport_error_stays_structured(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_emit_prints_even_when_console_trace_off(monkeypatch, capsys):
+@pytest.mark.parametrize(
+    "config_dict",
+    [
+        {"logging_format": "text", "console_trace": True},
+        {"logging_format": "jsonl", "console_trace": False},
+    ],
+)
+async def test_emit_prints_text_when_stdout_is_not_jsonl(
+    monkeypatch, capsys, config_dict
+):
     async def _ok(**_kwargs):
         return '{"n": 4}'
 
@@ -270,7 +279,7 @@ async def test_emit_prints_even_when_console_trace_off(monkeypatch, capsys):
     ctx = _Ctx()
     code = await aemit_structured_result(
         response=_finish(),
-        config_dict={"console_trace": False, "logging_format": "text"},
+        config_dict=config_dict,
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -284,9 +293,13 @@ async def test_emit_prints_even_when_console_trace_off(monkeypatch, capsys):
 
 
 @pytest.mark.asyncio
-async def test_emit_jsonl_does_not_print_a_line(monkeypatch, capsys):
+async def test_emit_jsonl_stream_keeps_stdout_free_of_raw_text(
+    monkeypatch, capsys
+):
+    """Сырая строка в потоке событий перестаёт быть jsonl."""
+
     async def _ok(**_kwargs):
-        return "only-in-event"
+        return '{"n": 4}'
 
     monkeypatch.setattr(
         "gc_cli.structured_output.arequest_auxiliary_completion_text",
@@ -305,8 +318,8 @@ async def test_emit_jsonl_does_not_print_a_line(monkeypatch, capsys):
     out, err = capsys.readouterr()
     assert out == ""
     assert err == ""
-    assert ctx.logger.infos[0][1]["answer"] == "only-in-event"
     assert ctx.logger.infos[0][1]["event"] == "final_answer"
+    assert ctx.logger.infos[0][1]["answer"] == '{"n": 4}'
 
 
 @pytest.mark.asyncio

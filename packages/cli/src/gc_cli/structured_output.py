@@ -134,8 +134,9 @@ async def aemit_structured_result(
 ) -> int:
     """Напечатать перефраз и записать ``final_answer``. 0 или 1.
 
-    В ``logging_format: jsonl`` отдельной строки в stdout нет: поток
-    событий уже занимает его, текст живёт в событии лога.
+    Текст всегда попадает в stdout. Если туда уже пишет jsonl-хендлер,
+    сырая строка сломала бы разбор по строкам: хватает события
+    ``final_answer``. Иначе печатается сам текст.
     """
     logger = getattr(ctx, "logger", None)
     try:
@@ -151,7 +152,7 @@ async def aemit_structured_result(
         if logger is not None:
             logger.warning("%s", exc)
         return 1
-    if not _stdout_is_event_stream(config_dict):
+    if not _stdout_is_jsonl_stream(config_dict):
         print(rendered)
     if logger is not None:
         logger.info(
@@ -179,8 +180,12 @@ def _no_outcome_message(terminal_outcome: str | None) -> str:
     return "structured-output-format: ход завершился без итога"
 
 
-def _stdout_is_event_stream(config_dict: dict[str, Any]) -> bool:
-    return (
-        str(config_dict.get("logging_format", "text")).strip().lower()
-        == "jsonl"
-    )
+def _stdout_is_jsonl_stream(config_dict: dict[str, Any]) -> bool:
+    """Хендлер jsonl на stdout, как в ``_build_jsonl_logger``.
+
+    Он вешается только при ``logging_format: jsonl`` и ``console_trace``.
+    """
+    logging_format = str(config_dict.get("logging_format", "text"))
+    if logging_format.strip().lower() != "jsonl":
+        return False
+    return bool(config_dict.get("console_trace", True))

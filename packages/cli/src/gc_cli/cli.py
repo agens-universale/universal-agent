@@ -507,8 +507,9 @@ async def arun_cli() -> int:
 
     Возвращает код выхода (0). Финальный ответ агента печатается в stdout
     при ``console_trace: true``; сырое значение доступно через ``cli.run()``.
-    С ``--structured-output-format`` наружу уходит перефраз ``turn_finish``,
-    и эта печать не зависит от ``console_trace`` (кроме ``logging_format: jsonl``).
+    С ``--structured-output-format`` перефраз всегда попадает в stdout.
+    Если stdout уже поток jsonl, это событие ``final_answer``, без сырой
+    строки. Иначе печатается сам текст.
     """
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
@@ -665,7 +666,7 @@ async def arun_cli() -> int:
         )
     finally:
         if ran and close_accounting_after:
-            await executor.aclose_run_accounting(console=False)
+            await executor.aclose_run_accounting()
         # Пул httpx привязан к этому loop — закрыть его надо до его остановки,
         # иначе на выходе получим «Event loop is closed» из деструктора.
         from gc_core.utils.async_http import aclose_clients
