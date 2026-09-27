@@ -1,0 +1,633 @@
+"""Цикл методов ACP на подставном агенте, без редактора и без модели."""
+
+import asyncio
+import importlib.metadata
+import json
+from types import SimpleNamespace
+
+from gc_acp.facade import AcpFacade
+from gc_core.thread_store import append_new_thread_messages
+
+
+class MemoryWriter:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, payload):
+        self.sent.append(payload)
+
+
+class GatedWriter(MemoryWriter):
+    """Задерживает result, чтобы отмена успела прийти после решения stopReason."""
+
+    def __init__(self):
+        super().__init__()
+        self.gate = False
+        self.reached = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def send(self, payload):
+        if self.gate and "result" in payload:
+            self.gate = False
+            self.reached.set()
+            await self.release.wait()
+        await super().send(payload)
+
+
+class FakeAgent:
+    def __init__(self):
+        self.executor = SimpleNamespace(
+            _ctx=SimpleNamespace(),
+            last_terminal_outcome=None,
+        )
+        self.last_answer = None
+        self.calls = []
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.hold = False
+        self.stopped = False
+        self.stop_calls = 0
+        self.closed = False
+        self.deltas = [("answer", "ok")]
+        self.answer = "ok"
+        self.outcome = None
+        self.error = None
+        self.cancel_raises = False
+
+    async def stream(self, prompt, **kwargs):
+        self.calls.append((prompt, dict(kwargs)))
+        self.started.set()
+        if self.hold:
+            await self.release.wait()
+        if self.stopped and self.cancel_raises:
+            raise asyncio.CancelledError()
+        if self.error is not None and (self.stopped or not self.hold):
+            raise self.error
+        if self.stopped:
+            self.last_answer = None
+            return
+        for item in self.deltas:
+            yield item
+        self.last_answer = self.answer
+        self.executor.last_terminal_outcome = self.outcome
+
+    def stop(self):
+        self.stop_calls += 1
+        self.stopped = True
+        self.release.set()
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _open(tmp_path, factory=None):
+    agents = []
+
+    async def default_factory(config, **kwargs):
+        agent = FakeAgent()
+        agent.seen_config = config
+        agent.factory_kwargs = kwargs
+        agents.append(agent)
+        return agent
+
+    writer = MemoryWriter()
+    facade = AcpFacade(
+        config={
+            "threads_data_path": str(tmp_path),
+            "os_backend": "local",
+        },
+        writer=writer,
+        agent_factory=factory or default_factory,
+    )
+    return facade, writer, agents
+
+
+def _line(method, params=None, request_id=1, *, notify=False):
+    body = {"jsonrpc": "2.0", "method": method}
+    if not notify:
+        body["id"] = request_id
+    if params is not None:
+        body["params"] = params
+    return json.dumps(body)
+
+
+def _by_id(writer, request_id):
+    found = [item for item in writer.sent if item.get("id") == request_id]
+    assert found, writer.sent
+    return found[-1]
+
+
+def _updates(writer):
+    return [
+        item["params"]["update"]
+        for item in writer.sent
+        if item.get("method") == "session/update"
+    ]
+
+
+async def _init(facade):
+    await facade.handle_line(_line("initialize", {"protocolVersion": 1}))
+
+
+async def _new(facade, cwd, request_id=2, **extra):
+    params = {"cwd": cwd, "mcpServers": []}
+    params.update(extra)
+    await facade.handle_line(_line("session/new", params, request_id))
+
+
+async def test_initialize_shape_and_blocks_session_until_then(tmp_path):
+    facade, writer, _agents = _open(tmp_path)
+    await facade.handle_line(
+        _line("session/new", {"cwd": "/work", "mcpServers": []}, 1)
+    )
+    assert _by_id(writer, 1)["error"]["code"] == -32600
+    await _init(facade)
+    result = _by_id(writer, 1)["result"]
+    # initialize переиспользует id 1 — берём последнее сообщение с result.
+    result = [item for item in writer.sent if item.get("id") == 1][-1][
+        "result"
+    ]
+    assert result["protocolVersion"] == 1
+    assert result["agentCapabilities"]["loadSession"] is True
+    assert result["agentCapabilities"]["promptCapabilities"] == {
+        "image": False,
+        "audio": False,
+        "embeddedContext": False,
+    }
+    assert result["agentCapabilities"]["mcpCapabilities"] == {
+        "http": False,
+        "sse": False,
+    }
+    assert result["agentInfo"]["name"] == "gc-acp"
+    assert result["agentInfo"]["version"] == importlib.metadata.version(
+        "gc-acp"
+    )
+    assert result["authMethods"] == []
+    assert "modes" not in result
+    assert "configOptions" not in result
+    await facade.shutdown()
+
+
+async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("think", "hmm"), ("tool", "{"), ("answer", "hi")]
+    agent.answer = "hi"
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [
+                    {"type": "text", "text": "see"},
+                    {
+                        "type": "resource_link",
+                        "name": "readme",
+                        "uri": "file:///tmp/readme",
+                    },
+                ],
+            },
+            3,
+        )
+    )
+    await agent.started.wait()
+    await facade._sessions[session_id].prompt_task
+    kinds = [item["sessionUpdate"] for item in _updates(writer)]
+    assert kinds == ["agent_thought_chunk", "agent_message_chunk"]
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
+    assert agent.calls[0][0] == "see\nreadme (file:///tmp/readme)"
+    assert agent.calls[0][1]["thread_id"] == session_id
+    assert agent.calls[0][1]["system"] == "acp"
+    assert agent.seen_config["launch_root"] == "/work/app"
+    assert "launch_root" not in facade._config
+    assert await agent.executor._ctx.ask_human("вопрос?") == ""
+
+    agent.deltas = [("answer", "ещё")]
+    agent.answer = "ещё"
+    agent.started = asyncio.Event()
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "дальше"}],
+            },
+            4,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert len(agents) == 1
+    assert agent.calls[1][1]["thread_id"] == session_id
+    assert _by_id(writer, 4)["result"]["stopReason"] == "end_turn"
+    await facade.shutdown()
+
+
+async def test_second_parallel_prompt_is_rejected(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agents[0].started.wait()
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "b"}],
+            },
+            4,
+        )
+    )
+    assert _by_id(writer, 4)["error"]["code"] == -32603
+    assert len(agents[0].calls) == 1
+    agents[0].release.set()
+    await facade._sessions[session_id].prompt_task
+    assert _by_id(writer, 3)["result"]["stopReason"] == "end_turn"
+    await facade.shutdown()
+
+
+async def test_cancel_notification_returns_cancelled_and_no_result_of_its_own(
+    tmp_path,
+):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agents[0].started.wait()
+    await facade.handle_line(
+        _line("session/cancel", {"sessionId": session_id}, notify=True)
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _by_id(writer, 3)["result"] == {"stopReason": "cancelled"}
+    assert [item.get("id") for item in writer.sent if "id" in item] == [
+        1,
+        2,
+        3,
+    ]
+    assert agents[0].stop_calls == 1
+    await facade.shutdown()
+
+
+async def test_cancel_request_and_exception_from_the_turn(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].hold = True
+    agents[0].error = RuntimeError("оборвалось")
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            9,
+        )
+    )
+    await agents[0].started.wait()
+    await facade.handle_line(_line("$/cancel_request", {"id": 9}, notify=True))
+    await facade._sessions[session_id].prompt_task
+    assert _by_id(writer, 9)["result"]["stopReason"] == "cancelled"
+    await facade.shutdown()
+
+
+async def test_late_cancel_does_not_rewrite_stop_reason(tmp_path):
+    facade, _writer, agents = _open(tmp_path)
+    writer = GatedWriter()
+    facade._writer = writer
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    writer.gate = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await writer.reached.wait()
+    await facade.handle_line(
+        _line("session/cancel", {"sessionId": session_id}, notify=True)
+    )
+    writer.release.set()
+    await facade._sessions[session_id].prompt_task
+    assert _by_id(writer, 3)["result"]["stopReason"] == "end_turn"
+    await facade.shutdown()
+
+
+async def test_image_does_not_start_a_turn(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "image", "data": "qq"}],
+            },
+            3,
+        )
+    )
+    assert _by_id(writer, 3)["error"]["code"] == -32602
+    assert agents[0].calls == []
+    await facade.shutdown()
+
+
+async def test_token_limit_and_final_answer_without_deltas(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].deltas = []
+    agents[0].answer = "итог"
+    agents[0].outcome = "token_limit"
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _updates(writer)[-1]["content"]["text"] == "итог"
+    assert _by_id(writer, 3)["result"]["stopReason"] == "max_tokens"
+    await facade.shutdown()
+
+
+async def test_run_error_is_internal(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].error = RuntimeError("boom")
+    agents[0].deltas = []
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert _by_id(writer, 3)["error"]["code"] == -32603
+    await facade.shutdown()
+
+
+async def test_ignored_client_fields_still_create_a_session(tmp_path, capsys):
+    facade, writer, _agents = _open(tmp_path)
+    await _init(facade)
+    await _new(
+        facade,
+        "/work",
+        mcpServers=[{"name": "from-client"}],
+        additionalDirectories=["/other"],
+    )
+    err = capsys.readouterr().err
+    assert "mcpServers" in err
+    assert "additionalDirectories" in err
+    assert "sessionId" in _by_id(writer, 2)["result"]
+    await facade.shutdown()
+
+
+async def test_relative_cwd_is_invalid_params(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await facade.handle_line(
+        _line("session/new", {"cwd": "relative", "mcpServers": []}, 2)
+    )
+    assert _by_id(writer, 2)["error"]["code"] == -32602
+    assert agents == []
+    await facade.shutdown()
+
+
+async def test_list_resume_load_after_restart(tmp_path):
+    facade, writer, _agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    append_new_thread_messages(
+        str(tmp_path),
+        "acp",
+        session_id,
+        [
+            {"role": "user", "content": "привет"},
+            {"role": "assistant", "content": "здравствуйте"},
+        ],
+        set(),
+    )
+    await facade.shutdown()
+
+    restored, writer2, agents2 = _open(tmp_path)
+    await _init(restored)
+    await restored.handle_line(_line("session/list", {}, 2))
+    sessions = _by_id(writer2, 2)["result"]["sessions"]
+    assert sessions[0]["sessionId"] == session_id
+    assert sessions[0]["cwd"] == "/work/app"
+    assert sessions[0]["title"] == "привет"
+    assert "nextCursor" not in _by_id(writer2, 2)["result"]
+
+    await restored.handle_line(
+        _line(
+            "session/load",
+            {"sessionId": "missing", "cwd": "/work/app", "mcpServers": []},
+            3,
+        )
+    )
+    assert _by_id(writer2, 3)["error"]["code"] == -32002
+    await restored.handle_line(
+        _line(
+            "session/resume",
+            {"sessionId": session_id, "cwd": "/other"},
+            4,
+        )
+    )
+    assert _by_id(writer2, 4)["error"]["code"] == -32002
+
+    await restored.handle_line(
+        _line(
+            "session/resume",
+            {"sessionId": session_id, "cwd": "/work/app"},
+            5,
+        )
+    )
+    assert _by_id(writer2, 5)["result"] == {}
+    assert len(agents2) == 1
+    await restored.handle_line(
+        _line(
+            "session/resume",
+            {"sessionId": session_id, "cwd": "/work/app"},
+            6,
+        )
+    )
+    assert len(agents2) == 1
+
+    await restored.handle_line(
+        _line(
+            "session/load",
+            {"sessionId": session_id, "cwd": "/work/app", "mcpServers": []},
+            7,
+        )
+    )
+    updates = _updates(writer2)
+    assert [item["sessionUpdate"] for item in updates] == [
+        "user_message_chunk",
+        "agent_message_chunk",
+    ]
+    assert updates[0]["content"]["text"] == "привет"
+    assert _by_id(writer2, 7)["result"] == {}
+    # Проигрыш кончился до ответа load.
+    load_at = next(
+        index
+        for index, item in enumerate(writer2.sent)
+        if item.get("id") == 7 and "result" in item
+    )
+    assert any(
+        item.get("method") == "session/update"
+        for item in writer2.sent[:load_at]
+    )
+    await restored.shutdown()
+
+
+async def test_delete_removes_acp_thread_and_repeat_is_not_found(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    append_new_thread_messages(
+        str(tmp_path),
+        "acp",
+        session_id,
+        [{"role": "user", "content": "hi"}],
+        set(),
+    )
+    cli_thread = tmp_path / "data_cli_foreign.jsonl"
+    cli_thread.write_text("{}\n", encoding="utf-8")
+    agents[0].hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agents[0].started.wait()
+    await facade.handle_line(
+        _line("session/delete", {"sessionId": session_id}, 4)
+    )
+    assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
+    assert _by_id(writer, 4)["result"] == {}
+    prompt_at = next(
+        index for index, item in enumerate(writer.sent) if item.get("id") == 3
+    )
+    delete_at = next(
+        index for index, item in enumerate(writer.sent) if item.get("id") == 4
+    )
+    assert prompt_at < delete_at
+    assert agents[0].closed is True
+    assert not (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
+    assert not (tmp_path / f"data_acp_{session_id}.jsonl").exists()
+    await facade.handle_line(
+        _line("session/delete", {"sessionId": session_id}, 5)
+    )
+    assert _by_id(writer, 5)["error"]["code"] == -32002
+    await facade.handle_line(
+        _line("session/delete", {"sessionId": "foreign"}, 6)
+    )
+    assert _by_id(writer, 6)["error"]["code"] == -32002
+    assert cli_thread.exists()
+    await facade.shutdown()
+
+
+async def test_close_drops_the_agent_and_keeps_files(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line("session/close", {"sessionId": session_id}, 3)
+    )
+    assert _by_id(writer, 3)["result"] == {}
+    assert agents[0].closed is True
+    assert (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
+    await facade.handle_line(
+        _line("session/close", {"sessionId": session_id}, 4)
+    )
+    assert _by_id(writer, 4)["error"]["code"] == -32602
+    await facade.shutdown()
+
+
+async def test_unknown_method_and_parse_error(tmp_path, capsys):
+    facade, writer, _agents = _open(tmp_path)
+    await _init(facade)
+    await facade.handle_line(_line("fs/read_text_file", {}, 2))
+    assert _by_id(writer, 2)["error"]["code"] == -32601
+    await facade.handle_line('{"id": 8, "method":')
+    assert _by_id(writer, 8)["error"]["code"] == -32700
+    sent_before = len(writer.sent)
+    await facade.handle_line("not-json")
+    assert len(writer.sent) == sent_before
+    assert "parse error" in capsys.readouterr().err
+    await facade.shutdown()
+
+
+async def test_shutdown_cancels_a_running_prompt(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].hold = True
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agents[0].started.wait()
+    await facade.shutdown()
+    assert agents[0].closed is True
+    assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
