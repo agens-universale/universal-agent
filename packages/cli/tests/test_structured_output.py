@@ -2,6 +2,7 @@
 
 import json
 import sys
+from types import SimpleNamespace
 
 import pytest
 from gc_cli.structured_output import (
@@ -12,9 +13,12 @@ from gc_cli.structured_output import (
     read_format_description,
     turn_outcome_text,
 )
+from gc_core.agent_executor import AgentExecutor
 from gc_core.config_modules.chat_completions import (
     DEFAULT_AUXILIARY_LLM_MAX_TOKENS,
 )
+from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
+from gc_core.usage.context import record_usage
 
 
 def _parse(argv, monkeypatch):
@@ -383,3 +387,122 @@ async def test_emit_failure_logs_raw_answer_then_rephrase_error(
     message, extra = ctx.logger.warnings[0]
     assert extra["event"] == "structured_output_failed"
     assert "backend down" in message
+
+
+class _RunLogger:
+    def __init__(self):
+        self.events = []
+
+    def info(self, msg, *args, extra=None):
+        if extra:
+            self.events.append(extra)
+
+    def warning(self, msg, *args, **kwargs):
+        return None
+
+
+class _Session:
+    def __init__(self):
+        self.meta = {}
+        self.backend_api_mode = "chat_completions"
+        self.batches = []
+
+    async def apersist_batch(self, messages, *, previous_response_id):
+        self.batches.append((list(messages), previous_response_id))
+
+
+def _executor_with_open_accounting():
+    """Учёт ещё не закрыт: токены хода уже в счёте, перефраз впереди."""
+    start = UsageAccount()
+    usage = UsageAccount()
+    usage.add(CATEGORY_MAIN, 100, 10)
+    state = SimpleNamespace(
+        usage=usage,
+        run_start_usage_meta=start.to_meta(),
+        last_run_usage=None,
+        user_intent_log=[],
+        current_user_intent=[],
+        user_turn_seq=0,
+        dialog_steps_offset=0,
+        last_main_prompt_tokens=None,
+        last_main_prompt_message_count=None,
+        shared=None,
+        previous_response_id="resp-1",
+        backend_api_mode="chat_completions",
+        discard_writes_after_stop=False,
+        stop_requested=False,
+    )
+    logger = _RunLogger()
+    ctx = SimpleNamespace(
+        config_dict={
+            "console_trace": True,
+            "logging_format": "text",
+            "model": "m",
+            "completions_url": "http://llm/v1/chat/completions",
+            "backend_request_timeout_sec": 30,
+        },
+        logger=logger,
+        auxiliary_llm=_Aux(),
+        model_router=None,
+    )
+    executor = AgentExecutor(ctx)
+    executor._state = state
+    executor._thread_session = _Session()
+    return executor
+
+
+@pytest.mark.asyncio
+async def test_rephrase_tokens_are_in_the_snapshot_taken_after_it(
+    monkeypatch, capsys
+):
+    """Перефраз сам пишет категорию, снимок учёта снимается уже после вызова."""
+
+    async def _headers(*_args, **_kwargs):
+        return {}
+
+    async def _policy(**_kwargs):
+        record_usage(
+            {"prompt_tokens": 17, "completion_tokens": 9},
+            "http://llm/v1/chat/completions",
+        )
+        return {"choices": [{"message": {"content": "форма"}}]}, {}
+
+    monkeypatch.setattr(
+        "gc_core.utils.llm_chat_client.acreate_call_headers",
+        _headers,
+    )
+    monkeypatch.setattr(
+        "gc_core.utils.llm_chat_client.arequest_chat_completions_with_policy",
+        _policy,
+    )
+    executor = _executor_with_open_accounting()
+    code = await aemit_structured_result(
+        response=_finish(),
+        config_dict=executor._ctx.config_dict,
+        ctx=executor._ctx,
+        state=executor.get_state(),
+        terminal_outcome=None,
+        format_text="json",
+    )
+    assert code == 0
+    await executor.aclose_run_accounting(console=False)
+
+    stored = executor._thread_session.meta["token_usage"]["by_category"]
+    assert stored[REQUEST_LABEL]["input"] == 17
+    assert stored[REQUEST_LABEL]["output"] == 9
+    assert stored[CATEGORY_MAIN]["input"] == 100
+    run = executor.get_state().last_run_usage
+    assert run.by_category[REQUEST_LABEL]["input"] == 17
+    assert run.by_category[REQUEST_LABEL]["output"] == 9
+    events = [
+        extra
+        for extra in executor._ctx.logger.events
+        if extra.get("event") == "run_usage"
+    ]
+    assert len(events) == 1
+    categories = events[0]["usage"]["categories"]
+    assert categories[REQUEST_LABEL]["input"] == 17
+    assert categories[REQUEST_LABEL]["output"] == 9
+    out, err = capsys.readouterr()
+    assert out == "форма\n"
+    assert err == ""
