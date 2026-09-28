@@ -291,6 +291,12 @@ def _sync_path(st: _SyncState, dotted: str, ctx: _SyncContext) -> None:
     if target is None:
         st.removed.append(dotted)
         return
+    if target != dotted and target in ctx.all_user_paths:
+        # Лист задан и старым, и новым именем (секция под обоими именами в
+        # одном файле): как у загрузчика, побеждает новое. Перенеся старое, sync
+        # затёр бы новое значение — и исход решал бы порядок секций в файле.
+        st.removed.append(dotted)
+        return
     if dotted in compat.RENAME_CONVERTERS:
         st.reenter.append(dotted)  # line-copy не умеет преобразовать значение
         return

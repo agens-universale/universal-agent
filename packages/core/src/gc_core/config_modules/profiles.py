@@ -17,7 +17,7 @@ from typing import Literal, Optional
 import yaml
 from pydantic import ValidationError
 
-from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.compat import apply_compat, manual_edit_fact
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.config_modules.model_registry import (
     RESERVED_WORDS,
@@ -266,7 +266,7 @@ def load_profile_document(
     # notices, с путём файла: иначе непонятно, в каком из документов ключ.
     for fact in apply_compat(raw):
         if notices is not None:
-            notices.append(f"{path}: {fact}")
+            notices.append(f"{path}: {manual_edit_fact(fact)}")
     # Пары «адрес+токен» — по СЫРОМУ документу и ДО схемы: слои сливаются позже,
     # и половина пары, наложенная на чужую полную, даёт корректный на вид итог,
     # пока токен базы уходит на адрес этого файла. Здесь же видно, чей это файл.

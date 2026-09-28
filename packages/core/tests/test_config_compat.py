@@ -224,6 +224,45 @@ def test_old_section_in_a_higher_layer_still_overrides_the_new_one_below(
     )
 
 
+def test_notice_for_a_file_sync_does_not_update_asks_to_edit_it_by_hand(
+    tmp_path, monkeypatch
+):
+    """`--sync-config` обновляет только пользовательский config.yml. Совет
+    «запустите его» в уведомлении про проектный слой вёл в тупик: команда
+    такой файл обновлять отказывается. Для него — править ключ вручную; для
+    пользовательского файла совет прежний."""
+    from gc_core.config import load_config
+    from gc_core.config_modules import env_vars
+    from gc_core.config_modules.env_vars import EnvVars
+
+    monkeypatch.setattr("sys.platform", "linux")
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path))
+
+    global_cfg = tmp_path / "global.yml"
+    global_cfg.write_text(
+        "backend:\n  api_mode: chat_completions\n"
+        "diff_tui:\n  trace_inline_max_lines: 30\n",
+        encoding="utf-8",
+    )
+    proj = tmp_path / "proj"
+    (proj / ".gc").mkdir(parents=True)
+    project_cfg = proj / ".gc" / "config.yml"
+    project_cfg.write_text(
+        "diff_tui:\n  replay_expanded_turns: 3\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(proj)
+
+    notices = load_config(str(global_cfg))["compat_notices"]
+
+    project_notes = [n for n in notices if str(project_cfg) in n]
+    base_notes = [n for n in notices if str(global_cfg) in n]
+    assert project_notes and base_notes
+    assert all(
+        "вручную" in n and "--sync-config" not in n for n in project_notes
+    )
+    assert all("--sync-config" in n for n in base_notes)
+
+
 def test_overrides_with_the_old_section_name_still_apply():
     """Перекрытие старым именем секции (`agent_overrides` сервера, `--ключ` CLI)
     доходит до новой секции — с уведомлением.

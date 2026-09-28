@@ -22,7 +22,7 @@ from pydantic import ValidationError
 
 from gc_core.config_modules import env_vars
 from gc_core.config_modules import env_vars as mcp_paths
-from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.compat import apply_compat, manual_edit_fact
 from gc_core.config_modules.env_interpolation import (
     resolve_env_only,
     resolve_env_placeholders,
@@ -164,7 +164,11 @@ def _candidate_profile_ref(
 
 
 def _compat_layer(
-    doc: Dict[str, Any], source: Any, notices: list[str]
+    doc: Dict[str, Any],
+    source: Any,
+    notices: list[str],
+    *,
+    synced_by_cli: bool = False,
 ) -> Dict[str, Any]:
     """Compat для слоя — до склейки, на копии документа. Для ВСЕХ слоёв, база тоже.
 
@@ -181,9 +185,15 @@ def _compat_layer(
     Копия — потому что документ может прийти от вызывающего (кандидат из формы
     настроек), и молча переписать его имена было бы сюрпризом. Факты — с путём
     файла, как у профилей: иначе непонятно, в каком из документов ключ.
+
+    ``synced_by_cli`` — файл, который обновляет ``gc-cli --sync-config``
+    (только пользовательский config.yml); про остальные уведомление советует
+    править ключ вручную.
     """
     doc = copy.deepcopy(doc)
     for fact in apply_compat(doc):
+        if not synced_by_cli:
+            fact = manual_edit_fact(fact)
         notices.append(f"{source}: {fact}")
     return doc
 
@@ -308,7 +318,9 @@ def _merge_layers(
     экономии этого самого чтения."""
     base_path = Path(path)
     notices = notices if notices is not None else []
-    raw_config = _compat_layer(raw_config, base_path, notices)
+    raw_config = _compat_layer(
+        raw_config, base_path, notices, synced_by_cli=True
+    )
 
     _candidates = {
         Path(p).resolve(): doc for p, doc in (candidates or {}).items()

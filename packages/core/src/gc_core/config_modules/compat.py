@@ -41,6 +41,15 @@ REMOVED: Dict[str, str] = {
 }
 
 _SYNC_HINT = "обновите config.yml: gc-cli --sync-config"
+# `--sync-config` обновляет только пользовательский config.yml: проектный слой,
+# config.local.yml и профили он не трогает, и совет запустить его про такой файл
+# вёл бы в тупик.
+_MANUAL_HINT = "переименуйте ключ в этом файле вручную"
+
+
+def manual_edit_fact(fact: str) -> str:
+    """Факт compat про файл, который ``--sync-config`` не обновляет."""
+    return fact.replace(_SYNC_HINT, _MANUAL_HINT)
 
 
 def _pop_path(d: Dict[str, Any], dotted: str) -> Tuple[bool, Any]:
