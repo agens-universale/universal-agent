@@ -30,6 +30,11 @@ from recommended_mcp.runtime.daemon_autostart import (
 )
 
 from gc_cli import arg_parser
+from gc_cli.structured_output import (
+    StructuredOutputError,
+    aemit_structured_result,
+    read_format_description,
+)
 
 
 def _ensure_project_gc_dir() -> None:
@@ -445,6 +450,83 @@ async def _run_service_command() -> int | None:
     return None
 
 
+def _load_structured_format() -> tuple[str | None, int | None]:
+    """Текст формы и код раннего выхода.
+
+    Второе значение не ``None`` — файл формы не годится, агент не стартует.
+    """
+    format_path = getattr(
+        arg_parser.run_args, "structured_output_format", None
+    )
+    if format_path is None:
+        return None, None
+    try:
+        return read_format_description(format_path), None
+    except StructuredOutputError as exc:
+        print(f"[gc] {exc}", file=sys.stderr)
+        return None, 1
+
+
+def _print_agent_response(
+    response: Any, config_dict: dict, ctx: RunContext
+) -> None:
+    formatted = format_json_for_display(response)
+    if human_console_enabled(config_dict) and formatted:
+        print(formatted)
+    if formatted:
+        ctx.logger.info(
+            "final_answer",
+            extra={"event": "final_answer", "answer": formatted},
+        )
+
+
+async def _emit_structured_if_requested(
+    *,
+    format_text: str | None,
+    response: Any,
+    config_dict: dict,
+    ctx: RunContext,
+    executor: AgentExecutor,
+) -> int | None:
+    if format_text is None:
+        return None
+    return await aemit_structured_result(
+        response=response,
+        config_dict=config_dict,
+        ctx=ctx,
+        state=executor.get_state(),
+        terminal_outcome=executor.last_terminal_outcome,
+        format_text=format_text,
+    )
+
+
+def _unconfigured_setup_exit(
+    config_arg: str | None,
+    config_dict: dict,
+    *,
+    just_created: bool,
+    format_text: str | None,
+) -> int | None:
+    """Код выхода, если дефолтный конфиг ещё не настроен.
+
+    ``None`` — конфиг указан явно или уже заполнен, агент стартует.
+    С ``--structured-output-format`` код 1: пустой stdout и 0 скрипт
+    принял бы за ответ. Без флага код 0, подсказка остаётся в stderr.
+    Вынесено из ``arun_cli``: вложенная ветка поднимала S3776 выше 15.
+    """
+    if config_arg is not None or not onboarding.is_unconfigured(config_dict):
+        return None
+    print(
+        onboarding.setup_guide(
+            str(user_config_path()), config_dict, just_created=just_created
+        ),
+        file=sys.stderr,
+    )
+    if format_text is not None:
+        return 1
+    return 0
+
+
 async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -452,6 +534,9 @@ async def arun_cli() -> int:
 
     Возвращает код выхода (0). Финальный ответ агента печатается в stdout
     при ``console_trace: true``; сырое значение доступно через ``cli.run()``.
+    С ``--structured-output-format`` перефраз всегда попадает в stdout.
+    Если stdout уже поток jsonl, это событие ``final_answer``, без сырой
+    строки. Иначе печатается сам текст.
     """
     _ensure_project_gc_dir()
     _ensure_user_skills_dir()
@@ -459,6 +544,10 @@ async def arun_cli() -> int:
     service_exit = await _run_service_command()
     if service_exit is not None:
         return service_exit
+
+    format_text, format_exit = _load_structured_format()
+    if format_exit is not None:
+        return format_exit
 
     config_arg = arg_parser.run_args.config
     profile_arg = getattr(arg_parser.run_args, "profile", None)
@@ -510,14 +599,14 @@ async def arun_cli() -> int:
 
     # gc-cli больше НЕ запускает визард автоматически — только по --init-config.
     # При неполном конфиге на дефолтном пути — пассивный текстовый хинт и выход.
-    if config_arg is None and onboarding.is_unconfigured(config_dict):
-        print(
-            onboarding.setup_guide(
-                str(user_config_path()), config_dict, just_created=just_created
-            ),
-            file=sys.stderr,
-        )
-        return 0
+    setup_exit = _unconfigured_setup_exit(
+        config_arg,
+        config_dict,
+        just_created=just_created,
+        format_text=format_text,
+    )
+    if setup_exit is not None:
+        return setup_exit
 
     # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
     # notice «агент обновлён» (ревью Task 4).
@@ -581,29 +670,46 @@ async def arun_cli() -> int:
     start_new_thread = arg_parser.run_args.new
 
     executor = AgentExecutor(ctx)
+    structured_exit: int | None = None
+    # Учёт закрывается один раз, после всего, что ещё прибавится к прогону.
+    # Сейчас это перефраз. Следующий такой шаг встаёт перед той же точкой.
+    close_accounting_after = format_text is not None
+    ran = False
     try:
         response = await executor.arun(
             user_parts,
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,
+            account_run=not close_accounting_after,
+        )
+        ran = True
+        structured_exit = await _emit_structured_if_requested(
+            format_text=format_text,
+            response=response,
+            config_dict=config_dict,
+            ctx=ctx,
+            executor=executor,
         )
     finally:
-        # Пул httpx привязан к этому loop — закрыть его надо до его остановки,
-        # иначе на выходе получим «Event loop is closed» из деструктора.
-        from gc_core.utils.async_http import aclose_clients
+        # Запись меты может бросить исключение. Если она стоит первой
+        # строкой finally, клиенты и демоны `-a` этого запуска не гасятся.
+        # Учёт — в своём try, уборка — во внутреннем finally.
+        try:
+            if ran and close_accounting_after:
+                await executor.aclose_run_accounting()
+        finally:
+            # Пул httpx привязан к этому loop — закрыть его надо до его
+            # остановки, иначе на выходе получим «Event loop is closed»
+            # из деструктора.
+            from gc_core.utils.async_http import aclose_clients
 
-        await aclose_clients()
-        if auto_mcp:
-            shutdown_mcp_daemons()
-    formatted = format_json_for_display(response)
-    if human_console_enabled(config_dict) and formatted:
-        print(formatted)
-    if formatted:
-        ctx.logger.info(
-            "final_answer",
-            extra={"event": "final_answer", "answer": formatted},
-        )
+            await aclose_clients()
+            if auto_mcp:
+                shutdown_mcp_daemons()
+    if structured_exit is not None:
+        return structured_exit
+    _print_agent_response(response, config_dict, ctx)
     return 0
 
 
