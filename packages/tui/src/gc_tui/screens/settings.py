@@ -708,20 +708,13 @@ class SettingsScreen(Screen):
             else base
         )
 
-    def _sync_footer(self) -> None:
-        """Перерисовать полосу подсказок (подсказка прокрутки зависит от высоты)."""
-        try:
-            self.query_one(_SEL_SET_FOOTER, Static).update(self._footer_text())
-        except NoMatches:
-            pass
-
     def on_resize(self, event: events.Resize) -> None:
         # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
         # ресайз, а не на каждый кадр секции (см. form_frame).
         cap_frame_height(self, _SEL_SET_SCROLL)
         # Влезет ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
         # называть ли клавишу прокрутки.
-        self.call_after_refresh(self._sync_footer)
+        self.call_after_refresh(self._refresh_footer)
 
     def _profile_footer(self, ed) -> str:
         """Футер под-вида профиля: строку даёт редактор (она позиционная), а
@@ -1440,7 +1433,7 @@ class SettingsScreen(Screen):
         self.query_one(_SEL_SET_FOOTER, Static).update(self._footer_text())
         # Влезет ли содержимое, видно только ПОСЛЕ раскладки — а от этого
         # зависит, называть ли клавишу прокрутки.
-        self.call_after_refresh(self._sync_footer)
+        self.call_after_refresh(self._refresh_footer)
         frame = self.query_one(_SEL_SET_FRAME, Vertical)
         title = self.query_one("#set-title", Static)
         # Снять фокус ДО remove: detached focused-виджет рвёт последующую доставку

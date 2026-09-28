@@ -35,8 +35,6 @@ class PostUpdateScreen(Screen):
     # Модальный экран (см. OnboardingScreen.BLOCKS_GLOBAL_NAV): показывается сразу после
     # апгрейда, до того как юзер дошёл до сессии. Гейт — TuiApp.check_action.
     BLOCKS_GLOBAL_NAV = True
-    # Миксин здесь ради одного — потолка рамки (Р19): курсор экрана по карточке
-    # не ходит, прокрутка у него своя, страницами (PgUp/PgDn контейнера).
 
     def __init__(self, *, upgrade, config: dict, config_path: str) -> None:
         super().__init__()
