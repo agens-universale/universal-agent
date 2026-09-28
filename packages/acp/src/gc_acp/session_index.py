@@ -60,6 +60,10 @@ class SessionIndex:
         self._write(record)
         return record
 
+    def thread_path(self, session_id: str) -> str:
+        """jsonl треда. Ядро дописывает сюда function_call по ходу."""
+        return _thread_data_path(self._threads_dir, session_id)
+
     def load(self, session_id: str) -> SessionFile | None:
         try:
             path = self._path(session_id)

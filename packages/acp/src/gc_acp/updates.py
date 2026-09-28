@@ -7,6 +7,8 @@ from typing import Any
 
 from gc_core.message_projection import project_assistant_text
 
+from gc_acp.tool_flow import report_from_record
+
 _ANSWER = "agent_message_chunk"
 _THINK = "agent_thought_chunk"
 _USER = "user_message_chunk"
@@ -85,13 +87,28 @@ def unseen_answer(sent: str, final: Any) -> str:
 
 
 def history_updates(messages: list[Any]) -> list[dict]:
-    """Проигрыш треда: у каждого сообщения свой messageId."""
+    """Проигрыш треда: у каждого сообщения свой messageId.
+
+    function_call встаёт карточкой между прозой. Результат тула — смена
+    статуса той же карточки, не текст ответа.
+    """
     rendered: list[dict] = []
+    seen: set[str] = set()
     for message in messages:
+        tool = _tool_report(message, seen)
+        if tool is not None:
+            rendered.append(tool)
+            continue
         chunk = _history_chunk(message)
         if chunk is not None:
             rendered.append(chunk)
     return rendered
+
+
+def _tool_report(message: Any, seen: set[str]) -> dict | None:
+    if not isinstance(message, dict):
+        return None
+    return report_from_record(message, seen)
 
 
 def _history_chunk(message: Any) -> dict | None:

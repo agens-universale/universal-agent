@@ -35,6 +35,7 @@ from gc_acp.protocol import (
 )
 from gc_acp.session_index import ACP_SYSTEM, SessionFile, SessionIndex
 from gc_acp.stop_reason import stop_reason
+from gc_acp.tool_flow import ToolFlow
 from gc_acp.updates import ChunkAssembler, history_updates
 
 logger = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ _RUN_FAILED = "agent run failed"
 _NO_SESSION = "Session not found"
 _CWD_MISMATCH = "cwd mismatch"
 _METHOD_NEW = "session/new"
+_TOOL_POLL_S = 0.05
 
 
 @dataclass
@@ -367,15 +369,43 @@ class AcpFacade:
     async def _stream_prompt(
         self, live: LiveSession, assembler: ChunkAssembler, text: str
     ) -> None:
+        flow = ToolFlow(self._index.thread_path(live.session_id))
+        stop = asyncio.Event()
+        watch = asyncio.create_task(self._watch_tools(live, flow, stop))
+        try:
+            await self._forward_deltas(live, assembler, text)
+        finally:
+            stop.set()
+            await watch
+            await self._emit_tools(live, flow)
+        if live.cancel_requested:
+            return
+        final = getattr(live.agent, "last_answer", None)
+        for update in assembler.flush_answer(final):
+            await self._notify(live.session_id, update)
+
+    async def _forward_deltas(
+        self, live: LiveSession, assembler: ChunkAssembler, text: str
+    ) -> None:
         async for kind, chunk in live.agent.stream(
             text, thread_id=live.session_id, system=ACP_SYSTEM
         ):
             for update in assembler.feed(kind, chunk):
                 await self._notify(live.session_id, update)
-        if live.cancel_requested:
-            return
-        final = getattr(live.agent, "last_answer", None)
-        for update in assembler.flush_answer(final):
+
+    async def _watch_tools(
+        self, live: LiveSession, flow: ToolFlow, stop: asyncio.Event
+    ) -> None:
+        """Пока тул исполняется, stream() не отдаёт дельт. Карточка — из файла."""
+        while not stop.is_set():
+            await self._emit_tools(live, flow)
+            try:
+                await asyncio.wait_for(stop.wait(), _TOOL_POLL_S)
+            except TimeoutError:
+                continue
+
+    async def _emit_tools(self, live: LiveSession, flow: ToolFlow) -> None:
+        for update in flow.poll():
             await self._notify(live.session_id, update)
 
     async def _close_prompt(self, live: LiveSession, request_id: Any) -> None:

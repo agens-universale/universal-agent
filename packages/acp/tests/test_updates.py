@@ -52,6 +52,46 @@ def test_flush_after_think_uses_a_new_answer_id():
     assert tail[0]["content"]["text"] == "ответ"
 
 
+def test_history_places_a_tool_call_between_prose():
+    updates = history_updates(
+        [
+            {"role": "assistant", "content": "смотрю"},
+            {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "c1",
+                "arguments": '{"path": "src/a.py"}',
+            },
+            {
+                "type": "function_call",
+                "name": "turn_finish",
+                "call_id": "fin",
+                "arguments": "{}",
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "c1",
+                "output": '{"ok": false, "error": "нет файла"}',
+            },
+            {"role": "assistant", "content": "готово"},
+        ]
+    )
+    assert [item["sessionUpdate"] for item in updates] == [
+        "agent_message_chunk",
+        "tool_call",
+        "tool_call_update",
+        "agent_message_chunk",
+    ]
+    assert updates[1]["toolCallId"] == "c1"
+    assert updates[1]["status"] == "in_progress"
+    assert updates[1]["title"] == "fs_read_file(path='src/a.py')"
+    assert updates[2] == {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "c1",
+        "status": "failed",
+    }
+
+
 def test_history_skips_tool_role_and_non_text_parts():
     updates = history_updates(
         [

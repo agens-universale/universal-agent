@@ -49,6 +49,8 @@ class FakeAgent:
         self.stop_calls = 0
         self.closed = False
         self.deltas = [("answer", "ok")]
+        self.lead: list[tuple[str, str]] = []
+        self.on_pause = None
         self.answer = "ok"
         self.outcome = None
         self.error = None
@@ -57,6 +59,10 @@ class FakeAgent:
     async def stream(self, prompt, **kwargs):
         self.calls.append((prompt, dict(kwargs)))
         self.started.set()
+        for item in self.lead:
+            yield item
+        if self.on_pause is not None:
+            self.on_pause()
         if self.hold:
             await self.release.wait()
         if self.stopped and self.cancel_raises:
@@ -115,6 +121,51 @@ def _by_id(writer, request_id):
     found = [item for item in writer.sent if item.get("id") == request_id]
     assert found, writer.sent
     return found[-1]
+
+
+def _append_call(path, name, call_id, arguments):
+    _append_record(
+        path,
+        {
+            "type": "function_call",
+            "name": name,
+            "call_id": call_id,
+            "arguments": json.dumps(arguments),
+        },
+    )
+
+
+def _append_output(path, call_id, output):
+    _append_record(
+        path,
+        {
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": json.dumps(output),
+        },
+    )
+
+
+def _append_record(path, payload):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(
+        {"type": "message", "payload": payload}, ensure_ascii=False
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(line + "\n")
+
+
+async def _wait_for_tool(writer, call_id):
+    for _ in range(50):
+        seen = [
+            item.get("toolCallId")
+            for item in _updates(writer)
+            if item.get("sessionUpdate") == "tool_call_update"
+        ]
+        if call_id in seen:
+            return
+        await asyncio.sleep(0.02)
+    raise AssertionError(writer.sent)
 
 
 def _updates(writer):
@@ -222,6 +273,54 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     assert len(agents) == 1
     assert agent.calls[1][1]["thread_id"] == session_id
     assert _by_id(writer, 4)["result"]["stopReason"] == "end_turn"
+    await facade.shutdown()
+
+
+async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    path = tmp_path / f"data_acp_{session_id}.jsonl"
+    _append_call(path, "fs_read_file", "old", {"path": "old.py"})
+    agent = agents[0]
+    agent.lead = [("answer", "смотрю")]
+    agent.hold = True
+    agent.deltas = [("answer", "готово")]
+    agent.answer = "готово"
+
+    def write_call():
+        _append_call(path, "fs_read_file", "call-1", {"path": "src/a.py"})
+        _append_call(path, "turn_finish", "fin", {})
+        _append_output(path, "call-1", {"ok": True, "total_lines": 3})
+
+    agent.on_pause = write_call
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await _wait_for_tool(writer, "call-1")
+    agent.release.set()
+    await facade._sessions[session_id].prompt_task
+    flow = [
+        (item["sessionUpdate"], item.get("toolCallId"), item.get("status"))
+        for item in _updates(writer)
+    ]
+    assert flow == [
+        ("agent_message_chunk", None, None),
+        ("tool_call", "call-1", "in_progress"),
+        ("tool_call_update", "call-1", "completed"),
+        ("agent_message_chunk", None, None),
+    ]
+    titles = [item.get("title") for item in _updates(writer)]
+    assert titles[1] == "fs_read_file(path='src/a.py')"
+    assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
     await facade.shutdown()
 
 
