@@ -28,7 +28,9 @@ def _positive_int(raw: Any, default: int) -> int:
     return value if value > 0 else default
 
 
-def _fs_tools_section(config: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
+def _fs_tools_section(
+    config: Optional[Mapping[str, Any]],
+) -> Mapping[str, Any]:
     raw = (config or {}).get("fs_tools")
     return raw if isinstance(raw, Mapping) else {}
 
@@ -37,7 +39,9 @@ def fs_read_max_bytes(config: Optional[Mapping[str, Any]] = None) -> int:
     """Max on-disk size for full-file read / content search."""
     fs = _fs_tools_section(config)
     if "max_read_bytes" in fs:
-        return _positive_int(fs.get("max_read_bytes"), DEFAULT_FS_READ_MAX_BYTES)
+        return _positive_int(
+            fs.get("max_read_bytes"), DEFAULT_FS_READ_MAX_BYTES
+        )
     return DEFAULT_FS_READ_MAX_BYTES
 
 
@@ -45,17 +49,23 @@ def fs_mutate_max_bytes(config: Optional[Mapping[str, Any]] = None) -> int:
     """Max on-disk size before mutate tools load the file into memory."""
     fs = _fs_tools_section(config)
     if "max_mutate_bytes" in fs:
-        return _positive_int(fs.get("max_mutate_bytes"), DEFAULT_FS_MUTATE_MAX_BYTES)
+        return _positive_int(
+            fs.get("max_mutate_bytes"), DEFAULT_FS_MUTATE_MAX_BYTES
+        )
     return DEFAULT_FS_MUTATE_MAX_BYTES
 
 
-def _find_in_files_section(config: Optional[Mapping[str, Any]]) -> Mapping[str, Any]:
+def _find_in_files_section(
+    config: Optional[Mapping[str, Any]],
+) -> Mapping[str, Any]:
     fs = _fs_tools_section(config)
     raw = fs.get("find_in_files")
     return raw if isinstance(raw, Mapping) else {}
 
 
-def fs_find_in_files_max_bytes(config: Optional[Mapping[str, Any]] = None) -> int:
+def fs_find_in_files_max_bytes(
+    config: Optional[Mapping[str, Any]] = None,
+) -> int:
     """Unified file-size cap for ``fs_find_in_files`` (file or directory mode).
 
     Reads ``fs_tools.find_in_files.max_file_bytes`` (default 16 MiB). Does NOT
@@ -64,7 +74,9 @@ def fs_find_in_files_max_bytes(config: Optional[Mapping[str, Any]] = None) -> in
     """
     fif = _find_in_files_section(config)
     if "max_file_bytes" in fif:
-        return _positive_int(fif.get("max_file_bytes"), DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES)
+        return _positive_int(
+            fif.get("max_file_bytes"), DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
+        )
     return DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
 
 
@@ -75,10 +87,7 @@ def file_too_large_error(
     operation: str | None = None,
 ) -> dict[str, Any]:
     if operation:
-        message = (
-            f"File is too large for {operation}: {actual_bytes} bytes "
-            f"(max {max_bytes} bytes)."
-        )
+        message = f"File is too large for {operation}: {actual_bytes} bytes (max {max_bytes} bytes)."
     else:
         message = f"File is {actual_bytes} bytes; limit is {max_bytes} bytes."
     return {

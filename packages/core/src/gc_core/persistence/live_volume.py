@@ -3,6 +3,7 @@
 Ключи ``live_history_chars`` / ``live_msg_count`` пишет thread_store при
 append / compact / discard; TUI только читает (см. docs_md/tui/meta-ownership).
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Sequence

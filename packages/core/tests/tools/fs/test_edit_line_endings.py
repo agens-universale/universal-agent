@@ -1,12 +1,14 @@
 """Edit tools match anchors across CRLF/LF and write replacements in the file's style."""
+
 import json
 
 import pytest
-
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
-from gc_core.tools.fs.edit_line_endings import collect_literal_matches, resolve_edit_line_endings
+from gc_core.tools.fs.edit_line_endings import (
+    collect_literal_matches,
+    resolve_edit_line_endings,
+)
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
 
 CRLF_TEXT = "def a():\r\n    return 1\r\n\r\ndef b():\r\n    return 2\r\n"
@@ -19,6 +21,7 @@ CRLF_REPLACE = LF_REPLACE.replace("\n", "\r\n")
 
 
 # --- policy: resolve_edit_line_endings ----------------------------------------
+
 
 def test_literal_match_is_kept_as_is():
     res = resolve_edit_line_endings(CRLF_TEXT, CRLF_ANCHOR, CRLF_REPLACE)
@@ -45,7 +48,9 @@ def test_replace_follows_the_matched_anchor_style():
 
 
 def test_single_line_anchor_replace_follows_file_style():
-    res = resolve_edit_line_endings(CRLF_TEXT, "    return 1", "    return 1\n    pass")
+    res = resolve_edit_line_endings(
+        CRLF_TEXT, "    return 1", "    return 1\n    pass"
+    )
     assert res.search == "    return 1"
     assert res.replace == "    return 1\r\n    pass"
 
@@ -74,17 +79,22 @@ def test_mixed_file_literal_lf_island_keeps_lf_replace():
 
 # --- both tools ---------------------------------------------------------------
 
+
 def _apply_edits(path, search, replace, **kwargs):
     return json.loads(
         with_local_ctx(ApplyFileEdits)(
-            path=str(path), edits=[{"search": search, "replace": replace}], **kwargs
+            path=str(path),
+            edits=[{"search": search, "replace": replace}],
+            **kwargs,
         )
     )
 
 
 def _search_replace(path, search, replace, **kwargs):
     return json.loads(
-        with_local_ctx(SearchAndReplace)(path=str(path), search=search, replace=replace, **kwargs)
+        with_local_ctx(SearchAndReplace)(
+            path=str(path), search=search, replace=replace, **kwargs
+        )
     )
 
 
@@ -147,7 +157,14 @@ def test_apply_file_edits_occurrence_all_counts_normalized_anchor(tmp_path):
     res = json.loads(
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
-            edits=[{"search": "x\ny\n", "replace": "z\n", "occurrence": "all", "expected_matches": 2}],
+            edits=[
+                {
+                    "search": "x\ny\n",
+                    "replace": "z\n",
+                    "occurrence": "all",
+                    "expected_matches": 2,
+                }
+            ],
         )
     )
     assert res["ok"] is True and res["total_replaced"] == 2
@@ -157,17 +174,24 @@ def test_apply_file_edits_occurrence_all_counts_normalized_anchor(tmp_path):
 def test_search_and_replace_dry_run_diff_uses_file_style(tmp_path):
     p = tmp_path / "f.py"
     p.write_bytes(CRLF)
-    res = _search_replace(p, "    return 1\n", "    return 10\n", dry_run=True, return_diff=True)
+    res = _search_replace(
+        p, "    return 1\n", "    return 10\n", dry_run=True, return_diff=True
+    )
     assert res["ok"] is True and res["applied"] is False
-    assert "-    return 1\r\n" in res["diff"] and "+    return 10\r\n" in res["diff"]
+    assert (
+        "-    return 1\r\n" in res["diff"]
+        and "+    return 10\r\n" in res["diff"]
+    )
     assert p.read_bytes() == CRLF
 
 
 # --- ревью F1: цель замены — EOL найденной строки; оба стиля на смешанном файле;
 # --- стиль строки матча; честный отказ при смене концов строк; флаг на каждом edit_result ---
 
-ISLAND_TEXT = "x\r\ny\r\nISLAND\nz\r\n"          # CRLF-доминантный файл с LF-островом
-MINOR_REGION_TEXT = "x\r\ny\r\nA\nB\nz\r\n"      # целевой регион целиком в минорном стиле
+ISLAND_TEXT = "x\r\ny\r\nISLAND\nz\r\n"  # CRLF-доминантный файл с LF-островом
+MINOR_REGION_TEXT = (
+    "x\r\ny\r\nA\nB\nz\r\n"  # целевой регион целиком в минорном стиле
+)
 
 
 def test_single_line_anchor_replace_follows_the_matched_line_eol():
@@ -178,7 +202,9 @@ def test_single_line_anchor_replace_follows_the_matched_line_eol():
 
 
 def test_anchor_in_dominant_style_still_finds_a_minor_style_region():
-    res = resolve_edit_line_endings(MINOR_REGION_TEXT, "A\r\nB\r\n", "A\r\nC\r\nB\r\n")
+    res = resolve_edit_line_endings(
+        MINOR_REGION_TEXT, "A\r\nB\r\n", "A\r\nC\r\nB\r\n"
+    )
     assert res.search == "A\nB\n"
     assert res.replace == "A\nC\nB\n"
     assert res.eol_adapted is True
@@ -190,13 +216,17 @@ def test_single_line_anchor_at_eof_without_newline_uses_the_previous_line_eol():
 
 
 @pytest.mark.parametrize("run", TOOLS)
-def test_intentional_eol_change_is_refused_with_a_pointer_to_the_write_tool(tmp_path, run):
+def test_intentional_eol_change_is_refused_with_a_pointer_to_the_write_tool(
+    tmp_path, run
+):
     p = tmp_path / "f.txt"
     p.write_bytes(b"a\r\nb\r\nc\r\n")
     res = run(p, "a\r\nb\r\n", "a\nb\n")
     assert res["ok"] is False
     assert res["error"]["type"] == "line_ending_change_refused"
-    assert "line endings" in res["message"] and "fs_write_file" in res["message"]
+    assert (
+        "line endings" in res["message"] and "fs_write_file" in res["message"]
+    )
     assert p.read_bytes() == b"a\r\nb\r\nc\r\n"
 
 
@@ -228,7 +258,9 @@ def test_plain_noop_batch_keeps_ok_true_without_a_hint(tmp_path):
 def test_collect_literal_matches_starts_from_resolved_first_index():
     content = "x\r\ny\r\nx\r\ny\r\n"
     resolved = resolve_edit_line_endings(content, "x\ny\n", "z\n")
-    matches = collect_literal_matches(content, resolved.search, resolved.first_index)
+    matches = collect_literal_matches(
+        content, resolved.search, resolved.first_index
+    )
     assert resolved.first_index == 0
     assert [m[0] for m in matches] == [0, 6]
     assert collect_literal_matches(content, resolved.search, -1) == []
@@ -240,7 +272,9 @@ def test_crlf_near_miss_still_returns_suggestions(tmp_path, run):
     p.write_bytes(b"def compute_total():\r\n    return 1\r\n")
     res = run(p, "def compute_totaal():\n    return 1\n", "x")
     assert res["ok"] is False
-    suggestions = res.get("suggestions") or res["edit_results"][0]["suggestions"]
+    suggestions = (
+        res.get("suggestions") or res["edit_results"][0]["suggestions"]
+    )
     assert suggestions
     assert suggestions[0]["line"] == 1
     assert "compute_total" in suggestions[0]["text"]

@@ -1,22 +1,23 @@
 """Shared chat/completions client helpers for controller-level modules."""
 
+import functools
 import json
 from typing import Any, Dict, List, Optional
 
 from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
-from gc_core.request_backend_policy import arequest_chat_completions_with_policy
+from gc_core.request_backend_policy import (
+    arequest_chat_completions_with_policy,
+)
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.usage.account import category_for_request_label
+from gc_core.usage.context import usage_scope
 from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
-    backend_override_value,
     acreate_call_headers,
+    backend_override_value,
     resolve_network_params,
 )
-from gc_core.usage.account import category_for_request_label
-from gc_core.usage.context import usage_scope
-from gc_core.usage.account import category_for_request_label
-from gc_core.usage.context import usage_scope
 
 # РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
 # «модель привязки недоступна → повтор активной моделью». `auto_judge` в таблице
@@ -54,34 +55,41 @@ def _positive_int(raw: object, *, default: int) -> int:
         n = int(raw)
         return n if n >= 1 else default
     if isinstance(raw, str):
-        s = raw.strip().lower().replace(" ", "").replace("_", "")
-        if not s:
-            return default
-        if s.endswith("k"):
-            try:
-                n = int(float(s[:-1]) * 1000)
-            except ValueError:
-                return default
-            return n if n >= 1 else default
-        try:
-            n = int(float(s))
-        except ValueError:
-            return default
-        return n if n >= 1 else default
+        return _positive_int_from_str(raw, default)
     return default
 
 
-def _deep_merge_dicts(base: Dict[str, Any], overlay: Dict[str, Any]) -> Dict[str, Any]:
+def _positive_int_from_str(raw: str, default: int) -> int:
+    """Строковая форма: "8192", "32_768", "16k"; пусто/не число/< 1 → default."""
+    s = raw.strip().lower().replace(" ", "").replace("_", "")
+    if not s:
+        return default
+    try:
+        n = int(float(s[:-1]) * 1000) if s.endswith("k") else int(float(s))
+    except ValueError:
+        return default
+    return n if n >= 1 else default
+
+
+def _deep_merge_dicts(
+    base: Dict[str, Any], overlay: Dict[str, Any]
+) -> Dict[str, Any]:
     result = dict(base)
     for key, value in overlay.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
             result[key] = _deep_merge_dicts(result[key], value)
         else:
             result[key] = value
     return result
 
 
-def _log_completion_response_meta(*, logger: Any, label: str, res: Any) -> None:
+def _log_completion_response_meta(
+    *, logger: Any, label: str, res: Any
+) -> None:
     """Полный сырой ответ backend chat/completions."""
     if logger is None:
         return
@@ -116,7 +124,9 @@ def log_llm_prompt_and_result(
     if logger is None:
         return
     system_part = "\n\n".join(
-        str(m.get("content", "")) for m in messages if m.get("role") == "system"
+        str(m.get("content", ""))
+        for m in messages
+        if m.get("role") == "system"
     )
     user_part = "\n\n".join(
         str(m.get("content", "")) for m in messages if m.get("role") == "user"
@@ -127,7 +137,9 @@ def log_llm_prompt_and_result(
         system_part,
         user_part,
     )
-    logger.info("summary_llm_result label=%s output=\n%s", label, output_text or "")
+    logger.info(
+        "summary_llm_result label=%s output=\n%s", label, output_text or ""
+    )
 
 
 def apply_payload_overrides(
@@ -174,7 +186,9 @@ def _build_chat_completion_payload(
         "model": model,
         "messages": messages,
     }
-    use_max_tokens_param = backend_override_value(resolved, "use_max_tokens_param")
+    use_max_tokens_param = backend_override_value(
+        resolved, "use_max_tokens_param"
+    )
     if use_max_tokens_param is NO_BACKEND_OVERRIDE:
         use_max_tokens_param = cfg.get("use_max_tokens_param", False)
     if bool(use_max_tokens_param):
@@ -234,11 +248,19 @@ async def _asend_chat_completion_text(
     )
     headers = await acreate_call_headers(state, ctx, resolved=resolved)
     url = resolved.url if resolved is not None else cfg["completions_url"]
-    (verify, cert, use_retry, timeout, config_proxy,
-     retry_embedded_choice_errors) = resolve_network_params(cfg, resolved)
+    (
+        verify,
+        cert,
+        use_retry,
+        timeout,
+        config_proxy,
+        retry_embedded_choice_errors,
+    ) = resolve_network_params(cfg, resolved)
 
     usage_category = category_for_request_label(request_label)
-    with usage_scope(getattr(state, "usage", None), usage_category, "chat_completions"):
+    with usage_scope(
+        getattr(state, "usage", None), usage_category, "chat_completions"
+    ):
         res, _call_data = await arequest_chat_completions_with_policy(
             payload_factory=_payload_factory,
             initial_max_tokens=max_tokens,
@@ -259,7 +281,9 @@ async def _asend_chat_completion_text(
         )
     logger = getattr(ctx, "logger", None)
     if logger is not None and full_log_backend:
-        _log_completion_response_meta(logger=logger, label=request_label, res=res)
+        _log_completion_response_meta(
+            logger=logger, label=request_label, res=res
+        )
     text = (
         res.get("choices", [{}])[0].get("message", {}).get("content")
         if isinstance(res, dict)
@@ -292,16 +316,17 @@ async def arequest_chat_completion_text(
         raise ValueError("max_tokens must be >= 1")
 
     router = getattr(ctx, "model_router", None)
+    send = functools.partial(
+        _asend_chat_completion_text,
+        ctx=ctx,
+        state=state,
+        messages=messages,
+        max_tokens=max_tokens,
+        request_label=request_label,
+        payload_overrides=payload_overrides,
+    )
     if router is None:
-        return await _asend_chat_completion_text(
-            ctx=ctx,
-            state=state,
-            messages=messages,
-            max_tokens=max_tokens,
-            request_label=request_label,
-            payload_overrides=payload_overrides,
-            resolved=None,
-        )
+        return await send(resolved=None)
 
     failed_alias: Optional[str] = None
     primary_exc: Optional[Exception] = None
@@ -314,33 +339,22 @@ async def arequest_chat_completion_text(
         primary_exc = exc
     else:
         try:
-            return await _asend_chat_completion_text(
-                ctx=ctx,
-                state=state,
-                messages=messages,
-                max_tokens=max_tokens,
-                request_label=request_label,
-                payload_overrides=payload_overrides,
-                resolved=resolved,
-            )
+            return await send(resolved=resolved)
         except Exception as exc:
             if resolved.alias is None or not is_model_unavailable_error(exc):
                 raise
             failed_alias = resolved.alias
-            newly_failed_alias = resolved.alias  # трипнем ПОСЛЕ резолва активной ниже
+            newly_failed_alias = (
+                resolved.alias
+            )  # трипнем ПОСЛЕ резолва активной ниже
             primary_exc = exc
 
     # Определяем активную модель ДО trip() свежего провала: иначе, если консьюмер
     # без привязки уже резолвился в ту же самую активную модель, резолв "main" для
     # сравнения ниже упал бы AliasCircuitOpenError раньше времени.
-    try:
-        active_resolved = router.resolve("main")
-    except AliasCircuitOpenError as open_exc:
-        active_resolved = open_exc.resolved
+    active_resolved = _resolve_active_model(router)
     if newly_failed_alias is not None:
-        router.breaker.trip(
-            newly_failed_alias, str(primary_exc).strip()[:300] or primary_exc.__class__.__name__
-        )
+        router.breaker.trip(newly_failed_alias, _breaker_reason(primary_exc))
 
     if active_resolved.alias == failed_alias:
         # Деградировать некуда: привязка и есть активная модель — то же самое
@@ -359,20 +373,21 @@ async def arequest_chat_completion_text(
         enabled=bool(getattr(ctx, "is_tui", False)),
     )
     try:
-        return await _asend_chat_completion_text(
-            ctx=ctx,
-            state=state,
-            messages=messages,
-            max_tokens=max_tokens,
-            request_label=request_label,
-            payload_overrides=payload_overrides,
-            resolved=active_resolved,
-        )
+        return await send(resolved=active_resolved)
     except Exception as exc:
-        if active_resolved.alias is not None and is_model_unavailable_error(exc):
-            router.breaker.trip(
-                active_resolved.alias, str(exc).strip()[:300] or exc.__class__.__name__
-            )
+        if active_resolved.alias is not None and is_model_unavailable_error(
+            exc
+        ):
+            router.breaker.trip(active_resolved.alias, _breaker_reason(exc))
         raise
 
 
+def _resolve_active_model(router: Any):
+    try:
+        return router.resolve("main")
+    except AliasCircuitOpenError as open_exc:
+        return open_exc.resolved
+
+
+def _breaker_reason(exc: BaseException) -> str:
+    return str(exc).strip()[:300] or exc.__class__.__name__

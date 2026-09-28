@@ -2,7 +2,10 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.project_memory import compaction
-from gc_core.project_memory.compaction import CompactionResult, SOFT_APPEND_INPUT_LIMIT_CHARS
+from gc_core.project_memory.compaction import (
+    SOFT_APPEND_INPUT_LIMIT_CHARS,
+    CompactionResult,
+)
 from gc_testkit import run_coro
 
 
@@ -24,7 +27,9 @@ def test_compact_text_happy_path():
         "gc_core.summarize.llm.arequest_chat_completion_text",
         return_value="compressed body",
     ) as mocked:
-        res = run_coro(compaction.acompact_text("very long original text", ctx))
+        res = run_coro(
+            compaction.acompact_text("very long original text", ctx)
+        )
     assert res == CompactionResult(
         ok=True, text="compressed body", error_type=None, error_message=None
     )
@@ -117,13 +122,16 @@ def test_compact_text_uses_prompt_template_as_system():
     ctx = _make_ctx()
     captured = {}
 
-    def fake_call(*, ctx, state, messages, max_tokens, request_label, **kwargs):
+    def fake_call(
+        *, ctx, state, messages, max_tokens, request_label, **kwargs
+    ):
         captured["messages"] = messages
         captured["label"] = request_label
         return "compressed"
 
     with patch(
-        "gc_core.summarize.llm.arequest_chat_completion_text", side_effect=fake_call
+        "gc_core.summarize.llm.arequest_chat_completion_text",
+        side_effect=fake_call,
     ):
         run_coro(compaction.acompact_text("text body", ctx))
 

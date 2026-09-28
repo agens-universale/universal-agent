@@ -1,11 +1,13 @@
 """TUI: runtime LLM error → счётчик в карточке, футере и /notices."""
+
 from __future__ import annotations
 
 import pytest
-
 from gc_core.runtime_notices import clear_runtime_notices, push_runtime_notice
 from gc_core.startup_notices import Notice
-from gc_tui.services.notices_ui import WARN_GLYPH   # в значке вариационный селектор
+from gc_tui.services.notices_ui import (
+    WARN_GLYPH,
+)  # в значке вариационный селектор
 
 
 @pytest.mark.asyncio
@@ -15,15 +17,20 @@ async def test_runtime_notice_appears_in_card(tmp_path):
 
     clear_runtime_notices()
     cfg = {"model": "M"}
-    async with TuiApp(threads_dir=str(tmp_path / "t"), config=cfg).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "t"), config=cfg
+    ).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()
         assert "/notices" not in str(scr._mcp_status_row.render())
 
-        push_runtime_notice(Notice(
-            "warning", "llm_error_400",
-            "Ошибка LLM (судья): HTTP 400. reasoning_effort invalid",
-        ))
+        push_runtime_notice(
+            Notice(
+                "warning",
+                "llm_error_400",
+                "Ошибка LLM (судья): HTTP 400. reasoning_effort invalid",
+            )
+        )
         pilot.app.refresh_notices_indicators()
         card = str(scr._mcp_status_row.render())
         assert f"{WARN_GLYPH} 1" in card
@@ -37,19 +44,25 @@ async def test_runtime_notice_appears_in_card(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_runtime_notice_footer_on_sessions_disappears_after_view(tmp_path):
+async def test_runtime_notice_footer_on_sessions_disappears_after_view(
+    tmp_path,
+):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.notices import NoticesScreen
     from gc_tui.screens.sessions import SessionsScreen
 
     clear_runtime_notices()
-    async with TuiApp(threads_dir=str(tmp_path / "t"), config={"model": "M"}).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "t"), config={"model": "M"}
+    ).run_test() as pilot:
         push_runtime_notice(Notice("warning", "w1", "тест"))
         await pilot.press("ctrl+s")
         await pilot.pause()
         assert isinstance(pilot.app.screen, SessionsScreen)
-        footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
+        footer_right = str(
+            pilot.app.screen.query_one("#sessions-footer-right").render()
+        )
         assert f"{WARN_GLYPH} 1" in footer_right
 
         await pilot.press("f4")
@@ -59,12 +72,15 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(tmp_path)
         await pilot.press("escape")
         await pilot.pause()
         assert isinstance(pilot.app.screen, SessionsScreen)
-        footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
+        footer_right = str(
+            pilot.app.screen.query_one("#sessions-footer-right").render()
+        )
         assert "⚠" not in footer_right
         assert len(pilot.app.collect_notices()) == 1
 
         push_runtime_notice(Notice("warning", "w2", "тест2"))
         pilot.app.refresh_notices_indicators()
-        footer_right = str(pilot.app.screen.query_one("#sessions-footer-right").render())
+        footer_right = str(
+            pilot.app.screen.query_one("#sessions-footer-right").render()
+        )
         assert f"{WARN_GLYPH} 1" in footer_right
-

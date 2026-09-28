@@ -1,8 +1,10 @@
 """Классификация ошибок бэкенда для восстановления в цикле агента."""
+
 from __future__ import annotations
 
-import httpx
 from typing import NamedTuple
+
+import httpx
 
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.chat_completions_stream import BackendStreamError
@@ -39,7 +41,9 @@ class EmbeddedChoiceError(Exception):
     (finish_reason='error' с пустым выбором: транзиентный сбой → ретраить).
     Оба дают status_code=None, но раскладываются по-разному."""
 
-    def __init__(self, message, *, status_code=None, metadata=None, raw_code=None):
+    def __init__(
+        self, message, *, status_code=None, metadata=None, raw_code=None
+    ):
         super().__init__(message)
         self.status_code = status_code
         self.metadata = metadata
@@ -71,7 +75,7 @@ HTTP_TRANSPORT_ERRORS = (
 )
 
 
-def http_status_code(exc: BaseException) -> "int | None":
+def http_status_code(exc: BaseException) -> int | None:
     """Код HTTP-ошибки независимо от транспорта; None — это не HTTP-ошибка."""
     if isinstance(exc, HTTP_STATUS_ERRORS):
         return getattr(getattr(exc, "response", None), "status_code", None)
@@ -198,9 +202,11 @@ _KNOWN_FINISH_KINDS = {
 
 
 class FinishDecision(NamedTuple):
-    accept: bool   # принять payload в историю (не крашиться/не ретраить транспорт)
+    accept: (
+        bool  # принять payload в историю (не крашиться/не ретраить транспорт)
+    )
     unknown: bool  # finish_reason незнакомый → залогировать warning
-    kind: str      # stop | tool_calls | length | blocked | unknown
+    kind: str  # stop | tool_calls | length | blocked | unknown
 
 
 def _finish_reason_key(finish_reason) -> str | None:
@@ -230,7 +236,7 @@ def finish_prevents_text_final(finish_reason) -> bool:
     решение text_response в run_agent (даже при text_answer_mode=allow).
     """
     kind = classify_finish_kind(finish_reason)
-    return kind == FINISH_KIND_BLOCKED or kind == FINISH_KIND_LENGTH
+    return kind in (FINISH_KIND_BLOCKED, FINISH_KIND_LENGTH)
 
 
 def normalize_finish_reason(
@@ -258,7 +264,9 @@ def normalize_finish_reason(
             accept=True, unknown=False, kind=_KNOWN_FINISH_KINDS[key]
         )
     if has_content or has_tool_calls or has_reasoning:
-        return FinishDecision(accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN)
+        return FinishDecision(
+            accept=True, unknown=True, kind=FINISH_KIND_UNKNOWN
+        )
     return FinishDecision(accept=False, unknown=True, kind=FINISH_KIND_UNKNOWN)
 
 
@@ -295,7 +303,7 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         # отсутствует вовсе) уходит на общий путь ниже и даёт False: гасить алиас
         # на всю сессию по неизвестной причине нельзя.
         status_code = exc.status_code
-    elif isinstance(exc, HTTP_TRANSPORT_ERRORS):
+    elif isinstance(exc, HTTP_TRANSPORT_ERRORS):  # noqa: SIM103  # ветка с обоснованием в цепочке elif
         # Только транспортные сбои (таймаут, обрыв, DNS), а не любой сбой
         # клиента: от битого url или лишних редиректов предохранитель гасил бы
         # алиас на всю сессию, хотя модель жива. У httpx это ровно

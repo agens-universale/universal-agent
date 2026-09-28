@@ -12,11 +12,10 @@
 Здесь проверяется свойство, а не наличие кода: сервер отвечает редиректом на
 запрещённый адрес, и тул обязан отказать, не сходив туда.
 """
+
 import json
 
 import httpx
-import pytest
-
 from gc_core.tools.exec.download_file import DownloadFile
 from gc_core.tools.exec.fetch_url import FetchUrl
 from gc_core.tools.exec.simple_fetch_url import SimpleFetchUrl
@@ -51,7 +50,7 @@ def _redirecting(monkeypatch, module, visited: list):
             return httpx.Response(200, content=b"SECRET")
         return httpx.Response(302, headers={"Location": FORBIDDEN})
 
-    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+    factory = lambda **kw: httpx.AsyncClient(
         transport=httpx.MockTransport(_dispatch)
     )
     monkeypatch.setattr(async_http, "get_async_client", factory)
@@ -76,7 +75,9 @@ def test_fetch_url_refuses_a_redirect_into_a_blocked_address(monkeypatch):
     factory = _redirecting(monkeypatch, mod, visited)
     _patch_tool_globals(monkeypatch, factory, FetchUrl.acall)
 
-    tool = CallableTool(with_local_ctx(FetchUrl, config_dict=_policy_config())._tool)
+    tool = CallableTool(
+        with_local_ctx(FetchUrl, config_dict=_policy_config())._tool
+    )
     out = json.loads(tool(url="https://example.com/start"))
 
     assert out["ok"] is False, out
@@ -93,7 +94,9 @@ def test_simple_fetch_url_refuses_the_same_redirect(monkeypatch):
     factory = _redirecting(monkeypatch, mod, visited)
     _patch_tool_globals(monkeypatch, factory, SimpleFetchUrl.acall)
 
-    tool = CallableTool(with_local_ctx(SimpleFetchUrl, config_dict=_policy_config())._tool)
+    tool = CallableTool(
+        with_local_ctx(SimpleFetchUrl, config_dict=_policy_config())._tool
+    )
     out = json.loads(tool(url="https://example.com/start"))
 
     assert out["ok"] is False, out
@@ -107,11 +110,14 @@ def test_download_file_refuses_the_same_redirect(monkeypatch, tmp_path):
     launch_root.mkdir()
     visited: list = []
     factory = _redirecting(monkeypatch, mod, visited)
-    _patch_tool_globals(monkeypatch, factory, DownloadFile.acall,
-                        DownloadFile._http_get_bytes)
+    _patch_tool_globals(
+        monkeypatch, factory, DownloadFile.acall, DownloadFile._http_get_bytes
+    )
 
     tool = CallableTool(
-        with_local_ctx(DownloadFile, config_dict=_policy_config(launch_root))._tool
+        with_local_ctx(
+            DownloadFile, config_dict=_policy_config(launch_root)
+        )._tool
     )
     out = json.loads(tool(url="https://example.com/start", filename="x.pdf"))
 
@@ -123,8 +129,12 @@ def test_all_three_share_one_redirect_loop():
     """Копий правила быть не должно: две расходятся молча, третья дырявая."""
     import inspect
 
-    from gc_core.tools.exec import download_file, fetch_url, simple_fetch_url
-    from gc_core.tools.exec import redirect_policy
+    from gc_core.tools.exec import (
+        download_file,
+        fetch_url,
+        redirect_policy,
+        simple_fetch_url,
+    )
 
     for module in (fetch_url, simple_fetch_url, download_file):
         src = inspect.getsource(module)
@@ -161,7 +171,11 @@ def test_all_three_share_one_redirect_ceiling():
     # Своих чисел у тулов быть не должно: разъезжаются они молча.
     for module in (fetch_url, simple_fetch_url, download_file):
         src = inspect.getsource(module)
-        for literal in ("max_redirects=5", "max_redirects=10", "_MAX_REDIRECTS = "):
+        for literal in (
+            "max_redirects=5",
+            "max_redirects=10",
+            "_MAX_REDIRECTS = ",
+        ):
             assert literal not in src, (
                 f"{module.__name__} завёл собственный потолок: {literal}"
             )
@@ -179,7 +193,7 @@ def _looping(monkeypatch, module, hops: int):
             302, headers={"Location": f"https://example.com/hop{seen['n']}"}
         )
 
-    factory = lambda **kw: httpx.AsyncClient(  # noqa: E731
+    factory = lambda **kw: httpx.AsyncClient(
         transport=httpx.MockTransport(_dispatch)
     )
     monkeypatch.setattr(async_http, "get_async_client", factory)
@@ -199,7 +213,9 @@ def test_a_redirect_loop_is_not_reported_as_a_policy_block(monkeypatch):
     factory, seen = _looping(monkeypatch, mod, hops=30)
     _patch_tool_globals(monkeypatch, factory, FetchUrl.acall)
 
-    tool = CallableTool(with_local_ctx(FetchUrl, config_dict=_policy_config())._tool)
+    tool = CallableTool(
+        with_local_ctx(FetchUrl, config_dict=_policy_config())._tool
+    )
     out = json.loads(tool(url="https://example.com/start"))
 
     assert out["ok"] is False, out

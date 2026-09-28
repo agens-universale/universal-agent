@@ -1,7 +1,9 @@
 import pytest
 
+
 def _as_coro(fn):
     """Обернуть синхронный двойник в корутину."""
+
     async def _wrapped(*a, **kw):
         return fn(*a, **kw)
 
@@ -9,16 +11,16 @@ def _as_coro(fn):
 
 
 def _trace_texts(scr):
-    from textual.widgets import Static
     return [str(w.render()) for w in scr.query("#trace Static")]
 
 
 @pytest.mark.asyncio
 async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_tui.app import TuiApp
+
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(
         sd,
@@ -36,12 +38,20 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
     class _Fake:
         async def arun(self, messages, **kw):
             import threading
-            self._evt = threading.Event(); self._evt.wait(timeout=2.0)
-        def stop_run(self):
-            if getattr(self, "_evt", None): self._evt.set()
-        def add_message(self, m): pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+            self._evt = threading.Event()
+            self._evt.wait(timeout=2.0)
+
+        def stop_run(self):
+            if getattr(self, "_evt", None):
+                self._evt.set()
+
+        def add_message(self, m):
+            pass
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -55,6 +65,7 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
         # маркер ПОСЛЕ реплики: порядок по mount-индексу виджетов в #trace
         from gc_tui.widgets.user_reply import UserReplyContainer
         from textual.widgets import Static
+
         trace = scr.query_one("#trace")
         kids = list(trace.children)
         reply = scr.query_one(UserReplyContainer)
@@ -85,9 +96,10 @@ async def test_inline_marker_loaded_after_reply(tmp_path, monkeypatch):
 @pytest.mark.asyncio
 async def test_marker_not_found_when_unavailable(tmp_path, monkeypatch):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_core.tools.skills import skill_delivery as sd
     from gc_core.tools.skills import registry as sreg
+    from gc_core.tools.skills import skill_delivery as sd
+    from gc_tui.app import TuiApp
+
     monkeypatch.setattr(sreg, "get_skills_registry", lambda cfg: object())
     monkeypatch.setattr(
         sd,
@@ -105,12 +117,20 @@ async def test_marker_not_found_when_unavailable(tmp_path, monkeypatch):
     class _Fake:
         async def arun(self, messages, **kw):
             import threading
-            self._evt = threading.Event(); self._evt.wait(timeout=2.0)
-        def stop_run(self):
-            if getattr(self, "_evt", None): self._evt.set()
-        def add_message(self, m): pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+            self._evt = threading.Event()
+            self._evt.wait(timeout=2.0)
+
+        def stop_run(self):
+            if getattr(self, "_evt", None):
+                self._evt.set()
+
+        def add_message(self, m):
+            pass
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
         scr = pilot.app.screen

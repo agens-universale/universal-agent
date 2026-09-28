@@ -3,6 +3,7 @@
 Технический слой — без Textual, без UI, без бизнес-логики. Чистые функции +
 модель данных ChipStore. Подпись плашки всегда однострочна (нет \\n) — это
 гарантирует, что спан плашки не пересекает строки (см. token_spans)."""
+
 from __future__ import annotations
 
 from gc_tui.services.plural import lines_word
@@ -57,7 +58,9 @@ class ChipStore:
         return {cid: chip_label(cid, t) for cid, t in self._chips.items()}
 
 
-def token_spans(text: str, store: ChipStore) -> list[tuple[int, int, int, int]]:
+def token_spans(
+    text: str, store: ChipStore
+) -> list[tuple[int, int, int, int]]:
     """Границы плашек в тексте: список (chip_id, row, col_start, col_end).
     Подпись однострочна → спан в пределах одной строки."""
     spans: list[tuple[int, int, int, int]] = []

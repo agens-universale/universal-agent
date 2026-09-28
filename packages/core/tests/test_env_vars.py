@@ -1,7 +1,6 @@
 from pathlib import Path
 
 import pytest
-
 from gc_core.config_modules.env_vars import EnvVars
 
 
@@ -10,11 +9,19 @@ def clear_gc_env(monkeypatch):
     """Очистить env-переменные реестра для гермитичности тестов."""
     for key in (
         "GC_HOME",
-        "GC_STATE_DIR", "GC_CONFIG_DIR", "GC_CACHE_DIR", "GC_DATA_DIR",
-        "XDG_STATE_HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME",
+        "GC_STATE_DIR",
+        "GC_CONFIG_DIR",
+        "GC_CACHE_DIR",
+        "GC_DATA_DIR",
+        "XDG_STATE_HOME",
+        "XDG_CONFIG_HOME",
+        "XDG_CACHE_HOME",
+        "XDG_DATA_HOME",
         "MCP_DEBUG",
         "SERVER_CONFIG_PATH",
-        "SWARM_AGENTMD_PATH", "SWARM_THREADS_DIR", "SWARM_SKILLS_DIR",
+        "SWARM_AGENTMD_PATH",
+        "SWARM_THREADS_DIR",
+        "SWARM_SKILLS_DIR",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -69,11 +76,21 @@ def test_mcp_debug_default_false(clear_gc_env):
     assert e.mcp_debug is False
 
 
-@pytest.mark.parametrize("raw,expected", [
-    ("1", True), ("true", True), ("TRUE", True), ("yes", True),
-    ("y", True), ("on", True),
-    ("0", False), ("false", False), ("", False), ("garbage", False),
-])
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("1", True),
+        ("true", True),
+        ("TRUE", True),
+        ("yes", True),
+        ("y", True),
+        ("on", True),
+        ("0", False),
+        ("false", False),
+        ("", False),
+        ("garbage", False),
+    ],
+)
 def test_mcp_debug_truthy_strings(clear_gc_env, monkeypatch, raw, expected):
     monkeypatch.setenv("MCP_DEBUG", raw)
     e = EnvVars()
@@ -124,7 +141,10 @@ from gc_core.config_modules.env_vars import project_slug
 
 
 def test_project_slug_windows_path_double_dash():
-    assert project_slug("D:\\dev\\sber\\background-agent") == "d--dev-sber-background-agent"
+    assert (
+        project_slug("D:\\dev\\sber\\background-agent")
+        == "d--dev-sber-background-agent"
+    )
 
 
 def test_project_slug_posix_path_keeps_leading_dash():
@@ -150,8 +170,8 @@ def test_project_slug_uses_cwd_when_no_arg(monkeypatch, tmp_path):
     assert len(slug) > 0
 
 
-from gc_core.config_modules.env_vars import gc_paths
 from gc_core.config_modules import env_vars as env_vars_module
+from gc_core.config_modules.env_vars import gc_paths
 
 
 def _isolate_env(monkeypatch, **overrides):
@@ -196,7 +216,9 @@ def test_gc_paths_windows_dot_gc_defaults(clear_gc_env, monkeypatch):
     assert paths["data"] == gc
 
 
-def test_gc_paths_xdg_state_home_respected_on_unix(clear_gc_env, monkeypatch, tmp_path):
+def test_gc_paths_xdg_state_home_respected_on_unix(
+    clear_gc_env, monkeypatch, tmp_path
+):
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path))
     _isolate_env(monkeypatch)
@@ -227,7 +249,9 @@ def test_gc_paths_pointed_state_dir_overrides_gc_home(
 ):
     monkeypatch.setattr("sys.platform", "linux")
     custom_state = tmp_path / "state"
-    _isolate_env(monkeypatch, gc_home=tmp_path / "home", gc_state_dir=custom_state)
+    _isolate_env(
+        monkeypatch, gc_home=tmp_path / "home", gc_state_dir=custom_state
+    )
     paths = gc_paths()
     assert paths["state"] == custom_state
     # config/cache/data — от GC_HOME
@@ -238,7 +262,9 @@ def test_gc_paths_pointed_state_dir_overrides_gc_home(
 from gc_core.config_modules.env_vars import effective_config_dir
 
 
-def test_effective_config_dir_default_when_usable(clear_gc_env, monkeypatch, tmp_path):
+def test_effective_config_dir_default_when_usable(
+    clear_gc_env, monkeypatch, tmp_path
+):
     monkeypatch.setattr("sys.platform", "linux")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     _isolate_env(monkeypatch)

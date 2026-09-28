@@ -28,13 +28,14 @@ sync- и async-копией, — это дыра, которую никто не
             return dual_wrap(func, _flow)
         return decorator
 """
+
 from __future__ import annotations
 
 import asyncio
 import functools
 import inspect
-from typing import Any, Callable, Generator
 import threading
+from typing import Any, Callable, Generator
 
 
 def _start(flow: Generator) -> tuple[bool, Any]:
@@ -66,7 +67,9 @@ _GUARD_SLOTS = threading.BoundedSemaphore(32)
 
 
 async def _off_loop(
-    fn: Callable[..., Any], *args: Any, on_abandoned: Callable[[], None] | None = None
+    fn: Callable[..., Any],
+    *args: Any,
+    on_abandoned: Callable[[], None] | None = None,
 ) -> Any:
     """Исполнить блокирующую часть гварда вне loop — на своём потоке.
 
@@ -146,10 +149,14 @@ class OffLoop:
     Ctrl+C на вопросе `y/n` рушит весь прогон вместо вежливого «не разрешаю».
     """
 
-    __slots__ = ("fn", "args", "on_interrupt")
+    __slots__ = ("args", "fn", "on_interrupt")
 
-    def __init__(self, fn: Callable[..., Any], *args: Any,
-                 on_interrupt: Any = _NO_INTERRUPT) -> None:
+    def __init__(
+        self,
+        fn: Callable[..., Any],
+        *args: Any,
+        on_interrupt: Any = _NO_INTERRUPT,
+    ) -> None:
         self.fn = fn
         self.args = args
         self.on_interrupt = on_interrupt
@@ -174,7 +181,9 @@ class _Failed:
 _INITIAL = object()
 
 
-async def _await_off_loop(request: "OffLoop", *, on_abandoned: Callable[[], None]) -> Any:
+async def _await_off_loop(
+    request: OffLoop, *, on_abandoned: Callable[[], None]
+) -> Any:
     """Дождаться блокирующего вызова; для ожидания человека — с перехватом Ctrl+C.
 
     Перехват НАРОЧНО узкий и временный: он живёт только пока ждут человека и
@@ -213,14 +222,34 @@ async def _await_off_loop(request: "OffLoop", *, on_abandoned: Callable[[], None
             )
             if task in done:
                 return task.result()
-            task.cancel()                  # человека ждать больше не нужно
+            task.cancel()  # человека ждать больше не нужно
             return request.on_interrupt
     finally:
         if not interrupted.done():
             interrupted.cancel()
 
 
-async def _drive_async(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
+async def _aserve_request(flow: Generator, request: Any) -> Any:
+    """Выполнить запрос тела (корутина или off-loop вызов); сбой — как ``_Failed``."""
+    try:
+        if isinstance(request, AwaitOnCaller):
+            return await request.make_coro()
+        return await _await_off_loop(
+            request, on_abandoned=lambda: _close_quietly(flow)
+        )
+    except asyncio.CancelledError:
+        # Отмену в тело НЕ бросаем: его `except Exception` её не
+        # поймает, но проглотить её могло бы чужое `except
+        # BaseException`, и вызов остался бы неотменяемым.
+        _close_quietly(flow)
+        raise
+    except Exception as exc:  # отдаём в точку запроса
+        return _Failed(exc)
+
+
+async def _drive_async(
+    flow: Generator, first: Any = _INITIAL
+) -> tuple[bool, Any]:
     """Крутить тело, обслуживая его запросы, до точки вызова тула или конца.
 
     Возвращает ``(нужен_ли_вызов_тула, результат)``.
@@ -228,31 +257,13 @@ async def _drive_async(flow: Generator, first: Any = _INITIAL) -> tuple[bool, An
     outcome: Any = first
     while True:
         try:
-            request = next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            request = (
+                next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            )
         except StopIteration as stop:
             return False, stop.value
-        if isinstance(request, AwaitOnCaller):
-            try:
-                outcome = await request.make_coro()
-            except asyncio.CancelledError:
-                # Отмену в тело НЕ бросаем: его `except Exception` её не
-                # поймает, но проглотить её могло бы чужое `except
-                # BaseException`, и вызов остался бы неотменяемым.
-                _close_quietly(flow)
-                raise
-            except Exception as exc:  # noqa: BLE001 — отдаём в точку запроса
-                outcome = _Failed(exc)
-            continue
-        if isinstance(request, OffLoop):
-            try:
-                outcome = await _await_off_loop(
-                    request, on_abandoned=lambda: _close_quietly(flow)
-                )
-            except asyncio.CancelledError:
-                _close_quietly(flow)
-                raise
-            except Exception as exc:  # noqa: BLE001
-                outcome = _Failed(exc)
+        if isinstance(request, (AwaitOnCaller, OffLoop)):
+            outcome = await _aserve_request(flow, request)
             continue
         return True, None
 
@@ -264,7 +275,9 @@ def _drive_sync(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
     outcome: Any = first
     while True:
         try:
-            request = next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            request = (
+                next(flow) if outcome is _INITIAL else _step(flow, outcome)
+            )
         except StopIteration as stop:
             return False, stop.value
         if isinstance(request, (AwaitOnCaller, OffLoop)):
@@ -273,7 +286,7 @@ def _drive_sync(flow: Generator, first: Any = _INITIAL) -> tuple[bool, Any]:
                     outcome = run_coro_blocking(request.make_coro())
                 else:
                     outcome = request.fn(*request.args)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 outcome = _Failed(exc)
             continue
         return True, None
@@ -301,8 +314,7 @@ def _forbid_second_call(again: bool) -> None:
     """
     if again:
         raise RuntimeError(
-            "тело гварда отдало управление дважды: у него должен быть ровно "
-            "один yield на путь исполнения"
+            "тело гварда отдало управление дважды: у него должен быть ровно один yield на путь исполнения"
         )
 
 
@@ -333,6 +345,7 @@ def dual_wrap(
     через ``await``, и запуск процесса остаётся асинхронным.
     """
     if inspect.iscoroutinefunction(func):
+
         @functools.wraps(func)
         async def awrapper(*args: Any, **kwargs: Any) -> Any:
             gen = flow(*args, **kwargs)

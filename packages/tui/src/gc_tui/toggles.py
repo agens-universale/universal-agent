@@ -3,6 +3,7 @@
 Конфиг — единственный источник истины; палитра — витрина. Действующее значение
 ключа считает его владелец (tui/session_settings.py) — здесь только читаем, чтобы
 витрина и сравнение с умолчанием не разошлись правилами."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -11,7 +12,15 @@ from typing import Any, Callable, Dict, Optional, Tuple
 from rich.text import Text
 
 from gc_tui import palette as _pal
-from gc_tui.session_settings import SESSION_KEYS, effective_finish_gate_mode, effective_text_answer_mode
+from gc_tui.session_settings import (
+    SESSION_KEYS,
+    effective_finish_gate_mode,
+    effective_text_answer_mode,
+)
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_TUI_FINISH_GATE_MODE = "tui.finish_gate_mode"
+_TUI_TEXT_ANSWER_MODE = "tui.text_answer_mode"
 
 
 def apply_finish_gate_mode(cfg: Dict[str, Any]) -> None:
@@ -30,13 +39,13 @@ def apply_finish_gate_mode(cfg: Dict[str, Any]) -> None:
 # --- /rigor: пресет как витрина над двумя ключами (спека §2, §6) --------------
 # Пресет НЕ хранится (производная). Пара — те же два существующих ключа сессии/
 # глобала; SESSION_KEYS их не расширяет — /rigor лишь ставит и резолвит.
-RIGOR_KEYS = ("tui.finish_gate_mode", "tui.text_answer_mode")
+RIGOR_KEYS = (_TUI_FINISH_GATE_MODE, _TUI_TEXT_ANSWER_MODE)
 PRESET_CUSTOM = "custom"
 
 PRESETS: Dict[str, Dict[str, str]] = {
-    "low":    {"tui.finish_gate_mode": "off",   "tui.text_answer_mode": "allow"},
-    "medium": {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"},
-    "high":   {"tui.finish_gate_mode": "on",    "tui.text_answer_mode": "deny"},
+    "low": {_TUI_FINISH_GATE_MODE: "off", _TUI_TEXT_ANSWER_MODE: "allow"},
+    "medium": {_TUI_FINISH_GATE_MODE: "smart", _TUI_TEXT_ANSWER_MODE: "judge"},
+    "high": {_TUI_FINISH_GATE_MODE: "on", _TUI_TEXT_ANSWER_MODE: "deny"},
 }
 
 
@@ -138,35 +147,37 @@ def level_value_hint(app: Any, value: str) -> str:
     пометки вместо модели+роли (канон §12.1); фоллбэк уровня — честная стрелка
     «light → default» вместо модели притворного light-слота."""
     from gc_core.model_router import AliasCircuitOpenError
+
     router = app.display_router()
     try:
         resolved = router.resolve_level(value)
     except AliasCircuitOpenError as exc:
-        return f"{exc.alias} недоступна (предохранитель) · переключите /profiles"
+        return (
+            f"{exc.alias} недоступна (предохранитель) · переключите /profiles"
+        )
     except ValueError:
-        return f'уровень "{value}" не резолвится · настройте slots в config.yml'
+        return (
+            f'уровень "{value}" не резолвится · настройте slots в config.yml'
+        )
     if router.force_legacy:
         return f"{resolved.model} · --model: уровни отключены на этот запуск"
     if router.registry_empty():
         return f"{resolved.model} · легаси: уровни появятся с реестром моделей"
     role = LEVEL_ROLE_TEXT.get(value, "")
     if resolved.source.startswith("фоллбэк "):
-        chain = resolved.source[len("фоллбэк "):]
+        chain = resolved.source[len("фоллбэк ") :]
         return f"{resolved.alias} ({chain}) · {role}"
     return f"{resolved.alias} · {role}"
 
 
 # --- /profiles: trackless-строка, циклический выбор файла-профиля -----------
-_PROFILE_EMPTY_HINT = (
-    "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · "
-    "пример — в /settings → Профили"
-)
+_PROFILE_EMPTY_HINT = "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · пример — в /settings → Профили"
 _LEVEL_ORDER = {"light": 0, "default": 1, "max": 2}
 
 
 def _profile_roots(app: Any) -> list:
-    from pathlib import Path
     import os
+    from pathlib import Path
 
     from gc_core.config import resolve_config_path
     from gc_core.config_modules.profiles import profile_roots
@@ -186,7 +197,10 @@ def profile_values(app: Any) -> Tuple[ToggleValue, ...]:
     """Алфавитный объединённый список профилей (спека §3.1/§12.1): тёзка — одна
     позиция (`discover_profiles` уже разрешает коллизию в пользу проектного).
     Цвет/hint не несут смысла здесь — trackless, `hint_provider` динамический."""
-    return tuple(ToggleValue(name, "", _pal.INK) for name in sorted(_discovered_profiles(app)))
+    return tuple(
+        ToggleValue(name, "", _pal.INK)
+        for name in sorted(_discovered_profiles(app))
+    )
 
 
 def _profile_slots_summary(cfg: Dict[str, Any]) -> str:
@@ -239,7 +253,9 @@ def profile_value_hint(app: Any, value: str) -> str:
     if summary:
         parts.append(summary)
     if ref is not None:
-        parts.append("проектный" if ref.root_kind == "project" else "глобальный")
+        parts.append(
+            "проектный" if ref.root_kind == "project" else "глобальный"
+        )
     note = _profile_mcp_rebuild_note(app, value)
     if note:
         parts.append(note)
@@ -248,7 +264,9 @@ def profile_value_hint(app: Any, value: str) -> str:
 
 
 PROFILE_NONE_VALUE = "без профиля"
-_PROFILE_NONE_HINT = "настройки берутся только из config.yml — файл профиля не подмешивается"
+_PROFILE_NONE_HINT = (
+    "настройки берутся только из config.yml — файл профиля не подмешивается"
+)
 # Тот же литерал, что и активный маркер секции «Профили» /settings
 # (`_profile_row_text`/`_none_row_text` в tui/screens/settings.py) — статус
 # пикера красится тем же цветом (OK), правая колонка ArgPicker (задача 10,
@@ -285,6 +303,7 @@ def _profile_verdict_key(app: Any, name: str) -> Optional[tuple]:
     решение то же, что у `_config_stack_texts`/`_models_verdict`
     (`settings.py`) для вердикта секции «Модели»."""
     from gc_core.config import profile_mtime_set
+
     try:
         mtimes = profile_mtime_set(getattr(app, "_config_path", None), name)
     except OSError:
@@ -303,7 +322,9 @@ def _cached_assembly_error(app: Any, name: str) -> str:
     (`ArgPicker.desired_height`, 0.25 с) — 4 раза в секунду на UI-потоке, пока
     список просто открыт, никто не нажал ни одной клавиши."""
     key = _profile_verdict_key(app, name)
-    cache: Dict[str, tuple] = getattr(app, "_profile_assembly_cache", None) or {}
+    cache: Dict[str, tuple] = (
+        getattr(app, "_profile_assembly_cache", None) or {}
+    )
     cached = cache.get(name)
     if key is not None and cached is not None and cached[0] == key:
         return cached[1]
@@ -341,7 +362,9 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     секунду, пока список просто открыт."""
     refs = _discovered_profiles(app)
     effective = str(_effective_cfg(app).get("profile") or "")
-    base_pointer = str((getattr(app, "_config", None) or {}).get("profile") or "")
+    base_pointer = str(
+        (getattr(app, "_config", None) or {}).get("profile") or ""
+    )
     none_status = _PROFILE_ACTIVE_STATUS if not effective else ""
     options = [(PROFILE_NONE_VALUE, "работать чистым конфигом", none_status)]
     for name in sorted(refs):
@@ -350,9 +373,13 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
         if name == base_pointer:
             desc += " (как в конфиге)"
         if name == effective:
-            status = _PROFILE_ACTIVE_STATUS   # действующий уже собрался — пробы не надо
+            status = _PROFILE_ACTIVE_STATUS  # действующий уже собрался — пробы не надо
         else:
-            status = _PROFILE_BROKEN_STATUS if _cached_assembly_error(app, name) else ""
+            status = (
+                _PROFILE_BROKEN_STATUS
+                if _cached_assembly_error(app, name)
+                else ""
+            )
         options.append((name, desc, status))
     return tuple(options)
 
@@ -366,6 +393,7 @@ def _profile_file_doc(app: Any, name: str) -> Dict[str, Any]:
         return {}
     import yaml
     from gc_core.utils.user_text import read_user_text_or_none
+
     # Нечитаемый файл роняет палитру на одном наведении курсора (живой смок):
     # хинт строится на подсветке пункта, до всякого выбора.
     try:
@@ -395,12 +423,15 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     reason = _cached_assembly_error(app, name)
     if reason:
         parts.append(reason)
-    summary = _profile_slots_summary({"slots": doc.get("slots") or {},
-                                      "models": merged_models})
+    summary = _profile_slots_summary(
+        {"slots": doc.get("slots") or {}, "models": merged_models}
+    )
     if summary:
         parts.append(summary)
     if ref is not None:
-        parts.append("проектный" if ref.root_kind == "project" else "глобальный")
+        parts.append(
+            "проектный" if ref.root_kind == "project" else "глобальный"
+        )
     note = _profile_mcp_rebuild_note(app, name)
     if note:
         parts.append(note)
@@ -425,7 +456,9 @@ def modes_section_names() -> list:
     стоит здесь же, отдельным блоком под чертой (к профилям он отношения не
     имеет — там правился чужой ключ). Знание о композиции секции живёт в одном
     месте: и рендер, и навигация, и запись, и превью меню спрашивают отсюда."""
-    return [n for group in MODES_SECTION_GROUPS for n in group_toggle_names(group)]
+    return [
+        n for group in MODES_SECTION_GROUPS for n in group_toggle_names(group)
+    ]
 
 
 def effective_toggle_names(app: Any, name: str) -> Tuple[str, ...]:
@@ -493,7 +526,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         palette_default=True,
     ),
     "gate": ToggleSpec(
-        dotted="tui.finish_gate_mode",
+        dotted=_TUI_FINISH_GATE_MODE,
         values=(
             ToggleValue(
                 "off",
@@ -517,7 +550,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         palette_default=False,
     ),
     "answers": ToggleSpec(
-        dotted="tui.text_answer_mode",
+        dotted=_TUI_TEXT_ANSWER_MODE,
         values=(
             ToggleValue(
                 "allow",
@@ -559,21 +592,26 @@ def _fit_hint(value: str, hint: str, keys: str, width: int) -> str:
 
     Владелец канонического представления тоггла (рядом с render_track) —
     переиспользуется палитрой (command_palette.py)."""
+
     def build(h: str, k: str) -> str:
         return f"{value} — {h}  ·  {k}"
 
     if width <= 0 or len(build(hint, keys)) <= width:
         return build(hint, keys)
-    core = hint.rsplit(" · ", 1)[0]                       # 1) без «кому подходит»
+    core = hint.rsplit(" · ", 1)[0]  # 1) без «кому подходит»
     if len(build(core, keys)) <= width:
         return build(core, keys)
     if len(build(core, _HINT_KEYS_TOGGLE_MEDIUM)) <= width:  # 2) без области
         return build(core, _HINT_KEYS_TOGGLE_MEDIUM)
-    if len(build(core, _HINT_KEYS_TOGGLE_SHORT)) <= width:  # 3) короткие клавиши
+    if (
+        len(build(core, _HINT_KEYS_TOGGLE_SHORT)) <= width
+    ):  # 3) короткие клавиши
         return build(core, _HINT_KEYS_TOGGLE_SHORT)
     fixed = len(build("", _HINT_KEYS_TOGGLE_SHORT))
     room = max(1, width - fixed)
-    return build(core[: room - 1] + "…", _HINT_KEYS_TOGGLE_SHORT)  # 4) многоточие
+    return build(
+        core[: room - 1] + "…", _HINT_KEYS_TOGGLE_SHORT
+    )  # 4) многоточие
 
 
 def _fit_value_hint(value: str, hint: str, width: int) -> str:
@@ -584,6 +622,7 @@ def _fit_value_hint(value: str, hint: str, width: int) -> str:
     Для строки внутри рамки подэкрана Settings («Режимы работы») — клавиши там
     показывает статичный футер вне рамки (см. `_fit_hint` — та же механика,
     но с клавишами внутри самой строки, там, где своего футера-подсказки нет)."""
+
     def build(h: str) -> str:
         return f"{value} — {h}"
 
@@ -599,7 +638,9 @@ def _fit_value_hint(value: str, hint: str, width: int) -> str:
     return build(core[: room - 1] + "…")
 
 
-def render_track(spec: ToggleSpec, current: str, *, extra_lit: Any = None) -> Text:
+def render_track(
+    spec: ToggleSpec, current: str, *, extra_lit: Any = None
+) -> Text:
     """Канонический трек тоггла (спека §2–§3): ● на позиции current цветом
     значения (bold), пустые позиции — ○ DEEP_DIM. `extra_lit` (спека §4.1,
     /rigor, ревизия 4): None — 4-й позиции нет вовсе (бит-в-бит как было,
@@ -618,16 +659,23 @@ def render_track(spec: ToggleSpec, current: str, *, extra_lit: Any = None) -> Te
         if i < len(spec.values) - 1:
             t.append(" ")
     if extra_lit is not None:
-        t.append("  ")   # двойной пробел — отделяет вне-шкальную позицию custom
+        t.append("  ")  # двойной пробел — отделяет вне-шкальную позицию custom
         if extra_lit is True:
             t.append("●", style=f"bold {_pal.BRAND}")
         else:
-            t.append(" ")   # резерв: 4-я позиция пуста, без тусклой ○ (ревизия 4)
+            t.append(
+                " "
+            )  # резерв: 4-я позиция пуста, без тусклой ○ (ревизия 4)
     return t
 
 
 def padded_track(
-    spec: ToggleSpec, current: str, *, extra_lit: Any, base_w: int, extra_w: int
+    spec: ToggleSpec,
+    current: str,
+    *,
+    extra_lit: Any,
+    base_w: int,
+    extra_w: int,
 ) -> Text:
     """Трек тоггла, выровненный по ЛЕВОМУ краю общего поля (ревизия 5, спека §6:
     системный контракт, владелец здесь — переиспользуют палитра и Settings).
@@ -654,7 +702,9 @@ def toggle_state(app: Any, name: str) -> str:
     коллизии, `answers` — сырое значение). Источник — эффективный конфиг
     (база + сессионные переопределения), не `app._config`."""
     getter = getattr(app, "effective_config", None)
-    cfg = getter() if callable(getter) else (getattr(app, "_config", None) or {})
+    cfg = (
+        getter() if callable(getter) else (getattr(app, "_config", None) or {})
+    )
     return TOGGLES[name].state(cfg)
 
 
@@ -712,8 +762,7 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
     if spec.preset_keys:
         if value not in PRESETS:
             raise ValueError(
-                f"invalid preset value {value!r} for toggle {name!r}, "
-                f"expected one of {tuple(PRESETS)}"
+                f"invalid preset value {value!r} for toggle {name!r}, expected one of {tuple(PRESETS)}"
             )
         app.apply_session_overrides(PRESETS[value])
         app.invalidate_runner()
@@ -774,7 +823,9 @@ def preset_track_extra(app: Any, name: str) -> Any:
     return spec.state(_effective_cfg(app)) == PRESET_CUSTOM
 
 
-def preset_custom_hint(app: Any, name: str, *, scope: str = "effective") -> str:
+def preset_custom_hint(
+    app: Any, name: str, *, scope: str = "effective"
+) -> str:
     """Динамический custom-хинт, два состояния (ревизия 4, спека §5, тексты
     ДОСЛОВНО) — зовётся, только когда custom реально ОТОБРАЖЁН (эффективная
     пара нестандартна; вызывающий `_toggle_hint` гарантирует это условием

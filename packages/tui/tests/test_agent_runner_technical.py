@@ -1,4 +1,5 @@
 """AgentRunner.start прокидывает технический компаньон вторым user-сообщением."""
+
 import time
 
 from gc_tui.services.agent_runner import AgentRunner
@@ -38,9 +39,16 @@ def test_start_without_technical_sends_single_message():
 def test_start_with_technical_sends_pair():
     ex = _CaptureExecutor()
     r = AgentRunner(executor=ex)
-    r.start(query="почини баг", technical="<technical type=\"technical\">attached</technical>",
-            thread_id="t1", message_id="m1")
+    r.start(
+        query="почини баг",
+        technical='<technical type="technical">attached</technical>',
+        thread_id="t1",
+        message_id="m1",
+    )
     _wait_idle(r)
     messages, mids = ex.calls[0]
-    assert messages == ["почини баг", "<technical type=\"technical\">attached</technical>"]
+    assert messages == [
+        "почини баг",
+        '<technical type="technical">attached</technical>',
+    ]
     assert mids == ["m1", None]

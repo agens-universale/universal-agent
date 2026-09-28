@@ -23,7 +23,10 @@ import pytest
 
 WRAPPER = (
     Path(__file__).resolve().parents[1]
-    / "src" / "gc_server" / "swarm" / "run-cli-in-sandbox.sh"
+    / "src"
+    / "gc_server"
+    / "swarm"
+    / "run-cli-in-sandbox.sh"
 )
 
 
@@ -35,24 +38,30 @@ pytestmark = pytest.mark.skipif(
 def _run(tmp_path, **overrides):
     """Запустить обёртку с минимальным окружением; вернуть (proc, completion)."""
     env = dict(os.environ)
-    env.update({
-        "SWARM_ID": "swarm_g_t1",
-        "SWARM_THREADS_DIR": str(tmp_path / "threads"),
-        "SWARM_SANDBOX_PATH": str(tmp_path / "sandbox"),
-        # Без bubblewrap: на dev-машинах его нет, а проверка наличия CLI идёт
-        # до выбора песочницы и от неё не зависит.
-        "SWARM_SANDBOX_TOOL": "none",
-        "SWARM_PAYLOAD_JSON": "{}",
-        "SWARM_LIMIT_TIMEOUT_SECONDS": "30",
-    })
+    env.update(
+        {
+            "SWARM_ID": "swarm_g_t1",
+            "SWARM_THREADS_DIR": str(tmp_path / "threads"),
+            "SWARM_SANDBOX_PATH": str(tmp_path / "sandbox"),
+            # Без bubblewrap: на dev-машинах его нет, а проверка наличия CLI идёт
+            # до выбора песочницы и от неё не зависит.
+            "SWARM_SANDBOX_TOOL": "none",
+            "SWARM_PAYLOAD_JSON": "{}",
+            "SWARM_LIMIT_TIMEOUT_SECONDS": "30",
+        }
+    )
     env.update(overrides)
     proc = subprocess.run(
-        ["bash", str(WRAPPER)], env=env, capture_output=True, text=True,
+        ["bash", str(WRAPPER)],
+        env=env,
+        capture_output=True,
+        text=True,
     )
     completion_path = tmp_path / "threads" / "swarm_g_t1" / "completion.json"
     completion = (
         json.loads(completion_path.read_text(encoding="utf-8"))
-        if completion_path.exists() else None
+        if completion_path.exists()
+        else None
     )
     return proc, completion
 
@@ -60,11 +69,15 @@ def _run(tmp_path, **overrides):
 def test_missing_cli_in_path_names_the_command_and_the_cure(tmp_path):
     """Команды нет в PATH — обёртка обязана сказать, ЧТО не нашлось и что делать."""
     proc, completion = _run(
-        tmp_path, SWARM_CLI_COMMAND="gc-cli-not-installed", SWARM_CLI_VENV_ROOT="",
+        tmp_path,
+        SWARM_CLI_COMMAND="gc-cli-not-installed",
+        SWARM_CLI_VENV_ROOT="",
     )
 
     assert proc.returncode == 127
-    assert completion is not None, "completion.json обязан появиться и в этом случае"
+    assert completion is not None, (
+        "completion.json обязан появиться и в этом случае"
+    )
     assert completion["exit_code"] == 127
     assert completion["error_type"] == "wrapper_setup_error"
     message = completion["error_message"]
@@ -72,7 +85,9 @@ def test_missing_cli_in_path_names_the_command_and_the_cure(tmp_path):
     assert "PATH" in message
     assert "cli_venv_root" in message
     # То же самое обязано быть видно в stderr.log прогона, а не только в JSON.
-    stderr_log = (tmp_path / "threads" / "swarm_g_t1" / "stderr.log").read_text()
+    stderr_log = (
+        tmp_path / "threads" / "swarm_g_t1" / "stderr.log"
+    ).read_text()
     assert "gc-cli-not-installed" in stderr_log
 
 
@@ -81,7 +96,9 @@ def test_missing_cli_in_venv_names_the_path_it_tried(tmp_path):
     venv = tmp_path / "venv"
     (venv / "bin").mkdir(parents=True)
     proc, completion = _run(
-        tmp_path, SWARM_CLI_COMMAND="gc-cli", SWARM_CLI_VENV_ROOT=str(venv),
+        tmp_path,
+        SWARM_CLI_COMMAND="gc-cli",
+        SWARM_CLI_VENV_ROOT=str(venv),
     )
 
     assert proc.returncode == 127
@@ -93,7 +110,9 @@ def test_missing_cli_in_venv_names_the_path_it_tried(tmp_path):
 def test_existing_cli_is_not_blocked_by_the_preflight(tmp_path):
     """Положительный контроль: живая команда проходит проверку и запускается."""
     proc, completion = _run(
-        tmp_path, SWARM_CLI_COMMAND="true", SWARM_CLI_VENV_ROOT="",
+        tmp_path,
+        SWARM_CLI_COMMAND="true",
+        SWARM_CLI_VENV_ROOT="",
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -124,7 +143,9 @@ def test_completion_json_survives_quotes_in_user_paths(tmp_path, venv_name):
     (venv / "bin").mkdir(parents=True)
 
     proc, completion = _run(
-        tmp_path, SWARM_CLI_COMMAND="gc-cli", SWARM_CLI_VENV_ROOT=str(venv),
+        tmp_path,
+        SWARM_CLI_COMMAND="gc-cli",
+        SWARM_CLI_VENV_ROOT=str(venv),
     )
 
     assert proc.returncode == 127

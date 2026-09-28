@@ -7,18 +7,19 @@ import logging
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core import processing_responses as pr
 from gc_core import run_summary_coordinator as rsc
-from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
+from gc_core.intent_guard import guard as intent_guard_guard
 from gc_core.intent_guard.validation_result import ValidationResult
-from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text
+from gc_core.message_policy.user_message_policy import (
+    is_dialog_summary_user_message_text,
+)
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.states import State
 from gc_core.summarize.compaction import apply_summary_state_patch
-from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit import run_coro
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.intent_fixtures import intent_user_ask_texts, seed_state_intent
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
@@ -28,10 +29,11 @@ def _async_noop(fn):
     Синхронную подмену цикл получил бы как готовый результат вместо awaitable
     и упал бы на ``await`` — или, хуже, тихо не исполнил бы её вовсе.
     """
+
     async def _wrapped(*args, **kwargs):
         return fn(*args, **kwargs)
-    return _wrapped
 
+    return _wrapped
 
 
 def _make_state(*, max_steps: int = 5) -> State:
@@ -127,7 +129,9 @@ async def _reject_validation(**_kwargs):
     )
 
 
-def _coordinator(state: State, *, turn_end_trigger_chars: int = 1) -> RunSummaryCoordinator:
+def _coordinator(
+    state: State, *, turn_end_trigger_chars: int = 1
+) -> RunSummaryCoordinator:
     ctx = _make_ctx()
     return RunSummaryCoordinator(
         ctx=ctx,
@@ -170,18 +174,29 @@ def test_turn_end_below_threshold_does_not_compact(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", record)
     coord = _coordinator(state, turn_end_trigger_chars=10_000)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
-        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+            turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+        )
+    )
 
     assert result == _expected_finish_arguments()
     assert recorded == []
-    assert len([m for m in state.messages if is_dialog_summary_user_message_text(
-        str(m.get("content") or "")
-    )]) == 0
+    assert (
+        len(
+            [
+                m
+                for m in state.messages
+                if is_dialog_summary_user_message_text(
+                    str(m.get("content") or "")
+                )
+            ]
+        )
+        == 0
+    )
 
 
 def test_turn_end_above_threshold_replaces_trace(monkeypatch):
@@ -194,38 +209,50 @@ def test_turn_end_above_threshold_replaces_trace(monkeypatch):
         recorded.append(str(kwargs.get("trigger_reason")))
         st = kwargs["state"]
         sys_m = next(
-            (m for m in st.messages if str(m.get("role", "")).lower() == "system"),
+            (
+                m
+                for m in st.messages
+                if str(m.get("role", "")).lower() == "system"
+            ),
             None,
         )
-        st.messages = [
-            sys_m,
-            {
-                "role": "user",
-                "content": '<technical type="dialog_summary">compact</technical>',
-                "id": "m_sum",
-            },
-        ] if sys_m else [
-            {
-                "role": "user",
-                "content": '<technical type="dialog_summary">compact</technical>',
-                "id": "m_sum",
-            }
-        ]
+        st.messages = (
+            [
+                sys_m,
+                {
+                    "role": "user",
+                    "content": '<technical type="dialog_summary">compact</technical>',
+                    "id": "m_sum",
+                },
+            ]
+            if sys_m
+            else [
+                {
+                    "role": "user",
+                    "content": '<technical type="dialog_summary">compact</technical>',
+                    "id": "m_sum",
+                }
+            ]
+        )
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
-        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+            turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+        )
+    )
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]
     assert len(state.messages) == 2
-    assert is_dialog_summary_user_message_text(str(state.messages[-1].get("content") or ""))
+    assert is_dialog_summary_user_message_text(
+        str(state.messages[-1].get("content") or "")
+    )
 
 
 def test_turn_end_reject_skips_compaction(monkeypatch):
@@ -261,12 +288,14 @@ def test_turn_end_reject_skips_compaction(monkeypatch):
     monkeypatch.setattr(pr, "aprocess_user_ask", _stub_user_ask)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
-        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
-    ))
+    run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+            turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+        )
+    )
 
     assert recorded == []
     assert intent_user_ask_texts(state.current_user_intent) == ["open"]
@@ -293,12 +322,14 @@ def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
     )
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(strict_turn_finish_validation=True),
-        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(strict_turn_finish_validation=True),
+            turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+        )
+    )
 
     assert result == _expected_finish_arguments()
     assert recorded == ["turn_end"]
@@ -314,22 +345,35 @@ def test_turn_end_flush_moves_intent_before_compact(monkeypatch):
     def compact(**kwargs):
         st = kwargs["state"]
         assert st.current_user_intent == []
-        assert intent_user_ask_texts(st.user_intent_log) == ["вопрос", "уточнение"]
+        assert intent_user_ask_texts(st.user_intent_log) == [
+            "вопрос",
+            "уточнение",
+        ]
         sys_m = next(
-            (m for m in st.messages if str(m.get("role", "")).lower() == "system"),
+            (
+                m
+                for m in st.messages
+                if str(m.get("role", "")).lower() == "system"
+            ),
             None,
         )
-        st.messages = [sys_m, {"role": "user", "content": "summary", "id": "s"}] if sys_m else []
+        st.messages = (
+            [sys_m, {"role": "user", "content": "summary", "id": "s"}]
+            if sys_m
+            else []
+        )
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
-        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
-    ))
+    run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+            turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+        )
+    )
 
 
 def test_turn_end_compaction_failure_still_returns_submit_payload(monkeypatch):
@@ -344,12 +388,14 @@ def test_turn_end_compaction_failure_still_returns_submit_payload(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", boom)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    result = run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
-        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
-    ))
+    result = run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+            turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+        )
+    )
 
     assert result == _expected_finish_arguments()
     assert state.current_user_intent == []
@@ -383,12 +429,14 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
     monkeypatch.setattr(rsc, "arun_summary_compaction", compact)
     coord = _coordinator(state, turn_end_trigger_chars=1)
 
-    run_coro(pr.arun_agent(
-        [_submit_solution_call()],
-        state,
-        _make_ctx(),
-        turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
-    ))
+    run_coro(
+        pr.arun_agent(
+            [_submit_solution_call()],
+            state,
+            _make_ctx(),
+            turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
+        )
+    )
 
     assert state.shared.working_memory.get("knowledge") == "note from patch"
     summary_msgs = [
@@ -449,7 +497,7 @@ def test_agent_executor_fail_open_turn_end_compaction(monkeypatch):
     # Строковые пути: после reload в test_summary_triggers импорт ``rsc`` в этом файле
     # может указывать на старый модуль, а AgentExecutor — на актуальный.
     monkeypatch.setattr(
-        "gc_core.run_summary_coordinator.history_exceeds_summary_trigger",
+        "gc_core.run_summary_coordinator.exceeded_summary_triggers",
         lambda **_k: True,
     )
     monkeypatch.setattr(

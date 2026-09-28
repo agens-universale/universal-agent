@@ -1,4 +1,5 @@
 """resolve_mode: git-mode только при git + launch_root/.git; nested не переключает."""
+
 from __future__ import annotations
 
 import subprocess
@@ -31,7 +32,9 @@ def test_no_git_dir_is_cache_mode(tmp_path, monkeypatch):
     assert resolve_mode(tmp_path) == "cache-mode"
 
 
-def test_git_unavailable_is_cache_mode_even_with_dot_git(tmp_path, monkeypatch):
+def test_git_unavailable_is_cache_mode_even_with_dot_git(
+    tmp_path, monkeypatch
+):
     (tmp_path / ".git").mkdir()
     monkeypatch.setattr("gc_core.agent_edits.mode.git_executable_available", lambda: False)
     assert resolve_mode(tmp_path) == "cache-mode"

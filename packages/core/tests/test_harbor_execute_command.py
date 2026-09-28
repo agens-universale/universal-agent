@@ -1,22 +1,37 @@
 import json
-from types import SimpleNamespace
 
-from gc_testkit.harbor_fakes import bind_os_backend
 from gc_core.backends.protocol import ExecResult, bound_exec_result
 from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_testkit.harbor_fakes import bind_os_backend
 
 
 class _RecordingFakeBackend:
     """Records exec()/is_dir() calls; container semantics (no host cwd default)."""
 
-    def __init__(self, stdout="", stderr="", rc=0, dirs=None, timed_out=False, capture_max_chars=None):
-        res = ExecResult(stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out)
-        self.res = res if capture_max_chars is None else bound_exec_result(res, capture_max_chars)
+    def __init__(
+        self,
+        stdout="",
+        stderr="",
+        rc=0,
+        dirs=None,
+        timed_out=False,
+        capture_max_chars=None,
+    ):
+        res = ExecResult(
+            stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out
+        )
+        self.res = (
+            res
+            if capture_max_chars is None
+            else bound_exec_result(res, capture_max_chars)
+        )
         self.calls = []
         self._dirs = set(dirs or [])
 
     def exec(self, command, *, cwd=None, timeout=None, env=None):
-        self.calls.append({"command": command, "cwd": cwd, "timeout": timeout, "env": env})
+        self.calls.append(
+            {"command": command, "cwd": cwd, "timeout": timeout, "env": env}
+        )
         return self.res
 
     async def is_dir(self, path):
@@ -37,10 +52,24 @@ def test_envelope_shape_matches_base_contract():
     b = _RecordingFakeBackend(stdout="hi", rc=0)
     env = json.loads(_tool(b)(command="echo hi"))
     # Same fields the base prompt_description advertises:
-    for k in ("tool", "ok", "command", "cwd", "exit_code", "timed_out", "error", "stdout", "stderr"):
+    for k in (
+        "tool",
+        "ok",
+        "command",
+        "cwd",
+        "exit_code",
+        "timed_out",
+        "error",
+        "stdout",
+        "stderr",
+    ):
         assert k in env, k
     assert "truncated" not in env
-    assert env["exit_code"] == 0 and env["ok"] is True and env["timed_out"] is False
+    assert (
+        env["exit_code"] == 0
+        and env["ok"] is True
+        and env["timed_out"] is False
+    )
 
 
 def test_default_timeout_flows_from_exec_timeout_sec_config():
@@ -115,11 +144,14 @@ def test_default_cwd_none_is_passed_through_untouched():
 
 # --- Gap 1: env_vars validation and forwarding as a raw dict via backend.exec(env=...) ---
 
+
 def test_env_vars_forwarded_as_env_kwarg():
     """env_vars must be forwarded to backend.exec() as the env= dict — the base tool
     does not embed them into the command string."""
     b = _RecordingFakeBackend(stdout="bar")
-    _tool(b)(command="printenv FOO", env_vars=[{"name": "FOO", "value": "bar"}])
+    _tool(b)(
+        command="printenv FOO", env_vars=[{"name": "FOO", "value": "bar"}]
+    )
     assert len(b.calls) == 1
     assert b.calls[0]["command"] == "printenv FOO"
     assert b.calls[0]["env"] == {"FOO": "bar"}
@@ -163,6 +195,7 @@ def test_env_vars_item_not_dict_returns_invalid_argument():
 
 # --- Gap 2: timeout and max_output_chars validation ---
 
+
 def test_timeout_zero_returns_invalid_argument():
     """timeout=0 must return invalid_argument with field='timeout'."""
     b = _RecordingFakeBackend()
@@ -192,6 +225,7 @@ def test_max_output_chars_argument_no_longer_exists():
 
 
 # --- Gap 3: cwd validation via backend.is_dir ---
+
 
 def test_cwd_nonexistent_in_container_returns_invalid_argument():
     """cwd that doesn't exist in the container must return invalid_argument with field='cwd'."""

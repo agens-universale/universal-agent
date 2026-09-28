@@ -13,9 +13,9 @@
 включая чужие реализации — заворачивается в ``SyncExecAdapter``: тот же
 результат, поток вместо корутины.
 """
+
 from __future__ import annotations
 
-import asyncio
 import threading
 from typing import Any, Optional, Protocol, runtime_checkable
 
@@ -26,25 +26,45 @@ from gc_core.backends.protocol import ExecResult
 class AsyncExecPort(Protocol):
     """Что нужно циклу от бэкенда, чтобы запускать команды не блокируя loop."""
 
-    async def aexec(self, command: str, *, cwd: Optional[str] = None,
-                    timeout: Optional[int] = None,
-                    env: Optional[dict] = None) -> ExecResult: ...
+    async def aexec(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+    ) -> ExecResult: ...
 
-    async def aexec_raw(self, command: str, *, cwd: Optional[str] = None,
-                        timeout: Optional[int] = None,
-                        env: Optional[dict] = None,
-                        capture_max_chars: Optional[int] = None) -> ExecResult:
+    async def aexec_raw(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+        capture_max_chars: Optional[int] = None,
+    ) -> ExecResult:
         """Механический POSIX без инициализации окружения образа."""
         ...
 
-    async def aexec_argv(self, argv: list, *, stdin: Optional[str] = None,
-                         cwd: Optional[str] = None,
-                         timeout: Optional[int] = None,
-                         env: Optional[dict] = None) -> ExecResult: ...
+    async def aexec_argv(
+        self,
+        argv: list,
+        *,
+        stdin: Optional[str] = None,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+    ) -> ExecResult: ...
 
-    async def arun_python(self, code: str, *, cwd: Optional[str] = None,
-                          timeout: Optional[int] = None,
-                          env: Optional[dict] = None) -> ExecResult: ...
+    async def arun_python(
+        self,
+        code: str,
+        *,
+        cwd: Optional[str] = None,
+        timeout: Optional[int] = None,
+        env: Optional[dict] = None,
+    ) -> ExecResult: ...
 
 
 #: Слоты для чужих синхронных бэкендов — СВОИ, не общие с MCP.
@@ -107,13 +127,17 @@ class SyncExecAdapter:
 
 def aexec_port(backend: Any) -> AsyncExecPort:
     """Асинхронный порт для бэкенда: свой, если он есть, иначе адаптер."""
-    if all(callable(getattr(backend, name, None))
-           for name in ("aexec", "aexec_argv", "arun_python")):
+    if all(
+        callable(getattr(backend, name, None))
+        for name in ("aexec", "aexec_argv", "arun_python")
+    ):
         return backend
     return SyncExecAdapter(backend)
 
 
-async def arun_backend_exec_raw(backend: Any, command: str, **kwargs: Any) -> ExecResult:
+async def arun_backend_exec_raw(
+    backend: Any, command: str, **kwargs: Any
+) -> ExecResult:
     """Сырой POSIX-канал для ВНУТРЕННИХ вызывающих: пробы, grep, обход, MCP.
 
     Канал модели (``aexec``) может предварять команду инициализацией окружения
@@ -132,4 +156,9 @@ async def arun_backend_exec_raw(backend: Any, command: str, **kwargs: Any) -> Ex
     return await fn(command, **kwargs)
 
 
-__all__ = ["AsyncExecPort", "SyncExecAdapter", "aexec_port", "arun_backend_exec_raw"]
+__all__ = [
+    "AsyncExecPort",
+    "SyncExecAdapter",
+    "aexec_port",
+    "arun_backend_exec_raw",
+]

@@ -49,8 +49,13 @@ def _windows_start_key(pid: int) -> str | None:
         return None
     try:
         created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-        if not k32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited),
-                                   ctypes.byref(kernel), ctypes.byref(user)):
+        if not k32.GetProcessTimes(
+            handle,
+            ctypes.byref(created),
+            ctypes.byref(exited),
+            ctypes.byref(kernel),
+            ctypes.byref(user),
+        ):
             return None
         return f"{created.dwHighDateTime}:{created.dwLowDateTime}"
     finally:
@@ -108,7 +113,7 @@ def live_leases(*, alive=is_pid_alive) -> list[int]:
         try:
             pid = int(entry.stem)
         except ValueError:
-            continue   # мусор — не наш файл, не трогаем содержимое каталога
+            continue  # мусор — не наш файл, не трогаем содержимое каталога
         if alive(pid) and _lease_is_ours(entry, pid):
             result.append(pid)
         else:

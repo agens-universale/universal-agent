@@ -9,7 +9,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from gc_core.thread_store import ThreadSession, delete_thread, touched_journal_path
+from gc_core.thread_store import (
+    ThreadSession,
+    delete_thread,
+    touched_journal_path,
+)
 
 
 def _seed_touched(threads: Path, system_id: str, thread_id: str) -> Path:

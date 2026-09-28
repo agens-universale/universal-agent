@@ -29,12 +29,14 @@ test_aapply_tool_offloads_sync_tool_to_thread``.
 запускает subprocess на весь таймаут. У запуска процесса нативная асинхронная
 форма ЕСТЬ, и он идёт через неё — сторожит ``test_skills_run_script_native.py``.
 """
+
 import json
 import threading
 
 import pytest
-
 from gc_core.tools import aapply_tool
+
+from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.file_info import FileInfo
@@ -43,15 +45,8 @@ from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.save_base64_file import SaveBase64File
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
-# Тул уехал в tools/deprecated/ вместе с переработкой FS-поиска (PR #86):
-# на смену ему пришли fs_find_in_files / fs_find_files_by_name. Контракт
-# «инлайн на loop» проверяем и для него — он всё ещё зарегистрирован.
-from gc_core.tools.deprecated.search_files import SearchFiles
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
-from gc_core.tools.turn.intermediate_reply import IntermediateReply
-from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_core.tools.project.project_memory import ProjectMemory
-from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
 from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
     ReadStoredToolOutput,
@@ -65,6 +60,8 @@ from gc_core.tools.skills.skills_tools import (
     LoadSkillTool,
     SkillsListTool,
 )
+from gc_core.tools.turn.intermediate_reply import IntermediateReply
+from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit.helpers.tool_ctx import local_ctx
 
 #: Тул → как его собрать без реального окружения. Тело всё равно подменяется
@@ -76,7 +73,6 @@ FILE_TOOLS = [
     (AppendToFile, lambda cls: cls(ctx=None)),
     (ApplyFileEdits, lambda cls: cls(ctx=None)),
     (SearchAndReplace, lambda cls: cls(ctx=None)),
-    (SearchFiles, lambda cls: cls(ctx=None)),
     (ListFiles, lambda cls: cls(ctx=None)),
     (FileInfo, lambda cls: cls(ctx=None)),
     # Тоже только ФС: обход дерева, процессов нет. Соседний find_in_files в
@@ -108,9 +104,13 @@ FILE_TOOLS = [
 
 
 @pytest.mark.parametrize(
-    "tool_cls,build", FILE_TOOLS, ids=lambda v: v.__name__ if isinstance(v, type) else ""
+    "tool_cls,build",
+    FILE_TOOLS,
+    ids=lambda v: v.__name__ if isinstance(v, type) else "",
 )
-async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, tmp_path):
+async def test_file_tool_acall_runs_body_on_the_calling_thread(
+    tool_cls, build, tmp_path
+):
     """``acall`` исполняет тело инлайн, не отдавая его в пул.
 
     Зонд следит за ПУЛОМ, а не за телом. Прежний наследовал тул и подменял
@@ -144,10 +144,13 @@ async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, 
         else:
             args[name] = "x"
     assert args or not [
-        p for p in inspect.signature(tool.acall).parameters.values()
+        p
+        for p in inspect.signature(tool.acall).parameters.values()
         if p.default is inspect.Parameter.empty
         and p.kind not in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
-    ], f"{tool_cls.__name__}: не удалось собрать аргументы — тест стал бы пустым"
+    ], (
+        f"{tool_cls.__name__}: не удалось собрать аргументы — тест стал бы пустым"
+    )
 
     went_to_pool = []
     real_to_thread = asyncio.to_thread
@@ -161,7 +164,7 @@ async def test_file_tool_acall_runs_body_on_the_calling_thread(tool_cls, build, 
         try:
             await tool.acall(**args)
         except Exception:
-            pass          # исход тела не важен — важен маршрут
+            pass  # исход тела не важен — важен маршрут
     finally:
         asyncio.to_thread = real_to_thread
 
@@ -197,7 +200,13 @@ async def test_project_memory_acall_runs_file_work_on_the_calling_thread():
 
 def _tools_data(tool_cls):
     spec = tool_cls.tool_description()
-    return {spec["name"]: {"tool_fabric": tool_cls, "spec": spec, "description": ""}}
+    return {
+        spec["name"]: {
+            "tool_fabric": tool_cls,
+            "spec": spec,
+            "description": "",
+        }
+    }
 
 
 async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
@@ -231,6 +240,5 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
 
     assert json.loads(out)["ok"] is True
     assert went_to_pool == [], (
-        f"fs_read_file уехал в пул ({went_to_pool}) — диспетчер снова уводит "
-        "тул в поток вместо того, чтобы звать acall"
+        f"fs_read_file уехал в пул ({went_to_pool}) — диспетчер снова уводит тул в поток вместо того, чтобы звать acall"
     )

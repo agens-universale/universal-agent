@@ -6,6 +6,7 @@
 экране изменений скрыли клавишей `x`: (system_id, thread_id, ход, число путей),
 до выхода из приложения.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field

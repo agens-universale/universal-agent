@@ -13,6 +13,7 @@ interval, with a maximum total timeout.
 ```python
 import time
 
+
 def wait_for(predicate, *, timeout=5.0, interval=0.05, message="condition"):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -21,9 +22,13 @@ def wait_for(predicate, *, timeout=5.0, interval=0.05, message="condition"):
         time.sleep(interval)
     raise TimeoutError(f"Timed out waiting for {message}")
 
+
 # usage
-wait_for(lambda: order_status(order_id) == "completed",
-         timeout=10.0, message="order completion")
+wait_for(
+    lambda: order_status(order_id) == "completed",
+    timeout=10.0,
+    message="order completion",
+)
 ```
 
 ## Why not just `sleep(N)`?
@@ -45,8 +50,11 @@ wait_for(lambda: order_status(order_id) == "completed",
 ```python
 def test_order_completes():
     place_order(order_id)
-    wait_for(lambda: order_status(order_id) == "completed",
-             timeout=2.0, message="order completion")
+    wait_for(
+        lambda: order_status(order_id) == "completed",
+        timeout=2.0,
+        message="order completion",
+    )
     assert get_order(order_id).total > 0
 ```
 

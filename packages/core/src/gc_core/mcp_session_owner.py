@@ -44,6 +44,7 @@ teardown закрывает только своё.
 SIGKILL он не отработает), но это разница между «обычно закрываем» и
 «не закрываем никогда».
 """
+
 from __future__ import annotations
 
 import contextvars

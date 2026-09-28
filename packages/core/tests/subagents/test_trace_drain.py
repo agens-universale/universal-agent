@@ -9,12 +9,12 @@
 Здесь два сценария, ровно те, от которых дренаж и вводился: запись, пришедшая
 ВО ВРЕМЯ дренажа, и отмена прогона посреди него.
 """
+
 import asyncio
 import logging
 import threading
 
 import pytest
-
 from gc_core.tools.subagents.runner import _drain_trace_writes
 
 

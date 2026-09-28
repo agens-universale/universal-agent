@@ -2,6 +2,7 @@
 
 Requires the `harbor` framework (dependency-group `test`).
 """
+
 import asyncio
 import sys
 from pathlib import Path
@@ -12,8 +13,11 @@ import pytest
 # tests/harbor/ (a test-fixture package) shadows the real harbor framework:
 # reorder sys.path so real site-packages wins, then evict cached shadows.
 _harbor_sp = next(
-    (p for p in sys.path
-     if (Path(p) / "harbor" / "agents" / "base.py").exists()),
+    (
+        p
+        for p in sys.path
+        if (Path(p) / "harbor" / "agents" / "base.py").exists()
+    ),
     None,
 )
 if _harbor_sp:
@@ -26,16 +30,17 @@ for _key in list(sys.modules.keys()):
 # The adapter is not part of src/; import it as harbor does at runtime
 # (`--agent-import-path adapters.gc_cli_external:GcCliExternal`), so its own
 # `from adapters.gc_cli_config import ...` resolves the same way here.
-from gc_testkit.paths import HARBOR, REPO
+from gc_testkit.paths import HARBOR
+
 _HARBOR = HARBOR
 sys.path.insert(0, str(_HARBOR))
 
-from adapters.gc_cli_external import (  # noqa: E402
+from adapters.gc_cli_external import (
     GcCliExternal,
     _messages_to_steps,
     _stringify_content,
 )
-from harbor.models.agent.context import AgentContext  # noqa: E402
+from harbor.models.agent.context import AgentContext
 
 
 def test_roles_map_to_atif_sources_with_sequential_ids():
@@ -76,7 +81,9 @@ def test_stringify_handles_none_str_and_parts():
     assert _stringify_content(None) == ""
     assert _stringify_content("x") == "x"
     assert (
-        _stringify_content([{"type": "text", "text": "a"}, {"type": "text", "text": "b"}])
+        _stringify_content(
+            [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+        )
         == "a\nb"
     )
 
@@ -97,13 +104,7 @@ def test_gc_cli_config_overrides_merge_into_build_config():
     cfg = agent._build_config()
     # scalar override wins
     assert cfg["no_tool_call_max_count"] == 5
-    # nested override merges into the structural defaults: temperature is added,
-    # tool_choice is kept; no hardcoded sampling default is shadowing it.
-    assert cfg["chat_completion_kwargs"]["temperature"] == 0.7
-    assert cfg["chat_completion_kwargs"]["tool_choice"] == "auto"
-    # adapter ships NO sampling defaults (generation_config governs by default)
-    assert "top_p" not in cfg["chat_completion_kwargs"]
-    assert "top_k" not in cfg["chat_completion_kwargs"]
+    assert cfg["chat_completion_kwargs"] == {"temperature": 0.7}
 
 
 def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
@@ -134,8 +135,12 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
     monkeypatch.setattr("gc_core.run_context.acreate_run_context", _actx)
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", FakeExecutor)
 
-    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m", session_id="s",
-                          gc_cli_config={"completions_url": "http://test/v1/chat/completions"})
+    agent = GcCliExternal(
+        logs_dir=tmp_path,
+        model_name="openai/m",
+        session_id="s",
+        gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
+    )
     context = SimpleNamespace(metadata=None)
 
     with pytest.raises(RuntimeError, match="HTTPError"):
@@ -148,8 +153,12 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
 
 def _agent(**kwargs) -> GcCliExternal:
     kwargs.setdefault("gc_cli_config", {})
-    kwargs["gc_cli_config"].setdefault("completions_url", "http://test/v1/chat/completions")
-    return GcCliExternal(logs_dir=Path("/tmp"), model_name="openai/m", **kwargs)
+    kwargs["gc_cli_config"].setdefault(
+        "completions_url", "http://test/v1/chat/completions"
+    )
+    return GcCliExternal(
+        logs_dir=Path("/tmp"), model_name="openai/m", **kwargs
+    )
 
 
 def test_polar_session_id_goes_into_every_llm_call(monkeypatch):
@@ -165,7 +174,9 @@ def test_profile_authorization_wins_over_session_bearer(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     cfg = _agent(
         session_id="task-1",
-        gc_cli_config={"chat_completion_headers": {"Authorization": "Bearer real-key"}},
+        gc_cli_config={
+            "chat_completion_headers": {"Authorization": "Bearer real-key"}
+        },
     )._build_config()
     headers = cfg["chat_completion_headers"]
     assert headers["Authorization"] == "Bearer real-key"
@@ -195,14 +206,18 @@ def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
     from pathlib import Path
 
     # Runtime sources (runner --model / env URL) are authoritative over profile.
-    monkeypatch.setenv("GC_CLI_BACKEND_URL", "http://runtime/v1/chat/completions")
+    monkeypatch.setenv(
+        "GC_CLI_BACKEND_URL", "http://runtime/v1/chat/completions"
+    )
     agent = GcCliExternal(
         logs_dir=Path("/tmp"),
         model_name="openai/real-model",
         gc_cli_config={"completions_url": "http://stale", "model": "stale"},
     )
     cfg = agent._build_config()
-    assert cfg["model"] == "real-model"  # openai/ stripped, profile value ignored
+    assert (
+        cfg["model"] == "real-model"
+    )  # openai/ stripped, profile value ignored
     assert cfg["completions_url"] == "http://runtime/v1/chat/completions"
 
 
@@ -220,10 +235,16 @@ def _state_with_usage(**calls):
 
 def test_usage_totals_reach_agent_context():
     context = AgentContext()
-    state = _state_with_usage(input_tokens=14300, output_tokens=250, cached_tokens=1200)
+    state = _state_with_usage(
+        input_tokens=14300, output_tokens=250, cached_tokens=1200
+    )
     _agent()._populate_usage(context, state)
     # n_input_tokens includes cache, per AgentContext's contract.
-    assert (context.n_input_tokens, context.n_output_tokens, context.n_cache_tokens) == (
+    assert (
+        context.n_input_tokens,
+        context.n_output_tokens,
+        context.n_cache_tokens,
+    ) == (
         14300,
         250,
         1200,
@@ -232,7 +253,12 @@ def test_usage_totals_reach_agent_context():
 
 def test_usage_sums_across_categories():
     """Summariser, finish gate and subagent calls are part of what the run cost."""
-    from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_SUBAGENT, CATEGORY_SUMMARY, UsageAccount
+    from gc_core.usage.account import (
+        CATEGORY_MAIN,
+        CATEGORY_SUBAGENT,
+        CATEGORY_SUMMARY,
+        UsageAccount,
+    )
 
     account = UsageAccount()
     account.add(CATEGORY_MAIN, input_tokens=1000, output_tokens=100)
@@ -274,6 +300,7 @@ def test_calls_without_usage_are_reported_not_hidden():
 
 def test_reporting_failure_never_breaks_the_run():
     """It runs inside a finally that may be unwinding a timeout."""
+
     class Exploding:
         @property
         def usage(self):

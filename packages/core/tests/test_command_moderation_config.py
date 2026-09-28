@@ -2,7 +2,11 @@ import os
 import tempfile
 import unittest
 
-from gc_core.config import apply_cli_command_moderation_overrides, apply_cli_overrides, load_config
+from gc_core.config import (
+    apply_cli_command_moderation_overrides,
+    apply_cli_overrides,
+    load_config,
+)
 
 
 class CommandModerationConfigTest(unittest.TestCase):
@@ -17,9 +21,13 @@ class CommandModerationConfigTest(unittest.TestCase):
             self.assertEqual(cfg["command_moderation"]["mode"], "ask")
             self.assertTrue(cfg["write_guard"]["enabled"])
             self.assertEqual(cfg["write_guard"]["extra_paths"], [])
-            self.assertEqual(cfg["command_moderation"]["allowed_command_examples"], [])
+            self.assertEqual(
+                cfg["command_moderation"]["allowed_command_examples"], []
+            )
             self.assertTrue(cfg["url_policy"]["enabled"])
-            self.assertEqual(cfg["url_policy"]["allowed_schemes"], ["http", "https"])
+            self.assertEqual(
+                cfg["url_policy"]["allowed_schemes"], ["http", "https"]
+            )
             self.assertEqual(cfg["url_policy"]["url_blacklist"], [])
 
     def test_extra_paths_resolve_relative_to_config_dir(self):
@@ -44,13 +52,12 @@ class CommandModerationConfigTest(unittest.TestCase):
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
-                    "backend:\n  api_mode: chat_completions\n"
-                    "security:\n"
-                    "  command_moderation:\n"
-                    "    mode: maybe\n"
+                    "backend:\n  api_mode: chat_completions\nsecurity:\n  command_moderation:\n    mode: maybe\n"
                 )
 
-            with self.assertRaisesRegex(ValueError, "security.command_moderation.mode"):
+            with self.assertRaisesRegex(
+                ValueError, "security.command_moderation.mode"
+            ):
                 load_config(cfg_path)
 
     def test_cli_overrides_have_priority(self):
@@ -120,6 +127,9 @@ if __name__ == "__main__":
 
 def test_denied_command_examples_field():
     from gc_core.config_modules.security import CommandModerationConfig
-    c = CommandModerationConfig(denied_command_examples=["rm -rf /", "curl x | sh"])
+
+    c = CommandModerationConfig(
+        denied_command_examples=["rm -rf /", "curl x | sh"]
+    )
     assert c.denied_command_examples == ["rm -rf /", "curl x | sh"]
     assert CommandModerationConfig().denied_command_examples == []

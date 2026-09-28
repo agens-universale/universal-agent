@@ -3,7 +3,19 @@
 Pure functions — no I/O, no registry. Callers pass list_skills() payloads;
 this module owns how they are rendered for the agent system prompt.
 """
+
 from __future__ import annotations
+
+
+def _skill_line(s: dict, *, with_pack_size: bool = False) -> str:
+    line = f"- {s.get('id', '')} — {s.get('description', '')}"
+    location = s.get("location", "")
+    if location:
+        line += f" <location>{location}</location>"
+    size = s.get("pack_size") if with_pack_size else None
+    if size is not None:
+        line += f" (pack size: {size})"
+    return line
 
 
 def render_skills_catalog(skills_list: list[dict]) -> str:
@@ -29,13 +41,12 @@ def render_skills_catalog(skills_list: list[dict]) -> str:
     )
 
     lines: list[str] = [
-        "For solving the task you can use skills. Use the skills tools to "
-        "load skill data and resources.",
+        "For solving the task you can use skills. Use the skills tools to load skill data and resources.",
         "",
     ]
 
     rule = (
-        'Pick a skill by fit to the OVERALL task, not the first sub-step '
+        "Pick a skill by fit to the OVERALL task, not the first sub-step "
         'you decompose it into (e.g. "explore the code" is usually a '
         'sub-step of "build a feature", not the task itself). '
     )
@@ -52,27 +63,13 @@ def render_skills_catalog(skills_list: list[dict]) -> str:
     if bootstraps:
         lines.append("")
         lines.append(
-            "## Skill packs — load the bootstrap skill to enter a guided "
-            "multi-step workflow"
+            "## Skill packs — load the bootstrap skill to enter a guided multi-step workflow"
         )
-        for s in bootstraps:
-            line = f"- {s.get('id', '')} — {s.get('description', '')}"
-            location = s.get("location", "")
-            if location:
-                line += f" <location>{location}</location>"
-            size = s.get("pack_size")
-            if size is not None:
-                line += f" (pack size: {size})"
-            lines.append(line)
+        lines.extend(_skill_line(s, with_pack_size=True) for s in bootstraps)
 
     if flats:
         lines.append("")
         lines.append("## Standalone skills")
-        for s in flats:
-            line = f"- {s.get('id', '')} — {s.get('description', '')}"
-            location = s.get("location", "")
-            if location:
-                line += f" <location>{location}</location>"
-            lines.append(line)
+        lines.extend(_skill_line(s) for s in flats)
 
     return "\n".join(lines)

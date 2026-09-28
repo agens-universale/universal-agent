@@ -2,10 +2,9 @@
 
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-from gc_core.states import State, SharedStateData
-from gc_core.tools.subagents import runner as runner_module
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
@@ -68,8 +67,12 @@ class TestStopRequestedPropagation:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "test"}, fake_run_agent
+            )
 
         assert "check_stop" in captured["kwargs"]
         assert callable(captured["kwargs"]["check_stop"])
@@ -87,8 +90,12 @@ class TestStopRequestedPropagation:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "test"}, fake_run_agent
+            )
 
         check_stop = captured["check_stop"]
 
@@ -111,8 +118,12 @@ class TestStopRequestedPropagation:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            result = await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, fake_run_agent
+            )
 
         payload = json.loads(result)
         assert payload["ok"] is False
@@ -130,9 +141,13 @@ class TestStopRequestedPropagation:
 
         runner = SubagentRunner(ctx, orch, cfg)
         with patch.object(
-            runner, "_build_child_ctx", return_value=SimpleNamespace(run_id="child-run-42")
+            runner,
+            "_build_child_ctx",
+            return_value=SimpleNamespace(run_id="child-run-42"),
         ):
-            result = await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
+            result = await runner.arun(
+                "subagent_worker", {"task": "test"}, fake_run_agent
+            )
 
         payload = json.loads(result)
         assert payload["meta"]["child_run_id"] == "child-run-42"
@@ -151,7 +166,11 @@ class TestStopRequestedPropagation:
 
         runner = SubagentRunner(ctx, orch, cfg)
 
-        with patch.object(runner, "_build_child_ctx", return_value=SimpleNamespace()):
-            await runner.arun("subagent_worker", {"task": "test"}, fake_run_agent)
+        with patch.object(
+            runner, "_build_child_ctx", return_value=SimpleNamespace()
+        ):
+            await runner.arun(
+                "subagent_worker", {"task": "test"}, fake_run_agent
+            )
 
         assert stop_values == [False]

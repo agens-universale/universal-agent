@@ -1,4 +1,5 @@
 """SkillsScreen — picker скиллов двустрочными карточками (id / тип · путь)."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -14,9 +15,9 @@ from gc_tui.palette import BRIGHT, CODE, DIM, INK, MUTED
 from gc_tui.services.skill_view import source_label, truncate_path_left
 
 _FOOTER = "[↑↓] выбрать  [Enter] открыть  [Esc] back  /skill <id>"
-_PATH_MIN = 16          # минимально видимая длина пути (хвост-папка)
-_DEFAULT_WIDTH = 80     # пока ширина списка неизвестна (до первой раскладки)
-_TYPE_RESERVE = 16      # длиннейший RU-ярлык типа ("пользовательский")
+_PATH_MIN = 16  # минимально видимая длина пути (хвост-папка)
+_DEFAULT_WIDTH = 80  # пока ширина списка неизвестна (до первой раскладки)
+_TYPE_RESERVE = 16  # длиннейший RU-ярлык типа ("пользовательский")
 
 
 class SkillsScreen(Screen):
@@ -24,8 +25,12 @@ class SkillsScreen(Screen):
 
     DEFAULT_CSS = ""
 
-    def __init__(self, *, skills: Optional[list[dict]] = None,
-                 config: Optional[dict] = None) -> None:
+    def __init__(
+        self,
+        *,
+        skills: Optional[list[dict]] = None,
+        config: Optional[dict] = None,
+    ) -> None:
         super().__init__()
         self._all_skills = skills or []
         self._config = config or {}
@@ -54,13 +59,15 @@ class SkillsScreen(Screen):
 
     def _refresh_header(self) -> None:
         self.query_one("#header-left", Static).update(
-            f"доступные навыки · {len(self._skills)}")
+            f"доступные навыки · {len(self._skills)}"
+        )
 
     def _reload(self) -> None:
         f = self._filter.lower()
         if f:
             self._skills = [
-                s for s in self._all_skills
+                s
+                for s in self._all_skills
                 if f in (s.get("id", "")).lower()
                 or f in (s.get("root_path", "")).lower()
                 or f in source_label(s.get("source", "")).lower()
@@ -107,14 +114,21 @@ class SkillsScreen(Screen):
         listview = self.query_one("#skills-list", VerticalScroll)
         listview.remove_children()
         if not self._skills:
-            listview.mount(Static("(скиллы недоступны)", classes="line-meta", markup=False))
+            listview.mount(
+                Static(
+                    "(скиллы недоступны)", classes="line-meta", markup=False
+                )
+            )
             return
         maxlen = self._path_maxlen()
         selected_card: Optional[Static] = None
         for idx, s in enumerate(self._skills):
             suffix = " selected" if idx == self._selected_idx else ""
-            card = Static(self._card_text(s, selected=bool(suffix), maxlen=maxlen),
-                          classes="card" + suffix, markup=False)
+            card = Static(
+                self._card_text(s, selected=bool(suffix), maxlen=maxlen),
+                classes="card" + suffix,
+                markup=False,
+            )
             if suffix:
                 selected_card = card
             listview.mount(card)
@@ -122,7 +136,9 @@ class SkillsScreen(Screen):
             # Элемент — ОДИН виджет (2 строки): scroll_visible тащит его целиком в
             # обе стороны кругового перехода (как карточка MCP), без конфликта двух
             # независимых прокруток заголовка и меты.
-            self.call_after_refresh(selected_card.scroll_visible, animate=False)
+            self.call_after_refresh(
+                selected_card.scroll_visible, animate=False
+            )
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "skills-filter":
@@ -131,18 +147,24 @@ class SkillsScreen(Screen):
 
     async def on_key(self, event: events.Key) -> None:
         if event.key == "up":
-            if self._skills:   # круговой: с первой строки ↑ → на последнюю
-                self._selected_idx = (self._selected_idx - 1) % len(self._skills)
+            if self._skills:  # круговой: с первой строки ↑ → на последнюю
+                self._selected_idx = (self._selected_idx - 1) % len(
+                    self._skills
+                )
                 self._render_list()
             event.stop()
         elif event.key == "down":
-            if self._skills:   # круговой: с последней ↓ → на первую
-                self._selected_idx = (self._selected_idx + 1) % len(self._skills)
+            if self._skills:  # круговой: с последней ↓ → на первую
+                self._selected_idx = (self._selected_idx + 1) % len(
+                    self._skills
+                )
                 self._render_list()
             event.stop()
         elif event.key in ("home", "end"):
             if self._skills:
-                self._selected_idx = 0 if event.key == "home" else len(self._skills) - 1
+                self._selected_idx = (
+                    0 if event.key == "home" else len(self._skills) - 1
+                )
                 self._render_list()
             event.stop()
         elif event.key == "enter":
@@ -158,6 +180,7 @@ class SkillsScreen(Screen):
         sid = skill.get("id")
         try:
             from gc_core.tools.skills.registry import get_skills_registry
+
             reg = get_skills_registry(self._config)
             detail = await reg.load_skill_detail(sid)
         except Exception as exc:
@@ -165,5 +188,6 @@ class SkillsScreen(Screen):
             return
         from gc_tui.screens.viewer import ViewerScreen
         from gc_tui.services.skill_view import build_skill_viewer
+
         title, body = build_skill_viewer(detail)
         self.app.push_screen(ViewerScreen(title=title, content=body))

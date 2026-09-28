@@ -1,4 +1,5 @@
 """Ctrl+C: есть выделение → копировать; нет выделения → остановить run."""
+
 import pytest
 
 
@@ -13,6 +14,7 @@ async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -24,7 +26,9 @@ async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:
@@ -32,8 +36,11 @@ async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
         # SSH, на Linux и как запасной путь (см. services/clipboard_ops).
         from gc_tui.services import clipboard_ops
 
-        monkeypatch.setattr(clipboard_ops, "write_clipboard",
-                            lambda text: copied.append(text) or True)
+        monkeypatch.setattr(
+            clipboard_ops,
+            "write_clipboard",
+            lambda text: copied.append(text) or True,
+        )
         # запускаем run, затем выделяем текст в поле ввода
         inp = pilot.app.query_one("#cmdinput")
         inp.text = "выделенный текст"
@@ -43,8 +50,11 @@ async def test_ctrl_c_copies_when_input_has_selection(tmp_path, monkeypatch):
         # нативная запись уходит в фоновый поток — ждём наблюдаемый результат
         from gc_testkit.tui_support import wait_until
 
-        await wait_until(pilot, lambda: copied == ["выделенный текст"],
-                         "текст ушёл в системный буфер")
+        await wait_until(
+            pilot,
+            lambda: copied == ["выделенный текст"],
+            "текст ушёл в системный буфер",
+        )
         assert stop_called["flag"] is False
 
 
@@ -58,6 +68,7 @@ async def test_ctrl_c_stops_run_when_nothing_selected(tmp_path):
     class _Fake:
         async def arun(self, messages, *, thread_id, **kw):
             import threading
+
             self._evt = threading.Event()
             self._evt.wait(timeout=3.0)
 
@@ -69,7 +80,9 @@ async def test_ctrl_c_stops_run_when_nothing_selected(tmp_path):
         def add_message(self, m):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     app._executor_factory = lambda: _Fake()
 
     async with app.run_test() as pilot:

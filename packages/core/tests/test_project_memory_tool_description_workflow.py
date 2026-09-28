@@ -4,6 +4,7 @@ After iter-3 the description is intentionally minimal (~250 chars):
 no workflow, no negation, no mention of other tools. Workflow lives in
 the system prompt (`prompts/<agent_md>`::## Long memory protocol).
 """
+
 from gc_core.tools.project.project_memory import ProjectMemory
 
 

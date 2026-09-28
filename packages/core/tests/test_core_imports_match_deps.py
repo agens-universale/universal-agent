@@ -11,6 +11,7 @@ gc-tui продолжал его импортировать — чистая у�
 не по строке: наивная проверка дала бы ложные срабатывания и была бы выключена
 первой же правкой.
 """
+
 import ast
 import sys
 import tomllib
@@ -22,7 +23,15 @@ CORE_SRC = REPO / "packages/core/src/gc_core"
 CORE_MANIFEST = REPO / "packages/core/pyproject.toml"
 
 #: Пакеты монорепозитория: их ядро видит через рабочую копию, не через PyPI.
-_OWN = {"gc_core", "gc_mcp", "gc_cli", "gc_tui", "gc_server", "recommended_mcp", "gc_testkit"}
+_OWN = {
+    "gc_core",
+    "gc_mcp",
+    "gc_cli",
+    "gc_tui",
+    "gc_server",
+    "recommended_mcp",
+    "gc_testkit",
+}
 
 
 def _norm(name: str) -> str:
@@ -30,7 +39,9 @@ def _norm(name: str) -> str:
 
 
 def _declared() -> set:
-    deps = tomllib.loads(CORE_MANIFEST.read_text(encoding="utf-8"))["project"]["dependencies"]
+    deps = tomllib.loads(CORE_MANIFEST.read_text(encoding="utf-8"))["project"][
+        "dependencies"
+    ]
     out = set()
     for dep in deps:
         name = dep
@@ -41,8 +52,10 @@ def _declared() -> set:
 
 
 def _module_to_distributions() -> dict:
-    return {mod: {_norm(d) for d in dists}
-            for mod, dists in packages_distributions().items()}
+    return {
+        mod: {_norm(d) for d in dists}
+        for mod, dists in packages_distributions().items()
+    }
 
 
 def _third_party_imports() -> dict:
@@ -53,7 +66,11 @@ def _third_party_imports() -> dict:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 names = [a.name.split(".")[0] for a in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.level == 0
+                and node.module
+            ):
                 names = [node.module.split(".")[0]]
             else:
                 continue
@@ -67,8 +84,7 @@ def _third_party_imports() -> dict:
 def test_urllib3_is_gone():
     """Точечно про urllib3: он и был находкой."""
     assert "urllib3" not in _third_party_imports(), (
-        "ядро снова импортирует urllib3: он не объявлен и приезжает транзитом, "
-        "а после переезда на httpx не нужен вовсе"
+        "ядро снова импортирует urllib3: он не объявлен и приезжает транзитом, а после переезда на httpx не нужен вовсе"
     )
 
 
@@ -80,9 +96,10 @@ def test_every_third_party_import_is_declared():
     for module, path in _third_party_imports().items():
         dists = mapping.get(module) or {_norm(module)}
         if not (dists & declared):
-            undeclared[module] = f"{path.relative_to(REPO)} (дистрибутив: {sorted(dists)})"
+            undeclared[module] = (
+                f"{path.relative_to(REPO)} (дистрибутив: {sorted(dists)})"
+            )
 
     assert not undeclared, (
-        "ядро импортирует необъявленное — на чистой установке это падение на "
-        f"импорте: {undeclared}"
+        f"ядро импортирует необъявленное — на чистой установке это падение на импорте: {undeclared}"
     )

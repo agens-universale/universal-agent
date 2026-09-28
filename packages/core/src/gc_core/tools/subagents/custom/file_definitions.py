@@ -6,6 +6,7 @@
 Модуль намеренно не импортирует ``registry``: тот импортирует адаптер, который
 импортирует этот модуль, и обратная связь замкнула бы граф.
 """
+
 from __future__ import annotations
 
 import logging
@@ -96,7 +97,9 @@ def _split_frontmatter(path: str, text: str) -> Tuple[str, str]:
     """
     lines = text.splitlines(keepends=True)
     if not lines or lines[0].strip() != "---":
-        raise SubagentDefinitionError(path, "файл должен начинаться с YAML-frontmatter ('---')")
+        raise SubagentDefinitionError(
+            path, "файл должен начинаться с YAML-frontmatter ('---')"
+        )
 
     fm_lines: List[str] = []
     idx = 1
@@ -106,33 +109,15 @@ def _split_frontmatter(path: str, text: str) -> Tuple[str, str]:
     if idx >= len(lines):
         raise SubagentDefinitionError(path, "frontmatter не закрыт ('---')")
 
-    return "".join(fm_lines), "".join(lines[idx + 1:])
+    return "".join(fm_lines), "".join(lines[idx + 1 :])
 
 
-def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
-    """Разобрать содержимое файла-определения либо бросить SubagentDefinitionError."""
-    fm_text, body = _split_frontmatter(path, text)
-
-    try:
-        meta = yaml.safe_load(fm_text)
-    except yaml.YAMLError as exc:
-        raise SubagentDefinitionError(path, f"frontmatter не разбирается как YAML: {exc}") from exc
-    if meta is None:
-        meta = {}
-    if not isinstance(meta, dict):
-        raise SubagentDefinitionError(path, "frontmatter должен быть отображением ключ-значение")
-
-    unknown = sorted(str(key) for key in meta.keys() if str(key) not in _ALLOWED_KEYS)
-    if unknown:
-        raise SubagentDefinitionError(
-            path,
-            "неизвестные ключи frontmatter: " + ", ".join(unknown)
-            + "; допустимы: " + ", ".join(sorted(_ALLOWED_KEYS)),
-        )
-
+def _require_name(path: str, meta: Dict[str, Any]) -> str:
     name = str(meta.get("name") or "").strip()
     if not name:
-        raise SubagentDefinitionError(path, "обязательное поле 'name' отсутствует или пусто")
+        raise SubagentDefinitionError(
+            path, "обязательное поле 'name' отсутствует или пусто"
+        )
     if not NAME_RE.match(name):
         raise SubagentDefinitionError(
             path,
@@ -144,33 +129,75 @@ def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
             f"'name' длиннее {MAX_NAME_LEN} символов ({len(name)}): лимит имени функции "
             "у OpenAI-совместимых бэкендов и защита имени лог-файла",
         )
+    return name
 
+
+def _require_description(path: str, meta: Dict[str, Any]) -> str:
     description = str(meta.get("description") or "").strip()
     if not description:
-        raise SubagentDefinitionError(path, "обязательное поле 'description' отсутствует или пусто")
+        raise SubagentDefinitionError(
+            path, "обязательное поле 'description' отсутствует или пусто"
+        )
     if len(description) > MAX_DESCRIPTION_LEN:
         raise SubagentDefinitionError(
             path,
             f"'description' длиннее {MAX_DESCRIPTION_LEN} символов ({len(description)}): "
             "описание уходит в схему тулов на каждом запросе к модели",
         )
+    return description
+
+
+def _parse_list_key(
+    path: str, meta: Dict[str, Any], key: str
+) -> Optional[Tuple[str, ...]]:
+    """Список имён из ключа frontmatter; None — ключа нет или он null."""
+    raw = meta.get(key)
+    if raw is None:
+        return None
+    if not isinstance(raw, list):
+        raise SubagentDefinitionError(
+            path, f"'{key}' должен быть списком строк"
+        )
+    return _normalize_names(raw)
+
+
+def parse_subagent_file(path: str, text: str) -> SubagentDefinition:
+    """Разобрать содержимое файла-определения либо бросить SubagentDefinitionError."""
+    fm_text, body = _split_frontmatter(path, text)
+
+    try:
+        meta = yaml.safe_load(fm_text)
+    except yaml.YAMLError as exc:
+        raise SubagentDefinitionError(
+            path, f"frontmatter не разбирается как YAML: {exc}"
+        ) from exc
+    if meta is None:
+        meta = {}
+    if not isinstance(meta, dict):
+        raise SubagentDefinitionError(
+            path, "frontmatter должен быть отображением ключ-значение"
+        )
+
+    unknown = sorted(str(key) for key in meta if str(key) not in _ALLOWED_KEYS)
+    if unknown:
+        raise SubagentDefinitionError(
+            path,
+            "неизвестные ключи frontmatter: "
+            + ", ".join(unknown)
+            + "; допустимы: "
+            + ", ".join(sorted(_ALLOWED_KEYS)),
+        )
+
+    name = _require_name(path, meta)
+    description = _require_description(path, meta)
 
     role = body.strip()
     if not role:
-        raise SubagentDefinitionError(path, "тело файла пусто — сабагент без роли бессмысленен")
+        raise SubagentDefinitionError(
+            path, "тело файла пусто — сабагент без роли бессмысленен"
+        )
 
-    parsed: Dict[str, Optional[Tuple[str, ...]]] = {}
-    for key in _LIST_KEYS:
-        if key not in meta:
-            parsed[key] = None
-            continue
-        raw = meta.get(key)
-        if raw is None:
-            parsed[key] = None
-            continue
-        if not isinstance(raw, list):
-            raise SubagentDefinitionError(path, f"'{key}' должен быть списком строк")
-        parsed[key] = _normalize_names(raw)
+    parsed = {key: _parse_list_key(path, meta, key) for key in _LIST_KEYS}
 
     return SubagentDefinition(
         name=name,
@@ -233,15 +260,28 @@ def discover_subagent_definitions(
         return []
 
     if not os.path.isdir(base_dir):
-        _warn(logger, "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
-              base_dir, event="subagents_dir_missing", diagnostics=diagnostics, dir=base_dir)
+        _warn(
+            logger,
+            "subagents_dir_missing dir=%s (кастомные сабагенты не загружены)",
+            base_dir,
+            event="subagents_dir_missing",
+            diagnostics=diagnostics,
+            dir=base_dir,
+        )
         return []
 
     try:
         entries = sorted(os.listdir(base_dir))
     except OSError as exc:
-        _warn(logger, "subagents_dir_unreadable dir=%s error=%s", base_dir, exc,
-              event="subagents_dir_unreadable", diagnostics=diagnostics, dir=base_dir)
+        _warn(
+            logger,
+            "subagents_dir_unreadable dir=%s error=%s",
+            base_dir,
+            exc,
+            event="subagents_dir_unreadable",
+            diagnostics=diagnostics,
+            dir=base_dir,
+        )
         return []
 
     taken: Dict[str, SubagentDefinition] = {}
@@ -260,28 +300,45 @@ def discover_subagent_definitions(
             # весь старт агента, хотя обещание модуля — «битый файл не лишает
             # оператора остальных».
             definition = parse_subagent_file(path, read_user_text(path))
-        except (OSError, ValueError) as exc:   # ValueError ⊇ SubagentDefinitionError
-            _warn(logger, "subagent_definition_invalid error=%s", exc,
-                  event="subagent_definition_invalid", diagnostics=diagnostics,
-                  path=path, reason=getattr(exc, "reason", str(exc)))
+        except (
+            OSError,
+            ValueError,
+        ) as exc:  # ValueError ⊇ SubagentDefinitionError
+            _warn(
+                logger,
+                "subagent_definition_invalid error=%s",
+                exc,
+                event="subagent_definition_invalid",
+                diagnostics=diagnostics,
+                path=path,
+                reason=getattr(exc, "reason", str(exc)),
+            )
             continue
 
         if definition.name in builtin:
             _warn(
                 logger,
                 "subagent_name_collision name=%s path=%s (совпадает со встроенным, файл пропущен)",
-                definition.name, path,
-                event="subagent_name_collision", diagnostics=diagnostics,
-                subagent_name=definition.name, path=path, winner="builtin",
+                definition.name,
+                path,
+                event="subagent_name_collision",
+                diagnostics=diagnostics,
+                subagent_name=definition.name,
+                path=path,
+                winner="builtin",
             )
             continue
         if definition.name in taken:
             _warn(
                 logger,
                 "subagent_name_collision name=%s path=%s winner=%s (побеждает прочитанный первым)",
-                definition.name, path, taken[definition.name].source_path,
-                event="subagent_name_collision", diagnostics=diagnostics,
-                subagent_name=definition.name, path=path,
+                definition.name,
+                path,
+                taken[definition.name].source_path,
+                event="subagent_name_collision",
+                diagnostics=diagnostics,
+                subagent_name=definition.name,
+                path=path,
                 winner=taken[definition.name].source_path,
             )
             continue
@@ -308,6 +365,6 @@ __all__ = [
     "SubagentDefinition",
     "SubagentDefinitionError",
     "discover_subagent_definitions",
-    "resolve_max_count",
     "parse_subagent_file",
+    "resolve_max_count",
 ]

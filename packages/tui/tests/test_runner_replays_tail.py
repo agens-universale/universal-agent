@@ -9,6 +9,7 @@ TUI держит один исполнитель на сессию. Сообще
 агента (записывает батчи) и снос MCP (двойник выполняет шаг теста ровно в
 окне сноса).
 """
+
 import asyncio
 import importlib
 import logging
@@ -16,7 +17,6 @@ import threading
 import types
 
 import pytest
-
 from gc_tui.services.agent_runner import AgentRunner
 
 _WAIT_SEC = 10.0
@@ -93,7 +93,9 @@ def test_message_typed_during_teardown_gets_its_own_turn(env):
     assert env.runs[1] == ("t", False), "хвост доигран не в том же треде"
 
 
-def test_message_that_misses_the_closed_run_is_not_mixed_into_the_next_request(env):
+def test_message_that_misses_the_closed_run_is_not_mixed_into_the_next_request(
+    env,
+):
     """Опоздавшее к закрытию прогона сообщение уходит своим ходом, не чужим.
 
     UI спрашивает `is_running()` и лишь потом отдаёт сообщение — между этими
@@ -176,7 +178,9 @@ def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
     # постороннего исключения.
     thread_errors: list = []
     monkeypatch.setattr(
-        threading, "excepthook", lambda args: thread_errors.append(args.exc_type)
+        threading,
+        "excepthook",
+        lambda args: thread_errors.append(args.exc_type),
     )
     runner = AgentRunner(executor=env.executor)
     env.teardown_steps += [
@@ -185,7 +189,9 @@ def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
     ]
 
     with caplog.at_level(logging.WARNING):
-        assert runner.start(query="первый", thread_id="t", start_new_thread=True)
+        assert runner.start(
+            query="первый", thread_id="t", start_new_thread=True
+        )
         _finish(runner)
 
     assert env.batches == [["первый"], ["хвост-1"]], (
@@ -194,7 +200,9 @@ def test_tail_of_a_turn_that_dies_in_setup_is_logged_as_lost(
     assert _dropped(caplog) == [(ending, 1)], (
         f"потеря хвоста умершего хода посчитана неверно: {_dropped(caplog)}"
     )
-    assert thread_errors == ([asyncio.CancelledError] if ending == "cancelled" else [])
+    assert thread_errors == (
+        [asyncio.CancelledError] if ending == "cancelled" else []
+    )
 
 
 def test_message_during_compaction_does_not_start_a_parallel_run():

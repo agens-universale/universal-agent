@@ -8,11 +8,9 @@
 
 import json
 
-import pytest
-
 from gc_core.backends.protocol import WalkOutputTooLargeError
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 from gc_core.tools.fs.find_in_files import FindInFiles
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
 _FILES = {"/work/app.py": "needle here\n"}
 
@@ -26,7 +24,14 @@ class _RaisingWalkBackend(FakeBackend):
         raise self._exc
         yield  # pragma: no cover - генератор
 
-    async def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+    async def iter_walk_entries(
+        self,
+        path,
+        *,
+        should_descend=None,
+        prune_names=(),
+        prune_dot_dirs=False,
+    ):
         # find_in_files обходит дерево через iter_walk_entries (размеры + prune).
         raise self._exc
         yield  # pragma: no cover - генератор

@@ -4,13 +4,16 @@
 при /stop runner заменяется (`active_runner=None`), поэтому опираться на сам
 объект раннера в момент стампа нельзя (баг: давало «completed» вместо «stopped»).
 """
+
 import json
+
 import pytest
 
 
 def _write_task(tmp_path, tid):
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8")
+        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8"
+    )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
 
@@ -26,21 +29,29 @@ class _Runner:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("runner,last_stop,last_error,expected", [
-    (_Runner(running=False), False, None, "completed"),
-    (None, True, None, "stopped"),     # /stop заменил runner на None
-    (_Runner(running=False), False, "boom", "failed"),
-])
-async def test_falling_edge_stamps_status(tmp_path, runner, last_stop, last_error, expected):
+@pytest.mark.parametrize(
+    "runner,last_stop,last_error,expected",
+    [
+        (_Runner(running=False), False, None, "completed"),
+        (None, True, None, "stopped"),  # /stop заменил runner на None
+        (_Runner(running=False), False, "boom", "failed"),
+    ],
+)
+async def test_falling_edge_stamps_status(
+    tmp_path, runner, last_stop, last_error, expected
+):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "stmp0000000000000000000000000001a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._was_running = True               # был running на прошлом тике
+        scr._was_running = True  # был running на прошлом тике
         pilot.app.active_runner = runner
         pilot.app.last_stop_requested = last_stop
         pilot.app.last_runner_error = last_error
@@ -56,13 +67,18 @@ async def test_compact_transition_does_not_stamp(tmp_path):
     терминальный статус: falling-edge должен пропустить compact-переход."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "stmp0000000000000000000000000003a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._store.update_tui_meta(tid, {"status": "stopped"})  # сессия была остановлена
+        scr._store.update_tui_meta(
+            tid, {"status": "stopped"}
+        )  # сессия была остановлена
         scr._was_running = True
         r = _Runner(running=False)
         r._thread_kind = "compact"
@@ -72,7 +88,9 @@ async def test_compact_transition_does_not_stamp(tmp_path):
         scr._poll_active()
         await pilot.pause()
         meta = scr._store.get_task_meta(tid)
-        assert (meta.get("tui") or {}).get("status") == "stopped"  # НЕ completed
+        assert (meta.get("tui") or {}).get(
+            "status"
+        ) == "stopped"  # НЕ completed
 
 
 @pytest.mark.asyncio
@@ -81,16 +99,21 @@ async def test_prepare_for_new_run_stamps_running_over_completed(tmp_path):
     last_indicator, иначе список сессий/бейдж врут после прошлого финиша."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "stmp0000000000000000000000000004a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(
             tid,
-            {"status": "completed",
-             "last_indicator": {"kind": "done", "elapsed": 32}},
+            {
+                "status": "completed",
+                "last_indicator": {"kind": "done", "elapsed": 32},
+            },
         )
         scr._prepare_for_new_run()
         meta = scr._store.get_task_meta(tid)
@@ -104,16 +127,21 @@ async def test_rising_edge_stamps_running(tmp_path):
     """Восходящий фронт poll: was_running False→True → status=running."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "stmp0000000000000000000000000005a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(
             tid,
-            {"status": "completed",
-             "last_indicator": {"kind": "done", "elapsed": 7}},
+            {
+                "status": "completed",
+                "last_indicator": {"kind": "done", "elapsed": 7},
+            },
         )
         scr._was_running = False
         pilot.app.active_runner = _Runner(running=True)
@@ -130,13 +158,15 @@ async def test_session_status_word_reads_tui_running(tmp_path):
     """meta.tui.status=running без живого runner (crash mid-run) → 'running'."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "stmp0000000000000000000000000006a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
         scr._store.update_tui_meta(tid, {"status": "running"})
         pilot.app.active_runner = None
         assert scr._session_status_word() == "running"
-

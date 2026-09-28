@@ -1,4 +1,5 @@
 """Test that agentsmd_override conflict is surfaced via startup_notices channel."""
+
 from gc_core.startup_notices import collect_startup_notices
 
 

@@ -3,6 +3,7 @@
 User-facing canon remains Python ``re``. Native grep is an adapter only after
 this gate passes. Fail closed → Python path.
 """
+
 from __future__ import annotations
 
 import re
@@ -13,12 +14,11 @@ from typing import Optional
 _INLINE_GROUP = re.compile(r"\(\?")
 
 # Python-ish escapes that are wrong or different under ERE / often silent-wrong.
-_BAD_ESCAPES = re.compile(
-    r"\\[dDwWsSbBAZz]|\\[1-9]"
-)
+_BAD_ESCAPES = re.compile(r"\\[dDwWsSbBAZz]|\\[1-9]")
 
 # Quantifier braces — Python by default (ERE supports them but portability/semantics).
-_BRACES = re.compile(r"\{[0-9]+(?:,[0-9]*)?\}")
+_BRACES = re.compile(r"\{\d+(?:,\d*)?\}", re.ASCII)
+
 
 @dataclass(frozen=True)
 class NativeGrepPlan:

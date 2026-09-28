@@ -3,6 +3,7 @@
 Навигация: ←/→ переключают вариант, Enter выбирает подсвеченный, Esc — отмена.
 Левый вариант (affirmative) выбран по умолчанию. y/n работают как прямые шорткаты.
 """
+
 from __future__ import annotations
 
 import re
@@ -75,7 +76,9 @@ class ConfirmScreen(ModalScreen[bool]):
         with Vertical(id="confirm-dialog"):
             yield Static(self._message, id="confirm-message", markup=False)
             yield Static("", id="confirm-spacer")
-            yield Static(_render_hint(self._hint, self._selected), id="confirm-hint")
+            yield Static(
+                _render_hint(self._hint, self._selected), id="confirm-hint"
+            )
 
     def on_mount(self) -> None:
         if self._title:

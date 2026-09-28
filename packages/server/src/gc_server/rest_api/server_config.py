@@ -3,12 +3,19 @@ import os
 from typing import Any, Dict
 
 import yaml
-
 from gc_core.agent_edits.ctx import RUN_MODE_KEY, RUN_MODE_SERVER
-from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_and_params
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.bundled_assets import bundled_root, repo_root
+from gc_core.config import (
+    apply_cli_overrides,
+    load_config,
+    sync_logging_flat_and_params,
+)
+from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.utils.user_text import read_user_text
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SERVER_CONFIG_NAME = "config_server.yml"
+
 
 logger = logging.getLogger(__name__)
 
@@ -29,13 +36,13 @@ def _server_config_candidates() -> list[str]:
     поднимался на минимальном дефолте — **с `auth_token: None`, то есть без
     авторизации**. Ни строки в лог.
     """
-    candidates = [os.path.join(os.getcwd(), "config_server.yml")]
+    candidates = [os.path.join(os.getcwd(), _SERVER_CONFIG_NAME)]
     root = repo_root()
     if root is not None:
-        candidates.append(str(root / "config_server.yml"))
+        candidates.append(str(root / _SERVER_CONFIG_NAME))
     # Исторический путь: рядом с ассетами. Оставлен, чтобы не сломать установки,
     # где файл действительно положили туда.
-    candidates.append(os.path.join(PROJECT_ROOT, "config_server.yml"))
+    candidates.append(os.path.join(PROJECT_ROOT, _SERVER_CONFIG_NAME))
     seen: set[str] = set()
     return [c for c in candidates if not (c in seen or seen.add(c))]
 
@@ -60,12 +67,15 @@ def load_server_config() -> Dict[str, Any]:
     `swarm.config._user_config_dir`).
     """
     from gc_core.config_modules import env_vars
+
     if env_vars.env.server_config_path is not None:
         cfg_path = str(env_vars.env.server_config_path)
         searched = [cfg_path]
     else:
         searched = _server_config_candidates()
-        cfg_path = next((c for c in searched if os.path.exists(c)), searched[-1])
+        cfg_path = next(
+            (c for c in searched if os.path.exists(c)), searched[-1]
+        )
     if not os.path.exists(cfg_path):
         # Минимальный дефолт, чтобы сервер мог стартовать и без файла. Раньше
         # эта ветка была молчаливой, и «конфиг не нашёлся» было не отличить от
@@ -176,14 +186,17 @@ def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
         return bundled
 
     logger.warning(
-        "agent.server_agentmd_path=%r не найден (искал %s и %s) — агент будет "
-        "работать БЕЗ системных инструкций",
-        raw, local, bundled,
+        "agent.server_agentmd_path=%r не найден (искал %s и %s) — агент будет работать БЕЗ системных инструкций",
+        raw,
+        local,
+        bundled,
     )
     return local
 
 
-def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
+def build_agent_config_for_server(
+    server_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
     """
     Построить config_dict для агента при запуске через REST-сервер.
 
@@ -217,7 +230,9 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     agent_cfg = server_cfg.get("agent") or {}
     server_agent_path = agent_cfg.get("server_agentmd_path")
     if isinstance(server_agent_path, str) and server_agent_path.strip():
-        server_agent_path = _resolve_server_agent_md(server_agent_path, server_cfg)
+        server_agent_path = _resolve_server_agent_md(
+            server_agent_path, server_cfg
+        )
         cfg["agent_md_path"] = server_agent_path
 
     overrides = server_cfg.get("agent_overrides") or {}
@@ -236,5 +251,8 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     return cfg
 
 
-__all__ = ["load_server_config", "build_agent_config_for_server", "PROJECT_ROOT"]
-
+__all__ = [
+    "PROJECT_ROOT",
+    "build_agent_config_for_server",
+    "load_server_config",
+]

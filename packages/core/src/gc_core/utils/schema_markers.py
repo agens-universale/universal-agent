@@ -24,7 +24,9 @@ def schema_without_internal_markers(schema: Any) -> Any:
         return {
             k: schema_without_internal_markers(v)
             for k, v in schema.items()
-            if not (isinstance(k, str) and k.startswith(INTERNAL_MARKER_PREFIX))
+            if not (
+                isinstance(k, str) and k.startswith(INTERNAL_MARKER_PREFIX)
+            )
         }
     if isinstance(schema, list):
         return [schema_without_internal_markers(v) for v in schema]

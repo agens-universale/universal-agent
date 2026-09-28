@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from gc_core.thread_store import append_subagent_trace_record, sanitize_system_id, validate_thread_id
+from gc_core.thread_store import sanitize_system_id, validate_thread_id
 
 
 @dataclass(frozen=True)

@@ -20,6 +20,7 @@ services/code_render).
 ВНЕШНЕГО инструмента (`git apply`/`patch`), с подставленным на показе именем
 файла в заголовках. Картинку он не трогает.
 """
+
 from __future__ import annotations
 
 import re

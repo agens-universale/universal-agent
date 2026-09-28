@@ -1,12 +1,11 @@
 """Публичный async-фасад SDK (план async-переезда, Задача 17)."""
+
 import asyncio
 import threading
 import time
 
 import pytest
-
 from gc_core.aio import AsyncAgent
-
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
@@ -17,11 +16,15 @@ from parity_harness import (
 
 
 def _finish(report: str, call_id: str = "c2") -> dict:
-    return assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer",
-        "task_report": report,
-        "handoff": "{}",
-    }, call_id=call_id)
+    return assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": report,
+            "handoff": "{}",
+        },
+        call_id=call_id,
+    )
 
 
 def _scenario(report: str = "готово") -> list[dict]:
@@ -138,9 +141,10 @@ def _finish_with_prose(prose: str, report: str = "готово") -> dict:
 async def test_facade_streams_deltas(tmp_path, monkeypatch):
     """stream() отдаёт дельты ответа и доигрывает ход до конца."""
     cfg = parity_config(tmp_path, monkeypatch)
-    install(monkeypatch, ScriptedBackend(
-        [_finish_with_prose("считаю ответ"), judge_accept()]
-    ))
+    install(
+        monkeypatch,
+        ScriptedBackend([_finish_with_prose("считаю ответ"), judge_accept()]),
+    )
 
     seen = []
     async with await AsyncAgent.create(cfg) as agent:
@@ -163,6 +167,7 @@ async def test_stream_propagates_run_error(tmp_path, monkeypatch):
     install(monkeypatch, ScriptedBackend(_scenario()))
 
     async with await AsyncAgent.create(cfg) as agent:
+
         async def _boom(*_a, **_k):
             raise RuntimeError("прогон сломался")
 

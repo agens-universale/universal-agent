@@ -5,25 +5,22 @@
 ещё и удерживая дескрипторы. Агент возвращал «команда снята», а работа
 продолжалась.
 """
+
 import asyncio
 import os
-import time
 from pathlib import Path
 
 import pytest
-
 from gc_core.backends.local import LocalFsBackend
 
-pytestmark = pytest.mark.skipif(os.name == "nt", reason="групп процессов нет на Windows")
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="групп процессов нет на Windows"
+)
 
 
 def _marker_script(marker: Path) -> str:
     """Потомок, который переживёт шелл и оставит след, если его не убили."""
-    return (
-        f"python3 -c \"import time,pathlib; time.sleep(2); "
-        f"pathlib.Path({str(marker)!r}).write_text('жив')\" & "
-        "sleep 30"
-    )
+    return f"python3 -c \"import time,pathlib; time.sleep(2); pathlib.Path({str(marker)!r}).write_text('жив')\" & sleep 30"
 
 
 async def test_timeout_kills_the_child_too(tmp_path):
@@ -33,9 +30,7 @@ async def test_timeout_kills_the_child_too(tmp_path):
 
     # Потомок спит 2 с: если группу сняли, до записи он не доживёт.
     await asyncio.sleep(3.0)
-    assert not marker.exists(), (
-        "потомок пережил таймаут — убили только шелл"
-    )
+    assert not marker.exists(), "потомок пережил таймаут — убили только шелл"
 
 
 async def test_cancellation_kills_the_child_too(tmp_path):

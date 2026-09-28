@@ -5,9 +5,10 @@ import pytest
 async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         # смонтировать индикатор как при живом прогоне
         scr._thinking_started_at = 0.0
@@ -16,12 +17,16 @@ async def test_cancel_sets_indicator_cancelled(tmp_path, monkeypatch):
 
         # сэмулировать живой runner
         class _R:
-            def is_running(self): return True
-            def stop(self): pass
+            def is_running(self):
+                return True
+
+            def stop(self):
+                pass
+
         scr.app.active_runner = _R()
         scr.app.tui_state.active_task_id = "t1"
         scr._active_task_id = "t1"
-        scr._events_since_last_user_send = 3   # не cancel-with-undo
+        scr._events_since_last_user_send = 3  # не cancel-with-undo
 
         scr._cmd_stop()
         await pilot.pause()
@@ -35,28 +40,45 @@ async def test_falling_edge_persists_last_indicator(tmp_path, monkeypatch):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "t1"
         # стор-двойник: фиксируем patch'и update_tui_meta
         patches = []
 
         class _Store:
-            def update_tui_meta(self, tid, patch): patches.append(patch)
-            def get_task_meta(self, tid): return {}
-            def read_live_messages(self, tid): return []
+            def update_tui_meta(self, tid, patch):
+                patches.append(patch)
+
+            def get_task_meta(self, tid):
+                return {}
+
+            def read_live_messages(self, tid):
+                return []
+
         scr._store = _Store()
         scr._thinking_started_at = 0.0
         scr._was_running = True
-        monkeypatch.setattr(type(scr), "_update_terminal_title", lambda self: None)
+        monkeypatch.setattr(
+            type(scr), "_update_terminal_title", lambda self: None
+        )
 
         class _R:
-            def is_running(self): return False
+            def is_running(self):
+                return False
+
             _thread_kind = "run"
+
         scr.app.active_runner = _R()
         scr.app.last_runner_error = None
-        scr.app.last_stop_requested = True   # => stopped → cancelled
+        scr.app.last_stop_requested = True  # => stopped → cancelled
 
         scr._poll_active()
-        kinds = [p.get("last_indicator", {}).get("kind") for p in patches if "last_indicator" in p]
+        kinds = [
+            p.get("last_indicator", {}).get("kind")
+            for p in patches
+            if "last_indicator" in p
+        ]
         assert kinds == ["cancelled"], patches

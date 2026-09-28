@@ -56,7 +56,7 @@ def ensure_mcp_daemons(
     kwargs = {} if disable_hint is None else {"disable_hint": disable_hint}
     try:
         _supervisor = ensure_daemons_for_agent(config_dict, **kwargs)
-    except Exception as exc:  # noqa: BLE001 — сознательно широко, см. докстринг
+    except Exception as exc:  # сознательно широко, см. докстринг
         _supervisor = None
         from recommended_mcp.autostart import _warn
 
@@ -70,11 +70,20 @@ def ensure_mcp_daemons(
 
 
 def shutdown_mcp_daemons() -> None:
-    """Остановить daemon'ы, поднятые ensure_mcp_daemons() в этом процессе."""
+    """Остановить daemon'ы, поднятые ensure_mcp_daemons() в этом процессе.
+    Гашение упало — супервизор не забываем: `kill_mcp_daemons_now()` добьёт тех,
+    кого оно не погасило."""
     global _supervisor
     if _supervisor is None:
         return
-    try:
-        _supervisor.shutdown_managed()
-    finally:
-        _supervisor = None
+    _supervisor.shutdown_managed()
+    _supervisor = None
+
+
+def kill_mcp_daemons_now() -> None:
+    """Последний рубеж аварийного выхода TUI: SIGKILL daemon'ам этого процесса
+    без ожидания — если штатное `shutdown_mcp_daemons()` упало или не уложилось
+    в бюджет."""
+    supervisor = _supervisor  # штатное гашение может обнулить его параллельно
+    if supervisor is not None:
+        supervisor.kill_managed_now()

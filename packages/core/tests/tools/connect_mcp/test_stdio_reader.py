@@ -3,11 +3,14 @@
 Прежняя реализация заводила поток на каждую строку JSON-RPC — до 32 на один
 вызов тула — и при таймауте оставляла его висеть на readline навсегда.
 """
-import io
+
 import threading
 import time
 
-from gc_core.tools.connect_mcp.transport import _readline_with_timeout, forget_stdio_reader
+from gc_core.tools.connect_mcp.transport import (
+    _readline_with_timeout,
+    forget_stdio_reader,
+)
 
 
 class _SlowStream:
@@ -22,7 +25,7 @@ class _SlowStream:
     def readline(self):
         if self._hang_after is not None and self._served >= self._hang_after:
             self.hanging.set()
-            time.sleep(30)          # имитируем молчащий сервер
+            time.sleep(30)  # имитируем молчащий сервер
             return ""
         if not self._lines:
             return ""
@@ -59,19 +62,24 @@ def test_one_thread_per_stream_not_per_line(monkeypatch):
         for _ in range(10):
             _readline_with_timeout(stream, 2)
         readers = [n for n in created if n == "mcp-stdio-reader"]
-        assert len(readers) == 1, f"потоков-читателей {len(readers)} на 10 строк"
+        assert len(readers) == 1, (
+            f"потоков-читателей {len(readers)} на 10 строк"
+        )
     finally:
         forget_stdio_reader(stream)
 
 
 def test_timeout_returns_none_without_leaking_a_thread_per_call():
     """Молчащий сервер: таймаут отдаёт None, но потоки не копятся."""
+
     def _readers() -> int:
         # Считаем ИМЕННО читателей stdio, а не все потоки процесса. Глобальный
         # счётчик здесь врёт: соседние тесты (дискавери MCP) оставляют
         # брошенные по дедлайну daemon-потоки, и те умирают в произвольный
         # момент — равенство до/после ломалось от постороннего шума.
-        return sum(1 for t in threading.enumerate() if t.name == "mcp-stdio-reader")
+        return sum(
+            1 for t in threading.enumerate() if t.name == "mcp-stdio-reader"
+        )
 
     stream = _SlowStream(["одна\n"], hang_after=1)
     try:
@@ -92,7 +100,9 @@ def test_closed_stream_stops_returning_lines():
         assert _readline_with_timeout(stream, 2).strip() == "всё"
         started = time.monotonic()
         assert _readline_with_timeout(stream, 5) is None
-        assert time.monotonic() - started < 1, "ждали таймаут вместо маркера конца"
+        assert time.monotonic() - started < 1, (
+            "ждали таймаут вместо маркера конца"
+        )
     finally:
         forget_stdio_reader(stream)
 

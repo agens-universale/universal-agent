@@ -13,6 +13,7 @@ Layout: скроллируемое тело (команда/код как ест
 При ``max_height`` от ``_cap_sticky_banner`` main.py выставляет ``height=cap``,
 иначе Textual клипает box, а дети layout'ятся полной высотой и опции уезжают.
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -40,7 +41,9 @@ def build_guard_label(title: str, via: str | None = None) -> Text:
     в самой строке вопроса ('Разрешить …?'), не в заголовке.
     via — метка субагента (child HITL), например `via subagent_worker`."""
     t = Text()
-    t.append(f"{GUARD_GLYPH}  ", style=RUN_COLOR)  # двойной пробел: ⚠ широкий, одиночный «съедается»
+    t.append(
+        f"{GUARD_GLYPH}  ", style=RUN_COLOR
+    )  # двойной пробел: ⚠ широкий, одиночный «съедается»
     label = f"{title} · via {via}" if via else title
     t.append(label, style=BRIGHT)
     return t
@@ -57,9 +60,17 @@ _OPTIONS = [
 ]
 
 # Метки primary payload-поля — рендерится первым, multiline, cb-payload class.
-_PAYLOAD_LABELS = frozenset({
-    "команда", "код", "command", "code", "path", "url", "путь",
-})
+_PAYLOAD_LABELS = frozenset(
+    {
+        "команда",
+        "код",
+        "command",
+        "code",
+        "path",
+        "url",
+        "путь",
+    }
+)
 
 
 def _is_payload_label(label: str) -> bool:
@@ -220,7 +231,9 @@ class ConfirmBanner(Vertical):
                     css_class = "cb-field"
                 if not text:
                     continue  # пустые поля (напр. Reason="") не засоряют баннер
-                yield Static(f"  {label}: {text}", classes=css_class, markup=False)
+                yield Static(
+                    f"  {label}: {text}", classes=css_class, markup=False
+                )
         opts = Static(_render_options(self.selected), classes="cb-options")
         self._options_static = opts
         yield opts
@@ -228,5 +241,8 @@ class ConfirmBanner(Vertical):
     def move_selection(self, delta: int) -> None:
         """Сдвинуть выделение на delta (-1 = вверх, +1 = вниз)."""
         self.selected = max(0, min(len(_OPTIONS) - 1, self.selected + delta))
-        if self._options_static is not None and self._options_static.is_mounted:
+        if (
+            self._options_static is not None
+            and self._options_static.is_mounted
+        ):
             self._options_static.update(_render_options(self.selected))

@@ -11,6 +11,7 @@
 сработает. Каталог набора и так на sys.path — тесты ядра тем же способом берут
 соседей (``from test_project_data_backend import ...``).
 """
+
 from __future__ import annotations
 
 import json
@@ -27,7 +28,7 @@ class _Response:
         self.headers: dict[str, str] = {}
         self.text = json.dumps(payload, ensure_ascii=False)
 
-    def __enter__(self) -> "_Response":
+    def __enter__(self) -> _Response:
         return self
 
     def __exit__(self, *exc: Any) -> bool:
@@ -68,8 +69,7 @@ class ScriptedBackend:
     def assert_clean(self) -> None:
         """Сценарий сошёлся: ни перебора, ни недобора ходов."""
         assert self.overflow == 0, (
-            f"сценарий исчерпан: {len(self._turns)} ходов, лишних запросов "
-            f"{self.overflow}"
+            f"сценарий исчерпан: {len(self._turns)} ходов, лишних запросов {self.overflow}"
         )
         assert self._i == len(self._turns), (
             f"сценарий недобран: исполнено {self._i} из {len(self._turns)} ходов"
@@ -80,8 +80,7 @@ class ScriptedBackend:
         if self._i >= len(self._turns):
             self.overflow += 1
             raise AssertionError(
-                f"ScriptedBackend: сценарий исчерпан ({len(self._turns)} ходов), "
-                f"пришёл вызов №{self._i + 1}"
+                f"ScriptedBackend: сценарий исчерпан ({len(self._turns)} ходов), пришёл вызов №{self._i + 1}"
             )
         turn = self._turns[self._i]
         self._i += 1
@@ -96,7 +95,6 @@ class ScriptedBackend:
         return self._next(json)
 
 
-
 def _as_sse(turn: dict) -> str:
     """Разложить готовый ответ модели в SSE-чанки.
 
@@ -108,24 +106,61 @@ def _as_sse(turn: dict) -> str:
     choice = (turn.get("choices") or [{}])[0]
     message = choice.get("message") or {}
     chunks: list[dict] = []
-    base = {"id": turn.get("id", "scripted"), "model": turn.get("model", "scripted")}
+    base = {
+        "id": turn.get("id", "scripted"),
+        "model": turn.get("model", "scripted"),
+    }
 
     content = message.get("content")
     if content:
-        chunks.append({**base, "choices": [{"index": 0, "delta": {"role": "assistant",
-                                                                 "content": content}}]})
+        chunks.append(
+            {
+                **base,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant", "content": content},
+                    }
+                ],
+            }
+        )
     for i, call in enumerate(message.get("tool_calls") or []):
-        chunks.append({**base, "choices": [{"index": 0, "delta": {"tool_calls": [{
-            "index": i,
-            "id": call.get("id"),
-            "type": call.get("type", "function"),
-            "function": call.get("function", {}),
-        }]}}]})
-    chunks.append({**base,
-                   "choices": [{"index": 0, "delta": {},
-                                "finish_reason": choice.get("finish_reason") or "stop"}],
-                   "usage": turn.get("usage")})
-    body = "".join(f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks)
+        chunks.append(
+            {
+                **base,
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": i,
+                                    "id": call.get("id"),
+                                    "type": call.get("type", "function"),
+                                    "function": call.get("function", {}),
+                                }
+                            ]
+                        },
+                    }
+                ],
+            }
+        )
+    chunks.append(
+        {
+            **base,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": choice.get("finish_reason") or "stop",
+                }
+            ],
+            "usage": turn.get("usage"),
+        }
+    )
+    body = "".join(
+        f"data: {json.dumps(c, ensure_ascii=False)}\n\n" for c in chunks
+    )
     return body + "data: [DONE]\n\n"
 
 
@@ -138,10 +173,9 @@ def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
     асинхронный: гейт паритета обязан кормить оба одним и тем же сценарием.
     """
     import httpx
-
     from gc_core.utils import connect_backend
 
-    def handler(request: "httpx.Request") -> "httpx.Response":
+    def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content or b"{}")
         turn = backend.next_payload(payload)
         if payload.get("stream"):
@@ -149,15 +183,19 @@ def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
             # on_stream_delta) — отдаём тот же ход в форме SSE. Иначе сборка
             # получит JSON вместо чанков и сочтёт ответ пустым.
             return httpx.Response(
-                200, text=_as_sse(turn),
+                200,
+                text=_as_sse(turn),
                 headers={"content-type": "text/event-stream"},
             )
         return httpx.Response(200, json=turn)
 
     if hasattr(connect_backend, "get_async_client"):
         monkeypatch.setattr(
-            connect_backend, "get_async_client",
-            lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+            connect_backend,
+            "get_async_client",
+            lambda **kw: httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            ),
         )
     else:
         # Синхронная ветка (develop) ходит к модели через requests-сессию.
@@ -167,7 +205,6 @@ def install(monkeypatch, backend: ScriptedBackend) -> ScriptedBackend:
         # с `requests` `post` ровно для этого случая.
         monkeypatch.setattr(connect_backend, "_NO_NETRC_SESSION", backend)
     return backend
-
 
 
 def install_many(monkeypatch, backends: dict) -> dict:
@@ -182,10 +219,9 @@ def install_many(monkeypatch, backends: dict) -> dict:
     отличаться полем ``model``.
     """
     import httpx
-
     from gc_core.utils import connect_backend
 
-    def handler(request: "httpx.Request") -> "httpx.Response":
+    def handler(request: httpx.Request) -> httpx.Response:
         payload = json.loads(request.content or b"{}")
         model = payload.get("model")
         backend = backends.get(model)
@@ -196,48 +232,70 @@ def install_many(monkeypatch, backends: dict) -> dict:
         turn = backend.next_payload(payload)
         if payload.get("stream"):
             return httpx.Response(
-                200, text=_as_sse(turn),
+                200,
+                text=_as_sse(turn),
                 headers={"content-type": "text/event-stream"},
             )
         return httpx.Response(200, json=turn)
 
     monkeypatch.setattr(
-        connect_backend, "get_async_client",
+        connect_backend,
+        "get_async_client",
         lambda **kw: httpx.AsyncClient(transport=httpx.MockTransport(handler)),
     )
     return backends
 
 
-def assistant_tool_call(name: str, arguments: dict, call_id: str = "c1") -> dict:
+def assistant_tool_call(
+    name: str, arguments: dict, call_id: str = "c1"
+) -> dict:
     """Ход модели «вызвать тул» в формате chat/completions."""
     return {
-        "choices": [{
-            "index": 0,
-            "message": {
-                "role": "assistant",
-                "content": None,
-                "tool_calls": [{
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name,
-                                 "arguments": json.dumps(arguments, ensure_ascii=False)},
-                }],
-            },
-            "finish_reason": "tool_calls",
-        }],
-        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+        "choices": [
+            {
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": call_id,
+                            "type": "function",
+                            "function": {
+                                "name": name,
+                                "arguments": json.dumps(
+                                    arguments, ensure_ascii=False
+                                ),
+                            },
+                        }
+                    ],
+                },
+                "finish_reason": "tool_calls",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15,
+        },
     }
 
 
 def assistant_text(text: str) -> dict:
     """Ход модели «ответить текстом»."""
     return {
-        "choices": [{
-            "index": 0,
-            "message": {"role": "assistant", "content": text},
-            "finish_reason": "stop",
-        }],
-        "usage": {"prompt_tokens": 12, "completion_tokens": 2, "total_tokens": 14},
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": text},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {
+            "prompt_tokens": 12,
+            "completion_tokens": 2,
+            "total_tokens": 14,
+        },
     }
 
 
@@ -251,8 +309,7 @@ def judge_accept() -> dict:
     хода перестаёт сходиться.
     """
     return assistant_text(
-        '{"action": "accept", "trace_ok": true, "report_ok": true, '
-        '"is_question": false}'
+        '{"action": "accept", "trace_ok": true, "report_ok": true, "is_question": false}'
     )
 
 
@@ -278,8 +335,9 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> dict:
     # (путь принадлежит конфигу). `config.py` берёт обе функции через модуль,
     # а не связанным именем, поэтому подмена у владельца действует.
     monkeypatch.setattr(_env_vars, "project_local_config_path", lambda: None)
-    monkeypatch.setattr(_env_vars, "managed_config_path",
-                        lambda: tmp_path / "absent.local.yml")
+    monkeypatch.setattr(
+        _env_vars, "managed_config_path", lambda: tmp_path / "absent.local.yml"
+    )
 
     prompt = tmp_path / "system_prompt.md"
     prompt.write_text("SYSTEM PROMPT", encoding="utf-8")
@@ -288,7 +346,7 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> dict:
     conf.write_text(
         "backend:\n"
         "  api_mode: chat_completions\n"
-        "  completions_url: \"http://parity.invalid/v1/chat/completions\"\n"
+        '  completions_url: "http://parity.invalid/v1/chat/completions"\n'
         "  use_retry: false\n"
         "agent:\n"
         "  model: parity-model\n"
@@ -312,19 +370,34 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> dict:
 #: Поля, которые меняются от прогона к прогону и сравнению не подлежат.
 #: Не «шум»: id и call_id генерируются от содержимого и времени, таймстемпы —
 #: от часов. Всё остальное обязано совпадать байт в байт.
-_VOLATILE_KEYS = ("id", "call_id", "created", "timestamp", "ts", "run_id",
-                  "trace_id", "message_id", "response_id")
+_VOLATILE_KEYS = (
+    "id",
+    "call_id",
+    "created",
+    "timestamp",
+    "ts",
+    "run_id",
+    "trace_id",
+    "message_id",
+    "response_id",
+)
 
 
 def strip_volatile(obj: Any) -> Any:
     if isinstance(obj, dict):
-        return {k: strip_volatile(v) for k, v in obj.items() if k not in _VOLATILE_KEYS}
+        return {
+            k: strip_volatile(v)
+            for k, v in obj.items()
+            if k not in _VOLATILE_KEYS
+        }
     if isinstance(obj, list):
         return [strip_volatile(x) for x in obj]
     return obj
 
 
-def run_thread_dump(config_dict: dict, system_id: str, thread_id: str) -> list[dict]:
+def run_thread_dump(
+    config_dict: dict, system_id: str, thread_id: str
+) -> list[dict]:
     """Дамп ``data_<system>_<thread>.jsonl`` без недетерминированных полей.
 
     Путь считает ``thread_store`` — повторять его формат здесь нельзя: имя
@@ -332,10 +405,14 @@ def run_thread_dump(config_dict: dict, system_id: str, thread_id: str) -> list[d
     """
     from gc_core.thread_store import _thread_paths, resolve_threads_dir
 
-    data_path, _meta = _thread_paths(resolve_threads_dir(config_dict),
-                                     system_id, thread_id)
+    data_path, _meta = _thread_paths(
+        resolve_threads_dir(config_dict), system_id, thread_id
+    )
     path = Path(data_path)
     if not path.exists():
         return []
-    return [strip_volatile(json.loads(line))
-            for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        strip_volatile(json.loads(line))
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]

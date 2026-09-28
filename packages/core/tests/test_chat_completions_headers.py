@@ -1,7 +1,10 @@
 import unittest
 from types import SimpleNamespace
 
-from gc_core.utils.connect_backend import acreate_call_headers, build_call_headers
+from gc_core.utils.connect_backend import (
+    acreate_call_headers,
+    build_call_headers,
+)
 
 
 class _StateStub:
@@ -57,7 +60,9 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
             config_dict={
                 "x_cl_id": 12345,
                 "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {"Authorization": "Bearer chat-token"},
+                "chat_completion_headers": {
+                    "Authorization": "Bearer chat-token"
+                },
             },
             auth_connector=_AuthStub(),
         )
@@ -75,14 +80,17 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
             config_dict={
                 "x_cl_id": 12345,
                 "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {"x-session-id": "sympy__sympy-12419"},
+                "chat_completion_headers": {
+                    "x-session-id": "sympy__sympy-12419"
+                },
             },
             auth_connector=None,
         )
         headers = build_call_headers(_StateStub(), ctx)
         self.assertEqual(headers.get("x-session-id"), "sympy__sympy-12419")
         self.assertEqual(
-            [k for k in headers if k.lower() == "x-session-id"], ["x-session-id"]
+            [k for k in headers if k.lower() == "x-session-id"],
+            ["x-session-id"],
         )
 
 

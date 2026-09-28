@@ -11,11 +11,21 @@ id, равный старому голому имени, на которое з�
 (session_memory/session_think/project_memory/file_info/…) trace_mapper по имени
 не сравнивает → рендерятся generic-веткой по текущему имени (как любой неизвестный
 тул, так было и раньше)."""
+
 from __future__ import annotations
 
 # Новые имена из core-контракта (единый источник истины; правильное направление
 # зависимости TUI→ядро). Если master снова переименует — правка здесь.
-from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME, FINISH_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME, FS_READ_FILE_NAME, FS_WRITE_FILE_NAME, EXEC_COMMAND_NAME, EXEC_PYTHON_NAME, EXEC_FETCH_URL_NAME
+from gc_core.constants.tool_names import (
+    ASK_HUMAN_TOOL_NAME,
+    EXEC_COMMAND_NAME,
+    EXEC_FETCH_URL_NAME,
+    EXEC_PYTHON_NAME,
+    FINISH_TOOL_NAME,
+    FS_READ_FILE_NAME,
+    FS_WRITE_FILE_NAME,
+    INTERMEDIATE_REPLY_TOOL_NAME,
+)
 
 # wire-имя (новое) → канонический id (старое голое имя, на которое завязан trace_mapper).
 _NEW_TO_CANONICAL: dict[str, str] = {

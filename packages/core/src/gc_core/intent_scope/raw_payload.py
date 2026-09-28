@@ -37,7 +37,9 @@ def truncate_raw_tool_payload(
         return args, None
 
     out_text = _output_as_text(output)
-    out_budget = max(max_chars - len(args_json) - _RAW_OUTPUT_WRAPPER_OVERHEAD, 1)
+    out_budget = max(
+        max_chars - len(args_json) - _RAW_OUTPUT_WRAPPER_OVERHEAD, 1
+    )
     if len(out_text) <= out_budget:
         return args, output
 

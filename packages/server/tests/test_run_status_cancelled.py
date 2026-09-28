@@ -4,6 +4,7 @@
 ``get_run_status`` его не читал, и клиент видел ``completed`` с пустым
 результатом. Отличить остановку uvicorn от отказа агента было нельзя.
 """
+
 import inspect
 
 from gc_server import server

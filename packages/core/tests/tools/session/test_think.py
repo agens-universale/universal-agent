@@ -1,12 +1,13 @@
 import json
 
-from gc_testkit.helpers.tool_ctx import CallableTool
-
 from gc_core.tools.session.think import Think
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_think_success_single_field():
-    data = json.loads(CallableTool(Think())(thoughts="Analyzing the problem..."))
+    data = json.loads(
+        CallableTool(Think())(thoughts="Analyzing the problem...")
+    )
     assert data["ok"] is True
     assert "Thinking added" in (data.get("message") or "")
     msg = (data.get("message") or "").lower()
@@ -39,7 +40,11 @@ def test_think_success_multiple_fields():
 
 
 def test_think_invalid_all_empty():
-    data = json.loads(CallableTool(Think())(thoughts="", critics="", doubts="", reflection=""))
+    data = json.loads(
+        CallableTool(Think())(
+            thoughts="", critics="", doubts="", reflection=""
+        )
+    )
     assert data["ok"] is False
     assert data.get("message") is None
     assert data.get("error") is not None
@@ -54,7 +59,10 @@ def test_think_descriptions_are_tool_agnostic():
     assert "thread memory" in combined
     assert "working_memory" not in combined
     assert "memory_files" not in combined
-    assert "if only injected `reason`" in prompt.lower() or "treated as `thoughts`" in prompt.lower()
+    assert (
+        "if only injected `reason`" in prompt.lower()
+        or "treated as `thoughts`" in prompt.lower()
+    )
 
 
 def test_think_invalid_argument_type():

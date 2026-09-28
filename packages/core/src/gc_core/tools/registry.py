@@ -2,32 +2,33 @@ import copy
 from typing import Any, Dict, Optional
 
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, copy_loop_warn
-
+from gc_core.tools.exec.calculator import Calculator
+from gc_core.tools.exec.download_file import DownloadFile
+from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_core.tools.exec.sleep_tool import Sleep
 from gc_core.tools.fs.append_to_file import AppendToFile
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.file_info import FileInfo
+from gc_core.tools.fs.find_files_by_name import FindFilesByName
+from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.save_base64_file import SaveBase64File
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
-from gc_core.tools.fs.find_files_by_name import FindFilesByName
-from gc_core.tools.fs.find_in_files import FindInFiles
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
-from gc_core.tools.exec.download_file import DownloadFile
-from gc_core.tools.exec.calculator import Calculator
-from gc_core.tools.exec.execute_command import ExecuteCommand
-from gc_core.tools.exec.run_python_code import RunPythonCode
-from gc_core.tools.exec.sleep_tool import Sleep
 from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
 from gc_core.tools.session.session_compact import SessionCompact
+from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
+    ReadStoredToolOutput,
+)
 from gc_core.tools.session.think import Think
 from gc_core.tools.session.todo import SessionTodo
 from gc_core.tools.session.working_memory import WorkingMemory
-from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
-from gc_core.tools.turn.submit_solution import SubmitSolution
-from gc_core.tools.turn.intermediate_reply import IntermediateReply
 from gc_core.tools.turn.ask_human import AskHuman
+from gc_core.tools.turn.intermediate_reply import IntermediateReply
+from gc_core.tools.turn.submit_solution import SubmitSolution
 
 try:
     from gc_core.tools.exec.fetch_url import FetchUrl
@@ -57,7 +58,9 @@ def _tool_entry(
     return entry
 
 
-def _fs_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _fs_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "fs_write_file": _tool_entry(WriteToFile, config_dict),
         "fs_append_file": _tool_entry(AppendToFile, config_dict),
@@ -72,7 +75,9 @@ def _fs_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict
     }
 
 
-def _exec_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _exec_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "exec_command": _tool_entry(ExecuteCommand, config_dict),
         "exec_calculator": _tool_entry(Calculator, config_dict),
@@ -83,7 +88,9 @@ def _exec_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Di
     }
 
 
-def _turn_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _turn_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "turn_ask_human": _tool_entry(AskHuman, config_dict),
         "turn_intermediate_reply": _tool_entry(IntermediateReply, config_dict),
@@ -91,23 +98,33 @@ def _turn_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Di
     }
 
 
-def _session_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _session_registry(
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     registry: Dict[str, Dict[str, Any]] = {
         "session_think": _tool_entry(Think, config_dict),
-        "session_read_stored_tool_output": _tool_entry(ReadStoredToolOutput, config_dict),
+        "session_read_stored_tool_output": _tool_entry(
+            ReadStoredToolOutput, config_dict
+        ),
         "session_memory": _tool_entry(WorkingMemory, config_dict),
         "session_todo": _tool_entry(SessionTodo, config_dict),
     }
 
-    backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    backend_mode = (
+        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    )
     if backend_mode == "chat_completions":
-        registry["session_read_user_intent_log"] = _tool_entry(ReadUserIntentLog, config_dict)
+        registry["session_read_user_intent_log"] = _tool_entry(
+            ReadUserIntentLog, config_dict
+        )
         registry["session_compact"] = _tool_entry(SessionCompact, config_dict)
 
     return registry
 
 
-def _project_registry(config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Dict[str, Any]]:
+def _project_registry(
+    config_dict: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Dict[str, Any]]:
     return {
         "project_memory": _tool_entry(ProjectMemory, config_dict),
     }
@@ -136,7 +153,9 @@ def _apply_stop_tools(
     }
 
 
-def _collect_builtin_registry(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def _collect_builtin_registry(
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     """Все встроенные tools_data ДО применения stop_tools."""
     tools_data: Dict[str, Dict[str, Any]] = {}
     tools_data.update(_fs_registry(config_dict))
@@ -156,7 +175,9 @@ def all_builtin_tool_names(config_dict: Dict[str, Any]) -> set[str]:
     return set(_collect_builtin_registry(config_dict).keys())
 
 
-def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+def get_builtin_tools_data(
+    config_dict: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
     """
     Собрать словарь builtin tools в формате tools_data.
 
@@ -166,15 +187,17 @@ def get_builtin_tools_data(config_dict: Dict[str, Any]) -> Dict[str, Dict[str, A
     повторным проходом по слитому набору. Прямые вызывающие по-прежнему
     получают builtin уже без ``stop_tools``.
     """
-    return _apply_stop_tools(_collect_builtin_registry(config_dict), config_dict)
+    return _apply_stop_tools(
+        _collect_builtin_registry(config_dict), config_dict
+    )
 
 
 __all__ = [
-    "get_builtin_tools_data",
-    "all_builtin_tool_names",
-    "_fs_registry",
     "_exec_registry",
-    "_turn_registry",
-    "_session_registry",
+    "_fs_registry",
     "_project_registry",
+    "_session_registry",
+    "_turn_registry",
+    "all_builtin_tool_names",
+    "get_builtin_tools_data",
 ]

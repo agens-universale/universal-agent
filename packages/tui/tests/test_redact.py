@@ -10,7 +10,10 @@ def test_masks_secret_keys_deeply():
             "s": {
                 "token": "tok-REAL",
                 "url": "http://x",
-                "headers": {"Authorization": "Bearer abc", "X-API-Key": "key-123"},
+                "headers": {
+                    "Authorization": "Bearer abc",
+                    "X-API-Key": "key-123",
+                },
             }
         },
         "nested": [{"password": "p"}, {"keep": "v"}],

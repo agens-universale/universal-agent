@@ -1,7 +1,12 @@
 import os
 
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace, discover_backend_cwd, resolve_execution_root
 from gc_core.backends.local import LocalFsBackend
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    build_execution_workspace,
+    discover_backend_cwd,
+    resolve_execution_root,
+)
 from gc_core.utils.project_data import get_project_data
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
@@ -111,7 +116,13 @@ def test_sandbox_config_root_overrides_pwd():
 
 async def test_project_data_and_tool_paths_share_workspace_root():
     be = SandboxBackend(cwd=None, pwd="/testbed")
-    ws = ExecutionWorkspace(root="/testbed", backend=be, shell="sh", os_name="Linux", root_writable=True)
+    ws = ExecutionWorkspace(
+        root="/testbed",
+        backend=be,
+        shell="sh",
+        os_name="Linux",
+        root_writable=True,
+    )
     data = await get_project_data(workspace=ws)
     assert data["projectDir"] == "/testbed"
     assert data["shell"] == "sh"
@@ -122,7 +133,13 @@ async def test_project_data_and_tool_paths_share_workspace_root():
 def test_tool_report_does_not_fall_back_to_slash_when_workspace_has_root():
     """Regression: default_cwd() is None, but workspace.root must still win."""
     be = SandboxBackend(cwd=None, pwd="/testbed")
-    ws = ExecutionWorkspace(root="/testbed", backend=be, shell="sh", os_name="Linux", root_writable=True)
+    ws = ExecutionWorkspace(
+        root="/testbed",
+        backend=be,
+        shell="sh",
+        os_name="Linux",
+        root_writable=True,
+    )
     assert tool_report_abspath("mod.py", workspace=ws) == "/testbed/mod.py"
 
 

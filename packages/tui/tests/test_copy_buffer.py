@@ -1,4 +1,5 @@
 """Буфер сессии: push_copy_buffer / clamp_copy_buffer (SPEC 2026-07-25 §3.1 B4)."""
+
 from __future__ import annotations
 
 import pytest

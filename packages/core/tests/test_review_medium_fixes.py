@@ -4,9 +4,6 @@
 строки, и раскладывать их по отдельным файлам значило бы плодить преамбулы.
 Блокер и high лежат отдельно, у каждого свой стенд.
 """
-import asyncio
-
-import pytest
 
 
 # --- M18: что ретраить, а что нести наверх сразу ---------------------------
@@ -22,20 +19,17 @@ def test_config_errors_are_not_retryable():
     Докстрока предохранителя требовала обратного.
     """
     import httpx
-
     from gc_core.utils.backend_errors import HTTP_TRANSPORT_ERRORS
 
     for exc_type in (httpx.UnsupportedProtocol, httpx.LocalProtocolError):
         assert not issubclass(exc_type, HTTP_TRANSPORT_ERRORS), (
-            f"{exc_type.__name__} снова считается сетевым сбоем — это ошибка "
-            f"конфигурации, её надо нести наверх сразу"
+            f"{exc_type.__name__} снова считается сетевым сбоем — это ошибка конфигурации, её надо нести наверх сразу"
         )
 
 
 def test_real_network_failures_are_still_retryable():
     """Обратная половина: настоящие сетевые сбои ретраить по-прежнему надо."""
     import httpx
-
     from gc_core.utils.backend_errors import HTTP_TRANSPORT_ERRORS
 
     for exc_type in (
@@ -65,7 +59,9 @@ def test_ownerless_session_arms_an_exit_hook(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio as ps
 
     registered: list = []
-    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn))
+    monkeypatch.setattr(
+        atexit, "register", lambda fn, *a, **kw: registered.append(fn)
+    )
 
     registry = ps.PersistentStdioRegistry()
     registry.get_or_create("srv", {"command": "true"})
@@ -88,7 +84,9 @@ def test_an_owned_session_arms_the_exit_hook_too(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio as ps
 
     registered: list = []
-    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn))
+    monkeypatch.setattr(
+        atexit, "register", lambda fn, *a, **kw: registered.append(fn)
+    )
 
     registry = ps.PersistentStdioRegistry()
     token = set_owner("owner-with-a-run")
@@ -109,7 +107,9 @@ def test_exit_hook_is_armed_once(monkeypatch):
     from gc_core.tools.connect_mcp import persistent_stdio as ps
 
     registered: list = []
-    monkeypatch.setattr(atexit, "register", lambda fn, *a, **kw: registered.append(fn))
+    monkeypatch.setattr(
+        atexit, "register", lambda fn, *a, **kw: registered.append(fn)
+    )
 
     registry = ps.PersistentStdioRegistry()
     for name in ("a", "b", "c"):
@@ -127,25 +127,41 @@ async def test_simple_fetch_url_parses_html_off_the_loop(monkeypatch):
     У ``fetch_url`` он по этой причине давно уходит в поток (замер: 237 мс
     инлайн против 22 мс), у ``simple_fetch_url`` оставался инлайн.
     """
+    import json
     import threading
+
+    import httpx
 
     from gc_core.tools.exec import simple_fetch_url as mod
 
-    here = threading.current_thread().name
-    seen: dict = {}
+    loop_thread = threading.get_ident()
+    parser_threads = []
     real = mod.SimpleFetchUrl._extract_simple_html_text
 
-    def _spy(self, text):
-        seen["thread"] = threading.current_thread().name
-        return real(self, text)
+    def spy(cls, text):
+        parser_threads.append(threading.get_ident())
+        return real(text)
 
-    monkeypatch.setattr(mod.SimpleFetchUrl, "_extract_simple_html_text", _spy)
+    async def request(self, *args, **kwargs):
+        return httpx.Response(
+            200,
+            text="<html><body><p>Worker thread text</p></body></html>",
+            headers={"Content-Type": "text/html"},
+            request=httpx.Request("GET", "https://example.com/thread-test"),
+        ), None
 
-    import inspect
-    import pathlib
+    monkeypatch.setattr(
+        mod.SimpleFetchUrl, "_extract_simple_html_text", classmethod(spy)
+    )
+    monkeypatch.setattr(mod.SimpleFetchUrl, "_arequest_with_retries", request)
 
-    src = pathlib.Path(inspect.getsourcefile(mod)).read_text(encoding="utf-8")
-    assert "asyncio.to_thread(self._extract_simple_html_text" in src, (
+    result = json.loads(
+        await mod.SimpleFetchUrl().acall("https://example.com/thread-test")
+    )
+    assert result["ok"] is True
+    assert "Worker thread text" in result["content"]
+    assert len(parser_threads) == 1
+    assert parser_threads[0] != loop_thread, (
         "разбор HTML снова исполняется на loop"
     )
 

@@ -1,29 +1,41 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
-
 from gc_tui.models import TaskSummary
 
 
 def _task(tid: str, updated_at: str) -> TaskSummary:
-    return TaskSummary(thread_id=tid, status="stopped", updated_at=updated_at,
-                       messages_count=1, skill_id=None, unread_count=0, last_error=None)
+    return TaskSummary(
+        thread_id=tid,
+        status="stopped",
+        updated_at=updated_at,
+        messages_count=1,
+        skill_id=None,
+        unread_count=0,
+        last_error=None,
+    )
 
 
 @pytest.mark.asyncio
 async def test_mass_delete_keep_last_count_and_submit():
     pytest.importorskip("textual")
+    from gc_tui.screens.mass_delete import MassDeleteScreen
     from textual.app import App
     from textual.widgets import Input, Static
-    from gc_tui.screens.mass_delete import MassDeleteScreen
-    now = datetime(2026, 6, 6, tzinfo=timezone.utc)
-    tasks = [_task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00") for i in range(5)]
+
+    now = datetime(2026, 6, 6, tzinfo=UTC)
+    tasks = [
+        _task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00")
+        for i in range(5)
+    ]
     result = {}
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=tasks, now=now),
-                             lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=tasks, now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -38,18 +50,21 @@ async def test_mass_delete_keep_last_count_and_submit():
 @pytest.mark.asyncio
 async def test_mass_delete_mode_toggle_to_older_than():
     pytest.importorskip("textual")
+    from gc_tui.screens.mass_delete import MassDeleteScreen
     from textual.app import App
     from textual.widgets import Input
-    from gc_tui.screens.mass_delete import MassDeleteScreen
-    now = datetime(2026, 6, 6, tzinfo=timezone.utc)
+
+    now = datetime(2026, 6, 6, tzinfo=UTC)
     # старше 1 дня от 06-06 → 06-01 точно под удаление (count > 0, чтобы submit сработал)
     tasks = [_task("t0", "2026-06-01T00:00:00+00:00")]
     result = {}
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=tasks, now=now),
-                             lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=tasks, now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -64,15 +79,18 @@ async def test_mass_delete_mode_toggle_to_older_than():
 @pytest.mark.asyncio
 async def test_mass_delete_escape_returns_none():
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.screens.mass_delete import MassDeleteScreen
-    now = datetime(2026, 6, 6, tzinfo=timezone.utc)
+    from textual.app import App
+
+    now = datetime(2026, 6, 6, tzinfo=UTC)
     result = {"v": "unset"}
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=[], now=now),
-                             lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=[], now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         await pilot.press("escape")
@@ -86,17 +104,23 @@ async def test_mass_delete_superscript_digit_is_not_a_count():
     и `_n()` зовётся на КАЖДОЙ отрисовке, так что диалог рушился прямо под
     пальцами. Ввод обязан читаться как «числа нет»: ноль под удаление."""
     pytest.importorskip("textual")
+    from gc_tui.screens.mass_delete import MassDeleteScreen
     from textual.app import App
     from textual.widgets import Input, Static
-    from gc_tui.screens.mass_delete import MassDeleteScreen
-    now = datetime(2026, 6, 6, tzinfo=timezone.utc)
-    tasks = [_task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00") for i in range(5)]
+
+    now = datetime(2026, 6, 6, tzinfo=UTC)
+    tasks = [
+        _task(f"t{i:02d}", f"2026-06-{5 - i:02d}T00:00:00+00:00")
+        for i in range(5)
+    ]
     result = {"v": "unset"}
 
     class _A(App):
         def on_mount(self):
-            self.push_screen(MassDeleteScreen(tasks=tasks, now=now),
-                             lambda v: result.update(v=v))
+            self.push_screen(
+                MassDeleteScreen(tasks=tasks, now=now),
+                lambda v: result.update(v=v),
+            )
 
     async with _A().run_test() as pilot:
         scr = pilot.app.screen
@@ -105,4 +129,4 @@ async def test_mass_delete_superscript_digit_is_not_a_count():
         assert "0 из 5" in str(scr.query_one("#mass-count", Static).render())
         await pilot.press("enter")
         await pilot.pause()
-    assert result["v"] == "unset"   # ничего не выбрано — диалог не закрывается
+    assert result["v"] == "unset"  # ничего не выбрано — диалог не закрывается

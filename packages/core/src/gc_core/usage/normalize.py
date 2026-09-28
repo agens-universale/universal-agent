@@ -40,7 +40,11 @@ class UsageSample(NamedTuple):
 _INPUT_KEYS = ("prompt_tokens", "input_tokens")
 _OUTPUT_KEYS = ("completion_tokens", "output_tokens")
 # Плоские ключи кэша (DeepSeek-native и пр.)
-_CACHED_FLAT_KEYS = ("prompt_cache_hit_tokens", "cached_tokens", "cache_read_input_tokens")
+_CACHED_FLAT_KEYS = (
+    "prompt_cache_hit_tokens",
+    "cached_tokens",
+    "cache_read_input_tokens",
+)
 # Вложенные контейнеры с ``cached_tokens`` внутри
 _CACHED_DETAIL_KEYS = ("prompt_tokens_details", "input_tokens_details")
 
@@ -101,12 +105,22 @@ def _pick_cost(raw: dict) -> Optional[float]:
     return float(value)
 
 
-def normalize_usage(raw: Any, backend_mode: str | None = None) -> Optional[UsageSample]:
+def prompt_input_tokens(raw: Any) -> Optional[int]:
+    """Input последнего prompt: ``prompt_tokens`` или ``input_tokens``.
+
+    Ключа нет — None, не 0. Ноль в ответе провайдера остаётся нулём.
+    """
+    if not isinstance(raw, dict):
+        return None
+    return _pick(raw, _INPUT_KEYS)
+
+
+def normalize_usage(raw: Any) -> Optional[UsageSample]:
     """Вернуть ``UsageSample`` с токенами и стоимостью или None, если usage не пришёл.
 
     ``cached`` — часть ``input`` (доля, попавшая в кэш-ставку); ограничена сверху input.
-    ``backend_mode`` сейчас не обязателен: оба набора ключей пробуются
-    одновременно, что устойчиво к расхождениям прокси/провайдеров.
+    Режим бэкенда не нужен: оба набора ключей пробуются одновременно, что
+    устойчиво к расхождениям прокси/провайдеров.
     """
     if not isinstance(raw, dict) or not raw:
         return None

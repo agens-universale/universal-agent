@@ -18,6 +18,7 @@ Harbor (environment_dir, trial_paths, task_env_config) незачем — harbor
 объявлен зависимостью ядра. Контейнер настоящий: shell, коды возврата и
 симлинки в нём не наши.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,7 +29,6 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
-
 from gc_core.backends.harbor import HarborBackend
 
 IMAGE = "python:3.12-slim"
@@ -38,13 +38,17 @@ BASHRC_MARK = "bashrc-ok"
 def _docker_ready() -> bool:
     if shutil.which("docker") is None:
         return False
-    return subprocess.run(
-        ["docker", "info"], capture_output=True, timeout=30
-    ).returncode == 0
+    return (
+        subprocess.run(
+            ["docker", "info"], capture_output=True, timeout=30
+        ).returncode
+        == 0
+    )
 
 
 pytestmark = pytest.mark.skipif(
-    not _docker_ready(), reason="docker недоступен — живой контейнер не поднять"
+    not _docker_ready(),
+    reason="docker недоступен — живой контейнер не поднять",
 )
 
 
@@ -65,14 +69,22 @@ class _ContainerEnv:
     def __init__(self, cid: str):
         self._cid = cid
 
-    async def _run(self, args: list[str], timeout_sec: int | None = None) -> _Result:
+    async def _run(
+        self, args: list[str], timeout_sec: int | None = None
+    ) -> _Result:
         proc = await asyncio.create_subprocess_exec(
-            *args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            *args,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout_sec or 60)
+        out, err = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout_sec or 60
+        )
         return _Result(out.decode(), err.decode(), proc.returncode or 0)
 
-    async def exec(self, command: str, timeout_sec: int | None = None, **_: object) -> _Result:
+    async def exec(
+        self, command: str, timeout_sec: int | None = None, **_: object
+    ) -> _Result:
         return await self._run(
             ["docker", "exec", self._cid, "bash", "-c", command], timeout_sec
         )
@@ -94,27 +106,52 @@ class _ContainerEnv:
 def container():
     name = f"gc-live-{uuid.uuid4().hex[:8]}"
     subprocess.run(
-        ["docker", "run", "-d", "--rm", "--name", name, "-w", "/app", IMAGE,
-         "sleep", "600"],
-        capture_output=True, check=True, timeout=300,
+        [
+            "docker",
+            "run",
+            "-d",
+            "--rm",
+            "--name",
+            name,
+            "-w",
+            "/app",
+            IMAGE,
+            "sleep",
+            "600",
+        ],
+        capture_output=True,
+        check=True,
+        timeout=300,
     )
     try:
         subprocess.run(
-            ["docker", "exec", name, "bash", "-c",
-             "mkdir -p /app && echo hello > /app/file.txt"
-             " && ln -s /app/file.txt /app/link && ln -s /app/nowhere /app/broken"
-             f" && echo 'export GC_LIVE={BASHRC_MARK}' >> /root/.bashrc"],
-            capture_output=True, check=True, timeout=60,
+            [
+                "docker",
+                "exec",
+                name,
+                "bash",
+                "-c",
+                "mkdir -p /app && echo hello > /app/file.txt"
+                " && ln -s /app/file.txt /app/link && ln -s /app/nowhere /app/broken"
+                f" && echo 'export GC_LIVE={BASHRC_MARK}' >> /root/.bashrc",
+            ],
+            capture_output=True,
+            check=True,
+            timeout=60,
         )
         yield name
     finally:
-        subprocess.run(["docker", "rm", "-f", name], capture_output=True, timeout=60)
+        subprocess.run(
+            ["docker", "rm", "-f", name], capture_output=True, timeout=60
+        )
 
 
 @pytest.fixture
 async def backend(container):
     return HarborBackend(
-        _ContainerEnv(container), asyncio.get_running_loop(), exec_init="bashrc"
+        _ContainerEnv(container),
+        asyncio.get_running_loop(),
+        exec_init="bashrc",
     )
 
 
@@ -132,8 +169,8 @@ async def test_broken_symlink_is_told_apart_from_a_missing_path(backend):
     assert await backend.exists("/app/link") is True
     assert await backend.is_symlink("/app/link") is True
 
-    assert await backend.exists("/app/broken") is False      # цель отсутствует
-    assert await backend.lexists("/app/broken") is True      # но линк на месте
+    assert await backend.exists("/app/broken") is False  # цель отсутствует
+    assert await backend.lexists("/app/broken") is True  # но линк на месте
     assert await backend.is_symlink("/app/broken") is True
 
     assert await backend.exists("/app/nope") is False
@@ -148,7 +185,9 @@ async def test_read_and_write_go_through_the_container(backend):
 
 async def _state(backend, pid: int) -> str:
     """Состояние процесса по `/proc`, а не по `kill -0`: тот считает живым зомби."""
-    res = await backend.aexec_raw(f"cut -d' ' -f3 /proc/{pid}/stat 2>/dev/null || echo gone")
+    res = await backend.aexec_raw(
+        f"cut -d' ' -f3 /proc/{pid}/stat 2>/dev/null || echo gone"
+    )
     return res.stdout.strip()
 
 
@@ -162,24 +201,35 @@ async def test_a_background_command_outlives_its_exec_call(backend):
     started = await backend.aspawn_background("sleep 30")
     pid = started["pid"]
 
-    assert await _state(backend, pid) in {"S", "R"}, "фоновый процесс не пережил свой exec"
+    assert await _state(backend, pid) in {"S", "R"}, (
+        "фоновый процесс не пережил свой exec"
+    )
     # Поле 6 в /proc/<pid>/stat — сессия. Своя сессия (sid == pid) — это `setsid`:
     # сигналы и конец exec-сессии фона не касаются.
     sid = await backend.aexec_raw(f"cut -d' ' -f6 /proc/{pid}/stat")
-    assert sid.stdout.strip() == str(pid), f"фон остался в сессии exec: sid={sid.stdout!r}"
+    assert sid.stdout.strip() == str(pid), (
+        f"фон остался в сессии exec: sid={sid.stdout!r}"
+    )
     cmdline = await backend.aexec_raw(f"tr '\\0' ' ' < /proc/{pid}/cmdline")
-    assert "sleep 30" in cmdline.stdout, f"pid в ответе — не сама команда: {cmdline.stdout!r}"
-    streams = await backend.aexec_raw(f"readlink /proc/{pid}/fd/0 /proc/{pid}/fd/1 /proc/{pid}/fd/2")
+    assert "sleep 30" in cmdline.stdout, (
+        f"pid в ответе — не сама команда: {cmdline.stdout!r}"
+    )
+    streams = await backend.aexec_raw(
+        f"readlink /proc/{pid}/fd/0 /proc/{pid}/fd/1 /proc/{pid}/fd/2"
+    )
     assert streams.stdout.split() == ["/dev/null"] * 3, (
         f"потоки фона смотрят не в /dev/null: {streams.stdout!r}"
     )
 
 
-async def test_a_background_command_gets_the_same_shell_as_the_foreground(backend):
+async def test_a_background_command_gets_the_same_shell_as_the_foreground(
+    backend,
+):
     """Профиль оболочки, переменные и рабочий каталог — как у переднего плана."""
     await backend.aspawn_background(
-        "echo \"$GC_LIVE|$GC_BG|$(pwd)\" > /app/bg.txt",
-        cwd="/tmp", env={"GC_BG": "from-env"},
+        'echo "$GC_LIVE|$GC_BG|$(pwd)" > /app/bg.txt',
+        cwd="/tmp",
+        env={"GC_BG": "from-env"},
     )
 
     for _ in range(50):

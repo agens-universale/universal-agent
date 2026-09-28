@@ -1,4 +1,5 @@
 """FileTaskStore.update_tui_meta — обновление meta.tui sub-dict."""
+
 import json
 from pathlib import Path
 
@@ -8,14 +9,21 @@ from gc_tui.services.stores.file_store import FileTaskStore
 def test_update_tui_meta_creates_skills_list(tmp_path):
     tid = "t1"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "updated_at": "2026-05-21T12:00:00+00:00",
-                    "messages_count": 1}),
+        json.dumps(
+            {
+                "thread_id": tid,
+                "updated_at": "2026-05-21T12:00:00+00:00",
+                "messages_count": 1,
+            }
+        ),
         encoding="utf-8",
     )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     store.update_tui_meta(tid, {"skills": ["supercoder"]})
 
-    meta = json.loads((Path(tmp_path) / f"meta_cli_{tid}.json").read_text(encoding="utf-8"))
+    meta = json.loads(
+        (Path(tmp_path) / f"meta_cli_{tid}.json").read_text(encoding="utf-8")
+    )
     assert meta["tui"]["skills"] == ["supercoder"]
 
 
@@ -39,12 +47,16 @@ def test_update_tui_meta_creates_meta_and_dir_when_missing(tmp_path):
 def test_update_tui_meta_merges_existing(tmp_path):
     tid = "t2"
     (Path(tmp_path) / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "tui": {"skills": ["a"], "cwd": "/old"}}),
+        json.dumps(
+            {"thread_id": tid, "tui": {"skills": ["a"], "cwd": "/old"}}
+        ),
         encoding="utf-8",
     )
     store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
     store.update_tui_meta(tid, {"skills": ["a", "b"]})
 
-    meta = json.loads((Path(tmp_path) / f"meta_cli_{tid}.json").read_text(encoding="utf-8"))
+    meta = json.loads(
+        (Path(tmp_path) / f"meta_cli_{tid}.json").read_text(encoding="utf-8")
+    )
     assert meta["tui"]["skills"] == ["a", "b"]
     assert meta["tui"]["cwd"] == "/old"

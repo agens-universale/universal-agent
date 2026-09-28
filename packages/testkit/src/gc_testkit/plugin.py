@@ -70,6 +70,12 @@ from gc_testkit.paths import (
 )
 from gc_testkit.sources import ensure_sources_on_path
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_MOD_TOOLS = "gc_core.tools"
+_MOD_TOOLS_MCP = "gc_core.tools.connect_mcp"
+_MOD_TOOLS_SKILLS = "gc_core.tools.skills"
+
+
 #: Собираем ли мы СВОЙ набор. Ставится в ``pytest_load_initial_conftests``:
 #: раньше хука rootdir неизвестен, а без него гейт не отличить от прежнего
 #: «плагин лежит в рабочей копии» — см. шапку модуля.
@@ -98,7 +104,9 @@ def _suite_root(rootpath) -> Path | None:
     rootpath = Path(rootpath).resolve()
     if _declares_gc_core(rootpath):
         return rootpath
-    if rootpath.parent.name == "packages" and _declares_gc_core(rootpath.parent.parent):
+    if rootpath.parent.name == "packages" and _declares_gc_core(
+        rootpath.parent.parent
+    ):
         return rootpath.parent.parent
     return None
 
@@ -200,33 +208,37 @@ def preload_minimal_tools_package() -> None:
 
     _stub_optional_web_parsers()
     for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
+        if name == _MOD_TOOLS or name.startswith("gc_core.tools."):
             del sys.modules[name]
 
-    tools_pkg = types.ModuleType("gc_core.tools")
+    tools_pkg = types.ModuleType(_MOD_TOOLS)
     tools_pkg.__path__ = [str(tools_dir)]
-    sys.modules["gc_core.tools"] = tools_pkg
+    sys.modules[_MOD_TOOLS] = tools_pkg
 
     session_pkg = types.ModuleType("gc_core.tools.session")
     session_pkg.__path__ = [str(tools_dir / "session")]
     sys.modules["gc_core.tools.session"] = session_pkg
-    setattr(tools_pkg, "session", session_pkg)
+    tools_pkg.session = session_pkg
 
     stored_pkg = types.ModuleType("gc_core.tools.session.stored_outputs")
     stored_pkg.__path__ = [str(tools_dir / "session" / "stored_outputs")]
     sys.modules["gc_core.tools.session.stored_outputs"] = stored_pkg
-    setattr(session_pkg, "stored_outputs", stored_pkg)
+    session_pkg.stored_outputs = stored_pkg
     _load_file_module(
         "gc_core.tools.session.stored_outputs.tool_call_outputs_store",
         _STORE_SRC,
     )
-    wrapping_mod = types.ModuleType("gc_core.tools.session.stored_outputs.wrapping")
-    wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: tool_res
+    wrapping_mod = types.ModuleType(
+        "gc_core.tools.session.stored_outputs.wrapping"
+    )
+    wrapping_mod.maybe_store_and_wrap_tool_output = lambda tool_res, **_kw: (
+        tool_res
+    )
     sys.modules["gc_core.tools.session.stored_outputs.wrapping"] = wrapping_mod
 
-    skills_pkg = types.ModuleType("gc_core.tools.skills")
+    skills_pkg = types.ModuleType(_MOD_TOOLS_SKILLS)
     skills_pkg.__path__ = [str(tools_dir / "skills")]
-    sys.modules["gc_core.tools.skills"] = skills_pkg
+    sys.modules[_MOD_TOOLS_SKILLS] = skills_pkg
 
     _load_file_module("gc_core.tools.simple_tool_base", _SIMPLE_TOOL_BASE_SRC)
     _load_file_module(
@@ -234,9 +246,9 @@ def preload_minimal_tools_package() -> None:
         _SUBMIT_SOLUTION_SRC,
     )
 
-    connect_mcp_pkg = types.ModuleType("gc_core.tools.connect_mcp")
+    connect_mcp_pkg = types.ModuleType(_MOD_TOOLS_MCP)
     connect_mcp_pkg.__path__ = [str(tools_dir / "connect_mcp")]
-    sys.modules["gc_core.tools.connect_mcp"] = connect_mcp_pkg
+    sys.modules[_MOD_TOOLS_MCP] = connect_mcp_pkg
 
 
 def _real_tools_loaded() -> bool:
@@ -248,16 +260,18 @@ def _real_tools_loaded() -> bool:
     снят вместе с синхронной сборкой, и ответ стал «не загружен» ВСЕГДА:
     фикстура перезагружала весь пакет после каждого теста.
     """
-    tools = sys.modules.get("gc_core.tools")
+    tools = sys.modules.get(_MOD_TOOLS)
     if tools is None:
         return False
     return (
         getattr(tools, "__file__", None) is not None
         and callable(getattr(tools, "abuild_tools_data", None))
-        and "gc_core.tools.connect_mcp" in sys.modules
-        and "gc_core.tools.skills" in sys.modules
-        and isinstance(getattr(sys.modules.get("gc_core.tools.skills"), "__path__", None), list)
-        and len(sys.modules["gc_core.tools.skills"].__path__) > 0
+        and _MOD_TOOLS_MCP in sys.modules
+        and _MOD_TOOLS_SKILLS in sys.modules
+        and isinstance(
+            getattr(sys.modules.get(_MOD_TOOLS_SKILLS), "__path__", None), list
+        )
+        and len(sys.modules[_MOD_TOOLS_SKILLS].__path__) > 0
     )
 
 
@@ -266,9 +280,36 @@ def ensure_real_tools_package() -> None:
     if _real_tools_loaded():
         return
     for name in list(sys.modules):
-        if name == "gc_core.tools" or name.startswith("gc_core.tools."):
+        if name == _MOD_TOOLS or name.startswith("gc_core.tools."):
             del sys.modules[name]
-    importlib.import_module("gc_core.tools")
+    importlib.import_module(_MOD_TOOLS)
+
+
+def _isolate_gc_home() -> None:
+    """GC_HOME набора — пустой каталог сессии, а не ``~/.gc`` запускающего.
+
+    Изоляция слоёв в ``_isolated_config_layers`` закрывает managed и проектный
+    слой, но базовый ``config.yml`` и данные читались из домашнего каталога: у
+    того, кто пользуется агентом, набор краснел на личных ключах. Ставим до
+    импорта conftest'ов — ``env_vars.env`` читает окружение один раз, на импорте.
+    Точечные ``GC_*_DIR`` сильнее GC_HOME, поэтому снимаются. Подпроцессы тестов
+    наследуют то же окружение.
+    """
+    import atexit
+    import os
+    import shutil
+    import tempfile
+
+    home = tempfile.mkdtemp(prefix="gc-test-home-")
+    atexit.register(shutil.rmtree, home, ignore_errors=True)
+    for name in (
+        "GC_STATE_DIR",
+        "GC_CONFIG_DIR",
+        "GC_CACHE_DIR",
+        "GC_DATA_DIR",
+    ):
+        os.environ.pop(name, None)
+    os.environ["GC_HOME"] = home
 
 
 def pytest_load_initial_conftests(early_config) -> None:
@@ -317,6 +358,7 @@ def pytest_load_initial_conftests(early_config) -> None:
     use_repo_root(suite_root)
 
     _OUR_SUITE = True
+    _isolate_gc_home()
     ensure_sources_on_path()
     if not _mcp_runtime_available():
         preload_minimal_tools_package()
@@ -341,7 +383,6 @@ def _clear_runtime_notices_between_tests():
     clear_runtime_notices(listeners=True)
     yield
     clear_runtime_notices(listeners=True)
-
 
 
 @pytest.fixture(autouse=True)

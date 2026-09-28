@@ -1,11 +1,11 @@
 """Лоадер профилей-файлов (спека `docs/specs/2026-07-23-profiles-design.md` §3):
 два корня, поиск по имени, двухфазная валидация, оверлей-слой в `load_config_ex`.
 """
+
 from pathlib import Path
 
 import pytest
 import yaml
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.config_modules.profiles import (
@@ -83,7 +83,10 @@ def test_explicit_config_excludes_home_profiles(tmp_path, monkeypatch):
     monkeypatch.setattr(env_vars, "env", fake_env)
 
     # Профиль лежит "рядом с базой" домашнего конфига — но запуск идёт с explicit --config.
-    _write_yaml(tmp_path / "gc_home" / "profiles" / "work.yml", {"agent": {"model": "home-work"}})
+    _write_yaml(
+        tmp_path / "gc_home" / "profiles" / "work.yml",
+        {"agent": {"model": "home-work"}},
+    )
 
     explicit_config = tmp_path / "explicit" / "config.yml"
     _write_yaml(explicit_config, _MINIMAL_BASE)
@@ -98,7 +101,9 @@ def test_explicit_config_excludes_home_profiles(tmp_path, monkeypatch):
 
 
 def test_profile_key_inside_profile_forbidden(tmp_path):
-    profile_path = _write_yaml(tmp_path / "work.yml", {"profile": "other", "agent": {"model": "x"}})
+    profile_path = _write_yaml(
+        tmp_path / "work.yml", {"profile": "other", "agent": {"model": "x"}}
+    )
     with pytest.raises(ValueError, match="запрещ"):
         load_profile_document(profile_path)
 
@@ -117,7 +122,9 @@ def test_removed_key_in_profile_is_dropped_with_notice_not_fatal(tmp_path):
     raw = load_profile_document(profile_path, notices=notices)
 
     assert "check_interval_days" not in (raw.get("update") or {})
-    assert any("check_interval_days" in n and str(profile_path) in n for n in notices)
+    assert any(
+        "check_interval_days" in n and str(profile_path) in n for n in notices
+    )
 
 
 def test_not_found_error_lists_paths_and_available(tmp_path):
@@ -178,7 +185,9 @@ def test_directory_named_like_a_profile_is_not_discovered(tmp_path):
     discovered = discover_profiles(roots)
     assert discovered["work"].path == roots[1] / "work.yml"
     assert "corp" in discovered
-    assert [ref.path for ref in discover_all_refs(roots)["work"]] == [roots[1] / "work.yml"]
+    assert [ref.path for ref in discover_all_refs(roots)["work"]] == [
+        roots[1] / "work.yml"
+    ]
     assert resolve_profile("work", roots).path == roots[1] / "work.yml"
 
 
@@ -193,7 +202,9 @@ def test_unopenable_profile_file_is_a_value_error(tmp_path):
 
     with pytest.raises(ValueError) as exc_info:
         load_profile_document(unreadable)
-    assert str(exc_info.value).startswith(f"{unreadable}: не удалось прочитать: ")
+    assert str(exc_info.value).startswith(
+        f"{unreadable}: не удалось прочитать: "
+    )
 
 
 # --- Интеграционный уровень: load_config_ex (base→managed→project→profile→compat→validate) ---
@@ -207,7 +218,10 @@ def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
 
     _write_yaml(
         isolated_cwd / ".gc" / "config.yml",
-        {"profile": "work", "summary": {"chat_completions_summary_trigger_chars": 1}},
+        {
+            "profile": "work",
+            "summary": {"chat_completions_summary_trigger_chars": 1},
+        },
     )
     _write_yaml(
         isolated_cwd / ".gc" / "profiles" / "work.yml",
@@ -220,14 +234,21 @@ def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
     assert meta.ref is not None and meta.ref.root_kind == "project"
 
 
-def test_level_from_profile_beats_project_but_loses_to_cli(isolated_cwd, tmp_path):
+def test_level_from_profile_beats_project_but_loses_to_cli(
+    isolated_cwd, tmp_path
+):
     from gc_core.config import apply_cli_overrides, load_config_ex
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
 
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "work", "level": "max"})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"})
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {"profile": "work", "level": "max"},
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"}
+    )
 
     cfg, meta = load_config_ex(str(base_config))
     assert cfg["level"] == "light"
@@ -236,7 +257,9 @@ def test_level_from_profile_beats_project_but_loses_to_cli(isolated_cwd, tmp_pat
     assert cfg["level"] == "default"
 
 
-def test_env_interpolation_per_file_before_validation(isolated_cwd, tmp_path, monkeypatch):
+def test_env_interpolation_per_file_before_validation(
+    isolated_cwd, tmp_path, monkeypatch
+):
     from gc_core.config import load_config_ex
 
     monkeypatch.setenv("GC_PROFILE_TEST_TIMEOUT", "42")
@@ -274,10 +297,14 @@ def test_mtime_set_includes_both_candidate_paths(isolated_cwd, tmp_path):
     assert str(project_profile) in meta.mtime_set
     assert meta.mtime_set[str(project_profile)] is not None
     assert str(base_root_candidate) in meta.mtime_set
-    assert meta.mtime_set[str(base_root_candidate)] is None  # второй корень — файла нет
+    assert (
+        meta.mtime_set[str(base_root_candidate)] is None
+    )  # второй корень — файла нет
 
 
-def test_reserved_profile_file_warns_via_load_config_ex(isolated_cwd, tmp_path):
+def test_reserved_profile_file_warns_via_load_config_ex(
+    isolated_cwd, tmp_path
+):
     """light.yml лежит рядом с активным профилем corp — резолв corp дискаверит весь
     корень попутно и обязан долетающим warning'ом отметить проигнорированный light.yml
     (спека §3.2). Раньше `resolve_profile` звал `discover_profiles(roots)` без `notices`,
@@ -288,8 +315,14 @@ def test_reserved_profile_file_warns_via_load_config_ex(isolated_cwd, tmp_path):
     _write_yaml(base_config, _MINIMAL_BASE)
 
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "corp"})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "corp.yml", {"agent": {"model": "corp-model"}})
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "light.yml", {"agent": {"model": "reserved-file"}})
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "corp.yml",
+        {"agent": {"model": "corp-model"}},
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "light.yml",
+        {"agent": {"model": "reserved-file"}},
+    )
 
     cfg, meta = load_config_ex(str(base_config))
     assert any("зарезервировано" in n for n in meta.notices)
@@ -316,11 +349,15 @@ def test_project_profile_literal_token_warns(isolated_cwd, tmp_path):
     )
 
     cfg, meta = load_config_ex(str(base_config))
-    assert any("token" in n and "sk-literal-secret" not in n for n in meta.notices)
+    assert any(
+        "token" in n and "sk-literal-secret" not in n for n in meta.notices
+    )
     assert any("token" in n for n in cfg["compat_notices"])
 
 
-def test_base_root_profile_literal_token_does_not_warn(isolated_env, isolated_cwd, tmp_path):
+def test_base_root_profile_literal_token_does_not_warn(
+    isolated_env, isolated_cwd, tmp_path
+):
     """Обратная половина предыдущего: предупреждение адресное, а не всеобщее.
 
     Смысл warning'а — «этот файл обычно лежит в репозитории» (§3.5), и он
@@ -336,8 +373,14 @@ def test_base_root_profile_literal_token_does_not_warn(isolated_env, isolated_cw
     _write_yaml(isolated_cwd / ".gc" / "config.yml", {"profile": "work"})
     _write_yaml(
         base_config.parent / "profiles" / "work.yml",
-        {"models": {"flash": {"url": "http://x/v1/chat/completions",
-                              "token": "sk-literal-secret"}}},
+        {
+            "models": {
+                "flash": {
+                    "url": "http://x/v1/chat/completions",
+                    "token": "sk-literal-secret",
+                }
+            }
+        },
     )
 
     cfg, meta = load_config_ex(str(base_config))
@@ -346,7 +389,9 @@ def test_base_root_profile_literal_token_does_not_warn(isolated_env, isolated_cw
     assert not [n for n in cfg["compat_notices"] if "token" in n]
 
 
-def test_registry_merges_across_layers_overlay_cannot_remove_a_model(isolated_cwd, tmp_path):
+def test_registry_merges_across_layers_overlay_cannot_remove_a_model(
+    isolated_cwd, tmp_path
+):
     """§14 «мерж реестров по слоям»: добавление алиаса, перекрытие алиаса и
     «оверлей не может убрать модель» — три семантики одним снимком.
 
@@ -370,29 +415,41 @@ def test_registry_merges_across_layers_overlay_cannot_remove_a_model(isolated_cw
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
 
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
-        "profile": "work",
-        "models": {"keep": {"url": "http://keep/v1", "token": "sk-keep"},
-                   "shared": {"url": "http://base/v1", "token": "sk-base"}},
-        "slots": {"default": "keep"},
-    })
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {
+            "profile": "work",
+            "models": {
+                "keep": {"url": "http://keep/v1", "token": "sk-keep"},
+                "shared": {"url": "http://base/v1", "token": "sk-base"},
+            },
+            "slots": {"default": "keep"},
+        },
+    )
     # Перекрытие алиаса — парой целиком (§2): слой, задавший только адрес, увёз бы
     # токен базы на свой хост и отвергается правилом ещё до мержа.
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
-        "models": {"shared": {"url": "http://profile/v1", "token": "sk-profile"},
-                   "added": {"url": "http://added/v1", "token": "sk-added"}},
-    })
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {
+            "models": {
+                "shared": {"url": "http://profile/v1", "token": "sk-profile"},
+                "added": {"url": "http://added/v1", "token": "sk-added"},
+            },
+        },
+    )
 
     cfg, _meta = load_config_ex(str(base_config))
     models = cfg["models"]
 
     assert set(models) == {"keep", "shared", "added"}
-    assert models["keep"]["url"] == "http://keep/v1"          # оверлей не убрал
-    assert models["shared"]["url"] == "http://profile/v1"     # оверлей перекрыл
-    assert models["added"]["url"] == "http://added/v1"        # оверлей добавил
+    assert models["keep"]["url"] == "http://keep/v1"  # оверлей не убрал
+    assert models["shared"]["url"] == "http://profile/v1"  # оверлей перекрыл
+    assert models["added"]["url"] == "http://added/v1"  # оверлей добавил
 
 
-def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_path):
+def test_model_inherits_from_backend_overridden_by_profile(
+    isolated_cwd, tmp_path
+):
     """§14 Router: наследование от ЭФФЕКТИВНОГО backend, «включая перекрытый
     профилем». Запись реестра без своих url/token берёт их из backend ПОСЛЕ мержа
     всей стопки — то есть из профиля, если тот перекрыл backend; иначе профиль
@@ -403,17 +460,27 @@ def test_model_inherits_from_backend_overridden_by_profile(isolated_cwd, tmp_pat
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
 
-    _write_yaml(isolated_cwd / ".gc" / "config.yml", {
-        "profile": "work",
-        "models": {"bare": {}},
-        "slots": {"default": "bare"},
-    })
-    _write_yaml(isolated_cwd / ".gc" / "profiles" / "work.yml", {
-        "backend": {"completions_url": "http://from-profile/v1/chat/completions"},
-    })
+    _write_yaml(
+        isolated_cwd / ".gc" / "config.yml",
+        {
+            "profile": "work",
+            "models": {"bare": {}},
+            "slots": {"default": "bare"},
+        },
+    )
+    _write_yaml(
+        isolated_cwd / ".gc" / "profiles" / "work.yml",
+        {
+            "backend": {
+                "completions_url": "http://from-profile/v1/chat/completions"
+            },
+        },
+    )
 
     cfg, _meta = load_config_ex(str(base_config))
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+        "main"
+    )
 
     assert resolved.alias == "bare"
     assert resolved.url == "http://from-profile/v1/chat/completions"
@@ -434,6 +501,8 @@ def test_pointer_into_a_directory_named_like_a_profile_fails_as_value_error(
 
     with pytest.raises(ValueError):
         load_config_ex(str(base_config))
+
+
 def test_the_read_failure_is_self_sufficient(tmp_path):
     """Текст отказа чтения профиля самодостаточен: путь + причина.
 
@@ -452,4 +521,4 @@ def test_the_read_failure_is_self_sufficient(tmp_path):
     broken.write_text("a: : :\n", encoding="utf-8")
     yaml_summary = profile_display_summary(broken)
     assert yaml_summary.error is not None
-    assert str(broken) in yaml_summary.error       # и у YAML-ошибки путь свой
+    assert str(broken) in yaml_summary.error  # и у YAML-ошибки путь свой

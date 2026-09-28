@@ -19,16 +19,15 @@
 коротком сценарии. Что она действительно сработала — проверяется каждым тестом
 отдельно, а не подразумевается: «порог выставлен» не значит «компакция была».
 """
+
 import asyncio
 import json
 import threading
 import time
 
 import pytest
-
 from gc_core.aio import AsyncAgent
 from gc_testkit import LoopPulse
-
 from parity_harness import (
     ScriptedBackend,
     assistant_text,
@@ -68,10 +67,18 @@ def _stub_turn_finish(monkeypatch):
 
 
 TURNS = [
-    assistant_tool_call("exec_calculator", {"expression": "2+2"}, call_id="c1"),
-    assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer", "task_report": "готово", "handoff": "{}",
-    }, call_id="c2"),
+    assistant_tool_call(
+        "exec_calculator", {"expression": "2+2"}, call_id="c1"
+    ),
+    assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": "готово",
+            "handoff": "{}",
+        },
+        call_id="c2",
+    ),
     judge_accept(),
 ]
 
@@ -108,27 +115,33 @@ def compacting_config(tmp_path, monkeypatch, **overrides):
 
 
 def thread_dump(cfg, system_id, thread_id):
-    from gc_core.thread_store import _thread_paths, resolve_threads_dir
     from pathlib import Path
 
-    data_path, _ = _thread_paths(resolve_threads_dir(cfg), system_id, thread_id)
+    from gc_core.thread_store import _thread_paths, resolve_threads_dir
+
+    data_path, _ = _thread_paths(
+        resolve_threads_dir(cfg), system_id, thread_id
+    )
     path = Path(data_path)
     if not path.exists():
         return []
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def was_compacted(cfg, system_id, thread_id) -> bool:
     """Компакция была ⟺ история схлопнулась в одну сводку."""
     dump = thread_dump(cfg, system_id, thread_id)
-    return (
-        len(dump) == 1
-        and "dialog_summary" in json.dumps(dump, ensure_ascii=False)
+    return len(dump) == 1 and "dialog_summary" in json.dumps(
+        dump, ensure_ascii=False
     )
 
 
 # --- S-1: компакция не заводит потоков -------------------------------------
+
 
 async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
     """Компакция не создаёт ни одного потока.
@@ -137,6 +150,7 @@ async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
     Проверяем именно ИТОГ: сколько потоков было до прогона, столько и после.
     Оседающий поток на каждую компакцию — утечка, заметная только под нагрузкой.
     """
+
     async def run_and_snapshot(cfg, tid):
         install(monkeypatch, script())
         async with await AsyncAgent.create(cfg) as agent:
@@ -151,12 +165,16 @@ async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
     # любом прогоне, и к компакции он отношения не имеет.
     plain_cfg = parity_config(tmp_path / "plain", monkeypatch)
     plain = await run_and_snapshot(plain_cfg, "t-s1-plain")
-    assert not was_compacted(plain_cfg, "sdk", "t-s1-plain"), "контроль сам сжался"
+    assert not was_compacted(plain_cfg, "sdk", "t-s1-plain"), (
+        "контроль сам сжался"
+    )
 
     cfg = compacting_config(tmp_path / "compact", monkeypatch)
     after = await run_and_snapshot(cfg, "t-s1")
 
-    assert was_compacted(cfg, "sdk", "t-s1"), "компакция не сработала — тест пуст"
+    assert was_compacted(cfg, "sdk", "t-s1"), (
+        "компакция не сработала — тест пуст"
+    )
     extra = after - plain
     assert not extra, (
         f"компакция оставила потоки, которых нет у обычного прогона: {sorted(extra)}. "
@@ -216,7 +234,7 @@ async def test_the_pulse_actually_sees_a_frozen_loop(where):
     async with LoopPulse() as pulse:
         if where != "head":
             await asyncio.sleep(pulse.step * 3)
-        time.sleep(_CONTROL_FREEZE)          # заморозка loop, не await
+        time.sleep(_CONTROL_FREEZE)  # заморозка loop, не await
         if where != "tail":
             await asyncio.sleep(pulse.step * 3)
 
@@ -293,7 +311,9 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
             async with await AsyncAgent.create(cfg) as agent:
                 await agent.run("сделай что-нибудь", thread_id="t-s2")
 
-    assert was_compacted(cfg, "sdk", "t-s2"), "компакция не сработала — тест пуст"
+    assert was_compacted(cfg, "sdk", "t-s2"), (
+        "компакция не сработала — тест пуст"
+    )
 
     # Выборка обязана быть настоящей: на одном-двух тиках процентиль вырождается
     # в «худший разрыв», и тест снова начинает мерить шум вместо занятости.
@@ -315,6 +335,7 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
 
 
 # --- S-3: два агента компактятся одновременно ------------------------------
+
 
 async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
     """Две одновременные компакции не путают треды.
@@ -345,7 +366,10 @@ async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
     # Архивы у каждого свои и не перемешались.
     from pathlib import Path
 
-    for cfg, tid, other in ((cfg_a, "t-s3-a", "t-s3-b"), (cfg_b, "t-s3-b", "t-s3-a")):
+    for cfg, tid, other in (
+        (cfg_a, "t-s3-a", "t-s3-b"),
+        (cfg_b, "t-s3-b", "t-s3-a"),
+    ):
         root = Path(cfg["threads_data_path"])
         archives = [p.name for p in root.glob("*__pre_summary__*")]
         assert archives, f"{tid}: архив компакции не создан"
@@ -355,6 +379,7 @@ async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
 
 
 # --- S-4: компакция под нагрузкой соседа -----------------------------------
+
 
 async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
     """Компакция одного агента не выстраивает второго в очередь.
@@ -381,7 +406,9 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
 
         cfg_a = compacting_config(tmp_path / "pa", monkeypatch, model="пара-а")
         cfg_b = compacting_config(tmp_path / "pb", monkeypatch, model="пара-б")
-        install_many(monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()})
+        install_many(
+            monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()}
+        )
         a = await AsyncAgent.create(cfg_a)
         b = await AsyncAgent.create(cfg_b)
         started = time.monotonic()
@@ -395,7 +422,9 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
             await b.aclose()
         together = time.monotonic() - started
 
-    assert was_compacted(cfg_a, "sdk", "t-s4-a"), "компакция не сработала — тест пуст"
+    assert was_compacted(cfg_a, "sdk", "t-s4-a"), (
+        "компакция не сработала — тест пуст"
+    )
     ratio = together / alone if alone else 0.0
     assert ratio < 1.6, (
         f"двое с компакцией шли {ratio:.2f}× от одиночного прогона "
@@ -405,7 +434,10 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
 
 # --- S-7: сообщение, пришедшее во время компакции --------------------------
 
-async def test_message_arriving_during_compaction_is_not_lost(tmp_path, monkeypatch):
+
+async def test_message_arriving_during_compaction_is_not_lost(
+    tmp_path, monkeypatch
+):
     """Сообщение, пришедшее во время компакции, не теряется.
 
     После turn-end компакции ядро добирает накопленное через
@@ -436,7 +468,10 @@ async def test_message_arriving_during_compaction_is_not_lost(tmp_path, monkeypa
 
 # --- S-8: отмена посреди компакции -----------------------------------------
 
-async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeypatch):
+
+async def test_cancelled_compaction_leaves_the_thread_readable(
+    tmp_path, monkeypatch
+):
     """Отмена посреди компакции не рвёт тред.
 
     Единственное место, где я заранее ждал сюрприза: замещение истории
@@ -458,7 +493,7 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
 
     async def slow_compaction(*args, **kwargs):
         entered.set()
-        await asyncio.sleep(5)          # отменят раньше, чем досчитает
+        await asyncio.sleep(5)  # отменят раньше, чем досчитает
         return await real(*args, **kwargs)
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", slow_compaction)
@@ -466,7 +501,9 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
 
     agent = await AsyncAgent.create(cfg)
     try:
-        task = asyncio.create_task(agent.run("сделай что-нибудь", thread_id="t-s8"))
+        task = asyncio.create_task(
+            agent.run("сделай что-нибудь", thread_id="t-s8")
+        )
         await asyncio.wait_for(entered.wait(), timeout=5)
         task.cancel()
         with pytest.raises((asyncio.CancelledError, Exception)):
@@ -478,7 +515,9 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
     from gc_core.thread_store import ThreadSession
 
     session = await ThreadSession.afrom_config(
-        config_dict=cfg, system_id="sdk", thread_id="t-s8",
+        config_dict=cfg,
+        system_id="sdk",
+        thread_id="t-s8",
     )
     assert isinstance(session.history_messages, list)
 
@@ -488,6 +527,5 @@ async def test_cancelled_compaction_leaves_the_thread_readable(tmp_path, monkeyp
     await areset_stale_summarizing_flag(session)
     runtime = session.meta.get("runtime") or {}
     assert not runtime.get("summarizing"), (
-        "флаг summarizing остался взведённым после отменённой компакции — "
-        "TUI будет вечно показывать «сжимаю контекст»"
+        "флаг summarizing остался взведённым после отменённой компакции — TUI будет вечно показывать «сжимаю контекст»"
     )

@@ -1,6 +1,6 @@
 """tui summarizing → meta.runtime.summarizing; снимается (в т.ч. при ошибке)."""
-import pytest
 
+import pytest
 from gc_core import run_summary_coordinator as rsc
 from gc_core import thread_store
 
@@ -15,7 +15,9 @@ class _FakeTS:
     def __init__(self):
         from gc_core.thread_store_file import FileThreadStore
 
-        self.threads_dir = "/tmp/x"; self.system_id = "cli"; self.thread_id = "t1"
+        self.threads_dir = "/tmp/x"
+        self.system_id = "cli"
+        self.thread_id = "t1"
         self.meta = {}
         self.store = FileThreadStore(self.threads_dir)
         self.flushed_states = []  # снимки наличия флага при каждом flush
@@ -45,9 +47,11 @@ async def test_flag_set_during_and_cleared_after(monkeypatch):
     ts = _FakeTS()
     _patch_flush(monkeypatch, ts)
     seen_during = {}
+
     def fake_compaction():
         rt = ts.meta.get("runtime") or {}
         seen_during["flag"] = bool(rt.get("summarizing"))
+
     async with rsc._asummarizing_flag(ts):
         fake_compaction()
     assert seen_during["flag"] is True

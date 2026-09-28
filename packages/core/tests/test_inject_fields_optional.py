@@ -1,6 +1,8 @@
 import pytest
-
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
 from gc_core.tools.schema_optional import (
     OPTIONAL_EMPTY_AS_OMIT_HINT,
@@ -33,8 +35,10 @@ def test_injected_reason_is_marked_optional():
     apply_injected_fields_to_spec(spec, INJECT)
     params = spec["parameters"]
 
-    assert params["required"][0] == "reason"          # API schema still demands it
-    assert "reason" in resolve_optional_property_keys(params)   # local validation does not
+    assert params["required"][0] == "reason"  # API schema still demands it
+    assert "reason" in resolve_optional_property_keys(
+        params
+    )  # local validation does not
 
 
 def test_call_without_reason_validates():

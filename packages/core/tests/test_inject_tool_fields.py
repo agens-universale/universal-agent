@@ -6,10 +6,13 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from gc_core import tools as tools_pkg
-from gc_core.tools import aapply_tool, abuild_tools_data, WrongFunctionArgumentsException
-from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec, resolve_inject_tool_fields, strip_injected_tool_args
+from gc_core.tools import aapply_tool, abuild_tools_data
+from gc_core.tools.inject_tool_fields import (
+    apply_injected_fields_to_spec,
+    resolve_inject_tool_fields,
+    strip_injected_tool_args,
+)
 
 _REASON = "reason"
 _REASON_DESC = (
@@ -25,11 +28,19 @@ def _reason_fields(**extra: str) -> dict[str, str]:
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
     yield
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
 
@@ -101,12 +112,19 @@ class TestInjectPropertyIntoSpec:
         assert json.dumps(spec) == before
 
     def test_empty_properties_gets_only_reason(self):
-        spec = {"name": "empty_tool", "parameters": {"type": "object", "properties": {}}}
-        assert apply_injected_fields_to_spec(spec, _reason_fields()) == [_REASON]
+        spec = {
+            "name": "empty_tool",
+            "parameters": {"type": "object", "properties": {}},
+        }
+        assert apply_injected_fields_to_spec(spec, _reason_fields()) == [
+            _REASON
+        ]
 
     def test_missing_parameters_creates_object(self):
         spec = {"name": "no_params"}
-        assert apply_injected_fields_to_spec(spec, _reason_fields()) == [_REASON]
+        assert apply_injected_fields_to_spec(spec, _reason_fields()) == [
+            _REASON
+        ]
         assert spec["parameters"]["required"] == [_REASON]
 
     def test_multiple_fields_from_config(self):
@@ -114,7 +132,10 @@ class TestInjectPropertyIntoSpec:
         fields = {"audit": "Audit note.", "reason": _REASON_DESC}
         injected = apply_injected_fields_to_spec(spec, fields)
         assert injected == ["audit", _REASON]
-        assert list(spec["parameters"]["properties"].keys())[:2] == ["reason", "audit"]
+        assert list(spec["parameters"]["properties"].keys())[:2] == [
+            "reason",
+            "audit",
+        ]
 
 
 class TestStripInjectedToolArgs:
@@ -127,13 +148,17 @@ class TestStripInjectedToolArgs:
 
 class TestBuildToolsData:
     async def test_disabled_leaves_spec_unchanged(self):
-        tools_data, _, _, _ = await abuild_tools_data(_base_config(inject_tool_fields={}))
+        tools_data, _, _, _ = await abuild_tools_data(
+            _base_config(inject_tool_fields={})
+        )
         entry = tools_data["fs_write_file"]
         assert _REASON not in entry["spec"]["parameters"]["properties"]
         assert entry.get("injected_fields", []) == []
 
     async def test_enabled_injects_from_config_dict(self):
-        tools_data, _, _, _ = await abuild_tools_data(_base_config(inject_tool_fields=_reason_fields()))
+        tools_data, _, _, _ = await abuild_tools_data(
+            _base_config(inject_tool_fields=_reason_fields())
+        )
         entry = tools_data["fs_write_file"]
         props = entry["spec"]["parameters"]["properties"]
         assert list(props.keys())[0] == _REASON
@@ -288,6 +313,7 @@ class TestApplyTool:
         with patch(
             "gc_core.tools.connect_mcp.agent_tools.acall_mcp_tool"
         ) as mock_call:
+
             async def _ok(**_kw):
                 return "mcp ok"
 
@@ -335,8 +361,11 @@ class TestApplyTool:
 
         run_agent_func = MagicMock()
         with patch.object(tools_pkg, "is_subagent_tool", return_value=True):
-            with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+            with patch(
+                "gc_core.tools.subagents.runner.SubagentRunner"
+            ) as MockRunner:
                 instance = MockRunner.return_value
+
                 async def _arun(*_a, **_kw):
                     return "done"
 
@@ -385,12 +414,16 @@ class TestInjectDoesNotPolluteClassSchema:
             # class-level / fresh tool_description stays clean of inject
             fabric = second[name]["tool_fabric"]
             fresh = fabric.tool_description()
-            assert _REASON not in (fresh.get("parameters") or {}).get("properties", {})
+            assert _REASON not in (fresh.get("parameters") or {}).get(
+                "properties", {}
+            )
 
     async def test_second_build_strips_reason_on_apply(self):
         cfg = _base_config(inject_tool_fields=_reason_fields())
         await abuild_tools_data(cfg)  # first build (pollution attempt)
-        tools_data, _, _, _ = await abuild_tools_data(cfg)  # second — must still strip
+        tools_data, _, _, _ = await abuild_tools_data(
+            cfg
+        )  # second — must still strip
 
         received = {}
 

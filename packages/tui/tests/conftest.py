@@ -3,6 +3,7 @@
 Импортируемые хелперы (wait_until, open_settings_section) живут в
 ``gc_testkit.tui_support``: conftest не импортируют из тестов напрямую.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -42,6 +43,18 @@ _SNAPSHOT_DRIFT = {
     "test_palette_open_snapshot",
     "test_unknown_command_snapshot",
 }
+
+
+@pytest.fixture(autouse=True)
+def _snapshot_color_mode(request, monkeypatch):
+    """Цветные эталоны не должны зависеть от NO_COLOR терминала или CI.
+
+    Textual читает NO_COLOR при создании App и переводит кадр в оттенки
+    серого. Снимаем переменную только для snap_compare: обычные тесты
+    и проверка пользовательского режима без цвета сохраняют окружение.
+    """
+    if "snap_compare" in request.fixturenames:
+        monkeypatch.delenv("NO_COLOR", raising=False)
 
 
 def pytest_configure(config):
@@ -94,14 +107,14 @@ def pytest_collection_modifyitems(items):
     drift = pytest.mark.xfail(
         strict=True,
         reason="эталон разъехался с кодом, пока снапшот-плагин отсутствовал в "
-               "манифестах; разбор расхождения — отдельная задача N2",
+        "манифестах; разбор расхождения — отдельная задача N2",
     )
     for item in items:
         try:
             path = Path(str(item.fspath)).resolve()
         except Exception:
             continue
-        if _TUI_DIR == path or _TUI_DIR in path.parents:
+        if path == _TUI_DIR or _TUI_DIR in path.parents:
             item.add_marker(flaky)
             if item.name in _SNAPSHOT_DRIFT:
                 item.add_marker(drift)
@@ -115,6 +128,7 @@ def _isolate_agent_state(tmp_path, monkeypatch):
     для всех TUI-тестов; локальный monkeypatch внутри теста (если есть) просто
     переопределяет этот же путь позже — конфликта нет."""
     from gc_core import upgrade_gate
+
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
 
@@ -130,6 +144,7 @@ def _isolate_model_list_cache():
     Автосброс до и после каждого теста (после — на случай, если тест сам не
     дошёл до конца)."""
     from gc_tui.services.model_list_cache import clear_cache
+
     clear_cache()
     yield
     clear_cache()
@@ -142,6 +157,7 @@ def _isolate_slow_git_memo():
     Туда же флаг «выходим»: его ставит `main()` (её зовут тесты в том же процессе),
     и после него индекс не запускал бы git никому из следующих."""
     from gc_tui.services import file_index
+
     file_index._slow_git_roots.clear()
     file_index._exiting = False
     yield
@@ -189,7 +205,9 @@ def _no_network_update_check(monkeypatch):
         check_mod,
         "check_for_update",
         lambda source, **k: CheckResult(
-            "current", getattr(source, "commit", None), "установлена последняя версия"
+            "current",
+            getattr(source, "commit", None),
+            "установлена последняя версия",
         ),
     )
 
@@ -224,10 +242,9 @@ def tui_app_factory():
     __file__: набор TUI лежит в packages/tui/tests, а стили — в
     packages/tui/src/gc_tui, и арифметика уровней здесь уже ломалась.
     """
-    from textual.app import App, ComposeResult
-
     from gc_testkit.paths import TUI_PKG
     from gc_tui import palette
+    from textual.app import App, ComposeResult
 
     def _factory(widget):
         class _StyledHost(App):

@@ -77,7 +77,6 @@ HANDOFF CONTRACT
         """
         Returns: Tuple[agent_role, initial_user_message]
         """
-        pass
 
     @abstractmethod
     def get_agent_name(self) -> str: ...

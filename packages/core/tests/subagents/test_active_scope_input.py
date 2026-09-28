@@ -7,10 +7,11 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-import pytest
-
-from gc_core.message_policy.user_message_policy import wrap_technical_user_content
+from gc_core.message_policy.user_message_policy import (
+    wrap_technical_user_content,
+)
 from gc_core.states import SharedStateData, State
+from gc_core.thread_store import read_subagent_trace
 from gc_core.tools.subagents.active_scope import (
     activate_child_input,
     active_parent_call_id,
@@ -19,8 +20,6 @@ from gc_core.tools.subagents.active_scope import (
 )
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink
 from gc_core.tools.subagents.runner import SubagentRunner
-from gc_core.thread_store import read_subagent_trace
-
 
 # Уборщика глобали больше нет: скоуп живёт в контексте прогона и не может
 # пережить тест — переживать негде.
@@ -81,7 +80,10 @@ def _make_ctx(cfg=None, **extra):
 class TestActiveScopeRegistry:
     def test_inactive_try_enqueue_false(self):
         ctx = SimpleNamespace()
-        assert try_enqueue_user_message(ctx, {"role": "user", "content": "hi"}) is False
+        assert (
+            try_enqueue_user_message(ctx, {"role": "user", "content": "hi"})
+            is False
+        )
         assert is_child_input_active(ctx) is False
         assert active_parent_call_id(ctx) is None
 
@@ -90,9 +92,12 @@ class TestActiveScopeRegistry:
         with activate_child_input(ctx, parent_call_id="call_sub_1") as scope:
             assert is_child_input_active(ctx) is True
             assert active_parent_call_id(ctx) == "call_sub_1"
-            assert try_enqueue_user_message(
-                ctx, {"role": "user", "content": "steer"}
-            ) is True
+            assert (
+                try_enqueue_user_message(
+                    ctx, {"role": "user", "content": "steer"}
+                )
+                is True
+            )
             assert scope.drain() == [{"role": "user", "content": "steer"}]
             assert scope.drain() == []
         assert is_child_input_active(ctx) is False
@@ -108,8 +113,6 @@ class TestActiveScopeRegistry:
 
 class TestAgentExecutorRoutesToChild:
     def test_add_message_goes_to_child_when_active(self):
-        from gc_core.agent_executor import AgentExecutor
-
         # Активатор берём У ТОГО ЖЕ МОДУЛЯ, что и исполнитель.
         #
         # Конфтесты подменяют `sys.modules["gc_core.tools"]` заглушкой и
@@ -124,8 +127,11 @@ class TestAgentExecutorRoutesToChild:
         # удалён, и поиск по имени падает с `KeyError`, — а `__globals__`
         # живут вместе с самой функцией.
         import gc_core.agent_executor as _ae
+        from gc_core.agent_executor import AgentExecutor
 
-        _activate = _ae.try_enqueue_user_message.__globals__["activate_child_input"]
+        _activate = _ae.try_enqueue_user_message.__globals__[
+            "activate_child_input"
+        ]
 
         ctx = MagicMock()
         # У MagicMock любой атрибут «есть», поэтому пустой скоуп задаём явно:
@@ -174,21 +180,25 @@ class TestRunnerWiresPending:
 
         def _run():
             with patch.object(
-                runner, "_build_child_ctx", return_value=SimpleNamespace(
+                runner,
+                "_build_child_ctx",
+                return_value=SimpleNamespace(
                     run_id="run_c1",
                     parent_call_id="call_parent_9",
                     subagent_progress_sink=None,
                     logger=None,
-                )
+                ),
             ):
                 # Цель потока: loop'а здесь нет, поэтому свой — как у точки
                 # входа `main`. Синхронной формы у прогона субагента больше нет.
-                asyncio.run(runner.arun(
-                    "subagent_worker",
-                    {"task": "test"},
-                    fake_run_agent,
-                    parent_call_id="call_parent_9",
-                ))
+                asyncio.run(
+                    runner.arun(
+                        "subagent_worker",
+                        {"task": "test"},
+                        fake_run_agent,
+                        parent_call_id="call_parent_9",
+                    )
+                )
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
@@ -197,8 +207,7 @@ class TestRunnerWiresPending:
         assert captured["parent_call_id"] == "call_parent_9"
         assert callable(captured["get_pending"])
         try_enqueue_user_message(
-            ctx,
-            {"role": "user", "content": "look at auth", "id": "m_steer"}
+            ctx, {"role": "user", "content": "look at auth", "id": "m_steer"}
         )
         release.set()
         t.join(timeout=2)
@@ -230,20 +239,23 @@ class TestRunnerWiresPending:
         runner = SubagentRunner(ctx, orch, cfg)
 
         def _run():
-            with patch.object(runner, "_build_child_ctx", return_value=child_ctx):
-                asyncio.run(runner.arun(
-                    "subagent_worker",
-                    {"task": "test"},
-                    fake_run_agent,
-                    parent_call_id="call_sub_steer",
-                ))
+            with patch.object(
+                runner, "_build_child_ctx", return_value=child_ctx
+            ):
+                asyncio.run(
+                    runner.arun(
+                        "subagent_worker",
+                        {"task": "test"},
+                        fake_run_agent,
+                        parent_call_id="call_sub_steer",
+                    )
+                )
 
         t = threading.Thread(target=_run, daemon=True)
         t.start()
         assert barrier.wait(timeout=5)
         try_enqueue_user_message(
-            ctx,
-            {"role": "user", "content": "check auth next", "id": "m_u1"}
+            ctx, {"role": "user", "content": "check auth next", "id": "m_u1"}
         )
         # technical must enqueue but not emit nested user row
         try_enqueue_user_message(
@@ -251,7 +263,7 @@ class TestRunnerWiresPending:
             {
                 "role": "user",
                 "content": wrap_technical_user_content("attachment meta"),
-            }
+            },
         )
         events = sink.drain()
         user_evs = [e for e in events if e.kind == "user_message"]

@@ -19,10 +19,10 @@
 Чиним НА ВХОДЕ, а не в `_make_swarm_id`: read-эндпоинты собирают идентификатор
 инлайном, мимо него.
 """
+
 from __future__ import annotations
 
 import pytest
-
 from gc_core.thread_store import sanitize_system_id
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
 
@@ -48,7 +48,9 @@ def test_traversal_task_id_is_rejected(bad):
         ensure_task_id({"task_id": bad})
 
 
-@pytest.mark.parametrize("good", ["PROJ-123", "build-42", "2026-09-01_run-7", "abc"])
+@pytest.mark.parametrize(
+    "good", ["PROJ-123", "build-42", "2026-09-01_run-7", "abc"]
+)
 def test_legitimate_task_id_still_passes(good):
     """Положительный контроль: живые формы не сломаны.
 
@@ -76,7 +78,12 @@ def test_traversal_system_is_coerced_not_rejected():
     Отказ сломал бы живых клиентов, а `../` обязан перестать быть путём.
     Подмена: убрать `sanitize_system_id` вокруг `normalize_system` в /swarm/run.
     """
-    assert sanitize_system_id(normalize_system("My System", default_system="generic")) == "my_system"
+    assert (
+        sanitize_system_id(
+            normalize_system("My System", default_system="generic")
+        )
+        == "my_system"
+    )
 
     coerced = sanitize_system_id(
         normalize_system("../../../../victim", default_system="generic")

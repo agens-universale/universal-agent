@@ -1,10 +1,13 @@
 """agent.model_steering → special_instructions merge."""
 
 import pytest
-from pydantic import ValidationError
-
-from gc_core.config_modules.agent import AgentConfig, merge_special_instructions_with_model_steering, resolve_model_steering_text
+from gc_core.config_modules.agent import (
+    AgentConfig,
+    merge_special_instructions_with_model_steering,
+    resolve_model_steering_text,
+)
 from gc_core.utils.local_render_system_prompt import render_system_prompt
+from pydantic import ValidationError
 
 
 def test_agent_config_accepts_model_steering_string():
@@ -19,7 +22,9 @@ def test_agent_config_rejects_non_string_steering():
 
 def test_resolve_model_steering_text():
     assert (
-        resolve_model_steering_text({"model_steering": "Cap exploratory reads."})
+        resolve_model_steering_text(
+            {"model_steering": "Cap exploratory reads."}
+        )
         == "Cap exploratory reads."
     )
 
@@ -48,8 +53,14 @@ def test_merge_steering_only():
 
 
 def test_merge_none_when_empty():
-    assert merge_special_instructions_with_model_steering(None, config_dict={}) is None
-    assert merge_special_instructions_with_model_steering("  ", config_dict={}) is None
+    assert (
+        merge_special_instructions_with_model_steering(None, config_dict={})
+        is None
+    )
+    assert (
+        merge_special_instructions_with_model_steering("  ", config_dict={})
+        is None
+    )
 
 
 def test_render_injects_merged_steering_into_slot():

@@ -1,4 +1,5 @@
 """AsyncAgent — тонкая обёртка над acreate_run_context + AgentExecutor.arun."""
+
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +37,7 @@ class AsyncAgent:
     """
 
     def __init__(
-        self, executor: AgentExecutor, subscribers: "set[asyncio.Queue]"
+        self, executor: AgentExecutor, subscribers: set[asyncio.Queue]
     ) -> None:
         self._executor = executor
         # Живые подписчики stream(). Пустой набор — дельты никуда не копятся.
@@ -60,7 +61,7 @@ class AsyncAgent:
         auth_connector: Any = None,
         on_stream_delta: Any = None,
         **context_kwargs: Any,
-    ) -> "AsyncAgent":
+    ) -> AsyncAgent:
         """Собрать агента, не блокируя loop.
 
         ``on_stream_delta`` — необязательный «второй слушатель»: дельты и так
@@ -93,7 +94,7 @@ class AsyncAgent:
         #   2. два stream() параллельно: первый забирал всё, включая чужое,
         #      второй получал пустоту.
         # Плюс агент копил события всегда, даже когда их никто не читал.
-        subscribers: "set[asyncio.Queue]" = set()
+        subscribers: set[asyncio.Queue] = set()
         loop = asyncio.get_running_loop()
 
         def _fanout(item: Any) -> None:
@@ -136,7 +137,7 @@ class AsyncAgent:
         """Исполнитель под фасадом — для того, чего фасад не покрывает."""
         return self._executor
 
-    async def run(self, prompt: "str | list[str]", **kwargs: Any) -> Any:
+    async def run(self, prompt: str | list[str], **kwargs: Any) -> Any:
         """Ход агента — и доигрывание хвоста. Возвращает ответ последнего хода.
 
         Хвост — отданное `send` после последнего забора очереди циклом: пока ход
@@ -183,10 +184,14 @@ class AsyncAgent:
                     texts, **{**kwargs, **fields, "start_new_thread": False}
                 )
         except asyncio.CancelledError:
-            self._drop_tail([*in_flight, *_take_tail(self._executor)], "cancelled", kwargs)
+            self._drop_tail(
+                [*in_flight, *_take_tail(self._executor)], "cancelled", kwargs
+            )
             raise
         except BaseException:
-            self._drop_tail([*in_flight, *_take_tail(self._executor)], "failed", kwargs)
+            self._drop_tail(
+                [*in_flight, *_take_tail(self._executor)], "failed", kwargs
+            )
             raise
 
     def _turn_was_stopped(self) -> bool:
@@ -204,7 +209,9 @@ class AsyncAgent:
             return
         logger.warning(
             "run_tail_dropped thread_id=%s ending=%s count=%d",
-            kwargs.get("thread_id"), ending, len(tail),
+            kwargs.get("thread_id"),
+            ending,
+            len(tail),
             extra={
                 "event": "run_tail_dropped",
                 "thread_id": kwargs.get("thread_id"),
@@ -215,7 +222,7 @@ class AsyncAgent:
         )
 
     async def stream(
-        self, prompt: "str | list[str]", **kwargs: Any
+        self, prompt: str | list[str], **kwargs: Any
     ) -> AsyncIterator[tuple]:
         """Ход агента с живыми дельтами: ``(kind, text)``.
 
@@ -255,7 +262,7 @@ class AsyncAgent:
             # заявленные 0.2 с, а через все три секунды прогона, и LLM-вызовы
             # с тулами продолжали идти.
             cancelled = True
-            self._executor.stop_run()      # кооперативно: дать ходу закрыться
+            self._executor.stop_run()  # кооперативно: дать ходу закрыться
             task.cancel()
             raise
         finally:
@@ -325,7 +332,9 @@ class AsyncAgent:
         # конца процесса вместе с открытым файловым хендлером. Ветка объявляет
         # сценарий «много AsyncAgent в одном процессе» — там это линейный рост
         # дескрипторов. Хендлеры, переданные вызывающим, не трогаем.
-        release_run_logger(getattr(getattr(self._executor, "_ctx", None), "logger", None))
+        release_run_logger(
+            getattr(getattr(self._executor, "_ctx", None), "logger", None)
+        )
 
     async def _aclose_owned_mcp_sessions(self) -> None:
         """Закрыть MCP-сессии, поднятые при ``create``.
@@ -345,7 +354,7 @@ class AsyncAgent:
 
         await _aclose_mcp_and_release(set_owner(owner))
 
-    async def __aenter__(self) -> "AsyncAgent":
+    async def __aenter__(self) -> AsyncAgent:
         return self
 
     async def __aexit__(self, *exc: Any) -> bool:

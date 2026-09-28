@@ -22,6 +22,7 @@ Ctrl+C на этом пути НЕ перехватывается: поток-ч
 перехвата он забрал бы строку у следующего вопроса. Без перехвата Ctrl+C
 снимает прогон — честнее, чем украденный ответ.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,7 +32,11 @@ import threading
 from typing import Any, Callable
 
 from gc_core.utils.sigint_waits import intercept_sigint
-from gc_core.utils.stdin_lines import discard_unread, pollable_stdin_fd, take_answer
+from gc_core.utils.stdin_lines import (
+    discard_unread,
+    pollable_stdin_fd,
+    take_answer,
+)
 
 #: Шаг опроса. Человек печатает секундами, 50 мс незаметны, а loop свободен.
 #: Опрос сохранён СОЗНАТЕЛЬНО, а не по инерции: на Windows Proactor-loop может
@@ -40,7 +45,7 @@ from gc_core.utils.stdin_lines import discard_unread, pollable_stdin_fd, take_an
 _POLL_SEC = 0.05
 
 
-def _read_stdin_lines_into(box: "queue.Queue[str]") -> None:
+def _read_stdin_lines_into(box: queue.Queue[str]) -> None:
     """Запасной путь (Windows, stdin без fileno): построчно до пустой строки."""
     lines: list[str] = []
     try:
@@ -49,17 +54,19 @@ def _read_stdin_lines_into(box: "queue.Queue[str]") -> None:
             if not line.strip():
                 break
             lines.append(line)
-    except Exception:  # noqa: BLE001 — stdin закрыли; отдаём, что успели
+    except Exception:  # stdin закрыли; отдаём, что успели
         pass
     box.put("\n".join(lines).strip())
 
 
 async def _ask_via_thread() -> str:
     """Запасной путь: поток-читатель, без перехвата Ctrl+C (см. докстроку модуля)."""
-    box: "queue.Queue[str]" = queue.Queue()
+    box: queue.Queue[str] = queue.Queue()
     threading.Thread(
-        target=_read_stdin_lines_into, args=(box,),
-        name="gc-cli-ask-human", daemon=True,
+        target=_read_stdin_lines_into,
+        args=(box,),
+        name="gc-cli-ask-human",
+        daemon=True,
     ).start()
     while True:
         try:
@@ -71,7 +78,7 @@ async def _ask_via_thread() -> str:
 def make_cli_ask_human_port() -> Callable[[str], Any]:
     """Корутинный порт для ``ctx.ask_human``."""
 
-    async def _ask(question: str) -> str:
+    async def _ask(question: str) -> str:  # noqa: ARG001  # часть контракта: подпись менять нельзя
         fd = pollable_stdin_fd()
         if fd is None:
             return await _ask_via_thread()

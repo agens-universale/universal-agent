@@ -134,7 +134,7 @@ class FsFindFilesByNameConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _default_not_above_hard(self) -> "FsFindFilesByNameConfig":
+    def _default_not_above_hard(self) -> FsFindFilesByNameConfig:
         if self.default_max_matches > self.hard_max_matches:
             raise ValueError("default_max_matches must be <= hard_max_matches")
         return self

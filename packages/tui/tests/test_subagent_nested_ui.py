@@ -1,17 +1,20 @@
 """MainScreen: batch waiting/active + drain nested subagent progress."""
+
 from __future__ import annotations
 
 import pytest
-
-from gc_core.tools.subagents.progress import QueueSubagentProgressSink, SubagentProgressEvent
+from gc_core.tools.subagents.progress import (
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+)
 from gc_tui.widgets.tool_call_row import ToolCallRow
 
 
 @pytest.mark.asyncio
 async def test_batch_calls_first_active_rest_waiting():
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
 
     class _LiveRunner:
         def is_running(self) -> bool:
@@ -22,9 +25,15 @@ async def test_batch_calls_first_active_rest_waiting():
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         trace = scr.query_one("#trace", VerticalScroll)
-        a = ToolCallRow(call_id="a", tool_name="t1", args_summary="", waiting=True)
-        b = ToolCallRow(call_id="b", tool_name="t2", args_summary="", waiting=True)
-        c = ToolCallRow(call_id="c", tool_name="t3", args_summary="", waiting=True)
+        a = ToolCallRow(
+            call_id="a", tool_name="t1", args_summary="", waiting=True
+        )
+        b = ToolCallRow(
+            call_id="b", tool_name="t2", args_summary="", waiting=True
+        )
+        c = ToolCallRow(
+            call_id="c", tool_name="t3", args_summary="", waiting=True
+        )
         for row in (a, b, c):
             trace.mount(row)
             scr._active_calls[row.call_id] = row
@@ -40,8 +49,8 @@ async def test_batch_calls_first_active_rest_waiting():
 @pytest.mark.asyncio
 async def test_drain_mounts_nested_under_parent():
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
+    from textual.containers import VerticalScroll
 
     class _LiveRunner:
         def is_running(self) -> bool:
@@ -92,9 +101,9 @@ async def test_drain_mounts_nested_under_parent():
 async def test_nested_stays_after_parent_result():
     """После finish + result parent nested остаётся под ✓ (живая сессия)."""
     pytest.importorskip("textual")
-    from textual.containers import VerticalScroll
     from gc_tui.app import TuiApp
     from gc_tui.models import TraceEvent
+    from textual.containers import VerticalScroll
 
     class _LiveRunner:
         def is_running(self) -> bool:

@@ -4,9 +4,9 @@
 import json
 
 from gc_core.backends.protocol import WalkOutputTooLargeError
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 from gc_core.tools.fs.find_files_by_name import FindFilesByName
 from gc_core.tools.fs.list_files import ListFiles
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
 _FILES = {"/work/app.py": "print(1)\n"}
 
@@ -19,7 +19,14 @@ class _OverflowingBackend(FakeBackend):
         raise WalkOutputTooLargeError(path, ceiling_chars=50_000_000)
         yield  # pragma: no cover
 
-    async def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+    async def iter_walk_entries(
+        self,
+        path,
+        *,
+        should_descend=None,
+        prune_names=(),
+        prune_dot_dirs=False,
+    ):
         raise WalkOutputTooLargeError(path, ceiling_chars=50_000_000)
         yield  # pragma: no cover
 

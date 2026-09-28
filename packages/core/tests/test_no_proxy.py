@@ -5,12 +5,12 @@
 подходит: вместе с прокси включилось бы чтение ``~/.netrc``, чей Basic-auth
 перетирает явный Authorization и даёт 401.
 """
+
 import itertools
 import json
 from pathlib import Path
 
 import pytest
-
 from gc_core.utils.no_proxy import should_bypass_proxies
 
 #: Пары «URL × список NO_PROXY», покрывающие все ветки матчинга.
@@ -60,8 +60,12 @@ def test_suffix_match_respects_label_boundary():
     Наивный ``endswith`` без точки дал бы здесь ложное совпадение и увёл
     трафик мимо прокси.
     """
-    assert should_bypass_proxies("http://api.corp.example.com/", "corp.example.com")
-    assert not should_bypass_proxies("http://bad-corp.example.com/", "corp.example.com")
+    assert should_bypass_proxies(
+        "http://api.corp.example.com/", "corp.example.com"
+    )
+    assert not should_bypass_proxies(
+        "http://bad-corp.example.com/", "corp.example.com"
+    )
 
 
 def test_leading_dot_is_equivalent():
@@ -70,10 +74,16 @@ def test_leading_dot_is_equivalent():
 
 
 def test_port_is_matched_both_ways():
-    assert should_bypass_proxies("https://corp.example.com:8443/", "corp.example.com:8443")
-    assert not should_bypass_proxies("https://corp.example.com:8443/", "corp.example.com:9999")
+    assert should_bypass_proxies(
+        "https://corp.example.com:8443/", "corp.example.com:8443"
+    )
+    assert not should_bypass_proxies(
+        "https://corp.example.com:8443/", "corp.example.com:9999"
+    )
     # без порта в записи хост совпадает независимо от порта
-    assert should_bypass_proxies("https://corp.example.com:8443/", "corp.example.com")
+    assert should_bypass_proxies(
+        "https://corp.example.com:8443/", "corp.example.com"
+    )
 
 
 def test_ipv4_cidr_and_exact():
@@ -92,20 +102,20 @@ def test_broken_cidr_does_not_explode():
 #: в чистой установке пропускался ВЕСЬ файл, включая проверки выше, которые
 #: requests не нужны вовсе. Таблица делает эквивалентность проверяемой везде.
 _REFERENCE = json.loads(
-    (Path(__file__).parent / "fixtures" / "no_proxy_reference_requests.json")
-    .read_text(encoding="utf-8")
+    (
+        Path(__file__).parent / "fixtures" / "no_proxy_reference_requests.json"
+    ).read_text(encoding="utf-8")
 )["pairs"]
 
 
 def test_reference_covers_every_pair():
     """Эталон обязан покрывать всю решётку — иначе он тихо усохнет."""
     assert len(_REFERENCE) == len(_URLS) * len(_LISTS), (
-        f"в эталоне {len(_REFERENCE)} пар, а решётка даёт "
-        f"{len(_URLS) * len(_LISTS)} — пересними fixture"
+        f"в эталоне {len(_REFERENCE)} пар, а решётка даёт {len(_URLS) * len(_LISTS)} — пересними fixture"
     )
-    assert any(r[2] for r in _REFERENCE) and not all(r[2] for r in _REFERENCE), (
-        "эталон вырожден: все ответы одинаковые, сверять нечего"
-    )
+    assert any(r[2] for r in _REFERENCE) and not all(
+        r[2] for r in _REFERENCE
+    ), "эталон вырожден: все ответы одинаковые, сверять нечего"
 
 
 @pytest.mark.parametrize("url,no_proxy,expected", _REFERENCE)
@@ -117,7 +127,9 @@ def test_no_proxy_matches_the_requests_reference(url, no_proxy, expected):
     assert should_bypass_proxies(url, no_proxy) is expected
 
 
-@pytest.mark.parametrize("url,no_proxy", list(itertools.product(_URLS, _LISTS)))
+@pytest.mark.parametrize(
+    "url,no_proxy", list(itertools.product(_URLS, _LISTS))
+)
 def test_reference_still_matches_live_requests(url, no_proxy):
     """Там, где requests ещё стоит, сверяем и ЖИВОЙ ответ.
 
@@ -127,6 +139,6 @@ def test_reference_still_matches_live_requests(url, no_proxy):
     """
     requests_utils = pytest.importorskip("requests.utils")
 
-    assert should_bypass_proxies(url, no_proxy) == requests_utils.should_bypass_proxies(
-        url, no_proxy=no_proxy
-    )
+    assert should_bypass_proxies(
+        url, no_proxy
+    ) == requests_utils.should_bypass_proxies(url, no_proxy=no_proxy)

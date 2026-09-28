@@ -12,13 +12,13 @@
 LLM-судьи (`command_moderation`) флага не несёт — там Ctrl+C обязан по-прежнему
 прерывать прогон, потому что означает «останови всё», а не «я не разрешаю».
 """
+
 import asyncio
 import os
 import signal
 import time
 
 import pytest
-
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
 
 pytestmark = pytest.mark.skipif(
@@ -102,7 +102,9 @@ def safety_net():
         signal.signal(signal.SIGINT, previous)
 
 
-async def test_ctrl_c_during_a_human_wait_returns_the_declared_value(safety_net):
+async def test_ctrl_c_during_a_human_wait_returns_the_declared_value(
+    safety_net,
+):
     """Тело получает объявленное значение, а прогон продолжается."""
     seen: list = []
     call = _wrapped(False, seen)
@@ -111,7 +113,9 @@ async def test_ctrl_c_during_a_human_wait_returns_the_declared_value(safety_net)
     result = await asyncio.wait_for(call(), 5)
     await fire
 
-    assert safety_net == [], "сигнал ушёл мимо перехвата — в жизни это снятый прогон"
+    assert safety_net == [], (
+        "сигнал ушёл мимо перехвата — в жизни это снятый прогон"
+    )
     assert seen == [False], f"телу гарда пришло не то: {seen}"
     assert result == "тул отработал", "прогон не продолжился после Ctrl+C"
 
@@ -131,7 +135,9 @@ async def test_the_interceptor_restores_the_previous_handler(safety_net):
     )
 
 
-async def test_overlapping_waits_keep_ctrl_c_for_the_one_still_waiting(safety_net):
+async def test_overlapping_waits_keep_ctrl_c_for_the_one_still_waiting(
+    safety_net,
+):
     """Ожидания выходят не в порядке входа — Ctrl+C всё равно у того, кто ждёт.
 
     Каждое ожидание запоминало обработчик на входе и возвращало его на выходе.
@@ -150,7 +156,9 @@ async def test_overlapping_waits_keep_ctrl_c_for_the_one_still_waiting(safety_ne
 
     assert await asyncio.wait_for(second, 3) == "тул отработал"
     assert seen_b == ["B"], f"Ctrl+C не дошёл до того, кто ещё ждёт: {seen_b}"
-    assert safety_net == [], "сигнал ушёл мимо перехвата — в жизни это снятый прогон"
+    assert safety_net == [], (
+        "сигнал ушёл мимо перехвата — в жизни это снятый прогон"
+    )
 
 
 # --- проводка флага во всех шести местах ожидания человека ------------------
@@ -175,7 +183,9 @@ def _ctx(config: dict):
     from gc_core.security.permission_store import PermissionStore
 
     return SimpleNamespace(
-        is_tui=True, tui_confirm=_slow_human, config_dict=config,
+        is_tui=True,
+        tui_confirm=_slow_human,
+        config_dict=config,
         permission_store=PermissionStore(),
     )
 
@@ -218,10 +228,12 @@ def _write_outside_the_project(tmp_path):
     project.mkdir()
 
     class _Tool(_Blocked):
-        _ctx = _ctx({
-            "launch_root": str(project),
-            "write_guard": {"enabled": True, "mode": "ask"},
-        })
+        _ctx = _ctx(
+            {
+                "launch_root": str(project),
+                "write_guard": {"enabled": True, "mode": "ask"},
+            }
+        )
 
         @enforce_write_guard(path_arg="path")
         async def write(self, path):
@@ -237,13 +249,16 @@ def _read_outside_the_project(tmp_path):
     project.mkdir()
 
     class _Tool(_Blocked):
-        _ctx = _ctx({
-            "launch_root": str(project),
-            "read_guard": {
-                "enabled": True, "mode": "ask",
-                "allowed_read_roots": [str(project)],
-            },
-        })
+        _ctx = _ctx(
+            {
+                "launch_root": str(project),
+                "read_guard": {
+                    "enabled": True,
+                    "mode": "ask",
+                    "allowed_read_roots": [str(project)],
+                },
+            }
+        )
 
         @enforce_read_guard(path_arg="path")
         async def read(self, path):
@@ -256,13 +271,17 @@ def _fetch_a_listed_url(tmp_path):
     from gc_core.security.url_policy import enforce_url_policy
 
     class _Tool(_Blocked):
-        _ctx = _ctx({
-            "launch_root": str(tmp_path),
-            "url_policy": {
-                "enabled": True, "mode": "ask",
-                "allowed_schemes": ["https"], "url_blacklist": ["example.com"],
-            },
-        })
+        _ctx = _ctx(
+            {
+                "launch_root": str(tmp_path),
+                "url_policy": {
+                    "enabled": True,
+                    "mode": "ask",
+                    "allowed_schemes": ["https"],
+                    "url_blacklist": ["example.com"],
+                },
+            }
+        )
 
         @enforce_url_policy(url_arg="url")
         async def fetch(self, url):
@@ -275,13 +294,16 @@ def _run_without_a_judge(tmp_path):
     from gc_core.security.command_moderation import moderate_command_execution
 
     class _Tool(_Blocked):
-        _ctx = _ctx({
-            "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "ask"},
-        })
+        _ctx = _ctx(
+            {
+                "launch_root": str(tmp_path),
+                "command_moderation": {"enabled": True, "mode": "ask"},
+            }
+        )
 
         @moderate_command_execution(
-            payload_arg="command", tool_name="execute_command",
+            payload_arg="command",
+            tool_name="execute_command",
             judge_client_extractor=lambda self, *a, **kw: None,
         )
         async def run(self, command):
@@ -297,25 +319,36 @@ def _run_touching_instructions(tmp_path):
     agents.write_text("правила проекта", encoding="utf-8")
 
     class _Tool(_Blocked):
-        _ctx = _ctx({"launch_root": str(tmp_path), "gc_protection": {"enabled": True}})
+        _ctx = _ctx(
+            {"launch_root": str(tmp_path), "gc_protection": {"enabled": True}}
+        )
 
-        @enforce_command_guard(payload_arg="command", tool_name="execute_command")
+        @enforce_command_guard(
+            payload_arg="command", tool_name="execute_command"
+        )
         async def run(self, command):
             return '{"ok": true}'
 
     return lambda: _Tool().run(command=f"cat {agents}")
 
 
-@pytest.mark.parametrize("make_call", [
-    _write_to_instructions,
-    _write_outside_the_project,
-    _read_outside_the_project,
-    _fetch_a_listed_url,
-    _run_without_a_judge,
-    _run_touching_instructions,
-], ids=lambda f: f.__name__.strip("_"))
+@pytest.mark.parametrize(
+    "make_call",
+    [
+        _write_to_instructions,
+        _write_outside_the_project,
+        _read_outside_the_project,
+        _fetch_a_listed_url,
+        _run_without_a_judge,
+        _run_touching_instructions,
+    ],
+    ids=lambda f: f.__name__.strip("_"),
+)
 async def test_every_human_wait_turns_ctrl_c_into_a_refusal(
-    make_call, tmp_path, monkeypatch, safety_net,
+    make_call,
+    tmp_path,
+    monkeypatch,
+    safety_net,
 ):
     """Ctrl+C на вопросе любого гарда — отказ сразу, а не снятый прогон.
 
@@ -333,8 +366,12 @@ async def test_every_human_wait_turns_ctrl_c_into_a_refusal(
     result = await asyncio.wait_for(call(), _HUMAN_THINKS - 1)
     await fire
 
-    assert safety_net == [], "Ctrl+C ушёл мимо перехвата — в жизни это снятый прогон"
-    assert json.loads(result)["ok"] is False, f"гард пропустил без подтверждения: {result}"
+    assert safety_net == [], (
+        "Ctrl+C ушёл мимо перехвата — в жизни это снятый прогон"
+    )
+    assert json.loads(result)["ok"] is False, (
+        f"гард пропустил без подтверждения: {result}"
+    )
 
 
 async def test_without_the_flag_the_wait_is_not_intercepted():

@@ -5,23 +5,26 @@
 subprocess) блокирующие — их прервать нечем, поэтому они уходят в поток,
 который можно бросить по дедлайну.
 """
-import asyncio
+
 import inspect
 import threading
 
 import pytest
-
 from gc_core.tools.connect_mcp import api, client_port, stream_client
 from gc_core.tools.connect_mcp.agent_tools import MCPToolWrapper
 
 _REGISTRY = {
     "mcp_srv_echo": {
-        "tool": {"name": "mcp_srv_echo", "parameters": {"type": "object",
-                                                        "properties": {}}},
+        "tool": {
+            "name": "mcp_srv_echo",
+            "parameters": {"type": "object", "properties": {}},
+        },
         "metadata": {"mcp_server_key": "srv", "mcp_tool_name": "echo"},
     }
 }
-_SDK_CFG = {"srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}}
+_SDK_CFG = {
+    "srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}
+}
 _LEGACY_CFG = {"srv": {"transport": "http", "url": "http://srv.invalid/mcp"}}
 
 
@@ -101,7 +104,9 @@ async def test_legacy_http_runs_natively_without_a_thread(monkeypatch):
     assert spawned == [], f"легаси-HTTP снова завёл потоки: {spawned}"
 
 
-async def test_persistent_stdio_still_goes_to_an_abandonable_thread(monkeypatch):
+async def test_persistent_stdio_still_goes_to_an_abandonable_thread(
+    monkeypatch,
+):
     """А вот долгоживущая stdio-сессия — по-прежнему в поток, и это осознанно.
 
     Asyncio-подпроцесс привязан к создавшему его loop (проверено прямым
@@ -110,7 +115,13 @@ async def test_persistent_stdio_still_goes_to_an_abandonable_thread(monkeypatch)
     ``arun`` — три разных loop. Поэтому ``subprocess.Popen`` и поток-демон.
     """
     seen = {}
-    cfg = {"srv": {"transport": "stdio", "command": "x", "persistent_session": True}}
+    cfg = {
+        "srv": {
+            "transport": "stdio",
+            "command": "x",
+            "persistent_session": True,
+        }
+    }
 
     def _fake_sync(self, tool_name, arguments, *, timeout):
         seen["thread"] = threading.current_thread().name
@@ -120,7 +131,9 @@ async def test_persistent_stdio_still_goes_to_an_abandonable_thread(monkeypatch)
         client_port.AgentRuntimeClient, "call_tool", _fake_sync, raising=True
     )
 
-    out = await api.acall_mcp_tool("mcp_srv_echo", {}, cfg, _REGISTRY, timeout=5)
+    out = await api.acall_mcp_tool(
+        "mcp_srv_echo", {}, cfg, _REGISTRY, timeout=5
+    )
 
     assert '"ok": true' in out
     assert seen["thread"] != threading.main_thread().name, (
@@ -149,7 +162,6 @@ def test_tool_wrapper_exposes_only_the_async_entry():
 
     assert inspect.iscoroutinefunction(tool.acall)
     assert not callable(tool), "у MCP-обёртки снова появился синхронный вход"
-
 
 
 async def test_dispatcher_awaits_acall_without_a_thread(monkeypatch):
@@ -187,7 +199,6 @@ async def test_dispatcher_awaits_acall_without_a_thread(monkeypatch):
 async def test_dispatcher_refuses_a_tool_without_acall():
     """Тул без `acall` — жёсткая ошибка проводки, а не тихий синхронный вызов."""
     import pytest
-
     from gc_core.tools import aapply_tool
 
     class _Legacy:

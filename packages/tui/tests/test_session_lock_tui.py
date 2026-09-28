@@ -1,19 +1,22 @@
 """TUI-проводка session lock: deny resume, badge, release на /new, empty-state."""
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
 import pytest
-
 from gc_core.thread_store import append_new_thread_messages
 from gc_tui.services.session_lock import BUSY_MESSAGE, lock_path, try_acquire
 
 
 def _seed(threads_dir, tid, prompt="hello"):
     append_new_thread_messages(
-        str(threads_dir), "cli", tid,
-        [{"role": "user", "content": prompt, "id": f"m_{tid}"}], set(),
+        str(threads_dir),
+        "cli",
+        tid,
+        [{"role": "user", "content": prompt, "id": f"m_{tid}"}],
+        set(),
     )
     meta = {
         "thread_id": tid,
@@ -23,13 +26,15 @@ def _seed(threads_dir, tid, prompt="hello"):
         "messages_count": 1,
     }
     (Path(threads_dir) / f"meta_cli_{tid}.json").write_text(
-        json.dumps(meta, ensure_ascii=False), encoding="utf-8",
+        json.dumps(meta, ensure_ascii=False),
+        encoding="utf-8",
     )
 
 
 def _rows_text(pilot):
     return "\n".join(
-        str(s.render()) for s in pilot.app.screen.query("#sessions-list Static")
+        str(s.render())
+        for s in pilot.app.screen.query("#sessions-list Static")
     )
 
 
@@ -43,7 +48,9 @@ async def test_attach_denies_when_held_by_other(tmp_path):
     from gc_tui.app import TuiApp
 
     notifications = []
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
         pilot.app.notify = lambda msg, **kw: notifications.append(msg)
         scr = pilot.app.screen
         ok = scr.attach_active_task(tid, is_resume=True)
@@ -61,7 +68,9 @@ async def test_attach_allows_own_tui_id(tmp_path):
 
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
         assert try_acquire(str(tmp_path), "cli", tid, pilot.app.tui_id) is True
         scr = pilot.app.screen
         assert scr.attach_active_task(tid, is_resume=True) is True
@@ -76,7 +85,9 @@ async def test_new_releases_lock(tmp_path):
 
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
         scr = pilot.app.screen
         assert scr.attach_active_task(tid, is_resume=True) is True
         assert Path(lock_path(str(tmp_path), "cli", tid)).exists()
@@ -90,7 +101,9 @@ async def test_empty_state_does_not_create_lock(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
         await pilot.pause()
         locks = list((Path(tmp_path) / "locks").glob("lock_*.json"))
         assert locks == []
@@ -107,7 +120,9 @@ async def test_sessions_shows_busy_badge(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
         await pilot.app.push_screen(
             SessionsScreen(threads_dir=str(tmp_path), system="cli")
         )
@@ -129,7 +144,9 @@ async def test_sessions_resume_denies_busy(tmp_path):
     from gc_tui.screens.sessions import SessionsScreen
 
     notifications = []
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
         pilot.app.notify = lambda msg, **kw: notifications.append(msg)
         scr = pilot.app.screen
         assert scr.attach_active_task(tid_a, is_resume=True) is True
@@ -163,7 +180,9 @@ async def test_sessions_switch_releases_previous(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.sessions import SessionsScreen
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
         scr = pilot.app.screen
         assert scr.attach_active_task(tid_a, is_resume=True) is True
         assert Path(lock_path(str(tmp_path), "cli", tid_a)).exists()

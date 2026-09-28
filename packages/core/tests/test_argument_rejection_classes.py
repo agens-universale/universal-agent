@@ -1,9 +1,10 @@
 """The three Wrong-arguments classes observed on SWE-bench Verified (13.07): 222 of 254 rejections."""
 
 import pytest
-
 from gc_core.tools import abuild_tools_data
-from gc_core.tools.arguments_validation import parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    parse_and_validate_tool_arguments,
+)
 
 CONFIG = {
     "inject_tool_fields": {
@@ -37,7 +38,11 @@ def test_class_2_minimal_edits(specs):
     args = _validate(
         specs,
         "fs_apply_file_edits",
-        {"reason": "r", "path": "/testbed/a.py", "edits": [{"search": "a", "replace": "b"}]},
+        {
+            "reason": "r",
+            "path": "/testbed/a.py",
+            "edits": [{"search": "a", "replace": "b"}],
+        },
     )
     assert args["edits"][0]["replace"] == "b"
 
@@ -46,6 +51,11 @@ def test_class_3_numeric_strings(specs):
     args = _validate(
         specs,
         "fs_read_file",
-        {"reason": "r", "path": "/testbed/a.py", "offset": "500.0", "limit": "200.0"},
+        {
+            "reason": "r",
+            "path": "/testbed/a.py",
+            "offset": "500.0",
+            "limit": "200.0",
+        },
     )
     assert (args["offset"], args["limit"]) == (500, 200)

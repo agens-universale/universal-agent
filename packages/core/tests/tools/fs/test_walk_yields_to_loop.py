@@ -25,12 +25,11 @@
 нет, хотя точка уступки добавлена во все три цикла. Замерзают они там, где
 фоллбек и работает: в песочнице без утилит и на Windows.
 """
+
 import asyncio
 import time
 
 import pytest
-
-from gc_core.tools.fs.find_files_by_name import FindFilesByName
 from gc_core.tools.fs.list_files import ListFiles
 from gc_testkit.helpers.tool_ctx import local_ctx
 
@@ -66,8 +65,12 @@ def python_walk(monkeypatch):
     """
     from gc_core.backends.local import LocalFsBackend
 
-    monkeypatch.setattr(LocalFsBackend, "has_find", property(lambda self: False))
-    monkeypatch.setattr(LocalFsBackend, "has_grep", property(lambda self: False))
+    monkeypatch.setattr(
+        LocalFsBackend, "has_find", property(lambda self: False)
+    )
+    monkeypatch.setattr(
+        LocalFsBackend, "has_grep", property(lambda self: False)
+    )
 
 
 @pytest.fixture
@@ -116,7 +119,9 @@ async def _worst_gap_while(coro):
     return result, pulse.worst(), len(pulse.gaps)
 
 
-async def test_list_files_lets_the_loop_breathe(big_tree, python_walk, costly_walk):
+async def test_list_files_lets_the_loop_breathe(
+    big_tree, python_walk, costly_walk
+):
     tool = ListFiles(ctx=local_ctx())
 
     _out, worst, ticks = await _worst_gap_while(
@@ -148,4 +153,6 @@ async def test_the_yielder_does_not_yield_on_every_entry():
     finally:
         coop.asyncio.sleep = real_sleep
 
-    assert yields < 500, f"уступали {yields} раз на 10 000 записей — слишком часто"
+    assert yields < 500, (
+        f"уступали {yields} раз на 10 000 записей — слишком часто"
+    )

@@ -82,6 +82,8 @@ class SummaryCompactionLog:
     trigger_volume: int = 0
     trigger_threshold_chars: int | None = None
     is_cli_mode: bool = False
+    exceeded_chars: bool = False
+    exceeded_tokens: bool = False
 
     @property
     def rule_label(self) -> str:
@@ -106,12 +108,14 @@ def log_compaction_started(
     if logger is not None:
         logger.info(
             "summary_triggered reason=%s thread_id=%s trigger_volume=%s "
-            "serialized_chars=%s history_messages=%s",
+            "serialized_chars=%s history_messages=%s exceeded_chars=%s exceeded_tokens=%s",
             log_ctx.trigger_reason,
             log_ctx.thread_id,
             log_ctx.trigger_volume,
             serialized_chars,
             history_messages_count,
+            log_ctx.exceeded_chars,
+            log_ctx.exceeded_tokens,
         )
         logger.info(
             "summary_boundary phase=started rule=%s rule_id=%s thread_id=%s volume=%s%s",
@@ -132,6 +136,8 @@ def log_compaction_started(
                 "serialized_chars": serialized_chars,
                 "history_messages": history_messages_count,
                 "threshold": log_ctx.trigger_threshold_chars,
+                "exceeded_chars": log_ctx.exceeded_chars,
+                "exceeded_tokens": log_ctx.exceeded_tokens,
             },
         )
     if not log_ctx.is_cli_mode:
@@ -151,6 +157,8 @@ def log_compaction_precheck(
     trigger_volume: int,
     serialized_chars: int,
     threshold: int,
+    exceeded_chars: bool = False,
+    exceeded_tokens: bool = False,
 ) -> None:
     if logger is None:
         return
@@ -174,6 +182,8 @@ def log_compaction_precheck(
             "trigger_volume": trigger_volume,
             "serialized_chars": serialized_chars,
             "threshold": threshold,
+            "exceeded_chars": exceeded_chars,
+            "exceeded_tokens": exceeded_tokens,
         },
     )
 
@@ -260,8 +270,7 @@ def log_compaction_completed(
             archive,
         )
         logger.info(
-            "summary_boundary phase=completed rule=%s rule_id=%s thread_id=%s "
-            "volume=%s%s%s",
+            "summary_boundary phase=completed rule=%s rule_id=%s thread_id=%s volume=%s%s%s",
             log_ctx.rule_label,
             log_ctx.trigger_reason,
             log_ctx.thread_id,
@@ -289,15 +298,16 @@ def log_compaction_completed(
                 "num_batches": num_batches,
                 "memory_delta_chars": memory_delta_chars,
                 "threshold": log_ctx.trigger_threshold_chars,
-                "archive_suffix": f"__pre_summary__{archive}" if archive else None,
+                "archive_suffix": f"__pre_summary__{archive}"
+                if archive
+                else None,
             },
         )
     if not log_ctx.is_cli_mode:
         return
     _cli_print(f"Сжатие завершено: {log_ctx.rule_label}")
     _cli_print(
-        f"  было={serialized_before} стало={serialized_after} "
-        f"коэффициент={compression_ratio}"
+        f"  было={serialized_before} стало={serialized_after} коэффициент={compression_ratio}"
     )
     if archive:
         _cli_print(f"  архив треда: __pre_summary__{archive}")
@@ -346,8 +356,7 @@ def log_summary_slice_fallback(
     if logger is None:
         return
     logger.warning(
-        "summary_slice_fallback rule_id=%s thread_id=%s slice_mode=%s "
-        "raw_summary_chars=%s agent_gets_full_raw=true",
+        "summary_slice_fallback rule_id=%s thread_id=%s slice_mode=%s raw_summary_chars=%s agent_gets_full_raw=true",
         log_ctx.trigger_reason,
         log_ctx.thread_id,
         slice_mode,
@@ -384,8 +393,7 @@ def log_memory_patch_skipped_multi_batch(
     if logger is None:
         return
     logger.info(
-        "summary_memory_patch_skipped_multi_batch batches=%s "
-        "working_memory_not_updated_from_summary=true",
+        "summary_memory_patch_skipped_multi_batch batches=%s working_memory_not_updated_from_summary=true",
         batches,
     )
 
@@ -402,6 +410,23 @@ def log_pre_run_max_rounds(
         "summary_pre_run_max_rounds thread_id=%s rounds=%s",
         thread_id,
         max_rounds,
+    )
+
+
+def log_token_trigger_no_prompt_tokens(
+    logger: Any | None,
+    *,
+    thread_id: Any,
+    threshold: int,
+) -> None:
+    if logger is None:
+        return
+    logger.warning(
+        "summary_token_trigger_no_prompt_tokens thread_id=%s threshold=%s: "
+        "нет prompt_tokens от провайдера, а история по символам уже выше порога — "
+        "сжатие по токенам не срабатывает",
+        thread_id,
+        threshold,
     )
 
 
@@ -427,6 +452,9 @@ def _normalize_archive_suffix(archive_suffix: str | None) -> str | None:
 
 def _started_cli_detail(log_ctx: SummaryCompactionLog) -> str:
     line = f"  thread={log_ctx.thread_id} объём={log_ctx.trigger_volume}"
-    if log_ctx.trigger_threshold_chars is not None and log_ctx.trigger_threshold_chars > 0:
+    if (
+        log_ctx.trigger_threshold_chars is not None
+        and log_ctx.trigger_threshold_chars > 0
+    ):
         line += f" порог={log_ctx.trigger_threshold_chars}"
     return line

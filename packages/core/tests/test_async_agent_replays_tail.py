@@ -12,13 +12,13 @@
 только цикл агента (записывает батчи) и снос MCP (двойник выполняет шаг теста
 ровно в окне сноса).
 """
+
 import asyncio
 import importlib
 import logging
 import types
 
 import pytest
-
 from gc_core.aio import AsyncAgent
 
 #: Потолок ожидания в тестах: зависший ход — красный тест, а не вечный набор.
@@ -55,7 +55,9 @@ def env(monkeypatch):
     h = types.SimpleNamespace(batches=[], teardown_steps=[], calls=[], ae=ae)
 
     async def _loop(messages, state, ctx, **kw):
-        batch = [m.get("content") if isinstance(m, dict) else m for m in messages]
+        batch = [
+            m.get("content") if isinstance(m, dict) else m for m in messages
+        ]
         h.batches.append(batch)
         return {"answer": batch[-1]}
 
@@ -77,7 +79,9 @@ async def _agent(tmp_path, env) -> AsyncAgent:
     arun = agent.executor.arun
 
     async def _recording_arun(messages, **kw):
-        env.calls.append((kw.get("thread_id"), kw.get("start_new_thread", False)))
+        env.calls.append(
+            (kw.get("thread_id"), kw.get("start_new_thread", False))
+        )
         return await arun(messages, **kw)
 
     agent.executor.arun = _recording_arun
@@ -96,7 +100,9 @@ def _break_thread_read(monkeypatch, env, turn: int, on_read) -> None:
         return await real_session.afrom_config(**kw)
 
     monkeypatch.setattr(
-        env.ae, "ThreadSession", types.SimpleNamespace(afrom_config=_read_thread)
+        env.ae,
+        "ThreadSession",
+        types.SimpleNamespace(afrom_config=_read_thread),
     )
 
 
@@ -105,13 +111,17 @@ async def test_message_sent_during_teardown_reaches_the_agent_in_its_own_turn(
 ):
     async with await _agent(tmp_path, env) as agent:
         env.teardown_steps.append(lambda: agent.send(_msg("вдогонку")))
-        answer = await agent.run("первый", thread_id="t", start_new_thread=True)
+        answer = await agent.run(
+            "первый", thread_id="t", start_new_thread=True
+        )
         leftover = agent.executor.take_undelivered_messages()
 
     assert env.batches == [["первый"], ["вдогонку"]], (
         f"сообщение, отданное send на излёте хода, не дошло до агента: {env.batches}"
     )
-    assert env.calls[1] == ("t", False), "хвост доигран не в том же треде или с чистого листа"
+    assert env.calls[1] == ("t", False), (
+        "хвост доигран не в том же треде или с чистого листа"
+    )
     assert leftover == [], "хвост доигран, но остался лежать в исполнителе"
     # `run` отдаёт ответ последнего хода: он идёт по тому же треду и отвечает
     # с учётом всего, что было до него.
@@ -171,7 +181,9 @@ async def test_stop_in_the_setup_of_a_tail_turn_ends_the_replays(
             await agent.run("первый", thread_id="t", start_new_thread=True)
 
     delivered = [text for batch in env.batches for text in batch]
-    assert "хвост-2" not in delivered, f"доигрывание пережило стоп: {env.batches}"
+    assert "хвост-2" not in delivered, (
+        f"доигрывание пережило стоп: {env.batches}"
+    )
     assert ("stopped", 1) in _dropped(caplog), _dropped(caplog)
 
 

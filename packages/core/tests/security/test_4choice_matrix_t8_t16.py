@@ -6,12 +6,12 @@ T11c: CLI prompt_user_confirmation_choice accepts latin+cyrillic same-key sets
 T13: write guard still works (bool) with 4-choice ids
 T16: long payload: multiline as-is (scroll body + docked options)
 """
+
 import io
 import sys
 from unittest import mock
 
 import pytest
-
 from gc_testkit.paths import ASSETS
 
 PROMPT_PATH = ASSETS / "prompts" / "security" / "command_judge_system.md"
@@ -19,18 +19,24 @@ PROMPT_PATH = ASSETS / "prompts" / "security" / "command_judge_system.md"
 
 # ── T8: config fields separate ───────────────────────────────────────────────
 
+
 def test_t8_config_command_moderation_and_write_guard_are_separate_fields():
     """SecurityConfig has command_moderation and write_guard as independent fields."""
     from gc_core.config_modules.security import SecurityConfig
 
     cfg = SecurityConfig()
-    assert hasattr(cfg, "command_moderation"), "SecurityConfig must have command_moderation"
+    assert hasattr(cfg, "command_moderation"), (
+        "SecurityConfig must have command_moderation"
+    )
     assert hasattr(cfg, "write_guard"), "SecurityConfig must have write_guard"
     # They are distinct objects (not nested or aliased).
     assert cfg.command_moderation is not cfg.write_guard
     # Changing one does not affect the other.
     cfg.command_moderation.mode = "ask"
-    assert cfg.write_guard.mode != "ask" or cfg.write_guard.mode == cfg.write_guard.mode
+    assert (
+        cfg.write_guard.mode != "ask"
+        or cfg.write_guard.mode == cfg.write_guard.mode
+    )
     # Independent mode fields.
     assert cfg.command_moderation.mode in {"allow", "ask", "deny"}
     assert cfg.write_guard.mode in {"allow", "ask", "deny"}
@@ -38,17 +44,23 @@ def test_t8_config_command_moderation_and_write_guard_are_separate_fields():
 
 # ── T9: prompt docs strings ──────────────────────────────────────────────────
 
+
 def test_t9_judge_prompt_has_insession_examples_section():
     """command_judge_system.md contains insession_examples documentation."""
     text = PROMPT_PATH.read_text(encoding="utf-8")
-    assert "insession_examples" in text, "prompt must document insession_examples"
+    assert "insession_examples" in text, (
+        "prompt must document insession_examples"
+    )
     assert "allowed" in text
     assert "denied" in text
     assert "session_denied" in text
-    assert "hard safety rules" in text or "Priority when signals conflict" in text
+    assert (
+        "hard safety rules" in text or "Priority when signals conflict" in text
+    )
 
 
 # ── T11c: CLI latin+cyrillic ─────────────────────────────────────────────────
+
 
 @pytest.fixture
 def fake_tty(monkeypatch):
@@ -80,7 +92,9 @@ def _run_prompt(fake_stdin, answer: str) -> str:
     fake_stdin.seek(0)
     with mock.patch.object(sys, "stderr", new=io.StringIO()):
         return prompt_user_confirmation_choice(
-            title="Test", fields=[("Tool", "exec_command")], question="Разрешить?"
+            title="Test",
+            fields=[("Tool", "exec_command")],
+            question="Разрешить?",
         )
 
 
@@ -115,7 +129,9 @@ def test_t11c_cli_rejects_legacy_words(fake_tty):
     assert _run_prompt(fake_tty, "yes") == "deny_remember"
     assert _run_prompt(fake_tty, "no") == "deny_remember"
     assert _run_prompt(fake_tty, "once") == "deny_remember"
-    assert _run_prompt(fake_tty, "s") == "deny_remember"  # old session key removed
+    assert (
+        _run_prompt(fake_tty, "s") == "deny_remember"
+    )  # old session key removed
 
 
 def test_t11c_cli_eof_returns_deny_remember(fake_tty):
@@ -162,13 +178,20 @@ def test_t11c_cli_nontty_returns_deny_once(monkeypatch):
 
 # ── T13: write guard smoke (allow/deny bool with 4 choices) ──────────────────
 
+
 def test_t13_write_guard_allow_choices_are_bool():
     """Write guard uses bool verdict; 4-choice allow_* maps to True, deny_* to False."""
     from gc_core.security.confirm_port import (
-        CONFIRM_ALLOW_REMEMBER as ALLOW_REMEMBER,
         CONFIRM_ALLOW_ONCE as ALLOW_ONCE,
-        CONFIRM_DENY_REMEMBER as DENY_REMEMBER,
+    )
+    from gc_core.security.confirm_port import (
+        CONFIRM_ALLOW_REMEMBER as ALLOW_REMEMBER,
+    )
+    from gc_core.security.confirm_port import (
         CONFIRM_DENY_ONCE as DENY_ONCE,
+    )
+    from gc_core.security.confirm_port import (
+        CONFIRM_DENY_REMEMBER as DENY_REMEMBER,
     )
 
     allow_choices = {ALLOW_REMEMBER, ALLOW_ONCE}
@@ -183,6 +206,7 @@ def test_t13_write_guard_allow_choices_are_bool():
 
 # ── T15: command confirm fields order / labels ───────────────────────────────
 
+
 def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
     """Confirm fields: Команда/Код first, then Причина/Риски — no Preview/Tool."""
     from gc_core.security import command_moderation as cm
@@ -194,7 +218,9 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
 
     captured = {}
 
-    def fake_request_confirm(*, title, question, fields, ctx, decision_key=None):
+    def fake_request_confirm(
+        *, title, question, fields, ctx, decision_key=None
+    ):
         captured["fields"] = fields
         captured["question"] = question
         captured["decision_key"] = decision_key
@@ -226,7 +252,9 @@ def test_t15_ask_confirmation_fields_payload_first_ru_labels(monkeypatch):
     assert captured["decision_key"] == f"command:{long_cmd}"
     assert "exec_command" in captured["question"]
 
-    py_ctx = ModerationContext(tool_name="exec_python", launch_root="/tmp", mode="ask")
+    py_ctx = ModerationContext(
+        tool_name="exec_python", launch_root="/tmp", mode="ask"
+    )
     _ask_user_confirmation("print(1)", py_ctx, decision, ctx=None)
     assert captured["fields"][0][0] == "Код"
 

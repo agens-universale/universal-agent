@@ -8,11 +8,12 @@
 ПРАВИЛО СОПРОВОЖДЕНИЯ (чек-лист релиза): удаляешь/переименовываешь ключ
 схемы → обязан добавить запись сюда.
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-# {"старый.dotted.путь": "новый.dotted.путь"}
+# {"старый.dotted.путь": "новый.dotted.путь"}  # noqa: ERA001  # описание формата, не выключенный код
 RENAMES: Dict[str, str] = {
     # Порядок значим: записи применяются по очереди. Сначала секция целиком
     # (`diff_tui` — запись правок давно в ядре и идёт не только в TUI), затем её
@@ -31,7 +32,7 @@ RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
 # ключей: у `chat_completions.llm` → `auxiliary_llm` это настройки модели, и
 # слияние смешало бы параметры двух разных моделей — там старая отбрасывается.
 MERGE_RENAMED_SECTIONS = frozenset({"diff_tui"})
-# {"dotted.путь": "почему удалён"}
+# {"dotted.путь": "почему удалён"}  # noqa: ERA001  # описание формата, не выключенный код
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
@@ -127,8 +128,8 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
                 value = conv(value)
             except Exception:
                 facts.append(
-                    f"{old}: значение не удалось перенести в {new} — "
-                    f"задайте заново ({_SYNC_HINT})")
+                    f"{old}: значение не удалось перенести в {new} — задайте заново ({_SYNC_HINT})"
+                )
                 continue
         if not explicit_new:
             _set_path(raw, new, value)
@@ -149,11 +150,12 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
             )
         else:
             facts.append(
-                f"{old} устарел: действует явно заданный {new}, "
-                f"старое значение отброшено — {_SYNC_HINT}"
+                f"{old} устарел: действует явно заданный {new}, старое значение отброшено — {_SYNC_HINT}"
             )
     for old, why in REMOVED.items():
         present, _ = _pop_path(raw, old)
         if present:
-            facts.append(f"{old} устарел и игнорируется ({why}) — {_SYNC_HINT}")
+            facts.append(
+                f"{old} устарел и игнорируется ({why}) — {_SYNC_HINT}"
+            )
     return facts

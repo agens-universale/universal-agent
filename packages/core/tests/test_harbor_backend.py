@@ -1,18 +1,42 @@
 import asyncio
+import os
+import shlex
 import subprocess
 import threading
+
 import pytest
 from gc_core.backends.harbor import HarborBackend, build_harbor_shell_command
 from gc_core.backends.protocol import FsBackend
 
 
+def _bash_runs(probe: str) -> bool:
+    """Хостовый bash реально исполняет `probe`.
+
+    Наличия имени мало: на Windows «bash» бывает заглушкой WSL без
+    дистрибутива — имя есть, а запуск падает на execvpe(/bin/bash).
+    """
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", probe], capture_output=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return proc.returncode == 0
+
+
 def _user_shell(command, *, cwd=None, env=None):
-    return build_harbor_shell_command(command, cwd=cwd, env=env, exec_init="bashrc")
+    return build_harbor_shell_command(
+        command, cwd=cwd, env=env, exec_init="bashrc"
+    )
 
 
 class FakeExecResult:
     def __init__(self, stdout="", stderr="", return_code=0, timed_out=False):
-        self.stdout, self.stderr, self.return_code = stdout, stderr, return_code
+        self.stdout, self.stderr, self.return_code = (
+            stdout,
+            stderr,
+            return_code,
+        )
         self.timed_out = timed_out
 
 
@@ -29,12 +53,14 @@ class FakeEnv:
 
     async def upload_file(self, src, dst):
         from pathlib import Path
+
         data = Path(src).read_bytes()
         self.uploaded.append((str(src), dst))
         self.uploaded_bytes.append(data)
 
     async def download_file(self, src, dst):
         from pathlib import Path
+
         Path(dst).write_bytes(b"old-content")
         self.downloaded.append((src, str(dst)))
 
@@ -167,6 +193,7 @@ async def test_listdir_raises_file_not_found_on_nonzero_rc(loop_in_thread):
 async def test_append_creates_file_if_missing(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
+
     # exists() -> exec("test -e ...") returns rc 0 by default FakeEnv.exec, so
     # simulate missing file via a custom exec that fails "test -e" but succeeds otherwise.
     async def fake_exec(command, **kw):
@@ -181,6 +208,7 @@ async def test_append_creates_file_if_missing(loop_in_thread):
     assert env.uploaded[0][1].startswith("/work/new.txt.gc-append-tmp.")
     assert any(">>" in c and "/work/new.txt" in c for c in env.calls)
 
+
 async def test_append_concatenates_existing_content(loop_in_thread):
     env = FakeEnv()
     uploaded_payloads = []
@@ -191,6 +219,7 @@ async def test_append_concatenates_existing_content(loop_in_thread):
 
     async def fake_upload_file(src, dst):
         from pathlib import Path
+
         uploaded_payloads.append((dst, Path(src).read_bytes()))
         env.uploaded.append((str(src), dst))
 
@@ -203,8 +232,11 @@ async def test_append_concatenates_existing_content(loop_in_thread):
     assert remote_tmp.startswith("/work/f.txt.gc-append-tmp.")
     assert ".gc-append-tmp." in remote_tmp
     assert payload == b"more"
-    assert any("cat " in c and ">>" in c and "/work/f.txt" in c for c in env.calls)
+    assert any(
+        "cat " in c and ">>" in c and "/work/f.txt" in c for c in env.calls
+    )
     assert not any(c.startswith("test -e") for c in env.calls)
+
 
 async def test_exec_env_prefix_quoting(loop_in_thread):
     env = FakeEnv()
@@ -224,7 +256,9 @@ async def test_exec_env_prefix_with_cwd(loop_in_thread):
     assert not wired.startswith("env ")
 
 
-async def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path):
+async def test_exec_env_prefix_applies_to_whole_command(
+    loop_in_thread, tmp_path
+):
     """`env` must not swallow `cd`/`&&`: with exec_init the script is one bash -c arg."""
     work = tmp_path / "proj"
     work.mkdir()
@@ -236,10 +270,18 @@ async def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path
         env={"FOO": "bar baz"},
     )
     script = env.calls[0]
-    assert script.startswith(f"cd {work} && env FOO='bar baz' bash -c ")
+    assert script.startswith(
+        f"cd {shlex.quote(str(work))} && env FOO='bar baz' bash -c "
+    )
     # cwd снаружи, скрипт агента — один закавыченный аргумент, не префикс env.
     assert "cd sub &&" in script.split("bash -c ", 1)[1]
 
+    # Дальше путь хоста играет роль cwd POSIX-контейнера: на Windows bash
+    # вернёт из pwd /c/… вместо C:\…, сверять не с чем.
+    if os.name == "nt":
+        pytest.skip(
+            "исполнение скрипта с путём хоста как cwd контейнера — только POSIX-хост"
+        )
     (work / "sub").mkdir()
     proc = subprocess.run(
         ["bash", "-c", script],
@@ -253,9 +295,13 @@ async def test_exec_env_prefix_applies_to_whole_command(loop_in_thread, tmp_path
 
 async def test_run_python_env_survives_bash_c_wrap(loop_in_thread):
     """Heredoc of run_python must still run after the env prefix is quoted."""
+    if not _bash_runs("python3 -c pass"):
+        pytest.skip("нет рабочего bash с python3 на хосте")
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread)
-    await backend.arun_python("import os\nprint(os.environ['FOO'])\n", env={"FOO": "it's"})
+    await backend.arun_python(
+        "import os\nprint(os.environ['FOO'])\n", env={"FOO": "it's"}
+    )
     proc = subprocess.run(
         ["bash", "-c", env.calls[0]],
         capture_output=True,
@@ -309,7 +355,9 @@ def test_build_harbor_shell_command_quotes_user_inner():
     assert raw == "cd /work && env FOO=x echo hi"
 
 
-async def test_exec_defaults_to_raw_and_custom_init_is_prefixed(loop_in_thread):
+async def test_exec_defaults_to_raw_and_custom_init_is_prefixed(
+    loop_in_thread,
+):
     import shlex
 
     env = FakeEnv()
@@ -317,7 +365,9 @@ async def test_exec_defaults_to_raw_and_custom_init_is_prefixed(loop_in_thread):
     assert env.calls == ["echo raw"]
 
     env.calls.clear()
-    await HarborBackend(env, loop_in_thread, exec_init="export READY=1").aexec("echo custom")
+    await HarborBackend(env, loop_in_thread, exec_init="export READY=1").aexec(
+        "echo custom"
+    )
     inner = shlex.split(env.calls[0])[-1]
     assert inner == "export READY=1\necho custom"
 
@@ -341,7 +391,9 @@ def test_every_impl_signature_accepts_protocol_parameters():
         try:
             impl.bind(*args, **kwargs)
         except TypeError as e:
-            pytest.fail(f"HarborBackend.{name}{impl} rejects protocol call {proto}: {e}")
+            pytest.fail(
+                f"HarborBackend.{name}{impl} rejects protocol call {proto}: {e}"
+            )
 
 
 async def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
@@ -353,6 +405,7 @@ async def test_write_and_append_accept_encoding_kwarg(loop_in_thread):
     await backend.append("/work/a.txt", "more", encoding="utf-8")
     assert any(dst == "/work/a.txt" for _, dst in env.uploaded)
     assert any(".gc-append-tmp." in dst for _, dst in env.uploaded)
+
 
 async def test_harbor_write_bytes_preserves_cp1251(loop_in_thread):
     """Harbor text-write must encode on host and upload raw bytes (not force utf-8)."""
@@ -377,7 +430,9 @@ async def test_exec_propagates_timed_out_from_environment(loop_in_thread):
 
     async def timed_exec(command, **kw):
         env.calls.append(command)
-        return FakeExecResult(stdout="partial", stderr="", return_code=None, timed_out=True)
+        return FakeExecResult(
+            stdout="partial", stderr="", return_code=None, timed_out=True
+        )
 
     env.exec = timed_exec
     backend = HarborBackend(env, loop_in_thread)
@@ -407,11 +462,14 @@ async def test_read_head_bytes_uses_head_not_full_file(loop_in_thread):
     sample = await backend.read_head_bytes("/work/a.bin", 3)
     assert sample == raw
     assert any(
-        c.startswith("head -c 3 ") and c.endswith("| base64") for c in env.calls
+        c.startswith("head -c 3 ") and c.endswith("| base64")
+        for c in env.calls
     )
 
 
-async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread):
+async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(
+    loop_in_thread,
+):
     """fs_append samples 100KiB; base64 (~137k) exceeds tool-exec 60k."""
     import base64
 
@@ -431,7 +489,9 @@ async def test_read_head_bytes_append_sample_not_cut_by_tool_60k(loop_in_thread)
 
     env.exec = head_exec
     backend = HarborBackend(env, loop_in_thread)
-    sample = await backend.read_head_bytes("/work/big.txt", APPEND_HEAD_SAMPLE_BYTES)
+    sample = await backend.read_head_bytes(
+        "/work/big.txt", APPEND_HEAD_SAMPLE_BYTES
+    )
     assert sample == raw
 
     async def huge_tool(command, **kw):
@@ -488,17 +548,25 @@ async def test_read_head_bytes_preserves_non_utf8_bytes(loop_in_thread):
 
 # --- walk_entries: prune внутри find, размер из -printf %s ----------------------
 
+
 async def test_walk_entries_prunes_in_find_and_parses_sizes(loop_in_thread):
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "src\td\t4096\nsrc/a.py\tf\t12\n")
     backend = HarborBackend(env, loop_in_thread)
 
-    entries = await backend.walk_entries("/work", prune_names=("node_modules",), prune_dot_dirs=True)
+    entries = await backend.walk_entries(
+        "/work", prune_names=("node_modules",), prune_dot_dirs=True
+    )
 
-    assert [(e.rel, e.is_dir, e.size) for e in entries] == [("src", True, None), ("src/a.py", False, 12)]
+    assert [(e.rel, e.is_dir, e.size) for e in entries] == [
+        ("src", True, None),
+        ("src/a.py", False, 12),
+    ]
     cmd = env.calls[-1]
     # -H: паритет с os.walk по симлинк-вершине; -printf ДО -prune: сам каталог в листинге остаётся.
-    assert cmd.startswith("find -H /work -mindepth 1 '(' -type d -name node_modules -o -type d -name '.*' ')' -printf")
+    assert cmd.startswith(
+        "find -H /work -mindepth 1 '(' -type d -name node_modules -o -type d -name '.*' ')' -printf"
+    )
     assert " -prune -o -printf" in cmd
     assert cmd.endswith(r"-printf '%P\t%y\t%s\n'")
 
@@ -547,8 +615,7 @@ def test_harbor_declares_the_async_port_and_skips_the_adapter(loop_in_thread):
     port = aexec_port(backend)
 
     assert port is backend, (
-        "Harbor снова заворачивается в SyncExecAdapter — значит запуск команды "
-        "опять уходит в поток из общего пула"
+        "Harbor снова заворачивается в SyncExecAdapter — значит запуск команды опять уходит в поток из общего пула"
     )
     assert not isinstance(port, SyncExecAdapter)
 
@@ -583,12 +650,13 @@ async def test_aexec_runs_without_taking_a_thread(loop_in_thread):
 
     assert [r.stdout for r in results] == [f"ran:echo {i}" for i in range(5)]
     assert spawned == [], (
-        f"пять асинхронных запусков завели потоки {spawned} — путь снова идёт "
-        "через пул"
+        f"пять асинхронных запусков завели потоки {spawned} — путь снова идёт через пул"
     )
 
 
-async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thread):
+async def test_every_exec_entry_funnels_through_one_command_builder(
+    loop_in_thread,
+):
     """Три входа (команда, argv, python) собирают команду ОДНИМ составителем.
 
     Раньше здесь сравнивались синхронная и асинхронная формы: «расхождение
@@ -614,7 +682,9 @@ async def test_every_exec_entry_funnels_through_one_command_builder(loop_in_thre
     argv = ["grep", "-n", "TOKEN", "/work/a b.py"]
     await backend.aexec_argv(argv)
     assert env.calls == [
-        build_harbor_shell_command(argv_to_posix_command(argv), cwd=None, env=None)
+        build_harbor_shell_command(
+            argv_to_posix_command(argv), cwd=None, env=None
+        )
     ]
 
     env.calls.clear()
@@ -653,7 +723,10 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
     `exec` у Harbor больше нет: отказ глотался, и корнем становился `/`.
     Теперь WORKDIR прогревается корутиной при сборке контекста.
     """
-    from gc_core.execution_workspace import aprime_backend_cwd, build_execution_workspace
+    from gc_core.execution_workspace import (
+        aprime_backend_cwd,
+        build_execution_workspace,
+    )
 
     class _PwdEnv(FakeEnv):
         async def exec(self, command, **kw):
@@ -667,5 +740,7 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
     assert backend.default_cwd() is None
     await aprime_backend_cwd(backend)
     assert backend.default_cwd() == "/testbed"
-    assert env.calls == ["pwd"], "pwd — внутренний вызов: сырой канал, без профиля"
+    assert env.calls == ["pwd"], (
+        "pwd — внутренний вызов: сырой канал, без профиля"
+    )
     assert build_execution_workspace(backend, {}).root == "/testbed"

@@ -37,7 +37,8 @@ class TestTraceHeader:
 
     def test_custom_name_is_used(self):
         headers = build_call_headers(
-            _StateStub(), _ctx(trace_id="wf-42", trace_id_header_name="X-Trace-Id")
+            _StateStub(),
+            _ctx(trace_id="wf-42", trace_id_header_name="X-Trace-Id"),
         )
         assert headers["X-Trace-Id"] == "wf-42"
         assert "x_trace_id" not in headers
@@ -90,5 +91,7 @@ class TestModelHeaderGate:
         assert "x_trace_id" not in headers
 
     def test_flag_alone_without_trace_adds_nothing(self):
-        headers = build_call_headers(_StateStub(), _ctx(trace_header_enabled=True))
+        headers = build_call_headers(
+            _StateStub(), _ctx(trace_header_enabled=True)
+        )
         assert "x_trace_id" not in headers

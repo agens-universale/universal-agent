@@ -9,6 +9,7 @@ fallback), то есть поиск глифа в других установл�
 нём есть, а недостающий символ занимает ровно ту же колонку, что и любой
 другой. Поэтому единственный честный признак — какой терминал перед нами.
 """
+
 from __future__ import annotations
 
 import os
@@ -34,15 +35,17 @@ def supports_font_fallback() -> bool:
     простой символ, а лишний раз True — показать пустой прямоугольник. Поэтому
     при любых сомнениях отвечаем False.
     """
-    if os.environ.get("WT_SESSION"):            # Windows Terminal
+    if os.environ.get("WT_SESSION"):  # Windows Terminal
         return True
-    if os.environ.get("TERM_PROGRAM") == "vscode":   # встроенный терминал VS Code
+    if (
+        os.environ.get("TERM_PROGRAM") == "vscode"
+    ):  # встроенный терминал VS Code
         return True
-    if _os_name() == "nt":                      # conhost: один шрифт, без подстановки
+    if _os_name() == "nt":  # conhost: один шрифт, без подстановки
         return False
-    if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
-        # WSL: платформа posix, но рисует всё равно терминал Windows. Если это
-        # был бы Windows Terminal, нас поймала бы ветка WT_SESSION выше; раз не
-        # поймала — терминал неизвестен, и это вполне может быть conhost.
-        return False
-    return True
+    # WSL: платформа posix, но рисует всё равно терминал Windows. Если это
+    # был бы Windows Terminal, нас поймала бы ветка WT_SESSION выше; раз не
+    # поймала — терминал неизвестен, и это вполне может быть conhost.
+    return not (
+        os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP")
+    )

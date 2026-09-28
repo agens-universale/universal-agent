@@ -1,8 +1,5 @@
 import sys
-from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 # arg_parser.py парсит sys.argv на import — подменяем argv до импорта cli,
 # чтобы required=True для -q не падал под pytest.

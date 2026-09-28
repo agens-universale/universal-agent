@@ -9,6 +9,7 @@
 переносятся verbatim-блоком при условии, что поддерево валидно по схеме
 (AppConfig.model_validate). Невалидное — в unknown.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -20,21 +21,25 @@ import yaml
 
 from gc_core.config import _default_config_path, validate_config_text
 from gc_core.config_modules import compat
-from gc_core.onboarding_config_writer import find_anchor, insert_missing, section_end
+from gc_core.onboarding_config_writer import (
+    find_anchor,
+    insert_missing,
+    section_end,
+)
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text
 
 
 class ResetReport(NamedTuple):
-    backup_path: str        # старый файл, в бэкап
+    backup_path: str  # старый файл, в бэкап
 
 
 class SyncReport(NamedTuple):
-    transferred: int        # перенесено значений/блоков юзера
-    renamed: int            # из них — под новым именем (RENAMES)
-    removed: List[str]      # устаревшие ключи (REMOVED) — только в бэкапе
-    unknown: List[str]      # неизвестные ключи — только в бэкапе
-    reenter: List[str]      # значение не переносимо (конвертер) — задать заново
+    transferred: int  # перенесено значений/блоков юзера
+    renamed: int  # из них — под новым именем (RENAMES)
+    removed: List[str]  # устаревшие ключи (REMOVED) — только в бэкапе
+    unknown: List[str]  # неизвестные ключи — только в бэкапе
+    reenter: List[str]  # значение не переносимо (конвертер) — задать заново
     backup_path: str
 
 
@@ -74,7 +79,9 @@ def _transfer(dst_text: str, src_text: str, src_key: str, dst_key: str) -> str:
 def _rename_legacy_keys_in_text(text: str) -> tuple[str, int]:
     """Переименовать оставшиеся RENAMES-якоря в тексте (verbatim-секции вне шаблона)."""
     count = 0
-    for old, new in sorted(compat.RENAMES.items(), key=lambda kv: -kv[0].count(".")):
+    for old, new in sorted(
+        compat.RENAMES.items(), key=lambda kv: -kv[0].count(".")
+    ):
         try:
             start, _end, _indent, _ = find_anchor(text, old)
         except KeyError:
@@ -87,7 +94,11 @@ def _rename_legacy_keys_in_text(text: str) -> tuple[str, int]:
         new_leaf = new.split(".")[-1]
         if f"{old_leaf}:" not in line:
             continue
-        text = text[:start] + line.replace(f"{old_leaf}:", f"{new_leaf}:", 1) + text[line_end:]
+        text = (
+            text[:start]
+            + line.replace(f"{old_leaf}:", f"{new_leaf}:", 1)
+            + text[line_end:]
+        )
         count += 1
     return text, count
 
@@ -97,14 +108,19 @@ def _remap_paths_after_rename(user_paths: set, old: str, new: str) -> set:
     out: set = set()
     for up in user_paths:
         if up == old or up.startswith(old + "."):
-            out.add(new + up[len(old):])
+            out.add(new + up[len(old) :])
         else:
             out.add(up)
     return out
 
 
-def _restore_template_keys(result: str, template_text: str, template_raw: Any,
-                           user_paths: set, ancestor: str) -> str:
+def _restore_template_keys(
+    result: str,
+    template_text: str,
+    template_raw: Any,
+    user_paths: set,
+    ancestor: str,
+) -> str:
     """Вернуть в перенесённую секцию ключи шаблона, которых у юзера нет.
 
     Collapse-перенос предка (см. sync_config) кладёт блок юзера ПОВЕРХ блока шаблона:
@@ -116,11 +132,11 @@ def _restore_template_keys(result: str, template_text: str, template_raw: Any,
         if path != ancestor and not path.startswith(ancestor + "."):
             continue
         if any(up == path or up.startswith(path + ".") for up in user_paths):
-            continue                     # юзер этот путь задал (сам или потомком) — уже перенесён
+            continue  # юзер этот путь задал (сам или потомком) — уже перенесён
         try:
             result = insert_missing(result, path, template_text)
         except KeyError:
-            continue                     # якорь в шаблоне не нашёлся — sync из-за этого не роняем
+            continue  # якорь в шаблоне не нашёлся — sync из-за этого не роняем
     return result
 
 
@@ -141,7 +157,8 @@ def needs_sync(user_text: str, template_text: str) -> bool:
     # Шаблонный путь «новый», только если юзер не покрывает его сам или
     # его потомком (chat_completion_kwargs: {} vs {temperature: 0.2}).
     new_in_tmpl = {
-        tp for tp in tmpl_paths
+        tp
+        for tp in tmpl_paths
         if not any(up == tp or up.startswith(tp + ".") for up in user_paths)
     }
     if new_in_tmpl:
@@ -163,6 +180,7 @@ def _validate_subtree(top_key: str, subtree: Any) -> bool:
     Возвращает True если схема принимает такую конфигурацию.
     """
     from gc_core.config_modules.root import AppConfig
+
     probe = {top_key: subtree}
     compat.apply_compat(probe)
     try:
@@ -199,7 +217,9 @@ def prune_backups(backup_dir: Path, name: str, *, keep: int = 10) -> None:
             pass
 
 
-def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -> ResetReport:
+def reset_config(
+    path, template_path=None, *, timestamp: Optional[str] = None
+) -> ResetReport:
     """«Сбросить к умолчанию» (спека §11): подменить `path` актуальным пакетным
     `config.default.yml` целиком (не line-copy, как `sync_config`) — старый файл
     уходит в бэкап той же конвенцией (`backups/<name>.bak-<ts>`, prune keep=10).
@@ -231,7 +251,198 @@ def reset_config(path, template_path=None, *, timestamp: Optional[str] = None) -
     return ResetReport(str(backup))
 
 
-def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) -> SyncReport:
+class _SyncContext:
+    def __init__(
+        self, user_text, user_raw, template_text, template_raw, all_user_paths
+    ):
+        self.user_text = user_text
+        self.user_raw = user_raw
+        self.template_text = template_text
+        self.template_raw = template_raw
+        self.all_user_paths = all_user_paths
+
+
+class _SyncState:
+    """Накопитель прогона sync: текущий текст результата и счётчики отчёта."""
+
+    def __init__(self, result: str) -> None:
+        self.result = result
+        self.transferred = 0
+        self.renamed = 0
+        self.removed: List[str] = []
+        self.unknown: List[str] = []
+        self.reenter: List[str] = []
+        self.done: List[str] = []  # dotted-пути уже перенесённых блоков
+        # verbatim-блоки секций вне шаблона — добавляются в конец результата
+        self.extra_blocks: List[str] = []
+
+    def covered(self, p: str) -> bool:
+        return any(p == d or p.startswith(d + ".") for d in self.done)
+
+
+def _sync_path(st: _SyncState, dotted: str, ctx: _SyncContext) -> None:
+    """Перенести один dotted-путь юзера в результат (прямо, через предка или verbatim)."""
+    if st.covered(dotted):
+        return
+    # Путь листа — через ВСЕ правила по очереди (перенос секции, затем свой):
+    # лист, перенесённый только по имени секции, оставил бы удалённый ключ в
+    # файле, а переименованный задублировал бы шаблонным.
+    target = compat.map_legacy_path(dotted)
+    if target is None:
+        st.removed.append(dotted)
+        return
+    if dotted in compat.RENAME_CONVERTERS:
+        st.reenter.append(dotted)  # line-copy не умеет преобразовать значение
+        return
+    try:
+        st.result = _transfer(st.result, ctx.user_text, dotted, target)
+    except KeyError:
+        pass
+    else:
+        st.transferred += 1
+        if target != dotted:
+            st.renamed += 1
+        st.done.append(
+            dotted
+        )  # исходный путь: дети старого ключа считаются покрытыми
+        return
+    # Нет прямого якоря в шаблоне. Поднимаемся по предкам (multi-level walk):
+    # ищем ближайшего предка с якорем в шаблоне.
+    parts = dotted.split(".")
+    st.result, ancestor_status = _transfer_via_ancestor(
+        st.result,
+        parts,
+        st.covered,
+        st.done,
+        ctx=(
+            ctx.user_text,
+            ctx.template_text,
+            ctx.template_raw,
+            ctx.all_user_paths,
+        ),
+    )
+    if ancestor_status in ("transferred", "renamed"):
+        st.transferred += 1
+    if ancestor_status == "renamed":
+        st.renamed += 1
+    if ancestor_status is not None:
+        return
+    # Якоря нет ни на одном уровне — top-level секция юзера отсутствует
+    # в шаблоне (напр. working_memory, agent_auth, chat_completions и др.).
+    # Переносим verbatim-блок если схема его принимает.
+    top_key = parts[0]
+    if st.covered(top_key):
+        return
+    block = _verbatim_top_block(ctx.user_text, ctx.user_raw, top_key)
+    if block is not None:
+        st.extra_blocks.append(block)
+        st.transferred += 1
+        st.done.append(top_key)
+        return
+    st.unknown.append(dotted)
+
+
+def _transfer_via_ancestor(
+    result: str, parts: List[str], covered, done: List[str], *, ctx
+) -> tuple:
+    """Перенос блока ближайшего предка с якорем в шаблоне.
+
+    → (result, статус): "transferred" — блок перенесён; "renamed" — блок предка из
+    compat.RENAMES перенесён под новым именем; "covered" — предок уже покрыт
+    (переносить нечего); None — якоря нет ни на одном уровне.
+    """
+    user_text, template_text, template_raw, all_user_paths = ctx
+    for depth in range(len(parts) - 1, 0, -1):
+        ancestor = ".".join(parts[:depth])
+        if covered(ancestor):
+            return result, "covered"
+        if ancestor in compat.RENAMES:
+            renamed_result = _transfer_renamed_ancestor(
+                result, ancestor, ctx=ctx
+            )
+            if renamed_result is None:
+                # Нового якоря нет в шаблоне — не глотаем секцию, идём к
+                # другим предкам / verbatim (финальный rename-pass допишет имя).
+                continue
+            done.append(ancestor)
+            return renamed_result, "renamed"
+        try:
+            result = _transfer(result, user_text, ancestor, ancestor)
+        except KeyError:
+            continue
+        done.append(ancestor)
+        # Блок юзера лёг ПОВЕРХ блока шаблона — вернём ключи шаблона,
+        # которых у юзера нет (иначе они молча теряются, см. _restore_template_keys).
+        result = _restore_template_keys(
+            result, template_text, template_raw, all_user_paths, ancestor
+        )
+        return result, "transferred"
+    return result, None
+
+
+def _transfer_renamed_ancestor(
+    result: str, ancestor: str, *, ctx
+) -> Optional[str]:
+    """Перенести блок предка из compat.RENAMES под новым именем секции.
+
+    Ключи шаблона, которых у юзера нет, возвращаются в секцию уже по новому
+    префиксу (user-paths перекладываются со старого имени на новое).
+    None — нового якоря нет в шаблоне.
+    """
+    user_text, template_text, template_raw, all_user_paths = ctx
+    target = compat.RENAMES[ancestor]
+    try:
+        result = _transfer(result, user_text, ancestor, target)
+    except KeyError:
+        return None
+    remapped = _remap_paths_after_rename(all_user_paths, ancestor, target)
+    return _restore_template_keys(
+        result, template_text, template_raw, remapped, target
+    )
+
+
+def _verbatim_top_block(
+    user_text: str, user_raw: dict, top_key: str
+) -> Optional[str]:
+    """Verbatim-блок top-level секции юзера вне шаблона, если схема её принимает."""
+    if not _validate_subtree(top_key, user_raw.get(top_key)):
+        return None
+    return _verbatim_block(user_text, top_key)
+
+
+def _append_extra_blocks(result: str, extra_blocks: List[str]) -> str:
+    if not extra_blocks:
+        return result
+    if not result.endswith("\n"):
+        result += "\n"
+    result += "\n" + "\n".join(extra_blocks)
+    if not result.endswith("\n"):
+        result += "\n"
+    return result
+
+
+def _write_with_backup(
+    path: Path, result: str, timestamp: Optional[str]
+) -> Path:
+    ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
+    backup_dir = path.parent / "backups"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    backup = backup_dir / (path.name + f".bak-{ts}")
+    shutil.copyfile(path, backup)
+    prune_backups(backup_dir, path.name)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    try:
+        tmp.write_text(result, encoding="utf-8")
+        atomic_replace(str(tmp), str(path))
+    finally:
+        if tmp.exists():
+            tmp.unlink(missing_ok=True)
+    return backup
+
+
+def sync_config(
+    path, template_path=None, *, timestamp: Optional[str] = None
+) -> SyncReport:
     path = Path(path)
     template_path = Path(template_path or _default_config_path())
     # Оба чтения — под общим переводом в `ValueError`: вызывающий (`gc-cli
@@ -249,119 +460,30 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
     if not isinstance(user_raw, dict):
         raise ValueError("config.yml должен быть YAML-объектом")
 
-    all_user_paths = set(_user_paths(user_raw))
-    result = template_text
-    transferred = renamed = 0
-    removed: List[str] = []
-    unknown: List[str] = []
-    reenter: List[str] = []
-    done: List[str] = []   # dotted-пути уже перенесённых блоков
-    # verbatim-блоки секций вне шаблона — добавляются в конец результата
-    extra_blocks: List[str] = []
-
-    def _covered(p: str) -> bool:
-        return any(p == d or p.startswith(d + ".") for d in done)
-
+    st = _SyncState(template_text)
+    ctx = _SyncContext(
+        user_text,
+        user_raw,
+        template_text,
+        template_raw,
+        set(_user_paths(user_raw)),
+    )
     for dotted in _user_paths(user_raw):
-        if _covered(dotted):
-            continue
-        target = compat.map_legacy_path(dotted)
-        if target is None:
-            removed.append(dotted)
-            continue
-        if dotted in compat.RENAME_CONVERTERS:
-            reenter.append(dotted)   # line-copy не умеет преобразовать значение
-            continue
-        try:
-            result = _transfer(result, user_text, dotted, target)
-            transferred += 1
-            if target != dotted:
-                renamed += 1
-            done.append(dotted)  # исходный путь: дети старого ключа считаются покрытыми
-            continue
-        except KeyError:
-            pass
-        # Нет прямого якоря в шаблоне. Поднимаемся по предкам (multi-level walk):
-        # ищем ближайшего предка с якорем в шаблоне.
-        parts = dotted.split(".")
-        parent_transferred = False
-        for depth in range(len(parts) - 1, 0, -1):
-            ancestor = ".".join(parts[:depth])
-            if _covered(ancestor):
-                parent_transferred = True
-                break
-            if ancestor in compat.RENAMES:
-                target = compat.RENAMES[ancestor]
-                try:
-                    result = _transfer(result, user_text, ancestor, target)
-                    transferred += 1
-                    renamed += 1
-                    done.append(ancestor)
-                    remapped = _remap_paths_after_rename(all_user_paths, ancestor, target)
-                    result = _restore_template_keys(
-                        result, template_text, template_raw, remapped, target
-                    )
-                    parent_transferred = True
-                    break
-                except KeyError:
-                    # Нового якоря нет в шаблоне — не глотаем секцию, идём к
-                    # другим предкам / verbatim (финальный rename-pass допишет имя).
-                    continue
-            try:
-                result = _transfer(result, user_text, ancestor, ancestor)
-                transferred += 1
-                done.append(ancestor)
-                # Блок юзера лёг ПОВЕРХ блока шаблона — вернём ключи шаблона,
-                # которых у юзера нет (иначе они молча теряются, см. _restore_template_keys).
-                result = _restore_template_keys(result, template_text, template_raw,
-                                                all_user_paths, ancestor)
-                parent_transferred = True
-                break
-            except KeyError:
-                continue
-        if parent_transferred:
-            continue
+        _sync_path(st, dotted, ctx)
 
-        # Якоря нет ни на одном уровне — top-level секция юзера отсутствует
-        # в шаблоне (напр. working_memory, agent_auth, chat_completions и др.).
-        # Переносим verbatim-блок если схема его принимает.
-        top_key = parts[0]
-        if _covered(top_key):
-            continue
-        subtree = user_raw.get(top_key)
-        if not _covered(top_key) and _validate_subtree(top_key, subtree):
-            block = _verbatim_block(user_text, top_key)
-            if block is not None:
-                extra_blocks.append(block)
-                transferred += 1
-                done.append(top_key)
-                continue
-        unknown.append(dotted)
-
-    if extra_blocks:
-        if not result.endswith("\n"):
-            result += "\n"
-        result += "\n" + "\n".join(extra_blocks)
-        if not result.endswith("\n"):
-            result += "\n"
-
+    result = _append_extra_blocks(st.result, st.extra_blocks)
     # Verbatim-секции вне шаблона могли приехать со старым именем ключа.
     result, legacy_renamed = _rename_legacy_keys_in_text(result)
-    renamed += legacy_renamed
+    st.renamed += legacy_renamed
 
     validate_config_text(result)
 
-    ts = timestamp or time.strftime("%Y%m%d-%H%M%S")
-    backup_dir = path.parent / "backups"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    backup = backup_dir / (path.name + f".bak-{ts}")
-    shutil.copyfile(path, backup)
-    prune_backups(backup_dir, path.name)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    try:
-        tmp.write_text(result, encoding="utf-8")
-        atomic_replace(str(tmp), str(path))
-    finally:
-        if tmp.exists():
-            tmp.unlink(missing_ok=True)
-    return SyncReport(transferred, renamed, removed, unknown, reenter, str(backup))
+    backup = _write_with_backup(path, result, timestamp)
+    return SyncReport(
+        st.transferred,
+        st.renamed,
+        st.removed,
+        st.unknown,
+        st.reenter,
+        str(backup),
+    )

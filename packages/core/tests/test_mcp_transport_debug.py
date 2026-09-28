@@ -1,7 +1,5 @@
 from unittest.mock import MagicMock
 
-import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 
@@ -24,11 +22,13 @@ async def test_mcp_debug_off_does_not_print(monkeypatch, capsys):
 
     from gc_core.tools.connect_mcp.transport import _aread_sse_first_json
 
-    resp = _make_mock_resp([
-        "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}",
-        "",
-    ])
-    result = await _aread_sse_first_json(resp, timeout=1.0)
+    resp = _make_mock_resp(
+        [
+            'data: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}',
+            "",
+        ]
+    )
+    result = await _aread_sse_first_json(resp)
     assert result.get("result") == {"ok": True}
     captured = capsys.readouterr()
     assert "[MCP_DEBUG SSE]" not in captured.out
@@ -39,10 +39,12 @@ async def test_mcp_debug_on_prints_lines(monkeypatch, capsys):
 
     from gc_core.tools.connect_mcp.transport import _aread_sse_first_json
 
-    resp = _make_mock_resp([
-        "data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}",
-        "",
-    ])
-    await _aread_sse_first_json(resp, timeout=1.0)
+    resp = _make_mock_resp(
+        [
+            'data: {"jsonrpc":"2.0","id":1,"result":{"ok":true}}',
+            "",
+        ]
+    )
+    await _aread_sse_first_json(resp)
     captured = capsys.readouterr()
     assert "[MCP_DEBUG SSE]" in captured.out

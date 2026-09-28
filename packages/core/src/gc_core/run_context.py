@@ -3,24 +3,31 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
-from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, auxiliary_llm_from_config_dict
-from gc_core.utils.prod_auth import AuthConnector
-from gc_core.utils.logging_module import create_run_logger
-from gc_core.utils.logging_module import generate_run_id
-from gc_core.tools import abuild_tools_data
-from gc_core.mcp_session_owner import new_owner_token, use_owner
-from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.backends.factory import resolve_os_backend
+from gc_core.backends.protocol import FsBackend
+from gc_core.config_modules.chat_completions import (
+    ChatCompletionsLlmConfig,
+    auxiliary_llm_from_config_dict,
+)
+from gc_core.config_modules.env_vars import (
+    project_gc_dir as _resolve_project_gc_dir,
+)
+from gc_core.config_modules.intent_scope import (
+    IntentScopeConfig,
+    intent_scope_from_config_dict,
+)
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
     build_execution_workspace,
 )
-from gc_core.backends.factory import resolve_os_backend
-from gc_core.backends.protocol import FsBackend
-from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
-from gc_core.trace_id import trace_id_from_config, trace_header_name
+from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.tools import abuild_tools_data
+from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.trace_id import trace_header_name, trace_id_from_config
+from gc_core.utils.logging_module import create_run_logger, generate_run_id
+from gc_core.utils.prod_auth import AuthConnector
 
 
 @dataclass
@@ -74,7 +81,9 @@ class RunContext:
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
     ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
-    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = (
+        None
+    )
     # Активный скоуп ввода субагента ЭТОГО прогона: сюда уходит сообщение
     # пользователя, пришедшее посреди работы ребёнка. Живёт здесь, а не в
     # глобали модуля, потому что процесс ведёт МНОГО прогонов сразу (сервер) —
@@ -96,7 +105,7 @@ class RunContext:
     mcp_session_owner: str = ""
 
 
-async def acreate_run_context(
+async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     config_dict: Dict[str, Any],
     *,
     auth_connector: Optional[AuthConnector] = None,
@@ -106,7 +115,9 @@ async def acreate_run_context(
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
-    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    on_messages_evicted: Optional[
+        Callable[[List[Dict[str, Any]]], None]
+    ] = None,
     is_tui: bool = False,
     tools_cache: Any = None,
     log_handlers: Any = None,
@@ -173,8 +184,12 @@ async def acreate_run_context(
         athread_store(thread_store)
 
     prep = _prepare_run_context(
-        config_dict, run_id=run_id, environment=environment, loop=loop,
-        os_backend=os_backend, log_handlers=log_handlers,
+        config_dict,
+        run_id=run_id,
+        environment=environment,
+        loop=loop,
+        os_backend=os_backend,
+        log_handlers=log_handlers,
     )
     # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
     # прогреваются, хотя `awarm_capabilities` для этого есть.
@@ -220,12 +235,19 @@ async def acreate_run_context(
                 registered_names=registered,
             )
         return _finish_run_context(
-            config_dict, prep, tools,
+            config_dict,
+            prep,
+            tools,
             registered_names=registered,
-            auth_connector=auth_connector, environment=environment,
-            on_stream_delta=on_stream_delta, on_messages_evicted=on_messages_evicted,
-            is_tui=is_tui, tools_cache=tools_cache, thread_store=thread_store,
-            level_provider=level_provider, circuit_breaker=circuit_breaker,
+            auth_connector=auth_connector,
+            environment=environment,
+            on_stream_delta=on_stream_delta,
+            on_messages_evicted=on_messages_evicted,
+            is_tui=is_tui,
+            tools_cache=tools_cache,
+            thread_store=thread_store,
+            level_provider=level_provider,
+            circuit_breaker=circuit_breaker,
             force_legacy=force_legacy,
         )
     except BaseException as exc:
@@ -261,7 +283,9 @@ async def _aclose_owned_mcp_sessions(owner: str) -> None:
     файла: закрывался реестр другой копии модуля. К тому же сборка контекста
     лежит ниже исполнителя, и тянуть его наверх ради отказа незачем.
     """
-    from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+    from gc_core.tools.connect_mcp.persistent_stdio import (
+        PersistentStdioRegistry,
+    )
 
     with use_owner(owner):
         await PersistentStdioRegistry.instance().aclose_all()
@@ -308,7 +332,10 @@ def _prepare_run_context(
     """
     effective_run_id = run_id or generate_run_id()
     backend = resolve_os_backend(
-        config_dict, environment=environment, loop=loop, override=os_backend,
+        config_dict,
+        environment=environment,
+        loop=loop,
+        override=os_backend,
     )
     skills_registry = get_skills_registry(config_dict, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
@@ -316,7 +343,9 @@ def _prepare_run_context(
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
     # зависит лишь от config_dict и run_id, поэтому порядок безопасен.
     run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict, run_id=effective_run_id, agent_kind="main",
+        config_dict,
+        run_id=effective_run_id,
+        agent_kind="main",
         log_handlers=log_handlers,
     )
     # Токен владельца MCP-сессий рождается здесь и живёт столько же, сколько
@@ -335,7 +364,7 @@ def _prepare_run_context(
     )
 
 
-def _finish_run_context(
+def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     config_dict: Dict[str, Any],
     prep: "_RunContextPrep",
     tools: tuple,
@@ -371,7 +400,6 @@ def _finish_run_context(
     logging_path = prep.logging_path
     summary_trace_path = prep.summary_trace_path
     mcp_session_owner = prep.mcp_session_owner
-    run_id = effective_run_id
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",

@@ -16,8 +16,11 @@ def test_error_msg_carries_call_id():
 
 
 def test_error_msg_without_call_id_is_none():
-    msg = {"role": "user",
-           "content": '<technical type="error_message">boom</technical>', "id": "m2"}
+    msg = {
+        "role": "user",
+        "content": '<technical type="error_message">boom</technical>',
+        "id": "m2",
+    }
     ev = map_message(msg, no=6, ts="2026-06-30T00:00:00Z")
     assert ev.kind == "error_msg"
     assert ev.call_id is None

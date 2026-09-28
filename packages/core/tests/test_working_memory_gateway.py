@@ -1,6 +1,27 @@
 import types
 
-from gc_core.summarize.working_memory_gateway import SESSION_MEMORY_REGISTERS, WorkingMemoryDeltas, WorkingMemorySnapshot, REGISTER_MERGE_MODES, REGISTER_ORDER, _REGISTER_BODY_PATTERNS, extract_register_bodies, apply_append_deltas, apply_memory_patch, apply_replace_deltas, apply_summary_memory_patch, coerce_working_memory_deltas, build_memory_deltas_format_repair_messages, parse_memory_deltas, parse_memory_deltas_with_repair, read_snapshot_from_state, render_persistent_state_for_prompt, render_session_memory_for_summary_message, resolve_persistent_state_block, should_attempt_memory_deltas_repair
+from gc_core.summarize.working_memory_gateway import (
+    _REGISTER_BODY_PATTERNS,
+    REGISTER_MERGE_MODES,
+    REGISTER_ORDER,
+    SESSION_MEMORY_REGISTERS,
+    WorkingMemoryDeltas,
+    WorkingMemorySnapshot,
+    apply_append_deltas,
+    apply_memory_patch,
+    apply_replace_deltas,
+    apply_summary_memory_patch,
+    build_memory_deltas_format_repair_messages,
+    coerce_working_memory_deltas,
+    extract_register_bodies,
+    parse_memory_deltas,
+    parse_memory_deltas_with_repair,
+    read_snapshot_from_state,
+    render_persistent_state_for_prompt,
+    render_session_memory_for_summary_message,
+    resolve_persistent_state_block,
+    should_attempt_memory_deltas_repair,
+)
 
 
 def test_read_snapshot_from_state_normalizes_registers():
@@ -61,13 +82,20 @@ def test_render_persistent_state_for_prompt_contains_all_registers():
     assert "<session_memory>" in rendered
     for name in REGISTER_ORDER:
         assert f"<{name}>" in rendered and f"</{name}>" in rendered
-    assert "G" in rendered and "C" in rendered and "S" in rendered and "K" in rendered
+    assert (
+        "G" in rendered
+        and "C" in rendered
+        and "S" in rendered
+        and "K" in rendered
+    )
 
 
 def test_coerce_working_memory_deltas_accepts_dto_and_mapping():
     dto = WorkingMemoryDeltas(goal="g", state="s")
     assert coerce_working_memory_deltas(dto) is dto
-    assert coerce_working_memory_deltas({"goal": " g ", "state": "s"}) == WorkingMemoryDeltas(
+    assert coerce_working_memory_deltas(
+        {"goal": " g ", "state": "s"}
+    ) == WorkingMemoryDeltas(
         goal="g",
         state="s",
     )
@@ -112,7 +140,7 @@ def test_parse_memory_deltas_empty_tag_clears_register():
 
 
 def test_register_merge_modes_all_replace():
-    assert REGISTER_MERGE_MODES == {name: "replace" for name in REGISTER_ORDER}
+    assert dict.fromkeys(REGISTER_ORDER, "replace") == REGISTER_MERGE_MODES
 
 
 def test_apply_append_deltas_is_noop_when_all_replace():
@@ -194,7 +222,9 @@ def test_apply_summary_memory_patch_skips_registers_missing_from_llm_output():
         full_replace=True,
     )
     assert present == frozenset({"goal", "state"})
-    updated = apply_summary_memory_patch(snapshot, deltas, replace_touched=present)
+    updated = apply_summary_memory_patch(
+        snapshot, deltas, replace_touched=present
+    )
     assert updated.goal == "new goal"
     assert updated.state == "fresh TODO"
     assert updated.constraints == "stale rule"
@@ -263,7 +293,10 @@ def test_render_session_memory_for_summary_message_skips_empty_registers():
 
     assert rendered.startswith("<session_memory>")
     assert "<goal>" in rendered and "finalize" in rendered
-    assert "<knowledge>" in rendered and "ref: docs_md/memory-files-to-working-memory-spec.md" in rendered
+    assert (
+        "<knowledge>" in rendered
+        and "ref: docs_md/memory-files-to-working-memory-spec.md" in rendered
+    )
     assert "<constraints>" not in rendered
     assert "<state>" not in rendered
     assert rendered.strip().endswith("</session_memory>")
@@ -272,11 +305,21 @@ def test_render_session_memory_for_summary_message_skips_empty_registers():
 def test_should_attempt_memory_deltas_repair_when_large_unparsed_text():
     raw = "x" * 120
     deltas = WorkingMemoryDeltas()
-    assert should_attempt_memory_deltas_repair(raw, deltas, min_chars_for_repair=100) is True
+    assert (
+        should_attempt_memory_deltas_repair(
+            raw, deltas, min_chars_for_repair=100
+        )
+        is True
+    )
 
 
 def test_should_not_attempt_memory_deltas_repair_when_short_or_parsed():
-    assert should_attempt_memory_deltas_repair("short", WorkingMemoryDeltas(), min_chars_for_repair=100) is False
+    assert (
+        should_attempt_memory_deltas_repair(
+            "short", WorkingMemoryDeltas(), min_chars_for_repair=100
+        )
+        is False
+    )
     assert (
         should_attempt_memory_deltas_repair(
             "x" * 120,
@@ -318,7 +361,9 @@ def test_build_memory_deltas_format_repair_messages_lists_register_tags():
 
 
 def test_resolve_persistent_state_block_uses_explicit_block():
-    state = types.SimpleNamespace(shared=types.SimpleNamespace(working_memory={"goal": "from state"}))
+    state = types.SimpleNamespace(
+        shared=types.SimpleNamespace(working_memory={"goal": "from state"})
+    )
     explicit = "<persistent_state>explicit</persistent_state>"
     assert resolve_persistent_state_block(state, explicit) == explicit
 

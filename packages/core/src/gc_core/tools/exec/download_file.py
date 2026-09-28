@@ -2,25 +2,35 @@ import asyncio
 import json
 import os
 from typing import Any, Dict, Optional
-from urllib.parse import urljoin
 
 import httpx
 
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
-from gc_core.security.path_policy import WriteGuardViolation, audit_policy_decision, check_write_path_allowed, normalize_path_for_policy, resolve_tool_context
-from gc_core.security.url_policy import UrlPolicyDecision, enforce_url_policy, validate_url_policy
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.utils.atomic_io import atomic_replace
-from gc_core.utils.async_http import get_async_client
-from gc_core.utils.http_proxy import resolve_proxies
-from contextlib import asynccontextmanager
+from gc_core.security.path_policy import (
+    WriteGuardViolation,
+    audit_policy_decision,
+    check_write_path_allowed,
+    normalize_path_for_policy,
+    resolve_tool_context,
+)
+from gc_core.security.url_policy import enforce_url_policy
 from gc_core.tools.exec.redirect_policy import (
     DEFAULT_MAX_REDIRECTS,
-    RedirectBlocked as _SharedRedirectBlocked,
-    TooManyRedirects as _TooManyRedirects,
     stream_validating_redirects,
 )
+from gc_core.tools.exec.redirect_policy import (
+    RedirectBlocked as _SharedRedirectBlocked,
+)
+from gc_core.tools.exec.redirect_policy import (
+    TooManyRedirects as _TooManyRedirects,
+)
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
+from gc_core.utils.async_http import get_async_client
+from gc_core.utils.atomic_io import atomic_replace
+from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.tool_report_paths import tool_report_abspath
+
+_HTML_EXT = ".html"
 
 
 #: Псевдоним общего исключения — см. ``tools/exec/redirect_policy``.
@@ -31,30 +41,45 @@ class DownloadFile(AbstractSimpleTool):
     timeout_seconds = 20
     max_retries = 2
     retry_backoff_seconds = 1.0
-    default_user_agent = (
-        "Mozilla/5.0 (X11; Linux x86_64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+    default_user_agent = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ALLOWED_EXTENSIONS = frozenset(
+        {
+            ".pdf",
+            ".docx",
+            ".xls",
+            ".xlsx",
+            ".pptx",
+            ".csv",
+            ".html",
+            ".msg",
+            ".txt",
+            ".md",
+            ".json",
+        }
     )
-    ALLOWED_EXTENSIONS = frozenset({
-        ".pdf", ".docx", ".xls", ".xlsx", ".pptx", ".csv", ".html", ".msg",
-        ".txt", ".md", ".json",
-    })
     _BOM_PREFIXES = (
         b"\xef\xbb\xbf",
         b"\xff\xfe",
         b"\xfe\xff",
     )
 
-    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+    def __init__(
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
-        if ctx is not None:  # keep the base-class LocalFsBackend fallback when ctx is absent
+        if (
+            ctx is not None
+        ):  # keep the base-class LocalFsBackend fallback when ctx is absent
             self._ctx = ctx
         self._state = state
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        extensions = ", ".join(sorted(ext.lstrip(".") for ext in cls.ALLOWED_EXTENSIONS))
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        extensions = ", ".join(
+            sorted(ext.lstrip(".") for ext in cls.ALLOWED_EXTENSIONS)
+        )
         return {
             "type": "function",
             "name": DOWNLOAD_FILE_NAME,
@@ -83,7 +108,9 @@ class DownloadFile(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return (
             "Tool name: download_file\n"
             "Tool description: Downloads a document or plain-text file from a URL into the configured download directory.\n\n"
@@ -95,7 +122,8 @@ class DownloadFile(AbstractSimpleTool):
             "- filename must include a supported extension (.pdf, .docx, .xlsx, .txt, .md, .json, ...).\n"
         )
 
-    def _result(self, 
+    def _result(
+        self,
         *,
         ok: bool = False,
         path: str = "",
@@ -107,7 +135,9 @@ class DownloadFile(AbstractSimpleTool):
             {
                 "tool": DownloadFile.registered_tool_name(),
                 "ok": ok,
-                "path": tool_report_abspath(path, workspace=self._workspace) if path else "",
+                "path": tool_report_abspath(path, workspace=self._workspace)
+                if path
+                else "",
                 "filename": filename,
                 "bytes_written": bytes_written,
                 "error": error,
@@ -124,34 +154,63 @@ class DownloadFile(AbstractSimpleTool):
             return ctx_config
         return {}
 
-    def _resolve_download_settings(self, launch_root: str) -> tuple[str, int] | Dict[str, Any]:
+    def _resolve_download_settings(
+        self, launch_root: str
+    ) -> tuple[str, int] | Dict[str, Any]:
         cfg = self._get_config_dict().get("download") or {}
-        raw = os.path.expanduser(os.path.expandvars(str(cfg.get("download_dir") or "downloads").strip()))
+        raw = os.path.expanduser(
+            os.path.expandvars(
+                str(cfg.get("download_dir") or "downloads").strip()
+            )
+        )
         if not raw:
-            return {"type": "invalid_download_dir", "message": "download_dir must not be empty."}
+            return {
+                "type": "invalid_download_dir",
+                "message": "download_dir must not be empty.",
+            }
         try:
             download_root = str(normalize_path_for_policy(raw, launch_root))
         except ValueError:
-            return {"type": "invalid_download_dir", "message": "download_dir resolved to an empty path."}
+            return {
+                "type": "invalid_download_dir",
+                "message": "download_dir resolved to an empty path.",
+            }
         max_bytes = int(cfg.get("max_bytes") or 52_428_800)
         return download_root, max_bytes
 
     @classmethod
-    def _validate_filename(cls, filename: Any) -> tuple[str, str] | Dict[str, Any]:
+    def _validate_filename(
+        cls, filename: Any
+    ) -> tuple[str, str] | Dict[str, Any]:
         if not filename or not isinstance(filename, str):
             return {"type": "invalid_argument", "field": "filename"}
         name = filename.strip()
         if not name or name in (".", ".."):
-            return {"type": "invalid_filename", "message": "filename must be a non-empty basename."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename must be a non-empty basename.",
+            }
         if os.path.basename(name) != name or "/" in name or "\\" in name:
-            return {"type": "invalid_filename", "message": "filename must be a basename without path separators."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename must be a basename without path separators.",
+            }
         if "\x00" in name or "\r" in name or "\n" in name:
-            return {"type": "invalid_filename", "message": "filename contains unsupported characters (null byte or newline)."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename contains unsupported characters (null byte or newline).",
+            }
         if len(name) > 255:
-            return {"type": "invalid_filename", "message": "filename is too long."}
+            return {
+                "type": "invalid_filename",
+                "message": "filename is too long.",
+            }
         ext = os.path.splitext(name)[1].lower()
         if ext not in cls.ALLOWED_EXTENSIONS:
-            return {"type": "format_blocked", "reason": "extension not allowed"}
+            return {
+                "type": "format_blocked",
+                "reason": "extension not allowed",
+            }
         return name, ext
 
     @classmethod
@@ -163,26 +222,34 @@ class DownloadFile(AbstractSimpleTool):
         if ext in {".docx", ".xlsx", ".pptx"}:
             return body.startswith(b"PK\x03\x04")
         if ext in {".xls", ".msg"}:
-            return body.startswith(b"\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1")
-        if ext in {".csv", ".txt", ".md", ".html", ".json"}:
+            return body.startswith(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1")
+        if ext in {".csv", ".txt", ".md", _HTML_EXT, ".json"}:
             if b"\x00" in body[:4096]:
                 return False
-            if ext != ".html":
-                return True
-            payload = body
-            for bom in cls._BOM_PREFIXES:
-                if payload.startswith(bom):
-                    payload = payload[len(bom):]
-                    break
-            for byte in payload:
-                if byte in (9, 10, 13, 32):
-                    continue
-                return byte == ord("<")
-            return False
+            return ext != _HTML_EXT or cls._looks_like_html(body)
+        return False
+
+    @classmethod
+    def _looks_like_html(cls, body: bytes) -> bool:
+        """Первый значащий байт после BOM/пробелов — '<'."""
+        payload = body
+        for bom in cls._BOM_PREFIXES:
+            if payload.startswith(bom):
+                payload = payload[len(bom) :]
+                break
+        for byte in payload:
+            if byte in (9, 10, 13, 32):
+                continue
+            return byte == ord("<")
         return False
 
     def _check_write_guard(self, dest: str) -> Optional[Dict[str, Any]]:
-        context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
+        context = resolve_tool_context(
+            self,
+            ctx=self._ctx,
+            state=self._state,
+            config_dict=self._get_config_dict(),
+        )
         if not context.write_guard.enabled:
             return None
         try:
@@ -206,6 +273,7 @@ class DownloadFile(AbstractSimpleTool):
                 return None
             if wg_mode == "ask":
                 from gc_core.security.confirm_port import request_confirm
+
                 confirmed = request_confirm(
                     title="Защита записи",
                     question=f"Разрешить запись вне периметра проекта в {dest}?",
@@ -213,7 +281,10 @@ class DownloadFile(AbstractSimpleTool):
                         ("Tool", self.registered_tool_name()),
                         ("Operation", "write"),
                         ("Path", dest),
-                        ("Allowed roots", exc.error.get("allowed_write_roots") or []),
+                        (
+                            "Allowed roots",
+                            exc.error.get("allowed_write_roots") or [],
+                        ),
                     ],
                     ctx=context.ctx,
                     decision_key=f"write:{dest}",
@@ -237,7 +308,9 @@ class DownloadFile(AbstractSimpleTool):
                 context,
                 tool_name=self.registered_tool_name(),
                 decision="blocked",
-                reason_code="policy_deny" if wg_mode == "deny" else "policy_ask_cancelled",
+                reason_code="policy_deny"
+                if wg_mode == "deny"
+                else "policy_ask_cancelled",
                 error_type=exc.error.get("type"),
             )
             return exc.error
@@ -265,7 +338,10 @@ class DownloadFile(AbstractSimpleTool):
         большой» надо принимать до того, как он приедет в память.
         """
         return stream_validating_redirects(
-            session, start_url, headers, timeout,
+            session,
+            start_url,
+            headers,
+            timeout,
             allowed_schemes=allowed_schemes,
             url_blacklist=url_blacklist,
             max_redirects=DEFAULT_MAX_REDIRECTS,
@@ -299,9 +375,15 @@ class DownloadFile(AbstractSimpleTool):
             chunks.append(chunk)
         return b"".join(chunks), None
 
-
-    async def _http_get_bytes(self, url: str, max_bytes: int) -> tuple[bytes, Optional[Dict[str, Any]]]:
-        context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
+    async def _http_get_bytes(
+        self, url: str, max_bytes: int
+    ) -> tuple[bytes, Optional[Dict[str, Any]]]:
+        context = resolve_tool_context(
+            self,
+            ctx=self._ctx,
+            state=self._state,
+            config_dict=self._get_config_dict(),
+        )
         headers = {
             "User-Agent": self.default_user_agent,
             "Accept": "*/*",
@@ -349,7 +431,9 @@ class DownloadFile(AbstractSimpleTool):
                     "blocked_on_redirect": True,
                 }
             except httpx.HTTPError as exc:
-                status = getattr(getattr(exc, "response", None), "status_code", None)
+                status = getattr(
+                    getattr(exc, "response", None), "status_code", None
+                )
                 retryable = status is None or status in (429,) or status >= 500
                 if (not retryable) or attempt == attempts:
                     return b"", {
@@ -361,9 +445,14 @@ class DownloadFile(AbstractSimpleTool):
                     }
                 await asyncio.sleep(self.retry_backoff_seconds * attempt)
 
-        return b"", {"type": "request_failed", "message": "Unknown request failure."}
+        return b"", {
+            "type": "request_failed",
+            "message": "Unknown request failure.",
+        }
 
-    def _atomic_write(self, dest: str, body: bytes) -> Optional[Dict[str, Any]]:
+    def _atomic_write(
+        self, dest: str, body: bytes
+    ) -> Optional[Dict[str, Any]]:
         tmp_path = f"{dest}.tmp"
         try:
             with open(tmp_path, "wb") as fd:
@@ -383,17 +472,28 @@ class DownloadFile(AbstractSimpleTool):
             return {"type": "write_failed", "message": str(exc)}
         return None
 
-
     @enforce_url_policy(url_arg="url")
     async def acall(self, url: str, filename: str, **kwargs: Any) -> str:
         if not isinstance(url, str):
-            return self._result(error={"type": "invalid_argument", "field": "url"})
+            return self._result(
+                error={"type": "invalid_argument", "field": "url"}
+            )
         normalized_url = url.strip()
         if not normalized_url:
-            return self._result(error={"type": "invalid_argument", "field": "url", "message": "URL cannot be empty."})
+            return self._result(
+                error={
+                    "type": "invalid_argument",
+                    "field": "url",
+                    "message": "URL cannot be empty.",
+                }
+            )
         if not normalized_url.startswith(("http://", "https://")):
             return self._result(
-                error={"type": "invalid_argument", "field": "url", "message": "URL must start with http:// or https://."},
+                error={
+                    "type": "invalid_argument",
+                    "field": "url",
+                    "message": "URL must start with http:// or https://.",
+                },
             )
 
         filename_result = self._validate_filename(filename)
@@ -401,8 +501,15 @@ class DownloadFile(AbstractSimpleTool):
             return self._result(error=filename_result)
         validated_filename, ext = filename_result
 
-        context = resolve_tool_context(self, ctx=self._ctx, state=self._state, config_dict=self._get_config_dict())
-        download_settings = self._resolve_download_settings(context.launch_root)
+        context = resolve_tool_context(
+            self,
+            ctx=self._ctx,
+            state=self._state,
+            config_dict=self._get_config_dict(),
+        )
+        download_settings = self._resolve_download_settings(
+            context.launch_root
+        )
         if isinstance(download_settings, dict):
             return self._result(error=download_settings)
         download_root, max_bytes = download_settings
@@ -422,24 +529,36 @@ class DownloadFile(AbstractSimpleTool):
 
         write_guard_error = await off_loop(self._check_write_guard, dest)
         if write_guard_error is not None:
-            return self._result(path=dest, filename=validated_filename, error=write_guard_error)
+            return self._result(
+                path=dest, filename=validated_filename, error=write_guard_error
+            )
 
         if os.path.exists(dest):
             return self._result(
                 path=dest,
                 filename=validated_filename,
-                error={"type": "file_exists", "message": "Destination file already exists."},
+                error={
+                    "type": "file_exists",
+                    "message": "Destination file already exists.",
+                },
             )
 
-        body, request_error = await self._http_get_bytes(normalized_url, max_bytes)
+        body, request_error = await self._http_get_bytes(
+            normalized_url, max_bytes
+        )
         if request_error is not None:
-            return self._result(path=dest, filename=validated_filename, error=request_error)
+            return self._result(
+                path=dest, filename=validated_filename, error=request_error
+            )
 
         if not self._validate_magic(body, ext):
             return self._result(
                 path=dest,
                 filename=validated_filename,
-                error={"type": "format_blocked", "reason": "content does not match expected format"},
+                error={
+                    "type": "format_blocked",
+                    "reason": "content does not match expected format",
+                },
             )
 
         try:
@@ -457,7 +576,9 @@ class DownloadFile(AbstractSimpleTool):
         # 150 мс. Сеть выше остаётся асинхронной, поток убран только с записи.
         write_error = self._atomic_write(dest, body)
         if write_error is not None:
-            return self._result(path=dest, filename=validated_filename, error=write_error)
+            return self._result(
+                path=dest, filename=validated_filename, error=write_error
+            )
 
         # Журнал правок: скачанный файл — правка агента в проекте, и без записи
         # его не было бы ни на экране изменений, ни в сводке хода, ни в откате

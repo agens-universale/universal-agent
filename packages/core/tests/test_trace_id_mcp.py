@@ -4,19 +4,43 @@ from gc_core.tools.connect_mcp.agent_tools import _servers_cfg_with_trace
 def _servers():
     """Рассылка trace — opt-in: без `trace_header_enabled: true` сервер не получает ничего."""
     return {
-        "http_srv": {"transport": "http", "url": "http://a/mcp", "trace_header_enabled": True},
+        "http_srv": {
+            "transport": "http",
+            "url": "http://a/mcp",
+            "trace_header_enabled": True,
+        },
         "sse_srv": {
-            "transport": "sse", "url": "http://b/mcp",
-            "headers": {"X-Keep": "1"}, "trace_header_enabled": True,
+            "transport": "sse",
+            "url": "http://b/mcp",
+            "headers": {"X-Keep": "1"},
+            "trace_header_enabled": True,
         },
-        "shttp_srv": {"transport": "stream_http", "url": "http://c/mcp", "trace_header_enabled": True},
-        "ssse_srv": {"transport": "stream_sse", "url": "http://d/mcp", "trace_header_enabled": True},
+        "shttp_srv": {
+            "transport": "stream_http",
+            "url": "http://c/mcp",
+            "trace_header_enabled": True,
+        },
+        "ssse_srv": {
+            "transport": "stream_sse",
+            "url": "http://d/mcp",
+            "trace_header_enabled": True,
+        },
         "stdio_srv": {
-            "transport": "stdio", "command": "srv",
-            "env": {"KEEP": "1"}, "trace_header_enabled": True,
+            "transport": "stdio",
+            "command": "srv",
+            "env": {"KEEP": "1"},
+            "trace_header_enabled": True,
         },
-        "sstdio_srv": {"transport": "stream_stdio", "command": "srv", "trace_header_enabled": True},
-        "opted_out": {"transport": "http", "url": "http://e/mcp", "trace_header_enabled": False},
+        "sstdio_srv": {
+            "transport": "stream_stdio",
+            "command": "srv",
+            "trace_header_enabled": True,
+        },
+        "opted_out": {
+            "transport": "http",
+            "url": "http://e/mcp",
+            "trace_header_enabled": False,
+        },
         "no_flag": {"transport": "http", "url": "http://f/mcp"},
     }
 
@@ -57,7 +81,8 @@ class TestPresentTrace:
 
     def test_custom_header_name_is_used(self):
         out = _servers_cfg_with_trace(
-            _servers(), {"trace_id": "wf-42", "trace_id_header_name": "X-Trace-Id"}
+            _servers(),
+            {"trace_id": "wf-42", "trace_id_header_name": "X-Trace-Id"},
         )
         assert out["http_srv"]["headers"]["X-Trace-Id"] == "wf-42"
         assert "trace_id" not in out["http_srv"]["headers"]

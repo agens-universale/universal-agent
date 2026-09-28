@@ -1,7 +1,5 @@
 from pathlib import Path
 
-import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.common import apply_swarm_env_overrides
 from gc_core.config_modules.env_vars import EnvVars

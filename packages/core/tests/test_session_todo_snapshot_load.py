@@ -2,7 +2,6 @@
 
 import json
 
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.states import State
 

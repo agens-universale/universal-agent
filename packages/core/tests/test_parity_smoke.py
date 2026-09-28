@@ -12,16 +12,14 @@
   доказательство эквивалентности, которое план объявлял целью Задачи 1.
 
 """
-import asyncio
 
-from gc_core.agent_executor import AgentExecutor
 import pytest
-
+from gc_core.agent_executor import AgentExecutor
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
-    judge_accept,
     install,
+    judge_accept,
     parity_config,
     run_thread_dump,
 )
@@ -73,15 +71,21 @@ def _stub_turn_finish(monkeypatch):
 #: Ход завершается ТОЛЬКО через turn_finish: голый текст ассистента цикл
 #: возвращает агенту (no-tool-call bounce), и сценарий бы не сошёлся.
 def _finish(task_report: str, call_id: str = "c9") -> dict:
-    return assistant_tool_call("turn_finish", {
-        "solution_type": "direct_answer",
-        "task_report": task_report,
-        "handoff": "{}",
-    }, call_id=call_id)
+    return assistant_tool_call(
+        "turn_finish",
+        {
+            "solution_type": "direct_answer",
+            "task_report": task_report,
+            "handoff": "{}",
+        },
+        call_id=call_id,
+    )
 
 
 TURNS = [
-    assistant_tool_call("exec_calculator", {"expression": "2+2"}, call_id="c1"),
+    assistant_tool_call(
+        "exec_calculator", {"expression": "2+2"}, call_id="c1"
+    ),
     _finish("2+2 = 4", call_id="c2"),
     # Третий ход — не агента: после финализатора к модели идёт судья
     # finish-gate. Ему нужен сырой JSON-вердикт; вызов тула он считает
@@ -112,16 +116,23 @@ async def _run_once(tmp_path, monkeypatch):
     executor = AgentExecutor(ctx)
     _arun = getattr(executor, "arun", None)
     answer = (
-        await _arun([PROMPT], thread_id="t1") if _arun
+        await _arun([PROMPT], thread_id="t1")
+        if _arun
         else executor.run([PROMPT], thread_id="t1")
     )
     return answer, run_thread_dump(cfg, "cli", "t1"), backend
 
 
-async def test_two_identical_runs_produce_identical_threads(tmp_path, monkeypatch):
+async def test_two_identical_runs_produce_identical_threads(
+    tmp_path, monkeypatch
+):
     """Прогон воспроизводим: тот же ответ и тот же дамп треда."""
-    first_answer, first_dump, _ = await _run_once(tmp_path / "run0", monkeypatch)
-    second_answer, second_dump, _ = await _run_once(tmp_path / "run1", monkeypatch)
+    first_answer, first_dump, _ = await _run_once(
+        tmp_path / "run0", monkeypatch
+    )
+    second_answer, second_dump, _ = await _run_once(
+        tmp_path / "run1", monkeypatch
+    )
 
     assert first_answer == second_answer
     assert first_dump == second_dump
@@ -161,7 +172,9 @@ async def test_scenario_is_consumed_exactly(tmp_path, monkeypatch):
     assert len(backend.calls) == len(TURNS)
 
 
-async def test_async_run_matches_pre_migration_reference(tmp_path, monkeypatch):
+async def test_async_run_matches_pre_migration_reference(
+    tmp_path, monkeypatch
+):
     """НАСТОЯЩИЙ ГЕЙТ ПЕРЕЕЗДА: сверка с прогоном на ДО-async коде.
 
     Здесь стоял ещё и ``test_async_run_matches_sync_run``. Он был тавтологичен
@@ -189,12 +202,19 @@ async def test_async_run_matches_pre_migration_reference(tmp_path, monkeypatch):
     from pathlib import Path
 
     reference = json.loads(
-        (Path(__file__).parent / "fixtures" / "parity_reference_e66a1e90.json")
-        .read_text(encoding="utf-8")
+        (
+            Path(__file__).parent
+            / "fixtures"
+            / "parity_reference_e66a1e90.json"
+        ).read_text(encoding="utf-8")
     )
 
     answer, dump, backend = await _run_once(tmp_path, monkeypatch)
 
-    assert answer == reference["answer"], "ответ разошёлся с прогоном на develop"
-    assert dump == reference["dump"], "дамп треда разошёлся с прогоном на develop"
+    assert answer == reference["answer"], (
+        "ответ разошёлся с прогоном на develop"
+    )
+    assert dump == reference["dump"], (
+        "дамп треда разошёлся с прогоном на develop"
+    )
     backend.assert_clean()

@@ -5,7 +5,6 @@ State no longer knows anything about long memory — the injection lives in
 after state construction. These tests pin that contract and the resulting
 rendered prompt.
 """
-from pathlib import Path
 
 from gc_core.project_memory import attach_status_to_prompt_vars
 from gc_testkit.paths import ASSETS
@@ -35,9 +34,13 @@ def test_attach_status_with_populated_memory(tmp_path, monkeypatch):
     assert "FIRST STEP" not in prompt_vars["longMemoryStatus"]
 
 
-def test_attach_status_skipped_when_long_memory_in_stop_tools(tmp_path, monkeypatch):
+def test_attach_status_skipped_when_long_memory_in_stop_tools(
+    tmp_path, monkeypatch
+):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("body", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "body", encoding="utf-8"
+    )
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(
@@ -62,7 +65,9 @@ def test_attach_status_uses_configured_limit(tmp_path, monkeypatch):
 
 def test_attach_status_with_explicit_cwd(tmp_path):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("seeded", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "seeded", encoding="utf-8"
+    )
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars, cwd=str(tmp_path))
     assert "project has long memory" in prompt_vars["longMemoryStatus"]
@@ -70,7 +75,9 @@ def test_attach_status_with_explicit_cwd(tmp_path):
 
 def test_attach_status_does_not_leak_path_or_tool_name(tmp_path, monkeypatch):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("body", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "body", encoding="utf-8"
+    )
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars)
@@ -80,20 +87,24 @@ def test_attach_status_does_not_leak_path_or_tool_name(tmp_path, monkeypatch):
     assert "project_memory" not in text
 
 
-def test_main_prompt_template_renders_long_memory_status(tmp_path, monkeypatch):
+def test_main_prompt_template_renders_long_memory_status(
+    tmp_path, monkeypatch
+):
     """End-to-end: attach status + render full system prompt template."""
     from gc_core.utils.local_render_system_prompt import render_system_prompt
 
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("seeded body", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "seeded body", encoding="utf-8"
+    )
     monkeypatch.chdir(tmp_path)
 
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(prompt_vars)
 
-    template = (ASSETS / "prompts" / "chat_completions_system_prompt.md").read_text(
-        encoding="utf-8"
-    )
+    template = (
+        ASSETS / "prompts" / "chat_completions_system_prompt.md"
+    ).read_text(encoding="utf-8")
 
     rendered = render_system_prompt(
         system_prompt=template,

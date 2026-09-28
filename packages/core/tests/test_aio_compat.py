@@ -3,11 +3,11 @@
 Раньше ту же дыру ядро закрывало через глобальный monkey-patch asyncio.run
 в gc_server — он действовал на весь процесс, включая код встраивающего.
 """
+
 import asyncio
 import threading
 
 import pytest
-
 from gc_core.utils.aio_compat import run_coro_blocking
 
 
@@ -24,6 +24,7 @@ def test_runs_inside_running_loop():
     Так ядро зовут TUI (loop Textual) и сервер (loop uvicorn); голый
     asyncio.run здесь падает «cannot be called from a running event loop».
     """
+
     async def outer():
         async def work():
             return 8

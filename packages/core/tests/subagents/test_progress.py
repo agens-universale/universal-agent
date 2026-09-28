@@ -8,7 +8,12 @@ from unittest.mock import MagicMock, patch
 
 from gc_core.states import SharedStateData, State
 from gc_core.tools import aapply_tool
-from gc_core.tools.subagents.progress import NOOP_SUBAGENT_PROGRESS_SINK, QueueSubagentProgressSink, SubagentProgressEvent, resolve_progress_sink
+from gc_core.tools.subagents.progress import (
+    NOOP_SUBAGENT_PROGRESS_SINK,
+    QueueSubagentProgressSink,
+    SubagentProgressEvent,
+    resolve_progress_sink,
+)
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_testkit import run_coro
 
@@ -151,8 +156,11 @@ class TestApplyToolPassesCallId:
         state = _make_state()
         run_agent_func = MagicMock(return_value="ok")
 
-        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch(
+            "gc_core.tools.subagents.runner.SubagentRunner"
+        ) as MockRunner:
             instance = MockRunner.return_value
+
             # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
             async def _arun(*_a, **_kw):
                 return "ok"
@@ -182,8 +190,11 @@ class TestApplyToolPassesCallId:
         state = _make_state()
         run_agent_func = MagicMock(return_value="ok")
 
-        with patch("gc_core.tools.subagents.runner.SubagentRunner") as MockRunner:
+        with patch(
+            "gc_core.tools.subagents.runner.SubagentRunner"
+        ) as MockRunner:
             instance = MockRunner.return_value
+
             # `_SubagentTool.acall` зовёт `runner.arun`: у тула форма одна.
             async def _arun(*_a, **_kw):
                 return "ok"
@@ -231,21 +242,25 @@ class TestProcessToolCallsForwardsCallId:
             seen.update(kwargs)
             return '{"ok": true}'
 
-        monkeypatch.setattr("gc_core.processing_responses.aapply_tool", _fake_apply_tool)
-        run_coro(aprocess_tool_calls(
-            messages=[
-                {
-                    "id": "fc_1",
-                    "type": "function_call",
-                    "call_id": "call_xyz",
-                    "name": "fs_read_file",
-                    "arguments": "{}",
-                }
-            ],
-            state=state,
-            ctx=ctx,
-            run_agent_func=lambda *_a, **_k: None,
-        ))
+        monkeypatch.setattr(
+            "gc_core.processing_responses.aapply_tool", _fake_apply_tool
+        )
+        run_coro(
+            aprocess_tool_calls(
+                messages=[
+                    {
+                        "id": "fc_1",
+                        "type": "function_call",
+                        "call_id": "call_xyz",
+                        "name": "fs_read_file",
+                        "arguments": "{}",
+                    }
+                ],
+                state=state,
+                ctx=ctx,
+                run_agent_func=lambda *_a, **_k: None,
+            )
+        )
         assert seen.get("call_id") == "call_xyz"
 
 

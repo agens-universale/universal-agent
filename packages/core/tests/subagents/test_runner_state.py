@@ -1,15 +1,17 @@
 """Tests for SubagentRunner._build_child_state."""
-import pytest
 
 from types import SimpleNamespace
 
-from gc_core.states import State, SharedStateData
-from gc_core.tools.subagents.registry import SUBAGENT_CLASSES, is_subagent_tool
+import pytest
+from gc_core.states import SharedStateData, State
+from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state(**overrides):
-    shared = overrides.pop("shared", SharedStateData(working_memory={"state": "test"}))
+    shared = overrides.pop(
+        "shared", SharedStateData(working_memory={"state": "test"})
+    )
     state = State(
         verbose=False,
         model="test-model",
@@ -91,7 +93,9 @@ class TestBuildChildState:
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("test role")
-        child_tool_names = {t.get("name") for t in child.tools if isinstance(t, dict)}
+        child_tool_names = {
+            t.get("name") for t in child.tools if isinstance(t, dict)
+        }
         for name in child_tool_names:
             assert not is_subagent_tool(name), (
                 f"Subagent tool {name} should NOT be in child state tools"

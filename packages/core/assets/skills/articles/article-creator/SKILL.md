@@ -107,4 +107,3 @@ Content with inline citations: ...[Source Title](https://example.com/source1) ..
 - [Source Title](https://example.com/source1) - Author, Year
 - [Source Title](https://example.com/source2) - Organization, Date
 ```
-

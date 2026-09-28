@@ -13,19 +13,26 @@ from gc_core.config_modules.fs_tools import (
     FsFindFilesByNameConfig,
     parse_find_files_by_name_config,
 )
-from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
+from gc_core.security.path_policy import (
+    _extract_config_dict,
+    resolve_tool_context,
+)
 from gc_core.security.read_guard import (
     ReadGuardViolation,
+    _resolve_skills_root,
     check_read_path_allowed,
     enforce_read_guard,
     parse_read_guard_config,
-    _resolve_skills_root,
 )
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
+from gc_core.tools.fs.cooperative import LoopYielder
 from gc_core.tools.schema_optional import coalesce_optional_string
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    classify_content_from_sample,
+)
 from gc_core.utils.fs_search_walk import (
     HARD_EXCLUDE_NESTED_DOT_DIRS,
     effective_exclude_dir_names,
@@ -34,11 +41,13 @@ from gc_core.utils.fs_search_walk import (
 )
 from gc_core.utils.glob_to_regex import glob_to_regex
 from gc_core.utils.tool_report_paths import tool_report_abspath
-from gc_core.tools.fs.cooperative import LoopYielder
 
 _GLOB_META_RE = re.compile(r"[*?\[\]]")
 
-def _compile_glob_fullmatch(pattern: str, *, case_insensitive: bool) -> re.Pattern:
+
+def _compile_glob_fullmatch(
+    pattern: str, *, case_insensitive: bool
+) -> re.Pattern:
     flags = re.IGNORECASE if case_insensitive else 0
     return re.compile(f"^{glob_to_regex(pattern)}$", flags)
 
@@ -48,7 +57,9 @@ class FindFilesByName(AbstractSimpleTool):
     """Full-tree locate by basename, path glob, or path substring (not file contents)."""
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
         _cfg = parse_find_files_by_name_config(config_dict)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
@@ -120,7 +131,9 @@ class FindFilesByName(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         skip = hard_exclude_dir_names_for_prompt()
         _cfg = parse_find_files_by_name_config(config_dict)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
@@ -177,8 +190,7 @@ class FindFilesByName(AbstractSimpleTool):
                 )
             else:
                 payload["guidance"] = (
-                    f"Results truncated (showing up to {max_matches} matches). "
-                    "Increase max_matches if you need more."
+                    f"Results truncated (showing up to {max_matches} matches). Increase max_matches if you need more."
                 )
         if walk_stats is not None:
             payload["walk_stats"] = walk_stats
@@ -214,12 +226,18 @@ class FindFilesByName(AbstractSimpleTool):
     def _resolve_config(self) -> FsFindFilesByNameConfig:
         """Load find_files_by_name limits from config (FsToolsConfig.find_files_by_name)."""
         context = resolve_tool_context(self)
-        cfg_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
-        return parse_find_files_by_name_config(cfg_dict if isinstance(cfg_dict, dict) else {})
+        cfg_dict = _extract_config_dict(
+            self, getattr(context, "ctx", None), {}
+        )
+        return parse_find_files_by_name_config(
+            cfg_dict if isinstance(cfg_dict, dict) else {}
+        )
 
     def _resolve_read_guard(self) -> Tuple[Any, Any, Any]:
         context = resolve_tool_context(self)
-        config_dict = _extract_config_dict(self, getattr(context, "ctx", None), {})
+        config_dict = _extract_config_dict(
+            self, getattr(context, "ctx", None), {}
+        )
         cfg = parse_read_guard_config(config_dict)
         if not cfg.enabled:
             return None, None, None
@@ -228,7 +246,9 @@ class FindFilesByName(AbstractSimpleTool):
         return cfg, context.launch_root, extra_allowed
 
     @staticmethod
-    def _read_guard_pass(filepath: str, rg_cfg, rg_root, rg_extra=None) -> bool:
+    def _read_guard_pass(
+        filepath: str, rg_cfg, rg_root, rg_extra=None
+    ) -> bool:
         if rg_cfg is None:
             return True
         try:
@@ -298,7 +318,9 @@ class FindFilesByName(AbstractSimpleTool):
             except OSError:
                 size_bytes = None
         try:
-            sample = await self._backend.read_head_bytes(filepath, BINARY_SAMPLE_BYTES)
+            sample = await self._backend.read_head_bytes(
+                filepath, BINARY_SAMPLE_BYTES
+            )
             classification = classify_content_from_sample(filepath, sample)
             is_binary = classification.is_binary
         except OSError:
@@ -325,6 +347,101 @@ class FindFilesByName(AbstractSimpleTool):
             entry.update(await self._probe_file_meta(filepath, size))
         return entry
 
+    def _arg_error(
+        self,
+        path: Any,
+        query: Any,
+        max_matches: Any,
+        _result: Callable[..., str],
+    ) -> Optional[str]:
+        if not isinstance(path, str):
+            return _result(
+                ok=False, error={"type": "invalid_argument", "field": "path"}
+            )
+        if not self._backend.isabs(path):
+            return _result(
+                ok=False,
+                error={
+                    "type": "invalid_argument",
+                    "field": "path",
+                    "message": "path must be absolute",
+                },
+            )
+        if not isinstance(query, str) or not query.strip():
+            return _result(
+                ok=False,
+                error={
+                    "type": "invalid_argument",
+                    "field": "query",
+                    "message": "query must be a non-empty string",
+                },
+            )
+        if not isinstance(max_matches, int) or max_matches < 1:
+            return _result(
+                ok=False,
+                error={"type": "invalid_argument", "field": "max_matches"},
+            )
+        return None
+
+    def _make_should_descend(
+        self, root_norm: str, exclude_names: Any, rg: tuple
+    ) -> Callable[[str], bool]:
+        def _should_descend(abs_dir: str) -> bool:
+            name = os.path.basename(os.path.normpath(abs_dir))
+            if os.path.normpath(abs_dir) == root_norm:
+                return True
+            if is_agent_hidden(name):
+                return False
+            if should_skip_nested_dir_name(
+                name,
+                exclude_names=exclude_names,
+                exclude_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+            ):
+                return False
+            return self._read_guard_pass(abs_dir, *rg)
+
+        return _should_descend
+
+    async def _awalk_matches(
+        self,
+        path: str,
+        matcher: Callable[[str, str], bool],
+        rg: tuple,
+        *,
+        max_visited: int,
+        max_matches: int,
+    ) -> Tuple[List[Dict[str, Any]], int, str]:
+        """``(matches, visited, stop_reason)``; исключения обхода — наружу."""
+        exclude_names = effective_exclude_dir_names()
+        walk_iter = self._backend.iter_walk_entries(
+            path,
+            should_descend=self._make_should_descend(
+                os.path.normpath(path), exclude_names, rg
+            ),
+            prune_names=tuple(sorted(exclude_names)),
+            prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+        )
+        matches: List[Dict[str, Any]] = []
+        visited = 0
+        yielder = LoopYielder()
+        async for entry in walk_iter:
+            await yielder.tick()
+            rel, is_d = entry.rel, entry.is_dir
+            base = os.path.basename(rel)
+            if is_agent_hidden(base):
+                continue
+            visited += 1
+            if visited > max_visited:
+                return matches, visited, "max_visited"
+            abs_path = self._backend.join(path, rel)
+            if not self._read_guard_pass(abs_path, *rg) or not matcher(
+                rel, base
+            ):
+                continue
+            matches.append(await self._entry(abs_path, is_d, size=entry.size))
+            if len(matches) >= max_matches:
+                return matches, visited, "max_matches"
+        return matches, visited, "completed"
 
     @enforce_read_guard(path_arg="path")
     async def acall(
@@ -347,8 +464,16 @@ class FindFilesByName(AbstractSimpleTool):
 
         path_for_report = path if isinstance(path, str) else ""
         query_for_report = query if isinstance(query, str) else None
-        ci = case_insensitive if isinstance(case_insensitive, bool) else bool(case_insensitive)
-        mm = max_matches if isinstance(max_matches, int) else default_max_matches
+        ci = (
+            case_insensitive
+            if isinstance(case_insensitive, bool)
+            else bool(case_insensitive)
+        )
+        mm = (
+            max_matches
+            if isinstance(max_matches, int)
+            else default_max_matches
+        )
 
         _rg_cfg, _rg_root, _rg_extra = self._resolve_read_guard()
         _result = functools.partial(
@@ -359,30 +484,10 @@ class FindFilesByName(AbstractSimpleTool):
             max_matches=mm,
         )
 
-        if not isinstance(path, str):
-            return _result(ok=False, error={"type": "invalid_argument", "field": "path"})
-        if not self._backend.isabs(path):
-            return _result(
-                ok=False,
-                error={
-                    "type": "invalid_argument",
-                    "field": "path",
-                    "message": "path must be absolute",
-                },
-            )
-        if not isinstance(query, str) or not query.strip():
-            return _result(
-                ok=False,
-                error={
-                    "type": "invalid_argument",
-                    "field": "query",
-                    "message": "query must be a non-empty string",
-                },
-            )
-        if not isinstance(max_matches, int) or max_matches < 1:
-            return _result(ok=False, error={"type": "invalid_argument", "field": "max_matches"})
-        if max_matches > hard_max_matches:
-            max_matches = hard_max_matches
+        arg_error = self._arg_error(path, query, max_matches, _result)
+        if arg_error is not None:
+            return arg_error
+        max_matches = min(max_matches, hard_max_matches)
 
         query = query.strip()
         path = self._backend.normpath(path)
@@ -400,71 +505,18 @@ class FindFilesByName(AbstractSimpleTool):
             return _result(ok=False, error={"type": "not_a_directory"})
 
         matcher = self._build_matcher(query, case_insensitive=ci)
-        matches: List[Dict[str, Any]] = []
-        visited = 0
-        truncated = False
-        stop_reason = "completed"
-        root_norm = os.path.normpath(path)
-        # Enumeration via backend.iter_walk only (Harbor: private walk channel
-        # ~50M fail-closed; local: os.walk). No tool-exec find dump (60k).
-
-        exclude_names = effective_exclude_dir_names()
-
-        def _should_descend(abs_dir: str) -> bool:
-            name = os.path.basename(os.path.normpath(abs_dir))
-            if os.path.normpath(abs_dir) == root_norm:
-                return True
-            if is_agent_hidden(name):
-                return False
-            if should_skip_nested_dir_name(
-                name,
-                exclude_names=exclude_names,
-                exclude_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
-            ):
-                return False
-            if not self._read_guard_pass(abs_dir, _rg_cfg, _rg_root, _rg_extra):
-                return False
-            return True
-
+        rg = (_rg_cfg, _rg_root, _rg_extra)
         try:
-            walk_iter = self._backend.iter_walk_entries(
+            matches, visited, stop_reason = await self._awalk_matches(
                 path,
-                should_descend=_should_descend,
-                prune_names=tuple(sorted(exclude_names)),
-                prune_dot_dirs=HARD_EXCLUDE_NESTED_DOT_DIRS,
+                matcher,
+                rg,
+                max_visited=max_visited,
+                max_matches=max_matches,
             )
-            yielder = LoopYielder()
-            async for entry in walk_iter:
-                # Обход идёт инлайн на loop вызывающего и ограничен ЧИСЛОМ
-                # записей, а не временем: на 24 тысячах он съедает весь бюджет
-                # приёмки одной операцией. Уступаем по времени — см. модуль.
-                await yielder.tick()
-                rel, is_d = entry.rel, entry.is_dir
-                base = os.path.basename(rel)
-                if is_agent_hidden(base):
-                    continue
-                visited += 1
-                if visited > max_visited:
-                    truncated = True
-                    stop_reason = "max_visited"
-                    break
-
-                abs_path = self._backend.join(path, rel)
-                if not self._read_guard_pass(
-                    abs_path, _rg_cfg, _rg_root, _rg_extra
-                ):
-                    continue
-                if not matcher(rel, base):
-                    continue
-                matches.append(await self._entry(abs_path, is_d, size=entry.size))
-                if len(matches) >= max_matches:
-                    truncated = True
-                    stop_reason = "max_matches"
-                    break
         except WalkOutputTooLargeError as e:
             return _result(
-                ok=False,
-                error={"type": "walk_too_large", "message": str(e)},
+                ok=False, error={"type": "walk_too_large", "message": str(e)}
             )
         except PermissionError as e:
             return _result(
@@ -473,12 +525,10 @@ class FindFilesByName(AbstractSimpleTool):
             )
         except Exception as e:
             return _result(
-                ok=False,
-                error={"type": "unexpected_error", "message": str(e)},
+                ok=False, error={"type": "unexpected_error", "message": str(e)}
             )
 
-        if stop_reason == "completed":
-            truncated = False
+        truncated = stop_reason != "completed"
 
         return self._result_listing(
             path=path,

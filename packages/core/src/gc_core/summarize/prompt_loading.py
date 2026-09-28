@@ -2,9 +2,18 @@
 
 import os
 
-from gc_core.summarize.summary_spec import MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER, SUMMARY_OUTPUT_SHAPE_PLACEHOLDER, SUMMARY_SECTIONS_PLACEHOLDER, render_output_shape_for_prompt, render_sections_for_prompt, render_summary_tags_for_memory_patch_prompt
-from gc_core.summarize.working_memory_gateway import inject_working_memory_prompt_placeholders
 from gc_core.bundled_assets import bundled_root
+from gc_core.summarize.summary_spec import (
+    MEMORY_PATCH_SUMMARY_TAGS_PLACEHOLDER,
+    SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
+    SUMMARY_SECTIONS_PLACEHOLDER,
+    render_output_shape_for_prompt,
+    render_sections_for_prompt,
+    render_summary_tags_for_memory_patch_prompt,
+)
+from gc_core.summarize.working_memory_gateway import (
+    inject_working_memory_prompt_placeholders,
+)
 from gc_core.utils.user_text import read_user_text
 
 
@@ -17,7 +26,9 @@ def default_prompt_path() -> str:
     Returns:
         Абсолютный путь к `prompts/chat_completions_summary_prompt.md` в корне репозитория.
     """
-    return os.path.join(str(bundled_root()), "prompts", "chat_completions_summary_prompt.md")
+    return os.path.join(
+        str(bundled_root()), "prompts", "chat_completions_summary_prompt.md"
+    )
 
 
 def load_prompt_template(path: str) -> str:
@@ -52,7 +63,9 @@ def load_prompt_template(path: str) -> str:
     return inject_working_memory_prompt_placeholders(prompt)
 
 
-MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER = "{{MEMORY_PATCH_SUBAGENT_GUIDANCE}}"
+MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER = (
+    "{{MEMORY_PATCH_SUBAGENT_GUIDANCE}}"
+)
 
 # Soft-only: no hard filter on apply. Injected when patch runs on a subagent State
 # (shared working_memory with the orchestrator).
@@ -87,7 +100,9 @@ def _load_memory_patch_prompt(path: str, *, subagent: bool = False) -> str:
         )
     if MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER in prompt:
         guidance = MEMORY_PATCH_SUBAGENT_GUIDANCE_TEXT if subagent else ""
-        prompt = prompt.replace(MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER, guidance)
+        prompt = prompt.replace(
+            MEMORY_PATCH_SUBAGENT_GUIDANCE_PLACEHOLDER, guidance
+        )
     prompt = inject_working_memory_prompt_placeholders(prompt)
     # Drop blank lines left when subagent guidance is empty.
     while "\n\n\n" in prompt:
@@ -95,5 +110,7 @@ def _load_memory_patch_prompt(path: str, *, subagent: bool = False) -> str:
     return prompt.strip()
 
 
-def load_memory_patch_replace_prompt(path: str, *, subagent: bool = False) -> str:
+def load_memory_patch_replace_prompt(
+    path: str, *, subagent: bool = False
+) -> str:
     return _load_memory_patch_prompt(path, subagent=subagent)

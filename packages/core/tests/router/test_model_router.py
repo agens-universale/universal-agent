@@ -1,8 +1,12 @@
 import pytest
-
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
-from gc_core.model_router import CONSUMERS, ModelRouter, ResolvedModel, SUBAGENT_CONSUMER_PREFIX
+from gc_core.model_router import (
+    CONSUMERS,
+    SUBAGENT_CONSUMER_PREFIX,
+    ModelRouter,
+    ResolvedModel,
+)
 
 
 def _snapshot(raw: dict) -> dict:
@@ -41,11 +45,13 @@ def test_consumers_constant_matches_spec():
 
 
 def test_binding_level_resolves_through_slot():
-    router = _router({
-        "models": {"flash": {"url": "http://flash/v1", "token": ""}},
-        "slots": {"light": "flash"},
-        "assign": {"finish_gate": "light"},
-    })
+    router = _router(
+        {
+            "models": {"flash": {"url": "http://flash/v1", "token": ""}},
+            "slots": {"light": "flash"},
+            "assign": {"finish_gate": "light"},
+        }
+    )
     resolved = router.resolve("finish_gate")
     assert resolved.alias == "flash"
     assert resolved.model == "flash"
@@ -54,54 +60,74 @@ def test_binding_level_resolves_through_slot():
 
 
 def test_binding_alias_pins_directly_bypassing_level():
-    router = _router({
-        "models": {"deepseek-max": {"url": "http://ds/v1", "token": ""},
-                   "flash": {"url": "http://fl/v1", "token": ""}},
-        "slots": {"default": "flash"},
-        "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
-    }, level="default")
+    router = _router(
+        {
+            "models": {
+                "deepseek-max": {"url": "http://ds/v1", "token": ""},
+                "flash": {"url": "http://fl/v1", "token": ""},
+            },
+            "slots": {"default": "flash"},
+            "assign": {"subagents": {"subagent_planner": "deepseek-max"}},
+        },
+        level="default",
+    )
     resolved = router.resolve("subagent:subagent_planner")
     assert resolved.alias == "deepseek-max"
-    assert "привязка" in resolved.source and "subagent_planner" in resolved.source
+    assert (
+        "привязка" in resolved.source and "subagent_planner" in resolved.source
+    )
     assert "deepseek-max" in resolved.source
 
 
 def test_subagent_exact_binding_beats_wildcard():
-    router = _router({
-        "models": {"deepseek-max": {}, "flash": {}},
-        "slots": {"light": "flash"},
-        "assign": {"subagents": {"subagent_planner": "deepseek-max", "*": "light"}},
-    })
+    router = _router(
+        {
+            "models": {"deepseek-max": {}, "flash": {}},
+            "slots": {"light": "flash"},
+            "assign": {
+                "subagents": {"subagent_planner": "deepseek-max", "*": "light"}
+            },
+        }
+    )
     assert router.resolve("subagent:subagent_planner").alias == "deepseek-max"
     assert router.resolve("subagent:subagent_critic").alias == "flash"
 
 
 def test_subagent_no_binding_falls_to_active_level():
-    router = _router({
-        "models": {"flash": {}},
-        "slots": {"max": "flash"},
-        "assign": {},
-    }, level="max")
+    router = _router(
+        {
+            "models": {"flash": {}},
+            "slots": {"max": "flash"},
+            "assign": {},
+        },
+        level="max",
+    )
     resolved = router.resolve("subagent:subagent_worker")
     assert resolved.alias == "flash"
     assert "активный" in resolved.source
 
 
 def test_unbound_scalar_consumer_uses_active_level():
-    router = _router({
-        "models": {"glm-local": {}},
-        "slots": {"max": "glm-local"},
-    }, level="max")
+    router = _router(
+        {
+            "models": {"glm-local": {}},
+            "slots": {"max": "glm-local"},
+        },
+        level="max",
+    )
     resolved = router.resolve("finish_gate")
     assert resolved.alias == "glm-local"
     assert "активный" in resolved.source and "max" in resolved.source
 
 
 def test_auto_judge_without_binding_uses_default_statically_not_active_level():
-    router = _router({
-        "models": {"a": {}, "b": {}, "c": {}},
-        "slots": {"light": "a", "default": "b", "max": "c"},
-    }, level="max")  # активный уровень max — auto_judge обязан игнорировать это
+    router = _router(
+        {
+            "models": {"a": {}, "b": {}, "c": {}},
+            "slots": {"light": "a", "default": "b", "max": "c"},
+        },
+        level="max",
+    )  # активный уровень max — auto_judge обязан игнорировать это
     resolved = router.resolve("auto_judge")
     assert resolved.alias == "b"
     assert "default" in resolved.source
@@ -109,10 +135,13 @@ def test_auto_judge_without_binding_uses_default_statically_not_active_level():
 
 
 def test_level_fallback_matrix_when_requested_slot_unset():
-    router = _router({
-        "models": {"b": {}},
-        "slots": {"default": "b"},  # light не задан
-    }, level="light")
+    router = _router(
+        {
+            "models": {"b": {}},
+            "slots": {"default": "b"},  # light не задан
+        },
+        level="light",
+    )
     resolved = router.resolve("main")
     assert resolved.alias == "b"
     assert "фоллбэк" in resolved.source
@@ -120,19 +149,24 @@ def test_level_fallback_matrix_when_requested_slot_unset():
 
 
 def test_single_model_registry_without_any_slot_resolves_to_it():
-    router = _router({"models": {"solo": {"url": "http://solo/v1", "token": ""}}}, level="light")
+    router = _router(
+        {"models": {"solo": {"url": "http://solo/v1", "token": ""}}},
+        level="light",
+    )
     resolved = router.resolve("main")
     assert resolved.alias == "solo"
     assert resolved.source  # заполнен
 
 
 def test_legacy_when_merged_registry_empty():
-    router = _router({
-        "backend": {
-            "completions_url": "http://legacy/v1/chat/completions",
-        },
-        "agent": {"model": "legacy-model"},
-    })
+    router = _router(
+        {
+            "backend": {
+                "completions_url": "http://legacy/v1/chat/completions",
+            },
+            "agent": {"model": "legacy-model"},
+        }
+    )
     resolved = router.resolve("main")
     assert resolved.alias is None
     assert resolved.model == "legacy-model"
@@ -151,33 +185,47 @@ def test_assign_bindings_are_inert_while_registry_is_empty():
     ЦЕЛИКОМ. Иначе привязка `finish_gate: light` увела бы судью на
     несуществующий слот — ровно тот случай, ради которого warning и написан.
     """
-    router = _router({
-        "assign": {
-            "finish_gate": "light",
-            "summary": "max",
-            "subagents": {"subagent_critic": "max", "*": "light"},
-        },
-        "backend": {"completions_url": "http://legacy/v1/chat/completions"},
-        "agent": {"model": "legacy-model"},
-    })
+    router = _router(
+        {
+            "assign": {
+                "finish_gate": "light",
+                "summary": "max",
+                "subagents": {"subagent_critic": "max", "*": "light"},
+            },
+            "backend": {
+                "completions_url": "http://legacy/v1/chat/completions"
+            },
+            "agent": {"model": "legacy-model"},
+        }
+    )
     assert router.registry_empty() is True
 
-    for consumer in ("main", "finish_gate", "summary",
-                     "subagent:subagent_critic", "subagent:subagent_worker"):
+    for consumer in (
+        "main",
+        "finish_gate",
+        "summary",
+        "subagent:subagent_critic",
+        "subagent:subagent_worker",
+    ):
         resolved = router.resolve(consumer)
-        assert resolved.alias is None, f"{consumer}: привязка сработала без реестра"
+        assert resolved.alias is None, (
+            f"{consumer}: привязка сработала без реестра"
+        )
         assert resolved.model == "legacy-model"
         assert resolved.url == "http://legacy/v1/chat/completions"
         assert resolved.source == "легаси"
 
 
 def test_legacy_force_overrides_nonempty_registry():
-    router = _router({
-        "models": {"flash": {"url": "http://flash/v1", "token": ""}},
-        "slots": {"default": "flash"},
-        "backend": {"completions_url": "http://legacy/v1"},
-        "agent": {"model": "legacy-model"},
-    }, force_legacy=True)
+    router = _router(
+        {
+            "models": {"flash": {"url": "http://flash/v1", "token": ""}},
+            "slots": {"default": "flash"},
+            "backend": {"completions_url": "http://legacy/v1"},
+            "agent": {"model": "legacy-model"},
+        },
+        force_legacy=True,
+    )
     resolved = router.resolve("main")
     assert resolved.alias is None
     assert resolved.model == "legacy-model"
@@ -186,61 +234,92 @@ def test_legacy_force_overrides_nonempty_registry():
 
 
 def test_model_inherits_url_and_token_from_effective_backend_when_unset():
-    router = _router({
-        "models": {"bare": {}},
-        "slots": {"default": "bare"},
-        "backend": {
-            "completions_url": "http://global/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer global-token"},
-        },
-    })
+    router = _router(
+        {
+            "models": {"bare": {}},
+            "slots": {"default": "bare"},
+            "backend": {
+                "completions_url": "http://global/v1/chat/completions",
+                "chat_completion_headers": {
+                    "Authorization": "Bearer global-token"
+                },
+            },
+        }
+    )
     resolved = router.resolve("main")
     assert resolved.model == "bare"  # model: опущен → id = алиас
     assert resolved.url == "http://global/v1/chat/completions"
-    assert resolved.authorization is None  # None = наследовать эффективный заголовок
+    assert (
+        resolved.authorization is None
+    )  # None = наследовать эффективный заголовок
 
 
 def test_model_token_normalized_to_bearer():
-    router = _router({
-        "models": {"secure": {"url": "http://secure/v1", "token": "sk-abc"}},
-        "slots": {"default": "secure"},
-    })
+    router = _router(
+        {
+            "models": {
+                "secure": {"url": "http://secure/v1", "token": "sk-abc"}
+            },
+            "slots": {"default": "secure"},
+        }
+    )
     assert router.resolve("main").authorization == "Bearer sk-abc"
 
 
 def test_model_token_empty_string_means_explicitly_no_auth():
-    router = _router({
-        "models": {"open": {"url": "http://open/v1", "token": ""}},
-        "slots": {"default": "open"},
-    })
+    router = _router(
+        {
+            "models": {"open": {"url": "http://open/v1", "token": ""}},
+            "slots": {"default": "open"},
+        }
+    )
     assert router.resolve("main").authorization == ""
 
 
 def test_model_url_inherited_from_own_backend_completions_url_override():
-    router = _router({
-        "models": {"viaBackend": {"token": "",
-                                  "backend": {"completions_url": "http://backend-url/v1"}}},
-        "slots": {"default": "viaBackend"},
-    })
+    router = _router(
+        {
+            "models": {
+                "viaBackend": {
+                    "token": "",
+                    "backend": {"completions_url": "http://backend-url/v1"},
+                }
+            },
+            "slots": {"default": "viaBackend"},
+        }
+    )
     resolved = router.resolve("main")
     assert resolved.url == "http://backend-url/v1"
-    assert resolved.backend_overrides.get("completions_url") == "http://backend-url/v1"
+    assert (
+        resolved.backend_overrides.get("completions_url")
+        == "http://backend-url/v1"
+    )
 
 
 def test_backend_overrides_only_explicitly_set_keys():
-    router = _router({
-        "models": {"flash": {"backend": {"chat_completion_kwargs": {"temperature": 0.2}}}},
-        "slots": {"default": "flash"},
-    })
+    router = _router(
+        {
+            "models": {
+                "flash": {
+                    "backend": {"chat_completion_kwargs": {"temperature": 0.2}}
+                }
+            },
+            "slots": {"default": "flash"},
+        }
+    )
     resolved = router.resolve("main")
-    assert resolved.backend_overrides == {"chat_completion_kwargs": {"temperature": 0.2}}
+    assert resolved.backend_overrides == {
+        "chat_completion_kwargs": {"temperature": 0.2}
+    }
 
 
 def test_tariff_passed_through_from_model_pricing():
-    router = _router({
-        "models": {"flash": {"pricing": {"input": 12, "output": 48}}},
-        "slots": {"default": "flash"},
-    })
+    router = _router(
+        {
+            "models": {"flash": {"pricing": {"input": 12, "output": 48}}},
+            "slots": {"default": "flash"},
+        }
+    )
     tariff = router.resolve("main").tariff
     assert tariff["input"] == 12.0
     assert tariff["output"] == 48.0
@@ -252,7 +331,9 @@ def test_tariff_none_when_model_has_no_pricing():
 
 
 def test_active_level_reflects_level_provider_regardless_of_binding():
-    router = _router({"models": {"a": {}}, "slots": {"default": "a"}}, level="max")
+    router = _router(
+        {"models": {"a": {}}, "slots": {"default": "a"}}, level="max"
+    )
     assert router.active_level() == "max"
 
 
@@ -267,7 +348,9 @@ def test_unknown_consumer_raises_value_error():
         router.resolve("not_a_real_consumer")
 
 
-@pytest.mark.parametrize("consumer", list(CONSUMERS) + ["subagent:subagent_worker"])
+@pytest.mark.parametrize(
+    "consumer", list(CONSUMERS) + ["subagent:subagent_worker"]
+)
 def test_source_always_filled_for_every_consumer(consumer):
     router = _router({"models": {"a": {}}, "slots": {"default": "a"}})
     resolved = router.resolve(consumer)

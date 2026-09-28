@@ -11,11 +11,13 @@ event loop. Клиент, созданный на одном loop и переи�
 401), env-прокси и REQUESTS_CA_BUNDLE не подхватываем — CA и прокси передаём
 явно.
 """
+
 from __future__ import annotations
 
 import asyncio
-import threading
+import os
 import ssl
+import threading
 import weakref
 from typing import Any, Optional, Union
 
@@ -35,7 +37,9 @@ _clients: dict[tuple, tuple] = {}
 def build_ssl_context(
     verify: Union[bool, str] = True,
     cert: Optional[tuple] = None,
-) -> Union[ssl.SSLContext, bool]:
+    *,
+    trust_env: bool = False,
+) -> ssl.SSLContext:
     """Собрать TLS-контекст из пары ``verify``/``cert``.
 
     Собираем сами, а не отдаём httpx: в его ``create_ssl_context`` ветка
@@ -46,20 +50,27 @@ def build_ssl_context(
     ``requests`` обрабатывал verify и cert независимо, и этот контракт мы
     обязаны сохранить.
 
-    ``verify=False`` возвращаем как есть — httpx сам сделает контекст без
-    проверки; собирать его руками смысла нет.
+    Клиентский сертификат загружается независимо от проверки сервера:
+    ``verify=False`` не должен отключать mTLS. Только явный False выключает
+    проверку; CA-путь сохраняет проверку цепочки и имени сервера.
+
+    ``trust_env`` учитывает SSL_CERT_FILE/SSL_CERT_DIR только при verify=True,
+    как httpx. Для MCP включён ради корпоративных CA; клиенты модели
+    по-прежнему берут CA из явного конфига. На netrc и прокси флаг не влияет.
     """
     if verify is False:
-        return False
-    if isinstance(verify, str):
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        # Явный opt-in verify=False; обоснование: CONTRIBUTING.md.
+        ctx.check_hostname = False  # NOSONAR: явный opt-in
+        ctx.verify_mode = ssl.CERT_NONE  # NOSONAR: явный opt-in
+    elif isinstance(verify, str):
+        verify = os.path.expanduser(os.path.expandvars(verify))
         ctx = ssl.create_default_context(
             capath=verify if _is_dir(verify) else None,
             cafile=None if _is_dir(verify) else verify,
         )
     else:
-        import certifi
-
-        ctx = ssl.create_default_context(cafile=certifi.where())
+        ctx = httpx.create_ssl_context(verify=True, trust_env=trust_env)
     if cert:
         if isinstance(cert, str):
             ctx.load_cert_chain(cert)
@@ -69,8 +80,6 @@ def build_ssl_context(
 
 
 def _is_dir(path: str) -> bool:
-    import os
-
     return os.path.isdir(path)
 
 
@@ -183,7 +192,7 @@ def _purge_dead_locked() -> None:
 #: Значение — ``(weakref на loop, счётчик)``: голого ``id`` мало по той же
 #: причине, что и у ``_clients`` — id переиспользуются между последовательными
 #: ``asyncio.run``, и новый loop унаследовал бы чужой счётчик.
-_holders: dict[int, tuple["weakref.ref", int]] = {}
+_holders: dict[int, tuple[weakref.ref, int]] = {}
 
 
 def _holder_count(loop) -> int:
@@ -253,8 +262,8 @@ async def aclose_clients() -> None:
 
 
 __all__ = [
-    "acquire_clients",
     "aclose_clients",
+    "acquire_clients",
     "build_ssl_context",
     "get_async_client",
     "mounts_from_proxies",

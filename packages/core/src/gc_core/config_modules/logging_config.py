@@ -7,8 +7,8 @@ class RedactSecretsConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    extra_keys: list[str] = []       # доп. подстроки имён ключей (к встроенным)
-    extra_patterns: list[str] = []   # доп. regex по значению (к встроенным)
+    extra_keys: list[str] = []  # доп. подстроки имён ключей (к встроенным)
+    extra_patterns: list[str] = []  # доп. regex по значению (к встроенным)
 
 
 class LoggingConfig(BaseModel):
@@ -32,7 +32,9 @@ class LoggingConfig(BaseModel):
     # НИЧЕГО, потому что per-run логгер обрывает цепочку.
     propagate: bool = False
     # Маскировка секретов перед записью в лог (stdout и файл). По умолчанию выкл.
-    redact_secrets: RedactSecretsConfig = Field(default_factory=RedactSecretsConfig)
+    redact_secrets: RedactSecretsConfig = Field(
+        default_factory=RedactSecretsConfig
+    )
 
     @field_validator("format")
     @classmethod

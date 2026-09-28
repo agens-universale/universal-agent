@@ -17,10 +17,10 @@ id» не сработает. Заметнее всего на конфиге п
 счётчик владельцев остаётся поднятым, и пул этого loop не закроется уже
 никогда.
 """
+
 import asyncio
 
 import pytest
-
 from gc_core.utils import async_http
 from gc_core.utils.aio_compat import run_coro_blocking
 
@@ -92,8 +92,7 @@ async def test_holder_is_released_when_context_build_fails(monkeypatch):
 
     loop = asyncio.get_running_loop()
     assert async_http._holder_count(loop) == 0, (
-        f"счётчик владельцев завис на {async_http._holder_count(loop)} — "
-        f"пул этого loop уже не закроется"
+        f"счётчик владельцев завис на {async_http._holder_count(loop)} — пул этого loop уже не закроется"
     )
 
 
@@ -137,7 +136,7 @@ def test_registry_survives_concurrent_loops():
         for _ in range(40):
             try:
                 asyncio.run(_body())
-            except BaseException as exc:  # noqa: BLE001 — нам важен сам факт
+            except BaseException as exc:  # нам важен сам факт
                 errors.append(exc)
                 return
 
@@ -182,7 +181,9 @@ def test_registry_hands_out_one_client_per_key():
     # `test_registry_does_not_accumulate_dead_loops`). Затёртый клиент виден
     # прямо — как совпадение объектов, — и это и есть проверяемое свойство:
     # затёртый утёк бы сокетом.
-    assert len({id(c) for c in seen}) == 6, "два потока получили одного клиента"
+    assert len({id(c) for c in seen}) == 6, (
+        "два потока получили одного клиента"
+    )
 
 
 # --- L6: реестр не копит мёртвые записи, общий пул не декорация ------------
@@ -208,10 +209,11 @@ def test_registry_does_not_accumulate_dead_loops():
     asyncio.run(_touch())
     gc.collect()
 
-    alive = [k for k, (ref, _c) in async_http._clients.items() if ref() is not None]
+    alive = [
+        k for k, (ref, _c) in async_http._clients.items() if ref() is not None
+    ]
     assert len(async_http._clients) <= len(alive) + 1, (
-        f"реестр копит мёртвые записи: всего {len(async_http._clients)}, "
-        f"живых {len(alive)}"
+        f"реестр копит мёртвые записи: всего {len(async_http._clients)}, живых {len(alive)}"
     )
 
 
@@ -223,7 +225,6 @@ def test_shared_sync_client_is_actually_used():
     TLS-рукопожатием.
     """
     import httpx
-
     from gc_core.utils.http_session import NO_NETRC_SESSION
 
     one_shots: list = []

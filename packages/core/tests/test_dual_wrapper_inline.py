@@ -26,11 +26,11 @@
 После правки ``awrapper`` отличается от ``wrapper`` одним словом ``await`` —
 той формой, которую обещает докстринг модуля.
 """
+
 import asyncio
 import threading
 
 import pytest
-
 from gc_core.security.dual_wrapper import dual_wrap
 
 
@@ -96,7 +96,9 @@ async def test_async_guard_closes_the_body_when_the_tool_raises():
 
     with pytest.raises(RuntimeError, match="тул упал"):
         await wrapped("раз")
-    assert "finish" not in seen, "после падения тула постобработки быть не должно"
+    assert "finish" not in seen, (
+        "после падения тула постобработки быть не должно"
+    )
 
 
 async def test_guard_does_not_queue_behind_a_busy_default_executor():
@@ -114,7 +116,10 @@ async def test_guard_does_not_queue_behind_a_busy_default_executor():
     wrapped = dual_wrap(target, _recording_flow(seen))
 
     # Забиваем пул: воркеров у него немного, а заданий заведомо больше.
-    hogs = [asyncio.create_task(asyncio.to_thread(_busy_wait, 0.5)) for _ in range(24)]
+    hogs = [
+        asyncio.create_task(asyncio.to_thread(_busy_wait, 0.5))
+        for _ in range(24)
+    ]
     await asyncio.sleep(0.05)  # даём им занять места
 
     started = asyncio.get_running_loop().time()

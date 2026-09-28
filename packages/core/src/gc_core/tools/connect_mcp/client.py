@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional
 
 from gc_core.tools.connect_mcp.transport import _INIT_PAYLOAD, aget_transport
 
-
 #: Параметры ``initialize`` — ОДИН источник на все локусы.
 #:
 #: Источников было два, и починили только один. В ``_INIT_PAYLOAD`` объявленные
@@ -82,12 +81,16 @@ def _mcp_headers(
     if session_id is not None:
         headers["mcp-session-id"] = session_id
     extra_headers: Dict[str, str] = server_cfg.get("headers") or {}
-    headers.update(_merge_mcp_headers(token=token, extra_headers=extra_headers))
+    headers.update(
+        _merge_mcp_headers(token=token, extra_headers=extra_headers)
+    )
     return headers
 
 
 def _session_id_from(resp_headers: Dict[str, str]) -> Optional[str]:
-    return resp_headers.get("mcp-session-id") or resp_headers.get("MCP-Session-Id")
+    return resp_headers.get("mcp-session-id") or resp_headers.get(
+        "MCP-Session-Id"
+    )
 
 
 def _tools_from(data: Any) -> List[Dict[str, Any]]:
@@ -130,7 +133,9 @@ def _tools_list_payload() -> Dict[str, Any]:
     }
 
 
-def _tools_call_payload(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+def _tools_call_payload(
+    tool_name: str, arguments: Dict[str, Any]
+) -> Dict[str, Any]:
     return {
         "jsonrpc": "2.0",
         "id": "tools-call-1",
@@ -148,7 +153,9 @@ async def _asend_initialized_notification(
 ) -> None:
     """Асинхронный двойник: отличается ровно транспортом."""
     headers = _mcp_headers(server_cfg, token, session_id=session_id)
-    await aget_transport(server_cfg)(url, headers, _NOTIFICATION_PAYLOAD, timeout)
+    await aget_transport(server_cfg)(
+        url, headers, _NOTIFICATION_PAYLOAD, timeout
+    )
 
 
 async def _ainit_mcp_session(
@@ -186,7 +193,9 @@ async def _atools_list_request(
     return _tools_from(data)
 
 
-def _remember_session(resp_headers: Dict[str, str], server_key: Optional[str]) -> None:
+def _remember_session(
+    resp_headers: Dict[str, str], server_key: Optional[str]
+) -> None:
     """Сервер прислал новый mcp-session-id — запомнить его для этого владельца."""
     if not server_key:
         return
@@ -251,9 +260,9 @@ async def _aget_or_init_session_id(
 __all__ = [
     "MCP_INIT_PARAMS",
     "_MCP_SESSIONS",
-    "forget_session",
-    "_normalize_url",
-    "_atools_list_request",
     "_acall_mcp_tool",
     "_aget_or_init_session_id",
+    "_atools_list_request",
+    "_normalize_url",
+    "forget_session",
 ]

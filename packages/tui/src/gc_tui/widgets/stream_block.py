@@ -1,5 +1,6 @@
 """Ephemeral in-progress streaming block (TUI). Shows live model output for the
 current step; removed when the canonical thread row arrives or the run ends."""
+
 from __future__ import annotations
 
 from rich.console import RenderableType
@@ -12,7 +13,9 @@ class StreamBlock(Static):
     def __init__(self) -> None:
         super().__init__("", classes="stream-block", markup=False)
 
-    def set_text(self, text: "RenderableType", *, thinking: bool = False) -> None:
+    def set_text(
+        self, text: RenderableType, *, thinking: bool = False
+    ) -> None:
         if not self.is_mounted:
             return
         if thinking:

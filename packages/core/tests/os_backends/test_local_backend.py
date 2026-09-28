@@ -1,14 +1,22 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import os
-import stat as stat_module
 import sys
+import threading
 
 import pytest
-
-from gc_core.run_context import acreate_run_context
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import ExecResult, FsBackend
-import threading
+from gc_core.run_context import acreate_run_context
+from gc_testkit.helpers.crossplatform import require_symlinks, shell_command
+from gc_testkit.helpers.tool_ctx import CallableTool
+
+
+def _py(code: str) -> str:
+    """Команда «этот Python исполняет `code`» для оболочки ЭТОЙ ОС.
+
+    Вместо `yes | head`, `sleep`, `$VAR` и `>&2`: этих слов нет в cmd.exe, а
+    тесты проверяют бэкенд, а не синтаксис sh.
+    """
+    return shell_command([sys.executable, "-c", code])
 
 
 @pytest.fixture()
@@ -24,7 +32,7 @@ def test_implements_protocol(be):
 
 async def test_stat_group(be, tmp_path):
     f = tmp_path / "a.txt"
-    f.write_text("hello\n", encoding="utf-8")
+    f.write_bytes(b"hello\n")  # байтами: write_text на Windows пишет \r\n
     p = str(f)
     assert await be.exists(p) and await be.lexists(p) and await be.is_file(p)
     assert not await be.is_dir(p) and await be.is_dir(str(tmp_path))
@@ -40,12 +48,13 @@ async def test_stat_group(be, tmp_path):
 
 async def test_read_group(be, tmp_path):
     f = tmp_path / "a.txt"
-    f.write_text("l1\nl2\n", encoding="utf-8")
+    f.write_bytes(b"l1\nl2\n")
     p = str(f)
     assert await be.read(p) == "l1\nl2\n"
     assert [line async for line in be.iter_lines(p)] == ["l1\n", "l2\n"]
     assert await be.read_head_bytes(p, 2) == b"l1"
     import hashlib
+
     assert await be.sha256_bytes(p) == hashlib.sha256(b"l1\nl2\n").hexdigest()
 
 
@@ -53,7 +62,7 @@ async def test_write_group_atomic_and_append(be, tmp_path):
     p = str(tmp_path / "w.txt")
     await be.write(p, "v1")
     assert await be.read(p) == "v1"
-    assert not os.path.exists(p + ".tmp")          # atomic: no tmp residue
+    assert not os.path.exists(p + ".tmp")  # atomic: no tmp residue
     await be.append(p, "-v2")
     assert await be.read(p) == "v1-v2"
     bp = str(tmp_path / "raw.bin")
@@ -98,7 +107,11 @@ async def test_traverse_and_paths(be, tmp_path):
     (tmp_path / "top.md").write_text("y", encoding="utf-8")
     root = str(tmp_path)
     assert await be.listdir(root) == [("sub", True), ("top.md", False)]
-    assert sorted(await be.walk(root)) == [("sub", True), ("sub/f.txt", False), ("top.md", False)]
+    assert sorted(await be.walk(root)) == [
+        ("sub", True),
+        ("sub/f.txt", False),
+        ("top.md", False),
+    ]
     assert be.normpath(root + "/") == os.path.normpath(root + "/")
     assert be.join(root, "x") == os.path.join(root, "x")
 
@@ -106,10 +119,18 @@ async def test_traverse_and_paths(be, tmp_path):
 async def test_exec_ok_and_timeout(be, tmp_path):
     res = await be.aexec("echo hi", cwd=str(tmp_path), timeout=10)
     assert isinstance(res, ExecResult)
-    assert res.return_code == 0 and res.stdout.strip() == "hi" and not res.timed_out
-    res = await be.aexec("sleep 5", timeout=1)
+    assert (
+        res.return_code == 0
+        and res.stdout.strip() == "hi"
+        and not res.timed_out
+    )
+    res = await be.aexec(_py("import time; time.sleep(5)"), timeout=1)
     assert res.timed_out and res.return_code is None
-    env_res = await be.aexec("echo $GC_T", timeout=10, env={"GC_T": "42"})
+    env_res = await be.aexec(
+        _py("import os; print(os.environ['GC_T'])"),
+        timeout=10,
+        env={"GC_T": "42"},
+    )
     assert env_res.stdout.strip() == "42"
 
 
@@ -146,6 +167,7 @@ async def test_tool_backend_resolution():
 
 async def test_walk_symlink_to_dir_is_file_entry(be, tmp_path):
     """Symlink to a directory must be is_dir=False in walk (lstat parity with listdir)."""
+    require_symlinks(tmp_path)
     sub = tmp_path / "sub"
     sub.mkdir()
     (sub / "inner.txt").write_text("x", encoding="utf-8")
@@ -159,6 +181,7 @@ async def test_walk_symlink_to_dir_is_file_entry(be, tmp_path):
 
 
 async def test_walk_symlink_to_file(be, tmp_path):
+    require_symlinks(tmp_path)
     real = tmp_path / "real.txt"
     real.write_text("x", encoding="utf-8")
     link = tmp_path / "link.txt"
@@ -184,9 +207,13 @@ async def test_write_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
     assert (tmp_path / "target.txt").read_text(encoding="utf-8") == "keep"
 
 
-async def test_write_bytes_replace_failure_cleans_tmp(be, tmp_path, monkeypatch):
+async def test_write_bytes_replace_failure_cleans_tmp(
+    be, tmp_path, monkeypatch
+):
     p = str(tmp_path / "bin.dat")
-    monkeypatch.setattr(os, "replace", lambda _s, _d: (_ for _ in ()).throw(OSError("nope")))
+    monkeypatch.setattr(
+        os, "replace", lambda _s, _d: (_ for _ in ()).throw(OSError("nope"))
+    )
     with pytest.raises(OSError):
         await be.write_bytes(p, b"\xff\xfe")
     assert not os.path.exists(p + ".tmp")
@@ -203,6 +230,7 @@ async def test_read_head_bytes_binary(be, tmp_path):
 
 # --- bounded exec runner (spec D1/D2/D9/D10) ---
 
+
 async def test_exec_result_has_capture_cap_flags(be):
     res = await be.aexec("echo hi", timeout=10)
     assert isinstance(res, ExecResult)
@@ -212,8 +240,6 @@ async def test_exec_result_has_capture_cap_flags(be):
 
 def test_exec_default_capture_cap_is_40k(be):
     assert be.exec_output_capture_max_chars == 40_000
-
-
 
 
 async def test_exec_spawns_no_helper_threads(be):
@@ -230,7 +256,9 @@ async def test_exec_spawns_no_helper_threads(be):
     assert threading.active_count() == before
 
 
-async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be):
+async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(
+    be,
+):
     """Захват ограничен, но процесс дочитывается и завершается сам.
 
     Раньше это проверялось на приватном _drain_pipe; теперь — на поведении
@@ -240,7 +268,9 @@ async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be)
     # sys.executable, а не голое `python`: имени `python` в PATH может не быть
     # (в окружениях uv/pyenv ставится только `python3`), и тест падал бы на
     # `command not found` — не на том свойстве, которое проверяет.
-    res = await be.aexec(f'{sys.executable} -c "print(\'z\' * 20000)"', timeout=15)
+    res = await be.aexec(
+        f"{sys.executable} -c \"print('z' * 20000)\"", timeout=15
+    )
 
     assert len(res.stdout) <= 40
     assert res.stdout_hit_capture_cap is True
@@ -250,7 +280,11 @@ async def test_exec_publishes_bounded_capture_without_waiting_for_full_drain(be)
 
 async def test_exec_per_call_capture_max_overrides_default(be):
     be.exec_output_capture_max_chars = 50
-    res = await be.aexec("yes A | head -c 5000", timeout=15, capture_max_chars=400)
+    res = await be.aexec(
+        _py("import sys; sys.stdout.write('A' * 5000)"),
+        timeout=15,
+        capture_max_chars=400,
+    )
     assert res.return_code == 0
     assert len(res.stdout) <= 400
     assert len(res.stdout) > 50
@@ -261,7 +295,9 @@ async def test_exec_bounded_stdout_not_killed(be):
     """Output exceeding cap is bounded; process is NOT killed (drain & discard)."""
     be.exec_output_capture_max_chars = 200
     # Print ~5000 chars to stdout; process must finish on its own (exit 0).
-    res = await be.aexec("yes A | head -c 5000", timeout=15)
+    res = await be.aexec(
+        _py("import sys; sys.stdout.write('A' * 5000)"), timeout=15
+    )
     assert res.return_code == 0
     assert not res.timed_out
     assert len(res.stdout) <= 200
@@ -272,7 +308,9 @@ async def test_exec_bounded_stdout_not_killed(be):
 async def test_exec_bounded_stderr(be):
     be.exec_output_capture_max_chars = 150
     # Redirect to stderr only.
-    res = await be.aexec("yes B | head -c 5000 >&2", timeout=15)
+    res = await be.aexec(
+        _py("import sys; sys.stderr.write('B' * 5000)"), timeout=15
+    )
     assert res.return_code == 0
     assert len(res.stderr) <= 150
     assert res.stderr_hit_capture_cap is True
@@ -282,7 +320,9 @@ async def test_exec_bounded_stderr(be):
 async def test_exec_both_pipes_large_no_deadlock(be):
     """Both stdout and stderr large simultaneously must not deadlock the runner."""
     be.exec_output_capture_max_chars = 100
-    cmd = "yes O | head -c 8000 & yes E | head -c 8000 >&2 & wait"
+    cmd = _py(
+        "import sys; sys.stdout.write('O' * 8000); sys.stderr.write('E' * 8000)"
+    )
     res = await be.aexec(cmd, timeout=20)
     assert res.return_code == 0
     assert len(res.stdout) <= 100
@@ -303,7 +343,10 @@ async def test_exec_small_output_no_cap_hit(be):
 async def test_exec_timeout_partial_buffer(be):
     """On timeout: timed_out=True, exit_code=None, partial buffer preserved."""
     be.exec_output_capture_max_chars = 60_000
-    res = await be.aexec("echo started; sleep 5", timeout=1)
+    res = await be.aexec(
+        _py("import time; print('started', flush=True); time.sleep(5)"),
+        timeout=1,
+    )
     assert res.timed_out is True
     assert res.return_code is None
     assert "started" in res.stdout
@@ -320,7 +363,9 @@ async def test_run_python_bounded_output(be):
 
 async def test_run_python_per_call_capture_max_overrides_default(be):
     be.exec_output_capture_max_chars = 50
-    res = await be.arun_python("print('A' * 5000)", timeout=15, capture_max_chars=400)
+    res = await be.arun_python(
+        "print('A' * 5000)", timeout=15, capture_max_chars=400
+    )
     assert res.return_code == 0
     assert len(res.stdout) <= 400
     assert len(res.stdout) > 50
@@ -345,7 +390,9 @@ async def test_run_python_bounded_stderr(be):
 
 
 async def test_run_python_timeout(be, tmp_path):
-    res = await be.arun_python("import time; print('go'); time.sleep(5)", cwd=str(tmp_path), timeout=1)
+    res = await be.arun_python(
+        "import time; print('go'); time.sleep(5)", cwd=str(tmp_path), timeout=1
+    )
     assert res.timed_out is True
     assert res.return_code is None
     assert "go" in res.stdout
@@ -359,7 +406,7 @@ async def test_drain_keeps_reading_after_head_is_full():
     прекращается по заполнении головы — иначе ни счётчик, ни хвост не будут
     настоящими, а вызывающий получит только начало вывода.
     """
-    from gc_core.backends.local import _Capture, _adrain_stream
+    from gc_core.backends.local import _adrain_stream, _Capture
 
     class _Stream:
         """Двойник `StreamReader`: отдаёт заготовленные чанки, потом EOF."""
@@ -374,7 +421,9 @@ async def test_drain_keeps_reading_after_head_is_full():
     await _adrain_stream(_Stream([b"A" * 50, b"B" * 50, b"END"]), sink)
     cs = sink.stream
 
-    assert cs.total_chars == 103, "счётчик считает только голову — чтение обрывается"
+    assert cs.total_chars == 103, (
+        "счётчик считает только голову — чтение обрывается"
+    )
     assert cs.truncated is True
     assert cs.head == "A" * 20
     assert cs.tail.endswith("END"), f"хвост не настоящий: {cs.tail!r}"

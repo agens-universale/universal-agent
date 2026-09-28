@@ -63,10 +63,13 @@ class _CompatClient(httpx.Client):
         # своим TLS-рукопожатием. `verify=True` без прокси и клиентского
         # сертификата — это ровно то, с чем создан общий клиент.
         needs_own = (
-            fresh or bool(proxies) or cert is not None or verify not in (None, True)
+            fresh
+            or bool(proxies)
+            or cert is not None
+            or verify not in (None, True)
         )
         if needs_own:
-            from gc_core.utils.async_http import build_ssl_context, mounts_from_proxies
+            from gc_core.utils.async_http import build_ssl_context
 
             ssl_context = build_ssl_context(
                 True if verify is None else verify, cert

@@ -1,4 +1,5 @@
 """gc-mcp — установка/подключение/снос MCP по имени из курируемого манифеста."""
+
 from __future__ import annotations
 
 import argparse
@@ -26,52 +27,80 @@ def _inst():
     и разрешение атрибута обязано оставаться на момент вызова.
     """
     from recommended_mcp import install
+
     return install
 
 
 def _load_manifest_entries(config: str | None = None):
     """(entries, recipe_root). Резолвит манифест (config=None → дефолтная цепочка)."""
-    from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path, recipe_root
     from recommended_mcp.manifest import load_manifest
+    from recommended_mcp.runtime.manifest_resolve import (
+        recipe_root,
+        resolve_install_manifest_path,
+    )
+
     path = resolve_install_manifest_path(config)
     return load_manifest(path), recipe_root()
 
 
 def _agent_dep_dir():
     from gc_core.config_modules.env_vars import gc_paths
+
     return gc_paths()["data"]
 
 
 def _load_repo_url(config: Optional[str] = None):
     from recommended_mcp.runtime.repo_path import ensure_repo_on_sys_path
+
     ensure_repo_on_sys_path()
-    from recommended_mcp.runtime.manifest_resolve import resolve_install_manifest_path
     from recommended_mcp import manifest as _r
+    from recommended_mcp.runtime.manifest_resolve import (
+        resolve_install_manifest_path,
+    )
+
     load_repo_url = _r.load_repo_url
     return load_repo_url(resolve_install_manifest_path(config))
 
 
-def _install_one(entry, root: Path, agent_dep_dir, editable: bool = False,
-                 repo_url=None, repo_ref=None) -> bool:
+def _install_one(
+    entry,
+    root: Path,
+    agent_dep_dir,
+    editable: bool = False,
+    repo_url=None,
+    repo_ref=None,
+) -> bool:
     """Поставить один рецепт в MCP-venv. True если успех."""
-    from recommended_mcp.runtime.venv import ensure_mcp_venv, pip_install_target
+    from recommended_mcp.runtime.venv import (
+        ensure_mcp_venv,
+        pip_install_target,
+    )
+
     ensure_mcp_venv()
     with pip_install_target():
         results = _inst().run_install_entries(
-            [entry], root, agent_dep_dir, editable=editable,
-            repo_url=repo_url, repo_ref=repo_ref,
+            [entry],
+            root,
+            agent_dep_dir,
+            editable=editable,
+            repo_url=repo_url,
+            repo_ref=repo_ref,
         )
     return any(s == "installed" for _, s, _ in results)
 
 
 def _wire_one(entry, root: Path, agent_dep_dir) -> None:
-    from recommended_mcp.runtime import wiring
     from gc_core.config_modules.env_vars import gc_paths
+
+    from recommended_mcp.runtime import wiring
+
     npx = str(_inst()._node_install_paths(agent_dep_dir)["npx"])
     cache = str(gc_paths()["cache"])
     recipe_dir = (root / entry.path).resolve()
     try:
-        leftover = wiring.wire_snippet(entry.name, recipe_dir, npx=npx, cache=cache)
+        leftover = wiring.wire_snippet(
+            entry.name, recipe_dir, npx=npx, cache=cache
+        )
     except (FileNotFoundError, ValueError) as exc:
         print(f"[warn] {entry.name}: wire пропущен — {exc}")
         return
@@ -84,21 +113,27 @@ def _uninstall_one(entry, root: Path) -> None:
     _inst().uninstall_entry(entry, root)
 
 
-def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bool = False) -> int:
+def _cmd_install(
+    name: Optional[str], config: Optional[str] = None, editable: bool = False
+) -> int:
     entries, root = _load_manifest_entries(config)
     dep = _agent_dep_dir()
     repo_url, repo_ref = _load_repo_url(config)
     if name:
         entry = _inst().find_entry(entries, name)
         if entry is None:
-            print(f"[error] MCP '{name}' не найден в манифесте. Доступны: "
-                  f"{', '.join(e.name for e in entries)}", file=sys.stderr)
+            print(
+                f"[error] MCP '{name}' не найден в манифесте. Доступны: {', '.join(e.name for e in entries)}",
+                file=sys.stderr,
+            )
             return 2
         if _install_one(entry, root, dep, editable, repo_url, repo_ref):
             _wire_one(entry, root, dep)
             print(f"[done] {name} установлен и подключён")
         else:
-            print(f"[warn] {name} не установлен — не подключаю", file=sys.stderr)
+            print(
+                f"[warn] {name} не установлен — не подключаю", file=sys.stderr
+            )
         return 0
     installed_names: list[str] = []
     failed_names: list[str] = []
@@ -110,7 +145,9 @@ def _cmd_install(name: Optional[str], config: Optional[str] = None, editable: bo
             installed_names.append(entry.name)
         else:
             failed_names.append(entry.name)
-    print(f"[summary] установлено+подключено: {', '.join(installed_names) or '—'}")
+    print(
+        f"[summary] установлено+подключено: {', '.join(installed_names) or '—'}"
+    )
     if failed_names:
         print(f"[summary] не установлено: {', '.join(failed_names)}")
     print("[done] install complete")
@@ -129,10 +166,11 @@ def descriptions(config: Optional[str] = None) -> dict:
     return {e.name: e.description for e in entries}
 
 
-def wired_names(config: Optional[str] = None) -> list:
+def wired_names(config: Optional[str] = None) -> list:  # noqa: ARG001  # часть контракта: подпись менять нельзя
     """Имена MCP, уже подключённых в конфиге (быстро, без subprocess) — для онбординга:
     отметить как установленные и не предлагать заново."""
     from recommended_mcp.runtime import wiring
+
     return list(wiring.wired_servers().keys())
 
 
@@ -155,10 +193,15 @@ def wire(name: str, config: Optional[str] = None) -> bool:
 def unwire(name: str) -> bool:
     """Отключить MCP (убрать из config.local.yml). True если был подключён."""
     from recommended_mcp.runtime import wiring
+
     return wiring.unwire(name)
 
 
-def remove(name: str, config: Optional[str] = None, keep_package: bool = False) -> int:
+def remove(
+    name: str,
+    config: Optional[str] = None,  # noqa: ARG001  # параметр контракта API
+    keep_package: bool = False,
+) -> int:
     """Отключить + деинсталл пакета MCP из venv (обёртка _cmd_remove)."""
     return _cmd_remove(name, keep_package)
 
@@ -166,6 +209,7 @@ def remove(name: str, config: Optional[str] = None, keep_package: bool = False) 
 def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
     """yes = установлен; — = проверили, не установлен; ? = проверить не удалось."""
     from recommended_mcp.runtime.venv import query_installed_version
+
     itype = entry.install.type
     if itype in ("pypi", "source", "wheel"):
         name = _inst()._dist_name(entry, root)
@@ -177,13 +221,16 @@ def _installed_status(entry, root: Path, agent_dep_dir: Path) -> str:
         if not pkg:
             return "?"
         res = _inst().npm_global_has(pkg, agent_dep_dir)
-        return "?" if res is None else ("yes" if res else "—")
+        if res is None:
+            return "?"
+        return "yes" if res else "—"
     return "?"
 
 
 def _cmd_list() -> int:
     entries, root = _load_manifest_entries()
     from recommended_mcp.runtime import wiring
+
     dep = _agent_dep_dir()
     wired = wiring.wired_servers()
     print(f"{'NAME':22} {'TRANSPORT':14} {'INSTALLED':10} WIRED")
@@ -192,13 +239,15 @@ def _cmd_list() -> int:
         srv = wired.get(e.name) or {}
         transport = srv.get("transport", "—")
         opt = " (opt)" if getattr(e, "optional", False) else ""
-        print(f"{e.name:22} {transport:14} {installed:10} "
-              f"{'yes' if e.name in wired else '—'}{opt}")
+        print(
+            f"{e.name:22} {transport:14} {installed:10} {'yes' if e.name in wired else '—'}{opt}"
+        )
     return 0
 
 
 def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
     from recommended_mcp.runtime import wiring
+
     if wiring.unwire(name):
         print(f"[unwired] {name}")
     else:
@@ -211,31 +260,46 @@ def _remove_one(name: str, entries, root: Path, keep_package: bool) -> None:
             print(f"[warn] {name} нет в манифесте — деинсталл пропущен")
 
 
-def _cmd_remove(name: Optional[str], keep_package: bool, remove_all: bool = False) -> int:
+def _remove_all(keep_package: bool) -> None:
     from recommended_mcp.runtime import wiring
+
+    names = list(wiring.wired_servers().keys())
+    for n in names:
+        wiring.unwire(n)
+    print(
+        f"[unwired] {', '.join(names)}"
+        if names
+        else "[info] нет подключённых MCP"
+    )
+    if keep_package:
+        print("[done] все MCP отключены (пакеты оставлены)")
+        return
+    import shutil
+
+    from gc_core.config_modules.env_vars import gc_paths
+
+    data = Path(gc_paths()["data"])
+    for sub in ("recommended_mcp", "node"):
+        d = data / sub
+        if d.exists():
+            try:
+                shutil.rmtree(d)
+                print(f"[wiped] {d}")
+            except OSError as exc:
+                print(
+                    f"[warn] не удалось удалить {d}: {exc} (закрой gc-ua, если daemon держит файлы, и повтори)"
+                )
+    print(
+        "[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — убрать вручную: playwright uninstall"
+    )
+    print("[done] все MCP удалены, артефакты под ~/.gc вычищены")
+
+
+def _cmd_remove(
+    name: Optional[str], keep_package: bool, remove_all: bool = False
+) -> int:
     if remove_all:
-        names = list(wiring.wired_servers().keys())
-        for n in names:
-            wiring.unwire(n)
-        print(f"[unwired] {', '.join(names)}" if names else "[info] нет подключённых MCP")
-        if keep_package:
-            print("[done] все MCP отключены (пакеты оставлены)")
-            return 0
-        import shutil
-        from gc_core.config_modules.env_vars import gc_paths
-        data = Path(gc_paths()["data"])
-        for sub in ("recommended_mcp", "node"):
-            d = data / sub
-            if d.exists():
-                try:
-                    shutil.rmtree(d)
-                    print(f"[wiped] {d}")
-                except OSError as exc:
-                    print(f"[warn] не удалось удалить {d}: {exc} "
-                          f"(закрой gc-ua, если daemon держит файлы, и повтори)")
-        print("[note] Chromium (общий кэш ms-playwright, вне ~/.gc) не трогаем — "
-              "убрать вручную: playwright uninstall")
-        print("[done] все MCP удалены, артефакты под ~/.gc вычищены")
+        _remove_all(keep_package)
         return 0
     if not name:
         print("[error] укажи имя MCP или --all", file=sys.stderr)
@@ -248,38 +312,57 @@ def _cmd_remove(name: Optional[str], keep_package: bool, remove_all: bool = Fals
 def _cmd_help() -> int:
     """Справка по gc-mcp (также при вызове без команды)."""
     print(
-        'gc-mcp — менеджер MCP-серверов (инструменты: веб-поиск, документы, браузер и др.)\n\n'
-        'Команды:\n'
-        '  gc-mcp install [имя]   поставить и подключить MCP (без имени — все доступные)\n'
-        '  gc-mcp list            показать: доступные / установленные / подключённые\n'
-        '  gc-mcp remove [имя]    отключить и удалить MCP\n'
-        '      --all              снести все подключённые\n'
-        '      --keep-package     только отключить, пакет оставить\n'
-        '  gc-mcp help            эта справка\n\n'
-        'Примеры:\n'
-        '  gc-mcp install                      весь рекомендованный набор\n'
-        '  gc-mcp install duckduckgo_search    только веб-поиск\n'
-        '  gc-mcp list                         что уже стоит и подключено'
+        "gc-mcp — менеджер MCP-серверов (инструменты: веб-поиск, документы, браузер и др.)\n\n"
+        "Команды:\n"
+        "  gc-mcp install [имя]   поставить и подключить MCP (без имени — все доступные)\n"
+        "  gc-mcp list            показать: доступные / установленные / подключённые\n"
+        "  gc-mcp remove [имя]    отключить и удалить MCP\n"
+        "      --all              снести все подключённые\n"
+        "      --keep-package     только отключить, пакет оставить\n"
+        "  gc-mcp help            эта справка\n\n"
+        "Примеры:\n"
+        "  gc-mcp install                      весь рекомендованный набор\n"
+        "  gc-mcp install duckduckgo_search    только веб-поиск\n"
+        "  gc-mcp list                         что уже стоит и подключено"
     )
     return 0
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(prog="gc-mcp")
-    sub = parser.add_subparsers(dest="cmd")   # не required: пустой вызов → справка
-    p_inst = sub.add_parser("install", help="поставить MCP по имени (или все) + авто-wire")
+    sub = parser.add_subparsers(
+        dest="cmd"
+    )  # не required: пустой вызов → справка
+    p_inst = sub.add_parser(
+        "install", help="поставить MCP по имени (или все) + авто-wire"
+    )
     p_inst.add_argument("name", nargs="?", default=None)
-    p_inst.add_argument("--config", default=None, metavar="PATH",
-                        help="кастомный манифест MCP (по умолчанию — дефолтная цепочка)")
-    p_inst.add_argument("-e", "--editable", action="store_true",
-                        help="source-MCP в editable-режиме (pip install -e)")
+    p_inst.add_argument(
+        "--config",
+        default=None,
+        metavar="PATH",
+        help="кастомный манифест MCP (по умолчанию — дефолтная цепочка)",
+    )
+    p_inst.add_argument(
+        "-e",
+        "--editable",
+        action="store_true",
+        help="source-MCP в editable-режиме (pip install -e)",
+    )
     sub.add_parser("list", help="доступные / установленные / подключённые MCP")
     p_rm = sub.add_parser("remove", help="отключить + деинсталл MCP")
     p_rm.add_argument("name", nargs="?", default=None)
-    p_rm.add_argument("--all", action="store_true", dest="remove_all",
-                      help="снести ВСЕ подключённые MCP")
-    p_rm.add_argument("--keep-package", action="store_true",
-                      help="только un-wire, пакет в venv оставить")
+    p_rm.add_argument(
+        "--all",
+        action="store_true",
+        dest="remove_all",
+        help="снести ВСЕ подключённые MCP",
+    )
+    p_rm.add_argument(
+        "--keep-package",
+        action="store_true",
+        help="только un-wire, пакет в venv оставить",
+    )
     sub.add_parser("help", help="показать справку по gc-mcp")
     args = parser.parse_args(list(argv) if argv is not None else sys.argv[1:])
 
@@ -307,7 +390,11 @@ def _available_update(entry, installed_version):
     itype = getattr(entry.install, "type", None)
     if itype == "pypi":
         package = getattr(entry.install, "package", None)
-        recipe = package.split("==", 1)[1].strip() if package and "==" in package else None
+        recipe = (
+            package.split("==", 1)[1].strip()
+            if package and "==" in package
+            else None
+        )
     elif itype in ("source", "wheel"):
         recipe = getattr(entry.install, "version", None)
     else:
@@ -321,12 +408,17 @@ def load_manifest_entries(config: Optional[str] = None):
     return _load_manifest_entries(config)
 
 
-def installed_state(name: str, config: Optional[str] = None, *, manifest=None) -> dict:
+def installed_state(
+    name: str, config: Optional[str] = None, *, manifest=None
+) -> dict:
     """{'installed': bool|None, 'version': str|None, 'update': str|None}.
     Медленно (subprocess-опрос venv). installed=None — проверить не удалось.
     manifest=(entries, root) — уже загруженный манифест (кэш вызывающего); иначе грузим."""
-    entries, root = manifest if manifest is not None else _load_manifest_entries(config)
+    entries, root = (
+        manifest if manifest is not None else _load_manifest_entries(config)
+    )
     from recommended_mcp.runtime.venv import query_installed_version
+
     entry = _inst().find_entry(entries, name)
     if entry is None:
         return {"installed": None, "version": None, "update": None}

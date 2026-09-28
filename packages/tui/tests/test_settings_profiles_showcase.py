@@ -3,15 +3,15 @@
 правило записи (активация), shadow-hints, value-origin слоя профиля, `/config`
 и `/status`, онбординг-предупреждение, cold-start notice (§3.5).
 """
+
 from pathlib import Path
 
 import pytest
 
 pytest.importorskip("textual")
 
-from textual.widgets import Static
-
 from gc_testkit.tui_support import open_settings_section
+from textual.widgets import Static
 
 
 def _fake_probe(result=None):
@@ -21,10 +21,12 @@ def _fake_probe(result=None):
     один на все settings-тесты — `_probe_ok` из `test_settings_screen`."""
     if result is None:
         from test_settings_screen import _probe_ok
+
         result = _probe_ok()
 
     def probe_fn(endpoint, auth, verify, model, **kw):
         return result
+
     return probe_fn
 
 
@@ -41,17 +43,20 @@ def _base_config_text(profile: str = "") -> str:
         f'profile: "{profile}"\n'
         "level: default\n"
         "backend:\n"
-        "  completions_url: \"http://host/v1/chat/completions\"\n"
+        '  completions_url: "http://host/v1/chat/completions"\n'
         "agent:\n"
-        "  model: \"test-model\"\n"
+        '  model: "test-model"\n'
     )
 
 
 def _mk_screen(config=None, config_path=None, on_apply=None):
     from gc_tui.screens.settings import SettingsScreen
+
     return SettingsScreen(
-        config=config or {}, config_path=str(config_path) if config_path else None,
-        on_apply=on_apply or (lambda: None), probe_fn=_fake_probe(),
+        config=config or {},
+        config_path=str(config_path) if config_path else None,
+        on_apply=on_apply or (lambda: None),
+        probe_fn=_fake_probe(),
     )
 
 
@@ -66,16 +71,24 @@ def _profiles_rows_text(screen) -> list[str]:
 
 # --- список профилей обоих корней: имя, источник, тёзка, суффикс «+security» ---
 
-async def test_profiles_section_lists_both_roots_with_source(tmp_path, monkeypatch):
+
+async def test_profiles_section_lists_both_roots_with_source(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -104,6 +117,7 @@ async def test_an_unreadable_profile_is_named_once(tmp_path, monkeypatch):
     профиль в UTF-16 не участвует в загрузке, и до витрины его никто не проверял.
     """
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -120,8 +134,11 @@ async def test_an_unreadable_profile_is_named_once(tmp_path, monkeypatch):
         await _open_profiles(pilot, scr)
         await _cursor_to(scr, "profile", "enc")
         await pilot.pause()
-        blob = "\n".join(_profiles_rows_text(scr)) + "\n" + "\n".join(
-            str(w.render()) for w in scr.query("Static"))
+        blob = (
+            "\n".join(_profiles_rows_text(scr))
+            + "\n"
+            + "\n".join(str(w.render()) for w in scr.query("Static"))
+        )
         assert "не удалось прочитать" in blob, blob
         assert blob.count("не удалось прочитать") == 1, blob
         # Путь стоит ПЕРВОЙ строкой блока — в строке причины он лишний: на экране
@@ -130,21 +147,31 @@ async def test_an_unreadable_profile_is_named_once(tmp_path, monkeypatch):
 
 
 def _base_dict() -> dict:
-    return {"completions_url": "http://host/v1/chat/completions", "model": "test-model"}
+    return {
+        "completions_url": "http://host/v1/chat/completions",
+        "model": "test-model",
+    }
 
 
-async def test_profiles_section_tie_break_one_row_shadow_in_hint(tmp_path, monkeypatch):
+async def test_profiles_section_tie_break_one_row_shadow_in_hint(
+    tmp_path, monkeypatch
+):
     """Тёзка (одинаковое имя в обоих корнях) — ОДНА строка, побеждает проектный;
     перекрытый (глобальный) файл — в hint выделенной строки (спека §3.1)."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    proj_profile = _write(project_dir / ".gc" / "profiles" / "work.yml",
-                          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
-    base_profile = _write(tmp_path / "base" / "profiles" / "work.yml",
-                          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+    proj_profile = _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
+    )
+    base_profile = _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -158,25 +185,33 @@ async def test_profiles_section_tie_break_one_row_shadow_in_hint(tmp_path, monke
         assert profile_rows[0]["ref"].path == proj_profile
         assert profile_rows[0]["shadow"].path == base_profile
         scr._profiles_idx = next(
-            i for i, r in enumerate(rows) if r["kind"] == "profile")
+            i for i, r in enumerate(rows) if r["kind"] == "profile"
+        )
         hint = scr._profiles_hint_text(rows)
         assert str(base_profile) in hint
         # Путь без объяснения оставлял человека гадать, кто кого перекрыл и правки в
         # каком из двух файлов что-то изменят: подсказка обязана СКАЗАТЬ, что этот
         # файл есть, но не работает (ревизия владельца по смоку).
-        assert f"тот же профиль есть здесь, но перекрыт: {base_profile}" in hint
+        assert (
+            f"тот же профиль есть здесь, но перекрыт: {base_profile}" in hint
+        )
 
 
-async def test_profiles_section_overlay_suffix_shows_plus_security(tmp_path, monkeypatch):
+async def test_profiles_section_overlay_suffix_shows_plus_security(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n    token: \"\"\n"
-          "slots:\n  default: flash\n"
-          "security:\n  command_moderation:\n    enabled: true\n")
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\n'
+        "slots:\n  default: flash\n"
+        "security:\n  command_moderation:\n    enabled: true\n",
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -188,15 +223,20 @@ async def test_profiles_section_overlay_suffix_shows_plus_security(tmp_path, mon
         assert any("+security" in l for l in lines)
 
 
-async def test_profiles_section_slot_composition_shown_inline(tmp_path, monkeypatch):
+async def test_profiles_section_slot_composition_shown_inline(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n    token: \"\"\n  glm:\n    url: http://y\n    token: \"\"\n"
-          "slots:\n  default: glm\n  light: flash\n")
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\n  glm:\n    url: http://y\n    token: ""\n'
+        "slots:\n  default: glm\n  light: flash\n",
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -214,21 +254,26 @@ def test_fit_overlay_suffix_whole_names_only():
     не посимвольно; хвост «+…», когда обрезка нужна; «+…» без имён вовсе, если
     не влезает даже первое."""
     from gc_tui.screens.settings import fit_overlay_suffix
+
     names = ["security", "summary", "long_memory"]
     full = fit_overlay_suffix(names, width=200)
     assert full == "+security+summary+long_memory"
     tight = fit_overlay_suffix(names, width=15)
     assert tight == "+security+…"
-    assert "summary" not in tight            # имя не режется посередине
+    assert "summary" not in tight  # имя не режется посередине
     tiny = fit_overlay_suffix(names, width=5)
-    assert tiny == "+…"                      # не влезло даже первое имя
+    assert tiny == "+…"  # не влезло даже первое имя
     assert fit_overlay_suffix([], width=200) == ""
 
 
 # --- пустое состояние (текст §12.3 дословно + скелет + путь) ---
 
-async def test_profiles_section_empty_state_shows_spec_text(tmp_path, monkeypatch):
+
+async def test_profiles_section_empty_state_shows_spec_text(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -258,14 +303,20 @@ async def test_profiles_section_empty_state_shows_spec_text(tmp_path, monkeypatc
 
 # --- активация: единое правило записи, все три случая + создание файла + no-op ---
 
-async def test_activate_project_profile_writes_project_config_creates_file(tmp_path, monkeypatch):
+
+async def test_activate_project_profile_writes_project_config_creates_file(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
+    )
     project_config = project_dir / ".gc" / "config.yml"
     assert not project_config.exists()
 
@@ -284,8 +335,11 @@ async def test_activate_project_profile_writes_project_config_creates_file(tmp_p
         assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_activate_base_profile_writes_base_config_without_project_pointer(tmp_path, monkeypatch):
+async def test_activate_base_profile_writes_base_config_without_project_pointer(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -294,8 +348,10 @@ async def test_activate_base_profile_writes_base_config_without_project_pointer(
     # профиля, а гейт активации теперь отказывает по стеку, который ломает сама
     # запись. Тест — про то, В КАКОЙ файл уходит указатель, и стенду положено
     # нести профиль, с которым следующий старт поднимается.
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-          'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n',
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -312,10 +368,13 @@ async def test_activate_base_profile_writes_base_config_without_project_pointer(
         assert not (project_dir / ".gc" / "config.yml").exists()
 
 
-async def test_activate_base_profile_redirects_to_project_when_project_sets_pointer(tmp_path, monkeypatch):
+async def test_activate_base_profile_redirects_to_project_when_project_sets_pointer(
+    tmp_path, monkeypatch
+):
     """Проектный `.gc/config.yml` уже несёт указатель (перекрыл бы базу) — запись
     базового профиля тоже уходит в проектный конфиг, иначе была бы no-op (спека §12.3)."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -323,9 +382,13 @@ async def test_activate_base_profile_redirects_to_project_when_project_sets_poin
     # профиль ВАЛИДЕН (полная пара не нужна — модель без своего подключения):
     # активация судится стеком строго, и стенд с половиной пары (url без token)
     # проверял бы отказ гейта, а не место записи указателя
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-          "models:\n  glm:\n    model: zhipu/glm\nslots:\n  default: glm\n")
-    project_config = _write(project_dir / ".gc" / "config.yml", 'profile: "other"\n')
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    model: zhipu/glm\nslots:\n  default: glm\n",
+    )
+    project_config = _write(
+        project_dir / ".gc" / "config.yml", 'profile: "other"\n'
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -343,7 +406,9 @@ async def test_activate_base_profile_redirects_to_project_when_project_sets_poin
         assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_overlay_suffix_is_spaced_off_the_active_marker(tmp_path, monkeypatch):
+async def test_overlay_suffix_is_spaced_off_the_active_marker(
+    tmp_path, monkeypatch
+):
     """Профиль, который несёт ТОЛЬКО секции (без слотов), не слипается с маркером.
 
     Отступ хвоста был привязан к наличию слотов, и у такого профиля пропадал —
@@ -351,16 +416,21 @@ async def test_overlay_suffix_is_spaced_off_the_active_marker(tmp_path, monkeypa
     2026-08-26). Профиль без слотов — обычный случай: секция `voice`, гварды,
     лимиты меняются без переопределения моделей."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "work.yml",
-           "voice:\n  url: https://from-profile/v1/audio/transcriptions\n")
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        "voice:\n  url: https://from-profile/v1/audio/transcriptions\n",
+    )
 
     app = app_mod.TuiApp(config={**_base_dict(), "profile": "work"})
     async with app.run_test() as pilot:
-        scr = _mk_screen(config={**_base_dict(), "profile": "work"}, config_path=base_cfg)
+        scr = _mk_screen(
+            config={**_base_dict(), "profile": "work"}, config_path=base_cfg
+        )
         app.push_screen(scr)
         await pilot.pause()
         await _open_profiles(pilot, scr)
@@ -370,7 +440,9 @@ async def test_overlay_suffix_is_spaced_off_the_active_marker(tmp_path, monkeypa
     assert "активен   +voice" in line, line
 
 
-async def test_active_base_profile_selected_by_project_config_shows_marker_and_hint(tmp_path, monkeypatch):
+async def test_active_base_profile_selected_by_project_config_shows_marker_and_hint(
+    tmp_path, monkeypatch
+):
     """Спека §12.3: активный профиль из БАЗОВОГО корня, выбранный проектным
     `.gc/config.yml` (не сам профиль — только указатель), — строка несёт
     «глобальный» (источник ФАЙЛА профиля) + «● активен» + «· выбран проектом»;
@@ -378,12 +450,15 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
     Important-находка: settings.py:1094-1097/1129-1131, ветка `_project_sets_
     profile_pointer() and ref.root_kind != "project"` — было без регресс-теста)."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
     # Проектный конфиг сам задаёт указатель — «home» становится действующим
     # ИМЕННО через него (self._config уже несёт "profile": "home" — так же, как
     # его отдал бы реальный load_config_ex после merge проектного слоя).
@@ -391,7 +466,9 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
 
     app = app_mod.TuiApp(config={**_base_dict(), "profile": "home"})
     async with app.run_test() as pilot:
-        scr = _mk_screen(config={**_base_dict(), "profile": "home"}, config_path=base_cfg)
+        scr = _mk_screen(
+            config={**_base_dict(), "profile": "home"}, config_path=base_cfg
+        )
         app.push_screen(scr)
         await pilot.pause()
         await _open_profiles(pilot, scr)
@@ -404,23 +481,33 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
         assert "● активен" in home_line
         assert "выбран проектом" in home_line
         scr._profiles_idx = next(
-            i for i, r in enumerate(rows) if r["kind"] == "profile")
+            i for i, r in enumerate(rows) if r["kind"] == "profile"
+        )
         hint = scr._profiles_hint_text(rows)
         assert "выбор задан .gc/config.yml проекта" in hint
 
 
-async def test_activate_already_active_profile_is_noop_with_notice(tmp_path, monkeypatch):
+async def test_activate_already_active_profile_is_noop_with_notice(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="home"))
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text(profile="home")
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
 
     app = app_mod.TuiApp(config={**_base_dict(), "profile": "home"})
     async with app.run_test() as pilot:
-        scr = _mk_screen(config={**_base_dict(), "profile": "home"}, config_path=base_cfg)
+        scr = _mk_screen(
+            config={**_base_dict(), "profile": "home"}, config_path=base_cfg
+        )
         app.push_screen(scr)
         await pilot.pause()
         await _open_profiles(pilot, scr)
@@ -428,19 +515,24 @@ async def test_activate_already_active_profile_is_noop_with_notice(tmp_path, mon
         row = next(r for r in rows if r.get("name") == "home")
         before = base_cfg.read_text(encoding="utf-8")
         scr._activate_profile(row["name"], row["ref"])
-        assert base_cfg.read_text(encoding="utf-8") == before   # файл не тронут
+        assert base_cfg.read_text(encoding="utf-8") == before  # файл не тронут
         title = " ".join(str(w.render()) for w in scr.query("#set-title"))
         assert "уже активен" in title
 
 
-async def test_profiles_hint_shows_path_and_activation_target(tmp_path, monkeypatch):
+async def test_profiles_hint_shows_path_and_activation_target(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    profile_path = _write(tmp_path / "base" / "profiles" / "home.yml",
-                          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+    profile_path = _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -450,7 +542,8 @@ async def test_profiles_hint_shows_path_and_activation_target(tmp_path, monkeypa
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
         scr._profiles_idx = next(
-            i for i, r in enumerate(rows) if r["kind"] == "profile")
+            i for i, r in enumerate(rows) if r["kind"] == "profile"
+        )
         hint = scr._profiles_hint_text(rows)
         assert str(profile_path) in hint
         # Волна B, решение юзера В1: активация — смена состояния, её клавиша Space
@@ -465,18 +558,28 @@ async def test_profiles_hint_shows_path_and_activation_target(tmp_path, monkeypa
 # это своими словами («действует только без реестра»). В «Подключении» смысл
 # прежний: плоские поля остаются базой наследования, но не действующим резолвом.
 
+
 async def test_shadow_hint_shown_when_profile_active(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
-    _write(tmp_path / "base" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text(profile="work")
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
+    )
 
-    app = app_mod.TuiApp(config={**_base_dict(), "profile": "work", "models": {"flash": {}}})
+    app = app_mod.TuiApp(
+        config={**_base_dict(), "profile": "work", "models": {"flash": {}}}
+    )
     async with app.run_test() as pilot:
-        scr = _mk_screen(config={**_base_dict(), "profile": "work"}, config_path=base_cfg)
+        scr = _mk_screen(
+            config={**_base_dict(), "profile": "work"}, config_path=base_cfg
+        )
         app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Подключение")
@@ -485,17 +588,24 @@ async def test_shadow_hint_shown_when_profile_active(tmp_path, monkeypatch):
         assert "действует профиль work" in body
 
 
-async def test_shadow_hint_shown_for_registry_without_profile(tmp_path, monkeypatch):
+async def test_shadow_hint_shown_for_registry_without_profile(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config={**_base_dict(), "models": {"flash": {"url": "http://x"}}})
+    app = app_mod.TuiApp(
+        config={**_base_dict(), "models": {"flash": {"url": "http://x"}}}
+    )
     async with app.run_test() as pilot:
-        scr = _mk_screen(config={**_base_dict(), "models": {"flash": {"url": "http://x"}}},
-                         config_path=base_cfg)
+        scr = _mk_screen(
+            config={**_base_dict(), "models": {"flash": {"url": "http://x"}}},
+            config_path=base_cfg,
+        )
         app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Подключение")
@@ -506,6 +616,7 @@ async def test_shadow_hint_shown_for_registry_without_profile(tmp_path, monkeypa
 
 async def test_shadow_hint_absent_in_legacy_mode(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -525,21 +636,32 @@ async def test_shadow_hint_absent_in_legacy_mode(tmp_path, monkeypatch):
 
 # --- value-origin: подпись слоя профиля обязательна (KeyError-регресс) ---
 
+
 def test_overlay_label_profile_kind_no_keyerror(tmp_path, monkeypatch):
     """Регресс: origin.overlay_kind='profile:*' без подписи в OVERLAY_LABELS
     роняет settings.py KeyError'ом (бриф Task 13) — подпись обязана быть."""
     from gc_core.config_origin import Origin, overlay_label
-    origin = Origin(raw="", overlay_kind="profile:project",
-                    overlay_path=str(tmp_path / "work.yml"), effective="glm")
+
+    origin = Origin(
+        raw="",
+        overlay_kind="profile:project",
+        overlay_path=str(tmp_path / "work.yml"),
+        effective="glm",
+    )
     assert overlay_label(origin) == "профилем work (проектным)"
 
-    origin_base = Origin(raw="", overlay_kind="profile:base",
-                         overlay_path=str(tmp_path / "home.yml"), effective="glm")
+    origin_base = Origin(
+        raw="",
+        overlay_kind="profile:base",
+        overlay_path=str(tmp_path / "home.yml"),
+        effective="glm",
+    )
     assert overlay_label(origin_base) == "профилем home (глобальным)"
 
 
 def test_origins_reports_profile_layer(tmp_path, monkeypatch):
     from gc_core.config_origin import origins
+
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.managed_config_path",
         lambda: tmp_path / "no-managed.yml",
@@ -547,9 +669,14 @@ def test_origins_reports_profile_layer(tmp_path, monkeypatch):
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base = _write(tmp_path / "base" / "config.yml",
-                 'profile: "work"\nagent:\n  model: base-model\n')
-    _write(project_dir / ".gc" / "profiles" / "work.yml", "agent:\n  model: profile-model\n")
+    base = _write(
+        tmp_path / "base" / "config.yml",
+        'profile: "work"\nagent:\n  model: base-model\n',
+    )
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        "agent:\n  model: profile-model\n",
+    )
 
     got = origins(str(base), ["agent.model"])["agent.model"]
     assert got.effective == "profile-model"
@@ -557,27 +684,37 @@ def test_origins_reports_profile_layer(tmp_path, monkeypatch):
     assert got.is_overridden is True
 
 
-async def test_settings_screen_shows_profile_overlay_label_no_keyerror(tmp_path, monkeypatch):
+async def test_settings_screen_shows_profile_overlay_label_no_keyerror(
+    tmp_path, monkeypatch
+):
     """Интеграционный регресс (бриф): открыть «Подключение», когда действующее
     значение перекрыто ПРОФИЛЕМ — не должно падать KeyError на OVERLAY_LABELS."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml",
-                      'profile: "work"\nbackend:\n  completions_url: "http://base/v1"\n'
-                      'agent:\n  model: "test-model"\n')
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-          'backend:\n  completions_url: "http://profile/v1"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml",
+        'profile: "work"\nbackend:\n  completions_url: "http://base/v1"\nagent:\n  model: "test-model"\n',
+    )
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'backend:\n  completions_url: "http://profile/v1"\n',
+    )
 
-    app = app_mod.TuiApp(config={"completions_url": "http://profile/v1", "profile": "work"})
+    app = app_mod.TuiApp(
+        config={"completions_url": "http://profile/v1", "profile": "work"}
+    )
     async with app.run_test() as pilot:
-        scr = _mk_screen(config={"completions_url": "http://profile/v1", "profile": "work"},
-                         config_path=base_cfg)
+        scr = _mk_screen(
+            config={"completions_url": "http://profile/v1", "profile": "work"},
+            config_path=base_cfg,
+        )
         app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Подключение")
-        await pilot.pause()          # не должно бросить KeyError
+        await pilot.pause()  # не должно бросить KeyError
         body = " ".join(str(w.render()) for w in scr.query(".set-hint"))
         assert "перекрыто профилем work (проектным)" in body
 
@@ -592,20 +729,25 @@ def test_voice_override_text_names_the_profile(tmp_path, monkeypatch):
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml",
-                      'profile: "work"\nvoice:\n  url: "http://base-voice/v1"\n'
-                      'agent:\n  model: "test-model"\n')
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-           'voice:\n  url: "http://profile-voice/v1"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml",
+        'profile: "work"\nvoice:\n  url: "http://base-voice/v1"\nagent:\n  model: "test-model"\n',
+    )
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'voice:\n  url: "http://profile-voice/v1"\n',
+    )
 
     scr = _mk_screen(config={"profile": "work"}, config_path=base_cfg)
     text = scr._voice_override_text()
-    assert text == ("⚠ действует http://profile-voice/v1 — "
-                    "перекрыто профилем work (проектным); "
-                    "выбор режима ниже этого не изменит")
+    assert text == (
+        "⚠ действует http://profile-voice/v1 — перекрыто профилем work (проектным); выбор режима ниже этого не изменит"
+    )
 
 
-async def test_voice_override_line_stands_above_both_modes(tmp_path, monkeypatch):
+async def test_voice_override_line_stands_above_both_modes(
+    tmp_path, monkeypatch
+):
     """Строка перекрытия — свойство ВСЕЙ секции, и стоит выше обоих вариантов.
 
     Перекрывший слой бьёт оба режима: профиль ложится выше managed-слоя, в котором
@@ -613,35 +755,47 @@ async def test_voice_override_line_stands_above_both_modes(tmp_path, monkeypatch
     получит адрес профиля. Стоя ПОД вариантами, строка прилипала к соседнему и
     читалась как его свойство (живой смок владельца 2026-08-26): курсор на
     «Локальном сервисе» — предупреждение про чужой, казалось бы, адрес."""
-    from gc_tui import app as app_mod
     from gc_testkit.tui_support import open_settings_section
-    from test_settings_voice import CLOUD, FakeVoiceSetup
+    from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
+    from test_settings_voice import CLOUD, FakeVoiceSetup
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml",
-                      'profile: "work"\nvoice:\n  url: "http://base-voice/v1"\n'
-                      'agent:\n  model: "test-model"\n')
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-           'voice:\n  url: "http://profile-voice/v1"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml",
+        'profile: "work"\nvoice:\n  url: "http://base-voice/v1"\nagent:\n  model: "test-model"\n',
+    )
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'voice:\n  url: "http://profile-voice/v1"\n',
+    )
 
     app = app_mod.TuiApp(config={"profile": "work", "voice": {}})
     async with app.run_test() as pilot:
-        scr = SettingsScreen(config={"profile": "work", "voice": {}},
-                             config_path=str(base_cfg), on_apply=lambda: None,
-                             probe_fn=_fake_probe(), voice=FakeVoiceSetup(CLOUD))
+        scr = SettingsScreen(
+            config={"profile": "work", "voice": {}},
+            config_path=str(base_cfg),
+            on_apply=lambda: None,
+            probe_fn=_fake_probe(),
+            voice=FakeVoiceSetup(CLOUD),
+        )
         app.push_screen(scr)
         await pilot.pause()
         open_settings_section(scr, "Голосовой ввод")
         await pilot.pause()
         widgets = list(scr.query("#set-frame > *"))
         classes = [" ".join(w.classes) for w in widgets]
-        over = next(i for i, c in enumerate(classes) if "set-voiceoverride" in c)
+        over = next(
+            i for i, c in enumerate(classes) if "set-voiceoverride" in c
+        )
         rows = [i for i, c in enumerate(classes) if "set-voicerow" in c]
         margin = widgets[over].styles.margin
     assert rows, classes
-    assert over < rows[0], f"строка перекрытия должна стоять ВЫШЕ вариантов: {classes}"
+    assert over < rows[0], (
+        f"строка перекрытия должна стоять ВЫШЕ вариантов: {classes}"
+    )
     # Воздух с ОБЕИХ сторон одним shorthand: вплотную к первой строке режима
     # предупреждение снова читается как её свойство. Раздельный margin-bottom рядом с
     # `.set-hint { margin-top: 1 }` Textual перетирает — сторож ловит и это.
@@ -650,9 +804,13 @@ async def test_voice_override_line_stands_above_both_modes(tmp_path, monkeypatch
 
 # --- /config: шапка профиль/уровень/модель + путь файла профиля ---
 
-async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypatch):
-    from gc_tui.screens.config import ConfigScreen
+
+async def test_config_screen_header_shows_profile_level_model(
+    tmp_path, monkeypatch
+):
     from gc_tui import app as app_mod
+    from gc_tui.screens.config import ConfigScreen
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -660,12 +818,23 @@ async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypa
         "gc_core.config_modules.env_vars.managed_config_path",
         lambda: tmp_path / "no-managed.yml",
     )
-    profile_path = _write(project_dir / ".gc" / "profiles" / "work.yml",
-                          "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
+    profile_path = _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
+    )
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text(profile="work")
+    )
 
-    app = app_mod.TuiApp(config={"profile": "work", "level": "default",
-                                "model": "flash", "models": {"flash": {}}, "slots": {"default": "flash"}})
+    app = app_mod.TuiApp(
+        config={
+            "profile": "work",
+            "level": "default",
+            "model": "flash",
+            "models": {"flash": {}},
+            "slots": {"default": "flash"},
+        }
+    )
     app.set_config_path(str(base_cfg))
     async with app.run_test() as pilot:
         app.screen._cmd_config()
@@ -684,7 +853,10 @@ async def test_config_screen_header_shows_profile_level_model(tmp_path, monkeypa
 
 # --- /status: строка профиля/уровня/модели ---
 
-async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch):
+
+async def test_status_command_includes_profile_level_model(
+    tmp_path, monkeypatch
+):
     """§14 TUI: `/status` — строка профиля/уровня/модели.
 
     Раньше тест проверял из четырёх полей блока `profile` ровно одно (`level`) —
@@ -694,8 +866,10 @@ async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch
     все четыре — `/status` для того и зовут, когда не понимают, чем идёт работа.
     """
     import json
+
     from gc_tui import app as app_mod
     from gc_tui.screens.viewer import ViewerScreen
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -703,12 +877,22 @@ async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch
         "gc_core.config_modules.env_vars.managed_config_path",
         lambda: tmp_path / "no-managed.yml",
     )
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-           "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n")
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        "models:\n  flash:\n    url: http://x\nslots:\n  default: flash\n",
+    )
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text(profile="work")
+    )
 
-    app = app_mod.TuiApp(config={"profile": "work", "level": "light",
-                                 "models": {"flash": {}}, "slots": {"default": "flash"}})
+    app = app_mod.TuiApp(
+        config={
+            "profile": "work",
+            "level": "light",
+            "models": {"flash": {}},
+            "slots": {"default": "flash"},
+        }
+    )
     app.set_config_path(str(base_cfg))
     async with app.run_test() as pilot:
         app.screen._cmd_status("")
@@ -725,91 +909,139 @@ async def test_status_command_includes_profile_level_model(tmp_path, monkeypatch
 
 # --- онбординг-предупреждение о перекрывающем слое (спека §11) ---
 
+
 def test_onboarding_note_for_active_profile():
     """Профиль лежит НАД базовым конфигом (ось 2, §2) и перекроет модельную часть
     того, что мастер запишет. Текст — факт без адреса действия: ту же строку
     печатает gc-cli, где экрана «Настройки · Профили» не существует."""
     from gc_core.onboarding import overriding_layer_note
+
     note = overriding_layer_note({"profile": "work"})
-    assert note == 'действует профиль "work" — он перекроет модельные настройки'
+    assert (
+        note == 'действует профиль "work" — он перекроет модельные настройки'
+    )
 
 
 def test_onboarding_note_absent_for_registry_in_the_edited_file(tmp_path):
     """Реестр лежит в том же файле, который мастер и правит, — перекрывать выбор
     некому (решение 10: мастер дописывает этот же реестр)."""
     from gc_core.onboarding import overriding_layer_note
+
     base = tmp_path / "config.yml"
-    base.write_text("models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
-                    encoding="utf-8")
+    base.write_text(
+        "models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
+        encoding="utf-8",
+    )
     assert overriding_layer_note({"models": {"flash": {}}}, str(base)) is None
 
 
-def test_onboarding_note_for_registry_from_layer_above_base(tmp_path, monkeypatch):
+def test_onboarding_note_for_registry_from_layer_above_base(
+    tmp_path, monkeypatch
+):
     """Спека §11 «любой источник»: действующий реестр пришёл проектным слоем — то,
     что мастер запишет в базовый config.yml, этот слой перекроет, и выбор человека
     не подействует. Молчать здесь нельзя."""
     from gc_core.config_modules import env_vars
     from gc_core.onboarding import overriding_layer_note
+
     base = tmp_path / "config.yml"
     base.write_text('profile: ""\n', encoding="utf-8")
     project = tmp_path / ".gc" / "config.yml"
     project.parent.mkdir(parents=True, exist_ok=True)
-    project.write_text("models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
-                       encoding="utf-8")
-    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: str(project))
+    project.write_text(
+        "models:\n  proj:\n    model: p\nslots:\n  default: proj\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        env_vars, "project_local_config_path", lambda: str(project)
+    )
     note = overriding_layer_note({"models": {"proj": {}}}, str(base))
     assert note is not None and "перекроет" in note
 
 
 def test_onboarding_note_absent_in_legacy_mode():
     from gc_core.onboarding import overriding_layer_note
+
     assert overriding_layer_note({"model": "x"}) is None
 
 
 def test_setup_guide_includes_profile_note():
     from gc_core.onboarding import setup_guide
-    text = setup_guide("/p/config.yml", {"profile": "work", "model": "x",
-                                        "completions_url": "http://x", }, program="gc-ua")
-    assert 'действует профиль "work" — он перекроет модельные настройки' in text
+
+    text = setup_guide(
+        "/p/config.yml",
+        {
+            "profile": "work",
+            "model": "x",
+            "completions_url": "http://x",
+        },
+        program="gc-ua",
+    )
+    assert (
+        'действует профиль "work" — он перекроет модельные настройки' in text
+    )
     # Адрес действия — принадлежность экрана мастера: в CLI-подсказке этого
     # экрана нет, и звать туда нельзя (спека §3).
     assert "Настройки · Профили" not in text
 
 
 class _FakeMcp:
-    def installable_names(self): return []
-    def wired_names(self): return []
-    def descriptions(self): return {}
-    def install(self, name=None): return 0
+    def installable_names(self):
+        return []
+
+    def wired_names(self):
+        return []
+
+    def descriptions(self):
+        return {}
+
+    def install(self, name=None):
+        return 0
 
 
 async def test_onboarding_screen_shows_warning_when_profile_active(tmp_path):
-    from gc_tui.screens.onboarding import OnboardingScreen
     from gc_tui import app as app_mod
+    from gc_tui.screens.onboarding import OnboardingScreen
+
     app = app_mod.TuiApp(config={"profile": "work"})
     async with app.run_test() as pilot:
-        scr = OnboardingScreen(config={"profile": "work"}, config_path=str(tmp_path / "config.yml"),
-                               review_all=True, on_commit=lambda: None,
-                               fetch=lambda *a, **k: None, mcp=_FakeMcp())
+        scr = OnboardingScreen(
+            config={"profile": "work"},
+            config_path=str(tmp_path / "config.yml"),
+            review_all=True,
+            on_commit=lambda: None,
+            fetch=lambda *a, **k: None,
+            mcp=_FakeMcp(),
+        )
         app.push_screen(scr)
         await pilot.pause()
         warn = scr.query_one("#onb-profile-warn", Static)
         assert 'действует профиль "work"' in str(warn.render())
 
 
-async def test_onboarding_screen_no_warning_for_registry_in_the_edited_file(tmp_path):
+async def test_onboarding_screen_no_warning_for_registry_in_the_edited_file(
+    tmp_path,
+):
     """Реестр лежит в файле, который мастер и правит, — плашке нечего сказать."""
+    from gc_tui import app as app_mod
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.css.query import NoMatches
-    from gc_tui import app as app_mod
+
     cfg_path = tmp_path / "config.yml"
-    cfg_path.write_text("models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
-                        encoding="utf-8")
+    cfg_path.write_text(
+        "models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
+        encoding="utf-8",
+    )
     app = app_mod.TuiApp(config={"models": {"flash": {}}})
     async with app.run_test() as pilot:
-        scr = OnboardingScreen(config={"models": {"flash": {}}}, config_path=str(cfg_path),
-                               review_all=True, on_commit=lambda: None,
-                               fetch=lambda *a, **k: None, mcp=_FakeMcp())
+        scr = OnboardingScreen(
+            config={"models": {"flash": {}}},
+            config_path=str(cfg_path),
+            review_all=True,
+            on_commit=lambda: None,
+            fetch=lambda *a, **k: None,
+            mcp=_FakeMcp(),
+        )
         app.push_screen(scr)
         await pilot.pause()
         with pytest.raises(NoMatches):
@@ -817,14 +1049,20 @@ async def test_onboarding_screen_no_warning_for_registry_in_the_edited_file(tmp_
 
 
 async def test_onboarding_screen_no_warning_in_legacy_mode(tmp_path):
+    from gc_tui import app as app_mod
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.css.query import NoMatches
-    from gc_tui import app as app_mod
+
     app = app_mod.TuiApp(config={"model": "x"})
     async with app.run_test() as pilot:
-        scr = OnboardingScreen(config={"model": "x"}, config_path=str(tmp_path / "config.yml"),
-                               review_all=True, on_commit=lambda: None,
-                               fetch=lambda *a, **k: None, mcp=_FakeMcp())
+        scr = OnboardingScreen(
+            config={"model": "x"},
+            config_path=str(tmp_path / "config.yml"),
+            review_all=True,
+            on_commit=lambda: None,
+            fetch=lambda *a, **k: None,
+            mcp=_FakeMcp(),
+        )
         app.push_screen(scr)
         await pilot.pause()
         with pytest.raises(NoMatches):
@@ -833,25 +1071,33 @@ async def test_onboarding_screen_no_warning_in_legacy_mode(tmp_path):
 
 # --- cold-start notice активации проектного профиля (спека §3.5, residual Task 11) ---
 
+
 def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
     """Профиль выбран прямо базовым `profile:` (не сессией) на самом первом старте
     (`tui.main()`) — notice тоже обязан всплыть (Concern из отчёта Task 11)."""
-    from gc_tui import app as app_mod
     from gc_core import runtime_notices
+    from gc_tui import app as app_mod
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    _write(project_dir / ".gc" / "profiles" / "work.yml",
-          "models:\n  flash:\n    url: http://x\n    token: sk\nslots:\n  default: flash\n")
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text(profile="work"))
+    _write(
+        project_dir / ".gc" / "profiles" / "work.yml",
+        "models:\n  flash:\n    url: http://x\n    token: sk\nslots:\n  default: flash\n",
+    )
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text(profile="work")
+    )
 
     from gc_core.config import load_config_ex
+
     config_dict, meta = load_config_ex(str(base_cfg))
 
     runtime_notices.clear_runtime_notices(listeners=True)
     app = app_mod.TuiApp(config=config_dict)
-    app._maybe_notice_profile_activation(meta.active_name or "", meta, config_dict)
+    app._maybe_notice_profile_activation(
+        meta.active_name or "", meta, config_dict
+    )
 
     notices = runtime_notices.collect_runtime_notices()
     assert any(n.code == "project_profile_activated" for n in notices)
@@ -859,12 +1105,14 @@ def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
 
 # --- «— без профиля» + черта + хвост (спека §12.3, ревизия 2026-07-28) -------
 
+
 async def test_none_row_first_active_marker(tmp_path, monkeypatch):
     """«— без профиля» — первая строка; при пустом указателе `● активен` на ней.
 
     Черты в секции больше нет: она отделяла строку уровня, а уровень переехал в
     «Режимы работы» (2026-08-27) — секция снова однородный список профилей."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -881,7 +1129,7 @@ async def test_none_row_first_active_marker(tmp_path, monkeypatch):
         assert rows[0]["kind"] == "none"
         lines = _profiles_rows_text(scr)
         assert "без профиля" in lines[0] and "● активен" in lines[0]
-        assert not list(scr.query(".set-group-sep"))   # отделять больше нечего
+        assert not list(scr.query(".set-group-sep"))  # отделять больше нечего
         hint = scr._profiles_hint_text(rows)
         assert hint == "профиль не выбран — действует чистый конфиг"
 
@@ -891,6 +1139,7 @@ async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
     «+ добавить профиль…» есть и в пустом состоянии (единственный вход кроме n) —
     и теперь она единственная: уровень уехал в «Режимы работы»."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -906,15 +1155,20 @@ async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
         assert [r["kind"] for r in rows] == ["add"]
 
 
-async def test_deactivate_writes_empty_pointer_to_base_config(tmp_path, monkeypatch):
+async def test_deactivate_writes_empty_pointer_to_base_config(
+    tmp_path, monkeypatch
+):
     """Space на «— без профиля» при активном глобальном профиле → `profile: ""`
     в базовый конфиг (единое правило записи). Клавиша — В1 волны B: снятие
     активации это та же смена состояния, что и активация."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
     cfg = dict(_base_dict(), profile="home")
@@ -930,12 +1184,14 @@ async def test_deactivate_writes_empty_pointer_to_base_config(tmp_path, monkeypa
         assert f"Space — деактивировать (запись: {base_cfg}" in hint_before
         scr._deactivate_profile()
         import yaml
+
         saved = yaml.safe_load(base_cfg.read_text(encoding="utf-8"))
         assert saved.get("profile") == ""
 
 
 async def test_deactivate_noop_when_nothing_active(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -950,13 +1206,14 @@ async def test_deactivate_noop_when_nothing_active(tmp_path, monkeypatch):
         await _open_profiles(pilot, scr)
         before = base_cfg.read_text(encoding="utf-8")
         scr._deactivate_profile()
-        assert base_cfg.read_text(encoding="utf-8") == before   # файл не тронут
+        assert base_cfg.read_text(encoding="utf-8") == before  # файл не тронут
 
 
 async def test_session_tail_full_form_on_profile_row(tmp_path, monkeypatch):
     """Хвост сессионного оверрайда — «· выбран в текущей сессии» (полная форма,
     ревизия 2026-07-28)."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -978,20 +1235,30 @@ async def test_session_tail_full_form_on_profile_row(tmp_path, monkeypatch):
 # --- строка уровня — редактируемая (←/→/Enter), единый источник TOGGLES,
 # единое правило записи, футер позиционный (задача 7) -------------------------
 
-async def test_profiles_section_refuses_to_write_into_packaged_template(tmp_path, monkeypatch):
+
+async def test_profiles_section_refuses_to_write_into_packaged_template(
+    tmp_path, monkeypatch
+):
     """Запуск без пользовательского конфига (GC_HOME не настроен, `--init-config`
     не запускали): базой стал пакетный config.default.yml — ни активация профиля,
     ни деактивация не смеют его править. Тот же guard, что у «Режимов работы»
     (`_modes_apply`), но по ЦЕЛИ записи: у профилей она бывает проектной."""
-    from gc_tui import app as app_mod
     from gc_core import config as config_mod
+    from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    packaged = _write(tmp_path / "packaged" / "config.default.yml", _base_config_text("home"))
-    _write(tmp_path / "packaged" / "profiles" / "home.yml",
-          "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
-    monkeypatch.setattr(config_mod, "_default_config_path", lambda: str(packaged))
+    packaged = _write(
+        tmp_path / "packaged" / "config.default.yml", _base_config_text("home")
+    )
+    _write(
+        tmp_path / "packaged" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
+    monkeypatch.setattr(
+        config_mod, "_default_config_path", lambda: str(packaged)
+    )
     cfg = dict(_base_dict(), profile="home", level="default")
 
     app = app_mod.TuiApp(config=dict(cfg))
@@ -1008,19 +1275,21 @@ async def test_profiles_section_refuses_to_write_into_packaged_template(tmp_path
         await pilot.pause()
 
         text = packaged.read_text(encoding="utf-8")
-        assert 'profile: "home"' in text                        # файл не тронут
+        assert 'profile: "home"' in text  # файл не тронут
         notice = " ".join(str(w.render()) for w in scr.query(Static))
         assert "пакетный шаблон" in notice
 
 
-async def test_profiles_render_reads_each_profile_file_once(tmp_path, monkeypatch):
+async def test_profiles_render_reads_each_profile_file_once(
+    tmp_path, monkeypatch
+):
     """Сводка профиля (чтение + разбор YAML) — самая дорогая часть отрисовки, а
     строки за кадр спрашивают четыре независимых места: футер, монтирование,
     refresh строк и refresh подсказки. Кэш прохода: каждый файл читается ровно
     раз на кадр — и всё равно перечитывается на следующем кадре и на нажатии
     (правка профиля извне обязана быть видна сразу)."""
-    from gc_tui import app as app_mod
     from gc_core.config_modules import profiles as profiles_mod
+    from gc_tui import app as app_mod
 
     project_dir = tmp_path / "project"
     project_dir.mkdir()
@@ -1028,8 +1297,10 @@ async def test_profiles_render_reads_each_profile_file_once(tmp_path, monkeypatc
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profiles_dir = tmp_path / "base" / "profiles"
     for name in ("home", "work", "corp"):
-        _write(profiles_dir / f"{name}.yml",
-               "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+        _write(
+            profiles_dir / f"{name}.yml",
+            "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+        )
 
     calls: list[str] = []
     real_summary = profiles_mod.profile_display_summary
@@ -1038,7 +1309,9 @@ async def test_profiles_render_reads_each_profile_file_once(tmp_path, monkeypatc
         calls.append(str(path))
         return real_summary(path)
 
-    monkeypatch.setattr(profiles_mod, "profile_display_summary", _counting_summary)
+    monkeypatch.setattr(
+        profiles_mod, "profile_display_summary", _counting_summary
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -1058,18 +1331,27 @@ async def test_profiles_render_reads_each_profile_file_once(tmp_path, monkeypatc
         assert len(calls) == len(set(calls)) == 3
 
 
-async def test_profiles_cursor_survives_row_disappearing_under_it(tmp_path, monkeypatch):
+async def test_profiles_cursor_survives_row_disappearing_under_it(
+    tmp_path, monkeypatch
+):
     """Набор строк перечитывается с диска на КАЖДОЕ нажатие и на каждый рендер, а
     файл профиля мог исчезнуть под ногами (правка/удаление извне) — курсор тогда
     указывает за конец, и голый `rows[idx]` уронил бы обработчик клавиш и хинт."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profiles_dir = tmp_path / "base" / "profiles"
-    _write(profiles_dir / "home.yml", "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
-    _write(profiles_dir / "work.yml", "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n")
+    _write(
+        profiles_dir / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
+    _write(
+        profiles_dir / "work.yml",
+        'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -1078,13 +1360,13 @@ async def test_profiles_cursor_survives_row_disappearing_under_it(tmp_path, monk
         await pilot.pause()
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
-        assert len(rows) == 4           # без профиля, home, work, «+ добавить»
+        assert len(rows) == 4  # без профиля, home, work, «+ добавить»
         scr._profiles_idx = len(rows) - 1
         scr._render_view()
         await pilot.pause()
 
         (profiles_dir / "home.yml").unlink()
-        scr._profiles_idx = 3                       # строк осталось 3 — курсор за концом
+        scr._profiles_idx = 3  # строк осталось 3 — курсор за концом
         await pilot.press("enter")
         await pilot.pause(0.1)
         assert scr._profiles_idx == 2
@@ -1092,14 +1374,19 @@ async def test_profiles_cursor_survives_row_disappearing_under_it(tmp_path, monk
         scr._profiles_idx = 3
         assert scr._profiles_hint_text(scr._profiles_rows())
         assert scr._profiles_idx == 2
+
+
 # --- Клавиша активации: Space (канон базы), Enter — тихий алиас -----------------
+
 
 async def _cursor_to(scr, kind, name=None):
     """Курсор на строку нужного вида, с перерисовкой."""
     rows = scr._profiles_rows()
     scr._profiles_idx = next(
-        i for i, r in enumerate(rows)
-        if r["kind"] == kind and (name is None or r.get("name") == name))
+        i
+        for i, r in enumerate(rows)
+        if r["kind"] == kind and (name is None or r.get("name") == name)
+    )
     scr._render_view()
 
 
@@ -1108,6 +1395,7 @@ async def test_profiles_footer_promises_space_not_enter(tmp_path, monkeypatch):
     у MCP «вкл/выкл» и у отметки в post-update). Enter в базе значит «войти
     внутрь», поэтому глаголом активации футер его больше не называет."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -1127,16 +1415,21 @@ async def test_profiles_footer_promises_space_not_enter(tmp_path, monkeypatch):
         assert "Enter — активировать" not in footer
 
 
-async def test_profiles_footer_on_none_row_names_deactivation(tmp_path, monkeypatch):
+async def test_profiles_footer_on_none_row_names_deactivation(
+    tmp_path, monkeypatch
+):
     """Строка «— без профиля» при АКТИВНОМ профиле снимает его — футер обязан
     называть это своим глаголом. Раньше он обещал «активировать», а подсказка в
     том же кадре говорила «деактивировать»: курсор при входе в секцию стоит
     ровно здесь, так что первое, что видел пользователь, было противоречие."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("home"))
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("home")
+    )
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
     cfg = _base_dict()
@@ -1154,11 +1447,14 @@ async def test_profiles_footer_on_none_row_names_deactivation(tmp_path, monkeypa
         assert "активировать  " not in footer.replace("деактивировать", "")
 
 
-async def test_profiles_footer_on_none_row_is_silent_with_nothing_to_undo(tmp_path, monkeypatch):
+async def test_profiles_footer_on_none_row_is_silent_with_nothing_to_undo(
+    tmp_path, monkeypatch
+):
     """Профиль не выбран — на этой строке делать нечего, и футер молчит о
     действии вовсе. Обещать «деактивировать» там, где деактивировать некого, —
     та же ложь, только с другим глаголом."""
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -1174,12 +1470,13 @@ async def test_profiles_footer_on_none_row_is_silent_with_nothing_to_undo(tmp_pa
         await _cursor_to(scr, "none")
         await pilot.pause()
         footer = str(scr.query_one("#set-footer", Static).render())
-        assert "активировать" not in footer          # ни с приставкой, ни без
+        assert "активировать" not in footer  # ни с приставкой, ни без
         assert "↑/↓ — выбор" in footer and "Esc — меню" in footer
 
 
 async def test_space_activates_profile(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
+
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
@@ -1199,7 +1496,9 @@ async def test_space_activates_profile(tmp_path, monkeypatch):
         assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
 
 
-async def test_profiles_section_no_longer_carries_the_level_row(tmp_path, monkeypatch):
+async def test_profiles_section_no_longer_carries_the_level_row(
+    tmp_path, monkeypatch
+):
     """`level` правит ГЛОБАЛЬНЫЙ `level:` конфига, а не ключ внутри файла профиля —
     в секции про профили он был гостем. Его дом — «Режимы работы», рядом с
     равными себе ручками «как работаем» (решение владельца 2026-08-27).
@@ -1212,8 +1511,10 @@ async def test_profiles_section_no_longer_carries_the_level_row(tmp_path, monkey
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-           "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n")
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     async with app.run_test() as pilot:
@@ -1227,7 +1528,8 @@ async def test_profiles_section_no_longer_carries_the_level_row(tmp_path, monkey
 
 
 async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choice(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Подсказка на «— без профиля» говорит о ДЕЙСТВУЮЩЕМ состоянии, а не о файле,
     и при сессионном выборе врала: «действует чистый конфиг», когда действует
     профиль из сессии — тот самый, который в это же время показывает футер.
@@ -1243,8 +1545,10 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     # Пара «адрес+токен» задана целиком: с половиной пары стек профиля не собрался
     # бы, и санация сняла бы сессионный выбор — предмет теста исчез бы до проверки.
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-           'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n',
+    )
 
     app = app_mod.TuiApp(config=_base_dict())
     app.set_config_path(str(base_cfg))
@@ -1258,12 +1562,14 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
         await pilot.pause()
         await _open_profiles(pilot, scr)
         rows = scr._profiles_rows()
-        scr._profiles_idx = next(i for i, r in enumerate(rows) if r["kind"] == "none")
+        scr._profiles_idx = next(
+            i for i, r in enumerate(rows) if r["kind"] == "none"
+        )
 
         hint = scr._profiles_hint_text(scr._profiles_rows())
 
         assert "чистый конфиг" not in hint, hint
-        assert "home" in hint            # назван тот профиль, что реально в силе
+        assert "home" in hint  # назван тот профиль, что реально в силе
         assert "сесси" in hint
 
 
@@ -1282,10 +1588,13 @@ def _app_launched_with(base_cfg, profile_override):
     Определение одно на набор — `test_app_reload_config._app_started_with`:
     вторая копия «как стартует окно» разошлась бы с первой на первой же правке."""
     from test_app_reload_config import _app_started_with
+
     return _app_started_with(base_cfg, profile_override)
 
 
-async def test_registry_origin_judges_the_launch_stack_not_the_pointer(tmp_path, monkeypatch):
+async def test_registry_origin_judges_the_launch_stack_not_the_pointer(
+    tmp_path, monkeypatch
+):
     """`gc-ua --profile ""` при `profile: work` в файле: реестр живёт только в
     профиле, и в этом запуске уровни НЕ работают. Витрина происхождения, судящая
     по диску, печатала «реестр перекрыт профилем work» и прятала легаси-редактор
@@ -1293,12 +1602,16 @@ async def test_registry_origin_judges_the_launch_stack_not_the_pointer(tmp_path,
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
-    _write(tmp_path / "base" / "profiles" / "work.yml",
-           'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n',
+    )
 
     app = _app_launched_with(base_cfg, "")
-    assert app._config["profile"] == ""          # стек запуска — без профиля
+    assert app._config["profile"] == ""  # стек запуска — без профиля
     async with app.run_test() as pilot:
         scr = _mk_screen(config=app._config, config_path=base_cfg)
         app.push_screen(scr)
@@ -1310,8 +1623,9 @@ async def test_registry_origin_judges_the_launch_stack_not_the_pointer(tmp_path,
         open_settings_section(scr, "Модели")
         await pilot.pause()
         from gc_tui.editors.models_section import ModelsSectionEditor
+
         editor = scr.query(ModelsSectionEditor).last()
-        assert editor._legacy_default() is True   # редактор модели на месте
+        assert editor._legacy_default() is True  # редактор модели на месте
         body = " ".join(str(w.render()) for w in scr.query(Static))
         assert "реестр перекрыт" not in body, body
 
@@ -1324,8 +1638,10 @@ async def test_registry_origin_sees_the_session_choice(tmp_path, monkeypatch):
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
-    _write(tmp_path / "base" / "profiles" / "home.yml",
-           'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n')
+    _write(
+        tmp_path / "base" / "profiles" / "home.yml",
+        'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n',
+    )
 
     app = _app_launched_with(base_cfg, None)
     async with app.run_test() as pilot:
@@ -1342,16 +1658,22 @@ async def test_registry_origin_sees_the_session_choice(tmp_path, monkeypatch):
         assert origin.overlay_kind == "profile:base"
 
 
-async def test_field_origins_judge_the_launch_stack_not_the_pointer(tmp_path, monkeypatch):
+async def test_field_origins_judge_the_launch_stack_not_the_pointer(
+    tmp_path, monkeypatch
+):
     """Тот же класс у полей визарда (`_read_origins` → маркеры ⚠ «перекрыто»):
     под `--profile ""` адрес из профиля не действует, и обещание «ваша правка не
     подействует» — ложь ровно там, где человек чинит конфиг."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text("work"))
-    _write(tmp_path / "base" / "profiles" / "work.yml",
-           'backend:\n  completions_url: "http://profile/v1"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml", _base_config_text("work")
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        'backend:\n  completions_url: "http://profile/v1"\n',
+    )
 
     app = _app_launched_with(base_cfg, "")
     async with app.run_test() as pilot:
@@ -1367,8 +1689,9 @@ async def test_field_origins_judge_the_launch_stack_not_the_pointer(tmp_path, mo
         assert "перекрыто профилем" not in body, body
 
 
-async def test_overriding_layer_name_answers_by_files_like_the_write_gate(tmp_path,
-                                                                         monkeypatch):
+async def test_overriding_layer_name_answers_by_files_like_the_write_gate(
+    tmp_path, monkeypatch
+):
     """ИСКЛЮЧЕНИЕ среди витрин происхождения экрана — и единственное: эта отвечает
     на вопрос о ПЕРСИСТЕНТНОСТИ записи, а не о том, что действует сейчас.
 
@@ -1389,10 +1712,14 @@ async def test_overriding_layer_name_answers_by_files_like_the_write_gate(tmp_pa
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml",
-                      _base_config_text("work") + 'tui:\n  finish_gate_mode: "off"\n')
-    _write(tmp_path / "base" / "profiles" / "work.yml",
-           'tui:\n  finish_gate_mode: "smart"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml",
+        _base_config_text("work") + 'tui:\n  finish_gate_mode: "off"\n',
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        'tui:\n  finish_gate_mode: "smart"\n',
+    )
     # Managed-слой теста — `tmp_path/config.local.yml` (автофикстура
     # `_isolated_config_layers`): достаточно его записать.
     _write(tmp_path / "config.local.yml", 'tui:\n  finish_gate_mode: "on"\n')
@@ -1408,16 +1735,22 @@ async def test_overriding_layer_name_answers_by_files_like_the_write_gate(tmp_pa
         assert "профилем work" in name, name
 
 
-async def test_voice_override_text_ignores_a_profile_out_of_the_stack(tmp_path, monkeypatch):
+async def test_voice_override_text_ignores_a_profile_out_of_the_stack(
+    tmp_path, monkeypatch
+):
     """Строка честности голосовой секции — та же витрина: под `--profile ""` адрес
     профиля не действует, и ⚠ о нём — ложная тревога о чужом файле."""
     project_dir = tmp_path / "project"
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
-    base_cfg = _write(tmp_path / "base" / "config.yml",
-                      _base_config_text("work") + 'voice:\n  url: "http://base-voice/v1"\n')
-    _write(tmp_path / "base" / "profiles" / "work.yml",
-           'voice:\n  url: "http://profile-voice/v1"\n')
+    base_cfg = _write(
+        tmp_path / "base" / "config.yml",
+        _base_config_text("work") + 'voice:\n  url: "http://base-voice/v1"\n',
+    )
+    _write(
+        tmp_path / "base" / "profiles" / "work.yml",
+        'voice:\n  url: "http://profile-voice/v1"\n',
+    )
 
     app = _app_launched_with(base_cfg, "")
     async with app.run_test() as pilot:

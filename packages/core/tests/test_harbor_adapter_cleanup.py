@@ -11,12 +11,12 @@
 * ``StepTimings._emit`` читал ``self._fh`` вне лока, а писал внутри. Между
   чтением и локом успевал ``close()``, и запись уходила в закрытый файл.
 """
+
 import ast
 import sys
 import threading
 from pathlib import Path
 
-import pytest
 from gc_testkit.paths import HARBOR
 
 ADAPTER = HARBOR / "adapters" / "gc_cli_external.py"
@@ -28,7 +28,10 @@ def _adapter_tree():
 
 def _func(tree, name):
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == name
+        ):
             return node
     raise AssertionError(f"{name} не найдена в адаптере")
 
@@ -41,7 +44,9 @@ def test_agent_run_closes_its_pool_in_finally():
     assert tries, "_agent_run без try/finally — пул не закроется на отказе"
     closed_in_finally = any(
         isinstance(c.func, ast.Name) and c.func.id == "aclose_clients"
-        for t in tries for stmt in t.finalbody for c in ast.walk(stmt)
+        for t in tries
+        for stmt in t.finalbody
+        for c in ast.walk(stmt)
         if isinstance(c, ast.Call)
     )
     assert closed_in_finally, (
@@ -57,7 +62,9 @@ def test_agent_run_releases_the_trial_logger_in_finally():
     tries = [n for n in ast.walk(run) if isinstance(n, ast.Try)]
     released_in_finally = any(
         isinstance(c.func, ast.Name) and c.func.id == "release_run_logger"
-        for t in tries for stmt in t.finalbody for c in ast.walk(stmt)
+        for t in tries
+        for stmt in t.finalbody
+        for c in ast.walk(stmt)
         if isinstance(c, ast.Call)
     )
     assert released_in_finally, (
@@ -84,7 +91,9 @@ def test_cancellation_is_recorded_before_the_executor_exists():
 def test_step_timings_reads_the_handle_under_the_lock():
     """Гонка на закрытии: дескриптор и читается, и пишется под одним локом."""
     sys.path.insert(0, str(HARBOR))
-    for key in [k for k in sys.modules if k.startswith("adapters.step_timings")]:
+    for key in [
+        k for k in sys.modules if k.startswith("adapters.step_timings")
+    ]:
         del sys.modules[key]
     import adapters.step_timings as mod
 
@@ -96,7 +105,8 @@ def test_step_timings_reads_the_handle_under_the_lock():
         "_emit снова читает self._fh до входа в лок"
     )
     read_lines = [
-        n.lineno for n in ast.walk(emit)
+        n.lineno
+        for n in ast.walk(emit)
         if isinstance(n, ast.Attribute) and n.attr == "_fh"
     ]
     assert read_lines and min(read_lines) > emit.body[0].lineno, read_lines
@@ -116,7 +126,7 @@ def test_step_timings_survives_a_close_during_writes(tmp_path):
         while not stop.is_set():
             try:
                 timings._emit({"k": "v"})
-            except BaseException as exc:  # noqa: BLE001 — нам важен сам факт
+            except BaseException as exc:  # нам важен сам факт
                 errors.append(exc)
                 return
 

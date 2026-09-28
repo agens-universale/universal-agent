@@ -53,7 +53,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
         memory_patch_hint="usually stays in summary only; do not copy into registers",
         description=(
             "- Approaches, edits, commands, configs, or fixes already tried and rejected, failed, or superseded.\n"
-            "- User corrections that ruled something out (\"don't use X\", \"revert Y\", \"that path failed\").\n"
+            '- User corrections that ruled something out ("don\'t use X", "revert Y", "that path failed").\n'
             "- Dead ends from tool errors or verification failures when they should not be retried blindly.\n"
             "- Use `n/a` only if nothing was explicitly ruled out or abandoned.\n"
             "- Do not invent rejected attempts; every item must be traceable to dialogue, tool output, or user message."
@@ -94,6 +94,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
     ),
 )
 
+
 def section_tags() -> tuple[str, ...]:
     return tuple(s.tag for s in SUMMARY_SECTIONS)
 
@@ -127,7 +128,8 @@ _SECTION_BODY_PATTERNS = _build_section_body_patterns()
 
 def render_sections_for_prompt() -> str:
     return "\n\n".join(
-        f"<{s.tag}>\n{s.description.strip()}\n</{s.tag}>" for s in SUMMARY_SECTIONS
+        f"<{s.tag}>\n{s.description.strip()}\n</{s.tag}>"
+        for s in SUMMARY_SECTIONS
     )
 
 
@@ -172,7 +174,9 @@ def extract_summary_bodies(text: str) -> dict[str, str]:
     return bodies
 
 
-def assemble_summary_xml(bodies: dict[str, str], *, only_present: bool = False) -> str:
+def assemble_summary_xml(
+    bodies: dict[str, str], *, only_present: bool = False
+) -> str:
     """Собрать `<summary>`. ``only_present=True`` — только ключи из ``bodies`` (ответ repair с частью тегов)."""
     lines = ["<summary>"]
     for section in SUMMARY_SECTIONS:
@@ -184,7 +188,9 @@ def assemble_summary_xml(bodies: dict[str, str], *, only_present: bool = False) 
     return "\n".join(lines)
 
 
-def merge_summary_bodies(*, preserved: dict[str, str], repaired: dict[str, str]) -> dict[str, str]:
+def merge_summary_bodies(
+    *, preserved: dict[str, str], repaired: dict[str, str]
+) -> dict[str, str]:
     """Repair перекрывает preserved; тег в repair с пустым телом затирает секцию; нет в repair — preserved."""
     merged: dict[str, str] = {}
     for section in SUMMARY_SECTIONS:
@@ -198,7 +204,9 @@ def merge_summary_bodies(*, preserved: dict[str, str], repaired: dict[str, str])
     return merged
 
 
-def agent_summary_slice_mode(*, num_batches: int, patch_executed: bool) -> SummarySliceMode:
+def agent_summary_slice_mode(
+    *, num_batches: int, patch_executed: bool
+) -> SummarySliceMode:
     if num_batches <= 1 and patch_executed:
         return "short"
     return "full"
@@ -208,7 +216,9 @@ def slice_summary(xml_text: str, mode: SummarySliceMode) -> str:
     bodies = extract_summary_bodies(xml_text)
     if not bodies:
         raise ValueError("expected <summary> content")
-    tags = [s.tag for s in SUMMARY_SECTIONS if mode == "full" or s.agent_visible]
+    tags = [
+        s.tag for s in SUMMARY_SECTIONS if mode == "full" or s.agent_visible
+    ]
     sliced = {tag: bodies[tag] for tag in tags if tag in bodies}
     if not sliced:
         raise ValueError("expected <summary> content")

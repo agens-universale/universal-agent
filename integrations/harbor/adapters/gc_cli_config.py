@@ -14,6 +14,7 @@ Layering uses ``config_modules.merge.deep_merge`` — the same rules the project
 Kept free of any ``harbor`` import on purpose: the config contract is testable without
 the harbor runtime installed.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -35,34 +36,32 @@ def schema_defaults(config_dir: str) -> Dict[str, Any]:
 def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
     """What a bench needs differently from a release default.
 
-    NO sampling defaults (temperature/top_p/top_k): open models ship their recommended
-    values in generation_config.json, which the backend applies when the client sends
-    none. Hardcoding sampling here would override every model's own recommended params
-    (e.g. force MiniMax's 1.0/0.95/40 onto Qwen-Coder, whose card recommends
-    0.7/0.8/20/1.05). Pin per-model via the profile's chat_completion_kwargs instead.
+    Generation kwargs belong to the model profile. Open models ship recommended
+    sampling values in generation_config.json, which the backend applies when the
+    client sends none. Pin any generation override per model in the profile's
+    chat_completion_kwargs instead.
     """
     return {
         "backend_api_mode": "chat_completions",
-        "chat_completions_system_prompt_path": str(prompts_dir / "chat_completions_system_prompt.md"),
-        "chat_completions_intent_guard_prompt_path": str(prompts_dir / "chat_completions_intent_guard_prompt.md"),
+        "chat_completions_system_prompt_path": str(
+            prompts_dir / "chat_completions_system_prompt.md"
+        ),
+        "chat_completions_intent_guard_prompt_path": str(
+            prompts_dir / "chat_completions_intent_guard_prompt.md"
+        ),
         "skills_data_path": str(skills_dir),
         "summary_params": {
-            "chat_completions_summary_prompt_path": str(prompts_dir / "chat_completions_summary_prompt.md"),
-            "chat_completions_memory_patch_replace_prompt_path": str(prompts_dir / "chat_completions_memory_patch_replace.md"),
-        },
-        "chat_completions_max_tokens": 32768,
-        "use_max_tokens_param": True,
-        "chat_completion_kwargs": {
-            "chat_template_kwargs": {"enable_thinking": False},
-            "tool_choice": "auto",
+            "chat_completions_summary_prompt_path": str(
+                prompts_dir / "chat_completions_summary_prompt.md"
+            ),
+            "chat_completions_memory_patch_replace_prompt_path": str(
+                prompts_dir / "chat_completions_memory_patch_replace.md"
+            ),
         },
         "use_ssl": False,
         "use_retry": True,
-        "use_local_subagents": False,
         "os_backend": "harbor",
         "system_prompt_id": "v1",
-        "no_tool_call_max_count": 3,
-        "max_steps": 200,
         "save_logs": False,
         "console_trace": False,
         # Guards pinned OFF for benches regardless of release defaults: host-path guards

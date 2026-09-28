@@ -4,6 +4,7 @@
 Доменный слой скиллов (знает структуру скилла, грузит detail). Презентацию/
 проводку добавляют контроллеры (TUI). См. spec 2026-06-25-skill-instruction-injection.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -43,13 +44,11 @@ async def build_skill_delivery(skill_id: str, registry: Any) -> str:
         )
 
     lock = [
-        f"Skill `{skill_id}` is already loaded — the instruction is shown above; "
-        "do not call skills_load again."
+        f"Skill `{skill_id}` is already loaded — the instruction is shown above; do not call skills_load again."
     ]
     if refs or assets:
         lock.append(
-            "Load auxiliary files by the exact names above "
-            "(skills_read_reference / skills_read_asset)."
+            "Load auxiliary files by the exact names above (skills_read_reference / skills_read_asset)."
         )
     parts.append("")
     parts.append(" ".join(lock))

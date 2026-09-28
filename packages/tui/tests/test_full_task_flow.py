@@ -4,6 +4,7 @@
 остаются None, _poll_active выходит сразу — agent-сообщения из data_*.jsonl
 никогда не попадают в trace.
 """
+
 import json
 from pathlib import Path
 
@@ -18,29 +19,59 @@ class _FakeExecutor:
         self.system = system
         self.stopped = False
 
-    async def arun(self, messages, *, thread_id, start_new_thread=False,
-            system=None, verbose=None, **_):
+    async def arun(
+        self,
+        messages,
+        *,
+        thread_id,
+        start_new_thread=False,
+        system=None,
+        verbose=None,
+        **_,
+    ):
         data = Path(self.threads_dir) / f"data_{self.system}_{thread_id}.jsonl"
         meta = Path(self.threads_dir) / f"meta_{self.system}_{thread_id}.json"
         lines: list[str] = []
         for i, msg in enumerate(messages, start=1):
-            lines.append(json.dumps({
-                "type": "message", "seq": i,
-                "payload": {"id": f"u{i}", "role": "user", "content": msg},
-            }))
+            lines.append(
+                json.dumps(
+                    {
+                        "type": "message",
+                        "seq": i,
+                        "payload": {
+                            "id": f"u{i}",
+                            "role": "user",
+                            "content": msg,
+                        },
+                    }
+                )
+            )
         # Agent-ответ: НЕ дублируется через _append_inline; виден только
         # после того, как polling прочитает файл.
-        lines.append(json.dumps({
-            "type": "message", "seq": len(messages) + 1,
-            "payload": {"id": "a1", "role": "assistant",
-                        "content": "это TUI проект на Textual"},
-        }))
+        lines.append(
+            json.dumps(
+                {
+                    "type": "message",
+                    "seq": len(messages) + 1,
+                    "payload": {
+                        "id": "a1",
+                        "role": "assistant",
+                        "content": "это TUI проект на Textual",
+                    },
+                }
+            )
+        )
         data.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        meta.write_text(json.dumps({
-            "thread_id": thread_id,
-            "updated_at": "2026-05-20T12:00:00+00:00",
-            "messages_count": len(messages) + 1,
-        }), encoding="utf-8")
+        meta.write_text(
+            json.dumps(
+                {
+                    "thread_id": thread_id,
+                    "updated_at": "2026-05-20T12:00:00+00:00",
+                    "messages_count": len(messages) + 1,
+                }
+            ),
+            encoding="utf-8",
+        )
 
     def stop_run(self):
         self.stopped = True

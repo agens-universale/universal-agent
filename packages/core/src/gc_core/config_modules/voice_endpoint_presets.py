@@ -1,14 +1,21 @@
 """Пресеты адресов STT-сервисов для поля «URL» голосового ввода (спека
 2026-08-05-voice-endpoint-presets §2). Зеркало endpoint_presets: та же модель
 записи, тот же контракт чтения — справочник данных без TUI-логики."""
+
 from __future__ import annotations
 
 from gc_core.config_modules.endpoint_presets import EndpointPreset
 
 DEFAULT_VOICE_ENDPOINT_PRESETS: tuple[EndpointPreset, ...] = (
-    EndpointPreset(name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"),
-    EndpointPreset(name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"),
-    EndpointPreset(name="Mistral", url="https://api.mistral.ai/v1/audio/transcriptions"),
+    EndpointPreset(
+        name="OpenAI", url="https://api.openai.com/v1/audio/transcriptions"
+    ),
+    EndpointPreset(
+        name="Groq", url="https://api.groq.com/openai/v1/audio/transcriptions"
+    ),
+    EndpointPreset(
+        name="Mistral", url="https://api.mistral.ai/v1/audio/transcriptions"
+    ),
 )
 
 

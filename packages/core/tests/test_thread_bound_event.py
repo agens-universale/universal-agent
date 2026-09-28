@@ -5,13 +5,13 @@
 только ``run_id``. Без этого события тред виден в логе лишь косвенно — через
 сообщения суммаризации, и только если она вообще срабатывала.
 """
+
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 from gc_core import agent_executor as agent_executor_module
 from gc_core.run_context import acreate_run_context
-from gc_testkit import run_coro
 
 
 def _config(tmp_path, log_format):
@@ -82,13 +82,17 @@ class TestJsonl:
         # run_id ставит RunContextFilter на каждую запись — дублировать его в
         # extra= не нужно, и именно он связывает событие с именем файла.
         text = await _run(tmp_path, "jsonl", thread_id="thr-1", system="cli")
-        bound = [e for e in _events(text) if e.get("event") == "thread_bound"][0]
+        bound = [e for e in _events(text) if e.get("event") == "thread_bound"][
+            0
+        ]
         assert bound["run_id"]
 
     async def test_no_event_without_thread(self, tmp_path):
         # gc-cli без -t: треда нет вовсе, связывать не с чем — и это не падение.
         text = await _run(tmp_path, "jsonl")
-        assert not [e for e in _events(text) if e.get("event") == "thread_bound"]
+        assert not [
+            e for e in _events(text) if e.get("event") == "thread_bound"
+        ]
 
 
 class TestText:
@@ -129,4 +133,7 @@ async def test_no_crash_when_logger_is_absent(tmp_path):
         agent_executor_module, "arun_agent", side_effect=_fake_run_agent
     ):
         executor = agent_executor_module.AgentExecutor(ctx)
-        assert await executor.arun(["привет"], thread_id="thr-1", system="cli") == "ok"
+        assert (
+            await executor.arun(["привет"], thread_id="thr-1", system="cli")
+            == "ok"
+        )

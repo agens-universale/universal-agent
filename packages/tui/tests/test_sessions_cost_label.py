@@ -7,14 +7,19 @@
 поэтому зовём его как несвязанную функцию с подставленным объектом. Продовый
 код при этом исполняется целиком, включая чтение `completions_url` из конфига.
 """
+
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 
-_PRICING = {"enabled": True, "input": 100, "output": 200, "currency": "₽",
-            "per_tokens": 1_000_000}
+_PRICING = {
+    "enabled": True,
+    "input": 100,
+    "output": 200,
+    "currency": "₽",
+    "per_tokens": 1_000_000,
+}
 _RU_URL = "https://routerai.ru/api/v1/chat/completions"
 _USD_URL = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -24,7 +29,9 @@ def _cost_label(config: dict, token_usage) -> str | None:
     from gc_tui.screens.sessions import SessionsScreen
 
     holder = SimpleNamespace(app=SimpleNamespace(_config=config))
-    return SessionsScreen._session_cost_label(holder, SimpleNamespace(token_usage=token_usage))
+    return SessionsScreen._session_cost_label(
+        holder, SimpleNamespace(token_usage=token_usage)
+    )
 
 
 def _billed_meta(cost: float) -> dict:
@@ -44,7 +51,9 @@ def test_card_cost_uses_endpoint_currency():
 def test_card_cost_without_fact_uses_tariff():
     pytest.importorskip("textual")
     acc = UsageAccount()
-    acc.add(CATEGORY_MAIN, 1_000_000, 100_000)  # факта нет — считается по тарифу
+    acc.add(
+        CATEGORY_MAIN, 1_000_000, 100_000
+    )  # факта нет — считается по тарифу
     config = {"model": "m", "pricing": _PRICING, "completions_url": _RU_URL}
     assert _cost_label(config, acc.to_meta()) == "120.0 ₽"
 

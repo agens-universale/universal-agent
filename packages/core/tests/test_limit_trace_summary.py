@@ -3,21 +3,25 @@
 Mock LLM: no live calls. Validates envelope shape, LLM failure, raw text passthrough,
 config kill-switch, and no working_memory injection into the prompt.
 """
+
 import json
 from types import SimpleNamespace
 
-import pytest
-
+from gc_core.states import State
 from gc_core.summarize import limit_trace_summary as lts
 from gc_core.summarize import llm as summary_llm
-from gc_core.states import State
 from gc_testkit import run_coro
 
 
 def _make_state(max_steps=2):
     return State(
-        verbose=False, model="Test", tools_spec=[], tools_descr=[],
-        skills_list=[], max_steps=max_steps, system_prompt_id="v1",
+        verbose=False,
+        model="Test",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=max_steps,
+        system_prompt_id="v1",
         use_server_subagents=False,
     )
 
@@ -43,11 +47,14 @@ def _make_ctx(**overrides):
 # Envelope shape
 # ---------------------------------------------------------------------------
 
+
 def test_step_limit_envelope_shape(monkeypatch):
     async def _fake_llm(**kw):
         return "## Intent\n\nDid stuff."
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_llm
+    )
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -55,7 +62,9 @@ def test_step_limit_envelope_shape(monkeypatch):
         {"role": "user", "content": "hello"},
         {"role": "assistant", "content": "working..."},
     ]
-    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
+    result = run_coro(
+        lts.abuild_limit_envelope(state, "step_limit", _make_ctx())
+    )
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "step_limit"
@@ -67,11 +76,17 @@ def test_tool_call_limit_envelope_shape(monkeypatch):
     async def _fake_llm(**kw):
         return "summary text"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_llm
+    )
     state = _make_state(max_steps=10)
     state.tool_calls = 5
     state.messages = [{"role": "user", "content": "hi"}]
-    result = run_coro(lts.abuild_limit_envelope(state, "tool_call_limit", _make_ctx(max_tool_calls=5)))
+    result = run_coro(
+        lts.abuild_limit_envelope(
+            state, "tool_call_limit", _make_ctx(max_tool_calls=5)
+        )
+    )
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "tool_call_limit"
@@ -83,10 +98,16 @@ def test_token_limit_envelope_shape(monkeypatch):
     async def _fake_llm(**kw):
         return "token summary"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_llm
+    )
     state = _make_state(max_steps=10)
     state.messages = [{"role": "user", "content": "hi"}]
-    result = run_coro(lts.abuild_limit_envelope(state, "token_limit", _make_ctx(session_token_limit=100)))
+    result = run_coro(
+        lts.abuild_limit_envelope(
+            state, "token_limit", _make_ctx(session_token_limit=100)
+        )
+    )
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "token_limit"
@@ -100,14 +121,18 @@ def test_token_limit_envelope_shape(monkeypatch):
 # LLM failure -> empty summary, envelope still returned
 # ---------------------------------------------------------------------------
 
+
 def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
     async def _boom(**kw):
         raise RuntimeError("LLM down")
+
     monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _boom)
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
-    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
+    result = run_coro(
+        lts.abuild_limit_envelope(state, "step_limit", _make_ctx())
+    )
     env = json.loads(result)
     assert env["ok"] is False
     assert env["status"] == "step_limit"
@@ -119,15 +144,20 @@ def test_llm_failure_returns_envelope_with_empty_summary(monkeypatch):
 # Raw non-JSON model text still in raw_trace_summary
 # ---------------------------------------------------------------------------
 
+
 def test_raw_non_markdown_text_still_in_summary(monkeypatch):
     async def _fake_llm(**kw):
         return "not json, just plain text"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_llm
+    )
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
-    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx()))
+    result = run_coro(
+        lts.abuild_limit_envelope(state, "step_limit", _make_ctx())
+    )
     env = json.loads(result)
     assert env["raw_trace_summary"] == "not json, just plain text"
 
@@ -136,6 +166,7 @@ def test_raw_non_markdown_text_still_in_summary(monkeypatch):
 # Config kill-switch: limit_trace_summary=false -> empty summary, no LLM call
 # ---------------------------------------------------------------------------
 
+
 def test_kill_switch_disables_llm_call(monkeypatch):
     called = {"n": 0}
 
@@ -143,11 +174,17 @@ def test_kill_switch_disables_llm_call(monkeypatch):
         called["n"] += 1
         return "should not be called"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _fake_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_llm
+    )
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [{"role": "user", "content": "hi"}]
-    result = run_coro(lts.abuild_limit_envelope(state, "step_limit", _make_ctx(limit_trace_summary=False)))
+    result = run_coro(
+        lts.abuild_limit_envelope(
+            state, "step_limit", _make_ctx(limit_trace_summary=False)
+        )
+    )
     env = json.loads(result)
     assert env["raw_trace_summary"] == ""
     assert called["n"] == 0  # LLM never invoked
@@ -157,6 +194,7 @@ def test_kill_switch_disables_llm_call(monkeypatch):
 # No working_memory / shared memory in the prompt
 # ---------------------------------------------------------------------------
 
+
 def test_no_working_memory_in_prompt(monkeypatch):
     captured = {}
 
@@ -164,7 +202,9 @@ def test_no_working_memory_in_prompt(monkeypatch):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _capture_llm
+    )
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -185,6 +225,7 @@ def test_no_working_memory_in_prompt(monkeypatch):
 # System message is stripped from trace serialization
 # ---------------------------------------------------------------------------
 
+
 def test_system_message_not_in_trace(monkeypatch):
     captured = {}
 
@@ -192,7 +233,9 @@ def test_system_message_not_in_trace(monkeypatch):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _capture_llm
+    )
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -209,6 +252,7 @@ def test_system_message_not_in_trace(monkeypatch):
 # Tool calls and outputs are serialized in the trace (not lost)
 # ---------------------------------------------------------------------------
 
+
 def test_function_call_serialized_in_trace(monkeypatch):
     captured = {}
 
@@ -216,7 +260,9 @@ def test_function_call_serialized_in_trace(monkeypatch):
         captured["messages"] = kw.get("messages", [])
         return "summary"
 
-    monkeypatch.setattr(summary_llm, "arequest_chat_completion_text", _capture_llm)
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _capture_llm
+    )
     state = _make_state(max_steps=1)
     state.steps = 2
     state.messages = [
@@ -256,6 +302,7 @@ def test_function_call_serialized_in_trace(monkeypatch):
 # from AgentConfig into config_dict (regression guard for missing wiring).
 # ---------------------------------------------------------------------------
 
+
 def test_kill_switch_wired_from_config():
     """flatten_app_config must include limit_trace_summary from AgentConfig.
 
@@ -264,9 +311,9 @@ def test_kill_switch_wired_from_config():
     key is absent from config_dict. Unit tests that set the key by hand
     on a SimpleNamespace mask the bug.
     """
+    from gc_core.config import flatten_app_config
     from gc_core.config_modules.agent import AgentConfig
     from gc_core.config_modules.root import AppConfig
-    from gc_core.config import flatten_app_config
 
     # False case: kill-switch must reach config_dict as False
     app_cfg_off = AppConfig(agent=AgentConfig(limit_trace_summary=False))

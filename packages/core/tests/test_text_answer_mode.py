@@ -9,12 +9,27 @@ def _ctx(mode):
 
 
 def test_allow_accepts_text():
-    assert run_coro(ashould_return_text_answer(_ctx("allow"), object(), "hi")).accept is True
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx("allow"), object(), "hi")
+        ).accept
+        is True
+    )
 
 
 def test_deny_bounces_text():
-    assert run_coro(ashould_return_text_answer(_ctx("deny"), object(), "hi")).accept is False
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx("deny"), object(), "hi")
+        ).accept
+        is False
+    )
 
 
 def test_empty_text_always_bounces():
-    assert run_coro(ashould_return_text_answer(_ctx("allow"), object(), "   ")).accept is False
+    assert (
+        run_coro(
+            ashould_return_text_answer(_ctx("allow"), object(), "   ")
+        ).accept
+        is False
+    )

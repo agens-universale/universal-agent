@@ -1,4 +1,3 @@
-import json
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional
 
@@ -47,7 +46,9 @@ class AbstractSimpleTool(ABC):
 
     @classmethod
     @abstractmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         pass
 
     @classmethod
@@ -62,7 +63,9 @@ class AbstractSimpleTool(ABC):
 
     @classmethod
     @abstractmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         pass
 
     @abstractmethod

@@ -14,22 +14,23 @@ def parse_chat_completions_max_tokens(raw: Any, *, default: int = 8096) -> int:
         n = int(raw)
         return n if n >= 1 else default
     if isinstance(raw, str):
-        s = raw.strip().lower().replace(" ", "").replace("_", "")
-        if not s:
-            return default
-        if s.endswith("k"):
-            try:
-                base = float(s[:-1])
-                n = int(base * 1000)
-            except ValueError:
-                return default
-            return n if n >= 1 else default
-        try:
-            n = int(float(s))
-        except ValueError:
-            return default
-        return n if n >= 1 else default
+        return _parse_max_tokens_str(raw, default)
     return default
+
+
+def _parse_max_tokens_str(raw: str, default: int) -> int:
+    """Строковая форма: ``"8192"``, ``"32_768"``, ``"16k"``; иначе/≤0 → default."""
+    s = raw.strip().lower().replace(" ", "").replace("_", "")
+    if not s:
+        return default
+    try:
+        if s.endswith("k"):
+            n = int(float(s[:-1]) * 1000)
+        else:
+            n = int(float(s))
+    except ValueError:
+        return default
+    return n if n >= 1 else default
 
 
 class BackendConfig(BaseModel):
@@ -64,7 +65,9 @@ class BackendConfig(BaseModel):
     def validate_api_mode(cls, value: str) -> str:
         normalized = str(value).strip().lower()
         if normalized not in {"responses", "chat_completions"}:
-            raise ValueError("backend.api_mode должен быть 'responses' или 'chat_completions'")
+            raise ValueError(
+                "backend.api_mode должен быть 'responses' или 'chat_completions'"
+            )
         return normalized
 
     @field_validator("chat_completions_max_tokens", mode="before")

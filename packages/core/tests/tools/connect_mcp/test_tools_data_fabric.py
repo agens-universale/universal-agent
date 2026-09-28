@@ -11,9 +11,8 @@
 и обязательно дёргают ``tool_fabric`` — то есть делают то же, что диспетчер
 в ``tools/__init__.py`` делает на каждый вызов.
 """
-import pytest
 
-from gc_core.tools.connect_mcp import agent_tools, api
+from gc_core.tools.connect_mcp import agent_tools
 from gc_core.tools.connect_mcp.agent_tools import (
     MCPToolWrapper,
     aget_mcp_tools_data_for_config,
@@ -31,7 +30,9 @@ _REGISTRY = {
     }
 }
 _CONFIG = {
-    "mcp-servers": {"srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}},
+    "mcp-servers": {
+        "srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}
+    },
 }
 
 
@@ -66,7 +67,7 @@ async def test_fabric_from_public_entry_builds_a_wrapper():
     assert status == {"srv": {"ok": True}}
 
     fabric = tools_data[_TOOL_NAME]["tool_fabric"]
-    tool = fabric()          # ровно так зовёт диспетчер, на каждый вызов тула
+    tool = fabric()  # ровно так зовёт диспетчер, на каждый вызов тула
 
     assert isinstance(tool, MCPToolWrapper)
 

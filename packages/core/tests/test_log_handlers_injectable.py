@@ -14,10 +14,10 @@
 Теперь: хендлеры принимаются параметром и ставятся после очистки, а
 ``propagate`` управляется ключом конфига (дефолт прежний).
 """
+
 import logging
 
 import pytest
-
 from gc_core.utils.logging_module import create_run_logger
 
 
@@ -60,7 +60,7 @@ def test_core_handlers_are_not_replaced():
     """Свой хендлер ДОБАВЛЯЕТСЯ, а не вытесняет файловый вывод ядра."""
     cap = _Capture()
     with_files = dict(_CFG)
-    with_files["save_logs"] = False        # файла нет, но stderr-хендлер остаётся
+    with_files["save_logs"] = False  # файла нет, но stderr-хендлер остаётся
     logger, *_ = create_run_logger(
         with_files, run_id="t3", agent_kind="main", log_handlers=[cap]
     )
@@ -107,7 +107,11 @@ async def test_handlers_reach_the_context_logger():
 
     cap = _Capture()
     ctx = await acreate_run_context(
-        {"stop_tools": [], "backend_api_mode": "chat_completions", "save_logs": False},
+        {
+            "stop_tools": [],
+            "backend_api_mode": "chat_completions",
+            "save_logs": False,
+        },
         log_handlers=[cap],
     )
     ctx.logger.info("из контекста")

@@ -1,6 +1,9 @@
 from typing import Optional
 
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    build_execution_workspace,
+)
 from gc_core.utils.project_data import get_project_data
 
 
@@ -9,9 +12,11 @@ class FakeSandboxBackend:
 
     is_sandbox = True
 
-    def __init__(self, cwd: str, tree: dict[str, list[tuple[str, bool]]], git: bool):
+    def __init__(
+        self, cwd: str, tree: dict[str, list[tuple[str, bool]]], git: bool
+    ):
         self._cwd = cwd
-        self._tree = tree          # path -> [(name, is_dir), ...]
+        self._tree = tree  # path -> [(name, is_dir), ...]
         self._git = git
 
     def default_cwd(self) -> Optional[str]:
@@ -48,7 +53,13 @@ def _backend() -> FakeSandboxBackend:
 
 def _ws(backend: FakeSandboxBackend | None = None) -> ExecutionWorkspace:
     be = backend or _backend()
-    return ExecutionWorkspace(root=be.default_cwd() or "/", backend=be, shell="sh", os_name="Linux", root_writable=True)
+    return ExecutionWorkspace(
+        root=be.default_cwd() or "/",
+        backend=be,
+        shell="sh",
+        os_name="Linux",
+        root_writable=True,
+    )
 
 
 async def test_sandbox_workspace_supplies_project_dir_and_git_flag():
@@ -62,7 +73,7 @@ async def test_sandbox_workspace_supplies_listing():
     listing = data["projectDirListing"]
     assert "django/" in listing
     assert "setup.py" in listing
-    assert "    __init__.py" in listing          # nested entry, one level deep
+    assert "    __init__.py" in listing  # nested entry, one level deep
 
 
 async def test_sandbox_workspace_reports_container_writable_and_shell():
@@ -80,7 +91,9 @@ async def test_no_git_dir_reports_false():
     assert data["projectDirListing"] == ""
 
 
-async def test_local_path_unchanged_when_workspace_is_none(tmp_path, monkeypatch):
+async def test_local_path_unchanged_when_workspace_is_none(
+    tmp_path, monkeypatch
+):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "a.txt").write_text("x")
     data = await get_project_data(None)
@@ -94,7 +107,9 @@ async def test_non_sandbox_backend_falls_back_to_local(tmp_path, monkeypatch):
 
     monkeypatch.chdir(tmp_path)
     (tmp_path / "b.txt").write_text("x")
-    data = await get_project_data(None, backend=LocalLike(cwd="/testbed", tree={}, git=True))
+    data = await get_project_data(
+        None, backend=LocalLike(cwd="/testbed", tree={}, git=True)
+    )
     assert data["projectDir"] == str(tmp_path.resolve())
     assert "b.txt" in data["projectDirListing"]
 

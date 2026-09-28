@@ -1,7 +1,5 @@
-import yaml
 import pytest
-from pydantic import ValidationError
-
+import yaml
 from gc_core.config import load_config
 from gc_core.config_modules.message_notice import (
     ToolUsageNoticeRule,
@@ -15,6 +13,7 @@ from gc_core.config_modules.project_memory import (
     project_memory_notice_enabled,
 )
 from gc_core.config_modules.root import AppConfig
+from pydantic import ValidationError
 
 
 def test_project_memory_notice_defaults():
@@ -54,7 +53,12 @@ def test_app_config_rejects_unknown_keys_in_notice_sections():
         AppConfig.model_validate(
             {
                 "tool_usage_notice": [
-                    {"tool_name": "x", "step_messages_count": 3, "notice_message": "n", "extra": 1}
+                    {
+                        "tool_name": "x",
+                        "step_messages_count": 3,
+                        "notice_message": "n",
+                        "extra": 1,
+                    }
                 ]
             }
         )
@@ -122,7 +126,9 @@ def test_project_memory_notice_enabled_from_nested_and_flat_config():
     assert project_memory_notice_enabled(
         {"project_memory_params": {"enable_project_memory_notice": True}}
     )
-    assert project_memory_notice_enabled({"enable_project_memory_notice": True})
+    assert project_memory_notice_enabled(
+        {"enable_project_memory_notice": True}
+    )
 
 
 def test_normalize_project_memory_limits_rejects_non_positive():
@@ -149,7 +155,10 @@ project_memory:
 """,
         encoding="utf-8",
     )
-    monkeypatch.setattr("gc_core.config_modules.env_vars.project_local_config_path", lambda: None)
+    monkeypatch.setattr(
+        "gc_core.config_modules.env_vars.project_local_config_path",
+        lambda: None,
+    )
     monkeypatch.setattr("gc_core.config._xdg_config_path", lambda: None)
     cfg = load_config(str(cfg_path))
     assert cfg["project_memory_check_interval_messages"] == 4

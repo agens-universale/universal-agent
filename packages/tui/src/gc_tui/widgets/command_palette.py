@@ -5,6 +5,7 @@ Toggle-подвал (/gate, /answers — спека 2026-07-16-palette-toggles-g
 Состояние тоггла палитра не знает сама — получает инъекцией через `toggle_state`
 (провайдер `name -> str`, отсутствует — если тоггл не инъецирован); запись/reload — вне палитры (tui/toggles.py).
 """
+
 from __future__ import annotations
 
 from typing import Any, Callable, Optional
@@ -17,7 +18,7 @@ from textual.widgets import Rule, Static
 
 from gc_tui import palette as _pal
 from gc_tui.commands import Command, CommandRegistry
-from gc_tui.toggles import TOGGLES, _fit_hint, _HINT_KEYS_TOGGLE, padded_track
+from gc_tui.toggles import _HINT_KEYS_TOGGLE, TOGGLES, _fit_hint, padded_track
 
 _HINT_NO_ARGS = "↑↓ выбрать · Enter выполнить · Esc закрыть"
 _HINT_WITH_ARGS = "↑↓ выбрать · Enter ввести аргумент · Esc закрыть"
@@ -101,7 +102,11 @@ class CommandPalette(VerticalScroll):
     def compose(self) -> ComposeResult:
         rows = self._visible_rows()
         for i, cmd in enumerate(rows):
-            classes = "palette-row selected" if i == self._selected else "palette-row"
+            classes = (
+                "palette-row selected"
+                if i == self._selected
+                else "palette-row"
+            )
             yield Static(self._format_row(cmd), classes=classes, markup=False)
         footer, _ = self._build_footer(offset=len(rows))
         yield footer
@@ -114,7 +119,9 @@ class CommandPalette(VerticalScroll):
         (`/rigor`) → 0; механизм рассчитан на будущие независимые группы.
         Общий источник для `_footer_reserved_height` и `_build_footer`."""
         return sum(
-            1 for j, c in enumerate(toggles) if j > 0 and TOGGLES[c.name].preset_keys
+            1
+            for j, c in enumerate(toggles)
+            if j > 0 and TOGGLES[c.name].preset_keys
         )
 
     def _footer_reserved_height(self) -> int:
@@ -183,15 +190,28 @@ class CommandPalette(VerticalScroll):
                 if j > 0 and TOGGLES[cmd.name].preset_keys:
                     children.append(Rule(classes="palette-group-sep"))
                 idx = offset + j
-                classes = "palette-row palette-toggle-row selected" if idx == self._selected \
+                classes = (
+                    "palette-row palette-toggle-row selected"
+                    if idx == self._selected
                     else "palette-row palette-toggle-row"
-                row = Static(self._format_toggle_row(cmd), classes=classes, markup=False)
+                )
+                row = Static(
+                    self._format_toggle_row(cmd), classes=classes, markup=False
+                )
                 if idx == self._selected:
                     selected_row = row
                 children.append(row)
         sel = self.selected_command()
-        hint_text = self._toggle_hint(sel) if sel is not None and sel.is_toggle else _hint_for(sel)
-        children.append(Static(hint_text, classes="palette-hint palette-keys", markup=False))
+        hint_text = (
+            self._toggle_hint(sel)
+            if sel is not None and sel.is_toggle
+            else _hint_for(sel)
+        )
+        children.append(
+            Static(
+                hint_text, classes="palette-hint palette-keys", markup=False
+            )
+        )
         return Vertical(*children, classes="palette-footer"), selected_row
 
     def _content_width(self) -> int:
@@ -235,14 +255,19 @@ class CommandPalette(VerticalScroll):
         else:
             current = spec.names[0] if spec.names else ""
         width = self._content_width() - 4 if self._content_width() else 0
-        if spec.hint_provider is not None and self._toggle_dynamic_hint is not None:
+        if (
+            spec.hint_provider is not None
+            and self._toggle_dynamic_hint is not None
+        ):
             hint = self._toggle_dynamic_hint(cmd.name, current)
             if not current:
                 return hint
         elif current in spec.names:
             hint = spec.values[spec.names.index(current)].hint
         elif self._toggle_custom_hint is not None:
-            hint = self._toggle_custom_hint(cmd.name)     # /rigor custom, отображаемый (спека §5)
+            hint = self._toggle_custom_hint(
+                cmd.name
+            )  # /rigor custom, отображаемый (спека §5)
         else:
             hint = spec.values[0].hint if spec.values else ""
         return _fit_hint(current, hint, _HINT_KEYS_TOGGLE, width)
@@ -275,7 +300,7 @@ class CommandPalette(VerticalScroll):
         Зазор +3, как и у колонки описаний (§4): было +2, и на строке с самым длинным
         описанием рядом оказывались два разных зазора — 3 слева от описания и 2 справа.
         На одной строке это видно глазом (находка живой приёмки)."""
-        rows = [c for c in self._visible_rows()]
+        rows = list(self._visible_rows())
         if not any(c.hotkey for c in rows):
             return 0
         # По ВСЕМ видимым описаниям, а не только по строкам с хоткеем: у длинного
@@ -286,7 +311,9 @@ class CommandPalette(VerticalScroll):
         head = self._row_head(cmd)
         col = self._hotkey_col_w()
         if not col or not cmd.hotkey:
-            return head              # колонку держит паддинг соседей, пустой хвост не нужен
+            return (
+                head  # колонку держит паддинг соседей, пустой хвост не нужен
+            )
         return head + " " * (col - len(cmd.description)) + cmd.hotkey
 
     def _my_base_w(self, name: str) -> int:
@@ -303,7 +330,11 @@ class CommandPalette(VerticalScroll):
         задействован (`toggle_extra` не инъецирован или вернул `None`, обычный
         single-key тоггл); иначе фиксированные 3 ячейки (двойной пробел +
         глиф custom-резерва, спека §6)."""
-        extra = self._toggle_extra(name) if self._toggle_extra is not None else None
+        extra = (
+            self._toggle_extra(name)
+            if self._toggle_extra is not None
+            else None
+        )
         return 3 if extra is not None else 0
 
     def _toggle_columns(self) -> tuple[int, int, int, int]:
@@ -328,7 +359,9 @@ class CommandPalette(VerticalScroll):
         col = max(len(self._row_head(c, name_w)) for c in toggles) + 3
         base_w = max(self._my_base_w(c.name) for c in toggles)
         extra_w = max(self._my_extra_w(c.name) for c in toggles)
-        label_w = max((len(n) for c in toggles for n in TOGGLES[c.name].names), default=0)
+        label_w = max(
+            (len(n) for c in toggles for n in TOGGLES[c.name].names), default=0
+        )
         return col, base_w, extra_w, label_w
 
     def _format_toggle_row(self, cmd: Command) -> Text:
@@ -391,7 +424,9 @@ class CommandPalette(VerticalScroll):
         avail = self._content_width() - 2 if self._content_width() else 0
         need = col + track_w + 2 + label_w
         if avail and need > avail:
-            prefix_floor = 1 + name_w + 1  # имя-колонка + хотя бы 1 символ описания
+            prefix_floor = (
+                1 + name_w + 1
+            )  # имя-колонка + хотя бы 1 символ описания
             head_w = max(prefix_floor, avail - (track_w + 2 + label_w) - 3)
             if len(head) > head_w:
                 head = head[: head_w - 1] + "…"
@@ -400,8 +435,16 @@ class CommandPalette(VerticalScroll):
         text = Text(head.ljust(col))
         if is_child:
             text.stylize(_pal.DIM, 0, len(head))
-        extra = self._toggle_extra(cmd.name) if self._toggle_extra is not None else None
-        text.append_text(padded_track(spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w))
+        extra = (
+            self._toggle_extra(cmd.name)
+            if self._toggle_extra is not None
+            else None
+        )
+        text.append_text(
+            padded_track(
+                spec, current, extra_lit=extra, base_w=base_w, extra_w=extra_w
+            )
+        )
         text.append("  ")
         value_start = len(text)
         text.append(current)
@@ -419,7 +462,9 @@ class CommandPalette(VerticalScroll):
 
     def _filtered(self, *, toggle: bool) -> list[Command]:
         f = self._filter.lower()
-        cmds = [c for c in self._registry.list_commands() if c.is_toggle == toggle]
+        cmds = [
+            c for c in self._registry.list_commands() if c.is_toggle == toggle
+        ]
         if not toggle:
             # Обычные команды — фильтр как был: startswith по имени ИЛИ алиасу
             # (§12.1: тихий алиас `models`→`/level` — тот же приём здесь).
@@ -445,8 +490,11 @@ class CommandPalette(VerticalScroll):
         # регистрации — он всё равно будет вставлен инъекцией под настоящим
         # родителем. Ребёнок, чей родитель фильтром НЕ пойман (отсутствует в
         # базе), в `owned` не попадает — остаётся обычной строкой на своём месте.
-        base = [c for c in cmds if _matches(c, f)] if f else \
-            [c for c in cmds if TOGGLES[c.name].palette_default]
+        base = (
+            [c for c in cmds if _matches(c, f)]
+            if f
+            else [c for c in cmds if TOGGLES[c.name].palette_default]
+        )
         owned: set[str] = set()
         for c in base:
             if TOGGLES[c.name].preset_keys:
@@ -508,7 +556,11 @@ class CommandPalette(VerticalScroll):
         new_widgets: list[Static] = []
         selected_widget: Optional[Static] = None
         for i, cmd in enumerate(rows):
-            classes = "palette-row selected" if i == self._selected else "palette-row"
+            classes = (
+                "palette-row selected"
+                if i == self._selected
+                else "palette-row"
+            )
             w = Static(self._format_row(cmd), classes=classes, markup=False)
             if i == self._selected:
                 selected_widget = w
@@ -521,4 +573,6 @@ class CommandPalette(VerticalScroll):
         self.remove_children()
         self.mount_all(new_widgets)
         if selected_widget is not None:
-            self.call_after_refresh(selected_widget.scroll_visible, animate=False)
+            self.call_after_refresh(
+                selected_widget.scroll_visible, animate=False
+            )

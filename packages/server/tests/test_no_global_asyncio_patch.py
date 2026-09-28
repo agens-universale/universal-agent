@@ -4,6 +4,7 @@
 включая код того, кто его импортировал. Дыру, ради которой это делалось,
 закрывает gc_core.utils.aio_compat.run_coro_blocking, локально.
 """
+
 import asyncio
 
 

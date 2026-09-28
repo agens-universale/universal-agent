@@ -78,6 +78,28 @@ class ActiveRun:
     stop_requested: bool = False
 
 
+def _finish_turn_locked(
+    run_ref: ActiveRun | None, result: Any, tail: list
+) -> bool:
+    """Обновить исход хода под блокировкой реестра; вернуть необходимость повтора."""
+    stopped = run_ref is not None and run_ref.stop_requested
+    replay = bool(tail) and not stopped
+    if run_ref is not None:
+        # Конец хода — активность прогона, а при хвосте
+        # это ещё и начало следующего. Иначе на всё
+        # время хвостового хода сторож по активности
+        # видел время последнего вебхука.
+        run_ref.last_activity_at = time.time()
+        if not replay:
+            run_ref.done = True
+            # Итог прогона задачи — ответ последнего хода:
+            # хвостовой ход идёт по тому же треду и
+            # отвечает с учётом всего, что было до него.
+            run_ref.result = result
+            run_ref.finished_at = run_ref.last_activity_at
+    return replay
+
+
 class AgentRunRegistry:
     """
     Реестр активных запусков агента (в памяти процесса).
@@ -116,7 +138,7 @@ class AgentRunRegistry:
         # Удаляем самые старые завершённые.
         items = sorted(
             self._completed.items(),
-            key=lambda kv: (kv[1].finished_at or 0.0),
+            key=lambda kv: kv[1].finished_at or 0.0,
         )
         overflow = len(items) - self._completed_max
         for i in range(max(0, overflow)):
@@ -212,6 +234,16 @@ class AgentRunRegistry:
         if reservation is not None:
             await reservation.done.wait()
 
+    def _complete_run_locked(
+        self, key: str, run_ref: ActiveRun | None
+    ) -> None:
+        current = self._runs.get(key)
+        if current is run_ref:
+            del self._runs[key]
+        if run_ref is not None:
+            self._completed[key] = run_ref
+            self._cleanup_completed_locked()
+
     async def astart_if_absent(
         self,
         *,
@@ -271,21 +303,7 @@ class AgentRunRegistry:
                             tail = _take_tail(executor)
                             # С этой строки хвост — только здесь.
                             in_flight = tail
-                            stopped = run_ref is not None and run_ref.stop_requested
-                            replay = bool(tail) and not stopped
-                            if run_ref is not None:
-                                # Конец хода — активность прогона, а при хвосте
-                                # это ещё и начало следующего. Иначе на всё
-                                # время хвостового хода сторож по активности
-                                # видел время последнего вебхука.
-                                run_ref.last_activity_at = time.time()
-                                if not replay:
-                                    run_ref.done = True
-                                    # Итог прогона задачи — ответ последнего хода:
-                                    # хвостовой ход идёт по тому же треду и
-                                    # отвечает с учётом всего, что было до него.
-                                    run_ref.result = result
-                                    run_ref.finished_at = run_ref.last_activity_at
+                            replay = _finish_turn_locked(run_ref, result, tail)
                             if not replay:
                                 dropped, ending = tail, "stopped"
                         if not replay:
@@ -293,7 +311,9 @@ class AgentRunRegistry:
                         # Доигрываем хвост отдельным ходом того же исполнителя
                         # по тому же треду: на следующий старт сервер строит
                         # НОВЫЙ исполнитель, и оставленное в этом пропало бы.
-                        from gc_core.agent_executor import undelivered_as_arun_args
+                        from gc_core.agent_executor import (
+                            undelivered_as_arun_args,
+                        )
 
                         messages, run_kwargs = undelivered_as_arun_args(tail)
                 except asyncio.CancelledError:
@@ -311,7 +331,7 @@ class AgentRunRegistry:
                         dropped = [*in_flight, *_take_tail(executor)]
                         ending = "cancelled"
                     raise
-                except BaseException as e:  # noqa: BLE001
+                except BaseException as e:
                     with self._lock:
                         if run_ref is not None:
                             run_ref.done = True
@@ -322,12 +342,7 @@ class AgentRunRegistry:
                         ending = "failed"
                 finally:
                     with self._lock:
-                        current = self._runs.get(key)
-                        if current is run_ref:
-                            del self._runs[key]
-                        if run_ref is not None:
-                            self._completed[key] = run_ref
-                            self._cleanup_completed_locked()
+                        self._complete_run_locked(key, run_ref)
                     if dropped:
                         # Хвост остановленного, упавшего или снятого прогона не
                         # доигрываем: это отменило бы остановку или спрятало
@@ -336,7 +351,10 @@ class AgentRunRegistry:
                         # В счёт входит и батч хвоста, с которым умер ход.
                         logger.warning(
                             "run_tail_dropped system=%s task_id=%s ending=%s count=%d",
-                            system, task_id, ending, len(dropped),
+                            system,
+                            task_id,
+                            ending,
+                            len(dropped),
                             extra={
                                 "event": "run_tail_dropped",
                                 "system": system,
@@ -369,7 +387,6 @@ class AgentRunRegistry:
             )
             self._runs[key] = run_ref
             return run_ref
-
 
     def add_user_message(
         self,

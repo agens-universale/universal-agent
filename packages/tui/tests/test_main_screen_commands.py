@@ -1,4 +1,5 @@
 """Парсинг /команд + inline-ошибка с closest-match (§4)."""
+
 import pytest
 
 

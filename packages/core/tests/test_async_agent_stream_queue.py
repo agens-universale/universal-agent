@@ -13,10 +13,10 @@
 Тесты дёргают фасад напрямую, без сети и модели: ``run`` подменён, а дельты
 кладутся тем же путём, каким их кладёт ядро — через ``ctx.on_stream_delta``.
 """
+
 import asyncio
 
 import pytest
-
 from gc_core.aio.agent import AsyncAgent
 
 
@@ -31,7 +31,7 @@ class _FakeExecutor:
     async def arun(self, messages, **kwargs):
         for kind, text in self.script:
             self.sink(kind, text)
-            await asyncio.sleep(0)      # дать петле разнести событие
+            await asyncio.sleep(0)  # дать петле разнести событие
         return self.answer
 
 
@@ -60,7 +60,7 @@ async def test_run_does_not_leak_deltas_into_the_next_stream():
     """Баг №1: дельты прошлого run() не должны прилетать в следующий stream()."""
     agent, ex = _agent([("answer", "ПЕРВЫЙ-ХОД")])
 
-    await agent.run("вопрос")                    # никто не подписан
+    await agent.run("вопрос")  # никто не подписан
 
     ex.script = [("answer", "ВТОРОЙ-ХОД")]
     got = [text async for kind, text in agent.stream("вопрос")]
@@ -91,8 +91,7 @@ async def test_two_streams_do_not_starve_each_other():
     first, second = await asyncio.gather(collect(), collect())
 
     assert first and second, (
-        f"один из stream() остался пустым — очередь делится, а не размножается: "
-        f"{first} / {second}"
+        f"один из stream() остался пустым — очередь делится, а не размножается: {first} / {second}"
     )
     assert first == second, (
         f"подписчики увидели разное — веер работает не на всех: {first} / {second}"
@@ -137,7 +136,7 @@ async def test_abandoned_iteration_unsubscribes():
 
     it = agent.stream("вопрос")
     async for _ in it:
-        break                       # бросаем на первой же дельте
+        break  # бросаем на первой же дельте
     await it.aclose()
 
     assert not agent._subscribers, "подписчик остался после броска итерации"

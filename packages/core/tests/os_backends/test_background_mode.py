@@ -15,18 +15,19 @@ daemon-поток, переживавший конец хода, — но тол
 фоновой команды упирался в гарды: путь от модели — гард записи, свой лог в `.gc`
 — закрыт на чтение, и модель его не видела.
 """
+
 import asyncio
 import os
 import pathlib
-import shlex
 import subprocess
 import sys
 import time
 
 import pytest
-
 from gc_core.backends import local as local_backend
 from gc_core.backends.local import LocalFsBackend
+from gc_testkit import LOOP_TIMER_QUANTUM
+from gc_testkit.helpers.crossplatform import python_command, shell_command
 
 #: Корень исходников ядра: `.../packages/core/src`. Его и кладём на путь
 #: подпроцессу, иначе он не найдёт `gc_core`.
@@ -52,10 +53,7 @@ _CHILD = (
 
 
 def _child_command(ticks) -> str:
-    return (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(_CHILD)} "
-        f"{shlex.quote(str(ticks))}"
-    )
+    return python_command(ticks.parent, _CHILD, ticks)
 
 
 async def _read_when_written(path, timeout: float = 15.0) -> str:
@@ -79,7 +77,9 @@ async def test_background_launch_returns_at_once(tmp_path):
     backend = LocalFsBackend()
 
     started = time.monotonic()
-    res = await backend.aspawn_background(_child_command(tmp_path / "ticks.log"))
+    res = await backend.aspawn_background(
+        _child_command(tmp_path / "ticks.log")
+    )
     elapsed = time.monotonic() - started
 
     assert isinstance(res.get("pid"), int) and res["pid"] > 0, res
@@ -87,12 +87,13 @@ async def test_background_launch_returns_at_once(tmp_path):
         f"живая команда должна прийти без кода выхода: {res}"
     )
     assert elapsed < 0.5, (
-        f"фоновый запуск ждал {elapsed:.2f} с — он не должен ждать вовсе "
-        f"(потомок живёт {CHILD_TICKS * 0.1:.0f} с)"
+        f"фоновый запуск ждал {elapsed:.2f} с — он не должен ждать вовсе (потомок живёт {CHILD_TICKS * 0.1:.0f} с)"
     )
 
 
-@pytest.mark.skipif(os.name == "nt", reason="NUL на Windows через samestat не сверить")
+@pytest.mark.skipif(
+    os.name == "nt", reason="NUL на Windows через samestat не сверить"
+)
 async def test_child_streams_are_the_null_device(tmp_path):
     """stdin, stdout и stderr потомка — нулевое устройство, а не труба и не файл.
 
@@ -107,10 +108,7 @@ async def test_child_streams_are_the_null_device(tmp_path):
         "same = [os.path.samestat(os.fstat(fd), null) for fd in (0, 1, 2)]\n"
         "open(sys.argv[1], 'w').write(repr(same))\n"
     )
-    command = (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} "
-        f"{shlex.quote(str(marker))}"
-    )
+    command = python_command(tmp_path, child, marker)
 
     await LocalFsBackend().aspawn_background(command)
 
@@ -137,7 +135,7 @@ async def test_chatty_child_is_not_blocked(tmp_path):
         "sys.stderr.flush()\n"
         f"open({str(marker)!r}, 'w').write('ok')\n"
     )
-    command = f"{shlex.quote(sys.executable)} -c {shlex.quote(child)}"
+    command = python_command(tmp_path, child)
 
     await LocalFsBackend().aspawn_background(command)
 
@@ -160,10 +158,7 @@ async def test_posix_child_leaves_our_session(tmp_path):
     """
     marker = tmp_path / "sid"
     child = "import os, sys\nopen(sys.argv[1], 'w').write(str(os.getsid(0)))\n"
-    command = (
-        f"{shlex.quote(sys.executable)} -c {shlex.quote(child)} "
-        f"{shlex.quote(str(marker))}"
-    )
+    command = python_command(tmp_path, child, marker)
 
     await LocalFsBackend().aspawn_background(command)
 
@@ -185,13 +180,18 @@ def test_windows_child_gets_its_own_hidden_console():
 
     flags = _background_detach_kwargs("nt")["creationflags"]
 
-    assert flags & 0x08000000, "нет CREATE_NO_WINDOW: потомок умрёт вместе с окном агента"
-    assert flags & 0x00000200, (
-        "нет CREATE_NEW_PROCESS_GROUP: потомок вне своей группы, в отличие от "
-        "process_supervisor и persistent_stdio"
+    assert flags & 0x08000000, (
+        "нет CREATE_NO_WINDOW: потомок умрёт вместе с окном агента"
     )
-    assert not flags & 0x00000008, "DETACHED_PROCESS: консольные внуки cmd откроют окна"
-    assert not flags & 0x00000010, "CREATE_NEW_CONSOLE: у каждой фоновой команды своё окно"
+    assert flags & 0x00000200, (
+        "нет CREATE_NEW_PROCESS_GROUP: потомок вне своей группы, в отличие от process_supervisor и persistent_stdio"
+    )
+    assert not flags & 0x00000008, (
+        "DETACHED_PROCESS: консольные внуки cmd откроют окна"
+    )
+    assert not flags & 0x00000010, (
+        "CREATE_NEW_CONSOLE: у каждой фоновой команды своё окно"
+    )
     assert not flags & 0x01000000, (
         "CREATE_BREAKAWAY_FROM_JOB: в job без права выхода запуск упадёт целиком"
     )
@@ -222,14 +222,20 @@ async def test_windows_child_does_not_share_our_console(tmp_path):
         "open(sys.argv[1], 'w').write(f'{n}:' + ','.join(map(str, pids)))\n",
         encoding="utf-8",
     )
-    command = subprocess.list2cmdline([sys.executable, str(probe), str(marker)])
+    command = subprocess.list2cmdline(
+        [sys.executable, str(probe), str(marker)]
+    )
 
     await LocalFsBackend().aspawn_background(command)
 
     count, _, listed = (await _read_when_written(marker)).partition(":")
     pids = {int(p) for p in listed.split(",") if p}
-    assert int(count) >= 1, "у потомка нет консоли вовсе — внуки cmd откроют окна"
-    assert os.getpid() not in pids, f"потомок делит консоль с агентом: {sorted(pids)}"
+    assert int(count) >= 1, (
+        "у потомка нет консоли вовсе — внуки cmd откроют окна"
+    )
+    assert os.getpid() not in pids, (
+        f"потомок делит консоль с агентом: {sorted(pids)}"
+    )
 
 
 async def test_background_spawns_keep_the_loop_breathing():
@@ -266,23 +272,25 @@ async def test_background_spawns_keep_the_loop_breathing():
     stamped: list = []
 
     async def pulse() -> None:
-        previous = time.monotonic()
+        # perf_counter: monotonic на Windows шагает по 15,6 мс (см. LoopPulse).
+        previous = time.perf_counter()
         while not stop.is_set():
             await asyncio.sleep(tick)
-            now = time.monotonic()
+            now = time.perf_counter()
             stamped.append((now, now - previous))
             previous = now
 
     beat = asyncio.ensure_future(pulse())
-    await asyncio.sleep(0.25)                  # дать пульсу устояться
+    await asyncio.sleep(0.25)  # дать пульсу устояться
     # Разделяем базу и замер: тики прогрева судить нельзя — там ничего не
     # происходит, и они только разбавили бы статистику пачки.
-    split = started = time.monotonic()
+    split = started = time.perf_counter()
     try:
         for _ in range(spawns):
-            await backend.aspawn_background("true")
+            # Встроенная команда и sh, и cmd.exe: процесс оболочки без программы.
+            await backend.aspawn_background("exit 0")
     finally:
-        batch = time.monotonic() - started
+        batch = time.perf_counter() - started
         stop.set()
         await beat
 
@@ -294,8 +302,8 @@ async def test_background_spawns_keep_the_loop_breathing():
         f"{spawns} фоновых запусков за {batch * 1000:.0f} мс: "
         f"тиков во время пачки {len(during)}, "
         f"худший разрыв {max(during) * 1000:.1f} мс"
-        if during else
-        f"{spawns} фоновых запусков за {batch * 1000:.0f} мс: НИ ОДНОГО тика"
+        if during
+        else f"{spawns} фоновых запусков за {batch * 1000:.0f} мс: НИ ОДНОГО тика"
     )
 
     assert base, "пульс не тикнул даже на прогреве — замер не состоялся"
@@ -305,10 +313,12 @@ async def test_background_spawns_keep_the_loop_breathing():
     # Страховка, не зависящая от числа тиков: ни один разрыв не съел пачку
     # целиком. В сломанном режиме единственный разрыв ≈ вся пачка (отношение
     # около 1,0), в здоровом — 0,3–0,45.
-    assert max(during) < batch * 0.6, f"один разрыв съел почти всю пачку: {detail}"
+    assert max(during) < batch * 0.6, (
+        f"один разрыв съел почти всю пачку: {detail}"
+    )
     # Медиана по всей выборке: ловит случай «loop занят ПОСТОЯННО», когда тики
     # есть, но редкие.
-    assert statistics.median(base) < tick * 1.5, (
+    assert statistics.median(base) < max(tick, LOOP_TIMER_QUANTUM) * 1.5, (
         f"loop занят ПОСТОЯННО ещё до пачки: медиана прогрева "
         f"{statistics.median(base) * 1000:.1f} мс при шаге {tick * 1000:.0f} мс"
     )
@@ -326,9 +336,11 @@ async def test_cancelled_launch_does_not_lose_a_started_process():
 
     before = set(_BACKGROUND_PROCS)
     task = asyncio.ensure_future(
-        LocalFsBackend().aspawn_background(f"{shlex.quote(sys.executable)} -c pass")
+        LocalFsBackend().aspawn_background(
+            shell_command([sys.executable, "-c", "pass"])
+        )
     )
-    await asyncio.sleep(0)          # задача дошла до своей уступки и стоит на ней
+    await asyncio.sleep(0)  # задача дошла до своей уступки и стоит на ней
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -347,14 +359,16 @@ async def test_a_command_that_fails_at_once_reports_its_exit_code(monkeypatch):
     """
     # Запас на медленную машину: `exit 3` выходит за миллисекунды, но под полным
     # набором тестов старт процесса бывает долгим.
-    monkeypatch.setattr(local_backend, "_BACKGROUND_EARLY_EXIT_SEC", 1.0, raising=False)
+    monkeypatch.setattr(
+        local_backend, "_BACKGROUND_EARLY_EXIT_SEC", 1.0, raising=False
+    )
 
     res = await LocalFsBackend().aspawn_background("exit 3")
 
     assert res.get("exit_code") == 3, res
-    assert not any(p.pid == res["pid"] for p in local_backend._BACKGROUND_PROCS), (
-        "вышедшая команда осталась в учёте живых"
-    )
+    assert not any(
+        p.pid == res["pid"] for p in local_backend._BACKGROUND_PROCS
+    ), "вышедшая команда осталась в учёте живых"
 
 
 def _group_gone_within(pgid: int, timeout: float) -> bool:
@@ -370,14 +384,18 @@ def _group_gone_within(pgid: int, timeout: float) -> bool:
     return False
 
 
-async def test_a_launch_cancelled_after_the_start_leaves_no_process(monkeypatch):
+async def test_a_launch_cancelled_after_the_start_leaves_no_process(
+    monkeypatch,
+):
     """Отмена, пришедшая уже после запуска, гасит запущенное.
 
     После `Popen` запуск ещё ждёт мгновенного отказа команды. Отмена на этом
     ожидании бросила бы живой процесс, чей pid не дошёл до модели, — ни найти,
     ни остановить. Поэтому такой процесс гасится вместе со своей группой.
     """
-    monkeypatch.setattr(local_backend, "_BACKGROUND_EARLY_EXIT_SEC", 5.0, raising=False)
+    monkeypatch.setattr(
+        local_backend, "_BACKGROUND_EARLY_EXIT_SEC", 5.0, raising=False
+    )
     spawned: list = []
     real_popen = subprocess.Popen
 
@@ -387,11 +405,13 @@ async def test_a_launch_cancelled_after_the_start_leaves_no_process(monkeypatch)
         return proc
 
     monkeypatch.setattr(subprocess, "Popen", _recording_popen)
-    sleeper = f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(30)')}"
+    sleeper = shell_command(
+        [sys.executable, "-c", "import time; time.sleep(30)"]
+    )
 
     task = asyncio.ensure_future(LocalFsBackend().aspawn_background(sleeper))
     try:
-        while not spawned:                    # процесс уже запущен
+        while not spawned:  # процесс уже запущен
             await asyncio.sleep(0.01)
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -401,18 +421,24 @@ async def test_a_launch_cancelled_after_the_start_leaves_no_process(monkeypatch)
         try:
             proc.wait(timeout=2)
         except subprocess.TimeoutExpired:
-            pytest.fail("отмена после запуска оставила процесс жить, а его pid потерян")
+            pytest.fail(
+                "отмена после запуска оставила процесс жить, а его pid потерян"
+            )
         if os.name == "posix":
-            assert _group_gone_within(proc.pid, 2.0), "потомки команды пережили отмену"
+            assert _group_gone_within(proc.pid, 2.0), (
+                "потомки команды пережили отмену"
+            )
     finally:
-        for proc in spawned:                  # в любом исходе сирот не оставляем
+        for proc in spawned:  # в любом исходе сирот не оставляем
             local_backend._BACKGROUND_PROCS.discard(proc)
             if proc.poll() is None:
                 proc.kill()
                 proc.wait(timeout=5)
 
 
-async def test_the_launch_asks_for_the_null_device_on_every_platform(monkeypatch):
+async def test_the_launch_asks_for_the_null_device_on_every_platform(
+    monkeypatch,
+):
     """Сторож без платформенной оговорки: все три потока — `DEVNULL`.
 
     Проверка по самому потомку (выше) на Windows не идёт — `NUL` через
@@ -464,7 +490,7 @@ async def test_finished_background_children_leave_the_registry(tmp_path):
     # Живёт дольше проверки мгновенного отказа: вышедшую за неё команду запуск
     # дожимает сам, и в учёт она не попадает вовсе.
     await backend.aspawn_background(
-        f"{shlex.quote(sys.executable)} -c {shlex.quote('import time; time.sleep(0.5)')}"
+        shell_command([sys.executable, "-c", "import time; time.sleep(0.5)"])
     )
     short_lived = set(_BACKGROUND_PROCS) - before
     assert short_lived, "запущенный процесс не попал в учёт"
@@ -490,23 +516,25 @@ def test_background_child_survives_the_whole_agent_process(tmp_path):
     """
     ticks = tmp_path / "ticks.log"
     agent = (
-        "import asyncio, shlex, sys\n"
+        "import asyncio, sys\n"
         f"sys.path.insert(0, {str(_SRC_ROOT)!r})\n"
         "from gc_core.backends.local import LocalFsBackend\n"
-        f"child = {_CHILD!r}\n"
-        f"ticks = {str(ticks)!r}\n"
         "async def turn():\n"
-        "    await LocalFsBackend().aspawn_background(\n"
-        "        f'{shlex.quote(sys.executable)} -c {shlex.quote(child)} {shlex.quote(ticks)}',\n"
-        "    )\n"
+        f"    await LocalFsBackend().aspawn_background({_child_command(ticks)!r})\n"
         "asyncio.run(turn())\n"
     )
 
-    done = subprocess.run([sys.executable, "-c", agent], capture_output=True, timeout=60)
+    done = subprocess.run(
+        [sys.executable, "-c", agent], capture_output=True, timeout=60
+    )
     assert done.returncode == 0, done.stderr.decode()[-400:]
 
     # На момент выхода агента потомок заведомо НЕ успел отработать.
-    early = ticks.read_text(encoding="utf-8").count("tick") if ticks.exists() else 0
+    early = (
+        ticks.read_text(encoding="utf-8").count("tick")
+        if ticks.exists()
+        else 0
+    )
     assert early < CHILD_TICKS, (
         f"потомок успел всё ({early}) до выхода агента — тест ничего не проверяет"
     )
@@ -520,6 +548,5 @@ def test_background_child_survives_the_whole_agent_process(tmp_path):
         time.sleep(0.1)
 
     assert text.count("tick") == CHILD_TICKS, (
-        f"дописано {text.count('tick')} из {CHILD_TICKS}: фоновый процесс не "
-        f"пережил выход агента"
+        f"дописано {text.count('tick')} из {CHILD_TICKS}: фоновый процесс не пережил выход агента"
     )

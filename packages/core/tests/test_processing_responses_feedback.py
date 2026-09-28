@@ -1,16 +1,16 @@
 import importlib
 import sys
 import types
-from pathlib import Path
-
-from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_ERROR_MESSAGE
-from gc_core.message_policy.user_message_policy import build_invalid_tool_call_feedback_message
-from gc_core.states import State
 from types import SimpleNamespace
+
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_ERROR_MESSAGE,
+    build_invalid_tool_call_feedback_message,
+)
+from gc_core.states import State
 from gc_core.utils.convertations import sanitize_messages_for_chat_completions
+from gc_testkit import as_coro, run_coro
 from gc_testkit.paths import module_dir
-from gc_testkit import run_coro
-from gc_testkit import as_coro
 
 
 def teardown_module(_module) -> None:
@@ -41,7 +41,9 @@ def _stub_tools_modules() -> None:
         raise AssertionError("apply_tool should not be called in this test")
 
     tools_pkg.aapply_tool = _apply_tool
-    tools_pkg.WrongFunctionArgumentsException = _WrongFunctionArgumentsException
+    tools_pkg.WrongFunctionArgumentsException = (
+        _WrongFunctionArgumentsException
+    )
     tools_pkg.is_unknown_tool_output = lambda _output: False
     tools_dir = module_dir("tools")
     # `processing_responses` импортирует эти имена на уровне модуля. Без них
@@ -105,7 +107,9 @@ def test_sanitize_messages_for_chat_completions_replaces_invalid_tool_call():
     assert "fs_write_file" in sanitized[0]["content"]
 
 
-def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(monkeypatch):
+def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
+    monkeypatch,
+):
     captured = {}
 
     def _fake_create_call_headers(_state, _ctx, resolved=None):
@@ -124,7 +128,9 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         }
 
     monkeypatch.setattr(
-        processing_module, "acreate_call_headers", as_coro(_fake_create_call_headers)
+        processing_module,
+        "acreate_call_headers",
+        as_coro(_fake_create_call_headers),
     )
     monkeypatch.setattr(
         "gc_core.request_backend_policy.arequest_backend_chat_completions",
@@ -162,14 +168,16 @@ def test_request_backend_canonical_sanitizes_state_history_for_chat_completions(
         logger=None,
     )
 
-    run_coro(processing_module._arequest_backend_canonical(
-        [{"role": "user", "content": "next", "id": "m_1"}],
-        state,
-        ctx,
-    ))
+    run_coro(
+        processing_module._arequest_backend_canonical(
+            [{"role": "user", "content": "next", "id": "m_1"}],
+            state,
+            ctx,
+        )
+    )
 
     payload_messages = captured["messages"]
     assert len(payload_messages) == 2
     assert payload_messages[0]["role"] == "user"
-    assert "<technical type=\"error_message\">" in payload_messages[0]["content"]
+    assert '<technical type="error_message">' in payload_messages[0]["content"]
     assert payload_messages[1]["role"] == "user"

@@ -1,6 +1,7 @@
 """Бегущая точка-волна загрузки (визуальный контракт §2): три точки `·`,
 подсвеченная (teal) перебегает по WAVE_SEQ. Общий helper — хаб /settings и
 MCP-секция используют один и тот же индикатор."""
+
 from __future__ import annotations
 
 from rich.text import Text

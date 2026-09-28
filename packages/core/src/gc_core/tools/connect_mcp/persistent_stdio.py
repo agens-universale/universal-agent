@@ -46,8 +46,6 @@ asyncio уместен и применён (``transport._astdio_exchange``), ч�
 ``run_abandonable``/``to_thread``, а GIL на ожидании pipe отпускается.
 """
 
-from typing import Any, Dict, Optional
-
 import asyncio
 import json
 import os
@@ -55,9 +53,9 @@ import signal
 import subprocess
 import threading
 import time
+from typing import Any, Dict, Optional
 
 from gc_core.mcp_session_owner import current_owner
-from gc_core.utils.aio_compat import run_coro_blocking
 from gc_core.tools.connect_mcp.transport import (
     _INIT_PAYLOAD,
     _INITIALIZED_PAYLOAD,
@@ -66,6 +64,7 @@ from gc_core.tools.connect_mcp.transport import (
     _resolve_command,
     forget_stdio_reader,
 )
+from gc_core.utils.aio_compat import run_coro_blocking
 
 #: Общий бюджет на дочистку остатка сессий, когда прогон сняли снаружи.
 #: Именно общий, а не на сессию: закрытие одной стоит до 7 с (SIGTERM →
@@ -74,7 +73,9 @@ from gc_core.tools.connect_mcp.transport import (
 _CANCEL_DRAIN_BUDGET_SEC = 3.0
 
 
-def _spawn_detached_stdio_process(server_cfg: Dict[str, Any]) -> subprocess.Popen:
+def _spawn_detached_stdio_process(
+    server_cfg: Dict[str, Any],
+) -> subprocess.Popen:
     """
     Запуск stdio MCP-сервера как лидера собственной сессии/process group.
 
@@ -160,10 +161,12 @@ def _group_alive(pgid: int) -> bool:
     try:
         return _signal_group(pgid, 0)
     except PermissionError:
-        return True                    # кто-то есть, но сигналить ему нам нельзя
+        return True  # кто-то есть, но сигналить ему нам нельзя
 
 
-def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> bool:
+def _signal_tree(
+    proc: subprocess.Popen, pgid: Optional[int], *, kill: bool
+) -> bool:
     """Сигнал всему дереву сервера: группе, а без неё — хотя бы лидеру.
 
     ``False`` — бить некого: группы нет, лидер мёртв. Не бросает никогда:
@@ -175,7 +178,7 @@ def _signal_tree(proc: subprocess.Popen, pgid: Optional[int], *, kill: bool) -> 
             if _signal_group(pgid, signal.SIGKILL if kill else signal.SIGTERM):
                 return True
         except OSError:
-            pass                       # группа недоступна (EPERM) — остаётся лидер
+            pass  # группа недоступна (EPERM) — остаётся лидер
     try:
         if proc.poll() is not None:
             return False
@@ -208,11 +211,15 @@ async def _await_exit(
     """
     deadline = time.monotonic() + timeout
     while True:
-        if proc.poll() is not None and (pgid is None or not _group_alive(pgid)):
+        if proc.poll() is not None and (
+            pgid is None or not _group_alive(pgid)
+        ):
             return True
         if time.monotonic() >= deadline:
             return False
-        await asyncio.sleep(min(_POLL_STEP_SEC, max(0.0, deadline - time.monotonic())))
+        await asyncio.sleep(
+            min(_POLL_STEP_SEC, max(0.0, deadline - time.monotonic()))
+        )
 
 
 async def _aterminate_process_tree(
@@ -266,6 +273,9 @@ async def _aterminate_process_tree(
         pass
 
 
+_NOT_RUNNING_MSG = "persistent stdio MCP process is not running"
+
+
 class PersistentStdioSession:
     """
     Одна долгоживущая stdio-сессия с MCP-сервером.
@@ -304,7 +314,9 @@ class PersistentStdioSession:
             # поэтому свой, как у `close`; `run_coro_blocking` переживёт и
             # вызов с живого loop.
             try:
-                run_coro_blocking(_aterminate_process_tree(dead, graceful_timeout=5.0))
+                run_coro_blocking(
+                    _aterminate_process_tree(dead, graceful_timeout=5.0)
+                )
             except Exception:
                 pass
 
@@ -333,21 +345,6 @@ class PersistentStdioSession:
             }
             self._write_line(payload)
             return self._read_matching(req_id, timeout)
-
-    def _detach(self) -> "Optional[subprocess.Popen]":
-        """Снять процесс с сессии под локом. Дальше он уже ничей — ждать его
-        можно сколько угодно, никого не блокируя.
-
-        Лок держится ТОЛЬКО здесь. Раньше он удерживался на всё закрытие,
-        включая ожидание close-тула (до 10 с) и смерти процесса (до 7 с); для
-        асинхронного пути это недопустимо — ``threading.Lock``, удержанный
-        через ``await``, застопорил бы весь loop, если бы за ним пришла
-        корутина.
-        """
-        with self._lock:
-            proc = self._proc
-            self._proc = None
-        return proc
 
     def _detach_nowait(self) -> "tuple[Optional[subprocess.Popen], bool]":
         """Снять процесс, НЕ вставая в очередь за локом.
@@ -400,7 +397,9 @@ class PersistentStdioSession:
             # встраивающий зовёт `close_all` из своего `finally` — под живым
             # loop. Голый `asyncio.run` там бросал, общий `except` выше это
             # глушил, и отцепленный процесс оставался жить без хозяина.
-            run_coro_blocking(_aterminate_process_tree(proc, graceful_timeout=5.0))
+            run_coro_blocking(
+                _aterminate_process_tree(proc, graceful_timeout=5.0)
+            )
 
     async def aclose(self) -> None:
         """То же закрытие, но ожидание не занимает поток.
@@ -471,7 +470,9 @@ class PersistentStdioSession:
             return close_tool.strip()
         return None
 
-    def _write_close_tool(self, proc: "subprocess.Popen", close_tool: str) -> int:
+    def _write_close_tool(
+        self, proc: "subprocess.Popen", close_tool: str
+    ) -> int:
         req_id = self._next_id
         self._next_id += 1
         self._write_line_on(
@@ -517,24 +518,28 @@ class PersistentStdioSession:
     def _write_line(self, payload: Dict[str, Any]) -> None:
         proc = self._proc
         if proc is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         self._write_line_on(proc, payload)
 
     @staticmethod
-    def _write_line_on(proc: "subprocess.Popen", payload: Dict[str, Any]) -> None:
+    def _write_line_on(
+        proc: "subprocess.Popen", payload: Dict[str, Any]
+    ) -> None:
         """Написать в УЖЕ ИЗВЕСТНЫЙ процесс.
 
         Закрытие снимает процесс с сессии первым делом (``_detach``), поэтому
         обращаться к ``self._proc`` дальше нельзя — там уже ``None``.
         """
         if proc.stdin is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         line = json.dumps(payload) + "\n"
         proc.stdin.write(line)
         proc.stdin.flush()
 
     @staticmethod
-    def _match_line(line: "str | None", req_id: Any) -> "tuple[bool, Dict[str, Any]]":
+    def _match_line(
+        line: "str | None", req_id: Any
+    ) -> "tuple[bool, Dict[str, Any]]":
         """``(готово, ответ)`` для одной прочитанной строки.
 
         Общий разбор для синхронного и асинхронного чтения: две копии этого
@@ -563,7 +568,7 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         """Асинхронный двойник чтения ответа — ожидание очереди без потока."""
         if proc.stdout is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
             done, obj = self._match_line(
                 await _areadline_with_timeout(proc.stdout, timeout), req_id
@@ -577,7 +582,7 @@ class PersistentStdioSession:
     ) -> Dict[str, Any]:
         """Чтение ответа из УЖЕ ИЗВЕСТНОГО процесса (после ``_detach``)."""
         if proc.stdout is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
             done, obj = self._match_line(
                 _readline_with_timeout(proc.stdout, timeout), req_id
@@ -594,7 +599,7 @@ class PersistentStdioSession:
         """
         proc = self._proc
         if proc is None or proc.stdout is None:
-            raise RuntimeError("persistent stdio MCP process is not running")
+            raise RuntimeError(_NOT_RUNNING_MSG)
         for _ in range(32):
             line = _readline_with_timeout(proc.stdout, timeout)
             if line is None:
@@ -801,9 +806,11 @@ class PersistentStdioRegistry:
                     # Сняли нас: дочищаем остаток в пределах общего бюджета и
                     # отдаём отмену наружу. Что не успели — ждёт выхода
                     # процесса, хук на который теперь стоит всегда.
-                    await self._adrain_own_within_budget(_CANCEL_DRAIN_BUDGET_SEC)
+                    await self._adrain_own_within_budget(
+                        _CANCEL_DRAIN_BUDGET_SEC
+                    )
                     raise
-                cancelled = exc            # отменилась сессия: гасим остальные
+                cancelled = exc  # отменилась сессия: гасим остальные
             except Exception:
                 pass
         if cancelled is not None:
@@ -846,8 +853,8 @@ def is_persistent_stdio(server_cfg: Dict[str, Any]) -> bool:
 
 
 __all__ = [
-    "PersistentStdioSession",
     "PersistentStdioRegistry",
-    "is_persistent_stdio",
+    "PersistentStdioSession",
     "is_persistent_session",
+    "is_persistent_stdio",
 ]

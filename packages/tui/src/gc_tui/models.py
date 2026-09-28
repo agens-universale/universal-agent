@@ -1,11 +1,22 @@
 """UI-модели TUI MVP — §3 спеки. Без textual."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
-
-Kind = Literal["user", "agent", "call", "result", "error", "error_msg", "system", "ask_human", "summary", "todo"]
+Kind = Literal[
+    "user",
+    "agent",
+    "call",
+    "result",
+    "error",
+    "error_msg",
+    "system",
+    "ask_human",
+    "summary",
+    "todo",
+]
 Status = Literal["running", "stopped", "completed", "failed"]
 
 
@@ -33,14 +44,18 @@ class TaskSummary:
     """Строка списка задач (tui3_impl §10.1)."""
 
     thread_id: str
-    status: Optional[Status]   # None — исход не записан (легаси / прогон без чистого финиша)
+    status: Optional[
+        Status
+    ]  # None — исход не записан (легаси / прогон без чистого финиша)
     updated_at: str
     messages_count: int
     skill_id: Optional[str]
     unread_count: int
     last_error: Optional[str]
     tui_meta: Optional[dict] = None
-    token_usage: Optional[dict] = None  # meta.token_usage (UsageAccount.to_meta)
+    token_usage: Optional[dict] = (
+        None  # meta.token_usage (UsageAccount.to_meta)
+    )
 
 
 @dataclass
@@ -62,4 +77,6 @@ class TraceEvent:
     # (COGNITIVE_TOOLS, "intermediate_reply"/"submit_solution"/"subagent_*" и т.д.).
     wire_name: Optional[str] = None
     hidden: bool = False  # True → не рендерить в трейс (но kind учитывается polling-логикой)
-    summary_content: str = ""  # очищенный текст сводки (только для kind="summary")
+    summary_content: str = (
+        ""  # очищенный текст сводки (только для kind="summary")
+    )

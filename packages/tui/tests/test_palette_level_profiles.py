@@ -4,6 +4,7 @@ docs/specs/2026-07-23-profiles-design.md §12.1-§12.2).
 Стиль — существующие тесты палитро-тогглов (tests/tui/test_palette_toggles.py):
 прямые `assert`, `pytest.importorskip("textual")` перед импортами Textual-слоя.
 """
+
 import pytest
 
 
@@ -12,16 +13,22 @@ def _wire_palette(app, reg, initial_filter=""):
     from gc_tui.widgets.command_palette import CommandPalette
 
     return CommandPalette(
-        reg, initial_filter=initial_filter,
+        reg,
+        initial_filter=initial_filter,
         toggle_state=lambda name: toggle_state(app, name),
-        toggle_dynamic_hint=lambda name, value: dynamic_toggle_hint(app, name, value),
+        toggle_dynamic_hint=lambda name, value: dynamic_toggle_hint(
+            app, name, value
+        ),
     )
 
 
 # --- Группа «чем работаем» (/level, /profiles) — трек, разделитель, порядок ---
 
+
 @pytest.mark.asyncio
-async def test_level_and_profiles_form_new_group_above_rigor(tmp_path, monkeypatch):
+async def test_level_and_profiles_form_new_group_above_rigor(
+    tmp_path, monkeypatch
+):
     """/level и /profiles — новая группа над /rigor, отделённая от неё чертой
     (спека §12.1); gate/answers по-прежнему скрыты в пустом фильтре (§4.1)."""
     pytest.importorskip("textual")
@@ -29,11 +36,14 @@ async def test_level_and_profiles_form_new_group_above_rigor(tmp_path, monkeypat
     from gc_tui.app import TuiApp
     from gc_tui.commands import build_default_registry
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={
-        "level": "default",
-        "models": {"glm-local": {}},
-        "slots": {"default": "glm-local"},
-    })
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        config={
+            "level": "default",
+            "models": {"glm-local": {}},
+            "slots": {"default": "glm-local"},
+        },
+    )
     app._config_path = str(tmp_path / "config.yml")
     reg = build_default_registry()
     async with app.run_test(size=(100, 40)) as pilot:
@@ -59,8 +69,12 @@ def test_level_track_three_positions_light_default_max():
     from gc_tui.widgets.command_palette import CommandPalette
 
     reg = CommandRegistry()
-    reg.register(Command("level", ("models",), "", "уровень модели", is_toggle=True))
-    pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n: "default")
+    reg.register(
+        Command("level", ("models",), "", "уровень модели", is_toggle=True)
+    )
+    pal = CommandPalette(
+        reg, initial_filter="", toggle_state=lambda n: "default"
+    )
 
     row = pal._format_toggle_row(reg.lookup("level")).plain
     assert "○ ● ○" in row
@@ -75,13 +89,26 @@ def test_level_track_colors_semantic():
     from gc_tui.widgets.command_palette import CommandPalette
 
     reg = CommandRegistry()
-    reg.register(Command("level", ("models",), "", "уровень модели", is_toggle=True))
+    reg.register(
+        Command("level", ("models",), "", "уровень модели", is_toggle=True)
+    )
 
-    for value, color in (("light", p.INK), ("default", p.RUN_COLOR), ("max", p.ACCENT)):
-        pal = CommandPalette(reg, initial_filter="", toggle_state=lambda n, v=value: v)
+    for value, color in (
+        ("light", p.INK),
+        ("default", p.RUN_COLOR),
+        ("max", p.ACCENT),
+    ):
+        pal = CommandPalette(
+            reg, initial_filter="", toggle_state=lambda n, v=value: v
+        )
         text = pal._format_toggle_row(reg.lookup("level"))
-        styles = [str(s.style) for s in text.spans if "bold" in str(s.style).lower()]
-        assert any(color.lower() in st.lower() for st in styles), (value, styles)
+        styles = [
+            str(s.style) for s in text.spans if "bold" in str(s.style).lower()
+        ]
+        assert any(color.lower() in st.lower() for st in styles), (
+            value,
+            styles,
+        )
 
 
 def test_profiles_row_is_trackless():
@@ -114,6 +141,7 @@ def test_profiles_row_empty_value_shows_none_words():
 
 # --- Тихий алиас `models` -> /level (механизм — прецедент /compact «сжать») ---
 
+
 def test_models_alias_filters_to_level():
     """Набранное `/models` (фильтр палитры) находит `/level` — тихий алиас
     (спека §12.1): набравший «models» по привычке «сменить модель» попадает
@@ -139,7 +167,10 @@ def test_models_alias_resolves_via_registry_lookup():
 
 # --- Хинт /level — из Router, канон §1 ---------------------------------------
 
-def test_level_hint_matches_canon_default_and_honest_fallback(tmp_path, monkeypatch):
+
+def test_level_hint_matches_canon_default_and_honest_fallback(
+    tmp_path, monkeypatch
+):
     """Канон §12.1/§1 дословно: «default — glm-local · основная рабочая:
     повседневные задачи»; фоллбэк честно показывает стрелку «light → default»,
     не притворяется, что у light своя модель."""
@@ -147,11 +178,13 @@ def test_level_hint_matches_canon_default_and_honest_fallback(tmp_path, monkeypa
     from gc_tui.app import TuiApp
     from gc_tui.toggles import level_value_hint
 
-    app = TuiApp(config={
-        "level": "default",
-        "models": {"glm-local": {}},
-        "slots": {"default": "glm-local"},
-    })
+    app = TuiApp(
+        config={
+            "level": "default",
+            "models": {"glm-local": {}},
+            "slots": {"default": "glm-local"},
+        }
+    )
     app._config_path = str(tmp_path / "config.yml")
 
     assert level_value_hint(app, "default") == (
@@ -187,12 +220,14 @@ def test_level_hint_legacy_force(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.toggles import level_value_hint
 
-    app = TuiApp(config={
-        "model": "glm-5.2-fp8",
-        "models": {"glm-local": {}},
-        "slots": {"default": "glm-local"},
-        "cli_explicit_keys": ["model"],
-    })
+    app = TuiApp(
+        config={
+            "model": "glm-5.2-fp8",
+            "models": {"glm-local": {}},
+            "slots": {"default": "glm-local"},
+            "cli_explicit_keys": ["model"],
+        }
+    )
     app._config_path = str(tmp_path / "config.yml")
 
     hint = level_value_hint(app, "default")
@@ -201,7 +236,10 @@ def test_level_hint_legacy_force(tmp_path, monkeypatch):
 
 # --- /profiles: цикл по алфавиту, тёзка — одна позиция, состав+источник -----
 
-def test_profile_values_deduplicate_namesake_project_wins(tmp_path, monkeypatch):
+
+def test_profile_values_deduplicate_namesake_project_wins(
+    tmp_path, monkeypatch
+):
     """Объединённый список — алфавитный, тёзка (одинаковое имя в обоих
     корнях) — ОДНА позиция; побеждает проектный (спека §3.1/§12.1)."""
     project_dir = tmp_path / "proj"
@@ -209,19 +247,28 @@ def test_profile_values_deduplicate_namesake_project_wins(tmp_path, monkeypatch)
     monkeypatch.chdir(project_dir)
     base_dir = tmp_path / "base"
     (base_dir / "profiles").mkdir(parents=True)
-    (base_dir / "profiles" / "alpha.yml").write_text("models: {}\n", encoding="utf-8")
-    (base_dir / "profiles" / "work.yml").write_text("models: {}\n", encoding="utf-8")
+    (base_dir / "profiles" / "alpha.yml").write_text(
+        "models: {}\n", encoding="utf-8"
+    )
+    (base_dir / "profiles" / "work.yml").write_text(
+        "models: {}\n", encoding="utf-8"
+    )
     (project_dir / ".gc" / "profiles").mkdir(parents=True)
-    (project_dir / ".gc" / "profiles" / "work.yml").write_text("models: {}\n", encoding="utf-8")
+    (project_dir / ".gc" / "profiles" / "work.yml").write_text(
+        "models: {}\n", encoding="utf-8"
+    )
 
     from gc_tui.app import TuiApp
-    from gc_tui.toggles import profile_values, _discovered_profiles
+    from gc_tui.toggles import _discovered_profiles, profile_values
 
     app = TuiApp(config={"profile": ""})
     app._config_path = str(base_dir / "config.yml")
 
     values = profile_values(app)
-    assert [v.value for v in values] == ["alpha", "work"]   # тёзка — одна позиция, алфавит
+    assert [v.value for v in values] == [
+        "alpha",
+        "work",
+    ]  # тёзка — одна позиция, алфавит
     assert _discovered_profiles(app)["work"].root_kind == "project"
 
 
@@ -229,8 +276,12 @@ def test_profiles_cycle_wraps_alphabetically(tmp_path, monkeypatch):
     """←/→ циклят по объединённому алфавитному списку, по кругу (спека §12.1)."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "profiles").mkdir()
-    (tmp_path / "profiles" / "alpha.yml").write_text("models: {}\n", encoding="utf-8")
-    (tmp_path / "profiles" / "work.yml").write_text("models: {}\n", encoding="utf-8")
+    (tmp_path / "profiles" / "alpha.yml").write_text(
+        "models: {}\n", encoding="utf-8"
+    )
+    (tmp_path / "profiles" / "work.yml").write_text(
+        "models: {}\n", encoding="utf-8"
+    )
 
     from gc_tui.app import TuiApp
     from gc_tui.toggles import next_toggle_value
@@ -240,7 +291,7 @@ def test_profiles_cycle_wraps_alphabetically(tmp_path, monkeypatch):
 
     assert next_toggle_value(app, "profiles", 1) == "work"
     app.set_session_override("profile", "work")
-    assert next_toggle_value(app, "profiles", 1) == "alpha"   # по кругу
+    assert next_toggle_value(app, "profiles", 1) == "alpha"  # по кругу
 
 
 def test_profiles_hint_shows_slots_and_project_source(tmp_path, monkeypatch):
@@ -250,20 +301,27 @@ def test_profiles_hint_shows_slots_and_project_source(tmp_path, monkeypatch):
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
     (project_dir / ".gc" / "profiles").mkdir(parents=True)
-    (project_dir / ".gc" / "profiles" / "work.yml").write_text("models: {}\n", encoding="utf-8")
+    (project_dir / ".gc" / "profiles" / "work.yml").write_text(
+        "models: {}\n", encoding="utf-8"
+    )
 
     from gc_tui.app import TuiApp
     from gc_tui.toggles import profile_value_hint
 
-    app = TuiApp(config={
-        "profile": "work",
-        "models": {"flash": {}, "glm-local": {}},
-        "slots": {"light": "flash", "default": "glm-local"},
-    })
+    app = TuiApp(
+        config={
+            "profile": "work",
+            "models": {"flash": {}, "glm-local": {}},
+            "slots": {"light": "flash", "default": "glm-local"},
+        }
+    )
     app._config_path = str(tmp_path / "base" / "config.yml")
 
     hint = profile_value_hint(app, "work")
-    assert hint == "light flash · default glm-local · проектный · Enter — открыть список"
+    assert (
+        hint
+        == "light flash · default glm-local · проектный · Enter — открыть список"
+    )
 
 
 def test_profiles_hint_warns_about_mcp_rebuild(tmp_path, monkeypatch):
@@ -296,7 +354,9 @@ def test_profiles_hint_warns_about_mcp_rebuild(tmp_path, monkeypatch):
     app = TuiApp(config={"profile": "corp"})
     app._config_path = str(tmp_path / "base" / "config.yml")
 
-    assert "переключение пересоберёт MCP: 2 серверов" in profile_value_hint(app, "corp")
+    assert "переключение пересоберёт MCP: 2 серверов" in profile_value_hint(
+        app, "corp"
+    )
 
 
 def test_profiles_empty_state_hint_verbatim(tmp_path, monkeypatch):
@@ -310,8 +370,7 @@ def test_profiles_empty_state_hint_verbatim(tmp_path, monkeypatch):
     app._config_path = str(tmp_path / "config.yml")
 
     assert profile_value_hint(app, "") == (
-        "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · "
-        "пример — в /settings → Профили"
+        "профили не настроены · создать: ~/.gc/profiles/<имя>.yml · пример — в /settings → Профили"
     )
 
 
@@ -329,25 +388,34 @@ def test_profiles_not_selected_hint_lists_available(tmp_path, monkeypatch):
     app = TuiApp(config={})
     app._config_path = str(tmp_path / "base" / "config.yml")
 
-    assert profile_value_hint(app, "") == "не выбран · доступно: smoke · Enter — открыть список"
+    assert (
+        profile_value_hint(app, "")
+        == "не выбран · доступно: smoke · Enter — открыть список"
+    )
 
 
 # --- Футер: действующая модель следующего хода из Router --------------------
 
+
 @pytest.mark.asyncio
-async def test_footer_shows_router_model_not_stale_flat_key(tmp_path, monkeypatch):
+async def test_footer_shows_router_model_not_stale_flat_key(
+    tmp_path, monkeypatch
+):
     """Футер берёт активную модель из Router (§12.2), а не устаревший плоский
     `cfg["model"]` (база наследования, не действующая модель при живом реестре)."""
     pytest.importorskip("textual")
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={
-        "model": "STALE-LEGACY-NAME",
-        "models": {"glm-local": {}},
-        "slots": {"default": "glm-local"},
-        "level": "default",
-    })
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        config={
+            "model": "STALE-LEGACY-NAME",
+            "models": {"glm-local": {}},
+            "slots": {"default": "glm-local"},
+            "level": "default",
+        },
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -364,12 +432,15 @@ async def test_footer_updates_on_level_switch(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={
-        "model": "STALE",
-        "models": {"glm-local": {}, "glm-max": {}},
-        "slots": {"default": "glm-local", "max": "glm-max"},
-        "level": "default",
-    })
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        config={
+            "model": "STALE",
+            "models": {"glm-local": {}, "glm-max": {}},
+            "slots": {"default": "glm-local", "max": "glm-max"},
+            "level": "default",
+        },
+    )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
@@ -380,14 +451,18 @@ async def test_footer_updates_on_level_switch(tmp_path, monkeypatch):
 
 # --- Fix round 1 (ревью): битый профиль-файл не роняет hint /profiles ------
 
-def test_profiles_hint_survives_syntactically_broken_yaml(tmp_path, monkeypatch):
+
+def test_profiles_hint_survives_syntactically_broken_yaml(
+    tmp_path, monkeypatch
+):
     """Синтаксически битый профиль-файл (юзер правит руками, волна A), найденный
     `discover_profiles` по glob, не должен ронять навигацию/рендер `/profiles` —
     MCP-предупреждение просто не показывается (yaml.YAMLError наравне с OSError)."""
     monkeypatch.chdir(tmp_path)
     (tmp_path / "profiles").mkdir()
     (tmp_path / "profiles" / "broken.yml").write_text(
-        "models:\n  flash: [unterminated\n", encoding="utf-8",
+        "models:\n  flash: [unterminated\n",
+        encoding="utf-8",
     )
 
     from gc_tui.app import TuiApp
@@ -396,12 +471,15 @@ def test_profiles_hint_survives_syntactically_broken_yaml(tmp_path, monkeypatch)
     app = TuiApp(config={"profile": "broken"})
     app._config_path = str(tmp_path / "config.yml")
 
-    assert [v.value for v in profile_values(app)] == ["broken"]   # дискавери не падает
-    hint = profile_value_hint(app, "broken")   # не бросает YAMLError
-    assert "MCP" not in hint   # предупреждения нет — просто не досчиталось
+    assert [v.value for v in profile_values(app)] == [
+        "broken"
+    ]  # дискавери не падает
+    hint = profile_value_hint(app, "broken")  # не бросает YAMLError
+    assert "MCP" not in hint  # предупреждения нет — просто не досчиталось
 
 
 # --- Fix round 2 (ревью): легаси-форс доходит до реального executor'а -------
+
 
 def _stub_create_run_context(monkeypatch, captured):
     class _Ctx:
@@ -424,23 +502,32 @@ def _stub_create_run_context(monkeypatch, captured):
         captured.update(kw)
         return _Ctx()
 
-    monkeypatch.setattr("gc_core.config.build_auth_connector", lambda cfg: None)
-    monkeypatch.setattr("gc_core.run_context.acreate_run_context", _fake_acreate_run_context)
+    monkeypatch.setattr(
+        "gc_core.config.build_auth_connector", lambda cfg: None
+    )
+    monkeypatch.setattr(
+        "gc_core.run_context.acreate_run_context", _fake_acreate_run_context
+    )
     monkeypatch.setattr("gc_core.agent_executor.AgentExecutor", _Ex)
 
 
-def test_build_real_executor_passes_force_legacy_when_cli_model_forces_it(tmp_path, monkeypatch):
+def test_build_real_executor_passes_force_legacy_when_cli_model_forces_it(
+    tmp_path, monkeypatch
+):
     """`--model` поверх непустого реестра — TUI обязана форсировать легаси в
     РЕАЛЬНОМ executor'е (не только в хинте `/level`, спека §2/§12.1): CLI/server
     уже передают `cli_forces_legacy_model(cfg)`, TUI была единственным пробелом."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={
-        "model": "cli-forced-model",
-        "models": {"glm-local": {}},
-        "slots": {"default": "glm-local"},
-        "cli_explicit_keys": ["model"],
-    })
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        config={
+            "model": "cli-forced-model",
+            "models": {"glm-local": {}},
+            "slots": {"default": "glm-local"},
+            "cli_explicit_keys": ["model"],
+        },
+    )
     captured: dict = {}
     _stub_create_run_context(monkeypatch, captured)
     app._build_real_executor()
@@ -448,15 +535,20 @@ def test_build_real_executor_passes_force_legacy_when_cli_model_forces_it(tmp_pa
     assert captured["force_legacy"] is True
 
 
-def test_build_real_executor_force_legacy_false_without_cli_model_override(tmp_path, monkeypatch):
+def test_build_real_executor_force_legacy_false_without_cli_model_override(
+    tmp_path, monkeypatch
+):
     """Без CLI-форса (обычный запуск с реестром) — `force_legacy=False`, резолв
     уровней/алиасов работает как обычно."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config={
-        "models": {"glm-local": {}},
-        "slots": {"default": "glm-local"},
-    })
+    app = TuiApp(
+        threads_dir=str(tmp_path / "t"),
+        config={
+            "models": {"glm-local": {}},
+            "slots": {"default": "glm-local"},
+        },
+    )
     captured: dict = {}
     _stub_create_run_context(monkeypatch, captured)
     app._build_real_executor()
@@ -465,6 +557,7 @@ def test_build_real_executor_force_legacy_false_without_cli_model_override(tmp_p
 
 
 # --- Пикер /profiles (спека §12.1, ревизия 2026-07-28) ----------------------
+
 
 def _picker_app(tmp_path, monkeypatch, *, base_profile="", session=None):
     """App с двумя глобальными профилями (alpha, smoke) для тестов пикера.
@@ -476,13 +569,17 @@ def _picker_app(tmp_path, monkeypatch, *, base_profile="", session=None):
     profiles_dir = tmp_path / "base" / "profiles"
     profiles_dir.mkdir(parents=True)
     (tmp_path / "base" / "config.yml").write_text(
-        "backend:\n  completions_url: http://b\n", encoding="utf-8")
+        "backend:\n  completions_url: http://b\n", encoding="utf-8"
+    )
     (profiles_dir / "smoke.yml").write_text(
         # token: "" — правило пары: свой адрес идёт со своим токеном (сервер ключа не требует).
-        "models:\n  gc:\n    url: http://x\n    token: \"\"\nslots:\n  default: gc\n", encoding="utf-8")
+        'models:\n  gc:\n    url: http://x\n    token: ""\nslots:\n  default: gc\n',
+        encoding="utf-8",
+    )
     (profiles_dir / "alpha.yml").write_text("models: {}\n", encoding="utf-8")
 
     from gc_tui.app import TuiApp
+
     app = TuiApp(config={"profile": base_profile})
     app._config_path = str(tmp_path / "base" / "config.yml")
     if session is not None:
@@ -508,7 +605,9 @@ def test_profile_picker_options_none_first_marks(tmp_path, monkeypatch):
     assert by_name["без профиля"][1] == ""
 
 
-def test_profile_picker_options_none_marked_active_when_no_profile(tmp_path, monkeypatch):
+def test_profile_picker_options_none_marked_active_when_no_profile(
+    tmp_path, monkeypatch
+):
     from gc_tui.toggles import profile_picker_options
 
     app = _picker_app(tmp_path, monkeypatch)
@@ -530,17 +629,21 @@ def test_profile_picker_options_exactly_one_active_row(tmp_path, monkeypatch):
         assert len(active) == 1, (base_profile, options)
 
 
-def test_profile_picker_hint_shows_target_slots_not_effective(tmp_path, monkeypatch):
+def test_profile_picker_hint_shows_target_slots_not_effective(
+    tmp_path, monkeypatch
+):
     """Хинт ховера — слоты ЦЕЛЕВОГО профиля из его файла (выбор ещё не применён),
     не слоты эффективного конфига."""
     from gc_tui.toggles import profile_picker_hint
 
-    app = _picker_app(tmp_path, monkeypatch)   # эффективный конфиг: слотов нет
+    app = _picker_app(tmp_path, monkeypatch)  # эффективный конфиг: слотов нет
     hint = profile_picker_hint(app, "smoke")
     assert "default gc" in hint and "глобальный" in hint
 
 
-def test_profile_picker_hint_survives_an_undecodable_profile(tmp_path, monkeypatch):
+def test_profile_picker_hint_survives_an_undecodable_profile(
+    tmp_path, monkeypatch
+):
     """Файл профиля в чужой кодировке не роняет палитру.
 
     `UnicodeDecodeError` — подкласс `ValueError`, а не `OSError`, и мимо
@@ -555,7 +658,7 @@ def test_profile_picker_hint_survives_an_undecodable_profile(tmp_path, monkeypat
     bad.write_bytes("slots:\n  default: gc\n".encode("utf-16"))
 
     hint = profile_picker_hint(app, "enc")
-    assert isinstance(hint, str)          # хинт без состава, а не крах
+    assert isinstance(hint, str)  # хинт без состава, а не крах
 
 
 def test_profile_picker_hint_none_value(tmp_path, monkeypatch):
@@ -563,7 +666,8 @@ def test_profile_picker_hint_none_value(tmp_path, monkeypatch):
 
     app = _picker_app(tmp_path, monkeypatch)
     assert profile_picker_hint(app, "без профиля") == (
-        "настройки берутся только из config.yml — файл профиля не подмешивается")
+        "настройки берутся только из config.yml — файл профиля не подмешивается"
+    )
 
 
 def test_profiles_command_has_dynamic_picker_wiring():
@@ -578,12 +682,17 @@ def test_profiles_command_has_dynamic_picker_wiring():
 @pytest.mark.asyncio
 async def test_arg_picker_dynamic_footer_hint_follows_selection(tmp_path):
     pytest.importorskip("textual")
-    from textual.app import App
     from gc_tui.widgets.arg_picker import ArgPicker
+    from textual.app import App
 
-    hints = {"без профиля": "чистый конфиг", "smoke": "default gc · глобальный"}
-    picker = ArgPicker([("без профиля", "работать чистым конфигом"), ("smoke", "глобальный")],
-                       hint_provider=lambda v: hints.get(v, ""))
+    hints = {
+        "без профиля": "чистый конфиг",
+        "smoke": "default gc · глобальный",
+    }
+    picker = ArgPicker(
+        [("без профиля", "работать чистым конфигом"), ("smoke", "глобальный")],
+        hint_provider=lambda v: hints.get(v, ""),
+    )
 
     class _Host(App):
         def compose(self):
@@ -606,21 +715,30 @@ def test_arg_picker_paints_a_refusal_status_as_an_error(tmp_path):
     from gc_tui import palette as p
     from gc_tui.widgets.arg_picker import ArgPicker
 
-    picker = ArgPicker([("normal", "глобальный", "● активен"),
-                        ("broken", "глобальный", "✗ не применится")])
+    picker = ArgPicker(
+        [
+            ("normal", "глобальный", "● активен"),
+            ("broken", "глобальный", "✗ не применится"),
+        ]
+    )
 
     spans = {}
     for opt in picker._options:
         row = picker._format_row(opt)
-        spans[opt[0]] = [row.plain[s.start:s.end] for s in row.spans if s.style == p.ERR]
+        spans[opt[0]] = [
+            row.plain[s.start : s.end] for s in row.spans if s.style == p.ERR
+        ]
     assert spans["broken"] == ["✗ не применится"]
     assert spans["normal"] == []
 
 
 def _bare_trace_screen(monkeypatch, app):
     from gc_tui.screens.main import TraceScreen
+
     scr = TraceScreen()
-    monkeypatch.setattr(type(scr), "app", property(lambda self: app), raising=False)
+    monkeypatch.setattr(
+        type(scr), "app", property(lambda self: app), raising=False
+    )
     return scr
 
 
@@ -656,10 +774,13 @@ def test_cmd_profiles_unknown_name_honest_refusal(tmp_path, monkeypatch):
 def _raiser(exc):
     def _fn(_name):
         raise exc
+
     return _fn
 
 
-def test_cmd_profiles_write_failure_shows_hint_not_crash(tmp_path, monkeypatch):
+def test_cmd_profiles_write_failure_shows_hint_not_crash(
+    tmp_path, monkeypatch
+):
     """Каталог тредов недоступен: `apply_session_override` откатывает и ре-райзит
     OSError. Из обработчика клавиш исключение уронило бы приложение — команда
     показывает то же «✗ не сохранено», что и палитра."""
@@ -681,13 +802,17 @@ def test_refusal_hint_outlives_the_ephemeral_default(tmp_path, monkeypatch):
     seen = []
     app.switch_session_profile = _raiser(ValueError("slots.default: алиас"))
     scr = _bare_trace_screen(monkeypatch, app)
-    scr._show_footer_hint = lambda text, **kw: seen.append((text, kw.get("seconds")))
+    scr._show_footer_hint = lambda text, **kw: seen.append(
+        (text, kw.get("seconds"))
+    )
     scr._cmd_profiles("smoke")
     assert seen and "не сохранено" in seen[0][0]
     assert seen[0][1] == 5.0
 
 
-def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(tmp_path, monkeypatch):
+def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(
+    tmp_path, monkeypatch
+):
     app = _picker_app(tmp_path, monkeypatch, session={"profile": "smoke"})
     hints = []
     app.switch_session_profile = _raiser(OSError("disk full"))
@@ -697,7 +822,9 @@ def test_cmd_profiles_dash_write_failure_shows_hint_not_crash(tmp_path, monkeypa
     assert hints and "не сохранено" in hints[0]
 
 
-def test_cmd_profiles_vanished_profile_shows_hint_not_crash(tmp_path, monkeypatch):
+def test_cmd_profiles_vanished_profile_shows_hint_not_crash(
+    tmp_path, monkeypatch
+):
     """Файл профиля исчез между листингом и выбором — пере-мерж внутри
     `switch_session_profile` бросает ValueError."""
     app = _picker_app(tmp_path, monkeypatch)
@@ -723,10 +850,14 @@ def _add_unassemblable_profile(tmp_path) -> None:
     с ним конфиг не может (файл не читается)."""
     (tmp_path / "base" / "profiles" / "broken-enc.yml").write_text(
         """models: {}
-""", encoding="utf-16")
+""",
+        encoding="utf-16",
+    )
 
 
-def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(tmp_path, monkeypatch):
+def test_cmd_profiles_refuses_a_profile_that_does_not_assemble(
+    tmp_path, monkeypatch
+):
     """Вход 1 (набранная команда), НАСТОЯЩИЙ `switch_session_profile`, не мок:
     профиль, с которым конфиг не собирается, отклоняется на месте — тем же
     «✗ не сохранено», что и сорвавшийся персист. Путь файла в отказе остаётся:
@@ -768,10 +899,13 @@ def _add_unresolvable_slot_profile(tmp_path) -> None:
     валиден, но `slots.default` зовёт алиас, которого нет в merged-реестре
     моделей. Витрина обязана судить сборкой, а не читаемостью файла."""
     (tmp_path / "base" / "profiles" / "broken-slot.yml").write_text(
-        "slots:\n  default: nope\n", encoding="utf-8")
+        "slots:\n  default: nope\n", encoding="utf-8"
+    )
 
 
-def test_profile_picker_marks_a_profile_that_does_not_assemble(tmp_path, monkeypatch):
+def test_profile_picker_marks_a_profile_that_does_not_assemble(
+    tmp_path, monkeypatch
+):
     """Профиль, который гейт выбора отклонит, помечен статусом ДО нажатия Enter:
     отказ после нажатия — половина дела (решение владельца по живому смоку)."""
     from gc_tui.toggles import profile_picker_options
@@ -783,7 +917,9 @@ def test_profile_picker_marks_a_profile_that_does_not_assemble(tmp_path, monkeyp
     assert by_name["broken-enc"] == "✗ не применится"
 
 
-def test_profile_picker_marks_a_profile_whose_slot_does_not_resolve(tmp_path, monkeypatch):
+def test_profile_picker_marks_a_profile_whose_slot_does_not_resolve(
+    tmp_path, monkeypatch
+):
     """Тот же статус там, где ломается не чтение файла, а сборка стека: судья —
     полная сборка конфига, а не «читается ли файл» (иначе половина негодных
     профилей проходила бы витрину молча)."""
@@ -796,7 +932,9 @@ def test_profile_picker_marks_a_profile_whose_slot_does_not_resolve(tmp_path, mo
     assert by_name["broken-slot"] == "✗ не применится"
 
 
-def test_profile_picker_leaves_healthy_profiles_without_a_status(tmp_path, monkeypatch):
+def test_profile_picker_leaves_healthy_profiles_without_a_status(
+    tmp_path, monkeypatch
+):
     """Сторож: рядом с негодным соседом здоровые профили остаются без статуса.
     Пометка «всех подряд» (например, когда не собирается сама база) обесценила бы
     метку — по ней перестали бы отличать негодный профиль от годного."""
@@ -811,7 +949,9 @@ def test_profile_picker_leaves_healthy_profiles_without_a_status(tmp_path, monke
     assert by_name["без профиля"] == "● активен"
 
 
-def test_profile_picker_keeps_active_marker_on_a_broken_active_profile(tmp_path, monkeypatch):
+def test_profile_picker_keeps_active_marker_on_a_broken_active_profile(
+    tmp_path, monkeypatch
+):
     """Действующий профиль помечен «● активен», даже если его файл испортили под
     ногами: он УЖЕ применён и работает, а «не применится» звало бы человека
     чинить выбор, который никуда не переключается. Два статуса в одной колонке
@@ -825,7 +965,9 @@ def test_profile_picker_keeps_active_marker_on_a_broken_active_profile(tmp_path,
     assert by_name["broken-enc"] == "● активен"
 
 
-def test_profile_picker_hint_names_the_reason_a_profile_will_not_apply(tmp_path, monkeypatch):
+def test_profile_picker_hint_names_the_reason_a_profile_will_not_apply(
+    tmp_path, monkeypatch
+):
     """Статус говорит ЧТО, подсказка — ПОЧЕМУ: без причины человеку нечего чинить
     (текст ядра самодостаточен — «<путь>: не удалось прочитать: …»)."""
     from gc_tui.toggles import profile_picker_hint
@@ -847,7 +989,9 @@ def test_profile_picker_hint_reuses_the_opening_probe(tmp_path, monkeypatch):
     from gc_tui.toggles import profile_picker_hint, profile_picker_options
 
     app = _picker_app(tmp_path, monkeypatch)
-    _add_unassemblable_profile(tmp_path)   # alpha, smoke — здоровые; broken-enc — нет
+    _add_unassemblable_profile(
+        tmp_path
+    )  # alpha, smoke — здоровые; broken-enc — нет
 
     calls: list = []
     original = app.probe_profile_assembly
@@ -858,26 +1002,31 @@ def test_profile_picker_hint_reuses_the_opening_probe(tmp_path, monkeypatch):
 
     monkeypatch.setattr(app, "probe_profile_assembly", counted)
 
-    options = profile_picker_options(app)             # «открытие» пикера
+    options = profile_picker_options(app)  # «открытие» пикера
     probed_on_open = list(calls)
     assert probed_on_open, "открытие обязано пробовать хотя бы один профиль"
     calls.clear()
 
     names = [name for name, _, _ in options if name != "без профиля"]
-    for name in names:                                 # «наведение» — хинт каждой строки
+    for name in names:  # «наведение» — хинт каждой строки
         profile_picker_hint(app, name)
     assert calls == [], (
-        f"хинт перепробовал профили, уже проверенные открытием: {calls}")
+        f"хинт перепробовал профили, уже проверенные открытием: {calls}"
+    )
 
 
-def test_profile_picker_hint_probes_once_across_repeated_polling(tmp_path, monkeypatch):
+def test_profile_picker_hint_probes_once_across_repeated_polling(
+    tmp_path, monkeypatch
+):
     """Хинт одного и того же (ещё не пробованного открытием) профиля, спрошенный
     повторно — как это делает поллинг `ArgPicker.desired_height` каждые 0.25 с,
     пока список просто открыт, — не должен звать пробу заново."""
     from gc_tui.toggles import profile_picker_hint
 
-    app = _picker_app(tmp_path, monkeypatch, base_profile="smoke")   # smoke — эффективный,
-    calls: list = []                                                # options() его не трогает
+    app = _picker_app(
+        tmp_path, monkeypatch, base_profile="smoke"
+    )  # smoke — эффективный,
+    calls: list = []  # options() его не трогает
     original = app.probe_profile_assembly
 
     def counted(name):
@@ -888,7 +1037,9 @@ def test_profile_picker_hint_probes_once_across_repeated_polling(tmp_path, monke
 
     for _ in range(4):
         profile_picker_hint(app, "smoke")
-    assert calls == ["smoke"], f"повторный хинт того же профиля пробует заново: {calls}"
+    assert calls == ["smoke"], (
+        f"повторный хинт того же профиля пробует заново: {calls}"
+    )
 
 
 def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
@@ -899,22 +1050,25 @@ def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
     (base_dir / "profiles").mkdir(parents=True)
     (base_dir / "profiles" / "work.yml").write_text(
         # token: "" — правило пары: свой адрес идёт со своим токеном (сервер ключа не требует).
-        "models:\n  flash:\n    url: http://x\n    token: \"\"\nslots:\n  default: flash\n",
-        encoding="utf-8")
+        'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
+        encoding="utf-8",
+    )
     (base_dir / "config.yml").write_text(
-        "profile: work\nbackend:\n  completions_url: http://b\n", encoding="utf-8")
+        "profile: work\nbackend:\n  completions_url: http://b\n",
+        encoding="utf-8",
+    )
 
     from gc_core.config import load_config_ex
     from gc_tui.app import TuiApp
 
     cfg, _meta = load_config_ex(str(base_dir / "config.yml"))
-    assert cfg.get("models")   # профиль подмешан
+    assert cfg.get("models")  # профиль подмешан
 
     app = TuiApp(config=cfg)
     app._config_path = str(base_dir / "config.yml")
     app.set_session_override("profile", "")
     eff = app.effective_config()
-    assert not eff.get("models")          # оверлей профиля снят
+    assert not eff.get("models")  # оверлей профиля снят
     assert eff.get("profile") == ""
 
 
@@ -928,6 +1082,7 @@ def test_session_removal_overrides_base_pointer(tmp_path, monkeypatch):
 
 def _level_app(tmp_path):
     from gc_tui.app import TuiApp
+
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text("level: default\n", encoding="utf-8")
     app = TuiApp(config={"level": "default"})
@@ -939,7 +1094,10 @@ def _level_app(tmp_path):
 
 def test_apply_level_toggle_defers_notice_while_run_is_live(tmp_path):
     pytest.importorskip("textual")
-    from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
+    from gc_core.runtime_notices import (
+        clear_runtime_notices,
+        collect_runtime_notices,
+    )
     from gc_tui.toggles import apply_toggle
 
     clear_runtime_notices()
@@ -952,16 +1110,25 @@ def test_apply_level_toggle_defers_notice_while_run_is_live(tmp_path):
     app.active_runner = _LiveRunner()
     apply_toggle(app, "level", "max")
 
-    assert app.effective_config()["level"] == "max"   # применилось сразу (§ выбор)
+    assert (
+        app.effective_config()["level"] == "max"
+    )  # применилось сразу (§ выбор)
     codes = [n.code for n in collect_runtime_notices()]
     assert "level_switch_deferred" in codes
-    msg = next(n.message for n in collect_runtime_notices() if n.code == "level_switch_deferred")
+    msg = next(
+        n.message
+        for n in collect_runtime_notices()
+        if n.code == "level_switch_deferred"
+    )
     assert "max" in msg and "завершения текущей задачи" in msg
 
 
 def test_apply_level_toggle_no_notice_without_active_run(tmp_path):
     pytest.importorskip("textual")
-    from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
+    from gc_core.runtime_notices import (
+        clear_runtime_notices,
+        collect_runtime_notices,
+    )
     from gc_tui.toggles import apply_toggle
 
     clear_runtime_notices()
@@ -974,7 +1141,10 @@ def test_apply_level_toggle_no_notice_without_active_run(tmp_path):
 
 def test_apply_level_toggle_no_notice_after_run_finished(tmp_path):
     pytest.importorskip("textual")
-    from gc_core.runtime_notices import clear_runtime_notices, collect_runtime_notices
+    from gc_core.runtime_notices import (
+        clear_runtime_notices,
+        collect_runtime_notices,
+    )
     from gc_tui.toggles import apply_toggle
 
     clear_runtime_notices()

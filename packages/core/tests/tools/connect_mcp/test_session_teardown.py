@@ -17,17 +17,15 @@
   вызывающего: сняли ход по дедлайну — поток остался в ``readline`` под локом,
   и ``aclose_all`` из ``finally`` встал на локе прямо на loop.
 """
+
 import asyncio
+import inspect
 import threading
 import time
 
-import inspect
-
 import pytest
-
 from gc_core.tools.connect_mcp import persistent_stdio as ps
 from gc_core.tools.connect_mcp import stream_client as sc
-
 
 # --- B1: снос сессии закрывает стек здесь же -------------------------------
 
@@ -47,7 +45,11 @@ async def test_ainvalidate_closes_the_stack_in_the_calling_task():
     """Стек закрывается СРАЗУ и в ТОЙ ЖЕ задаче, где сессию открывали."""
     closed: list = []
     manager = sc._PersistentSessionManager()
-    manager.set_session("srv", object(), (_Stack(closed, "transport"), _Stack(closed, "session")))
+    manager.set_session(
+        "srv",
+        object(),
+        (_Stack(closed, "transport"), _Stack(closed, "session")),
+    )
 
     here = asyncio.current_task().get_name()
     await manager.ainvalidate("srv")
@@ -72,6 +74,7 @@ async def test_ainvalidate_forgets_the_session_too():
 
 async def test_ainvalidate_survives_a_broken_stack():
     """Ошибка закрытия не должна подменять причину, по которой сессию сносят."""
+
     class _Boom:
         async def __aexit__(self, *_exc):
             raise RuntimeError("закрытие не удалось")
@@ -79,7 +82,7 @@ async def test_ainvalidate_survives_a_broken_stack():
     manager = sc._PersistentSessionManager()
     manager.set_session("srv", object(), (_Boom(),))
 
-    await manager.ainvalidate("srv")          # не должно бросить
+    await manager.ainvalidate("srv")  # не должно бросить
 
     assert manager.get_session("srv") is None
 
@@ -110,7 +113,7 @@ async def test_aclose_does_not_wait_for_a_held_lock():
     переживший отмену вызывающего, — и закрываем сессию с loop.
     """
     session = ps.PersistentStdioSession({"command": "true"})
-    session._proc = None                       # процесса нет: меряем только лок
+    session._proc = None  # процесса нет: меряем только лок
 
     released = threading.Event()
 
@@ -120,7 +123,7 @@ async def test_aclose_does_not_wait_for_a_held_lock():
 
     holder = threading.Thread(target=_hold, daemon=True)
     holder.start()
-    time.sleep(0.05)                           # дать потоку взять лок
+    time.sleep(0.05)  # дать потоку взять лок
 
     try:
         started = time.perf_counter()
@@ -131,8 +134,7 @@ async def test_aclose_does_not_wait_for_a_held_lock():
         holder.join(5)
 
     assert spent < 1.0, (
-        f"закрытие ждало лок {spent:.2f}с — на живом loop это заморозка "
-        f"до request_timeout_sec"
+        f"закрытие ждало лок {spent:.2f}с — на живом loop это заморозка до request_timeout_sec"
     )
 
 
@@ -175,7 +177,7 @@ async def test_teardown_finishes_even_when_the_caller_is_cancelled():
         registry._sessions[(owner, name)] = _SlowSession(name)
 
     task = asyncio.create_task(registry.aclose_all())
-    await asyncio.sleep(0.02)                  # дать начать первую
+    await asyncio.sleep(0.02)  # дать начать первую
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -239,10 +241,10 @@ async def test_closing_from_a_foreign_task_warns(caplog):
     async def _open() -> None:
         manager.set_session("srv", object(), (_Stack([], "t"),))
 
-    await asyncio.create_task(_open())         # открыли в ОДНОЙ задаче
+    await asyncio.create_task(_open())  # открыли в ОДНОЙ задаче
 
     with caplog.at_level(logging.WARNING):
-        await manager.ainvalidate("srv")       # закрываем в ДРУГОЙ
+        await manager.ainvalidate("srv")  # закрываем в ДРУГОЙ
 
     assert any("не в той задаче" in r.getMessage() for r in caplog.records), [
         r.getMessage() for r in caplog.records

@@ -11,7 +11,6 @@ from gc_core.utils.fs_size_limits import fs_mutate_max_bytes
 
 
 class SaveBase64File(AbstractSimpleTool):
-
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {
@@ -61,7 +60,15 @@ class SaveBase64File(AbstractSimpleTool):
             "- On decode_failed, check for non-ASCII characters or incorrect padding.\n"
         )
 
-    def _result(self, *, ok: bool, path: str, bytes_written: int = 0, sha256=None, error=None) -> str:
+    def _result(
+        self,
+        *,
+        ok: bool,
+        path: str,
+        bytes_written: int = 0,
+        sha256=None,
+        error=None,
+    ) -> str:
         return json.dumps(
             {
                 "tool": SaveBase64File.registered_tool_name(),
@@ -84,26 +91,47 @@ class SaveBase64File(AbstractSimpleTool):
     ) -> str:
         return self._result(ok=False, path=path, error=error)
 
-
     @enforce_write_guard(path_arg="path", operation="write")
     async def acall(self, path: str, data: str, **kwargs) -> str:
         if not isinstance(path, str) or not path.strip():
-            return self._result(ok=False, path=str(path), error={"type": "invalid_argument", "field": "path"})
+            return self._result(
+                ok=False,
+                path=str(path),
+                error={"type": "invalid_argument", "field": "path"},
+            )
 
         if not os.path.isabs(path):
-            return self._result(ok=False, path=path, error={"type": "invalid_argument", "field": "path", "message": "path must be absolute"})
+            return self._result(
+                ok=False,
+                path=path,
+                error={
+                    "type": "invalid_argument",
+                    "field": "path",
+                    "message": "path must be absolute",
+                },
+            )
 
         if not isinstance(data, str) or not data.strip():
-            return self._result(ok=False, path=path, error={"type": "invalid_argument", "field": "data"})
+            return self._result(
+                ok=False,
+                path=path,
+                error={"type": "invalid_argument", "field": "data"},
+            )
 
         try:
             raw = base64.b64decode(data, validate=False)
         except Exception as e:
-            return self._result(ok=False, path=path, error={"type": "decode_failed", "message": str(e)})
+            return self._result(
+                ok=False,
+                path=path,
+                error={"type": "decode_failed", "message": str(e)},
+            )
 
         parent = os.path.dirname(path) or "."
         if not await self._backend.is_dir(parent):
-            return self._result(ok=False, path=path, error={"type": "parent_not_found"})
+            return self._result(
+                ok=False, path=path, error={"type": "parent_not_found"}
+            )
 
         from gc_core.agent_edits.recorder import is_recording, record_edit  # nested: cycle with thread_store
 
@@ -125,7 +153,11 @@ class SaveBase64File(AbstractSimpleTool):
         try:
             await self._backend.write_bytes(path, raw)
         except Exception as e:
-            return self._result(ok=False, path=path, error={"type": "write_failed", "message": str(e)})
+            return self._result(
+                ok=False,
+                path=path,
+                error={"type": "write_failed", "message": str(e)},
+            )
 
         # op — по факту существования файла: бинарность контента классифицирует
         # сам рекордер (иначе текстовый payload получил бы op="binary" с хэнками,

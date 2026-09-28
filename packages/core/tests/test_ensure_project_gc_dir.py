@@ -1,4 +1,5 @@
 """Общий стартовый хелпер env_vars.ensure_project_gc_dir (зовут gc-cli и gc-ua)."""
+
 from unittest.mock import patch
 
 from gc_core.config_modules import env_vars

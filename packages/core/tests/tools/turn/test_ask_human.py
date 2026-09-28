@@ -1,11 +1,8 @@
 import builtins
 import json
 
-from gc_testkit.helpers.tool_ctx import CallableTool
-
-import pytest
-
 from gc_core.tools.turn.ask_human import AskHuman
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def test_ask_human_multiline(monkeypatch):
@@ -60,7 +57,10 @@ def test_prompt_description_is_full_reference_doc():
     assert "black box" in desc.lower()
     assert "Meta-question" in desc or "meta-question" in desc
     assert "4096" in desc
-    assert "long material" in desc.lower() or "pacing follows the user" in desc.lower()
+    assert (
+        "long material" in desc.lower()
+        or "pacing follows the user" in desc.lower()
+    )
     assert "Pacing follows the user" in desc
 
 

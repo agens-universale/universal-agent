@@ -2,9 +2,8 @@ import json
 
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.utils.file_text import sha256_hex_of_bytes
-
-
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+
 
 def test_apply_batch_success(tmp_path):
     p = tmp_path / "f.txt"
@@ -13,8 +12,18 @@ def test_apply_batch_success(tmp_path):
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[
-                {"search": "A", "replace": "X", "occurrence": "first", "expected_matches": 2},
-                {"search": "C", "replace": "Z", "occurrence": "all", "expected_matches": 2},
+                {
+                    "search": "A",
+                    "replace": "X",
+                    "occurrence": "first",
+                    "expected_matches": 2,
+                },
+                {
+                    "search": "C",
+                    "replace": "Z",
+                    "occurrence": "all",
+                    "expected_matches": 2,
+                },
             ],
         )
     )
@@ -34,7 +43,12 @@ def test_apply_batch_atomic_fail_keeps_file(tmp_path):
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
             edits=[
-                {"search": "one", "replace": "ONE", "occurrence": "all", "expected_matches": 2},
+                {
+                    "search": "one",
+                    "replace": "ONE",
+                    "occurrence": "all",
+                    "expected_matches": 2,
+                },
                 {"search": "missing", "replace": "x"},
             ],
         )
@@ -50,7 +64,7 @@ def test_apply_batch_atomic_fail_keeps_file(tmp_path):
 
 def test_apply_batch_dry_run(tmp_path):
     p = tmp_path / "f.txt"
-    p.write_text("foo bar\n", encoding="utf-8")
+    p.write_text("foo bar\n", encoding="utf-8", newline="")
     res = json.loads(
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
@@ -206,10 +220,7 @@ def test_apply_not_found_multiline_suggestions(tmp_path):
 def test_apply_not_found_picks_nearest_among_distractors(tmp_path):
     p = tmp_path / "code.py"
     p.write_text(
-        "import os\n"
-        "def compute_total(items):\n"
-        "    return sum(items)\n"
-        "print('done')\n",
+        "import os\ndef compute_total(items):\n    return sum(items)\nprint('done')\n",
         encoding="utf-8",
     )
     res = json.loads(
@@ -230,7 +241,9 @@ def test_apply_success_path_has_no_suggestions_field_needed(tmp_path):
     res = json.loads(
         with_local_ctx(ApplyFileEdits)(
             path=str(p),
-            edits=[{"search": "alpha beta gamma", "replace": "ALPHA BETA GAMMA"}],
+            edits=[
+                {"search": "alpha beta gamma", "replace": "ALPHA BETA GAMMA"}
+            ],
         )
     )
     assert res["ok"] is True and res["applied"] is True

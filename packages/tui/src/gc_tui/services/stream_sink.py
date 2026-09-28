@@ -6,6 +6,7 @@ stripped); reasoning is surfaced via the ThinkingIndicator. The sink also tracks
 a self-counted progress counter and reasoning start/end timing for that indicator.
 Presentation layer — no business logic, not a substitute for the thread store.
 """
+
 from __future__ import annotations
 
 import re
@@ -23,7 +24,7 @@ class StreamSink:
         self._answer = ""
         self._chars = 0
         self._reasoning_started_at = None  # float | None
-        self._reasoning_ended_at = None    # float | None
+        self._reasoning_ended_at = None  # float | None
 
     def push(self, kind: str, text: str) -> None:
         with self._lock:
@@ -83,7 +84,10 @@ class StreamSink:
                 return (None, None)
             if self._reasoning_ended_at is None:
                 return ("thinking", None)
-            return ("done", self._reasoning_ended_at - self._reasoning_started_at)
+            return (
+                "done",
+                self._reasoning_ended_at - self._reasoning_started_at,
+            )
 
     def reset(self) -> None:
         with self._lock:
@@ -114,7 +118,7 @@ def _reasoning_tail(think: str, maxlen: int) -> str:
     tail = one_line[-maxlen:]
     sp = tail.find(" ")
     if sp != -1:  # drop the leading partial word → start at a word boundary
-        tail = tail[sp + 1:]
+        tail = tail[sp + 1 :]
     return "…" + tail
 
 

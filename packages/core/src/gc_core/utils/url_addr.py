@@ -43,7 +43,7 @@ def is_loopback(url: str) -> bool:
         return True
     try:
         return ipaddress.ip_address(host).is_loopback
-    except ValueError:      # не числовой адрес — значит обычное имя, наружу
+    except ValueError:  # не числовой адрес — значит обычное имя, наружу
         return False
 
 

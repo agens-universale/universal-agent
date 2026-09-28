@@ -11,12 +11,12 @@
 `test_execution_workspace.py` имеет синхронный `exec`, поэтому там `pwd`
 отвечает. Здесь двойник намеренно async-only — как настоящая песочница.
 """
+
 import asyncio
 import logging
 import time
 
 import pytest
-
 from gc_core import execution_workspace as ew
 from gc_core.execution_workspace import (
     WorkspaceRootUnknownError,
@@ -158,7 +158,9 @@ async def test_a_local_backend_is_never_a_hard_failure(caplog):
     with caplog.at_level(logging.WARNING):
         await aprime_backend_cwd(_Local(), {})
 
-    assert any("backend_cwd_prime_failed" in r.getMessage() for r in caplog.records)
+    assert any(
+        "backend_cwd_prime_failed" in r.getMessage() for r in caplog.records
+    )
 
 
 def _acreate_run_context_node():
@@ -169,16 +171,21 @@ def _acreate_run_context_node():
     origin = importlib.util.find_spec("gc_core.run_context").origin
     tree = ast.parse(pathlib.Path(origin).read_text(encoding="utf-8"))
     return next(
-        n for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "acreate_run_context"
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef)
+        and n.name == "acreate_run_context"
     )
 
 
 def _calls_named(node, name: str) -> list:
     import ast
 
-    return [n.lineno for n in ast.walk(node)
-            if isinstance(n, ast.Call) and getattr(n.func, "id", None) == name]
+    return [
+        n.lineno
+        for n in ast.walk(node)
+        if isinstance(n, ast.Call) and getattr(n.func, "id", None) == name
+    ]
 
 
 def test_the_root_is_asked_before_mcp_discovery():
@@ -210,10 +217,15 @@ def test_a_failed_prime_releases_the_run_logger():
 
     node = _acreate_run_context_node()
     guarded = [
-        t for t in ast.walk(node)
+        t
+        for t in ast.walk(node)
         if isinstance(t, ast.Try)
-        and any(getattr(getattr(c, "func", None), "id", None) == "aprime_backend_cwd"
-                for stmt in t.body for c in ast.walk(stmt))
+        and any(
+            getattr(getattr(c, "func", None), "id", None)
+            == "aprime_backend_cwd"
+            for stmt in t.body
+            for c in ast.walk(stmt)
+        )
     ]
     assert guarded, (
         "прогрев не обёрнут в try — его отказ оставит логгер прогона с открытым файлом"
@@ -222,10 +234,13 @@ def test_a_failed_prime_releases_the_run_logger():
     handlers = [h for t in guarded for h in t.handlers]
     released = any(
         getattr(getattr(c, "func", None), "id", None) == "release_run_logger"
-        for h in handlers for c in ast.walk(h)
+        for h in handlers
+        for c in ast.walk(h)
     )
     reraised = any(
-        isinstance(n, ast.Raise) and n.exc is None for h in handlers for n in ast.walk(h)
+        isinstance(n, ast.Raise) and n.exc is None
+        for h in handlers
+        for n in ast.walk(h)
     )
 
     assert released, "логгер прогона не освобождается при отказе прогрева"

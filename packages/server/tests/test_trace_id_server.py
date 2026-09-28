@@ -24,7 +24,9 @@ def client(monkeypatch, tmp_path):
 
     # Эндпоинт собирает контекст асинхронно: сборка включает MCP-дискавери
     # и синхронный вызов морозил бы loop uvicorn на всё это время.
-    monkeypatch.setattr(server, "acreate_run_context", _fake_create_run_context)
+    monkeypatch.setattr(
+        server, "acreate_run_context", _fake_create_run_context
+    )
     monkeypatch.setattr(server, "build_auth_connector", lambda cfg: None)
     monkeypatch.setattr(
         server.agent_run_registry, "astart_if_absent", _fake_start_if_absent
@@ -37,14 +39,18 @@ def client(monkeypatch, tmp_path):
 
 def test_trace_id_reaches_run_config(client):
     api, captured = client
-    resp = api.post("/events/webhook", json={"task_id": "t1", "trace_id": "wf-42"})
+    resp = api.post(
+        "/events/webhook", json={"task_id": "t1", "trace_id": "wf-42"}
+    )
     assert resp.status_code == 200
     assert captured["config_dict"]["trace_id"] == "wf-42"
 
 
 def test_trace_id_is_removed_from_the_prompt(client):
     api, captured = client
-    api.post("/events/webhook", json={"task_id": "t1", "trace_id": "wf-42", "x": 1})
+    api.post(
+        "/events/webhook", json={"task_id": "t1", "trace_id": "wf-42", "x": 1}
+    )
     message = captured["start_kwargs"]["initial_user_message"]
     assert "wf-42" not in message
     assert "trace_id" not in json.loads(message)
@@ -58,7 +64,9 @@ def test_absent_trace_id_leaves_no_key(client):
 
 def test_invalid_trace_id_is_rejected(client):
     api, _ = client
-    resp = api.post("/events/webhook", json={"task_id": "t1", "trace_id": "wf\n42"})
+    resp = api.post(
+        "/events/webhook", json={"task_id": "t1", "trace_id": "wf\n42"}
+    )
     assert resp.status_code == 400
 
 
@@ -66,7 +74,9 @@ def test_second_webhook_into_live_run_drops_trace_and_logs_it(client, caplog):
     api, captured = client
     captured["live_run"] = True
     with caplog.at_level("WARNING"):
-        resp = api.post("/events/webhook", json={"task_id": "t1", "trace_id": "wf-99"})
+        resp = api.post(
+            "/events/webhook", json={"task_id": "t1", "trace_id": "wf-99"}
+        )
     assert resp.json()["status"] == "queued"
     assert "trace_id_ignored" in caplog.text
     assert "wf-99" in caplog.text

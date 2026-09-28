@@ -3,6 +3,7 @@
 TUI-сервис: parse / preflight / Popen+read / truncate / cancel.
 Не пишет в thread jsonl — только эфемерный результат для трейса.
 """
+
 from __future__ import annotations
 
 import os
@@ -20,10 +21,21 @@ from gc_core.utils.win_console import preserve_console_mode
 DEFAULT_MAX_OUTPUT_BYTES = 32768
 DEFAULT_MAX_OUTPUT_LINES = 200
 
-_INTERACTIVE_BINS = frozenset({
-    "vim", "nvim", "vi", "nano", "emacs",
-    "less", "more", "top", "htop", "btop", "watch",
-})
+_INTERACTIVE_BINS = frozenset(
+    {
+        "vim",
+        "nvim",
+        "vi",
+        "nano",
+        "emacs",
+        "less",
+        "more",
+        "top",
+        "htop",
+        "btop",
+        "watch",
+    }
+)
 _PRIVILEGE_TOKENS = frozenset({"sudo", "su", "doas", "pkexec", "runas"})
 _TTY_CONTAINER_CMDS = frozenset({"docker", "podman", "nerdctl"})
 _TTY_FLAGS = frozenset({"-it", "-ti", "--interactive", "--tty"})
@@ -47,7 +59,9 @@ class BangShellSettings:
     max_output_lines: int = DEFAULT_MAX_OUTPUT_LINES
 
     @classmethod
-    def from_mapping(cls, data: Optional[Mapping[str, Any]]) -> "BangShellSettings":
+    def from_mapping(
+        cls, data: Optional[Mapping[str, Any]]
+    ) -> BangShellSettings:
         if not data:
             return cls()
         timeout = data.get("timeout_sec", None)
@@ -61,8 +75,12 @@ class BangShellSettings:
         return cls(
             enabled=bool(data.get("enabled", True)),
             timeout_sec=timeout,
-            max_output_bytes=int(data.get("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES)),
-            max_output_lines=int(data.get("max_output_lines", DEFAULT_MAX_OUTPUT_LINES)),
+            max_output_bytes=int(
+                data.get("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES)
+            ),
+            max_output_lines=int(
+                data.get("max_output_lines", DEFAULT_MAX_OUTPUT_LINES)
+            ),
         )
 
 
@@ -155,7 +173,10 @@ def preflight(command: str) -> Optional[str]:
 
     for tok in tokens:
         base = os.path.basename(tok.rstrip("/\\"))
-        if base.lower() in _PRIVILEGE_TOKENS or tok.lower() in _PRIVILEGE_TOKENS:
+        if (
+            base.lower() in _PRIVILEGE_TOKENS
+            or tok.lower() in _PRIVILEGE_TOKENS
+        ):
             return _MSG_PRIVILEGE
 
     leading = _leading_command(tokens)
@@ -165,9 +186,10 @@ def preflight(command: str) -> Optional[str]:
     if leading.lower() in _INTERACTIVE_BINS:
         return _MSG_INTERACTIVE
 
-    if leading.lower() in _TTY_CONTAINER_CMDS:
-        if any(t in _TTY_FLAGS for t in tokens):
-            return _MSG_INTERACTIVE
+    if leading.lower() in _TTY_CONTAINER_CMDS and any(
+        t in _TTY_FLAGS for t in tokens
+    ):
+        return _MSG_INTERACTIVE
 
     return None
 
@@ -206,14 +228,14 @@ def _kill_process(proc: subprocess.Popen) -> None:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
                 return
-            except (ProcessLookupError, PermissionError, OSError):
+            except OSError:
                 pass
         proc.terminate()
         try:
             proc.wait(timeout=1.0)
         except subprocess.TimeoutExpired:
             proc.kill()
-    except (ProcessLookupError, OSError):
+    except OSError:
         pass
 
 

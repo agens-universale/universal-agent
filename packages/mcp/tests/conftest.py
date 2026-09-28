@@ -8,7 +8,6 @@
 """
 
 import pytest
-
 from gc_testkit.paths import RECIPES
 
 

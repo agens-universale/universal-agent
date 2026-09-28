@@ -38,7 +38,9 @@ class TuiConfig(BaseModel):
     #   minimal (default) — индикатор + счётчик, без текста стрима;
     #   answer            — прогрессивный ответ, дорастающий до финала;
     #   answer_reasoning  — + однострочный «глазок» рассуждения «⠇ …».
-    stream_display: Literal["minimal", "answer", "answer_reasoning"] = "minimal"
+    stream_display: Literal["minimal", "answer", "answer_reasoning"] = (
+        "minimal"
+    )
     # adaptive bounce: как поступать с текст-ответом без тула.
     # deny — всегда bounce (как CLI); judge — судья intent_guard решает;
     # allow — всегда принять текст (ни bounce, ни судьи).

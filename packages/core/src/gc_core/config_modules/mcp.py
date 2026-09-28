@@ -1,6 +1,12 @@
 from typing import Literal
 
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 
 class McpToolsWhitelistConfig(BaseModel):
@@ -33,7 +39,9 @@ class McpToolsWhitelistConfig(BaseModel):
 class McpServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    transport: Literal["http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"]
+    transport: Literal[
+        "http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"
+    ]
     # Where this server's protocol is spoken. `agent` (default) = the agent's own
     # process, today's behaviour. `os_backend` = the environment the tool layer
     # works in (task container), reached through FsBackend.exec. Orthogonal to
@@ -62,7 +70,9 @@ class McpServerConfig(BaseModel):
     # аргументами намеренно даёт новый результат. ``"all"`` — generic-профиль
     # на каждый тул сервера; список — базовые имена из tools/list (без
     # префикса mcp_<server>_), как у whitelist.tools.
-    loop_control_tools: Literal["all"] | list[str] = Field(default_factory=list)
+    loop_control_tools: Literal["all"] | list[str] = Field(
+        default_factory=list
+    )
     # Отправлять ли внешний trace_id этому серверу. False (дефолт) — не
     # отправлять ничего: внутренний корреляционный id не уходит наружу, пока
     # его не разрешили явно (в mcp-servers могут быть сторонние эндпойнты).
@@ -75,15 +85,24 @@ class McpServerConfig(BaseModel):
     # в config_dict дампится как verify-ssl (его читает get_verify_ssl).
     verify_ssl: bool | str = Field(
         default=True,
-        validation_alias=AliasChoices("verify_ssl", "verify-ssl", "use_ssl", "use-ssl"),
+        validation_alias=AliasChoices(
+            "verify_ssl", "verify-ssl", "use_ssl", "use-ssl"
+        ),
         serialization_alias="verify-ssl",
     )
     client_cert: str | None = Field(default=None, alias="client-cert")
     client_key: str | None = Field(default=None, alias="client-key")
 
     @field_validator(
-        "url", "token", "server_name", "description", "command", "cwd",
-        "client_cert", "client_key", mode="before"
+        "url",
+        "token",
+        "server_name",
+        "description",
+        "command",
+        "cwd",
+        "client_cert",
+        "client_key",
+        mode="before",
     )
     @classmethod
     def normalize_optional_text(cls, value: object) -> str | None:
@@ -98,7 +117,9 @@ class McpServerConfig(BaseModel):
         if value is None:
             return []
         if not isinstance(value, list):
-            raise ValueError("mcp.servers.<name>.args должен быть списком строк")
+            raise ValueError(
+                "mcp.servers.<name>.args должен быть списком строк"
+            )
         return [str(item) for item in value]
 
     @field_validator("env", mode="before")
@@ -107,7 +128,9 @@ class McpServerConfig(BaseModel):
         if value is None:
             return {}
         if not isinstance(value, dict):
-            raise ValueError("mcp.servers.<name>.env должен быть объектом key/value")
+            raise ValueError(
+                "mcp.servers.<name>.env должен быть объектом key/value"
+            )
         return {str(k): str(v) for k, v in value.items()}
 
     @field_validator("headers", mode="before")
@@ -116,7 +139,9 @@ class McpServerConfig(BaseModel):
         if value is None:
             return {}
         if not isinstance(value, dict):
-            raise ValueError("mcp.servers.<name>.headers должен быть объектом key/value")
+            raise ValueError(
+                "mcp.servers.<name>.headers должен быть объектом key/value"
+            )
         return {str(k): str(v) for k, v in value.items()}
 
     @field_validator("loop_control_tools", mode="before")
@@ -131,13 +156,11 @@ class McpServerConfig(BaseModel):
             if text == "all":
                 return "all"
             raise ValueError(
-                'mcp.servers.<name>.loop_control_tools должен быть "all" '
-                "или списком имён тулов"
+                'mcp.servers.<name>.loop_control_tools должен быть "all" или списком имён тулов'
             )
         if not isinstance(value, list):
             raise ValueError(
-                'mcp.servers.<name>.loop_control_tools должен быть "all" '
-                "или списком имён тулов"
+                'mcp.servers.<name>.loop_control_tools должен быть "all" или списком имён тулов'
             )
         seen: set[str] = set()
         out: list[str] = []
@@ -160,14 +183,18 @@ class McpMetaConfig(BaseModel):
     )
 
     @field_validator(
-        "tools_cache_ttl", "request_timeout_sec", "discovery_timeout_sec",
+        "tools_cache_ttl",
+        "request_timeout_sec",
+        "discovery_timeout_sec",
         mode="before",
     )
     @classmethod
     def validate_positive_int(cls, value: object) -> int:
         n = int(value)
         if n <= 0:
-            raise ValueError("mcp.meta значения должны быть положительными числами")
+            raise ValueError(
+                "mcp.meta значения должны быть положительными числами"
+            )
         return n
 
 

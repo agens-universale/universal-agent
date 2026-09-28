@@ -54,7 +54,9 @@ def test_nested_lists_in_dicts():
     base = {"agent": {"stop_tools": ["a", "b"]}}
     overlay = {"agent": {"stop_tools": ["b", "c"], "max_steps": 50}}
     result = deep_merge(base, overlay)
-    assert result == {"agent": {"stop_tools": ["a", "b", "c"], "max_steps": 50}}
+    assert result == {
+        "agent": {"stop_tools": ["a", "b", "c"], "max_steps": 50}
+    }
 
 
 def test_does_not_mutate_inputs():

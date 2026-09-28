@@ -9,6 +9,7 @@ Ctrl+C, но принесла свой дефект: отменить поток
 копится»: на POSIX их нет вовсе, и набранное после прерывания достаётся
 следующему вопросу, а не осиротевшему читателю.
 """
+
 import ast
 import asyncio
 import os
@@ -19,7 +20,6 @@ import threading
 import time
 
 import pytest
-
 from gc_cli.ask_human_port import make_cli_ask_human_port
 
 READER_THREAD = "gc-cli-ask-human"
@@ -90,6 +90,12 @@ def _fresh_reader(monkeypatch) -> None:
 
 @pytest.fixture
 def pipe_stdin(monkeypatch):
+    if os.name == "nt":
+        # На Windows трубу stdin не опросить: порт читает её потоком (запасной
+        # путь), а эти тесты проверяют именно путь опроса. Заодно здесь не
+        # доходим до `os.kill(SIGINT)`: на Windows это TerminateProcess всего
+        # pytest.
+        pytest.skip("путь опроса stdin есть только на POSIX")
     _fresh_reader(monkeypatch)
     fake = _PipeStdin()
     monkeypatch.setattr(sys, "stdin", fake)
@@ -121,7 +127,9 @@ async def test_no_reader_thread_on_posix(pipe_stdin):
     task = asyncio.create_task(port("вопрос?"))
     await asyncio.sleep(0.2)
 
-    assert _reader_threads() == [], "поток-читатель вернулся — вместе с ним вернётся R2.6"
+    assert _reader_threads() == [], (
+        "поток-читатель вернулся — вместе с ним вернётся R2.6"
+    )
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -129,7 +137,9 @@ async def test_no_reader_thread_on_posix(pipe_stdin):
 
 
 @pytest.mark.asyncio
-async def test_interrupted_question_leaves_the_line_to_the_next_reader(pipe_stdin):
+async def test_interrupted_question_leaves_the_line_to_the_next_reader(
+    pipe_stdin,
+):
     """Главная регрессия R2.6: набранное не уходит осиротевшему читателю.
 
     Человек прерывает первый вопрос и отвечает на второй. Ответ обязан достаться
@@ -160,13 +170,16 @@ async def test_interrupted_question_leaves_the_line_to_the_next_reader(pipe_stdi
     assert caught == [], "Ctrl+C ушёл мимо перехвата вопроса"
 
     pipe_stdin.send("ответ-на-второй\n\n")
-    assert await asyncio.wait_for(port("второй вопрос?"), 5) == "ответ-на-второй"
+    assert (
+        await asyncio.wait_for(port("второй вопрос?"), 5) == "ответ-на-второй"
+    )
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("how", ["ctrl_c", "cancel"])
 async def test_a_draft_for_a_withdrawn_question_does_not_leak_into_the_next(
-    pipe_stdin, how,
+    pipe_stdin,
+    how,
 ):
     """Недописанный ответ к снятому вопросу не приклеивается к следующему.
 
@@ -186,8 +199,9 @@ async def test_a_draft_for_a_withdrawn_question_does_not_leak_into_the_next(
     signal.signal(signal.SIGINT, lambda *_: caught.append(True))
     try:
         if how == "ctrl_c":
+
             async def _ctrl_c() -> None:
-                await asyncio.sleep(0.2)           # черновик уже в буфере
+                await asyncio.sleep(0.2)  # черновик уже в буфере
                 os.kill(os.getpid(), signal.SIGINT)
 
             # Вопрос ждём прямо в тесте, а не отдельной задачей: из задачи
@@ -199,7 +213,7 @@ async def test_a_draft_for_a_withdrawn_question_does_not_leak_into_the_next(
             await fire
         else:
             first = asyncio.ensure_future(port("первый вопрос?"))
-            await asyncio.sleep(0.2)               # черновик уже в буфере
+            await asyncio.sleep(0.2)  # черновик уже в буфере
             first.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await first
@@ -250,7 +264,7 @@ async def test_ctrl_d_ends_only_the_current_answer(pty_stdin):
     конец ввода навсегда, и разовость на ней не увидеть.
     """
     port = make_cli_ask_human_port()
-    pty_stdin.type("l1\n\x04")                 # строка и Ctrl+D в начале следующей
+    pty_stdin.type("l1\n\x04")  # строка и Ctrl+D в начале следующей
     assert await asyncio.wait_for(port("первый?"), 5) == "l1"
 
     second = asyncio.ensure_future(port("второй?"))
@@ -306,7 +320,9 @@ async def test_stdin_without_fileno_falls_back_to_a_daemon_thread(monkeypatch):
 
     threads = _reader_threads()
     assert threads, "запасной путь не поднял читателя"
-    assert all(t.daemon for t in threads), "читатель не daemon — задержит выход"
+    assert all(t.daemon for t in threads), (
+        "читатель не daemon — задержит выход"
+    )
 
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
@@ -325,7 +341,8 @@ def test_cli_installs_the_port():
     origin = importlib.util.find_spec("gc_cli.cli").origin
     tree = ast.parse(pathlib.Path(origin).read_text(encoding="utf-8"))
     installs = [
-        n for n in ast.walk(tree)
+        n
+        for n in ast.walk(tree)
         if isinstance(n, ast.Assign)
         and any(getattr(t, "attr", None) == "ask_human" for t in n.targets)
     ]

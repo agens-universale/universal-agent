@@ -1,6 +1,7 @@
 """AgentExecutor.stop_run: stop, пришедший до создания state (setup-фаза run()),
 не теряется — запоминается в _stop_pending и применяется при создании state, до
 первого persist. Закрывает окно off-thread сборки executor'а."""
+
 import types
 
 from gc_core.agent_executor import AgentExecutor

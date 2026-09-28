@@ -1,4 +1,5 @@
 """confirm banner — каноничный вид."""
+
 import pytest
 
 pytest.importorskip("textual")
@@ -10,7 +11,9 @@ def test_confirm_banner_snapshot(snap_compare, tmp_path, monkeypatch):
     from gc_tui.screens.main import TraceScreen
 
     # cwd-чип в футере фиксируем — иначе снапшот стал бы машинно-зависимым.
-    monkeypatch.setattr(TraceScreen, "_current_cwd", lambda self: "/work/demo-project")
+    monkeypatch.setattr(
+        TraceScreen, "_current_cwd", lambda self: "/work/demo-project"
+    )
 
     app = TuiApp(
         threads_dir=str(tmp_path),

@@ -14,6 +14,7 @@
 Всё проверяется через настоящий эндпоинт и настоящий реестр. Подменены только
 сборка контекста (её держит заслонка теста) и сам агент.
 """
+
 import asyncio
 import json
 import logging
@@ -22,7 +23,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from gc_server import server
 from gc_server.rest_api import agent_execution_registry as registry_module
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
@@ -124,7 +124,9 @@ def _texts(delivered: list) -> list:
     return [json.loads(content)["text"] for content in delivered]
 
 
-def _watch_arrival(monkeypatch, registry: AgentRunRegistry, text: str) -> asyncio.Event:
+def _watch_arrival(
+    monkeypatch, registry: AgentRunRegistry, text: str
+) -> asyncio.Event:
     """Событие «вебхук с этим текстом дошёл до реестра».
 
     Дальше до ожидания брони у эндпоинта нет ни одного `await`, поэтому к
@@ -169,7 +171,9 @@ async def test_waiting_webhook_builds_its_own_context_when_the_first_build_fails
 ):
     first, second = await _failed_build_with_a_waiter(harness, monkeypatch)
 
-    assert first.status_code == 500, "упавшая сборка обязана честно ответить ошибкой"
+    assert first.status_code == 500, (
+        "упавшая сборка обязана честно ответить ошибкой"
+    )
     assert second.status_code == 200
     assert second.json()["status"] == "started", (
         f"второй ответил {second.json()['status']!r}: его сообщение ждёт вебхука, "
@@ -197,8 +201,13 @@ async def test_waiting_webhook_joins_the_run_after_a_successful_build(
         gate.set()
         first, second = await _within(asyncio.gather(first, second))
 
-    assert [first.json()["status"], second.json()["status"]] == ["started", "queued"]
-    assert harness.builds == 1, "построен второй контекст впустую: его никто не закроет"
+    assert [first.json()["status"], second.json()["status"]] == [
+        "started",
+        "queued",
+    ]
+    assert harness.builds == 1, (
+        "построен второй контекст впустую: его никто не закроет"
+    )
     hold.set()
     await _settle(harness.registry)
     assert _texts(harness.agents[0].delivered) == ["первый", "второй"], (
@@ -206,7 +215,9 @@ async def test_waiting_webhook_joins_the_run_after_a_successful_build(
     )
 
 
-async def test_nothing_is_left_behind_after_a_failed_build(harness, monkeypatch):
+async def test_nothing_is_left_behind_after_a_failed_build(
+    harness, monkeypatch
+):
     """После отказа сборки в реестре не остаётся ни брони, ни отложенного.
 
     Раньше сообщение ждущего оставалось в реестре без срока и уезжало в
@@ -236,10 +247,13 @@ def test_failed_context_build_releases_the_key():
 
     assert registry.reserve(system="s", task_id="t") is True
 
+
 # --- статус во время сборки -------------------------------------------------
 
 
-async def test_status_during_the_build_is_running_not_the_previous_result(harness):
+async def test_status_during_the_build_is_running_not_the_previous_result(
+    harness,
+):
     """Пока строится контекст, статус — `running`, а не итог прошлого прогона.
 
     Бронь выдаётся ровно тогда, когда прошлый прогон закончился, а его запись
@@ -248,8 +262,11 @@ async def test_status_during_the_build_is_running_not_the_previous_result(harnes
     """
     registry = harness.registry
     previous = await registry.astart_if_absent(
-        system="s", task_id="t", executor_factory=_Agent,
-        ctx=SimpleNamespace(logger=None), initial_user_message="прошлый",
+        system="s",
+        task_id="t",
+        executor_factory=_Agent,
+        ctx=SimpleNamespace(logger=None),
+        initial_user_message="прошлый",
     )
     await _within(previous.thread)
 
@@ -295,9 +312,10 @@ async def test_status_during_the_build_carries_the_reservation_time(
     await _settle(harness.registry)
 
     assert during["status"] == "running"
-    assert (during["started_at"], during["last_activity_at"]) == (100.0, 100.0), (
-        f"статус сборки не несёт времени брони: {during}"
-    )
+    assert (during["started_at"], during["last_activity_at"]) == (
+        100.0,
+        100.0,
+    ), f"статус сборки не несёт времени брони: {during}"
 
 
 # --- потолок ожидания чужой сборки -----------------------------------------
@@ -347,8 +365,7 @@ async def test_waiting_webhook_gets_503_at_the_ceiling_and_the_build_goes_on(
                 second = await _within(second)
 
     assert second is not None and done, (
-        "ждущий вебхук висит дольше потолка: его HTTP-запрос открыт, пока идёт "
-        "чужая сборка"
+        "ждущий вебхук висит дольше потолка: его HTTP-запрос открыт, пока идёт чужая сборка"
     )
     assert second.status_code == 503, second.text
     assert second.json()["detail"]["status"] == "error", second.text
@@ -408,7 +425,9 @@ async def test_ceiling_covers_the_whole_request_not_each_foreign_build(
             gate1.set()
             await _within(entered2.wait())
             await asyncio.wait(
-                waiters, timeout=ceiling + 1.5, return_when=asyncio.FIRST_COMPLETED
+                waiters,
+                timeout=ceiling + 1.5,
+                return_when=asyncio.FIRST_COMPLETED,
             )
         finally:
             gate1.set()
@@ -419,11 +438,12 @@ async def test_ceiling_covers_the_whole_request_not_each_foreign_build(
 
     assert first.status_code == 500
     rejected = [text for text, r in answers.items() if r.status_code == 503]
-    assert len(rejected) == 1, {text: r.status_code for text, r in answers.items()}
+    assert len(rejected) == 1, {
+        text: r.status_code for text, r in answers.items()
+    }
     waited = answered_at[rejected[0]] - began
     assert waited < ceiling + 0.4, (
-        f"503 через {waited:.2f} с при потолке {ceiling} с: потолок отсчитан "
-        f"заново на второй чужой сборке"
+        f"503 через {waited:.2f} с при потолке {ceiling} с: потолок отсчитан заново на второй чужой сборке"
     )
     (built,) = [r for text, r in answers.items() if text not in rejected]
     assert built.json()["status"] == "started"
@@ -443,7 +463,9 @@ def test_ceiling_is_read_from_the_server_config(raw, expected):
     assert server._context_build_wait_s(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["минута", 0, -5, True, float("inf"), float("nan")])
+@pytest.mark.parametrize(
+    "raw", ["минута", 0, -5, True, float("inf"), float("nan")]
+)
 def test_broken_ceiling_falls_back_to_the_default_loudly(raw, caplog):
     """Мусор в ключе не отключает потолок и не роняет старт, но и не молчит."""
     with caplog.at_level(logging.WARNING, logger=server.__name__):

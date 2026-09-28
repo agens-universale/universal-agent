@@ -17,7 +17,9 @@ def _stream(text: str, cap: int = L):
     return captured_stream_from_text(text, cap)
 
 
-def _envelope(stdout_text: str, stderr_text: str = "", *, p: int = P, cap: int = L) -> dict:
+def _envelope(
+    stdout_text: str, stderr_text: str = "", *, p: int = P, cap: int = L
+) -> dict:
     raw = build_exec_envelope(
         tool="exec_command",
         ok=True,
@@ -47,7 +49,10 @@ def test_truncated_stream_uses_head_tail_and_omits_content():
     assert js["tail"] == text[-20:]
     assert js["total_chars"] == 100
     assert js["omitted_chars"] == 60
-    assert len(js["head"]) + len(js["tail"]) + js["omitted_chars"] == js["total_chars"]
+    assert (
+        len(js["head"]) + len(js["tail"]) + js["omitted_chars"]
+        == js["total_chars"]
+    )
 
 
 def test_truncated_capture_has_no_synthetic_marker():
@@ -131,7 +136,9 @@ def test_preview_precedes_expanded_channels_in_serialized_json():
         error={"type": "non_zero_exit"},
         head_fields={"command": "cmd", "cwd": "/tmp"},
     )
-    assert raw.index('"error"') < raw.index('"preview"') < raw.index('"stdout"')
+    assert (
+        raw.index('"error"') < raw.index('"preview"') < raw.index('"stdout"')
+    )
     assert raw.index('"preview"') < raw.index('"stderr"')
 
 

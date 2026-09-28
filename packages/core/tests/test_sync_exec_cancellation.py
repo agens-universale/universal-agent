@@ -12,13 +12,13 @@ Esc в TUI это выглядело как «стоп не работает».
 у каждого встраивающего), но платить за них на loop незачем: прогрев уводит
 все четыре в один поток однократно на процесс.
 """
+
 import asyncio
 import threading
 import time
 
 import pytest
-
-from gc_core.backends.async_protocol import SyncExecAdapter, aexec_port
+from gc_core.backends.async_protocol import aexec_port
 
 
 class _SlowSyncBackend:
@@ -69,7 +69,9 @@ def test_cancelled_run_exits_without_waiting_for_the_command():
     assert elapsed < 2.0, (
         f"прогон вышел за {elapsed:.2f} с — выход ждал чужую команду"
     )
-    assert not backend.finished.is_set(), "проверка пустая: команда уже кончилась"
+    assert not backend.finished.is_set(), (
+        "проверка пустая: команда уже кончилась"
+    )
 
 
 async def test_the_thread_is_not_the_default_pool():
@@ -108,7 +110,8 @@ def test_sync_exec_does_not_share_the_mcp_pool():
     src = inspect.getsource(async_protocol.SyncExecAdapter._off_loop)
     called = {
         getattr(c.func, "id", None) or getattr(c.func, "attr", None)
-        for c in ast.walk(ast.parse(inspect.cleandoc(src))) if isinstance(c, ast.Call)
+        for c in ast.walk(ast.parse(inspect.cleandoc(src)))
+        if isinstance(c, ast.Call)
     }
     assert "run_abandonable" not in called, (
         "команды снова идут на пуле MCP: долгая команда займёт слоты дискавери"
@@ -139,4 +142,6 @@ async def test_search_warms_the_probes_off_loop(monkeypatch, tmp_path):
 
     await tool.acall(path=str(tmp_path), pattern="x")
 
-    assert calls, "прогрев не позвали — первый поиск снова платит пробами на loop"
+    assert calls, (
+        "прогрев не позвали — первый поиск снова платит пробами на loop"
+    )

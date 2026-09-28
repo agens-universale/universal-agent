@@ -37,6 +37,8 @@ dmypy.json
 .pyre/
 .pytype/
 .ruff_cache/
+# кэш complexipy: пересобирается на каждом прогоне, в гит не едет
+.complexipy_cache/
 
 # Testing
 .pytest_cache/

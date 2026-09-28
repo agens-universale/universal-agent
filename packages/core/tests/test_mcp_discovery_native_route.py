@@ -15,10 +15,9 @@
 Здесь проверяется наблюдаемое: для сервера, живущего у нас, поток не
 заводится; для видимого только из песочницы — маршрут через бэкенд сохранён.
 """
+
 import asyncio
 import threading
-
-import pytest
 
 from gc_core.tools.connect_mcp import registry as reg
 from gc_core.tools.connect_mcp.client_port import AgentRuntimeClient
@@ -52,8 +51,11 @@ def _no_threads(monkeypatch) -> list:
     return spawned
 
 
-async def test_discovery_spawns_no_thread_for_an_agent_runtime_server(monkeypatch):
+async def test_discovery_spawns_no_thread_for_an_agent_runtime_server(
+    monkeypatch,
+):
     """ГЛАВНОЕ: наличие бэкенда больше не заставляет заводить поток."""
+
     async def _alist(self, *, timeout):
         return [{"name": "do_x", "description": "d"}]
 
@@ -66,9 +68,7 @@ async def test_discovery_spawns_no_thread_for_an_agent_runtime_server(monkeypatc
 
     assert status["status"] == "connected", status
     assert [t["name"] for t in tools] == ["do_x"], tools
-    assert spawned == [], (
-        f"дискавери завела поток на пустом месте: {spawned}"
-    )
+    assert spawned == [], f"дискавери завела поток на пустом месте: {spawned}"
 
 
 async def test_sandbox_server_still_goes_through_the_backend(monkeypatch):
@@ -81,8 +81,13 @@ async def test_sandbox_server_still_goes_through_the_backend(monkeypatch):
     seen: list = []
 
     def _resolve(server_name, server_cfg, *, os_backend=None):
-        seen.append(type(resolve_mcp_client(server_name, server_cfg,
-                                            os_backend=os_backend)).__name__)
+        seen.append(
+            type(
+                resolve_mcp_client(
+                    server_name, server_cfg, os_backend=os_backend
+                )
+            ).__name__
+        )
 
         class _Stub:
             async def alist_tools(self, *, timeout):
@@ -90,7 +95,9 @@ async def test_sandbox_server_still_goes_through_the_backend(monkeypatch):
 
         return _Stub()
 
-    monkeypatch.setitem(reg._adiscover_one.__globals__, "resolve_mcp_client", _resolve)
+    monkeypatch.setitem(
+        reg._adiscover_one.__globals__, "resolve_mcp_client", _resolve
+    )
     cfg = dict(STREAM_CFG, execute_on="os_backend")
 
     await reg._adiscover_one("srv", cfg, timeout=5, os_backend=_Sandbox())
@@ -111,8 +118,14 @@ def test_the_locus_rule_lives_in_one_place():
         ({"transport": "http", "url": "u"}, _Local()),
         ({"transport": "http", "url": "u"}, _Sandbox()),
         ({"transport": "http", "url": "u", "execute_on": "os_backend"}, None),
-        ({"transport": "http", "url": "u", "execute_on": "os_backend"}, _Local()),
-        ({"transport": "http", "url": "u", "execute_on": "os_backend"}, _Sandbox()),
+        (
+            {"transport": "http", "url": "u", "execute_on": "os_backend"},
+            _Local(),
+        ),
+        (
+            {"transport": "http", "url": "u", "execute_on": "os_backend"},
+            _Sandbox(),
+        ),
     ]
     for cfg, backend in cases:
         predicate = runs_in_agent_runtime(cfg, os_backend=backend)
@@ -133,15 +146,19 @@ def test_discovery_has_exactly_one_form():
     src = inspect.getsource(reg)
     tree = ast.parse(src)
     names = {
-        n.name for n in ast.walk(tree)
+        n.name
+        for n in ast.walk(tree)
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
         and "discover_one" in n.name
     }
-    assert names == {"_adiscover_one"}, f"формы дискавери размножились: {names}"
+    assert names == {"_adiscover_one"}, (
+        f"формы дискавери размножились: {names}"
+    )
 
 
 async def test_loop_stays_responsive_during_discovery(monkeypatch):
     """Пока идёт дискавери, соседний хартбит тикает."""
+
     async def _alist(self, *, timeout):
         await asyncio.sleep(0.2)
         return []

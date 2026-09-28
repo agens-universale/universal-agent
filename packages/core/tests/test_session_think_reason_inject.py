@@ -5,17 +5,24 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.tools import aapply_tool, abuild_tools_data
 
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
     yield
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
 

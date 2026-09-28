@@ -3,7 +3,13 @@
 import json
 from pathlib import Path
 
-from gc_core.thread_store import append_subagent_trace_record, delete_thread, read_subagent_trace, reset_thread_files, subagent_trace_path
+from gc_core.thread_store import (
+    append_subagent_trace_record,
+    delete_thread,
+    read_subagent_trace,
+    reset_thread_files,
+    subagent_trace_path,
+)
 
 
 def test_subagent_trace_path_shape(tmp_path: Path) -> None:
@@ -11,7 +17,9 @@ def test_subagent_trace_path_shape(tmp_path: Path) -> None:
     assert path == str(tmp_path / "data_subagents_cli_task-1.jsonl")
 
 
-def test_append_assigns_monotonic_seq_and_flat_envelope(tmp_path: Path) -> None:
+def test_append_assigns_monotonic_seq_and_flat_envelope(
+    tmp_path: Path,
+) -> None:
     threads_dir = str(tmp_path)
     r1 = append_subagent_trace_record(
         threads_dir,
@@ -43,19 +51,31 @@ def test_append_assigns_monotonic_seq_and_flat_envelope(tmp_path: Path) -> None:
 
     assert r1["seq"] == 1
     assert r2["seq"] == 2
-    assert set(r1) == {"ts", "seq", "parent_call_id", "child_run_id", "kind", "payload"}
+    assert set(r1) == {
+        "ts",
+        "seq",
+        "parent_call_id",
+        "child_run_id",
+        "kind",
+        "payload",
+    }
     assert "type" not in r1
     assert "thread_id" not in r1
     assert "system" not in r1
 
     path = Path(subagent_trace_path(threads_dir, "cli", "t1"))
-    lines = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    lines = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
     assert [row["seq"] for row in lines] == [1, 2]
     assert lines[0]["kind"] == "call"
     assert lines[1]["payload"]["output"] == "a.txt\n"
 
 
-def test_read_subagent_trace_returns_records_in_file_order(tmp_path: Path) -> None:
+def test_read_subagent_trace_returns_records_in_file_order(
+    tmp_path: Path,
+) -> None:
     threads_dir = str(tmp_path)
     append_subagent_trace_record(
         threads_dir,
@@ -139,7 +159,11 @@ def _append_call(threads_dir: str, seq_hint: int = 1) -> object:
         parent_call_id="p1",
         child_run_id="c1",
         kind="call",
-        payload={"type": "function_call", "call_id": f"x{seq_hint}", "name": "shell"},
+        payload={
+            "type": "function_call",
+            "call_id": f"x{seq_hint}",
+            "name": "shell",
+        },
     )
 
 
@@ -160,7 +184,9 @@ def test_append_does_not_rescan_after_cold_init(monkeypatch, tmp_path):
     r3 = _append_call(threads_dir, 3)
 
     assert [r1["seq"], r2["seq"], r3["seq"]] == [1, 2, 3]
-    assert calls["n"] == 1, "rescan должен происходить ровно один раз (cold init)"
+    assert calls["n"] == 1, (
+        "rescan должен происходить ровно один раз (cold init)"
+    )
 
 
 def test_append_cold_init_continues_from_preseed_seq(tmp_path):
@@ -168,19 +194,22 @@ def test_append_cold_init_continues_from_preseed_seq(tmp_path):
     threads_dir = str(tmp_path)
     path = tmp_path / "data_subagents_cli_t1.jsonl"
     preseed = []
-    import json as _json
     import datetime as _dt
+    import json as _json
 
     for seq in range(1, 6):  # K = 5
         preseed.append(
             _json.dumps(
                 {
-                    "ts": _dt.datetime.now(_dt.timezone.utc).isoformat(),
+                    "ts": _dt.datetime.now(_dt.UTC).isoformat(),
                     "seq": seq,
                     "parent_call_id": "p1",
                     "child_run_id": "c1",
                     "kind": "call",
-                    "payload": {"type": "function_call", "call_id": f"old{seq}"},
+                    "payload": {
+                        "type": "function_call",
+                        "call_id": f"old{seq}",
+                    },
                 },
                 ensure_ascii=False,
             )
@@ -247,10 +276,12 @@ def test_parallel_writers_unique_monotonic_seq(tmp_path):
                         "name": "shell",
                     },
                 )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             errors.append(exc)
 
-    threads = [threading.Thread(target=writer, args=(w,)) for w in range(n_writers)]
+    threads = [
+        threading.Thread(target=writer, args=(w,)) for w in range(n_writers)
+    ]
     for t in threads:
         t.start()
     for t in threads:

@@ -1,19 +1,17 @@
 import asyncio
 import json
+import logging
 import os
 import threading
 from typing import Any, Dict, Optional
-import logging
 
 import uvicorn
 import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-
-from gc_core.run_context import acreate_run_context
 from gc_core.agent_executor import AgentExecutor
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
 from gc_core.config import build_auth_connector, cli_forces_legacy_model
+from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import (
     load_thread_messages,
     load_thread_meta,
@@ -21,11 +19,27 @@ from gc_core.thread_store import (
     sanitize_system_id,
     validate_thread_id,
 )
-from gc_server.rest_api.agent_execution_registry import agent_run_registry
-from gc_server.rest_api.server_config import build_agent_config_for_server, load_server_config
-from gc_server.rest_api.utils import ensure_task_id, normalize_system
-from gc_server.server_cleanup_threads import register_cleanup_threads_on_startup, register_swarm_cleanup_on_startup
 from gc_core.trace_id import normalize_trace_id
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
+
+from gc_server.rest_api.agent_execution_registry import agent_run_registry
+from gc_server.rest_api.server_config import (
+    build_agent_config_for_server,
+    load_server_config,
+)
+from gc_server.rest_api.utils import ensure_task_id, normalize_system
+from gc_server.server_cleanup_threads import (
+    attach_shutdown,
+    attach_startup,
+    register_cleanup_threads_on_startup,
+    register_swarm_cleanup_on_startup,
+)
+
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
+
 
 logger = logging.getLogger(__name__)
 
@@ -34,12 +48,12 @@ logger = logging.getLogger(__name__)
 # если swarm не импортируется — считаем, что он выключен.
 _SWARM_MODULES_AVAILABLE = True
 try:
-    from gc_server.swarm.config import build_swarm_config
-    from gc_server.swarm.monitor import SwarmMonitor
     from gc_server.swarm import lifecycle as swarm_lifecycle
     from gc_server.swarm import runner as swarm_runner
     from gc_server.swarm import storage as swarm_storage
-except (ModuleNotFoundError, ImportError) as e:
+    from gc_server.swarm.config import build_swarm_config
+    from gc_server.swarm.monitor import SwarmMonitor
+except ImportError as e:
     _SWARM_MODULES_AVAILABLE = False
     logger.warning("swarm disabled due to import error: %r", e)
     build_swarm_config = None  # type: ignore[assignment]
@@ -47,8 +61,6 @@ except (ModuleNotFoundError, ImportError) as e:
     swarm_lifecycle = None  # type: ignore[assignment]
     swarm_runner = None  # type: ignore[assignment]
     swarm_storage = None  # type: ignore[assignment]
-
-
 
 
 try:
@@ -59,7 +71,9 @@ try:
     # тот же приём, что config_modules/env_vars.py уже применяет к битым
     # GC_*-переменным окружения.
     SERVER_CONFIG: Dict[str, Any] = load_server_config()
-    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(SERVER_CONFIG)
+    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(
+        SERVER_CONFIG
+    )
 except (ValueError, OSError, yaml.YAMLError) as exc:
     raise SystemExit(
         f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
@@ -96,12 +110,11 @@ register_swarm_cleanup_on_startup(
 )
 
 
-@app.on_event("startup")
 async def _startup_swarm_monitor() -> None:
     """
     Инициализировать фоновый монитор сворм-процессов, если режим включён.
     """
-    global _swarm_monitor  # noqa: PLW0603
+    global _swarm_monitor
 
     if not SWARM_CONFIG.get("enabled"):
         return
@@ -117,7 +130,56 @@ async def _startup_swarm_monitor() -> None:
     _swarm_monitor = monitor
 
 
-@app.on_event("shutdown")
+def _mark_swarm_shutdown(threads_dir: str, swarm_id: str) -> None:
+    # Обновляем meta — даже если процесс уже умер, обновляем статус
+    # на server_shutdown для аудита.
+    try:
+        existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+        if existing:
+            sm = existing.get("swarm_meta") or {}
+            current_status = str(sm.get("status", "")).strip().lower()
+            if current_status not in swarm_lifecycle.FINAL_STATUSES:
+                swarm_storage.save_swarm_meta(
+                    threads_dir,
+                    swarm_id,
+                    base_meta={
+                        "system": existing.get("system"),
+                        "task_id": existing.get("task_id"),
+                    },
+                    swarm_meta_patch={
+                        "status": "unknown_failed",
+                        "finished_at": swarm_storage._utc_now_iso(),
+                        "error_type": "server_shutdown",
+                        "error_message": "Killed during server shutdown",
+                        "sandbox_status": "completed",
+                    },
+                )
+    except Exception:
+        logger.exception("shutdown: failed to update meta for %s", swarm_id)
+
+
+def _terminate_swarm_groups(
+    threads_dir: str, active_ids: list[str]
+) -> list[tuple[str, int]]:
+    import signal
+
+    pids_to_kill = []
+    for swarm_id in active_ids:
+        meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
+        if not meta:
+            continue
+        sm = meta.get("swarm_meta") or {}
+        pid = sm.get("pid")
+        if isinstance(pid, int) and swarm_lifecycle._is_pid_alive(pid):
+            try:
+                os.killpg(pid, signal.SIGTERM)
+                pids_to_kill.append((swarm_id, pid))
+            except OSError:
+                pass
+
+    return pids_to_kill
+
+
 async def _shutdown_swarm_processes() -> None:
     """Graceful shutdown: убить все живые sworm-процессы (шаг 3.3).
 
@@ -132,8 +194,6 @@ async def _shutdown_swarm_processes() -> None:
     4. Кто остался жив — SIGKILL.
     5. Обновляем meta: status=unknown_failed, error_type=server_shutdown.
     """
-    import asyncio
-    import os
     import signal
 
     monitor = _swarm_monitor
@@ -148,19 +208,7 @@ async def _shutdown_swarm_processes() -> None:
     logger.info("shutdown: terminating %d active sworm(s)", len(active_ids))
 
     # 1. SIGTERM для всех.
-    pids_to_kill = []
-    for swarm_id in active_ids:
-        meta = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-        if not meta:
-            continue
-        sm = meta.get("swarm_meta") or {}
-        pid = sm.get("pid")
-        if isinstance(pid, int) and swarm_lifecycle._is_pid_alive(pid):
-            try:
-                os.killpg(pid, signal.SIGTERM)
-                pids_to_kill.append((swarm_id, pid))
-            except (ProcessLookupError, PermissionError, OSError):
-                pass
+    pids_to_kill = _terminate_swarm_groups(threads_dir, active_ids)
 
     # 2. Grace period — CLI пытается дописать summary.
     await asyncio.sleep(3.0)
@@ -170,38 +218,29 @@ async def _shutdown_swarm_processes() -> None:
         if swarm_lifecycle._is_pid_alive(pid):
             try:
                 os.killpg(pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
+            except OSError:
                 pass
 
-        # Обновляем meta — даже если процесс уже умер, обновляем статус
-        # на server_shutdown для аудита.
-        try:
-            existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-            if existing:
-                sm = existing.get("swarm_meta") or {}
-                current_status = str(sm.get("status", "")).strip().lower()
-                if current_status not in swarm_lifecycle.FINAL_STATUSES:
-                    swarm_storage.save_swarm_meta(
-                        threads_dir, swarm_id,
-                        base_meta={
-                            "system": existing.get("system"),
-                            "task_id": existing.get("task_id"),
-                        },
-                        swarm_meta_patch={
-                            "status": "unknown_failed",
-                            "finished_at": swarm_storage._utc_now_iso(),  # noqa: SLF001
-                            "error_type": "server_shutdown",
-                            "error_message": "Killed during server shutdown",
-                            "sandbox_status": "completed",
-                        },
-                    )
-        except Exception:  # noqa: BLE001
-            logger.exception("shutdown: failed to update meta for %s", swarm_id)
+        _mark_swarm_shutdown(threads_dir, swarm_id)
 
         monitor.unregister_active(swarm_id)
 
     # Останавливаем фоновой loop.
     monitor.stop()
+
+
+# Lifespan вместо deprecated @app.on_event("startup"/"shutdown").
+# Lookup имён при вызове — чтобы тесты могли monkeypatch'ить хуки.
+async def _lifespan_startup() -> None:
+    await _startup_swarm_monitor()
+
+
+async def _lifespan_shutdown() -> None:
+    await _shutdown_swarm_processes()
+
+
+attach_startup(app, _lifespan_startup)
+attach_shutdown(app, _lifespan_shutdown)
 
 
 @app.middleware("http")
@@ -231,7 +270,10 @@ async def auth_middleware(request: Request, call_next):
     if scheme.lower() != "bearer" or token != str(auth_token):
         return JSONResponse(
             status_code=403,
-            content={"status": "forbidden", "detail": "invalid or missing token"},
+            content={
+                "status": "forbidden",
+                "detail": "invalid or missing token",
+            },
         )
 
     return await call_next(request)
@@ -244,7 +286,7 @@ async def get_run_status(system: str, task_id: str):
     if not sys_norm or not task_norm:
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
+            detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
 
     # Бронь и прогон — одним снимком реестра, бронь первой: пока строится
@@ -336,16 +378,15 @@ def _context_build_wait_s(raw: Any) -> float:
     # NaN отсекается тем же сравнением — с ним оно ложно.
     if isinstance(raw, bool) or not 0 < value < float("inf"):
         logger.warning(
-            "server.context_build_wait_seconds=%r — нужно положительное конечное "
-            "число секунд, беру %g",
-            raw, _CONTEXT_BUILD_WAIT_DEFAULT_S,
+            "server.context_build_wait_seconds=%r — нужно положительное конечное число секунд, беру %g",
+            raw,
+            _CONTEXT_BUILD_WAIT_DEFAULT_S,
         )
         return _CONTEXT_BUILD_WAIT_DEFAULT_S
     return value
 
 
-@app.post("/events/webhook")
-async def events_webhook(request: Request):
+async def _read_request_payload(request: Request) -> dict:
     try:
         payload = await request.json()
     except Exception:
@@ -357,9 +398,16 @@ async def events_webhook(request: Request):
     if not isinstance(payload, dict):
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "JSON body must be an object"},
+            detail={
+                "status": "error",
+                "payload": "JSON body must be an object",
+            },
         )
 
+    return payload
+
+
+def _request_task_identifiers(payload: dict) -> tuple[str, str | None]:
     try:
         task_id = ensure_task_id(payload)
     except ValueError as e:
@@ -379,6 +427,15 @@ async def events_webhook(request: Request):
             status_code=400,
             detail={"status": "error", "payload": f"invalid trace_id: {exc}"},
         )
+
+    return task_id, trace_id
+
+
+@app.post("/events/webhook")
+async def events_webhook(request: Request):
+    payload = await _read_request_payload(request)
+
+    task_id, trace_id = _request_task_identifiers(payload)
 
     # Определяем/нормализуем system: берём из payload["system"] или defaults.system.
     source_value = payload.get("system")
@@ -452,16 +509,22 @@ async def events_webhook(request: Request):
         # По истечении — честный 503: сообщение не принято, повторять клиенту.
         if ceiling is None:
             ceiling = _context_build_wait_s(
-                (SERVER_CONFIG.get("server") or {}).get("context_build_wait_seconds")
+                (SERVER_CONFIG.get("server") or {}).get(
+                    "context_build_wait_seconds"
+                )
             )
             deadline = asyncio.get_running_loop().time() + ceiling
         try:
             async with asyncio.timeout_at(deadline):
-                await agent_run_registry.await_build(system=system, task_id=task_id)
+                await agent_run_registry.await_build(
+                    system=system, task_id=task_id
+                )
         except TimeoutError:
             logger.warning(
                 "context_build_wait_timeout system=%s task_id=%s ceiling_s=%g",
-                system, task_id, ceiling,
+                system,
+                task_id,
+                ceiling,
                 extra={
                     "event": "context_build_wait_timeout",
                     "system": system,
@@ -491,13 +554,17 @@ async def events_webhook(request: Request):
         # (agent_overrides перекрывают config.yml так же, как CLI-аргументы).
         force_legacy = cli_forces_legacy_model(config_dict)
         if force_legacy:
-            logger.warning("agent_overrides: уровни отключены на этот запуск (легаси-форс)")
+            logger.warning(
+                "agent_overrides: уровни отключены на этот запуск (легаси-форс)"
+            )
         # Асинхронная сборка: внутри MCP-дискавери — сетевые вызовы к каждому
         # серверу с общим дедлайном. Синхронный вариант морозил loop uvicorn на
         # всё это время, а с переездом прогоны стали тасками на общем loop,
         # поэтому заморозка била разом по всем эндпоинтам и всем идущим прогонам.
         ctx = await acreate_run_context(
-            config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+            config_dict,
+            auth_connector=auth_connector,
+            force_legacy=force_legacy,
         )
 
         await agent_run_registry.astart_if_absent(
@@ -556,10 +623,13 @@ async def get_thread_logs(system: str, task_id: str):
 
     try:
         threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
+            detail={
+                "status": "error",
+                "payload": f"threads resolve error: {e!r}",
+            },
         )
 
     meta = load_thread_meta(threads_dir, sys_norm, task_norm)
@@ -577,6 +647,28 @@ async def get_thread_logs(system: str, task_id: str):
     }
 
 
+def _thread_log_entry(meta: dict, name: str) -> dict:
+    system = meta.get("system")
+    if not isinstance(system, str) or not system.strip():
+        system = "unknown"
+
+    task_id = meta.get("thread_id")
+    if not isinstance(task_id, str) or not task_id.strip():
+        # legacy fallback: meta_<thread_id>.json
+        task_id = name.removeprefix("meta_").removesuffix(".json")
+
+    updated_at = meta.get("updated_at") or meta.get("created_at")
+    messages_count = meta.get("messages_count")
+
+    return {
+        "system": system,
+        "task_id": task_id,
+        "updated_at": updated_at,
+        "messages_count": messages_count,
+        "logs_url": f"/logs/{system}/{task_id}",
+    }
+
+
 @app.get("/logs/all")
 async def get_all_thread_logs():
     """
@@ -587,22 +679,29 @@ async def get_all_thread_logs():
     """
     try:
         threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
-    except Exception as e:  # noqa: BLE001
+    except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail={"status": "error", "payload": f"threads resolve error: {e!r}"},
+            detail={
+                "status": "error",
+                "payload": f"threads resolve error: {e!r}",
+            },
         )
 
     out: list[dict[str, Any]] = []
     try:
-        names = [n for n in os.listdir(threads_dir) if n.startswith("meta_") and n.endswith(".json")]
+        names = [
+            n
+            for n in os.listdir(threads_dir)
+            if n.startswith("meta_") and n.endswith(".json")
+        ]
     except FileNotFoundError:
         return {"status": "ok", "logs": []}
 
     for name in names:
         meta_path = os.path.join(threads_dir, name)
         try:
-            with open(meta_path, "r", encoding="utf-8") as f:
+            with open(meta_path, encoding="utf-8") as f:
                 meta = json.load(f)
         except Exception:
             continue
@@ -610,30 +709,46 @@ async def get_all_thread_logs():
         if not isinstance(meta, dict):
             continue
 
-        system = meta.get("system")
-        if not isinstance(system, str) or not system.strip():
-            system = "unknown"
-
-        task_id = meta.get("thread_id")
-        if not isinstance(task_id, str) or not task_id.strip():
-            # legacy fallback: meta_<thread_id>.json
-            task_id = name.removeprefix("meta_").removesuffix(".json")
-
-        updated_at = meta.get("updated_at") or meta.get("created_at")
-        messages_count = meta.get("messages_count")
-
-        out.append(
-            {
-                "system": system,
-                "task_id": task_id,
-                "updated_at": updated_at,
-                "messages_count": messages_count,
-                "logs_url": f"/logs/{system}/{task_id}",
-            }
-        )
+        out.append(_thread_log_entry(meta, name))
 
     out.sort(key=lambda x: str(x.get("updated_at") or ""), reverse=True)
     return {"status": "ok", "logs": out}
+
+
+def _reject_existing_swarm(
+    existing: dict, system: str, task_id: str
+) -> JSONResponse | None:
+    if existing:
+        sm = existing.get("swarm_meta") or {}
+        if not isinstance(sm, dict):
+            sm = {}
+        current_status = str(sm.get("status", "")).strip().lower()
+        if current_status in {"queued", "running"}:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "rejected",
+                    "reason": "swarm_id_already_active",
+                    "system": system,
+                    "task_id": task_id,
+                    "current_status": current_status,
+                },
+            )
+        # Финальный статус → reject (AR-3).
+        if current_status in swarm_lifecycle.FINAL_STATUSES:
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "status": "rejected",
+                    "reason": "swarm_id_already_finalized",
+                    "system": system,
+                    "task_id": task_id,
+                    "current_status": current_status,
+                },
+            )
+        # Неизвестный/повреждённый статус — пропускаем как fresh start.
+
+    return None
 
 
 @app.post("/swarm/run")
@@ -647,41 +762,9 @@ async def swarm_run(request: Request):
             detail={"status": "error", "reason": "swarm_disabled"},
         )
 
-    try:
-        payload = await request.json()
-    except Exception:
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": "invalid JSON body"},
-        )
+    payload = await _read_request_payload(request)
 
-    if not isinstance(payload, dict):
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": "JSON body must be an object"},
-        )
-
-    # Нормализуем system и task_id по тем же правилам, что и в вебхуке.
-    try:
-        task_id = ensure_task_id(payload)
-    except ValueError as e:
-        # Присланный task_id уезжает в имя каталога и дальше в пути ФС.
-        # Отвергаем ДО любого побочного эффекта, а не падаем позже в сторе.
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": f"invalid task_id: {e}"},
-        )
-    # trace_id — поле контекста задачи, а не часть запроса к модели. Снимаем его
-    # ДО того, как payload уедет в песочницу целиком: он доставляется ребёнку
-    # аргументом `-q`, то есть оставленный в теле трейс попал бы в промпт модели
-    # как текст задачи. Симметрично вебхуку.
-    try:
-        trace_id = normalize_trace_id(payload.pop("trace_id", None))
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"status": "error", "payload": f"invalid trace_id: {exc}"},
-        )
+    task_id, trace_id = _request_task_identifiers(payload)
     source_value = payload.get("system")
     defaults = SERVER_CONFIG.get("defaults") or {}
     default_system = str(defaults.get("system", "generic"))
@@ -698,7 +781,9 @@ async def swarm_run(request: Request):
 
     # AR-3: reuse_strategy MVP — поддерживаем только "reject".
     # "continue" и "fresh" — отдадим 501, чтобы клиент не зависел от непостроенной семантики.
-    reuse_strategy = str(payload.get("reuse_strategy") or "reject").strip().lower()
+    reuse_strategy = (
+        str(payload.get("reuse_strategy") or "reject").strip().lower()
+    )
     if reuse_strategy not in {"reject", ""}:
         return JSONResponse(
             status_code=501,
@@ -721,35 +806,9 @@ async def swarm_run(request: Request):
     #   3) перезапись meta живого прогона.
     with _SWARM_RUN_LOCK:
         existing = swarm_storage.load_swarm_meta(threads_dir, swarm_id)
-        if existing:
-            sm = existing.get("swarm_meta") or {}
-            if not isinstance(sm, dict):
-                sm = {}
-            current_status = str(sm.get("status", "")).strip().lower()
-            if current_status in {"queued", "running"}:
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "status": "rejected",
-                        "reason": "swarm_id_already_active",
-                        "system": system,
-                        "task_id": task_id,
-                        "current_status": current_status,
-                    },
-                )
-            # Финальный статус → reject (AR-3).
-            if current_status in swarm_lifecycle.FINAL_STATUSES:
-                return JSONResponse(
-                    status_code=409,
-                    content={
-                        "status": "rejected",
-                        "reason": "swarm_id_already_finalized",
-                        "system": system,
-                        "task_id": task_id,
-                        "current_status": current_status,
-                    },
-                )
-            # Неизвестный/повреждённый статус — пропускаем как fresh start.
+        rejection = _reject_existing_swarm(existing, system, task_id)
+        if rejection is not None:
+            return rejection
 
         # Лимит на количество одновременно работающих свормов.
         if monitor is not None:
@@ -773,10 +832,13 @@ async def swarm_run(request: Request):
                 payload=payload,
                 trace_id=trace_id,
             )
-        except Exception as e:  # noqa: BLE001
+        except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail={"status": "error", "reason": f"swarm_start_failed: {e!r}"},
+                detail={
+                    "status": "error",
+                    "reason": f"swarm_start_failed: {e!r}",
+                },
             )
 
         if monitor is not None:
@@ -810,7 +872,7 @@ async def get_swarm_status(system: str, task_id: str):
     if not str(system or "").strip() or not str(task_id or "").strip():
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
+            detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
     sys_norm = sanitize_system_id(str(system).lower().strip())
     try:
@@ -834,7 +896,9 @@ async def get_swarm_status(system: str, task_id: str):
     # подтянет completion.json или проверит PID и обновит meta при необходимости.
     # См. swarm_spec.md §5.2 и шаг M2/1.5.
     meta = swarm_lifecycle.check_and_finalize(
-        threads_dir, sandbox_root_dir, swarm_id,
+        threads_dir,
+        sandbox_root_dir,
+        swarm_id,
         swarm_logs_dir=str(SWARM_CONFIG.get("swarm_logs_dir", "")),
     )
     if not meta:
@@ -879,7 +943,7 @@ async def get_swarm_logs(system: str, task_id: str):
     if not str(system or "").strip() or not str(task_id or "").strip():
         raise HTTPException(
             status_code=400,
-            detail={"status": "error", "payload": "system and task_id are required"},
+            detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
     sys_norm = sanitize_system_id(str(system).lower().strip())
     try:
@@ -926,7 +990,9 @@ async def healthcheck():
 #: падает KeyError. До этой ветки `server.log_level` читался и НИКУДА не
 #: передавался, поэтому конфиг с `warn` работал; передав его в uvicorn, мы бы
 #: уронили такие установки на старте.
-_UVICORN_LOG_LEVELS = frozenset({"critical", "error", "warning", "info", "debug", "trace"})
+_UVICORN_LOG_LEVELS = frozenset(
+    {"critical", "error", "warning", "info", "debug", "trace"}
+)
 
 #: Написания, которые logging принимает как синонимы, а uvicorn — нет.
 _LOG_LEVEL_ALIASES = {"warn": "warning", "fatal": "critical"}
@@ -943,7 +1009,8 @@ def _normalize_log_level(raw) -> str:
     if level not in _UVICORN_LOG_LEVELS:
         logger.warning(
             "server.log_level=%r uvicorn не понимает (допустимы: %s) — беру info",
-            raw, ", ".join(sorted(_UVICORN_LOG_LEVELS)),
+            raw,
+            ", ".join(sorted(_UVICORN_LOG_LEVELS)),
         )
         return "info"
     return level
@@ -979,7 +1046,8 @@ def serve() -> int:
     # `SERVER_CONFIG["config_path"]`, читать файл заново не требуется.
     logger.info(
         "config_server.yml: %s",
-        SERVER_CONFIG.get("config_path") or "не найден, взят минимальный дефолт",
+        SERVER_CONFIG.get("config_path")
+        or "не найден, взят минимальный дефолт",
     )
 
     # Тревога по СОСТОЯНИЮ, а не по факту «файл не найден». Прежде она жила в
@@ -1000,10 +1068,11 @@ def serve() -> int:
     # репозитория, а из wheel падала ModuleNotFoundError.
     # log_level передаётся явно — server.log_level из конфига читался и не
     # использовался нигде.
-    uvicorn.run("gc_server.server:app", host=host, port=port, log_level=log_level)
+    uvicorn.run(
+        "gc_server.server:app", host=host, port=port, log_level=log_level
+    )
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(serve())
-

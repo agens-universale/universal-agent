@@ -1,19 +1,31 @@
 import tempfile
 import types
 
-from gc_testkit.intent_fixtures import intent_user_ask_texts, meta_intent_log, user_ask_records
-from gc_core.intent_log import append_user_ask, serialize_for_meta
+from gc_core.intent_log import append_user_ask
 from gc_core.summarize.compaction import amaybe_run_summary_compaction
-from gc_core.thread_store import ThreadSession, append_new_thread_messages, save_thread_meta
-from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_core.thread_store import (
+    ThreadSession,
+    append_new_thread_messages,
+    save_thread_meta,
+)
 from gc_testkit import run_coro
+from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.intent_fixtures import (
+    intent_user_ask_texts,
+    meta_intent_log,
+    user_ask_records,
+)
 
 TS = "2026-05-30T11:35:08Z"
 
 
 def _patch_chat_completion(monkeypatch, fake):
-    monkeypatch.setattr("gc_core.summarize.thread_summarizer.arequest_summary_text", fake)
-    monkeypatch.setattr("gc_core.summarize.summary_llm_steps.arequest_summary_text", fake)
+    monkeypatch.setattr(
+        "gc_core.summarize.thread_summarizer.arequest_summary_text", fake
+    )
+    monkeypatch.setattr(
+        "gc_core.summarize.summary_llm_steps.arequest_summary_text", fake
+    )
 
 
 def _ctx(trigger_chars: int = 1):
@@ -23,7 +35,9 @@ def _ctx(trigger_chars: int = 1):
             "completions_url": "http://example.test/v1/chat/completions",
             "summary_params": {
                 "chat_completions_summary_trigger_chars": trigger_chars,
-                "incremental_batch_chars": int(trigger_chars * 1.4) if trigger_chars > 0 else 0,
+                "incremental_batch_chars": int(trigger_chars * 1.4)
+                if trigger_chars > 0
+                else 0,
                 "max_accumulated_summary_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
@@ -78,7 +92,9 @@ def test_state_user_intent_log_preserves_order_and_dedup():
     ]
 
 
-async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch):
+async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
+    monkeypatch,
+):
     with tempfile.TemporaryDirectory() as tmp_dir:
         thread_id = "demo-thread"
         system_id = "cli"
@@ -103,7 +119,9 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch
             {
                 "backend_api_mode": "chat_completions",
                 "state_schema_version": "v2",
-                "user_intent_log": meta_intent_log("first request", "second request"),
+                "user_intent_log": meta_intent_log(
+                    "first request", "second request"
+                ),
             },
         )
         session = await ThreadSession.afrom_config(
@@ -112,13 +130,18 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch
             thread_id=thread_id,
         )
 
-        monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+        monkeypatch.setattr(
+            "gc_core.summarize.prompt_loading.load_prompt_template",
+            lambda _p: "prompt",
+        )
 
         async def _fake_summary(**_kwargs):
             return valid_summary_xml_for_tests(seed="context")
 
         _patch_chat_completion(monkeypatch, _fake_summary)
-        empty_patch = types.SimpleNamespace(request_messages=[], raw_response="")
+        empty_patch = types.SimpleNamespace(
+            request_messages=[], raw_response=""
+        )
 
         async def _fake_patch_replace(**_k):
             return empty_patch
@@ -131,7 +154,9 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch
         state = _state()
         state.thread_id = thread_id
         state.messages = session.get_full_history_messages()
-        state.user_intent_log = user_ask_records("first request", "second request", turn=1)
+        state.user_intent_log = user_ask_records(
+            "first request", "second request", turn=1
+        )
         state.user_turn_seq = 1
         ran_1 = await amaybe_run_summary_compaction(
             ctx=_ctx(trigger_chars=1),
@@ -139,12 +164,17 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
-                event.get("summary_payload", {})
+            on_summary_applied=lambda event: (
+                session.aarchive_and_compact_summary_payload(
+                    event.get("summary_payload", {})
+                )
             ),
         )
         assert ran_1 is True
-        assert "<original_user_messages>" not in session.history_messages[0]["content"]
+        assert (
+            "<original_user_messages>"
+            not in session.history_messages[0]["content"]
+        )
 
         state.user_intent_log = append_user_ask(
             state.user_intent_log,
@@ -166,8 +196,10 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(monkeypatch
             summary_trigger_chars=1,
             trigger_reason="post_step",
             is_cli_mode=False,
-            on_summary_applied=lambda event: session.aarchive_and_compact_summary_payload(
-                event.get("summary_payload", {})
+            on_summary_applied=lambda event: (
+                session.aarchive_and_compact_summary_payload(
+                    event.get("summary_payload", {})
+                )
             ),
         )
         assert ran_2 is True
@@ -187,7 +219,9 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
             system_id=system_id,
             thread_id=thread_id,
         )
-        session.meta["user_intent_log"] = meta_intent_log("first request", "second request")
+        session.meta["user_intent_log"] = meta_intent_log(
+            "first request", "second request"
+        )
         session.meta["state_schema_version"] = "v2"
         await session.apersist_batch(
             [
@@ -209,7 +243,10 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
 
 
 def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
 
     async def _fake_summary(**_kwargs):
         return valid_summary_xml_for_tests(seed="context")
@@ -232,23 +269,38 @@ def test_maybe_run_summary_compaction_works_without_thread(monkeypatch):
         {"role": "user", "content": "second request"},
         {"role": "assistant", "content": "second reply"},
     ]
-    state.user_intent_log = user_ask_records("first request", "second request", turn=1)
+    state.user_intent_log = user_ask_records(
+        "first request", "second request", turn=1
+    )
     state.user_turn_seq = 1
-    ran = run_coro(amaybe_run_summary_compaction(
-        ctx=_ctx(trigger_chars=1),
-        state=state,
-        summary_trigger_chars=1,
-        trigger_reason="post_step",
-        is_cli_mode=False,
-    ))
+    ran = run_coro(
+        amaybe_run_summary_compaction(
+            ctx=_ctx(trigger_chars=1),
+            state=state,
+            summary_trigger_chars=1,
+            trigger_reason="post_step",
+            is_cli_mode=False,
+        )
+    )
     assert ran is True
     assert len(state.messages) == 1
-    assert "Summarized context from previous dialogue." in state.messages[0]["content"]
-    assert intent_user_ask_texts(state.user_intent_log) == ["first request", "second request"]
+    assert (
+        "Summarized context from previous dialogue."
+        in state.messages[0]["content"]
+    )
+    assert intent_user_ask_texts(state.user_intent_log) == [
+        "first request",
+        "second request",
+    ]
 
 
-def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkeypatch):
-    monkeypatch.setattr("gc_core.summarize.prompt_loading.load_prompt_template", lambda _p: "prompt")
+def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        "gc_core.summarize.prompt_loading.load_prompt_template",
+        lambda _p: "prompt",
+    )
 
     async def _fake_summary(**_kwargs):
         return valid_summary_xml_for_tests(seed="context")
@@ -277,20 +329,25 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     initial_project_data_before = dict(state.initial_project_data)
     call_metadata_before = dict(state.call_metadata)
 
-    ran = run_coro(amaybe_run_summary_compaction(
-        ctx=_ctx(trigger_chars=1),
-        state=state,
-        summary_trigger_chars=1,
-        trigger_reason="post_step",
-        is_cli_mode=False,
-    ))
+    ran = run_coro(
+        amaybe_run_summary_compaction(
+            ctx=_ctx(trigger_chars=1),
+            state=state,
+            summary_trigger_chars=1,
+            trigger_reason="post_step",
+            is_cli_mode=False,
+        )
+    )
 
     assert ran is True
     assert len(state.messages) == 2
     assert state.messages[0]["role"] == "system"
     assert state.messages[0]["content"] == "SYSTEM"
     assert state.messages[1]["role"] == "user"
-    assert "Summarized context from previous dialogue." in state.messages[1]["content"]
+    assert (
+        "Summarized context from previous dialogue."
+        in state.messages[1]["content"]
+    )
     assert "keep me" in state.shared.working_memory.get("goal", "")
     assert intent_user_ask_texts(state.user_intent_log) == ["first request"]
     assert state.dialog_steps_offset > 7
@@ -298,4 +355,3 @@ def test_maybe_run_summary_compaction_preserves_system_and_state_metadata(monkey
     # Контракт этапа 1: compaction не должен менять project metadata/call metadata.
     assert state.initial_project_data == initial_project_data_before
     assert state.call_metadata == call_metadata_before
-

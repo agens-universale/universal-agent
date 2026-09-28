@@ -1,9 +1,9 @@
-from gc_testkit.helpers.tool_ctx import CallableTool
 import json
 
-from gc_testkit.harbor_fakes import bind_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.harbor_fakes import bind_os_backend
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 class RecordingSandboxBackend(FsBackend):
@@ -111,7 +111,9 @@ class RecordingSandboxBackend(FsBackend):
     def exec(self, command, *, cwd=None, timeout=None, env=None):
         raise NotImplementedError
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+    def run_python(
+        self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None
+    ):
         raise NotImplementedError
 
     def default_cwd(self):
@@ -120,11 +122,13 @@ class RecordingSandboxBackend(FsBackend):
 
 def test_write_to_file_envelope_reports_container_path(monkeypatch, tmp_path):
     """In sandbox mode the reported path must not be rewritten against the host cwd."""
-    monkeypatch.chdir(tmp_path)                      # host cwd differs from container cwd
+    monkeypatch.chdir(tmp_path)  # host cwd differs from container cwd
     backend = RecordingSandboxBackend()
     tool = bind_os_backend(CallableTool(WriteToFile()), backend)
 
-    out = tool(path="/testbed/mod.py", content="x")   # tools are callables (__call__)
+    out = tool(
+        path="/testbed/mod.py", content="x"
+    )  # tools are callables (__call__)
     envelope = json.loads(out) if isinstance(out, str) else out
 
     assert envelope["ok"] is True

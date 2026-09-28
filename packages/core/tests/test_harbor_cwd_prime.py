@@ -7,11 +7,10 @@
 области становилась корневая файловая система вместо WORKDIR контейнера —
 ровно тот симптом, который уже чинили.
 """
+
 import ast
 import logging
 import pathlib
-
-import pytest
 
 from gc_core.backends import harbor as harbor_backend
 from gc_core.execution_workspace import aprime_backend_cwd
@@ -36,9 +35,9 @@ async def test_failed_prime_is_logged_not_swallowed(caplog):
         await aprime_backend_cwd(backend)
 
     assert backend.calls == 1
-    assert any("backend_cwd_prime_failed" in r.getMessage() for r in caplog.records), (
-        "отказ прогрева не виден в логе — корнем тихо станет '/'"
-    )
+    assert any(
+        "backend_cwd_prime_failed" in r.getMessage() for r in caplog.records
+    ), "отказ прогрева не виден в логе — корнем тихо станет '/'"
 
 
 async def test_successful_prime_is_quiet(caplog):
@@ -47,11 +46,16 @@ async def test_successful_prime_is_quiet(caplog):
     with caplog.at_level(logging.WARNING):
         await aprime_backend_cwd(backend)
 
-    assert not [r for r in caplog.records if "backend_cwd_prime_failed" in r.getMessage()]
+    assert not [
+        r
+        for r in caplog.records
+        if "backend_cwd_prime_failed" in r.getMessage()
+    ]
 
 
 async def test_backend_without_prime_is_skipped():
     """Локальный бэкенд метода не имеет — и это не повод шуметь."""
+
     class _Plain:
         pass
 
@@ -60,15 +64,28 @@ async def test_backend_without_prime_is_skipped():
 
 def test_prime_asks_with_a_timeout():
     """Структурно: у вопроса «где мы» есть потолок по времени."""
-    tree = ast.parse(pathlib.Path(harbor_backend.__file__).read_text(encoding="utf-8"))
-    fn = next(n for n in ast.walk(tree)
-              if isinstance(n, ast.AsyncFunctionDef) and n.name == "aprime_default_cwd")
+    tree = ast.parse(
+        pathlib.Path(harbor_backend.__file__).read_text(encoding="utf-8")
+    )
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef)
+        and n.name == "aprime_default_cwd"
+    )
 
-    exec_calls = [n for n in ast.walk(fn)
-                  if isinstance(n, ast.Call)
-                  and getattr(n.func, "attr", None) == "_aexec_impl"]
-    assert exec_calls, "проверка устарела: прогрев больше не спрашивает окружение"
-    assert all(any(kw.arg == "timeout" for kw in call.keywords) for call in exec_calls), (
+    exec_calls = [
+        n
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "attr", None) == "_aexec_impl"
+    ]
+    assert exec_calls, (
+        "проверка устарела: прогрев больше не спрашивает окружение"
+    )
+    assert all(
+        any(kw.arg == "timeout" for kw in call.keywords) for call in exec_calls
+    ), (
         "прогрев рабочего каталога идёт без таймаута — медленный контейнер "
         "задержит сборку контекста на неопределённое время"
     )

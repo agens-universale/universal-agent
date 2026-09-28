@@ -1,6 +1,10 @@
 """Образцы сводки для тестов."""
 
-from gc_core.summarize.summary_spec import assemble_summary_xml, primary_section_tag, section_tags
+from gc_core.summarize.summary_spec import (
+    assemble_summary_xml,
+    primary_section_tag,
+    section_tags,
+)
 
 
 def valid_summary_xml_for_tests(

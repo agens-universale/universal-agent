@@ -5,14 +5,23 @@
   ordering_key    → max seq из data_*
   storage_epoch   → meta.last_summary_archive_suffix (fallback last_summarized_at)
 """
+
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Optional, Sequence
 
-from gc_core.message_policy.user_message_policy import is_dialog_summary_user_message_text, user_content_to_text
-from gc_core.thread_store import delete_thread, discard_message_by_id, read_subagent_trace
+from gc_core.message_policy.user_message_policy import (
+    is_dialog_summary_user_message_text,
+    user_content_to_text,
+)
+from gc_core.thread_store import (
+    delete_thread,
+    discard_message_by_id,
+    read_subagent_trace,
+)
+
 from gc_tui.models import TailResult, TaskCursor, TaskSummary
 from gc_tui.services.trace_mapper import _clean_summary
 
@@ -26,7 +35,9 @@ class FileTaskStore:
 
     # ---- listing ------------------------------------------------------
 
-    def list_tasks(self, *, limit: int = 200, offset: int = 0) -> list[TaskSummary]:
+    def list_tasks(
+        self, *, limit: int = 200, offset: int = 0
+    ) -> list[TaskSummary]:
         items: list[TaskSummary] = []
         prefix = f"meta_{self._system}_"
         if not self._dir.exists():
@@ -41,11 +52,13 @@ class FileTaskStore:
                 meta = json.loads(meta_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
                 continue
-            tid = meta.get("thread_id") or meta_path.stem[len(prefix):]
+            tid = meta.get("thread_id") or meta_path.stem[len(prefix) :]
             # Исход сессии: TUI-владелец пишет в meta.tui.status (completed/stopped/
             # failed); верхний meta.status — для CLI/server-потоков. Нет ни того, ни
             # другого → None (исход не записан; список не выдумывает «stopped»).
-            status = (meta.get("tui") or {}).get("status") or meta.get("status")
+            status = (meta.get("tui") or {}).get("status") or meta.get(
+                "status"
+            )
             updated = meta.get("updated_at", "")
             msgs = int(meta.get("messages_count", 0))
             tui_meta = meta.get("tui") or {}
@@ -55,23 +68,27 @@ class FileTaskStore:
             token_usage = meta.get("token_usage")
             if not isinstance(token_usage, dict):
                 token_usage = None
-            items.append(TaskSummary(
-                thread_id=tid,
-                status=status,
-                updated_at=updated,
-                messages_count=msgs,
-                skill_id=skill_id,
-                unread_count=unread,
-                last_error=last_err,
-                tui_meta=tui_meta,
-                token_usage=token_usage,
-            ))
+            items.append(
+                TaskSummary(
+                    thread_id=tid,
+                    status=status,
+                    updated_at=updated,
+                    messages_count=msgs,
+                    skill_id=skill_id,
+                    unread_count=unread,
+                    last_error=last_err,
+                    tui_meta=tui_meta,
+                    token_usage=token_usage,
+                )
+            )
         items.sort(key=lambda s: s.updated_at, reverse=True)
-        return items[offset:offset + limit]
+        return items[offset : offset + limit]
 
     # ---- per-task -----------------------------------------------------
 
-    def get_task_meta(self, task_id: str, system: Optional[str] = None) -> dict:
+    def get_task_meta(
+        self, task_id: str, system: Optional[str] = None
+    ) -> dict:
         sys_ = system or self._system
         meta_path = self._dir / f"meta_{sys_}_{task_id}.json"
         if not meta_path.exists():
@@ -98,7 +115,9 @@ class FileTaskStore:
         # (TraceScreen._track_pending on the very first send), so the threads dir
         # need not exist yet. Own our write — create the dir.
         meta_path.parent.mkdir(parents=True, exist_ok=True)
-        meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
+        meta_path.write_text(
+            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
+        )
 
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред (все формы файлов). Делегирует в thread_store."""
@@ -167,7 +186,7 @@ class FileTaskStore:
         max_seq: int = 0
         offset: int = 0
         if data_path.exists():
-            with open(data_path, "r", encoding="utf-8") as f:
+            with open(data_path, encoding="utf-8") as f:
                 for line in f:
                     rec = self._parse_line(line.rstrip("\n"))
                     if rec is None:
@@ -216,7 +235,9 @@ class FileTaskStore:
             files.append(live)
         return "".join(f.read_text(encoding="utf-8") for f in files)
 
-    def read_segments(self, task_id: str, system: Optional[str] = None) -> list[dict]:
+    def read_segments(
+        self, task_id: str, system: Optional[str] = None
+    ) -> list[dict]:
         """Тред → сегменты (части между сжатиями). Read-only реконструкция.
 
         Каждый сегмент: {"index", "messages": [envelope-records], "compacted_by":
@@ -234,16 +255,20 @@ class FileTaskStore:
         if live.exists():
             files.append(live)
 
-        # parsed[i] = (seg_records, leading_summary_record_or_None)
+        # parsed[i] = (seg_records, leading_summary_record_or_None)  # noqa: ERA001  # описание формата, не выключенный код
         parsed: list[tuple[list[dict], Optional[dict]]] = []
         for fpath in files:
             recs: list[dict] = []
-            with open(fpath, "r", encoding="utf-8") as f:
+            with open(fpath, encoding="utf-8") as f:
                 for line in f:
                     rec = self._parse_line(line.rstrip("\n"))
                     if rec is not None:
                         recs.append(rec)
-            leading = recs[0] if (recs and self.is_compaction_summary(recs[0])) else None
+            leading = (
+                recs[0]
+                if (recs and self.is_compaction_summary(recs[0]))
+                else None
+            )
             seg = recs[1:] if leading is not None else recs
             parsed.append((seg, leading))
 
@@ -254,9 +279,15 @@ class FileTaskStore:
                 next_leading = parsed[i + 1][1]
                 if next_leading is not None:
                     payload = next_leading.get("payload") or {}
-                    synthesis = _clean_summary(user_content_to_text(payload.get("content")))
+                    synthesis = _clean_summary(
+                        user_content_to_text(payload.get("content"))
+                    )
                     chars_before = sum(
-                        len(user_content_to_text((r.get("payload") or {}).get("content")))
+                        len(
+                            user_content_to_text(
+                                (r.get("payload") or {}).get("content")
+                            )
+                        )
                         for r in seg
                     )
                     compacted_by = {
@@ -266,10 +297,14 @@ class FileTaskStore:
                         "chars_before": chars_before,
                         "chars_after": len(synthesis),
                     }
-            segments.append({"index": i, "messages": seg, "compacted_by": compacted_by})
+            segments.append(
+                {"index": i, "messages": seg, "compacted_by": compacted_by}
+            )
         return segments
 
-    def read_live_messages(self, task_id: str, system: Optional[str] = None) -> list[dict]:
+    def read_live_messages(
+        self, task_id: str, system: Optional[str] = None
+    ) -> list[dict]:
         """payload-словари сообщений ТОЛЬКО из live data-файла (без архивов).
         Для лёгкого подсчёта объёма контекста (индикатор). Нет файла → []."""
         sys_ = system or self._system
@@ -277,7 +312,7 @@ class FileTaskStore:
         if not live.exists():
             return []
         out: list[dict] = []
-        with open(live, "r", encoding="utf-8") as f:
+        with open(live, encoding="utf-8") as f:
             for line in f:
                 rec = self._parse_line(line.rstrip("\n"))
                 payload = rec.get("payload") if isinstance(rec, dict) else None
@@ -317,9 +352,11 @@ class FileTaskStore:
         # 3. incremental read
         new_records: list[dict] = []
         max_seq: int = (
-            int(cursor.ordering_key) if isinstance(cursor.ordering_key, int) else 0
+            int(cursor.ordering_key)
+            if isinstance(cursor.ordering_key, int)
+            else 0
         )
-        with open(data_path, "r", encoding="utf-8") as f:
+        with open(data_path, encoding="utf-8") as f:
             f.seek(int(cursor.position_token or 0))
             for line in f:
                 rec = self._parse_line(line.rstrip("\n"))

@@ -4,13 +4,12 @@ from pathlib import Path
 
 from gc_testkit.paths import PACKAGE_SRC_DIRS, REPO
 
-# Единственные допустимые вхождения memory_files вне deprecated-зоны (fail-fast reject).
+# Единственное допустимое вхождение memory_files — fail-fast reject старого поля
+# при загрузке. Сам тул MemoryFiles удалён вместе с tools/deprecated.
 # Пути даны от корня репозитория: после разбиения на пакеты исходники лежат в
-# packages/<дистрибутив>/src, а не в едином src/. Инвариант тот же — список
-# файлов не изменился, изменилась только их раскладка.
+# packages/<дистрибутив>/src, а не в едином src/.
 _ALLOWED_MEMORY_FILES_RELPATHS = frozenset(
     {
-        "packages/core/src/gc_core/tools/deprecated/memory_files.py",
         "packages/core/src/gc_core/persistence/schema.py",
     }
 )
@@ -21,7 +20,7 @@ def _relpath(path: Path) -> str:
 
 
 def test_memory_files_only_in_allowed_locations() -> None:
-    """rg "memory_files" по исходникам — только tools/deprecated и schema reject."""
+    """rg "memory_files" по исходникам — только schema reject."""
     unexpected: list[str] = []
     for src_dir in PACKAGE_SRC_DIRS:
         for path in sorted(src_dir.rglob("*.py")):

@@ -13,12 +13,13 @@ Router читает секции `models`/`slots`/`assign` из снимка `co
 Выбор фоллбэк-цели (активная модель / честная ошибка / рестарт субагента) — задача
 тех же потребителей, не Router'а.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from gc_core.config_modules.model_registry import LEVELS, LEVEL_FALLBACK
+from gc_core.config_modules.model_registry import LEVEL_FALLBACK, LEVELS
 
 # Канонический реестр потребителей (спека §5.1). `subagent:<agent_name>` — отдельный
 # префиксный consumer id, не перечислимый статически здесь (канонический реестр имён
@@ -53,13 +54,15 @@ _SCALAR_ASSIGN_FIELDS = (
 class ResolvedModel:
     """Комплект «модель + куда слать + чем авторизоваться», отданный потребителю."""
 
-    alias: str | None        # None в легаси
-    model: str               # провайдерский id
+    alias: str | None  # None в легаси
+    model: str  # провайдерский id
     url: str
-    authorization: str | None  # None=наследовать эффективный заголовок, ""=явно без, иначе значение
-    backend_overrides: dict    # плоские ключи backend поверх эффективных
+    authorization: (
+        str | None
+    )  # None=наследовать эффективный заголовок, ""=явно без, иначе значение
+    backend_overrides: dict  # плоские ключи backend поверх эффективных
     tariff: object | None
-    source: str                # человекочитаемое «почему» — питает витрины/футер/notices
+    source: str  # человекочитаемое «почему» — питает витрины/футер/notices
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -69,11 +72,13 @@ class AliasCircuitOpenError(RuntimeError):
     чтобы вызывающий код мог построить честное сообщение об ошибке без похода
     в реестр повторно."""
 
-    def __init__(self, resolved: "ResolvedModel", reason: str) -> None:
+    def __init__(self, resolved: ResolvedModel, reason: str) -> None:
         self.resolved = resolved
         self.alias = resolved.alias
         self.reason = reason
-        super().__init__(f"алиас '{resolved.alias}' в предохранителе: {reason}")
+        super().__init__(
+            f"алиас '{resolved.alias}' в предохранителе: {reason}"
+        )
 
 
 class CircuitBreaker:
@@ -96,7 +101,7 @@ class CircuitBreaker:
         return dict(self._tripped)
 
     @classmethod
-    def restore(cls, snapshot: dict) -> "CircuitBreaker":
+    def restore(cls, snapshot: dict) -> CircuitBreaker:
         breaker = cls()
         breaker._tripped = dict(snapshot or {})
         return breaker
@@ -126,9 +131,9 @@ class ModelRouter:
         self,
         config_snapshot: dict,
         level_provider: Callable[[], str],
-        breaker: "CircuitBreaker | None" = None,
+        breaker: CircuitBreaker | None = None,
         force_legacy: bool = False,
-        unbound_override: "ResolvedModel | None" = None,
+        unbound_override: ResolvedModel | None = None,
     ) -> None:
         """``unbound_override`` — явный канал «во что резолвится этот Router, если
         потребитель НЕ имеет assign-привязки» (используется дочерним Router'ом
@@ -172,7 +177,7 @@ class ModelRouter:
         резолвов, а не этот флаг)."""
         return self._unbound_override is not None
 
-    def with_override(self, override: "ResolvedModel | None") -> "ModelRouter":
+    def with_override(self, override: ResolvedModel | None) -> ModelRouter:
         """Клон Router'а с другим ``unbound_override`` — тот же снимок конфига,
         level_provider и breaker (спека §8: деградация субагента на активную
         модель без пересборки снимка/уровня, см. ``SubagentRunner``)."""
@@ -184,11 +189,16 @@ class ModelRouter:
             unbound_override=override,
         )
 
-    def resolve(self, consumer: str, *, check_breaker: bool = True) -> ResolvedModel:
+    def resolve(
+        self, consumer: str, *, check_breaker: bool = True
+    ) -> ResolvedModel:
         """``check_breaker=False`` — витринный резолв (футер, `/status`, спека §12.2):
         открытый алиас не роняет резолв, модель отдаётся честно. Рантайм-потребители
         оставляют дефолт ``True`` — открытый алиас отказывает мгновенно (§8)."""
-        if not (consumer in CONSUMERS or consumer.startswith(SUBAGENT_CONSUMER_PREFIX)):
+        if not (
+            consumer in CONSUMERS
+            or consumer.startswith(SUBAGENT_CONSUMER_PREFIX)
+        ):
             raise ValueError(
                 f"неизвестный consumer '{consumer}' — используйте ModelRouter.CONSUMERS "
                 f"или '{SUBAGENT_CONSUMER_PREFIX}<agent_name>'"
@@ -204,10 +214,14 @@ class ModelRouter:
             label, value = binding
             if value in LEVELS:
                 return self._resolve_level(
-                    value, source_prefix=f"привязка {label}→", check_breaker=check_breaker
+                    value,
+                    source_prefix=f"привязка {label}→",
+                    check_breaker=check_breaker,
                 )
             return self._resolve_alias(
-                value, source=f"привязка {label}→{value}", check_breaker=check_breaker
+                value,
+                source=f"привязка {label}→{value}",
+                check_breaker=check_breaker,
             )
 
         if self._unbound_override is not None:
@@ -215,11 +229,15 @@ class ModelRouter:
 
         if consumer == "auto_judge":
             return self._resolve_level(
-                "default", source_prefix="auto_judge без привязки → ", check_breaker=check_breaker
+                "default",
+                source_prefix="auto_judge без привязки → ",
+                check_breaker=check_breaker,
             )
 
         level = self._level_provider()
-        return self._resolve_level(level, source_prefix="активный ", check_breaker=check_breaker)
+        return self._resolve_level(
+            level, source_prefix="активный ", check_breaker=check_breaker
+        )
 
     def resolve_level(self, level: str) -> ResolvedModel:
         """Резолв ПРОИЗВОЛЬНОГО уровня, не только активного (спека §12.1) — витринам
@@ -240,7 +258,7 @@ class ModelRouter:
 
     def _lookup_binding(self, consumer: str) -> tuple[str, str] | None:
         if consumer.startswith(SUBAGENT_CONSUMER_PREFIX):
-            name = consumer[len(SUBAGENT_CONSUMER_PREFIX):]
+            name = consumer[len(SUBAGENT_CONSUMER_PREFIX) :]
             subagents = self._assign.get("subagents") or {}
             if subagents.get(name) is not None:
                 return name, subagents[name]
@@ -262,17 +280,20 @@ class ModelRouter:
             if alias:
                 phrase = _level_phrase(level, candidate_level)
                 return self._resolve_alias(
-                    alias, source=f"{source_prefix}{phrase}", check_breaker=check_breaker
+                    alias,
+                    source=f"{source_prefix}{phrase}",
+                    check_breaker=check_breaker,
                 )
         if len(self._models) == 1:
             (only_alias,) = self._models.keys()
             phrase = f"уровень {level} (единственная модель реестра)"
             return self._resolve_alias(
-                only_alias, source=f"{source_prefix}{phrase}", check_breaker=check_breaker
+                only_alias,
+                source=f"{source_prefix}{phrase}",
+                check_breaker=check_breaker,
             )
         raise ValueError(
-            f"не удалось резолвить уровень '{level}': ни один слот не задан, "
-            "моделей в реестре не ровно одна"
+            f"не удалось резолвить уровень '{level}': ни один слот не задан, моделей в реестре не ровно одна"
         )
 
     def _resolve_alias(
@@ -280,7 +301,9 @@ class ModelRouter:
     ) -> ResolvedModel:
         entry = self._models.get(alias)
         if entry is None:
-            raise ValueError(f"алиас '{alias}' отсутствует в merged-реестре models")
+            raise ValueError(
+                f"алиас '{alias}' отсутствует в merged-реестре models"
+            )
         backend_overrides = entry.get("backend_overrides") or {}
         model_id = entry.get("model") or alias
         url = (
@@ -302,7 +325,9 @@ class ModelRouter:
         # ``check_breaker=False`` — витринный резолв (футер/`/status`): показать
         # модель честно, не роняя резолв (§12.2).
         if check_breaker and self.breaker.is_open(alias):
-            raise AliasCircuitOpenError(resolved, self.breaker.snapshot().get(alias, ""))
+            raise AliasCircuitOpenError(
+                resolved, self.breaker.snapshot().get(alias, "")
+            )
         return resolved
 
     def _resolve_legacy(self, source: str) -> ResolvedModel:

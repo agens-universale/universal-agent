@@ -1,8 +1,8 @@
 """meta.tui.live_history_chars / live_msg_count — агрегаты объёма live (persist)."""
+
 from gc_core.message_format import calc_history_chars_for_trigger
 from gc_core.thread_store import (
     ThreadSession,
-    append_new_thread_messages,
     discard_message_by_id,
     load_thread_messages,
     load_thread_meta,
@@ -26,10 +26,12 @@ def _session(tmp_path, tid="t1", *, strip_think=True):
 
 def _live_tui(tmp_path, tid="t1"):
     """Обратная совместимость имени: live_* теперь в meta.runtime."""
-    return (load_thread_meta(str(tmp_path), "cli", tid).get("runtime") or {})
+    return load_thread_meta(str(tmp_path), "cli", tid).get("runtime") or {}
 
 
-async def test_persist_batch_sets_live_volume_matching_full_recompute(tmp_path):
+async def test_persist_batch_sets_live_volume_matching_full_recompute(
+    tmp_path,
+):
     msgs = [
         {"role": "user", "content": "привет", "id": "m1"},
         {"role": "assistant", "content": "ответ длиннее", "id": "m2"},
@@ -93,7 +95,9 @@ async def test_discard_keeps_live_volume_consistent(tmp_path):
         ],
         previous_response_id=None,
     )
-    assert discard_message_by_id(str(tmp_path), "cli", "t1", "m_orphan") is True
+    assert (
+        discard_message_by_id(str(tmp_path), "cli", "t1", "m_orphan") is True
+    )
 
     tui = _live_tui(tmp_path)
     live, _, _ = load_thread_messages(str(tmp_path), "cli", "t1")

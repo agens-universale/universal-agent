@@ -30,6 +30,7 @@
 строка под курсором. Пока вьюпорта не было, подводить было НЕКУДА: элемент «виден» в
 координатах скролла и невидим на экране.
 """
+
 from __future__ import annotations
 
 from textual.containers import VerticalScroll
@@ -72,7 +73,9 @@ def cap_frame_height(screen, scroll_id: str) -> None:
         scroll = screen.query_one(scroll_id)
     except NoMatches:
         return
-    chrome = sum(child.region.height for child in root.children if child is not scroll)
+    chrome = sum(
+        child.region.height for child in root.children if child is not scroll
+    )
     if chrome <= 0:
         return
     margin = scroll.styles.margin
@@ -190,9 +193,10 @@ def _reveal_widget(widget, frame: int) -> None:
     уходила навсегда, если её такт опередил применение mount'а."""
     if widget.is_mounted:
         widget.scroll_visible(animate=False)
-    if not widget.is_mounted or _again(frame, widget):
-        if frame + 1 < _MAX_FRAMES:
-            _step(widget.app, _reveal_widget, widget, frame + 1)
+    if (
+        not widget.is_mounted or _again(frame, widget)
+    ) and frame + 1 < _MAX_FRAMES:
+        _step(widget.app, _reveal_widget, widget, frame + 1)
 
 
 def _schedule(host, frame: int) -> None:
@@ -205,7 +209,7 @@ def _reveal_focus_now(host, frame: int) -> None:
     try:
         scope = host.screen
     except Exception:
-        return                     # экран уже сменился — подводить нечего
+        return  # экран уже сменился — подводить нечего
     target = None
     for selector in (f".{KEEP_IN_VIEW}", ".selected"):
         found = [w for w in scope.query(selector) if w.display]

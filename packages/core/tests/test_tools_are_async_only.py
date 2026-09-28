@@ -17,10 +17,9 @@
 тулы исполняют его инлайн на loop (`test_file_tools_run_inline`), долгие идут
 нативно (`test_native_async_tools`). Здесь проверяется только форма.
 """
+
 import ast
 import inspect
-
-import pytest
 
 from gc_testkit.paths import REPO
 
@@ -32,12 +31,15 @@ def _tool_classes() -> list[tuple[str, str]]:
     found: list[tuple[str, str]] = []
     for path in sorted(_TOOLS_DIR.rglob("*.py")):
         try:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            tree = ast.parse(
+                path.read_text(encoding="utf-8"), filename=str(path)
+            )
         except SyntaxError:  # pragma: no cover — синтаксис ловит другой гейт
             continue
         for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
             has_acall = any(
-                isinstance(m, (ast.AsyncFunctionDef, ast.FunctionDef)) and m.name == "acall"
+                isinstance(m, (ast.AsyncFunctionDef, ast.FunctionDef))
+                and m.name == "acall"
                 for m in cls.body
             )
             if has_acall:
@@ -50,11 +52,15 @@ def test_no_core_tool_declares_a_sync_entry():
     for rel, cls_name in _tool_classes():
         tree = ast.parse((_TOOLS_DIR / rel).read_text(encoding="utf-8"))
         cls = next(
-            n for n in ast.walk(tree)
+            n
+            for n in ast.walk(tree)
             if isinstance(n, ast.ClassDef) and n.name == cls_name
         )
         for m in cls.body:
-            if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)) and m.name == "__call__":
+            if (
+                isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and m.name == "__call__"
+            ):
                 offenders.append(f"{rel}:{m.lineno}: {cls_name}.__call__")
 
     assert offenders == [], (
@@ -70,8 +76,7 @@ def test_acall_is_the_abstract_contract():
     from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
     assert "acall" in AbstractSimpleTool.__abstractmethods__, (
-        "`acall` перестал быть абстрактным: тул без него создастся, а диспетчер "
-        "упадёт уже в рантайме, на вызове"
+        "`acall` перестал быть абстрактным: тул без него создастся, а диспетчер упадёт уже в рантайме, на вызове"
     )
     assert "__call__" not in AbstractSimpleTool.__abstractmethods__
 
@@ -96,7 +101,7 @@ async def test_every_core_tool_acall_is_a_coroutine_function():
         except Exception:
             try:
                 tool = fabric()
-            except Exception as exc:      # pragma: no cover — диагностика
+            except Exception as exc:  # pragma: no cover — диагностика
                 not_coroutines.append(f"{name}: не собрался ({exc})")
                 continue
         acall = getattr(tool, "acall", None)

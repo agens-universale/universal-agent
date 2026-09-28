@@ -12,10 +12,10 @@ stream-сессии не закрывались, владение не сним�
 Ради этой проверки уборка и вынесена из ``finally`` отдельной функцией: внутри
 ``finally`` свойство сверялось бы только с копией блока в тесте, то есть никак.
 """
+
 import asyncio
 
 import pytest
-
 from gc_core import agent_executor as ae
 
 
@@ -78,7 +78,7 @@ async def test_an_ordinary_error_does_not_stop_the_teardown(monkeypatch):
     order: list = []
     _wire(monkeypatch, order, stdio_raises=RuntimeError("сервер не отвечает"))
 
-    await ae._aclose_mcp_and_release(object())      # без исключения наружу
+    await ae._aclose_mcp_and_release(object())  # без исключения наружу
 
     assert order == ["stdio", "stream", "owner"], order
 

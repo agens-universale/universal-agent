@@ -1,27 +1,42 @@
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
-
 import base64
 import json
 import logging
 import os
 import time
 import uuid
-
+from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 from gc_core.config import load_config
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
-from gc_core.tools.connect_mcp.abandonable import run_abandonable
-from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
-from gc_core.tools.connect_mcp.transport_policy import resolve_effective_transport
+from gc_core.tools.connect_mcp.transport_policy import (
+    resolve_effective_transport,
+)
 from gc_core.tools.connect_mcp.validation import (
     _validate_tool_arguments,
     format_mcp_tool_result,
 )
 from gc_core.utils.aretry import retry_with_backoff_async
-from gc_core.utils.retry import retry_with_backoff
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_dict(value: Dict[Any, Any]) -> Dict[str, Any]:
+    ctype = value.get("type")
+    strip_data = ctype in ("image", "audio") and isinstance(
+        value.get("data"), str
+    )
+    out: Dict[str, Any] = {}
+    for k, v in value.items():
+        # JSON keys must be strings
+        key = k if isinstance(k, str) else str(k)
+        if strip_data and k == "data":
+            out[key] = (
+                f"<{ctype} data stripped: {len(value['data'])} base64 chars>"
+            )
+        else:
+            out[key] = _json_sanitize(v)
+    return out
 
 
 def _json_sanitize(value: Any) -> Any:
@@ -41,26 +56,8 @@ def _json_sanitize(value: Any) -> Any:
     if isinstance(value, (bytes, bytearray)):
         return "binary data"
     if isinstance(value, dict):
-        ctype = value.get("type")
-        if ctype in ("image", "audio") and isinstance(value.get("data"), str):
-            size = len(value["data"])
-            out: Dict[str, Any] = {}
-            for k, v in value.items():
-                key = k if isinstance(k, str) else str(k)
-                if k == "data":
-                    out[key] = f"<{ctype} data stripped: {size} base64 chars>"
-                else:
-                    out[key] = _json_sanitize(v)
-            return out
-        out = {}
-        for k, v in value.items():
-            # JSON keys must be strings
-            key = k if isinstance(k, str) else str(k)
-            out[key] = _json_sanitize(v)
-        return out
-    if isinstance(value, list):
-        return [_json_sanitize(v) for v in value]
-    if isinstance(value, tuple):
+        return _sanitize_dict(value)
+    if isinstance(value, (list, tuple)):
         return [_json_sanitize(v) for v in value]
     # Try to keep primitive JSON types as-is
     if isinstance(value, (str, int, float, bool)):
@@ -113,7 +110,9 @@ def _pick_filename(
     fname: Optional[str] = None
     if isinstance(arguments, dict):
         raw_name = (
-            arguments.get("filename") or arguments.get("file") or arguments.get("path")
+            arguments.get("filename")
+            or arguments.get("file")
+            or arguments.get("path")
         )
         if isinstance(raw_name, str) and raw_name.strip():
             fname = os.path.basename(raw_name.strip())
@@ -164,14 +163,18 @@ def _rewrite_media_blocks(
     """Рекурсивно обходит result, декодирует и сохраняет image/audio блоки,
     заменяя base64 `data` на ссылку `path` на хостовой ФС."""
     if isinstance(raw, dict):
-        if raw.get("type") in ("image", "audio") and isinstance(raw.get("data"), str):
+        if raw.get("type") in ("image", "audio") and isinstance(
+            raw.get("data"), str
+        ):
             return _save_media_block(raw, arguments, base_tool_name)
         return {
             k: _rewrite_media_blocks(v, arguments, base_tool_name)
             for k, v in raw.items()
         }
     if isinstance(raw, list):
-        return [_rewrite_media_blocks(v, arguments, base_tool_name) for v in raw]
+        return [
+            _rewrite_media_blocks(v, arguments, base_tool_name) for v in raw
+        ]
     return raw
 
 
@@ -241,6 +244,41 @@ class _McpCallTarget:
     use_retry: bool
 
 
+def _coerce_mcp_arguments(
+    full_tool_name: str, arguments: Dict[str, Any] | str
+) -> Any:
+    # Поддержка случая, когда arguments приходит как JSON-строка
+    if not isinstance(arguments, str):
+        return arguments or {}
+    try:
+        return json.loads(arguments) if arguments.strip() else {}
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Arguments for tool '{full_tool_name}' are not valid JSON: {e}"
+        ) from e
+
+
+def _split_legacy_tool_name(full_tool_name: str) -> tuple[str, str]:
+    # Фоллбек на старый формат имени, если метаданных нет
+    if "_" not in full_tool_name:
+        raise ValueError(
+            f"Tool name '{full_tool_name}' does not contain server prefix '<server>_<tool>'."
+        )
+    server_key, base_tool_name = full_tool_name.split("_", 1)
+    return server_key, base_tool_name
+
+
+def _check_server_cfg(server_key: str, server_cfg: Dict[str, Any]) -> None:
+    transport = server_cfg.get("transport")
+    stdio_like = transport in ("stdio", "stream_stdio")
+    if not stdio_like and not (server_cfg.get("url") or ""):
+        raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
+    if stdio_like and not server_cfg.get("command"):
+        raise ValueError(
+            f"MCP server '{server_key}' ({transport}) has no 'command' in config"
+        )
+
+
 def _prepare_mcp_call(
     full_tool_name: str,
     arguments: Dict[str, Any] | str,
@@ -260,23 +298,13 @@ def _prepare_mcp_call(
         # обход серверов. Реестр обязан приехать готовым: его собирает
         # `acall_mcp_tool` до разбора имени.
         raise ValueError(
-            "tools_registry обязателен: дискавери делает вызывающий "
-            "(`ToolsCache.aget_tools`), а не разбор имени тула"
+            "tools_registry обязателен: дискавери делает вызывающий (`ToolsCache.aget_tools`), а не разбор имени тула"
         )
 
     if full_tool_name not in tools_registry:
         raise ValueError(f"Unknown tool '{full_tool_name}'")
 
-    # Поддержка случая, когда arguments приходит как JSON-строка
-    if isinstance(arguments, str):
-        try:
-            arguments_obj = json.loads(arguments) if arguments.strip() else {}
-        except json.JSONDecodeError as e:
-            raise ValueError(
-                f"Arguments for tool '{full_tool_name}' are not valid JSON: {e}"
-            ) from e
-    else:
-        arguments_obj = arguments or {}
+    arguments_obj = _coerce_mcp_arguments(full_tool_name, arguments)
 
     # Берём описание тулы и метаданные.
     # Ожидаемый формат: {"tool": {...}, "metadata": {...}}.
@@ -286,19 +314,16 @@ def _prepare_mcp_call(
         if isinstance(raw_entry, dict) and "tool" in raw_entry
         else raw_entry
     )
-    metadata = raw_entry.get("metadata", {}) if isinstance(raw_entry, dict) else {}
+    metadata = (
+        raw_entry.get("metadata", {}) if isinstance(raw_entry, dict) else {}
+    )
 
     # Ключ сервера и реальное имя тулы на MCP‑сервере
     server_key = metadata.get("mcp_server_key")
     base_tool_name = metadata.get("mcp_tool_name") or full_tool_name
 
     if not server_key:
-        # Фоллбек на старый формат имени, если метаданных нет
-        if "_" not in full_tool_name:
-            raise ValueError(
-                f"Tool name '{full_tool_name}' does not contain server prefix '<server>_<tool>'."
-            )
-        server_key, base_tool_name = full_tool_name.split("_", 1)
+        server_key, base_tool_name = _split_legacy_tool_name(full_tool_name)
 
     server_cfg = servers_cfg.get(server_key)
     if not isinstance(server_cfg, dict):
@@ -307,13 +332,7 @@ def _prepare_mcp_call(
     transport = server_cfg.get("transport")
     url = server_cfg.get("url") or ""
     token = server_cfg.get("token")
-    stdio_like = transport in ("stdio", "stream_stdio")
-    if not stdio_like and not url:
-        raise ValueError(f"MCP server '{server_key}' has no 'url' in config")
-    if stdio_like and not server_cfg.get("command"):
-        raise ValueError(
-            f"MCP server '{server_key}' ({transport}) has no 'command' in config"
-        )
+    _check_server_cfg(server_key, server_cfg)
 
     # Схема параметров тулы (JSON Schema)
     tool_schema = tool_entry.get("parameters") or {}
@@ -391,7 +410,11 @@ async def acall_mcp_tool(
         ).aget_tools()
 
     target = _prepare_mcp_call(
-        full_tool_name, arguments, servers_cfg, tools_registry, default_use_retry,
+        full_tool_name,
+        arguments,
+        servers_cfg,
+        tools_registry,
+        default_use_retry,
         os_backend=os_backend,
     )
 

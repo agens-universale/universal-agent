@@ -2,7 +2,10 @@ import json
 import re
 from typing import Any, Dict, List
 
-from gc_core.constants.tool_names import FS_APPEND_FILE_NAME, FS_WRITE_FILE_NAME
+from gc_core.constants.tool_names import (
+    FS_APPEND_FILE_NAME,
+    FS_WRITE_FILE_NAME,
+)
 
 TECHNICAL_TYPE_TECHNICAL = "technical"
 TECHNICAL_TYPE_ERROR_MESSAGE = "error_message"
@@ -159,8 +162,9 @@ def resolve_technical_user_content_type(content: str) -> str:
     return TECHNICAL_TYPE_TECHNICAL
 
 
-
-def append_user_log_entries(existing: List[str], step_messages: List[Dict[str, Any]]) -> List[str]:
+def append_user_log_entries(
+    existing: List[str], step_messages: List[Dict[str, Any]]
+) -> List[str]:
     out = list(existing) if isinstance(existing, list) else []
     seen = set(out)
     for message in step_messages:
@@ -179,8 +183,10 @@ def build_invalid_tool_call_feedback_message(message: dict) -> dict:
     args_text = str(raw_args) if raw_args is not None else "(missing)"
     try:
         json.loads(args_text)
-        error_text = "tool arguments were marked invalid by pre-send validation"
-    except Exception as exc:  # noqa: BLE001
+        error_text = (
+            "tool arguments were marked invalid by pre-send validation"
+        )
+    except Exception as exc:
         error_text = f"invalid JSON in tool arguments: {exc}"
 
     mitigation = ""

@@ -24,6 +24,7 @@ on_click целиком (со своим prevent_default(), иначе микс�
 Симметрия распространяется и на гейт security-confirm: экран события не
 открывает НИ Enter, НИ Ctrl+клик, пока баннер ждёт ответа (`confirm_is_active`).
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -94,7 +95,7 @@ class ClickModelMixin:
     # того, как экран события накроет трейс. self.focus() в on_click остаётся
     # как идемпотентная страховка (синтетические клики в тестах идут мимо
     # mousedown-пути экрана), а event.stop() — защита от перехвата фокуса
-    # контейнером #trace (main.py.on_click) — живёт на Click-уровне.
+    # контейнером #trace (main.py.on_click) — живёт на Click-уровне.  # noqa: ERA001  # описание формата, не выключенный код
     #
     # БЛОКИ со служебными элементами (BlockPanel, DiffBlock) ставят
     # FOCUS_ON_CLICK = False: экран фокусирует блок ЛЮБЫМ нажатием, в том числе

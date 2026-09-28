@@ -3,11 +3,11 @@
 Проверяется драйвер, а не политика: политика у sync и async одна и та же по
 построению — тело гварда одно.
 """
+
 import inspect
 import json
 
 import pytest
-
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.url_policy import enforce_url_policy
 
@@ -20,7 +20,7 @@ def _passthrough_flow(*args, **kwargs):
 def _blocking_flow(*args, **kwargs):
     """Тело, которое отказывает, не позвав тул."""
     return "blocked"
-    yield  # noqa: unreachable — делает функцию генератором
+    yield  # недостижимо намеренно: делает функцию генератором
 
 
 def _postprocessing_flow(*args, **kwargs):
@@ -87,6 +87,7 @@ def test_postprocessing_sees_sync_result():
 def test_wrapper_preserves_signature_metadata():
     """Гварды достают имена аргументов из сигнатуры обёрнутой функции
     (_extract_named_value) — без переноса метаданных они брали бы не тот."""
+
     def f(path: str, depth: int = 1):
         return "ok"
 
@@ -97,6 +98,7 @@ def test_wrapper_preserves_signature_metadata():
 
 def test_tool_exception_propagates_unchanged():
     """Гвард не глотает падение тула: этим занимается диспетчер apply_tool."""
+
     def f(x):
         raise ValueError("тул упал")
 
@@ -114,6 +116,7 @@ async def test_async_tool_exception_propagates_unchanged():
 
 def test_double_yield_is_a_loud_error():
     """Тело с двумя yield — ошибка автора гварда, а не тихо съеденный результат."""
+
     def _bad_flow(*args, **kwargs):
         yield
         yield
@@ -148,7 +151,9 @@ async def test_real_url_guard_blocks_async_tool():
         called["n"] += 1
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(await fetch("https://blocked.example", config_dict=_URL_CONFIG))
+    result = json.loads(
+        await fetch("https://blocked.example", config_dict=_URL_CONFIG)
+    )
 
     assert result["ok"] is False
     assert result["error"]["type"] == "url_blocked_by_policy"
@@ -161,12 +166,16 @@ async def test_real_url_guard_lets_allowed_async_tool_through():
     async def fetch(url: str, config_dict: dict) -> str:
         return json.dumps({"ok": True, "url": url})
 
-    result = json.loads(await fetch("https://allowed.example", config_dict=_URL_CONFIG))
+    result = json.loads(
+        await fetch("https://allowed.example", config_dict=_URL_CONFIG)
+    )
 
     assert result == {"ok": True, "url": "https://allowed.example"}
 
 
-def test_real_url_guard_verdicts_match_across_sync_and_async(anyio_backend=None):
+def test_real_url_guard_verdicts_match_across_sync_and_async(
+    anyio_backend=None,
+):
     """Вердикт синхронного тула — тот же, что у асинхронного.
 
     Это и есть смысл одного тела: разъехавшаяся политика между sync- и
@@ -189,10 +198,15 @@ def test_real_url_guard_verdicts_match_across_sync_and_async(anyio_backend=None)
         data.pop("tool", None)
         return data
 
-    for url in ("https://blocked.example", "https://allowed.example",
-                "http://insecure.example"):
+    for url in (
+        "https://blocked.example",
+        "https://allowed.example",
+        "http://insecure.example",
+    ):
         sync_verdict = _verdict(fetch_sync(url, config_dict=_URL_CONFIG))
-        async_verdict = _verdict(asyncio.run(fetch_async(url, config_dict=_URL_CONFIG)))
+        async_verdict = _verdict(
+            asyncio.run(fetch_async(url, config_dict=_URL_CONFIG))
+        )
         assert sync_verdict == async_verdict, url
 
 
@@ -262,12 +276,12 @@ async def test_cancelled_guard_closes_its_body():
     entered = threading.Event()
     release = threading.Event()
     closed: list = []
-    kept: list = []                      # строгая ссылка: см. докстроку
+    kept: list = []  # строгая ссылка: см. докстроку
 
     def _flow(*_a, **_kw):
         try:
             entered.set()
-            release.wait(5)              # «человек думает»
+            release.wait(5)  # «человек думает»
             return (yield)
         finally:
             closed.append(True)

@@ -3,23 +3,25 @@
 No file I/O. Caller (the tool) decides what to do with the compressed text.
 Used only from the append-overflow path in the project_memory tool.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Optional
 
 from gc_core.bundled_assets import bundled_root
-from gc_core.summarize.llm import arequest_auxiliary_completion_text
-
 from gc_core.config_modules.project_memory import (
     DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS,
     project_memory_from_config_dict,
 )
+from gc_core.summarize.llm import arequest_auxiliary_completion_text
 
 SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
 
 # bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_COMPACTION_PROMPT_PATH = bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
+_COMPACTION_PROMPT_PATH = (
+    bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
+)
 
 
 @dataclass(frozen=True)
@@ -45,7 +47,9 @@ def _load_prompt() -> str:
     return _COMPACTION_PROMPT_PATH.read_text(encoding="utf-8")
 
 
-async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionResult:
+async def acompact_text(
+    text: str, ctx: Any, state: Any = None
+) -> CompactionResult:
     """Сжать `text` бэкендным LLM по промпту компакции long_memory.
 
     Основная и единственная реализация; синхронный ``compact_text`` — шим над ней.
@@ -83,9 +87,12 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
             request_label="project_memory_compaction",
             consumer="memory_compaction",
         )
-    except Exception as exc:  # noqa: BLE001 — caller wants explicit ok=false, not exception.
+    except Exception as exc:  # caller wants explicit ok=false, not exception.
         return CompactionResult(
-            ok=False, text="", error_type="backend_error", error_message=str(exc)
+            ok=False,
+            text="",
+            error_type="backend_error",
+            error_message=str(exc),
         )
 
     if not compressed:
@@ -98,5 +105,3 @@ async def acompact_text(text: str, ctx: Any, state: Any = None) -> CompactionRes
     return CompactionResult(
         ok=True, text=compressed, error_type=None, error_message=None
     )
-
-

@@ -1,7 +1,6 @@
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config_modules.mcp import McpServerConfig
+from pydantic import ValidationError
 
 
 def _srv(**extra):
@@ -66,7 +65,6 @@ import logging
 
 from gc_core.tools.connect_mcp import registry as reg
 
-
 _RAW = [
     {"name": "search", "description": "s"},
     {"name": "create", "description": "c"},
@@ -75,7 +73,9 @@ _RAW = [
 
 
 def test_filter_passthrough_without_block():
-    assert reg._apply_tools_whitelist("srv", {"transport": "stdio"}, _RAW) == _RAW
+    assert (
+        reg._apply_tools_whitelist("srv", {"transport": "stdio"}, _RAW) == _RAW
+    )
 
 
 def test_filter_passthrough_when_disabled():
@@ -110,6 +110,7 @@ async def test_discover_one_applies_whitelist(monkeypatch):
     Берём корутинный путь: SDK-транспорты после шага A1 ходят нативно, а
     синхронный вход для них теперь громко отказывает.
     """
+
     # Дискавери ходит через КЛИЕНТА, поэтому подменяем его: фильтр стоит
     # сразу после `alist_tools`. Форм дискавери больше не три, а одна, и
     # отдельного шва «забор тулов у SDK-ветки» в ней нет.
@@ -118,7 +119,8 @@ async def test_discover_one_applies_whitelist(monkeypatch):
             return list(_RAW)
 
     monkeypatch.setitem(
-        reg._adiscover_one.__globals__, "resolve_mcp_client",
+        reg._adiscover_one.__globals__,
+        "resolve_mcp_client",
         lambda *a, **kw: _Client(),
     )
     server_cfg = {
@@ -157,15 +159,16 @@ def test_cache_invalidated_by_whitelist_change():
 
 def test_apply_tool_blocks_tool_outside_tools_data(monkeypatch):
     """Enforcement: вызов не-whitelisted имени не доходит до MCP-транспорта."""
-    from gc_testkit import run_coro
-
     from gc_core import tools as tools_pkg
     from gc_core.tools.connect_mcp import api as mcp_api
+    from gc_testkit import run_coro
 
     calls = []
     monkeypatch.setattr(
         mcp_api, "acall_mcp_tool", lambda *a, **kw: calls.append(a) or "never"
     )
-    out = run_coro(tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={}))
+    out = run_coro(
+        tools_pkg.aapply_tool("mcp_srv_delete", "{}", tools_data_={})
+    )
     assert "mcp_srv_delete" in out
     assert calls == []

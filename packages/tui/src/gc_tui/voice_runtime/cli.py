@@ -10,7 +10,12 @@ from pathlib import Path
 from typing import Optional, Sequence
 
 from recommended_mcp.process_supervisor import (
-    build_command_argv, is_pid_alive, read_pid, remove_pid, terminate_pid, write_pid,
+    build_command_argv,
+    is_pid_alive,
+    read_pid,
+    remove_pid,
+    terminate_pid,
+    write_pid,
 )
 
 from gc_tui.voice_runtime.fs import force_rmtree
@@ -19,9 +24,17 @@ from gc_tui.voice_runtime.leases import clear_agent_owned, live_leases
 from gc_tui.voice_runtime.paths import voice_pids_dir
 from gc_tui.voice_runtime.service import build_run_spec, port_alive
 from gc_tui.voice_runtime.state import (
-    DEFAULT_MODEL, DEFAULT_PORT, available_update, clear_state, load_state,
+    DEFAULT_MODEL,
+    DEFAULT_PORT,
+    available_update,
+    clear_state,
+    load_state,
 )
-from gc_tui.voice_runtime.wire import base_config_raw, managed_voice, unwire_voice
+from gc_tui.voice_runtime.wire import (
+    base_config_raw,
+    managed_voice,
+    unwire_voice,
+)
 
 SERVICE_NAME = "speaches"
 
@@ -47,31 +60,40 @@ def _cmd_status() -> int:
     state = load_state()
     if state is None:
         print("[voice] не установлен. Установка: gc-voice install")
-        return 0
-    # Устаревание называем прямо здесь: раньше status печатал версию, но ни с чем её не
-    # сравнивал — узнать, что движок отстал, было неоткуда, кроме экрана после апгрейда.
-    upd = available_update(state)
-    print(f"[voice] установлен: speaches {state.version} → {state.root}"
-          + (f"  · доступно {upd}" if upd else ""))
-    if upd:
-        print("[voice] обновить: /settings → Голосовой ввод → Ctrl+U (или gc-voice install)")
-    print(f"[voice] порт {state.port}, модель {state.model}")
-    pid = read_pid(SERVICE_NAME, voice_pids_dir())
-    running = pid is not None and is_pid_alive(pid)
-    if running:
-        print(f"[voice] сервис: жив (pid {pid})"
-              f"{', порт отвечает' if port_alive(state) else ''}")
-    elif port_alive(state):
-        # pid-файла нет, а порт занят: сервис подняли снаружи (gc-voice serve в другом
-        # окне) либо его pid-файл потерян. Сказать «не запущен» — соврать в глаза.
-        print(f"[voice] сервис: порт {state.port} отвечает, но pid-файла нет — "
-              "поднят снаружи; остановите его там, где запускали (Ctrl+C)")
     else:
-        print("[voice] сервис: не запущен")
-    clients = live_leases()
-    print(f"[voice] клиенты (lease): {clients if clients else 'нет'}")
-    wired = managed_voice()
-    print(f"[voice] конфиг (managed): {wired['url'] if wired else 'не прописан'}")
+        # Устаревание называем прямо здесь: раньше status печатал версию, но ни с чем её не
+        # сравнивал — узнать, что движок отстал, было неоткуда, кроме экрана после апгрейда.
+        upd = available_update(state)
+        print(
+            f"[voice] установлен: speaches {state.version} → {state.root}"
+            + (f"  · доступно {upd}" if upd else "")
+        )
+        if upd:
+            print(
+                "[voice] обновить: /settings → Голосовой ввод → Ctrl+U (или gc-voice install)"
+            )
+        print(f"[voice] порт {state.port}, модель {state.model}")
+        pid = read_pid(SERVICE_NAME, voice_pids_dir())
+        running = pid is not None and is_pid_alive(pid)
+        if running:
+            print(
+                f"[voice] сервис: жив (pid {pid}){', порт отвечает' if port_alive(state) else ''}"
+            )
+        elif port_alive(state):
+            # pid-файла нет, а порт занят: сервис подняли снаружи (gc-voice serve в другом
+            # окне) либо его pid-файл потерян. Сказать «не запущен» — соврать в глаза.
+            print(
+                f"[voice] сервис: порт {state.port} отвечает, но pid-файла нет — "
+                "поднят снаружи; остановите его там, где запускали (Ctrl+C)"
+            )
+        else:
+            print("[voice] сервис: не запущен")
+        clients = live_leases()
+        print(f"[voice] клиенты (lease): {clients if clients else 'нет'}")
+        wired = managed_voice()
+        print(
+            f"[voice] конфиг (managed): {wired['url'] if wired else 'не прописан'}"
+        )
     return 0
 
 
@@ -81,7 +103,9 @@ def _stop_service() -> bool:
         return False
     terminate_pid(pid)
     remove_pid(SERVICE_NAME, voice_pids_dir())
-    clear_agent_owned(SERVICE_NAME)     # погашен — пометке владельца не о чем лежать
+    clear_agent_owned(
+        SERVICE_NAME
+    )  # погашен — пометке владельца не о чем лежать
     return True
 
 
@@ -93,8 +117,10 @@ def _cmd_stop() -> int:
     if state is not None and port_alive(state):
         # Погасить нечем: pid неизвестен, а искать процесс по порту значит разбирать
         # вывод netstat/lsof на трёх системах. Честнее сказать, где его выключить.
-        print(f"[voice] порт {state.port} отвечает, но pid-файла нет — сервис поднят "
-              "снаружи; остановите его там, где запускали (Ctrl+C)")
+        print(
+            f"[voice] порт {state.port} отвечает, но pid-файла нет — сервис поднят "
+            "снаружи; остановите его там, где запускали (Ctrl+C)"
+        )
         return 1
     print("[voice] not running")
     return 0
@@ -103,7 +129,10 @@ def _cmd_stop() -> int:
 def _cmd_serve() -> int:
     state = load_state()
     if state is None:
-        print("[voice] не установлен. Установка: gc-voice install", file=sys.stderr)
+        print(
+            "[voice] не установлен. Установка: gc-voice install",
+            file=sys.stderr,
+        )
         return 1
     spec = build_run_spec(state)
     argv = build_command_argv(spec)
@@ -158,9 +187,11 @@ def _cmd_remove() -> int:
         # rmtree молча оставляет огрызок). Не удалилось — файлы держит процесс
         # (например, форграунд serve: он без pid-файла, _stop_service его не видит).
         if not force_rmtree(root):
-            print(f"[voice] окружение {root} удалено НЕ полностью — файлы заняты. "
-                  "Остановите сервис (gc-voice stop; форграунд serve — Ctrl+C) "
-                  "и повторите gc-voice remove.")
+            print(
+                f"[voice] окружение {root} удалено НЕ полностью — файлы заняты. "
+                "Остановите сервис (gc-voice stop; форграунд serve — Ctrl+C) "
+                "и повторите gc-voice remove."
+            )
             print("[voice] модели в HF-кэше не тронуты (общий кэш машины).")
             # Ненулевой код — единственное, по чему остаток видят снаружи: состояние уже
             # очищено, и «не установлен» скроет от человека занятое на диске место.
@@ -172,10 +203,13 @@ def _cmd_remove() -> int:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     _tolerant_console()
-    parser = argparse.ArgumentParser(prog="gc-voice",
-                                     description="Локальный STT-сервис (батарейка)")
+    parser = argparse.ArgumentParser(
+        prog="gc-voice", description="Локальный STT-сервис (батарейка)"
+    )
     sub = parser.add_subparsers(dest="command")
-    p_inst = sub.add_parser("install", help="поставить speaches + модель + конфиг")
+    p_inst = sub.add_parser(
+        "install", help="поставить speaches + модель + конфиг"
+    )
     p_inst.add_argument("--model", default=DEFAULT_MODEL)
     p_inst.add_argument("--port", type=int, default=DEFAULT_PORT)
     sub.add_parser("status", help="состояние установки/сервиса/клиентов")
