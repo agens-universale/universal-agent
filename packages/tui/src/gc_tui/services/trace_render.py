@@ -13,6 +13,12 @@ if TYPE_CHECKING:
     from rich.text import Text
 
 from gc_tui.services.duration_format import format_compact_int
+from gc_tui.services.trace_retention import (
+    apply_payload_retention,
+    filter_sidecar_to_parents,
+    message_ids_in_retention_window,
+    retention_window_start_index,
+)
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -375,6 +381,8 @@ def _render_record_readonly(
     no: int,
     calls: dict,
     skipped_call_ids: set | None = None,
+    *,
+    in_window: bool = True,
 ) -> int:
     """Одна envelope-запись → виджеты. Возвращает следующий no.
     hidden-события (policy/bounce/context) считаем, но в трейс не рендерим —
@@ -387,6 +395,8 @@ def _render_record_readonly(
     ev = map_message(
         payload, no=no, ts=rec.get("ts", ""), skipped_call_ids=skipped_call_ids
     )
+    if ev is not None:
+        apply_payload_retention(ev, seg_in_window=in_window)
     # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
     # даёт ev=None, но маркер [skill] всё равно нужен в превью.
     sk = payload.get("skill_loaded")
@@ -436,10 +446,14 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
         for rec in seg.get("messages", [])
         if isinstance(rec, dict)
     )
-    # Дедуп по id: preserved last-user-message лежит в двух соседних сегментах
-    # (архив + live) — иначе реплика дублируется вокруг маркера сжатия.
+    # Дедуп по id: preserved-копия (user и пара call/output) лежит в следующем
+    # файле с тем же id. Рисуем первое вхождение. Payload full, пока id есть
+    # в окне segments[-2:].
     seen_ids: set = set()
-    for seg in segments:
+    window_start = retention_window_start_index(len(segments))
+    window_ids = message_ids_in_retention_window(segments)
+    for i, seg in enumerate(segments):
+        seg_in_window = i >= window_start
         for rec in seg.get("messages", []):
             payload = rec.get("payload") if isinstance(rec, dict) else None
             mid = payload.get("id") if isinstance(payload, dict) else None
@@ -447,7 +461,17 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
                 if mid in seen_ids:
                     continue
                 seen_ids.add(mid)
-            no = _render_record_readonly(mount_target, rec, no, calls, skipped)
+            in_window = seg_in_window or (
+                mid is not None and mid in window_ids
+            )
+            no = _render_record_readonly(
+                mount_target,
+                rec,
+                no,
+                calls,
+                skipped,
+                in_window=in_window,
+            )
         comp = seg.get("compacted_by")
         if comp:
             label = build_compaction_label(seg.get("index", 0) + 1, comp)
@@ -458,10 +482,22 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
     return calls
 
 
-def merge_nested_readonly(mount_target, records: list, calls: dict) -> None:
+def merge_nested_readonly(
+    mount_target,
+    records: list,
+    calls: dict,
+    *,
+    allowed_parent_ids: set[str] | None = None,
+) -> None:
     """Read-only домонтирование вложенного трейса субагентов из sidecar-records
     (превью). Паритет с MainScreen._merge_sidecar_nested: те же plan/apply,
-    якорение «после parent или последнего nested» — локальными anchors."""
+    якорение «после parent или последнего nested» — локальными anchors.
+
+    ``allowed_parent_ids`` — parent'ы из окна retention. None оставляет все
+    записи (вызывающий без сегментов). Полный sidecar после вызова не хранить.
+    """
+    if allowed_parent_ids is not None:
+        records = filter_sidecar_to_parents(records, allowed_parent_ids)
     from gc_tui.services.subagent_sidecar_mapper import (
         CHILD_SUMMARY_LABEL,
         apply_sidecar_nested_actions,
