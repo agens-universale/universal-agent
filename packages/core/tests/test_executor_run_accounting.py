@@ -20,7 +20,8 @@ class _Logger:
             self.events.append(extra)
 
     def warning(self, msg, *args, **kwargs):
-        return None
+        text = msg % args if args else msg
+        self.events.append({"level": "warning", "msg": text})
 
 
 class _Session:
@@ -140,3 +141,48 @@ async def test_close_skips_persist_when_stop_discarded_writes():
     assert structured["input"] == 3
     assert session.batches == []
     assert "token_usage" not in session.meta
+
+
+@pytest.mark.asyncio
+async def test_persist_failure_reaches_the_caller():
+    """Ошибка финальной записи меты не маскируется успешным закрытием."""
+    usage = UsageAccount()
+    usage.add(CATEGORY_MAIN, 10, 1)
+    state = _state(usage=usage, start=UsageAccount(), last_run=None)
+    session = _Session(meta={})
+
+    async def _boom(_messages, **_kwargs):
+        raise OSError("disk full")
+
+    session.apersist_batch = _boom
+    ex, _logger = _executor(state, session)
+
+    with pytest.raises(OSError, match="disk full"):
+        await ex.aclose_run_accounting(console=False)
+    assert ex._accounting_closed is False
+
+
+@pytest.mark.asyncio
+async def test_usage_report_failure_keeps_successful_persist(monkeypatch):
+    """Сбой отчёта usage не отменяет запись меты и не роняет закрытие."""
+    usage = UsageAccount()
+    usage.add(CATEGORY_MAIN, 10, 1)
+    state = _state(usage=usage, start=UsageAccount(), last_run=None)
+    session = _Session(meta={})
+    ex, logger = _executor(state, session)
+
+    def _boom(_meta):
+        raise RuntimeError("отчёт сломался")
+
+    monkeypatch.setattr("gc_core.agent_executor.UsageAccount.from_meta", _boom)
+
+    await ex.aclose_run_accounting(console=False)
+
+    assert ex._accounting_closed is True
+    assert session.batches == [([], "resp-1")]
+    warnings = [
+        event["msg"]
+        for event in logger.events
+        if event.get("level") == "warning"
+    ]
+    assert any("run usage report failed" in text for text in warnings)

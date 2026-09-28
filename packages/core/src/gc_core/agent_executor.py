@@ -710,6 +710,10 @@ class AgentExecutor:
         К этому моменту цикл и все шаги после него уже прошли. Повторный
         вызов ничего не пишет. ``arun`` зовёт метод сам. Кто после цикла ещё
         работает, передаёт ``account_run=False`` и зовёт его после своих шагов.
+
+        Ошибка записи меты уходит вызывающему: прогон без сохранённого
+        состояния не выглядит успешным. Сбой отчёта usage только пишется
+        в лог.
         """
         if self._accounting_closed:
             return
@@ -717,8 +721,9 @@ class AgentExecutor:
         if state is None:
             return
         logger = getattr(self._ctx, "logger", None)
+        await self._afinalize_thread(self._thread_session, state, logger)
+        self._accounting_closed = True
         try:
-            await self._afinalize_thread(self._thread_session, state, logger)
             baseline = UsageAccount.from_meta(
                 getattr(state, "run_start_usage_meta", None)
             )
@@ -726,12 +731,10 @@ class AgentExecutor:
         except Exception as usage_exc:
             if logger is not None:
                 logger.warning(
-                    "run accounting close failed: %s",
+                    "run usage report failed: %s",
                     usage_exc,
                     exc_info=True,
                 )
-            return
-        self._accounting_closed = True
 
     async def _apersist_finished_loop_during_cancel(self) -> None:
         """Записать учёт уже завершённого цикла, хотя уборку MCP сняли.
