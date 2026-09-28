@@ -64,7 +64,7 @@ from gc_core.agent_edits.snapshots import (
     snapshots_root,
     thread_key_from_journal_path,
 )
-from gc_core.config_modules.diff_tui import (
+from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
 )
@@ -247,7 +247,7 @@ class ResetTarget:
 
 
 def diff_limits(config: Optional[Dict[str, Any]]) -> Tuple[int, int]:
-    """``(max_diff_source_bytes, hunk_context_lines)`` из секции ``diff_tui``.
+    """``(max_diff_source_bytes, hunk_context_lines)`` из секции ``agent_edits``.
 
     Одна точка чтения на сервис и на сводку хода: разъехавшиеся лимиты — это
     разные числа в статусной строке и на экране.
@@ -255,7 +255,7 @@ def diff_limits(config: Optional[Dict[str, Any]]) -> Tuple[int, int]:
     Мусор в конфиге (``true``, строка, отрицательное) заменяется дефолтом, но
     ``hunk_context_lines: 0`` — законное значение: дифф без контекстных строк.
     """
-    section = (config or {}).get("diff_tui") or {}
+    section = (config or {}).get("agent_edits") or {}
     return (
         _limit(section, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES,
                minimum=1),
@@ -428,7 +428,7 @@ class _LadderGitFacts:
         # Байты HEAD зависят от стиля концов строк файла на диске: ключ кэша
         # несёт этот стиль, и правка, сменившая его, промахивается сама.
         # Кап источника проверяется по ``stat`` ДО чтения, и это тот же
-        # НАСТРОЕННЫЙ лимит (``diff_tui.max_diff_source_bytes``), с которым
+        # НАСТРОЕННЫЙ лимит (``agent_edits.max_diff_source_bytes``), с которым
         # считает ``deltas.delta_vs_disk``: файл сверх капа целиком не читается,
         # и база остаётся в форме выкладки. Разъехавшись с лимитом счёта, кап
         # вернул бы «весь файл заменён» на файле, который счёт уже пускает.

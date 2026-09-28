@@ -128,7 +128,7 @@ tui:
     # page_lines: null
 
 # Правки агента: запись в журнал и показ на экране /diff (не параметры fs return_diff).
-diff_tui:
+agent_edits:
   snapshots_max_files: 500     # лимит снимков «до правки» в .gc/agent_edits (LRU; треды с живым журналом не вытесняются)
   max_diff_chars: 100000       # усечение больших диффов (0 = без лимита)
   hunk_context_lines: 3        # строк контекста в хэнках журнальных диффов

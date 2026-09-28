@@ -286,3 +286,27 @@ def test_sync_keeps_new_template_keys_when_user_has_key_outside_template(tmp_pat
     assert "/etc/ssl/client.key" in out
     assert "request_timeout_sec: 600" in out             # новый ключ шаблона не потерян
     assert config_sync.needs_sync(out, tmpl) is False    # и sync идемпотентен
+
+
+def test_sync_moves_the_old_diff_tui_section_to_agent_edits(tmp_path):
+    """`--sync-config` переносит старую секцию под новое имя вместе со старыми листьями
+    — без мусора и без повторного требования синка."""
+    import yaml
+    from gc_testkit.paths import ASSETS
+
+    template = (ASSETS / "config.default.yml").read_text(encoding="utf-8")
+    user = (
+        "diff_tui:\n"
+        "  cache_max_orig: 42\n"
+        "  preview_context_lines: 50\n"
+        "  hunk_context_lines: 5\n"
+    )
+    cfg, _ = _run_sync(tmp_path, user=user, template=template)
+    out = cfg.read_text(encoding="utf-8")
+    parsed = yaml.safe_load(out)
+
+    assert "diff_tui" not in parsed
+    assert parsed["agent_edits"]["snapshots_max_files"] == 42
+    assert parsed["agent_edits"]["hunk_context_lines"] == 5
+    assert "preview_context_lines" not in parsed["agent_edits"]
+    assert config_sync.needs_sync(out, template) is False

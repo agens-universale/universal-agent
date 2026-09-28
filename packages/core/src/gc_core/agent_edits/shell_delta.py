@@ -7,7 +7,7 @@
 — ``op="shell"`` с хэнками, исчезнувшее — ``op="delete"``.
 
 Канал живёт при живой thread-identity (``is_recording``) и не выключен ключом
-``diff_tui.shell_tracking`` — этого достаточно для запуска объекта. Внутри
+``agent_edits.shell_tracking`` — этого достаточно для запуска объекта. Внутри
 два подканала разной природы:
 
 * карманный — снимает байты уже ИЗВЕСТНЫХ журналу файлов, кроме внешних
@@ -65,7 +65,7 @@ from gc_core.agent_edits.paths import canonical_path_key, goes_through_link, is_
 # Приватные хелперы рекордера переиспользуются намеренно: периметр правки и
 # thread-identity обязаны считаться в обоих каналах записи одинаково.
 from gc_core.agent_edits.ctx import (
-    diff_tui_config,
+    agent_edits_config,
     identity_from_ctx,
     launch_root_from_ctx,
     limit,
@@ -77,7 +77,7 @@ from gc_core.agent_edits.snapshots import (
     snapshots_root,
     thread_key_from_journal_path,
 )
-from gc_core.config_modules.diff_tui import (
+from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_CHARS,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
@@ -1386,7 +1386,7 @@ def _edit_record(
 
 
 def _shell_tracking_enabled(ctx: Any) -> bool:
-    return bool(diff_tui_config(ctx).get("shell_tracking", DEFAULT_SHELL_TRACKING))
+    return bool(agent_edits_config(ctx).get("shell_tracking", DEFAULT_SHELL_TRACKING))
 
 
 def _max_diff_chars(ctx: Any) -> int:

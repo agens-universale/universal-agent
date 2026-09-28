@@ -16,9 +16,9 @@ def config_from_ctx(ctx: Any) -> dict:
     return config_dict if isinstance(config_dict, dict) else {}
 
 
-def diff_tui_config(ctx: Any) -> dict:
-    """Секция ``diff_tui`` конфига на ctx — общая для обоих каналов записи."""
-    section = config_from_ctx(ctx).get("diff_tui") or {}
+def agent_edits_config(ctx: Any) -> dict:
+    """Секция ``agent_edits`` конфига на ctx — общая для обоих каналов записи."""
+    section = config_from_ctx(ctx).get("agent_edits") or {}
     return section if isinstance(section, dict) else {}
 
 def identity_from_ctx(ctx: Any) -> tuple[str, str, str] | None:
@@ -66,13 +66,13 @@ _DEFAULT_MINIMUM = 1
 def limit(explicit: int | None, ctx: Any, key: str, default: int) -> int:
     """Явно переданный лимит побеждает конфиг, конфиг — дефолт схемы.
 
-    Значение из конфига санитизируется здесь: схема (`DiffTuiConfig`) объявляет
+    Значение из конфига санитизируется здесь: схема (`AgentEditsConfig`) объявляет
     эти ключи простым `int` без ограничений, то есть пропускает и
     отрицательное, а через слой оверрайдов доходит и нечисловое — прежде оно
     роняло `int()` внутри записи, и правка исчезала вместе с исключением.
     Ключи делит ровно один читатель — `edits_view.diff_limits`
     (`hunk_context_lines`, `max_diff_source_bytes`), и семантика у нас с ним
-    одна: ниже минимума — дефолт, `bool` отсеивается. `main._diff_tui_limit`
+    одна: ниже минимума — дефолт, `bool` отсеивается. `main._agent_edits_limit`
     санитизирует ДРУГИЕ ключи (`trace_inline_max_lines`,
     `replay_expanded_turns`) и делает это иначе — клампом, без отсева `bool`;
     сравнивать себя с ним нельзя, общих ключей нет.
@@ -82,7 +82,7 @@ def limit(explicit: int | None, ctx: Any, key: str, default: int) -> int:
     """
     if explicit is not None:
         return explicit
-    raw = diff_tui_config(ctx).get(key, default)
+    raw = agent_edits_config(ctx).get(key, default)
     if isinstance(raw, bool):       # `true` в yaml — не «единица», а мусор
         return default
     try:

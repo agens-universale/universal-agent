@@ -1,6 +1,6 @@
-"""Чтение лимитов секции `diff_tui` с ctx: мусор из конфига до записи не доезжает.
+"""Чтение лимитов секции `agent_edits` с ctx: мусор из конфига до записи не доезжает.
 
-Схема (`DiffTuiConfig`) объявляет эти ключи простым `int` и пропускает и
+Схема (`AgentEditsConfig`) объявляет эти ключи простым `int` и пропускает и
 отрицательное, и — через слой оверрайдов — нечисловое. Читатели на стороне TUI
 клампят такое сами; здесь страж того, что запись правок делает то же самое.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from gc_core.agent_edits.ctx import limit
-from gc_core.config_modules.diff_tui import (
+from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_CHARS,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
@@ -17,8 +17,8 @@ from gc_core.config_modules.diff_tui import (
 )
 
 
-def _ctx(**diff_tui):
-    return SimpleNamespace(config_dict={"diff_tui": dict(diff_tui)})
+def _ctx(**agent_edits):
+    return SimpleNamespace(config_dict={"agent_edits": dict(agent_edits)})
 
 
 def test_explicit_value_wins_over_config():

@@ -10,6 +10,7 @@
 импорт агрегатора замыкал бы цикл — и держался этот цикл только на отложенных
 импортах внутри функций, то есть до первой естественной правки.
 """
+import copy
 import os
 import re
 from pathlib import Path
@@ -146,6 +147,31 @@ def _candidate_profile_ref(pointer: str, roots: list, candidates: Dict[Path, Dic
     return None
 
 
+def _compat_layer(
+    doc: Dict[str, Any], source: Any, notices: list[str]
+) -> Dict[str, Any]:
+    """Compat для слоя — до склейки, на копии документа. Для ВСЕХ слоёв, база тоже.
+
+    Compat, применённый к уже склеенному конфигу, не знает, из какого слоя
+    пришёл ключ: переименованная секция, заданная старым именем в проектном
+    слое и новым в пользовательском, проигрывала бы пользовательскому, и
+    настройка проекта молча терялась. База — не исключение: переименуй только
+    верхние слои, и старое имя базы столкнётся после склейки с новым сверху —
+    общий проход отбросит его целиком (`chat_completions.llm` базы терял бы
+    всё, что проект не перекрыл). Приведённые к новым именам слои склеиваются
+    честно — выше лежит, выше и побеждает; проход после склейки остаётся
+    страховкой и на таких слоях ничего не находит.
+
+    Копия — потому что документ может прийти от вызывающего (кандидат из формы
+    настроек), и молча переписать его имена было бы сюрпризом. Факты — с путём
+    файла, как у профилей: иначе непонятно, в каком из документов ключ.
+    """
+    doc = copy.deepcopy(doc)
+    for fact in apply_compat(doc):
+        notices.append(f"{source}: {fact}")
+    return doc
+
+
 def _merge_layers(
     raw_config: Dict[str, Any],
     path: str,
@@ -198,6 +224,7 @@ def _merge_layers(
     экономии этого самого чтения."""
     base_path = Path(path)
     notices = notices if notices is not None else []
+    raw_config = _compat_layer(raw_config, base_path, notices)
 
     _candidates = {Path(p).resolve(): doc for p, doc in (candidates or {}).items()}
 
@@ -228,6 +255,7 @@ def _merge_layers(
         managed_raw = (
             _cand if _cand is not _UNSET
             else _readable_layer_document(managed_path, "config.local.yml"))
+        managed_raw = _compat_layer(managed_raw, managed_path, notices)
         managed_before_env = managed_raw
         managed_raw = resolve_env_placeholders(managed_raw)
         validate_registry_pairs(managed_raw, source=str(managed_path),
@@ -242,6 +270,7 @@ def _merge_layers(
         project_raw = (
             _cand if _cand is not _UNSET
             else _readable_layer_document(project_path, "проектный config.yml"))
+        project_raw = _compat_layer(project_raw, project_path, notices)
         project_before_env = project_raw
         project_raw = resolve_env_placeholders(project_raw)
         validate_registry_pairs(project_raw, source=project_path,
@@ -275,6 +304,9 @@ def _merge_layers(
                 notices=notices,
             )
         )
+        # Загруженный с диска документ compat уже прошёл (`load_profile_document`),
+        # кандидат из формы — нет; повторный проход идемпотентен.
+        profile_raw = _compat_layer(profile_raw, ref.path, notices)
         # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
         raw_config = deep_merge(raw_config, profile_raw)
 
@@ -283,10 +315,10 @@ def _merge_layers(
 
 
 def _raw_from_text(text: str, subject: str = "config.yml") -> Dict[str, Any]:
-    """Текст → документ → ${ENV:VAR}. Отдельный шаг, потому что стековая фаза 2
-    накладывает слои на СЫРОЙ документ и зовёт compat один раз на итог мержа —
-    ровно как загрузчик; склеенный с ним `_app_config_from_text` compat применил
-    бы к слою поодиночке."""
+    """Текст → документ → ${ENV:VAR}. Отдельный шаг, без compat: стековая фаза 2
+    накладывает слои на СЫРОЙ документ, а compat каждого слоя делает
+    `_merge_layers` (`_compat_layer`) — ровно как загрузчик. Проход compat после
+    склейки остаётся страховкой и на приведённых слоях ничего не находит."""
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
@@ -488,7 +520,10 @@ def prospective_registry(text: str, *, base_path=None, is_profile: bool = False)
                 # profile_override="" — пустой указатель: слой профиля из файлов НЕ
                 # берётся, его место занимает наш текст, чьим бы файлом он ни был.
                 layers = _merge_layers(base_raw, str(base_path), profile_override="")
-                merged = deep_merge(layers.config, _raw_from_text(text, subject))
+                # Текст профиля — такой же слой, как в `_merge_layers`: compat до
+                # склейки, иначе старое имя в нём проиграло бы новому в базе.
+                profile_raw = _compat_layer(_raw_from_text(text, subject), subject, [])
+                merged = deep_merge(layers.config, profile_raw)
             cfg = _app_config_from_raw(merged)
             return cfg.models, cfg.slots
         except (OSError, ValueError):

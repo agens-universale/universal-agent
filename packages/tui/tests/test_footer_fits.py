@@ -71,7 +71,7 @@ def _diff_screen(tmp_path: Path) -> DiffScreen:
     (root / "a.py").write_text("after\n", encoding="utf-8", newline="\n")
     return DiffScreen(
         launch_root=str(root),
-        config={"launch_root": str(root), "model": "M", "diff_tui": {}},
+        config={"launch_root": str(root), "model": "M", "agent_edits": {}},
         threads_dir=str(threads), system_id="cli", thread_id="th1",
     )
 
@@ -615,7 +615,7 @@ def _viewer_screen(tmp_path: Path):
                    hunks="", add=1, del_=1, before_sha256=None,
                    after_sha256=None, flags=[])
     )
-    config = {"launch_root": str(root), "model": "M", "diff_tui": {}}
+    config = {"launch_root": str(root), "model": "M", "agent_edits": {}}
     view = EditsView(str(threads), "cli", "th1", str(root), config)
     files = [row.entry for row in view.session_view(SOURCE_SESSION).active]
     return DiffFileViewer(view=view, source=SOURCE_SESSION, files=files, index=0)

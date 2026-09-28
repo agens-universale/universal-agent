@@ -1,6 +1,6 @@
-"""Секция конфига `diff_tui:` — дефолты схемы и flatten в config_dict.
+"""Секция конфига `agent_edits:` — дефолты схемы и flatten в config_dict.
 
-Пакет `diff_tui` умер, секция конфига — нет: её ключи держат лимиты записи
+Пакет `agent_edits` умер, секция конфига — нет: её ключи держат лимиты записи
 правок и их показа в TUI.
 """
 from __future__ import annotations
@@ -8,48 +8,48 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from gc_core.config_modules.diff_tui import DiffTuiConfig
+from gc_core.config_modules.agent_edits import AgentEditsConfig
 
 
-def test_diff_tui_defaults():
-    cfg = DiffTuiConfig()
+def test_agent_edits_defaults():
+    cfg = AgentEditsConfig()
     assert cfg.snapshots_max_files == 500
     assert cfg.max_diff_chars == 100_000
 
 
-def test_diff_tui_rejects_unknown_keys():
+def test_agent_edits_rejects_unknown_keys():
     with pytest.raises(ValidationError):
-        DiffTuiConfig(unknown_flag=True)
+        AgentEditsConfig(unknown_flag=True)
 
 
-def test_diff_tui_rejects_keys_of_dead_visual_diff():
+def test_agent_edits_rejects_keys_of_dead_visual_diff():
     """Удалённые ключи не должны молча воскреснуть в схеме (см. compat.REMOVED)."""
     for dead in ("preview_context_lines", "full_file_max_lines"):
         with pytest.raises(ValidationError):
-            DiffTuiConfig(**{dead: 1})
+            AgentEditsConfig(**{dead: 1})
 
 
-def test_app_config_includes_diff_tui():
+def test_app_config_includes_agent_edits():
     from gc_core.config_modules.root import AppConfig
 
     app = AppConfig()
-    assert app.diff_tui.snapshots_max_files == 500
-    assert app.diff_tui.max_diff_chars == 100_000
+    assert app.agent_edits.snapshots_max_files == 500
+    assert app.agent_edits.max_diff_chars == 100_000
 
 
-def test_flatten_exposes_diff_tui(tmp_path):
-    """Значение из config.yml доходит до config_dict['diff_tui']."""
+def test_flatten_exposes_agent_edits(tmp_path):
+    """Значение из config.yml доходит до config_dict['agent_edits']."""
     from gc_core import config as cfgmod
 
     conf = tmp_path / "config.yml"
     conf.write_text(
-        "diff_tui:\n"
+        "agent_edits:\n"
         "  snapshots_max_files: 42\n"
         "  max_diff_chars: 100\n",
         encoding="utf-8",
     )
     cfg = cfgmod.load_config(str(conf))
-    assert cfg["diff_tui"] == {
+    assert cfg["agent_edits"] == {
         "snapshots_max_files": 42,
         "max_diff_chars": 100,
         "hunk_context_lines": 3,

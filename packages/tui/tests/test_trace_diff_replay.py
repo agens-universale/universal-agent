@@ -120,7 +120,7 @@ async def test_replay_expands_only_last_turns(tmp_path):
     _turns_thread(tmp_path, tid, 5)
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"replay_expanded_turns": 3}}) as pilot:
+                      config={"agent_edits": {"replay_expanded_turns": 3}}) as pilot:
         blocks = _blocks(pilot.app.screen)
         assert len(blocks) == 5
         assert [_has_body(b) for b in blocks] == [False, False, True, True, True]
@@ -135,7 +135,7 @@ async def test_replay_limit_one_expands_only_last_turn(tmp_path):
     _turns_thread(tmp_path, tid, 3)
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"replay_expanded_turns": 1}}) as pilot:
+                      config={"agent_edits": {"replay_expanded_turns": 1}}) as pilot:
         blocks = _blocks(pilot.app.screen)
         assert [_has_body(b) for b in blocks] == [False, False, True]
 
@@ -147,7 +147,7 @@ async def test_compact_block_expands_on_click(tmp_path):
     _turns_thread(tmp_path, tid, 2, hunks=_long_hunks(30))
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"replay_expanded_turns": 1}}) as pilot:
+                      config={"agent_edits": {"replay_expanded_turns": 1}}) as pilot:
         block = _blocks(pilot.app.screen)[0]
         assert not _has_body(block)
         tail = block.query_one(".diff-more", Static)
@@ -181,7 +181,7 @@ async def test_replay_window_counts_only_turns_with_blocks(tmp_path):
     _write_journal(tmp_path, tid, records)
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"replay_expanded_turns": 3}}) as pilot:
+                      config={"agent_edits": {"replay_expanded_turns": 3}}) as pilot:
         blocks = _blocks(pilot.app.screen)
         assert len(blocks) == 3
         assert [_has_body(b) for b in blocks] == [True, True, True]
@@ -310,7 +310,7 @@ async def test_detail_card_full_diff_without_collapse(tmp_path):
         _record("c1", hunks=_long_hunks(30), add=30, del_=0)])
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"trace_inline_max_lines": 3}}) as pilot:
+                      config={"agent_edits": {"trace_inline_max_lines": 3}}) as pilot:
         await _open_detail(pilot)
         diff = pilot.app.screen.query_one(".detail-diff", Static).visual.plain
         assert diff.count("\n") + 1 == 30
@@ -348,7 +348,7 @@ async def test_broken_inline_threshold_keeps_body(tmp_path, value):
     _write_journal(tmp_path, tid, [_record("c1", hunks=_long_hunks(30), add=30, del_=0)])
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"trace_inline_max_lines": value}}) as pilot:
+                      config={"agent_edits": {"trace_inline_max_lines": value}}) as pilot:
         block = pilot.app.screen.query_one(DiffBlock)
         assert _has_body(block)
         body = block.query_one(".block-body", Static).visual.plain
@@ -362,12 +362,12 @@ async def test_broken_replay_limit_behaves_like_one(tmp_path, value):
     """Отрицательное / `true` в replay_expanded_turns схлопывают окно до одного хода.
 
     Ровно `0` — не мусор, а «без ограничения» (см. соседний тест);
-    нечисловой мусор уходит в дефолт (см. `_diff_tui_limit`)."""
+    нечисловой мусор уходит в дефолт (см. `_agent_edits_limit`)."""
     tid = f"broken_replay_{abs(hash(value)) % 1000}"
     _turns_thread(tmp_path, tid, 2)
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"replay_expanded_turns": value}}) as pilot:
+                      config={"agent_edits": {"replay_expanded_turns": value}}) as pilot:
         blocks = _blocks(pilot.app.screen)
         assert [_has_body(b) for b in blocks] == [False, True]
 
@@ -379,7 +379,7 @@ async def test_replay_limit_zero_expands_every_turn(tmp_path):
     _turns_thread(tmp_path, tid, 5)
 
     async with _pilot(tmp_path, tid,
-                      config={"diff_tui": {"replay_expanded_turns": 0}}) as pilot:
+                      config={"agent_edits": {"replay_expanded_turns": 0}}) as pilot:
         blocks = _blocks(pilot.app.screen)
         assert len(blocks) == 5
         assert [_has_body(b) for b in blocks] == [True] * 5

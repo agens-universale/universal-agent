@@ -29,7 +29,7 @@ from gc_tui.commands import build_default_registry, closest_command
 from gc_tui.messages import CopyBlockRequest
 from gc_tui.models import TaskCursor
 from rich.cells import cell_len
-from gc_core.config_modules.diff_tui import (
+from gc_core.config_modules.agent_edits import (
     DEFAULT_REPLAY_EXPANDED_TURNS,
     DEFAULT_TRACE_INLINE_MAX_LINES,
     DEFAULT_TURN_SUMMARY_IN_STATUS,
@@ -2688,7 +2688,7 @@ class TraceScreen(Screen):
         хода, которые на каждом событии пересоздавать нельзя. `launch_root`
         нужен сводке — по нему находятся снапшоты и сами файлы на диске.
 
-        Лимиты секции `diff_tui` входят в ключ кэша: без них правка порогов в
+        Лимиты секции `agent_edits` входят в ключ кэша: без них правка порогов в
         настройках не доехала бы до расчёта до самой смены треда."""
         identity = self._diff_thread_identity()
         if not all(identity):
@@ -2710,41 +2710,41 @@ class TraceScreen(Screen):
             self._edits_lookup_key = key
         return self._edits_lookup
 
-    def _diff_tui_limit(self, key: str, default: int) -> int:
-        """Числовой порог секции `diff_tui`, всегда >= 1.
+    def _agent_edits_limit(self, key: str, default: int) -> int:
+        """Числовой порог секции `agent_edits`, всегда >= 1.
 
         Кламп обязателен: 0 / отрицательное / `true` в конфиге иначе дают блок
         с пустым телом и хвостом «… ещё N строк» — сломанный вид вместо диффа."""
         cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("diff_tui") or {}
+        section = cfg.get("agent_edits") or {}
         try:
             return max(1, int(section.get(key, default)))
         except (TypeError, ValueError):
             return default
 
     def _trace_inline_max_lines(self) -> int:
-        """Порог свёртки инлайн-диффа — `diff_tui.trace_inline_max_lines`."""
-        return self._diff_tui_limit("trace_inline_max_lines",
+        """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
+        return self._agent_edits_limit("trace_inline_max_lines",
                                     DEFAULT_TRACE_INLINE_MAX_LINES)
 
     def _replay_expanded_turns(self) -> int:
-        """Сколько последних ходов показывают дифф телом — `diff_tui.replay_expanded_turns`.
+        """Сколько последних ходов показывают дифф телом — `agent_edits.replay_expanded_turns`.
 
         Ровно `0` — «без ограничения»: разворачиваются все ходы (вернём -1 как
         признак «окно не режем», см. `_is_stale_edit_turn`). Прочий мусор
         (отрицательное, `true`, строка) клампится общим правилом."""
         cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("diff_tui") or {}
+        section = cfg.get("agent_edits") or {}
         raw = section.get("replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS)
         if isinstance(raw, int) and not isinstance(raw, bool) and raw == 0:
             return -1
-        return self._diff_tui_limit("replay_expanded_turns",
+        return self._agent_edits_limit("replay_expanded_turns",
                                     DEFAULT_REPLAY_EXPANDED_TURNS)
 
     def _turn_summary_in_status(self) -> bool:
-        """Показывать ли сводку правок в строке-итоге — `diff_tui.turn_summary_in_status`."""
+        """Показывать ли сводку правок в строке-итоге — `agent_edits.turn_summary_in_status`."""
         cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("diff_tui") or {}
+        section = cfg.get("agent_edits") or {}
         return bool(section.get("turn_summary_in_status",
                                 DEFAULT_TURN_SUMMARY_IN_STATUS))
 

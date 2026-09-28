@@ -351,7 +351,7 @@ async def test_config_switch_off_hides_segment(tmp_path):
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T1", add=3, del_=1)
     app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "diff_tui": {"turn_summary_in_status": False}})
+                 config={"model": "M", "agent_edits": {"turn_summary_in_status": False}})
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)

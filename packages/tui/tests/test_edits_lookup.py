@@ -314,7 +314,7 @@ def test_turn_summary_counts_shell_edits_via_counting_base(tmp_path):
 
 
 def test_turn_summary_honours_config_limits(tmp_path):
-    """Лимиты секции `diff_tui` доезжают до расчёта, а не остаются дефолтными."""
+    """Лимиты секции `agent_edits` доезжают до расчёта, а не остаются дефолтными."""
     ws = _Workspace(tmp_path, max_diff_source_bytes=10)
     ws.snapshot("big.py", "a\n")
     ws.write("big.py", "".join(f"line{i}\n" for i in range(50)))

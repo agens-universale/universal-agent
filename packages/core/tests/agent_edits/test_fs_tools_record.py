@@ -389,8 +389,8 @@ async def test_save_base64_file_binary_over_existing_keeps_before_hash(roots):
     assert rec.after_sha256 == _sha(PNG_BYTES)
 
 
-async def test_diff_tui_config_keys_affect_fs_tool_record(roots):
-    """Ключи секции diff_tui доходят до записи, сделанной fs-тулом."""
+async def test_agent_edits_config_keys_affect_fs_tool_record(roots):
+    """Ключи секции agent_edits доходят до записи, сделанной fs-тулом."""
     launch_root, threads_dir = roots
     target = launch_root / "app.py"
     old_lines = [f"line{i}\n" for i in range(10)]
@@ -404,7 +404,7 @@ async def test_diff_tui_config_keys_affect_fs_tool_record(roots):
             launch_root,
             threads_dir,
             call_id="call-cfg",
-            config={"diff_tui": {"hunk_context_lines": 1}},
+            config={"agent_edits": {"hunk_context_lines": 1}},
         ).acall(path=str(target), content="".join(new_lines))
     )
     assert res["ok"] is True
@@ -427,7 +427,7 @@ async def test_max_diff_chars_from_config_truncates_fs_tool_record(roots):
             launch_root,
             threads_dir,
             call_id="call-cfg-chars",
-            config={"diff_tui": {"max_diff_chars": 30}},
+            config={"agent_edits": {"max_diff_chars": 30}},
         ).acall(path=str(target), content="".join(f"new-{i}\n" for i in range(50)))
     )
     assert res["ok"] is True

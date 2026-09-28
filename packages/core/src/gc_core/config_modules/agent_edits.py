@@ -1,4 +1,8 @@
-"""Конфиг секции ``diff_tui:`` — лимиты записи правок агента и их показа в TUI."""
+"""Конфиг секции ``agent_edits:`` — запись правок агента (ядро, все режимы) и их показ в TUI.
+
+До переименования секция называлась ``diff_tui``: старые конфиги переносит
+``config_modules.compat``.
+"""
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict
@@ -14,8 +18,8 @@ DEFAULT_REPLAY_EXPANDED_TURNS = 20
 DEFAULT_TURN_SUMMARY_IN_STATUS = True
 
 
-class DiffTuiConfig(BaseModel):
-    """Yaml section ``diff_tui:`` — правки агента в TUI, не параметры fs-тулов.
+class AgentEditsConfig(BaseModel):
+    """Yaml section ``agent_edits:`` — правки агента, не параметры fs-тулов.
 
     ``snapshots_max_files`` — потолок НЕ глобальный, и это сознательно.
     Вытеснение обходит снимки треда с живым журналом: снять базу живого треда

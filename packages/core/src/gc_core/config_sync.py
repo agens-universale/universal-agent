@@ -265,10 +265,10 @@ def sync_config(path, template_path=None, *, timestamp: Optional[str] = None) ->
     for dotted in _user_paths(user_raw):
         if _covered(dotted):
             continue
-        if dotted in compat.REMOVED:
+        target = compat.map_legacy_path(dotted)
+        if target is None:
             removed.append(dotted)
             continue
-        target = compat.RENAMES.get(dotted, dotted)
         if dotted in compat.RENAME_CONVERTERS:
             reenter.append(dotted)   # line-copy не умеет преобразовать значение
             continue

@@ -118,7 +118,7 @@ class _Workspace:
 
     @property
     def config(self) -> dict:
-        return {"launch_root": str(self.root), "model": "M", "diff_tui": {}}
+        return {"launch_root": str(self.root), "model": "M", "agent_edits": {}}
 
     def write(self, rel: str, text: str) -> None:
         path = self.root / rel

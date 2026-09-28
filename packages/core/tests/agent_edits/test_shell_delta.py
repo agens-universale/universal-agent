@@ -87,7 +87,7 @@ def _ctx(launch_root, threads_dir, *, shell_tracking=True, turn_id="turn-1"):
     return SimpleNamespace(
         config_dict={
             "launch_root": str(launch_root),
-            "diff_tui": {"shell_tracking": shell_tracking},
+            "agent_edits": {"shell_tracking": shell_tracking},
         },
         threads_dir=str(threads_dir),
         system_id="cli",
@@ -637,7 +637,7 @@ def test_binary_file_follows_recorder_contract(repo):
 def test_file_over_source_cap_is_recorded_without_diffing(repo, monkeypatch):
     launch_root, threads_dir = repo
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"]["max_diff_source_bytes"] = 10
+    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 10
     diff_calls: list[str] = []
 
     def _spy_diff(self, rel, *, untracked):
@@ -664,7 +664,7 @@ def test_file_over_source_cap_is_recorded_without_diffing(repo, monkeypatch):
 def test_huge_diff_is_truncated_with_flag_but_counts_stay_accurate(repo):
     launch_root, threads_dir = repo
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"]["max_diff_chars"] = 40
+    ctx.config_dict["agent_edits"]["max_diff_chars"] = 40
     delta = ShellDelta.begin(ctx)
     _run_command(
         launch_root,
@@ -1049,7 +1049,7 @@ def test_no_snapshot_for_oversize_record(repo):
     (launch_root / "big.txt").write_bytes(b"y" * 100)
     _git(launch_root, "add", "big.txt")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"]["max_diff_source_bytes"] = 10
+    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 10
     delta = ShellDelta.begin(ctx)
     _run_command(launch_root, "open('big.txt','wb').write(b'x' * 100)")
     delta.after_and_record()
@@ -1077,7 +1077,7 @@ def test_shell_channel_evicts_when_it_wrote_a_new_base(repo, monkeypatch):
     launch_root, threads_dir = repo
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2-dirty\n")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"]["snapshots_max_files"] = 7
+    ctx.config_dict["agent_edits"]["snapshots_max_files"] = 7
     calls: list[int] = []
     monkeypatch.setattr(
         SnapshotStore, "evict_lru", lambda self, max_files: calls.append(max_files)
@@ -1616,7 +1616,7 @@ def test_pocket_skips_oversize_and_respects_total_cap(tmp_path, monkeypatch):
     threads_dir.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"]["max_diff_source_bytes"] = 20
+    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 20
     monkeypatch.setattr(shell_delta, "POCKET_TOTAL_CAP_BYTES", 8)
 
     # недавний, но сверх пофайлового капа — не кандидат вовсе, бюджет не тратит
@@ -1649,7 +1649,7 @@ def test_pocket_keeps_filling_after_a_candidate_that_does_not_fit(
     threads_dir.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"]["max_diff_source_bytes"] = 20
+    ctx.config_dict["agent_edits"]["max_diff_source_bytes"] = 20
     monkeypatch.setattr(shell_delta, "POCKET_TOTAL_CAP_BYTES", 8)
 
     _seed_known_file(threads_dir, launch_root, "big.txt", b"x" * 7, ts=3.0)

@@ -414,7 +414,7 @@ def test_file_diff_of_accepted_path_the_recorder_never_snapshotted(tmp_path):
 def test_file_diff_of_settled_uncountable_path_falls_back_to_journal(tmp_path):
     """Сравнить нечем (кап) — тело честно из журнала и с `exact=False`:
     `SettledRow` признака не несёт, и выясняется это только здесь."""
-    ws = _Workspace(tmp_path, {"diff_tui": {"max_diff_source_bytes": 5}})
+    ws = _Workspace(tmp_path, {"agent_edits": {"max_diff_source_bytes": 5}})
     ws.write("a.py", "ab\n")
     ws.journal.append(_rec("a.py", ts=1.0, hunks="@@ из журнала @@\n+ab\n"))
     ws.view.accept(["a.py"])
@@ -742,7 +742,7 @@ def test_limits_come_from_config_not_defaults(tmp_path):
     default_ws.write("a.py", after)
     default_ws.journal.append(_rec("a.py"))
 
-    tight_ws = _Workspace(tmp_path / "t", {"diff_tui": {"hunk_context_lines": 0}})
+    tight_ws = _Workspace(tmp_path / "t", {"agent_edits": {"hunk_context_lines": 0}})
     tight_ws.session_base("a.py", before)
     tight_ws.write("a.py", after)
     tight_ws.journal.append(_rec("a.py"))
@@ -755,7 +755,7 @@ def test_limits_come_from_config_not_defaults(tmp_path):
 
 
 def test_source_bytes_cap_comes_from_config(tmp_path):
-    ws = _Workspace(tmp_path, {"diff_tui": {"max_diff_source_bytes": 10}})
+    ws = _Workspace(tmp_path, {"agent_edits": {"max_diff_source_bytes": 10}})
     ws.session_base("a.py", "a\n")
     ws.write("a.py", "".join(f"line{i}\n" for i in range(50)))
     ws.journal.append(_rec("a.py"))
@@ -768,23 +768,23 @@ def test_source_bytes_cap_comes_from_config(tmp_path):
 
 
 def test_diff_limits_ignore_broken_config_values(tmp_path):
-    from gc_core.config_modules.diff_tui import (
+    from gc_core.config_modules.agent_edits import (
         DEFAULT_HUNK_CONTEXT_LINES,
         DEFAULT_MAX_DIFF_SOURCE_BYTES,
     )
 
     assert diff_limits({}) == (DEFAULT_MAX_DIFF_SOURCE_BYTES,
                                DEFAULT_HUNK_CONTEXT_LINES)
-    assert diff_limits({"diff_tui": {"hunk_context_lines": True}})[1] == (
+    assert diff_limits({"agent_edits": {"hunk_context_lines": True}})[1] == (
         DEFAULT_HUNK_CONTEXT_LINES
     )
-    assert diff_limits({"diff_tui": {"hunk_context_lines": -1}})[1] == (
+    assert diff_limits({"agent_edits": {"hunk_context_lines": -1}})[1] == (
         DEFAULT_HUNK_CONTEXT_LINES
     )
-    assert diff_limits({"diff_tui": {"max_diff_source_bytes": "мусор"}})[0] == (
+    assert diff_limits({"agent_edits": {"max_diff_source_bytes": "мусор"}})[0] == (
         DEFAULT_MAX_DIFF_SOURCE_BYTES
     )
-    assert diff_limits({"diff_tui": {"hunk_context_lines": 0}})[1] == 0
+    assert diff_limits({"agent_edits": {"hunk_context_lines": 0}})[1] == 0
 
 
 # --- принятие и сброс принятия ------------------------------------------------
@@ -934,7 +934,7 @@ def test_reset_targets_assume_a_lost_point_when_the_store_refuses(tmp_path, monk
 
 
 def test_accept_oversize_is_skipped_with_reason(tmp_path):
-    ws = _Workspace(tmp_path, {"diff_tui": {"max_diff_source_bytes": 10}})
+    ws = _Workspace(tmp_path, {"agent_edits": {"max_diff_source_bytes": 10}})
     ws.write("a.py", "".join(f"line{i}\n" for i in range(50)))
 
     outcome = ws.view.accept(["a.py"])
@@ -1156,7 +1156,7 @@ def test_reset_targets_lose_the_point_only_when_the_delta_is_nonempty(tmp_path):
 def test_reset_targets_treat_uncountable_delta_as_a_lost_point(tmp_path):
     """Сравнить нечем (кап на диске) — безопасная сторона: точка отката
     считается теряемой, подтверждение спрашивается."""
-    ws = _Workspace(tmp_path, {"diff_tui": {"max_diff_source_bytes": 5}})
+    ws = _Workspace(tmp_path, {"agent_edits": {"max_diff_source_bytes": 5}})
     ws.write("a.py", "ab\n")
     ws.view.accept(["a.py"])
     ws.write("a.py", "".join(f"line{i}\n" for i in range(20)))
@@ -1586,7 +1586,7 @@ def test_created_then_committed_counts_from_head_with_lf_disk_under_autocrlf(tmp
 
 
 def test_ladder_head_bytes_skips_reading_oversized_file(tmp_path):
-    """Кап источника — НАСТРОЕННЫЙ (`diff_tui.max_diff_source_bytes`), тот же,
+    """Кап источника — НАСТРОЕННЫЙ (`agent_edits.max_diff_source_bytes`), тот же,
     с которым считает `deltas.delta_vs_disk`. Файл сверх лимита целиком не
     читается: стиля диска тогда взять неоткуда, и база остаётся в форме
     выкладки, как было до Е1. Поднятый в конфиге кап обязан пускать к диску
@@ -1596,7 +1596,7 @@ def test_ladder_head_bytes_skips_reading_oversized_file(tmp_path):
     def _facts(root: Path, cap: int):
         view = EditsView(
             str(tmp_path / "threads"), "cli", "th1", str(root),
-            {"diff_tui": {"max_diff_source_bytes": cap}},
+            {"agent_edits": {"max_diff_source_bytes": cap}},
         )
         facts = view._ladder_facts
         facts.prime(git_ops.rev_parse_head(str(root)), {})

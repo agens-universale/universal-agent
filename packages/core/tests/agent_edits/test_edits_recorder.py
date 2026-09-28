@@ -699,7 +699,7 @@ async def test_partial_skips_snapshots_and_file_hashes(roots):
 
 def _ctx_with_limit(launch_root, threads_dir, max_files: int):
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"] = {"snapshots_max_files": max_files}
+    ctx.config_dict["agent_edits"] = {"snapshots_max_files": max_files}
     return ctx
 
 
@@ -1061,7 +1061,7 @@ async def test_garbage_source_cap_in_config_does_not_kill_the_snapshot(roots):
     target.parent.mkdir()
     target.write_bytes(b"old\n")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"] = {"max_diff_source_bytes": -1}
+    ctx.config_dict["agent_edits"] = {"max_diff_source_bytes": -1}
 
     await record_edit(
         ctx,
@@ -1087,7 +1087,7 @@ async def test_non_numeric_limit_in_config_does_not_lose_the_record(roots):
     target.parent.mkdir()
     target.write_bytes(b"old\n")
     ctx = _ctx(launch_root, threads_dir)
-    ctx.config_dict["diff_tui"] = {"hunk_context_lines": "три"}
+    ctx.config_dict["agent_edits"] = {"hunk_context_lines": "три"}
 
     await record_edit(
         ctx,

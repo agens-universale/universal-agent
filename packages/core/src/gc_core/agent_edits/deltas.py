@@ -27,7 +27,7 @@ from typing import Callable, Iterable, Optional, Tuple
 
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.agent_edits.paths import is_external_key
-from gc_core.config_modules.diff_tui import (
+from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
 )

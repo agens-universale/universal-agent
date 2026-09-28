@@ -28,7 +28,7 @@ from gc_core.agent_edits.snapshots import (
     snapshots_root,
     thread_key_from_journal_path,
 )
-from gc_core.config_modules.diff_tui import (
+from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
 )

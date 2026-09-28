@@ -96,7 +96,7 @@ class _Workspace:
 
     @property
     def config(self) -> dict:
-        return {"launch_root": str(self.root), "model": "M", "diff_tui": {}}
+        return {"launch_root": str(self.root), "model": "M", "agent_edits": {}}
 
     def write(self, rel: str, text: str) -> None:
         path = self.root / rel
@@ -636,7 +636,7 @@ async def test_failed_accept_from_viewer_reaches_the_user_via_notify(tmp_path):
     ws.edit("a.py", "a\n", "a\n" + "b" * 50 + "\n")
 
     config = dict(ws.config)
-    config["diff_tui"] = {"max_diff_source_bytes": 1}
+    config["agent_edits"] = {"max_diff_source_bytes": 1}
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=config

@@ -262,7 +262,7 @@ async def test_nested_collapse_threshold_comes_from_config(tmp_path):
         _record("call_child_9", path="a.py", hunks=long_hunks, add=30, del_=0)])
 
     async with _screen(tmp_path, tid,
-                       config={"diff_tui": {"trace_inline_max_lines": 3}}) as scr:
+                       config={"agent_edits": {"trace_inline_max_lines": 3}}) as scr:
         block = scr.query_one(DiffBlock)
         body = block.query_one(".block-body", Static).visual.plain
         assert body.count("\n") + 1 == 3

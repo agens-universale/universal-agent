@@ -464,7 +464,7 @@ NOT_IN_MATRIX = {
     "tui.file_view.max_file_bytes": "только TUI",
     "tui.file_view.page_lines": "только TUI",
 
-    # --- секция diff_tui: правки агента вне проекта (журнал, снимки, откат) ---
+    # --- секция agent_edits: правки агента вне проекта (журнал, снимки, откат) ---
     #
     # Ветка переименовала `cache_max_orig` в `snapshots_max_files`, убрала
     # `preview_context_lines` и `full_file_max_lines` (см. `config_modules.compat`)
@@ -478,10 +478,10 @@ NOT_IN_MATRIX = {
     # а сравниваемый дамп читает только `data_*.jsonl`. Вдобавок сценарий
     # матрицы (калькулятор, финализатор, вердикт судьи) не правит ни одного
     # файла: писатели канала — fs-тулы и шелл-делта — на нём не просыпаются.
-    "diff_tui.snapshots_max_files": "потолок вытеснения снимков в .gc/agent_edits; сценарий не правит файлы, покрыт agent_edits/test_snapshots",
-    "diff_tui.hunk_context_lines": "контекст хэнков в записи журнала; там же, покрыт agent_edits/test_deltas",
-    "diff_tui.max_diff_source_bytes": "порог, выше которого дифф не считается и снимок не снимается; там же",
-    "diff_tui.max_diff_chars": "потолок текста хэнков в записи журнала; там же (раньше числился «только TUI» — ветка увела читателей в ядро)",
+    "agent_edits.snapshots_max_files": "потолок вытеснения снимков в .gc/agent_edits; сценарий не правит файлы, покрыт agent_edits/test_snapshots",
+    "agent_edits.hunk_context_lines": "контекст хэнков в записи журнала; там же, покрыт agent_edits/test_deltas",
+    "agent_edits.max_diff_source_bytes": "порог, выше которого дифф не считается и снимок не снимается; там же",
+    "agent_edits.max_diff_chars": "потолок текста хэнков в записи журнала; там же (раньше числился «только TUI» — ветка увела читателей в ядро)",
 
     # `shell_tracking` — единственный из секции, который ДЕЙСТВИТЕЛЬНО стоит на
     # пути, переехавшем на корутины: он гасит `ShellDelta.begin` внутри
@@ -494,15 +494,15 @@ NOT_IN_MATRIX = {
     # обращений к бэкенду и отказ. Асинхронность самой обёртки покрыта
     # `agent_edits/test_tracking_async_exec.py` и `test_tracking_probe_off_loop.py`,
     # сам переключатель — `test_shell_delta.py::test_shell_tracking_false_writes_nothing`.
-    "diff_tui.shell_tracking": "гейт шелл-делты; сценарий матрицы не запускает ни одной команды",
+    "agent_edits.shell_tracking": "гейт шелл-делты; сценарий матрицы не запускает ни одной команды",
 
     # Показ, а не запись: эти три читает только `gc_tui.screens.main`. Матрица
     # гоняет CLI-прогон, до ленты TUI он не доходит. Покрытие — наборы TUI
     # `test_trace_diff_block.py`, `test_trace_diff_replay.py`,
     # `test_turn_summary_segment.py`.
-    "diff_tui.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
-    "diff_tui.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
-    "diff_tui.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
+    "agent_edits.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
+    "agent_edits.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
+    "agent_edits.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
 }
 
 

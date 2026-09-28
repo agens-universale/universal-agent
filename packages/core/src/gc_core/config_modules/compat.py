@@ -10,25 +10,34 @@
 """
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 # {"старый.dotted.путь": "новый.dotted.путь"}
 RENAMES: Dict[str, str] = {
+    # Порядок значим: записи применяются по очереди. Сначала секция целиком
+    # (`diff_tui` — запись правок давно в ядре и идёт не только в TUI), затем её
+    # старые листья — уже под новым именем.
+    "diff_tui": "agent_edits",
     # лимит снимков «до правки» уехал из cache-mode legacy-стора в .gc/agent_edits
-    "diff_tui.cache_max_orig": "diff_tui.snapshots_max_files",
+    "agent_edits.cache_max_orig": "agent_edits.snapshots_max_files",
     # AliasChoices("auxiliary_llm", "llm") недостаточно: deep_merge user(llm)+project
     # (auxiliary_llm) оставляет оба ключа → extra=forbid «Extra inputs are not permitted».
     "chat_completions.llm": "chat_completions.auxiliary_llm",
 }
 # опциональное преобразование значения при переносе (смена формата/смысла)
 RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
+# Переименованные СЕКЦИИ, которые при обоих заданных именах сливаются (новое
+# побеждает), а не теряют старую целиком. Только для секций из независимых
+# ключей: у `chat_completions.llm` → `auxiliary_llm` это настройки модели, и
+# слияние смешало бы параметры двух разных моделей — там старая отбрасывается.
+MERGE_RENAMED_SECTIONS = frozenset({"diff_tui"})
 # {"dotted.путь": "почему удалён"}
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
-    "diff_tui.preview_context_lines":
-        "экран правок считает дифф по журналу; контекст хэнков — diff_tui.hunk_context_lines",
-    "diff_tui.full_file_max_lines":
+    "agent_edits.preview_context_lines":
+        "экран правок считает дифф по журналу; контекст хэнков — agent_edits.hunk_context_lines",
+    "agent_edits.full_file_max_lines":
         "порога больше нет: клавиша f на экране правок показывает файл целиком",
 }
 
@@ -68,6 +77,42 @@ def _set_path(d: Dict[str, Any], dotted: str, value: Any) -> None:
     cur[parts[-1]] = value
 
 
+def _get_path(d: Dict[str, Any], dotted: str) -> Any:
+    cur: Any = d
+    for p in dotted.split("."):
+        if not isinstance(cur, dict) or p not in cur:
+            return None
+        cur = cur[p]
+    return cur
+
+
+def _deep_merge_missing(target: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+    """``target`` дополняется ключами ``extra``, которых в нём нет; свои не трогаются."""
+    for key, value in extra.items():
+        if key not in target:
+            target[key] = value
+        elif isinstance(target[key], dict) and isinstance(value, dict):
+            _deep_merge_missing(target[key], value)
+    return target
+
+
+def map_legacy_path(dotted: str) -> Optional[str]:
+    """Куда `apply_compat` унесёт ключ ``dotted``; ``None`` — ключ удалён.
+
+    Переименования применяются по очереди и к самому пути, и к его предкам: лист
+    старой секции (``diff_tui.cache_max_orig``) проходит сначала перенос секции,
+    затем свой собственный. Нужно `--sync-config`: он переносит конфиг по листьям,
+    и лист, перенесённый только по имени секции, оставил бы удалённый ключ в файле.
+    """
+    path = dotted
+    for old, new in RENAMES.items():
+        if path == old or path.startswith(old + "."):
+            path = new + path[len(old):]
+    if any(path == gone or path.startswith(gone + ".") for gone in REMOVED):
+        return None
+    return path
+
+
 def apply_compat(raw: Dict[str, Any]) -> List[str]:
     """Мутирует raw. Возвращает человекочитаемые факты для startup-notices."""
     facts: List[str] = []
@@ -88,6 +133,20 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
         if not explicit_new:
             _set_path(raw, new, value)
             facts.append(f"{old} переименован в {new} — {_SYNC_HINT}")
+        elif (
+            old in MERGE_RENAMED_SECTIONS
+            and isinstance(value, dict)
+            and isinstance(_get_path(raw, new), dict)
+        ):
+            # Переименованная СЕКЦИЯ, заданная под обоими именами — обычно в
+            # разных слоях конфига (старое в пользовательском, новое в проектном):
+            # выбросить старую целиком значило бы молча потерять её ключи.
+            # Сливаем под новую, заданное в новой побеждает.
+            _set_path(raw, new, _deep_merge_missing(_get_path(raw, new), value))
+            facts.append(
+                f"{old} переименован в {new}: ключи слиты, заданные в {new} "
+                f"побеждают — {_SYNC_HINT}"
+            )
         else:
             facts.append(
                 f"{old} устарел: действует явно заданный {new}, "

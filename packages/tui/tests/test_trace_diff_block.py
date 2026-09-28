@@ -339,7 +339,7 @@ async def test_lookup_failure_does_not_break_trace(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_collapse_threshold_comes_from_config(tmp_path):
-    """Порог свёртки берётся из diff_tui.trace_inline_max_lines."""
+    """Порог свёртки берётся из agent_edits.trace_inline_max_lines."""
     tid = "threshold"
     _write_thread(tmp_path, tid, [
         {"id": "u1", "role": "user", "content": "правь"},
@@ -349,7 +349,7 @@ async def test_collapse_threshold_comes_from_config(tmp_path):
     _write_journal(tmp_path, tid, [_record("c1", hunks=_long_hunks(30), add=30, del_=0)])
 
     async with _screen(tmp_path, tid,
-                       config={"diff_tui": {"trace_inline_max_lines": 3}}) as scr:
+                       config={"agent_edits": {"trace_inline_max_lines": 3}}) as scr:
         block = scr.query_one(DiffBlock)
         assert _body_lines(block) == 3
         assert block.query_one(".diff-more", Static).visual.plain == "… ещё 27 строк"
@@ -397,7 +397,7 @@ def _focus_fixture(tmp_path, tid: str) -> None:
 
 
 #: Лимит для тестов фокуса: блок обрезан (сноска есть) и при этом короток.
-_FOCUS_CONFIG = {"model": "M", "diff_tui": {"trace_inline_max_lines": 5}}
+_FOCUS_CONFIG = {"model": "M", "agent_edits": {"trace_inline_max_lines": 5}}
 
 
 @pytest.mark.asyncio
@@ -485,7 +485,7 @@ async def test_tail_follows_the_width(tmp_path):
     _write_journal(tmp_path, tid, [_record("c1", hunks=long_hunks, add=8, del_=0)])
 
     async with _pilot(tmp_path, tid, {"model": "M",
-                                      "diff_tui": {"trace_inline_max_lines": 30}}) as pilot:
+                                      "agent_edits": {"trace_inline_max_lines": 30}}) as pilot:
         block = pilot.app.screen.query_one(DiffBlock)
 
         await pilot.resize_terminal(40, 30)

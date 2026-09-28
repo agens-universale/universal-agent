@@ -52,7 +52,7 @@ def _cfg(launch_root: Path) -> dict:
     return {
         "launch_root": str(launch_root),
         "write_guard": {"enabled": False, "mode": "deny", "extra_paths": []},
-        "diff_tui": {},
+        "agent_edits": {},
     }
 
 

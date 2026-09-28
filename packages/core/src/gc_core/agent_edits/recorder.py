@@ -4,7 +4,7 @@ fs-тулы после успешной правки файла зовут ``rec
 unified diff, sha256 обеих сторон, снимает session/turn-снапшоты «до правки»
 (а у созданного файла, у которого «до» нет, ставит отметку создания) и
 добавляет запись в журнал треда (``EditsJournal``). Лимиты диффа берутся из
-секции ``diff_tui`` конфига на ctx (как во втором канале записи,
+секции ``agent_edits`` конфига на ctx (как во втором канале записи,
 ``shell_delta``); одноимённый параметр вызова, если передан, побеждает конфиг.
 ``is_recording`` — дешёвый предикат для тулов: стоит ли вообще поднимать в
 память старый контент ради журнала.
@@ -33,7 +33,7 @@ from gc_core.agent_edits.snapshots import (
     snapshots_root,
     thread_key_from_journal_path,
 )
-from gc_core.config_modules.diff_tui import (
+from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_CHARS,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
@@ -86,7 +86,7 @@ async def record_edit(
     ``asyncio.to_thread``.
 
     Лимиты (``max_diff_source_bytes``/``hunk_context_lines``/``max_diff_chars``)
-    по умолчанию — ``None``: значение берётся из секции ``diff_tui`` конфига на
+    по умолчанию — ``None``: значение берётся из секции ``agent_edits`` конфига на
     ctx, а переданное явно побеждает конфиг.
 
     ``partial=True`` — вызывающий знает лишь фрагмент правки, а не оба полных

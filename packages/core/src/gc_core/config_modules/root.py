@@ -31,7 +31,7 @@ from gc_core.config_modules.voice import VoiceConfig
 from gc_core.config_modules.endpoint_presets import EndpointPreset, default_endpoint_presets
 from gc_core.config_modules.voice_endpoint_presets import default_voice_endpoint_presets
 from gc_core.config_modules.update import UpdateConfig
-from gc_core.config_modules.diff_tui import DiffTuiConfig
+from gc_core.config_modules.agent_edits import AgentEditsConfig
 from gc_core.config_modules.fs_tools import FsToolsConfig
 from gc_core.config_modules.summary import (
     DEFAULT_INCREMENTAL_BATCH_MULTIPLIER,
@@ -84,7 +84,7 @@ class AppConfig(BaseModel):
     endpoint_presets: list[EndpointPreset] = Field(default_factory=default_endpoint_presets)
     voice_endpoint_presets: list[EndpointPreset] = Field(default_factory=default_voice_endpoint_presets)
     update: UpdateConfig = Field(default_factory=UpdateConfig)
-    diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
+    agent_edits: AgentEditsConfig = Field(default_factory=AgentEditsConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig
