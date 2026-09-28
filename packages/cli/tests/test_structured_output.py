@@ -610,3 +610,104 @@ async def test_truncated_rephrase_is_not_printed(monkeypatch, capsys):
     assert len(finals) == 1
     assert '"task_report"' in finals[0]["answer"]
     assert '"result": "answer' not in finals[0]["answer"]
+
+
+@pytest.mark.asyncio
+async def test_meta_write_error_still_shuts_down_mcp(monkeypatch, tmp_path):
+    """Ошибка записи меты не пропускает закрытие клиентов и MCP-демонов."""
+    import sys
+    from unittest.mock import AsyncMock
+
+    # Импорт cli разбирает sys.argv. Флаг pytest `-q` иначе становится запросом.
+    monkeypatch.setattr(sys, "argv", ["gc-cli", "-q", "x"])
+    from gc_cli import cli
+
+    fmt = tmp_path / "format.md"
+    fmt.write_text("верни JSON\n", encoding="utf-8")
+    calls: list[str] = []
+
+    async def _arun(*_args, **_kwargs):
+        calls.append("arun")
+        return "ok"
+
+    async def _close_accounting():
+        calls.append("accounting")
+        raise OSError("meta write failed")
+
+    async def _aclose_clients():
+        calls.append("clients")
+
+    def _shutdown():
+        calls.append("daemons")
+
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+    monkeypatch.setattr(
+        cli.arg_parser,
+        "run_args",
+        SimpleNamespace(
+            init_config=False,
+            sync_config=False,
+            reset_config=False,
+            check_update=False,
+            update=False,
+            init=False,
+            config="cfg.yml",
+            profile=None,
+            write_guard=None,
+            no_write_guard=False,
+            command_moderation=None,
+            read_guard=None,
+            no_read_guard=False,
+            read_guard_mode=None,
+            agentsmd_override=False,
+            trace_id=None,
+            skill=None,
+            query="hi",
+            wrap_technical=False,
+            verbose=False,
+            thread_id=None,
+            new=False,
+            auto_mcp=True,
+            structured_output_format=str(fmt),
+        ),
+    )
+    monkeypatch.setattr(cli, "load_config_ex", lambda *_a, **_k: ({}, None))
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "gc_core.upgrade_gate.detect_upgrade", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        "gc_core.upgrade_gate.mark_current_run", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(cli, "build_auth_connector", lambda *_a, **_k: None)
+    monkeypatch.setattr(cli, "ensure_mcp_daemons", lambda *_a, **_k: None)
+    monkeypatch.setattr(cli, "shutdown_mcp_daemons", _shutdown)
+    monkeypatch.setattr(
+        cli, "acreate_run_context", AsyncMock(return_value=SimpleNamespace())
+    )
+    monkeypatch.setattr(
+        "gc_core.startup_notices.collect_startup_notices",
+        lambda *_a, **_k: [],
+    )
+    monkeypatch.setattr(
+        "gc_core.utils.async_http.aclose_clients", _aclose_clients
+    )
+    monkeypatch.setattr(
+        cli, "aemit_structured_result", AsyncMock(return_value=0)
+    )
+    monkeypatch.setattr(
+        cli,
+        "AgentExecutor",
+        lambda _ctx: SimpleNamespace(
+            arun=_arun,
+            aclose_run_accounting=_close_accounting,
+            get_state=lambda: None,
+            last_terminal_outcome=None,
+        ),
+    )
+
+    with pytest.raises(OSError, match="meta write failed"):
+        await cli.arun_cli()
+
+    assert calls == ["arun", "accounting", "clients", "daemons"]

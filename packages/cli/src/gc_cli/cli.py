@@ -692,15 +692,21 @@ async def arun_cli() -> int:
             executor=executor,
         )
     finally:
-        if ran and close_accounting_after:
-            await executor.aclose_run_accounting()
-        # Пул httpx привязан к этому loop — закрыть его надо до его остановки,
-        # иначе на выходе получим «Event loop is closed» из деструктора.
-        from gc_core.utils.async_http import aclose_clients
+        # Запись меты может бросить исключение. Если она стоит первой
+        # строкой finally, клиенты и демоны `-a` этого запуска не гасятся.
+        # Учёт — в своём try, уборка — во внутреннем finally.
+        try:
+            if ran and close_accounting_after:
+                await executor.aclose_run_accounting()
+        finally:
+            # Пул httpx привязан к этому loop — закрыть его надо до его
+            # остановки, иначе на выходе получим «Event loop is closed»
+            # из деструктора.
+            from gc_core.utils.async_http import aclose_clients
 
-        await aclose_clients()
-        if auto_mcp:
-            shutdown_mcp_daemons()
+            await aclose_clients()
+            if auto_mcp:
+                shutdown_mcp_daemons()
     if structured_exit is not None:
         return structured_exit
     _print_agent_response(response, config_dict, ctx)
