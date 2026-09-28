@@ -733,6 +733,21 @@ class AgentExecutor:
             return
         self._accounting_closed = True
 
+    async def _apersist_finished_loop_during_cancel(self) -> None:
+        """Записать учёт уже завершённого цикла, хотя уборку MCP сняли.
+
+        В снятой задаче следующий ``await`` сразу получает ``CancelledError``,
+        и запись не начинается. Снимаем отмену и пишем. ``arun`` затем бросает
+        ``CancelledError`` заново — вызывающий её видит. Счётчик не
+        восстанавливаем: иначе задача останется снятой даже после того,
+        как вызывающий эту ошибку поймает.
+        """
+        task = asyncio.current_task()
+        if task is not None:
+            while task.cancelling():
+                task.uncancel()
+        await self.aclose_run_accounting()
+
     async def arun(
         self,
         messages: list[str],
@@ -758,6 +773,8 @@ class AgentExecutor:
 
         ``account_run=False`` — не закрывать учёт внутри. Вызывающий ещё
         добавит шаги после цикла и сам вызовет ``aclose_run_accounting``.
+        Отмена закрытия MCP после уже завершённого цикла учёт всё равно
+        записывает и затем пробрасывается: дополнительного шага уже не будет.
         """
         with self._lock:
             # State прошлого хода снимаем ПЕРВЫМ делом. Пока он жил до конца
@@ -939,6 +956,8 @@ class AgentExecutor:
         _owner_reset = set_owner(
             getattr(self._ctx, "mcp_session_owner", "") or None
         )
+        loop_finished = False
+        teardown_cancel: BaseException | None = None
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
@@ -976,6 +995,7 @@ class AgentExecutor:
                     )
                 ),
             )
+            loop_finished = True
             self.last_terminal_outcome = getattr(
                 state, "terminal_outcome", None
             )
@@ -996,9 +1016,22 @@ class AgentExecutor:
             # Ждём напрямую, без потока: блокирующим в закрытии было только
             # ожидание смерти процесса, и оно переведено на опрос. Подробности
             # и разбор отмены — в самой `_aclose_mcp_and_release`.
-            await _aclose_mcp_and_release(_owner_reset)
+            # Отмену здесь не выпускаем: иначе учёт ниже не выполнится, а цикл
+            # уже закончился. Проброс — после записи.
+            try:
+                await _aclose_mcp_and_release(_owner_reset)
+            except asyncio.CancelledError as exc:
+                teardown_cancel = exc
+
+        if teardown_cancel is not None:
+            # Незавершённый цикл сюда не попадает: его исключение выходит из
+            # try/finally само, и чужой итог мы не записываем.
+            if loop_finished:
+                await self._apersist_finished_loop_during_cancel()
+            raise teardown_cancel
 
         # Учёт — одна точка. Кто продолжит прогон после возврата, закроет её сам.
+        # Отмена уборки сюда не доходит: завершённый цикл уже записан выше.
         if account_run:
             await self.aclose_run_accounting()
 
