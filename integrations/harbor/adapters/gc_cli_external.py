@@ -157,7 +157,12 @@ def _messages_to_steps(messages: list) -> list:
             source = _ROLE_TO_SOURCE.get(role, "user")
             text = _stringify_content(m.get("content"))
 
-        step = Step(step_id=len(steps) + 1, source=source, message=text)
+        step = Step(
+            step_id=len(steps) + 1,
+            source=source,
+            message=text,
+            reasoning_content=m.get("reasoning_content") if source == "agent" else None,
+        )
         steps.append(step)
         if source == "agent":
             last_agent = step
