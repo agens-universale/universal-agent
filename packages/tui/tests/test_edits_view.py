@@ -2787,3 +2787,24 @@ def test_a_committed_case_only_rename_is_not_a_deletion(tmp_path):
     targets = ws.view.revert_targets(SOURCE_SESSION, ["Readme.md"])
 
     assert all(target.kind != "delete" for target in targets)
+
+
+def test_view_after_a_commit_asks_git_status_only_about_journal_paths(tmp_path, monkeypatch):
+    """Экран изменений спрашивает `git status` ТОЛЬКО по путям журнала.
+
+    Статус нужен, чтобы понять, какие файлы ушли в коммит, — а их десятки. Полный
+    `git status -u` обходил весь проект, в потоке интерфейса: на проекте с
+    миллионом файлов F3 открывался бы до таймаута, и всё это время интерфейс
+    стоял."""
+    ws = _committed_workspace(tmp_path, 3)
+    (ws.root / "unrelated.txt").write_text("x\n", encoding="utf-8")
+    calls = _count_git(monkeypatch)
+
+    ws.view.session_view(SOURCE_SESSION)
+
+    status_calls = [c for c in calls if "status" in c]
+    assert status_calls, calls
+    for args in status_calls:
+        assert "--" in args, args
+        tail = args[args.index("--") + 1:]
+        assert tail and all("p" in spec and "unrelated" not in spec for spec in tail), args

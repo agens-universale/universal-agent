@@ -866,3 +866,21 @@ def test_head_tree_tells_a_git_failure_from_an_absent_path(tmp_git_repo, tmp_pat
 
     assert set(tree) == {tracked}
     assert head_tree(str(tmp_path / "not-a-repo"), ["a.py"]) is None
+
+
+def test_status_entries_for_answers_only_about_the_given_paths(tmp_git_repo):
+    """Статус по заданным путям: грязные и неотслеживаемые из них — да, остальные
+    нет; имя с `[` не разрастается в шаблон; отказ git — `None`."""
+    from gc_core.agent_edits.git_ops import status_entries_for
+
+    root = tmp_git_repo
+    tracked = next(p.name for p in root.iterdir() if p.is_file())
+    (root / tracked).write_text("changed\n", encoding="utf-8")
+    (root / "new[1].py").write_text("n\n", encoding="utf-8")
+    (root / "new1.py").write_text("n\n", encoding="utf-8")
+    (root / "other.txt").write_text("o\n", encoding="utf-8")
+
+    rows = status_entries_for(str(root), [tracked, "new[1].py", "clean-or-missing.py"])
+
+    assert {path for path, _xy in rows} == {tracked, "new[1].py"}
+    assert status_entries_for(str(root / "no-such-dir"), [tracked]) is None

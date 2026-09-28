@@ -1772,7 +1772,10 @@ class EditsView:
                 # ВСЕ отслеживаемые молча объявлялись бы закоммиченными — экран
                 # показывал бы «изменений нет», а откат отказывался бы работать.
                 # Безопасная сторона: не знаем — ступень не объявляем.
-                status_rows = git_ops.status_entries(self._launch_root)
+                # Только по путям журнала: полный `git status -u` обходил бы
+                # весь проект, и в потоке интерфейса — на миллионе файлов F3
+                # открывался бы секундами.
+                status_rows = git_ops.status_entries_for(self._launch_root, rels)
                 if status_rows is not None:
                     status_paths = {path for path, _xy in status_rows}
                     for rel in rels:

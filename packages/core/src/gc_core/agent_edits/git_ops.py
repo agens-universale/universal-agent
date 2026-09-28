@@ -128,6 +128,33 @@ def status_entries(launch_root: str) -> Optional[List[Tuple[str, str]]]:
     return rows
 
 
+def status_entries_for(
+    launch_root: str, rels: Sequence[str]
+) -> Optional[List[Tuple[str, str]]]:
+    """``status_entries``, но только по ``rels``; ``None`` — git отказал.
+
+    Для того, кому нужен статус считанных путей, а не всего проекта: полный
+    ``git status -u`` обходит каждый файл, и на проекте в миллион файлов это
+    секунды. С путями git смотрит только их. ``:(literal)`` — имя с ``[`` или
+    ``*`` не должно разрастаться в шаблон. Пути идут кусками (``argv_chunks``).
+    """
+    rels = list(rels)
+    if not rels:
+        return []
+    outputs = _chunked_outputs(
+        launch_root, [*_STATUS_ARGS, "--"], [f":(literal){rel}" for rel in rels]
+    )
+    if outputs is None:
+        return None
+    rows: List[Tuple[str, str]] = []
+    for out in outputs:
+        for line in _decode(out).splitlines():
+            parsed = parse_status_line(line)
+            if parsed is not None:
+                rows.append(parsed)
+    return rows
+
+
 def parse_status_line(line: str) -> Optional[Tuple[str, str]]:
     """Строка ``XY <path>`` porcelain v1 → (путь, XY)."""
     if len(line) < 4:
