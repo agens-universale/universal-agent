@@ -96,7 +96,10 @@ def _footer(scr) -> str:
     # Хвост подсказки прокрутки снимаем: он зависит от того, влезло ли
     # содержимое в окно теста, и к предмету этих сверок не относится.
     from gc_tui.form_frame import FOOTER_SCROLL
-    return str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
+
+    return str(scr.query_one("#set-footer", Static).render()).replace(
+        FOOTER_SCROLL, ""
+    )
 
 
 def _notice(scr) -> str:
@@ -3162,8 +3165,8 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
         await pilot.press("d")
         await pilot.pause()
         assert form.query_one("#mef-model", Input).value == model_before, (
-            "печать после клика изменила поле под вопросом")
-
+            "печать после клика изменила поле под вопросом"
+        )
 
 
 async def test_ctrl_down_on_a_registry_entry_scrolls_the_section(tmp_path):
@@ -3174,8 +3177,13 @@ async def test_ctrl_down_on_a_registry_entry_scrolls_the_section(tmp_path):
     «Ctrl+↑/↓ — прокрутка», и вниз кадр не ехал ничем. Сперва `Ctrl+↑`: он
     раскрытием не занят и освобождает место внизу."""
     registry = "models:\n" + "".join(
-        f"  m{i}:\n    model: \"vendor/model-{i}\"\n" for i in range(15))
-    async with _section(tmp_path, registry, size=(100, 12)) as (pilot, scr, _cfg):
+        f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(15)
+    )
+    async with _section(tmp_path, registry, size=(100, 12)) as (
+        pilot,
+        scr,
+        _cfg,
+    ):
         await pilot.pause()
         scroll = scr.query_one("#set-scroll")
         for _ in range(4):

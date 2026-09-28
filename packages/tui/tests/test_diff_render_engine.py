@@ -2,6 +2,7 @@
 
 Проверяются и текстовый слепок (`.plain`), и стили (через `get_style_at_offset`).
 """
+
 from __future__ import annotations
 
 import time
@@ -34,14 +35,7 @@ from gc_tui.services.diff_render import (
 
 CONSOLE = Console()
 
-DIFFLIB_HUNKS = (
-    "--- \n"
-    "+++ \n"
-    "@@ -1,2 +1,2 @@\n"
-    " line1\n"
-    "-line2\n"
-    "+line2x\n"
-)
+DIFFLIB_HUNKS = "--- \n+++ \n@@ -1,2 +1,2 @@\n line1\n-line2\n+line2x\n"
 
 # Реальный вывод `git diff --no-ext-diff --no-textconv` (см. agent_edits/shell_delta).
 GIT_HUNKS = (
@@ -84,7 +78,9 @@ def _row_start(render, index):
 
 
 def _style_at(render, row_index, col):
-    return render.text.get_style_at_offset(CONSOLE, _row_start(render, row_index) + col)
+    return render.text.get_style_at_offset(
+        CONSOLE, _row_start(render, row_index) + col
+    )
 
 
 def _bg_at(render, row_index, col):
@@ -102,12 +98,7 @@ def test_carriage_return_inside_a_line_does_not_cut_the_body():
     строкой без маркера, а разбор терял место в хэнке — номера уезжали, и всё,
     что шло дальше, приходило неверным (пятый раунд ревью, находка 3).
     """
-    hunks = (
-        "@@ -1,1 +1,3 @@\n"
-        " one\n"
-        "+two\rthree\n"
-        "+four\n"
-    )
+    hunks = "@@ -1,1 +1,3 @@\n one\n+two\rthree\n+four\n"
 
     render = render_hunks(hunks, path="a.txt")
 
@@ -129,15 +120,7 @@ def test_difflib_form_numbers_markers_and_no_headers():
 
 
 def test_line_numbers_follow_hunk_header_offsets():
-    hunks = (
-        "--- \n"
-        "+++ \n"
-        "@@ -5,3 +5,3 @@\n"
-        " line4\n"
-        "-line5\n"
-        "+line5x\n"
-        " line6\n"
-    )
+    hunks = "--- \n+++ \n@@ -5,3 +5,3 @@\n line4\n-line5\n+line5x\n line6\n"
     render = render_hunks(hunks, path="a.txt")
     assert _shape(render) == ["5  line4", "6 -line5", "6 +line5x", "7  line6"]
 
@@ -150,8 +133,7 @@ def test_hunk_header_without_counts_is_parsed():
 
 def test_hunk_header_with_trailing_context_is_parsed():
     """`@@ ... @@ def foo():` — git дописывает имя охватывающей секции."""
-    hunks = ("--- \n+++ \n@@ -1,3 +1,3 @@ def foo():\n"
-             " keep\n-old\n+new\n")
+    hunks = "--- \n+++ \n@@ -1,3 +1,3 @@ def foo():\n keep\n-old\n+new\n"
     render = render_hunks(hunks, path="a.py")
     assert _shape(render) == ["1  keep", "2 -old", "2 +new"]
     assert "def foo():" not in render.text.plain
@@ -159,9 +141,11 @@ def test_hunk_header_with_trailing_context_is_parsed():
 
 def test_gutter_width_follows_widest_number():
     body = "".join(f" line{n}\n" for n in range(1, 11))
-    render = render_hunks(f"--- \n+++ \n@@ -1,10 +1,10 @@\n{body}", path="a.txt")
+    render = render_hunks(
+        f"--- \n+++ \n@@ -1,10 +1,10 @@\n{body}", path="a.txt"
+    )
     rows = _rows(render)
-    assert rows[0].startswith(" 1 ")   # право-выровненный гаттер шириной 2
+    assert rows[0].startswith(" 1 ")  # право-выровненный гаттер шириной 2
     assert rows[9].startswith("10 ")
 
 
@@ -231,8 +215,9 @@ def test_gutter_is_filled_with_row_background():
 def test_fill_width_stretches_rows_to_requested_width():
     """`fill_width` — ширина залитой строки в ячейках (гаттер включён): виджет
     отдаёт сюда правый край подложки минус поле в один символ."""
-    render = render_hunks(DIFFLIB_HUNKS, path="tracked.txt", syntax=False,
-                          fill_width=40)
+    render = render_hunks(
+        DIFFLIB_HUNKS, path="tracked.txt", syntax=False, fill_width=40
+    )
     rows = _rows(render)
 
     assert len(rows[1]) == len(rows[2]) == 40
@@ -250,14 +235,26 @@ def test_fill_width_below_content_wraps_and_loses_nothing():
     хвост строки пропадал молча, добраться до него было нельзя. Теперь строка
     продолжается на следующем ряду, и склейка рядов даёт исходное содержимое.
     """
-    narrow = render_hunks(DIFFLIB_HUNKS, path="tracked.txt", syntax=False,
-                          fill_width=8, wrap=True)
+    narrow = render_hunks(
+        DIFFLIB_HUNKS,
+        path="tracked.txt",
+        syntax=False,
+        fill_width=8,
+        wrap=True,
+    )
     rows = _rows(narrow)
-    assert len(rows) > len(_rows(render_hunks(DIFFLIB_HUNKS, path="tracked.txt",
-                                              syntax=False)))
+    assert len(rows) > len(
+        _rows(render_hunks(DIFFLIB_HUNKS, path="tracked.txt", syntax=False))
+    )
     # содержимое добавленной строки собирается из рядов без потерь
-    joined = "".join(row[3:].rstrip() for row in rows if row.lstrip().startswith(("2 +", "+")))
-    assert "line2x" in joined.replace(" ", "") or "line2x" in "".join(rows).replace(" ", "")
+    joined = "".join(
+        row[3:].rstrip()
+        for row in rows
+        if row.lstrip().startswith(("2 +", "+"))
+    )
+    assert "line2x" in joined.replace(" ", "") or "line2x" in "".join(
+        rows
+    ).replace(" ", "")
 
 
 def test_fill_width_none_keeps_content_width():
@@ -272,13 +269,16 @@ def test_gutter_number_and_marker_colored_by_row_kind():
     render = render_hunks(DIFFLIB_HUNKS, path="tracked.txt")
     rows = _shape(render)
     assert rows == ["1  line1", "2 -line2", "2 +line2x"]
-    marker_at = 2   # гаттер шириной 1 + пробел
+    marker_at = 2  # гаттер шириной 1 + пробел
 
     expected = [DIFF_GUTTER, DIFF_DEL_GUTTER, DIFF_ADD_GUTTER]
     for row, token in enumerate(expected):
-        assert _style_at(render, row, 0).color == Color.parse(token), f"номер {row}"
-        assert _style_at(render, row, marker_at).color == Color.parse(token), \
+        assert _style_at(render, row, 0).color == Color.parse(token), (
+            f"номер {row}"
+        )
+        assert _style_at(render, row, marker_at).color == Color.parse(token), (
             f"маркер {row}"
+        )
 
 
 def test_marker_color_survives_row_background_and_syntax():
@@ -287,20 +287,28 @@ def test_marker_color_survives_row_background_and_syntax():
     hunks = "--- \n+++ \n@@ -1,1 +1,1 @@\n-def old(): pass\n+def new(): pass\n"
     render = render_hunks(hunks, path="mod.py")
     marker_at = 2
-    assert _rows(render)[0][marker_at] == "-" and _rows(render)[1][marker_at] == "+"
-    assert _style_at(render, 0, marker_at).color == Color.parse(DIFF_DEL_GUTTER)
-    assert _style_at(render, 1, marker_at).color == Color.parse(DIFF_ADD_GUTTER)
+    assert (
+        _rows(render)[0][marker_at] == "-"
+        and _rows(render)[1][marker_at] == "+"
+    )
+    assert _style_at(render, 0, marker_at).color == Color.parse(
+        DIFF_DEL_GUTTER
+    )
+    assert _style_at(render, 1, marker_at).color == Color.parse(
+        DIFF_ADD_GUTTER
+    )
     assert _bg_at(render, 0, marker_at) == Color.parse(DIFF_DEL_BG)
     assert _bg_at(render, 1, marker_at) == Color.parse(DIFF_ADD_BG)
 
 
 def test_hunk_separator_uses_gutter_color():
-    hunks = ("--- \n+++ \n@@ -1,1 +1,1 @@\n-a\n+b\n"
-             "@@ -20,1 +20,1 @@\n-c\n+d\n")
+    hunks = "--- \n+++ \n@@ -1,1 +1,1 @@\n-a\n+b\n@@ -20,1 +20,1 @@\n-c\n+d\n"
     render = render_hunks(hunks, path="a.txt")
     separator_row = next(i for i, r in enumerate(_rows(render)) if "⋮" in r)
     at = _rows(render)[separator_row].index("⋮")
-    assert _style_at(render, separator_row, at).color == Color.parse(DIFF_GUTTER)
+    assert _style_at(render, separator_row, at).color == Color.parse(
+        DIFF_GUTTER
+    )
     assert _bg_at(render, separator_row, at) is None
 
 
@@ -338,7 +346,7 @@ def test_intraline_skipped_for_dissimilar_lines():
 
 
 def _one_char_diff(old: str, changed_at: int, replacement: str):
-    return old[:changed_at] + replacement + old[changed_at + 1:]
+    return old[:changed_at] + replacement + old[changed_at + 1 :]
 
 
 def _pair_hunks(old: str, new: str) -> str:
@@ -348,7 +356,8 @@ def _pair_hunks(old: str, new: str) -> str:
 def _accent_free(render, row_index, kind_bg):
     row = _rows(render)[row_index]
     return {_bg_at(render, row_index, i) for i in range(2, len(row))} == {
-        Color.parse(kind_bg)}
+        Color.parse(kind_bg)
+    }
 
 
 # 215 РАЗНЫХ символов (печатный ASCII + кириллица + греческий). Длинная строка
@@ -413,7 +422,9 @@ def test_intraline_skipped_for_very_long_line_under_work_budget():
     """
     old = _mixed_line(_INTRALINE_MAX_LINE_CHARS + 1)
     new = _one_char_diff(old, 500, "§")
-    assert _match_work(old, new) < _INTRALINE_MAX_MATCH_WORK   # бюджет ни при чём
+    assert (
+        _match_work(old, new) < _INTRALINE_MAX_MATCH_WORK
+    )  # бюджет ни при чём
     render = render_hunks(_pair_hunks(old, new), path="a.txt", syntax=False)
 
     assert _accent_free(render, 0, DIFF_DEL_BG)
@@ -447,35 +458,22 @@ def test_intraline_skipped_on_pathological_repeat_line():
 
 def test_intraline_pairs_rows_in_order_and_leaves_extra_rows_plain():
     hunks = (
-        "--- \n+++ \n@@ -1,3 +1,2 @@\n"
-        "-x = 1\n"
-        "-y = 1\n"
-        "-z = 1\n"
-        "+x = 2\n"
-        "+y = 2\n"
+        "--- \n+++ \n@@ -1,3 +1,2 @@\n-x = 1\n-y = 1\n-z = 1\n+x = 2\n+y = 2\n"
     )
     render = render_hunks(hunks, path="a.txt", syntax=False)
     rows = _rows(render)
 
-    assert _bg_at(render, 0, 7) == Color.parse(DIFF_DEL_HL)   # -x = 1 ↔ +x = 2
-    assert _bg_at(render, 1, 7) == Color.parse(DIFF_DEL_HL)   # -y = 1 ↔ +y = 2
+    assert _bg_at(render, 0, 7) == Color.parse(DIFF_DEL_HL)  # -x = 1 ↔ +x = 2
+    assert _bg_at(render, 1, 7) == Color.parse(DIFF_DEL_HL)  # -y = 1 ↔ +y = 2
     third = {_bg_at(render, 2, i) for i in range(2, len(rows[2]))}
-    assert third == {Color.parse(DIFF_DEL_BG)}                # -z = 1 без пары
+    assert third == {Color.parse(DIFF_DEL_BG)}  # -z = 1 без пары
 
 
 # --- 6. разделитель хэнков ---------------------------------------------------
 
 
 def test_separator_between_hunks():
-    hunks = (
-        "--- \n+++ \n"
-        "@@ -1,1 +1,1 @@\n"
-        "-a\n"
-        "+b\n"
-        "@@ -20,1 +20,1 @@\n"
-        "-c\n"
-        "+d\n"
-    )
+    hunks = "--- \n+++ \n@@ -1,1 +1,1 @@\n-a\n+b\n@@ -20,1 +20,1 @@\n-c\n+d\n"
     render = render_hunks(hunks, path="a.txt")
     rows = _rows(render)
 
@@ -519,7 +517,7 @@ def test_numbering_continues_correctly_across_multiline_hunks():
         "21 -line21",
         "21 +line21x",
         "22 +line21y",
-        "23  line22",   # добавленная строка сдвинула нумерацию нового файла
+        "23  line22",  # добавленная строка сдвинула нумерацию нового файла
     ]
     assert render.shown_lines == render.total_lines == 10
 
@@ -529,8 +527,9 @@ def test_numbering_continues_correctly_across_multiline_hunks():
 
 def test_truncation_reports_honest_counters():
     body = "".join(f" line{n}\n" for n in range(1, 11))
-    render = render_hunks(f"--- \n+++ \n@@ -1,10 +1,10 @@\n{body}", path="a.txt",
-                          max_lines=3)
+    render = render_hunks(
+        f"--- \n+++ \n@@ -1,10 +1,10 @@\n{body}", path="a.txt", max_lines=3
+    )
 
     assert render.shown_lines == 3
     assert render.total_lines == 10
@@ -585,8 +584,15 @@ def test_syntax_disabled_automatically_above_threshold():
 # --- 9. пустой и мусорный вход -----------------------------------------------
 
 
-@pytest.mark.parametrize("hunks", ["", "   ", "не дифф\nвообще никак",
-                                   "diff --git a/x b/x\nindex 111..222 100644\n"])
+@pytest.mark.parametrize(
+    "hunks",
+    [
+        "",
+        "   ",
+        "не дифф\nвообще никак",
+        "diff --git a/x b/x\nindex 111..222 100644\n",
+    ],
+)
 def test_empty_and_garbage_input_render_empty(hunks):
     render = render_hunks(hunks, path="a.txt")
     assert render.text.plain == ""
@@ -653,9 +659,7 @@ def test_intraline_survives_a_border_inside_the_pair():
     посчитай движок акценты по строкам участка — вторая половина пары осталась
     бы без подсветки, и одинаковый дифф выглядел бы по-разному в двух местах.
     """
-    hunks = (
-        "@@ -1,4 +1,4 @@\n-alpha one\n-alpha two\n+alpha ONE\n+alpha TWO\n"
-    )
+    hunks = "@@ -1,4 +1,4 @@\n-alpha one\n-alpha two\n+alpha ONE\n+alpha TWO\n"
     whole = render_hunks(hunks, path="a.txt")
     # Граница ровно между удалёнными и добавленными строками пары.
     glued = _glued(hunks, 2, path="a.txt")
@@ -673,9 +677,10 @@ def test_line_count_is_known_without_drawing():
 
     hunks = "@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n@@ -40,2 +40,2 @@\n-a\n+b\n"
     body = HunkBody(hunks, path="a.txt")
-    assert len(body.kinds) == len(render_hunks(hunks, path="a.txt")
-                                  .text.plain.splitlines())
-    assert body.kinds.count("sep") == 1          # разделитель тоже занимает строку
+    assert len(body.kinds) == len(
+        render_hunks(hunks, path="a.txt").text.plain.splitlines()
+    )
+    assert body.kinds.count("sep") == 1  # разделитель тоже занимает строку
 
 
 # --- копия для внешних инструментов (Ж5 батча 4) ----------------------------
@@ -688,7 +693,7 @@ def test_difflib_headers_get_the_file_name():
     lines = out.split("\n")
     assert lines[0] == "--- a/src/app.py"
     assert lines[1] == "+++ b/src/app.py"
-    assert out.endswith("+новое\n")          # тело не тронуто
+    assert out.endswith("+новое\n")  # тело не тронуто
 
 
 def test_windows_separators_become_forward_slashes():
@@ -697,8 +702,10 @@ def test_windows_separators_become_forward_slashes():
 
 
 def test_git_form_is_returned_as_is():
-    git_form = ("diff --git a/x.py b/x.py\nindex 1..2 100644\n"
-                "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n")
+    git_form = (
+        "diff --git a/x.py b/x.py\nindex 1..2 100644\n"
+        "--- a/x.py\n+++ b/x.py\n@@ -1 +1 @@\n-a\n+b\n"
+    )
     assert copyable_hunks(git_form, path="x.py") == git_form
 
 
@@ -711,8 +718,12 @@ def test_absolute_path_leaves_the_headers_alone():
     # `canonical_path_key` штатно отдаёт АБСОЛЮТНЫЙ ключ любому файлу ВНЕ
     # проекта, а `git apply -p1` не примет `--- a/C:/…`. Дифф без имени
     # честнее диффа с именем, которое инструмент отвергнет.
-    assert copyable_hunks(_COPY_DIFFLIB, path="C:\\out\\app.py") == _COPY_DIFFLIB
-    assert copyable_hunks(_COPY_DIFFLIB, path="/srv/data/app.py") == _COPY_DIFFLIB
+    assert (
+        copyable_hunks(_COPY_DIFFLIB, path="C:\\out\\app.py") == _COPY_DIFFLIB
+    )
+    assert (
+        copyable_hunks(_COPY_DIFFLIB, path="/srv/data/app.py") == _COPY_DIFFLIB
+    )
 
 
 # --- Перенос длинных строк (дизайн 2026-09-09) --------------------------------
@@ -723,8 +734,14 @@ _LONG = "x" * 60
 
 def _wrapped(fill_width, *, max_lines=None):
     hunks = "--- \n+++ \n@@ -1,2 +1,2 @@\n short\n+" + _LONG + "\n"
-    return render_hunks(hunks, path="a.txt", syntax=False, wrap=True,
-                        fill_width=fill_width, max_lines=max_lines)
+    return render_hunks(
+        hunks,
+        path="a.txt",
+        syntax=False,
+        wrap=True,
+        fill_width=fill_width,
+        max_lines=max_lines,
+    )
 
 
 def test_long_line_wraps_instead_of_being_cut():
@@ -735,7 +752,7 @@ def test_long_line_wraps_instead_of_being_cut():
     первое слово одиноко на ряду и тратит ряды впустую.
     """
     rows = _rows(_wrapped(20))
-    assert len(rows) > 2                       # контекст + минимум два ряда правки
+    assert len(rows) > 2  # контекст + минимум два ряда правки
     assert "".join(row[3:].rstrip() for row in rows[1:]) == _LONG
 
 
@@ -746,7 +763,7 @@ def test_number_prints_once_and_marker_on_every_row():
     tail = rows[1:]
     assert tail[0].startswith("2 +")
     for row in tail[1:]:
-        assert row.startswith("  +"), row     # колонка пуста, маркер на месте
+        assert row.startswith("  +"), row  # колонка пуста, маркер на месте
 
 
 def test_budget_counts_screen_rows_not_file_lines():
@@ -768,8 +785,8 @@ def test_footnote_counts_logical_lines():
     """«ещё N строк» — про строки файла: экранные ряды зависят от ширины окна и
     менялись бы при её изменении."""
     render = _wrapped(20, max_lines=1)
-    assert render.total_lines == 2            # short + длинная
-    assert render.shown_lines == 1            # влезла только короткая
+    assert render.total_lines == 2  # short + длинная
+    assert render.shown_lines == 1  # влезла только короткая
     assert render.truncated
 
 
@@ -781,11 +798,13 @@ def test_wrapped_fill_does_not_blow_up_on_a_huge_line():
     200 МБ на один блок ленты.
     """
     huge = "@@ -1,1 +1,1 @@\n+" + "x" * 100_000
-    render = render_hunks(huge, path="a.js", syntax=False, fill_width=100, wrap=True)
+    render = render_hunks(
+        huge, path="a.js", syntax=False, fill_width=100, wrap=True
+    )
     plain = render.text.plain
     rows = plain.count("\n") + 1
-    assert rows > 900                       # строка действительно перенеслась
-    assert len(plain) < 2 * 100_000         # и текст остался соразмерен ей
+    assert rows > 900  # строка действительно перенеслась
+    assert len(plain) < 2 * 100_000  # и текст остался соразмерен ей
 
 
 def test_single_long_line_cannot_blow_the_row_budget():
@@ -796,8 +815,14 @@ def test_single_long_line_cannot_blow_the_row_budget():
     превращались в 310.
     """
     hunks = "@@ -1,2 +1,2 @@\n+" + "y" * 30_000 + "\n+короткая"
-    render = render_hunks(hunks, path="a.js", syntax=False, fill_width=100,
-                          wrap=True, max_lines=30)
+    render = render_hunks(
+        hunks,
+        path="a.js",
+        syntax=False,
+        fill_width=100,
+        wrap=True,
+        max_lines=30,
+    )
     assert render.text.plain.count("\n") + 1 <= 30
 
 
@@ -809,8 +834,9 @@ def test_single_long_line_cut_by_the_row_cap_is_reported_as_truncated():
     содержимое молча обрезано и развернуть его нечем.
     """
     hunks = "@@ -1,1 +1,1 @@\n+" + "x" * 4000 + "\n"
-    render = render_hunks(hunks, path="a.py", max_lines=30,
-                          fill_width=80, wrap=True)
+    render = render_hunks(
+        hunks, path="a.py", max_lines=30, fill_width=80, wrap=True
+    )
 
     assert render.total_lines == render.shown_lines == 1
     assert render.hidden_rows > 0

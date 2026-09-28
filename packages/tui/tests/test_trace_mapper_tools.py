@@ -110,9 +110,13 @@ def test_call_event_wire_name_for_mapped_tool_differs_from_canonical_id():
     оно; `tool_name` остаётся каноническим id (`append_to_file`) для логики
     маппера (сравнения вида `ev.tool_name == "..."` в других модулях)."""
     ev = map_message(
-        {"type": "function_call", "name": "fs_append_file",
-         "arguments": json.dumps({"path": "x.py", "content": "hi"})},
-        no=1, ts="t",
+        {
+            "type": "function_call",
+            "name": "fs_append_file",
+            "arguments": json.dumps({"path": "x.py", "content": "hi"}),
+        },
+        no=1,
+        ts="t",
     )
     assert ev.tool_name == "append_to_file"
     assert ev.wire_name == "fs_append_file"
@@ -122,9 +126,13 @@ def test_call_event_wire_name_matches_canonical_for_unmapped_tool():
     """Немаппленный тул (и легаси голое имя) — wire_name совпадает с tool_name,
     как и раньше (tool_id — no-op)."""
     ev = map_message(
-        {"type": "function_call", "name": "mystery",
-         "arguments": json.dumps({"foo": "bar"})},
-        no=1, ts="t",
+        {
+            "type": "function_call",
+            "name": "mystery",
+            "arguments": json.dumps({"foo": "bar"}),
+        },
+        no=1,
+        ts="t",
     )
     assert ev.tool_name == ev.wire_name == "mystery"
 
@@ -137,7 +145,7 @@ def test_summarize_output_plain_fallback_cuts_at_word_boundary():
     пределах лимита, не буквально посередине слова."""
     from gc_tui.services.trace_mapper import _summarize_output
 
-    text = "A" * 75 + " " + "B" * 20   # пробел ровно на границе среза [:80]
+    text = "A" * 75 + " " + "B" * 20  # пробел ровно на границе среза [:80]
     assert _summarize_output(text, error=False) == "A" * 75 + "…"
 
 
@@ -598,7 +606,8 @@ def test_function_call_output_invalid_arguments_is_error():
 def _call(name: str, args: dict):
     return map_message(
         {"type": "function_call", "name": name, "arguments": json.dumps(args)},
-        no=1, ts="t",
+        no=1,
+        ts="t",
     )
 
 
@@ -608,8 +617,10 @@ LONG = "D:\\dev\\smoke-diff3\\нет-такого-файла-с-очень-дл�
 def test_unknown_tool_path_argument_is_shown_as_a_path_not_a_length():
     ev = _call("fs_file_info", {"path": LONG})
     assert "<" not in ev.summary and "chars>" not in ev.summary
-    assert ev.summary.endswith("обрезки-текста.txt')")     # хвост с именем файла остаётся
-    assert "…" not in ev.summary                           # путь целиком, не режем (Ж2 батча 4)
+    assert ev.summary.endswith(
+        "обрезки-текста.txt')"
+    )  # хвост с именем файла остаётся
+    assert "…" not in ev.summary  # путь целиком, не режем (Ж2 батча 4)
 
 
 def test_read_file_long_path_is_shown_whole_too():
@@ -632,7 +643,9 @@ def test_search_and_replace_missing_path_does_not_crash():
 
 
 def test_search_and_replace_non_string_path_does_not_crash():
-    ev = _call("search_and_replace", {"path": 42, "search": "x", "replace": "y"})
+    ev = _call(
+        "search_and_replace", {"path": 42, "search": "x", "replace": "y"}
+    )
     assert "path=42" in ev.summary
 
 
@@ -641,23 +654,30 @@ def test_search_and_replace_non_string_path_does_not_crash():
 # 100 знаков — только страховка от патологии (величина уточнена смоуком 5). ---
 
 
-LONG_NAME = ("D:\\dev\\smoke\\"
-             "очень-длинное-имя-файла-которого-точно-нет-на-диске-для-проверки-показа-пути.txt")
+LONG_NAME = (
+    "D:\\dev\\smoke\\"
+    "очень-длинное-имя-файла-которого-точно-нет-на-диске-для-проверки-показа-пути.txt"
+)
 
 
 def test_long_path_is_shown_whole_not_cut_to_a_fixed_budget():
     ev = _call("fs_file_info", {"path": LONG_NAME})
     # repr() экранирует «\» — сравниваем с repr(), не с сырым путём (тот же
     # приём, что и в соседних path-тестах файла с backslash-хвостом).
-    assert repr(LONG_NAME) in ev.summary  # путь целиком, строка ленты перенесётся сама
+    assert (
+        repr(LONG_NAME) in ev.summary
+    )  # путь целиком, строка ленты перенесётся сама
     assert "…" not in ev.summary
 
 
 def test_pathological_path_keeps_the_file_name_and_cuts_the_middle():
     # За потолком путь режется ПО-ПУТЕВОМУ: середина схлопывается в «…», имя
     # файла остаётся — именно его и спрашивают у строки вызова.
-    monster = ("D:\\dev\\" + "\\".join(f"очень-длинный-сегмент-{i}" for i in range(20))
-               + "\\target.txt")
+    monster = (
+        "D:\\dev\\"
+        + "\\".join(f"очень-длинный-сегмент-{i}" for i in range(20))
+        + "\\target.txt"
+    )
     ev = _call("fs_file_info", {"path": monster})
     assert "…" in ev.summary
     assert "target.txt" in ev.summary
@@ -667,11 +687,16 @@ def test_pathological_path_keeps_the_file_name_and_cuts_the_middle():
 def test_pathological_path_with_an_early_space_still_keeps_the_file_name():
     # Пробел в пути (`C:\Program Files`, `C:\Users\Имя Фамилия`) — не граница
     # слова: прозаическое правило схлопнуло бы весь путь до первого сегмента.
-    monster = ("C:\\Program Files\\" + "\\".join(f"verylongsegmentname{i}" for i in range(8))
-               + "\\target.txt")
+    monster = (
+        "C:\\Program Files\\"
+        + "\\".join(f"verylongsegmentname{i}" for i in range(8))
+        + "\\target.txt"
+    )
     ev = _call("fs_file_info", {"path": monster})
     assert "target.txt" in ev.summary
-    assert "verylongsegmentname0" in ev.summary  # не схлопнулось до `C:\Program…`
+    assert (
+        "verylongsegmentname0" in ev.summary
+    )  # не схлопнулось до `C:\Program…`
 
 
 def test_content_arguments_still_collapse_to_a_length():
@@ -687,13 +712,19 @@ def test_search_and_replace_summary_uses_the_schema_argument_names():
     в принципе, и подпись врала при каждом вызове.
     """
     ev = map_message(
-        {"type": "function_call", "name": "search_and_replace",
-         "arguments": json.dumps({
-             "path": "src/mod.py",
-             "search": "compute_total",
-             "replace": "compute_total_v2",
-         })},
-        no=1, ts="t",
+        {
+            "type": "function_call",
+            "name": "search_and_replace",
+            "arguments": json.dumps(
+                {
+                    "path": "src/mod.py",
+                    "search": "compute_total",
+                    "replace": "compute_total_v2",
+                }
+            ),
+        },
+        no=1,
+        ts="t",
     )
     assert "search=<13 chars>" in ev.summary
     assert "replace=<16 chars>" in ev.summary

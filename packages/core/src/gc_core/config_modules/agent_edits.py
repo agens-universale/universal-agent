@@ -3,10 +3,10 @@
 До переименования секция называлась ``diff_tui``: старые конфиги переносит
 ``config_modules.compat``.
 """
+
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 DEFAULT_SNAPSHOTS_MAX_FILES = 500
 DEFAULT_MAX_DIFF_CHARS = 100_000
@@ -58,4 +58,6 @@ class AgentEditsConfig(BaseModel):
     trace_inline_max_lines: int = DEFAULT_TRACE_INLINE_MAX_LINES
     replay_expanded_turns: int = DEFAULT_REPLAY_EXPANDED_TURNS
     turn_summary_in_status: bool = DEFAULT_TURN_SUMMARY_IN_STATUS
-    record: AgentEditsRecordConfig = Field(default_factory=AgentEditsRecordConfig)
+    record: AgentEditsRecordConfig = Field(
+        default_factory=AgentEditsRecordConfig
+    )

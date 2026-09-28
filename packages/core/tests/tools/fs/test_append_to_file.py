@@ -395,7 +395,7 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
         )
     )
     assert res["ok"], res
-    assert res["created"] is False, res      # файл существовал — не создание
+    assert res["created"] is False, res  # файл существовал — не создание
     raw = p.read_bytes()
     if encoding in ("utf-16", "utf-16-le"):
         assert raw[:2] == b"\xff\xfe", f"{encoding}: BOM missing: {raw[:2]!r}"
@@ -451,12 +451,16 @@ def test_append_to_crlf_file_reports_normalized_bytes(tmp_path):
     size_before = p.stat().st_size
     res = json.loads(
         with_local_ctx(AppendToFile)(
-            path=str(p), content="added line3\nmore text", separator="\n\n",
+            path=str(p),
+            content="added line3\nmore text",
+            separator="\n\n",
         )
     )
     assert res["ok"], res
     size_after = p.stat().st_size
-    assert res["bytes_appended"] == size_after - size_before, res["bytes_appended"]
+    assert res["bytes_appended"] == size_after - size_before, res[
+        "bytes_appended"
+    ]
 
 
 def test_append_to_lf_file_keeps_lf(tmp_path):

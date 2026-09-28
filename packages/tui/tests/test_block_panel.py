@@ -369,7 +369,7 @@ async def test_partial_drag_on_wrapped_line_yields_dragged_part_only():
     app = _Host(BlockPanel.for_code(long_line, "python", event_no=1))
     async with app.run_test(size=(40, 20)) as pilot:
         body = app.query_one(".block-body", Static)
-        assert body.size.width < len(long_line)   # строка реально не влезает
+        assert body.size.width < len(long_line)  # строка реально не влезает
 
         await pilot.mouse_down(body, offset=(0, 0))
         await pilot.hover(body, offset=(body.size.width - 1, 0))
@@ -395,7 +395,9 @@ async def test_partial_drag_on_wrapped_line_yields_dragged_part_only():
 
 
 @pytest.mark.asyncio
-async def test_focused_panel_background_is_focus_bg_not_band_bg(tui_app_factory):
+async def test_focused_panel_background_is_focus_bg_not_band_bg(
+    tui_app_factory,
+):
     """Т-C (спека §6.11): фон сфокусированной панели — $focus-bg, не фон покоя
     (иначе тихое удаление `BlockPanel:focus` из styles.tcss тест не заметит).
 
@@ -425,7 +427,7 @@ async def test_copy_button_click_does_not_focus_panel():
     panel = BlockPanel.for_code(CODE, "python", event_no=7, focusable=True)
     app = _Host(panel)
     async with app.run_test(size=(60, 20)) as pilot:
-        panel.blur()   # AUTO_FOCUS сам фокусирует единственный focusable-виджет
+        panel.blur()  # AUTO_FOCUS сам фокусирует единственный focusable-виджет
         await pilot.pause()
         await pilot.click(".block-copy")
         await pilot.pause()

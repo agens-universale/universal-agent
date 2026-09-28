@@ -7,6 +7,7 @@
 не влияет. Agent-facing protected (operational / instructions) не трекается
 вовсе.
 """
+
 from __future__ import annotations
 
 import os
@@ -14,7 +15,10 @@ import stat
 from pathlib import Path
 from typing import Optional, Sequence, Union
 
-from gc_core.security.path_policy import is_within_root, normalize_path_for_policy
+from gc_core.security.path_policy import (
+    is_within_root,
+    normalize_path_for_policy,
+)
 from gc_core.security.protected_paths import classify_path, protected_paths
 
 PathLike = Union[str, os.PathLike[str]]
@@ -36,7 +40,9 @@ def is_protected_from_tracking(
     protected_extra: Sequence[str] | None = None,
 ) -> bool:
     """Agent-facing protected: operational / instructions — не трекаем."""
-    ps = protected_paths(cwd=str(launch_root), extra=list(protected_extra or ()))
+    ps = protected_paths(
+        cwd=str(launch_root), extra=list(protected_extra or ())
+    )
     cls = classify_path(path, ps)
     return cls in ("operational", "instructions")
 
@@ -97,10 +103,12 @@ def is_external_key(path_key: str) -> bool:
 # Теги точек повторной обработки Windows, которые ведут в ДРУГОЕ место: junction
 # (mount point) и symlink. Прочие теги — например, заглушки облачных файлов —
 # ссылками не являются, и путь через них законен.
-_LINK_REPARSE_TAGS = frozenset({
-    getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003),
-    getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C),
-})
+_LINK_REPARSE_TAGS = frozenset(
+    {
+        getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", 0xA0000003),
+        getattr(stat, "IO_REPARSE_TAG_SYMLINK", 0xA000000C),
+    }
+)
 
 
 def _is_link(node: Path) -> bool:

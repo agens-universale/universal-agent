@@ -8,13 +8,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+from gc_core.agent_edits.journal import EditRecord
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_core.agent_edits.journal import EditRecord
 from gc_tui.models import TraceEvent
 from gc_tui.services.diff_render import render_hunks
 from gc_tui.services.json_payload import render_payload, unfold_payload
@@ -49,14 +49,18 @@ class ToolCallDetailScreen(Screen):
     }
     """
 
-    def __init__(self, *, call_event: TraceEvent,
-                 result_event: Optional[TraceEvent],
-                 edit_record: Optional[EditRecord] = None) -> None:
+    def __init__(
+        self,
+        *,
+        call_event: TraceEvent,
+        result_event: Optional[TraceEvent],
+        edit_record: Optional[EditRecord] = None,
+    ) -> None:
         super().__init__()
         self._call_event = call_event
         self._result_event = result_event
         self._edit_record = edit_record
-        self._fill = _DIFF_UNBUILT      # ширина, на которую собрана заливка
+        self._fill = _DIFF_UNBUILT  # ширина, на которую собрана заливка
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -110,7 +114,9 @@ class ToolCallDetailScreen(Screen):
 
     def _diff_text(self, fill: Optional[int]):
         record = self._edit_record
-        return render_hunks(record.hunks, path=record.path, fill_width=fill).text
+        return render_hunks(
+            record.hunks, path=record.path, fill_width=fill
+        ).text
 
     def _header_text(self) -> str:
         ev = self._call_event
@@ -153,6 +159,8 @@ class ToolCallDetailScreen(Screen):
         if render.total_lines:
             # Ширины на `compose` ещё нет — заливка по содержимому; правый край
             # доводит первый же `Resize` (он приходит сразу после раскладки).
-            widgets.append(Static(render.text, classes="detail-diff", markup=False))
+            widgets.append(
+                Static(render.text, classes="detail-diff", markup=False)
+            )
         widgets.append(render_payload(rest))
         return Vertical(*widgets, classes="detail-output")

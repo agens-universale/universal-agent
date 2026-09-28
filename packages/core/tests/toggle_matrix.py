@@ -738,7 +738,6 @@ NOT_IN_MATRIX = {
     "tui.bang_shell.max_output_lines": "только TUI",
     "tui.file_view.max_file_bytes": "только TUI",
     "tui.file_view.page_lines": "только TUI",
-
     # --- секция agent_edits: правки агента вне проекта (журнал, снимки, откат) ---
     #
     # Ветка переименовала `cache_max_orig` в `snapshots_max_files`, убрала
@@ -757,7 +756,6 @@ NOT_IN_MATRIX = {
     "agent_edits.hunk_context_lines": "контекст хэнков в записи журнала; там же, покрыт agent_edits/test_deltas",
     "agent_edits.max_diff_source_bytes": "порог, выше которого дифф не считается и снимок не снимается; там же",
     "agent_edits.max_diff_chars": "потолок текста хэнков в записи журнала; там же (раньше числился «только TUI» — ветка увела читателей в ядро)",
-
     # `shell_tracking` — единственный из секции, который ДЕЙСТВИТЕЛЬНО стоит на
     # пути, переехавшем на корутины: он гасит `ShellDelta.begin` внутри
     # `TrackingFsBackend._atrack_shell_delta`, то есть ровно вокруг запуска
@@ -770,7 +768,6 @@ NOT_IN_MATRIX = {
     # `agent_edits/test_tracking_async_exec.py` и `test_tracking_probe_off_loop.py`,
     # сам переключатель — `test_shell_delta.py::test_shell_tracking_false_writes_nothing`.
     "agent_edits.shell_tracking": "гейт шелл-делты; сценарий матрицы не запускает ни одной команды",
-
     # Показ, а не запись: эти три читает только `gc_tui.screens.main`. Матрица
     # гоняет CLI-прогон, до ленты TUI он не доходит. Покрытие — наборы TUI
     # `test_trace_diff_block.py`, `test_trace_diff_replay.py`,

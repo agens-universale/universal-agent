@@ -1,4 +1,5 @@
 """launch_root snapshot на старте TUI — cwd на момент входа, не live Path.cwd()."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -30,7 +31,9 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
             # не падать — тест снимает launch_root, а не поведение профилей.
             pass
 
-        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
         def run(self):
@@ -40,20 +43,31 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     fake_mod.TuiApp = FakeApp
 
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module", lambda name, *a: fake_mod if name == "gc_tui.app" else MagicMock()
+        tui_pkg.importlib,
+        "import_module",
+        lambda name, *a: fake_mod if name == "gc_tui.app" else MagicMock(),
     )
     # Подмена ПО ОБЪЕКТАМ модулей, а не по строкам: строковую форму monkeypatch
     # резолвит через `importlib.import_module`, а он здесь подменён на заглушку —
     # строковые адреса попадали бы в MagicMock и не делали ничего (тест зеленел,
     # ничего не проверяя). Порядок важен: реальные модули берём ДО подмены
     # importlib.
-    monkeypatch.setattr(_cfg_mod, "load_config_ex",
-                        lambda *a, **k: ({"threads_data_path": str(tmp_path / "threads")},
-                                         SimpleNamespace(active_name=None)))
+    monkeypatch.setattr(
+        _cfg_mod,
+        "load_config_ex",
+        lambda *a, **k: (
+            {"threads_data_path": str(tmp_path / "threads")},
+            SimpleNamespace(active_name=None),
+        ),
+    )
     monkeypatch.setattr(_cfg_mod, "apply_cli_overrides", lambda _cfg: None)
-    monkeypatch.setattr(_cfg_mod, "resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
+    monkeypatch.setattr(
+        _cfg_mod, "resolve_config_path", lambda _p: str(tmp_path / "c.yml")
+    )
     monkeypatch.setattr(_onb_mod, "is_unconfigured", lambda _cfg: False)
-    monkeypatch.setattr(_ts_mod, "resolve_threads_dir", lambda _cfg: str(tmp_path / "threads"))
+    monkeypatch.setattr(
+        _ts_mod, "resolve_threads_dir", lambda _cfg: str(tmp_path / "threads")
+    )
     monkeypatch.setattr(_env_mod, "ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(_env_mod, "project_local_config_path", lambda: None)
 
@@ -87,7 +101,9 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
             # не падать — тест снимает launch_root, а не поведение профилей.
             pass
 
-        def set_config_path(self, path):   # как у настоящего TuiApp: путь + снимок mtime
+        def set_config_path(
+            self, path
+        ):  # как у настоящего TuiApp: путь + снимок mtime
             self._config_path = path
 
         def run(self):
@@ -97,20 +113,31 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     fake_mod.TuiApp = FakeApp
 
     monkeypatch.setattr(
-        tui_pkg.importlib, "import_module", lambda name, *a: fake_mod if name == "gc_tui.app" else MagicMock()
+        tui_pkg.importlib,
+        "import_module",
+        lambda name, *a: fake_mod if name == "gc_tui.app" else MagicMock(),
     )
     # Подмена ПО ОБЪЕКТАМ модулей, а не по строкам: строковую форму monkeypatch
     # резолвит через `importlib.import_module`, а он здесь подменён на заглушку —
     # строковые адреса попадали бы в MagicMock и не делали ничего (тест зеленел,
     # ничего не проверяя). Порядок важен: реальные модули берём ДО подмены
     # importlib.
-    monkeypatch.setattr(_cfg_mod, "load_config_ex",
-                        lambda *a, **k: ({"threads_data_path": str(tmp_path / "threads")},
-                                         SimpleNamespace(active_name=None)))
+    monkeypatch.setattr(
+        _cfg_mod,
+        "load_config_ex",
+        lambda *a, **k: (
+            {"threads_data_path": str(tmp_path / "threads")},
+            SimpleNamespace(active_name=None),
+        ),
+    )
     monkeypatch.setattr(_cfg_mod, "apply_cli_overrides", lambda _cfg: None)
-    monkeypatch.setattr(_cfg_mod, "resolve_config_path", lambda _p: str(tmp_path / "c.yml"))
+    monkeypatch.setattr(
+        _cfg_mod, "resolve_config_path", lambda _p: str(tmp_path / "c.yml")
+    )
     monkeypatch.setattr(_onb_mod, "is_unconfigured", lambda _cfg: False)
-    monkeypatch.setattr(_ts_mod, "resolve_threads_dir", lambda _cfg: str(tmp_path / "threads"))
+    monkeypatch.setattr(
+        _ts_mod, "resolve_threads_dir", lambda _cfg: str(tmp_path / "threads")
+    )
     monkeypatch.setattr(_env_mod, "ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(_env_mod, "project_local_config_path", lambda: None)
 

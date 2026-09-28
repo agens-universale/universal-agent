@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
-from gc_core.thread_store import edits_journal_path, load_thread_messages, reset_thread_files
+from gc_core.thread_store import (
+    edits_journal_path,
+    load_thread_messages,
+    reset_thread_files,
+)
 
 
 def test_reset_thread_files_deletes_only_target_thread_files(
@@ -24,7 +28,9 @@ def test_reset_thread_files_deletes_only_target_thread_files(
     other_meta.write_text("{}", encoding="utf-8")
 
     deleted = reset_thread_files(
-        str(threads_dir), system_id="cli", thread_id="demo-thread",
+        str(threads_dir),
+        system_id="cli",
+        thread_id="demo-thread",
         launch_root=str(tmp_path),
     )
 
@@ -53,7 +59,9 @@ def test_reset_thread_files_deletes_edits_journal_lock(tmp_path: Path) -> None:
     journal_lock.write_bytes(b"")
 
     deleted = reset_thread_files(
-        str(threads_dir), system_id="cli", thread_id="demo-thread",
+        str(threads_dir),
+        system_id="cli",
+        thread_id="demo-thread",
         launch_root=str(tmp_path),
     )
 
@@ -63,7 +71,9 @@ def test_reset_thread_files_deletes_edits_journal_lock(tmp_path: Path) -> None:
     assert not journal_lock.exists()
 
 
-def test_reset_thread_files_deletes_legacy_thread_files(tmp_path: Path) -> None:
+def test_reset_thread_files_deletes_legacy_thread_files(
+    tmp_path: Path,
+) -> None:
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
 
@@ -73,7 +83,9 @@ def test_reset_thread_files_deletes_legacy_thread_files(tmp_path: Path) -> None:
     legacy_meta.write_text("{}", encoding="utf-8")
 
     deleted = reset_thread_files(
-        str(threads_dir), system_id="cli", thread_id="legacy-1",
+        str(threads_dir),
+        system_id="cli",
+        thread_id="legacy-1",
         launch_root=str(tmp_path),
     )
 
@@ -136,7 +148,9 @@ def test_reset_survives_a_lock_held_by_another_process(tmp_path: Path) -> None:
 
     with file_lock(journal, timeout=5.0):
         deleted = reset_thread_files(
-            str(threads_dir), system_id="cli", thread_id="demo-thread",
+            str(threads_dir),
+            system_id="cli",
+            thread_id="demo-thread",
             launch_root=str(tmp_path),
         )
 
@@ -179,7 +193,9 @@ def test_reset_keeps_going_when_one_file_refuses_to_die(
     monkeypatch.setattr(_os, "remove", stubborn_remove)
 
     deleted = reset_thread_files(
-        str(threads_dir), system_id="cli", thread_id="demo-thread",
+        str(threads_dir),
+        system_id="cli",
+        thread_id="demo-thread",
         launch_root=str(tmp_path),
     )
 

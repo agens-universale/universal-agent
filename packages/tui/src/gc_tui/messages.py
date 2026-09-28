@@ -35,6 +35,7 @@ class OpenEditsScreenRequest(Message):
     Источник приходит сообщением, а не подразумевается: сводка говорит про
     последний ход, и экран обязан открыться на тех же числах, по которым
     кликнули."""
+
     def __init__(self, source: str) -> None:
         super().__init__()
         self.source = source

@@ -26,6 +26,7 @@
 инфраструктура (`_Workspace`, `_flash_text`) общая, а сам откат этой задачей
 не тронут.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -57,15 +58,28 @@ pytest.importorskip("textual")
 # --- фикстуры данных ---------------------------------------------------------
 
 
-def _rec(path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1, ts=1.0):
+def _rec(
+    path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1, ts=1.0
+):
     return EditRecord(
-        path=path, turn_id=turn, ts=ts, call_id=call_id, op=op, hunks="",
-        add=add, del_=del_, before_sha256=None, after_sha256=None, flags=[],
+        path=path,
+        turn_id=turn,
+        ts=ts,
+        call_id=call_id,
+        op=op,
+        hunks="",
+        add=add,
+        del_=del_,
+        before_sha256=None,
+        after_sha256=None,
+        flags=[],
     )
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=str(root), check=True, capture_output=True)
+    subprocess.run(
+        ["git", *args], cwd=str(root), check=True, capture_output=True
+    )
 
 
 class _Workspace:
@@ -116,9 +130,13 @@ class _Workspace:
     def staged(self) -> set[str]:
         out = subprocess.run(
             ["git", "diff", "--cached", "--name-only"],
-            cwd=str(self.root), capture_output=True, check=True,
+            cwd=str(self.root),
+            capture_output=True,
+            check=True,
         )
-        return {line for line in out.stdout.decode("utf-8").splitlines() if line}
+        return {
+            line for line in out.stdout.decode("utf-8").splitlines() if line
+        }
 
     def edit(self, rel: str, before: str, after: str, **kwargs) -> None:
         """Правка агента «как в жизни»: точный снимок + файл на диске + запись."""
@@ -150,10 +168,14 @@ def _body(screen) -> str:
 def _flashes(screen) -> list:
     """Видимые плашки: снятая живёт в DOM спрятанной (см. `_clear_flash`)."""
     return [
-        w for w in screen.query("Static")
-        if w.display and (w.has_class("set-flash-ok")
-                          or w.has_class("set-flash-warn")
-                          or w.has_class("set-flash-note"))
+        w
+        for w in screen.query("Static")
+        if w.display
+        and (
+            w.has_class("set-flash-ok")
+            or w.has_class("set-flash-warn")
+            or w.has_class("set-flash-note")
+        )
     ]
 
 
@@ -165,8 +187,10 @@ def _flash_text(screen) -> str:
 
 def _screen_lines(app) -> list[str]:
     """Текстовый слепок ВИДИМОГО экрана строками композитора."""
-    return ["".join(seg.text for seg in strip).rstrip()
-            for strip in app.screen._compositor.render_strips()]
+    return [
+        "".join(seg.text for seg in strip).rstrip()
+        for strip in app.screen._compositor.render_strips()
+    ]
 
 
 async def _open(pilot, screen):
@@ -195,30 +219,34 @@ async def test_accept_flow_from_list_and_viewer(tmp_path):
         scr = await _open(pilot, ws.screen())
         assert [e.path for e in scr._entries] == ["first.py", "second.py"]
 
-        await pilot.press("a")                      # список: принять first.py
+        await pilot.press("a")  # список: принять first.py
         await pilot.pause()
 
         assert ws.staged() == {"first.py"}
         assert f"принято: first.py — {ACCEPT_NEW_BASELINE}" in _flash_text(scr)
-        assert [e.path for e in scr._entries] == ["second.py"]     # ушёл в группу
+        assert [e.path for e in scr._entries] == ["second.py"]  # ушёл в группу
         assert ws.store.accepted_state("first.py") is not None
         assert any(row.path == "first.py" for row in scr._settled)
 
-        await pilot.press("enter")                  # вьюер second.py
+        await pilot.press("enter")  # вьюер second.py
         await pilot.pause()
         viewer = pilot.app.screen
         assert isinstance(viewer, DiffFileViewer)
         assert viewer.entry.path == "second.py"
 
-        await pilot.press("a")                      # вьюер: принять second.py
+        await pilot.press("a")  # вьюер: принять second.py
         await pilot.pause()
 
         assert ws.staged() == {"first.py", "second.py"}
-        assert pilot.app.screen is scr               # вьюер закрылся — файл ушёл из активных
+        assert (
+            pilot.app.screen is scr
+        )  # вьюер закрылся — файл ушёл из активных
         assert scr._entries == []
         assert ws.store.accepted_state("second.py") is not None
         assert any(row.path == "second.py" for row in scr._settled)
-        assert f"принято: second.py — {ACCEPT_NEW_BASELINE}" in _flash_text(scr)
+        assert f"принято: second.py — {ACCEPT_NEW_BASELINE}" in _flash_text(
+            scr
+        )
 
 
 @pytest.mark.asyncio
@@ -272,7 +300,7 @@ async def test_accept_works_outside_a_repository_too(tmp_path):
     """
     from gc_tui.app import TuiApp
 
-    ws = _Workspace(tmp_path)                       # без .git → cache-mode
+    ws = _Workspace(tmp_path)  # без .git → cache-mode
     ws.edit("a.py", "a\n", "a\nb\n")
 
     async with TuiApp(
@@ -284,11 +312,11 @@ async def test_accept_works_outside_a_repository_too(tmp_path):
         await pilot.press("a")
         await pilot.pause()
 
-        assert ws.store.accepted_state("a.py") is not None    # база сдвинулась
-        assert scr._entries == []                              # ушёл в группу
+        assert ws.store.accepted_state("a.py") is not None  # база сдвинулась
+        assert scr._entries == []  # ушёл в группу
         text = _flash_text(scr)
         assert text == f"✓ принято: a.py — {ACCEPT_NEW_BASELINE}"
-        assert "индекс" not in text                            # без git-хвоста
+        assert "индекс" not in text  # без git-хвоста
 
 
 @pytest.mark.asyncio
@@ -308,7 +336,7 @@ async def test_ack_mentions_the_new_baseline(tmp_path):
 
         text = _flash_text(scr)
         assert ACCEPT_NEW_BASELINE in text
-        assert text.startswith("✓ ")           # исход — успех, глиф канонный
+        assert text.startswith("✓ ")  # исход — успех, глиф канонный
 
 
 @pytest.mark.asyncio
@@ -330,7 +358,9 @@ async def test_git_refusal_reaches_the_user_with_git_own_words(tmp_path):
         await pilot.pause()
 
         assert ws.staged() == set()
-        assert ws.store.accepted_state("ign.txt") is not None   # база всё равно сдвинута
+        assert (
+            ws.store.accepted_state("ign.txt") is not None
+        )  # база всё равно сдвинута
         text = _flash_text(scr)
         assert text.startswith(f"⚠ принято: ign.txt, но {ACCEPT_STAGE_FAILED}")
         assert ACCEPT_STAGE_ACTION in text
@@ -427,11 +457,11 @@ async def test_flash_swaps_outcome_class_in_place(tmp_path):
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
-        await pilot.press("a")                    # ign.txt — отказ стейджинга
+        await pilot.press("a")  # ign.txt — отказ стейджинга
         await pilot.pause()
         assert _flashes(scr)[0].has_class("set-flash-warn")
 
-        await pilot.press("a")                    # ign.txt ушёл в группу — ok.py под курсором
+        await pilot.press("a")  # ign.txt ушёл в группу — ok.py под курсором
         await pilot.pause()
         flash = _flashes(scr)[0]
         assert flash.has_class("set-flash-ok")
@@ -460,11 +490,15 @@ async def test_revert_ack_moved_from_notify_to_flash(tmp_path):
 
         assert notes == []
         assert _flash_text(scr) == "✓ откат · восстановлено: a.py"
-        assert ws.acks == ["откат · восстановлено: a.py"]   # строка в трейсе жива
+        assert ws.acks == [
+            "откат · восстановлено: a.py"
+        ]  # строка в трейсе жива
 
 
 @pytest.mark.asyncio
-async def test_failed_revert_from_viewer_reaches_the_user_over_the_viewer(tmp_path):
+async def test_failed_revert_from_viewer_reaches_the_user_over_the_viewer(
+    tmp_path,
+):
     """Провалившийся откат из вьюера обязан быть виден — вьюер не закрывается.
 
     Живой промах: `changed=False` оставляет вьюер открытым, а плашка монтируется
@@ -481,7 +515,9 @@ async def test_failed_revert_from_viewer_reaches_the_user_over_the_viewer(tmp_pa
     ).run_test() as pilot:
         await _open(pilot, ws.screen())
         notes: list[tuple[str, str]] = []
-        pilot.app.notify = lambda text, **kw: notes.append((text, kw.get("severity")))
+        pilot.app.notify = lambda text, **kw: notes.append(
+            (text, kw.get("severity"))
+        )
 
         await pilot.press("enter")
         await pilot.pause()
@@ -490,11 +526,13 @@ async def test_failed_revert_from_viewer_reaches_the_user_over_the_viewer(tmp_pa
 
         await pilot.press("r")
         await pilot.pause()
-        next(snapshots_root(str(ws.root)).glob("*.orig")).unlink()   # снимок унесли
+        next(
+            snapshots_root(str(ws.root)).glob("*.orig")
+        ).unlink()  # снимок унесли
         await pilot.press("enter")
         await pilot.pause()
 
-        assert pilot.app.screen is viewer          # ничего не изменилось — вьюер жив
+        assert pilot.app.screen is viewer  # ничего не изменилось — вьюер жив
         assert ws.read("a.py") == "правленое\n"
         assert len(notes) == 1
         text, severity = notes[0]
@@ -525,7 +563,7 @@ async def test_successful_revert_does_not_duplicate_the_ack(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
 
-        assert pilot.app.screen is scr             # вьюер закрылся сам
+        assert pilot.app.screen is scr  # вьюер закрылся сам
         assert notes == []
         assert _flash_text(scr) == "✓ откат · восстановлено: a.py"
 
@@ -605,7 +643,7 @@ async def test_viewer_accept_works_outside_a_repository(tmp_path):
     база сдвигается, вьюер закрывается вместе с уходом файла из активных."""
     from gc_tui.app import TuiApp
 
-    ws = _Workspace(tmp_path)                       # без .git → cache-mode
+    ws = _Workspace(tmp_path)  # без .git → cache-mode
     ws.edit("a.py", "a\n", "a\nb\n")
 
     async with TuiApp(
@@ -642,14 +680,19 @@ async def test_failed_accept_from_viewer_reaches_the_user_via_notify(tmp_path):
         threads_dir=str(ws.threads_dir), system="cli", config=config
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(ws.root), config=config,
-            threads_dir=str(ws.threads_dir), system_id="cli", thread_id="th1",
+            launch_root=str(ws.root),
+            config=config,
+            threads_dir=str(ws.threads_dir),
+            system_id="cli",
+            thread_id="th1",
             on_ui_ack=ws.acks.append,
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
         notes: list[tuple[str, str]] = []
-        pilot.app.notify = lambda text, **kw: notes.append((text, kw.get("severity")))
+        pilot.app.notify = lambda text, **kw: notes.append(
+            (text, kw.get("severity"))
+        )
 
         await pilot.press("enter")
         await pilot.pause()
@@ -659,7 +702,7 @@ async def test_failed_accept_from_viewer_reaches_the_user_via_notify(tmp_path):
         await pilot.press("a")
         await pilot.pause()
 
-        assert pilot.app.screen is viewer           # ничего не изменилось — вьюер жив
+        assert pilot.app.screen is viewer  # ничего не изменилось — вьюер жив
         assert ws.store.accepted_state("a.py") is None
         assert len(notes) == 1
         text, severity = notes[0]
@@ -731,7 +774,9 @@ async def test_second_a_accepts_the_file_anew(tmp_path):
         ws.write("a.py", "a\nb\nc\n")
         ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", add=1, del_=0))
         again = await _open(pilot, ws.screen())
-        assert again._entries and again._entries[0].path == "a.py"    # снова активен
+        assert (
+            again._entries and again._entries[0].path == "a.py"
+        )  # снова активен
 
         await pilot.press("a")
         await pilot.pause()
@@ -739,7 +784,10 @@ async def test_second_a_accepts_the_file_anew(tmp_path):
         assert "принято: a.py" in _flash_text(again)
         # индекс и правда обновлён заново
         out = subprocess.run(
-            ["git", "show", ":a.py"], cwd=str(ws.root), capture_output=True, check=True
+            ["git", "show", ":a.py"],
+            cwd=str(ws.root),
+            capture_output=True,
+            check=True,
         )
         assert out.stdout.decode("utf-8") == "a\nb\nc\n"
 
@@ -781,11 +829,11 @@ async def test_reset_confirm_only_when_delta_nonempty(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("clean.py", "v1\n")
     ws.journal.append(_rec("clean.py", ts=2.0))
-    ws.accept("clean.py", "v1\n")                    # диск == принятое → в группе
+    ws.accept("clean.py", "v1\n")  # диск == принятое → в группе
     ws.write("dirty.py", "v1\n")
     ws.journal.append(_rec("dirty.py", ts=1.0, call_id="c2"))
     ws.accept("dirty.py", "v1\n")
-    ws.write("dirty.py", "v2\n")                      # дописано ПОСЛЕ принятия
+    ws.write("dirty.py", "v2\n")  # дописано ПОСЛЕ принятия
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -800,34 +848,37 @@ async def test_reset_confirm_only_when_delta_nonempty(tmp_path):
         await pilot.pause()
         confirm = pilot.app.screen
         assert isinstance(confirm, RevertConfirmScreen)
-        assert _plain(confirm.query_one("#header-left")) == "Сброс принятия · dirty.py"
+        assert (
+            _plain(confirm.query_one("#header-left"))
+            == "Сброс принятия · dirty.py"
+        )
         assert "после сброса счёт пойдёт от начала сессии" in _body(confirm)
 
-        await pilot.press("escape")                   # отмена — база остаётся
+        await pilot.press("escape")  # отмена — база остаётся
         await pilot.pause()
         assert pilot.app.screen is scr
         assert ws.store.accepted_state("dirty.py") is not None
 
         await pilot.press("u")
         await pilot.pause()
-        await pilot.press("enter")                    # подтвердили
+        await pilot.press("enter")  # подтвердили
         await pilot.pause()
 
         assert pilot.app.screen is scr
         assert ws.store.accepted_state("dirty.py") is None
 
         # clean.py (в группе): дельта пуста — сразу, без подтверждения
-        await pilot.press("down")                      # строка группы
+        await pilot.press("down")  # строка группы
         await pilot.pause()
-        await pilot.press("enter")                      # раскрыть
+        await pilot.press("enter")  # раскрыть
         await pilot.pause()
-        await pilot.press("down")                        # settled-строка clean.py
+        await pilot.press("down")  # settled-строка clean.py
         await pilot.pause()
 
         await pilot.press("u")
         await pilot.pause()
 
-        assert pilot.app.screen is scr                    # без подтверждения
+        assert pilot.app.screen is scr  # без подтверждения
         assert ws.store.accepted_state("clean.py") is None
 
 
@@ -843,7 +894,9 @@ async def test_ctrl_u_confirm_mentions_count(tmp_path):
         ws.write(name, "v1\n")
         ws.journal.append(_rec(name, ts=ts, call_id=f"c_{name}"))
         ws.accept(name, "v1\n")
-        ws.write(name, "v2\n")          # дописано после принятия — дельта непуста у обоих
+        ws.write(
+            name, "v2\n"
+        )  # дописано после принятия — дельта непуста у обоих
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -856,7 +909,10 @@ async def test_ctrl_u_confirm_mentions_count(tmp_path):
 
         confirm = pilot.app.screen
         assert isinstance(confirm, RevertConfirmScreen)
-        assert _plain(confirm.query_one("#header-left")) == "Сброс принятия у 2 файлов"
+        assert (
+            _plain(confirm.query_one("#header-left"))
+            == "Сброс принятия у 2 файлов"
+        )
         body = _body(confirm)
         assert "a.py" in body and "b.py" in body
 
@@ -879,7 +935,7 @@ async def test_u_in_viewer_resets_the_open_file_and_closes_on_change(tmp_path):
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
     ws.accept("a.py", "v1\n")
-    ws.write("a.py", "v2\n")            # дельта от принятого непуста
+    ws.write("a.py", "v2\n")  # дельта от принятого непуста
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -893,7 +949,10 @@ async def test_u_in_viewer_resets_the_open_file_and_closes_on_change(tmp_path):
         await pilot.pause()
         confirm = pilot.app.screen
         assert isinstance(confirm, RevertConfirmScreen)
-        assert _plain(confirm.query_one("#header-left")) == "Сброс принятия · a.py"
+        assert (
+            _plain(confirm.query_one("#header-left"))
+            == "Сброс принятия · a.py"
+        )
         await pilot.press("enter")
         await pilot.pause()
 
@@ -902,7 +961,9 @@ async def test_u_in_viewer_resets_the_open_file_and_closes_on_change(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_u_in_viewer_resets_the_open_file_from_the_turn_source_too(tmp_path):
+async def test_u_in_viewer_resets_the_open_file_from_the_turn_source_too(
+    tmp_path,
+):
     """Тот же сценарий, что выше, но открыт из «Хода» (финальный фикс волны 4,
     Р27-ревью): владелец на смоуке оставил `u` рабочим и там — вьюер получает
     тот же жест над открытым файлом независимо от источника, эффект просто
@@ -915,7 +976,7 @@ async def test_u_in_viewer_resets_the_open_file_from_the_turn_source_too(tmp_pat
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
     ws.accept("a.py", "v1\n")
-    ws.write("a.py", "v2\n")            # дельта от принятого непуста
+    ws.write("a.py", "v2\n")  # дельта от принятого непуста
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -929,7 +990,10 @@ async def test_u_in_viewer_resets_the_open_file_from_the_turn_source_too(tmp_pat
         await pilot.pause()
         confirm = pilot.app.screen
         assert isinstance(confirm, RevertConfirmScreen)
-        assert _plain(confirm.query_one("#header-left")) == "Сброс принятия · a.py"
+        assert (
+            _plain(confirm.query_one("#header-left"))
+            == "Сброс принятия · a.py"
+        )
         await pilot.press("enter")
         await pilot.pause()
 
@@ -951,7 +1015,9 @@ async def test_actions_rejected_while_running(tmp_path):
     ws.write("accepted.py", "v1\n")
     ws.journal.append(_rec("accepted.py", ts=1.0, call_id="c2"))
     ws.accept("accepted.py", "v1\n")
-    ws.write("accepted.py", "v2\n")     # дельта непуста — у `u`/`Ctrl+U` есть что снять
+    ws.write(
+        "accepted.py", "v2\n"
+    )  # дельта непуста — у `u`/`Ctrl+U` есть что снять
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -960,11 +1026,13 @@ async def test_actions_rejected_while_running(tmp_path):
         assert [e.path for e in scr._entries] == ["a.py", "accepted.py"]
         pilot.app.active_runner = SimpleNamespace(is_running=lambda: True)
         notes: list[tuple[str, str]] = []
-        pilot.app.notify = lambda text, **kw: notes.append((text, kw.get("severity")))
+        pilot.app.notify = lambda text, **kw: notes.append(
+            (text, kw.get("severity"))
+        )
 
-        await pilot.press("a")                  # a.py — курсор здесь по умолчанию
+        await pilot.press("a")  # a.py — курсор здесь по умолчанию
         await pilot.pause()
-        await pilot.press("down")               # accepted.py — у него есть `u`
+        await pilot.press("down")  # accepted.py — у него есть `u`
         await pilot.pause()
         await pilot.press("u")
         await pilot.pause()
@@ -973,8 +1041,10 @@ async def test_actions_rejected_while_running(tmp_path):
         await pilot.press("ctrl+u")
         await pilot.pause()
 
-        assert pilot.app.screen is scr                  # ни принятия, ни подтверждения
+        assert pilot.app.screen is scr  # ни принятия, ни подтверждения
         assert notes == [(BUSY_ACTION, "warning")] * 4
         assert ws.staged() == set()
         assert ws.store.accepted_state("a.py") is None
-        assert ws.store.accepted_state("accepted.py") is not None   # снять не дали
+        assert (
+            ws.store.accepted_state("accepted.py") is not None
+        )  # снять не дали

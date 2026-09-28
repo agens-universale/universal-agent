@@ -13,8 +13,8 @@ from textual.widgets import Static
 
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
-from gc_tui.widgets.loading_wave import wave_glyph
 from gc_tui.services.plural import plural_form
+from gc_tui.widgets.loading_wave import wave_glyph
 
 
 class McpSectionEditor(Vertical):
@@ -252,7 +252,9 @@ class McpSectionEditor(Vertical):
             t.append("Обновить все подключённые", style=INK)
             detail = f"    {len(names)} шт: {', '.join(names)}"
             if upd:
-                word = plural_form(len(upd), "обновление", "обновления", "обновлений")
+                word = plural_form(
+                    len(upd), "обновление", "обновления", "обновлений"
+                )
                 detail += f" · {len(upd)} {word}"
             t.append(detail, style=DIM)
         return t

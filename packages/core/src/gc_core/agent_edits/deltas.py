@@ -18,6 +18,7 @@
 (единственная реализация на оба канала), контент декодируется тем же
 best-effort способом — снимки хранятся байтами.
 """
+
 from __future__ import annotations
 
 import difflib
@@ -31,10 +32,12 @@ from gc_core.config_modules.agent_edits import (
     DEFAULT_HUNK_CONTEXT_LINES,
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
 )
-from gc_core.utils.file_text import (BINARY_SAMPLE_BYTES,
-                                     decode_text_best_effort,
-                                     sha256_hex_of_bytes,
-                                     split_lines_lf)
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    decode_text_best_effort,
+    sha256_hex_of_bytes,
+    split_lines_lf,
+)
 
 # Байты, которые может дать кириллический текст cp1251: ASCII плюс сама
 # кириллица — буквы (0xC0–0xFF) и Ё/ё (0xA8/0xB8). Проверка идёт вычитанием
@@ -71,7 +74,7 @@ def decode_edit_text(data: bytes) -> str | None:
     if b"\x00" in data[:BINARY_SAMPLE_BYTES]:
         return None
     if data.translate(None, _CP1251_TEXT_BYTES):
-        return None      # остались байты, которых кириллица cp1251 не даёт
+        return None  # остались байты, которых кириллица cp1251 не даёт
     return data.decode("cp1251")
 
 
@@ -98,8 +101,8 @@ class FileDelta:
     disk_sha256: Optional[str] = field(default=None, compare=False)
 
 
-EMPTY_DELTA = FileDelta(0, 0, "")               # различий нет — честный ноль
-_UNCOUNTABLE_DELTA = FileDelta(0, 0, "", countable=False)   # сравнить нечем
+EMPTY_DELTA = FileDelta(0, 0, "")  # различий нет — честный ноль
+_UNCOUNTABLE_DELTA = FileDelta(0, 0, "", countable=False)  # сравнить нечем
 
 
 def build_diff(old_text: str, new_text: str, n: int) -> Tuple[str, int, int]:
@@ -123,7 +126,9 @@ def build_diff(old_text: str, new_text: str, n: int) -> Tuple[str, int, int]:
         )
     ]
     hunks = "".join(lines)
-    body = lines[2:]  # без заголовков --- / +++ (пусто, если lines пуст — различий нет)
+    body = lines[
+        2:
+    ]  # без заголовков --- / +++ (пусто, если lines пуст — различий нет)
     add = sum(1 for line in body if line.startswith("+"))
     del_ = sum(1 for line in body if line.startswith("-"))
     return hunks, add, del_
@@ -209,16 +214,16 @@ class FileEntry:
     ``revertable`` отвечает только за точные снимки и файлы, созданные здесь.
     """
 
-    path: str          # canonical key журнала
+    path: str  # canonical key журнала
     add: int
     del_: int
-    kind: str          # "created" | "deleted" | "modified"
-    exact: bool        # False → счётчики из журнала, а не от базы
-    countable: bool    # False → дельта не считалась вовсе
-    by_shell: bool     # среди записей пути есть сделанные командой
-    external: bool     # разрыв before-цепочки: файл правился извне
+    kind: str  # "created" | "deleted" | "modified"
+    exact: bool  # False → счётчики из журнала, а не от базы
+    countable: bool  # False → дельта не считалась вовсе
+    by_shell: bool  # среди записей пути есть сделанные командой
+    external: bool  # разрыв before-цепочки: файл правился извне
     revertable: bool
-    last_ts: float     # для сортировки «по последней правке»
+    last_ts: float  # для сортировки «по последней правке»
     # Создан в этом наборе (``created_here`` с поправкой на ступень лестницы) —
     # независимо от того, есть ли файл на диске сейчас. ``kind`` этого не
     # несёт: созданный и удалённый путь — это ``deleted``, а для правила
@@ -310,7 +315,9 @@ def file_entries(
         on_disk = abs_path.is_file()
         created = created_here(path_records)
         # Ступень выше есть — база больше не пуста, created-обход снят.
-        stepped_over_created = created and stepped is not None and stepped(path_key)
+        stepped_over_created = (
+            created and stepped is not None and stepped(path_key)
+        )
         if stepped_over_created:
             created = False
         # ...кроме ступени «принято отсутствие»: её база — ПУСТОТА, и путь
@@ -340,13 +347,15 @@ def file_entries(
                 add, del_ = delta.add, delta.del_
                 disk_sha256 = delta.disk_sha256
             else:
-                countable = True   # пошаговые хэнки в журнале всё-таки посчитаны
+                countable = (
+                    True  # пошаговые хэнки в журнале всё-таки посчитаны
+                )
             if not exact:
                 add = sum(rec.add for rec in path_records)
                 del_ = sum(rec.del_ for rec in path_records)
 
         if stepped_over_created:
-            revertable = True   # ступень — точная порода, база под неё есть
+            revertable = True  # ступень — точная порода, база под неё есть
         elif created:
             # Созданный файл откатывается удалением, и права на это ему даёт
             # только собственное существование: точного «до» у него нет и
@@ -409,7 +418,9 @@ def net_summary(
     )
 
 
-def _kind(path_records: list[EditRecord], *, created: bool, on_disk: bool) -> str:
+def _kind(
+    path_records: list[EditRecord], *, created: bool, on_disk: bool
+) -> str:
     """Вид правки файла. Порядок проверок важен.
 
     «Создан и удалён в наборе» — это ``deleted``: на диске файла нет, и
@@ -446,7 +457,7 @@ def _since_baseline(
             cut = idx
     if cut < 0:
         return path_records, False
-    return path_records[cut + 1:], True
+    return path_records[cut + 1 :], True
 
 
 def _edited_outside(
@@ -505,15 +516,18 @@ def _edited_outside(
     # хэш в цепочке не встречался ни разу — у записей git-подканала `before`
     # пустой (смок 2026-09-24: 100 путей из 500 получили «извне» за правки
     # самого агента).
-    known: set[str] = {baseline_sha256} if baseline_sha256 is not None else set()
+    known: set[str] = (
+        {baseline_sha256} if baseline_sha256 is not None else set()
+    )
     previous_after: Optional[str] = baseline_sha256 if anchored else None
     for rec in records:
-        if rec.before_sha256 is not None and previous_after is not None:
-            if (
-                rec.before_sha256 != previous_after
-                and rec.before_sha256 not in known
-            ):
-                outside = True
+        if (
+            rec.before_sha256 is not None
+            and previous_after is not None
+            and rec.before_sha256 != previous_after
+            and rec.before_sha256 not in known
+        ):
+            outside = True
         for digest in (rec.before_sha256, rec.after_sha256):
             if digest is not None:
                 known.add(digest)

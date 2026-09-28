@@ -1,4 +1,5 @@
 import pytest
+
 # Хвост подсказки прокрутки зависит от того, влезло ли содержимое в окно
 # теста, и к предмету этих сверок не относится.
 from gc_tui.form_frame import FOOTER_SCROLL
@@ -762,7 +763,9 @@ async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(
         )  # видны все, подсвеченной нет
         hint = str(list(scr.query(".conn-url-preset-hint"))[-1].render())
         assert hint == PRESET_HINT_NO_MATCH
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert footer == _FOOTER_PRESET_LIST_NO_MATCH
 
 
@@ -786,17 +789,23 @@ async def test_wizard_connection_footer_names_alt_down_only_on_the_url_field(
             "escape"
         )  # свернуть список, курсор остаётся на адресе
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Alt+↓ — показать список" in footer
         await pilot.press("down")  # адрес → токен
         await pilot.pause()
-        footer2 = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer2 = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Alt+↓" not in footer2
         await pilot.press("up")  # обратно на адрес — список раскрылся заново
         await pilot.pause()
         await pilot.press("escape")
         await pilot.pause()
-        footer3 = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer3 = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Alt+↓ — показать список" in footer3
 
 
@@ -1032,7 +1041,9 @@ async def test_connection_footer_always_says_next_no_mark_state(tmp_path):
         await pilot.pause()
         await pilot.press("escape")  # свернуть пресет-лист, не выйти
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — далее" in footer
         assert "выбрать" not in footer and "PgDn — далее" not in footer
 
@@ -1734,7 +1745,9 @@ async def test_model_footer_and_pagedown(tmp_path):
             ),
             "models loaded",
         )
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — выбрать" in footer and "PgDn — далее" in footer
         await pilot.press("pagedown")
         await pilot.pause()
@@ -1832,7 +1845,9 @@ async def test_model_footer_follows_filter_reselect(tmp_path):
             "#onb-model", Input
         ).value = "qw"  # Flash уходит → курсор на Qwen
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — далее" in footer and "Enter — выбрать" not in footer
 
 
@@ -1863,7 +1878,9 @@ async def test_model_footer_says_next_when_no_list(tmp_path):
             "models loaded",
         )
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — далее" in footer and "Enter — выбрать" not in footer
         scr.query_one("#onb-model", Input).value = "my-model"
         await pilot.press("enter")
@@ -1913,7 +1930,9 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
             "models loaded",
         )
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — далее" in footer and "Enter — выбрать" not in footer
 
 
@@ -3472,12 +3491,16 @@ async def test_levels_footer_follows_the_row_under_the_cursor(tmp_path):
         await pilot.pause()
         scr._goto(STEP_LEVELS)
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — выбрать" in footer and "PgDn — далее" in footer
         await pilot.press("down")
         await pilot.press("down")  # → «продолжить»
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — далее" in footer and "PgDn — далее" not in footer
 
 
@@ -3499,7 +3522,9 @@ async def test_levels_footer_promises_the_keys_that_work(tmp_path):
         await pilot.pause()
         scr._goto(STEP_LEVELS)
         await pilot.pause()
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Enter — выбрать" in footer and "PgDn — далее" in footer
         assert "Esc — выход" in footer
         await pilot.press("enter")
@@ -3511,7 +3536,9 @@ async def test_levels_footer_promises_the_keys_that_work(tmp_path):
             ),
             "models loaded",
         )
-        footer = str(scr.query_one("#onb-footer", Static).render()).replace(FOOTER_SCROLL, "")
+        footer = str(scr.query_one("#onb-footer", Static).render()).replace(
+            FOOTER_SCROLL, ""
+        )
         assert "Alt+↓ — перечитать список" in footer
         assert "Esc — назад" in footer and "Esc — выход" not in footer
 

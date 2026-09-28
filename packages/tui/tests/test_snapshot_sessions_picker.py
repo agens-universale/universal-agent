@@ -32,8 +32,17 @@ def _fixed_rel(iso_utc, **_):
     return f"{dt.day} мая"
 
 
-def _write_task(tmp_path, tid, *, status, hours_ago, msgs_count,
-                skills=None, branch=None, first_prompt=""):
+def _write_task(
+    tmp_path,
+    tid,
+    *,
+    status,
+    hours_ago,
+    msgs_count,
+    skills=None,
+    branch=None,
+    first_prompt="",
+):
     from gc_tui.services.session_title import normalize_prompt_title
 
     updated = (_FIXED_NOW - timedelta(hours=hours_ago)).isoformat()

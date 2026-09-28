@@ -42,7 +42,7 @@ BAND_BG = "#1f2128"
 # должен читаться карточкой, но не «выпирать» из почти чёрного трейса.
 # Дистанция до BG: 15.6 против 27.7 у BAND_BG (метрика _distance тестов палитры).
 BLOCK_BG = "#171a22"
-FOCUS_BG = "#363b47"     # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
+FOCUS_BG = "#363b47"  # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
 
 # Выделение текста мышью. Тот же синий, которым Textual выделяет текст в
 # TextArea (экран /buffer): #368AE9 с прозрачностью 40% поверх фона даёт
@@ -59,8 +59,8 @@ FRAME_ARCHIVE = "#4b525d"  # серая рамка «архив/история»
 
 def _mix(base: str, accent: str, t: float) -> str:
     """Смешивает accent с base в пропорции t∈[0,1] → hex (base при t=0, accent при t=1)."""
-    b = [int(base.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
-    a = [int(accent.lstrip("#")[i:i + 2], 16) for i in (0, 2, 4)]
+    b = [int(base.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)]
+    a = [int(accent.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)]
     mixed = (round(bc + (ac - bc) * t) for bc, ac in zip(b, a))
     return "#" + "".join(f"{c:02x}" for c in mixed)
 
@@ -107,16 +107,35 @@ def css_variables() -> dict[str, str]:
     """Токены → CSS-переменные (kebab-имена как в TCSS). Инжектится в
     `TuiApp.get_css_variables()`; TCSS ссылается на них через `$name`."""
     variables = {
-        "bg": BG, "ink": INK, "bright": BRIGHT, "dim": DIM, "muted": MUTED,
-        "deep-dim": DEEP_DIM, "accent": ACCENT, "code": CODE, "tool-name": TOOL_NAME,
-        "code-block": CODE_BLOCK, "ok": OK, "run-color": RUN_COLOR, "olive": OLIVE,
-        "err": ERR, "warn": WARN, "info": INFO, "brand": BRAND,
-        "band-bg": BAND_BG, "block-bg": BLOCK_BG, "focus-bg": FOCUS_BG,
+        "bg": BG,
+        "ink": INK,
+        "bright": BRIGHT,
+        "dim": DIM,
+        "muted": MUTED,
+        "deep-dim": DEEP_DIM,
+        "accent": ACCENT,
+        "code": CODE,
+        "tool-name": TOOL_NAME,
+        "code-block": CODE_BLOCK,
+        "ok": OK,
+        "run-color": RUN_COLOR,
+        "olive": OLIVE,
+        "err": ERR,
+        "warn": WARN,
+        "info": INFO,
+        "brand": BRAND,
+        "band-bg": BAND_BG,
+        "block-bg": BLOCK_BG,
+        "focus-bg": FOCUS_BG,
         "screen-selection-background": SCREEN_SELECTION_BACKGROUND,
-        "card-select-bg": CARD_SELECT_BG, "frame-archive": FRAME_ARCHIVE,
-        "diff-add-bg": DIFF_ADD_BG, "diff-del-bg": DIFF_DEL_BG,
-        "diff-add-hl": DIFF_ADD_HL, "diff-del-hl": DIFF_DEL_HL,
+        "card-select-bg": CARD_SELECT_BG,
+        "frame-archive": FRAME_ARCHIVE,
+        "diff-add-bg": DIFF_ADD_BG,
+        "diff-del-bg": DIFF_DEL_BG,
+        "diff-add-hl": DIFF_ADD_HL,
+        "diff-del-hl": DIFF_DEL_HL,
         "diff-gutter": DIFF_GUTTER,
-        "diff-add-gutter": DIFF_ADD_GUTTER, "diff-del-gutter": DIFF_DEL_GUTTER,
+        "diff-add-gutter": DIFF_ADD_GUTTER,
+        "diff-del-gutter": DIFF_DEL_GUTTER,
     }
     return variables

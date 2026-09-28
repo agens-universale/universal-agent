@@ -8,6 +8,7 @@
 резервируется до того, как участок нарисован, поэтому полоса прокрутки не врёт
 и содержимое не прыгает под курсором, когда участок наконец собрался.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -40,22 +41,31 @@ class _Host(App):
 
 
 def _text(number: int) -> Text:
-    return Text("\n".join(f"часть {number} строка {line}"
-                          for line in range(PART_LINES)))
+    return Text(
+        "\n".join(
+            f"часть {number} строка {line}" for line in range(PART_LINES)
+        )
+    )
 
 
 def _slots(count: int = PARTS) -> list[BodySlot]:
     return [
-        BodySlot(Static("", classes="chunk"), PART_LINES,
-                 (lambda number=number: _text(number)))
+        BodySlot(
+            Static("", classes="chunk"),
+            PART_LINES,
+            (lambda number=number: _text(number)),
+        )
         for number in range(count)
     ]
 
 
 def _built(body: LazyBody) -> list[int]:
     """Номера собранных участков — по содержимому виджета, а не по внутренностям."""
-    return [index for index, slot in enumerate(body._slots)
-            if str(slot.widget.render())]
+    return [
+        index
+        for index, slot in enumerate(body._slots)
+        if str(slot.widget.render())
+    ]
 
 
 @pytest.mark.asyncio
@@ -73,10 +83,10 @@ async def test_places_are_reserved_before_the_parts_are_built():
         await pilot.pause()
 
         assert body.virtual_size.height == PARTS * PART_LINES
-        assert len(body.children) == PARTS          # места на все участки
+        assert len(body.children) == PARTS  # места на все участки
         built = _built(body)
-        assert built                                # кадр наполнен сразу
-        assert len(built) < PARTS                   # но собрано не всё
+        assert built  # кадр наполнен сразу
+        assert len(built) < PARTS  # но собрано не всё
 
 
 @pytest.mark.asyncio
@@ -112,9 +122,9 @@ async def test_scrolling_builds_the_next_parts_and_releases_the_far_ones():
         await pilot.pause()
         middle = set(_built(body))
 
-        assert middle - first                       # добрали следующие
-        assert first - middle                       # и отпустили далёкие
-        assert not middle & {0, 1}                  # начало полотна отпущено
+        assert middle - first  # добрали следующие
+        assert first - middle  # и отпустили далёкие
+        assert not middle & {0, 1}  # начало полотна отпущено
 
 
 @pytest.mark.asyncio
@@ -156,9 +166,9 @@ async def test_ensure_builds_the_part_before_the_frame_goes_there():
         slots = _slots()
         body.set_slots(slots)
         await pilot.pause()
-        assert PARTS - 1 not in _built(body)        # хвост полотна далеко
+        assert PARTS - 1 not in _built(body)  # хвост полотна далеко
 
-        body.ensure(slots[-1].widget)               # без прокрутки
+        body.ensure(slots[-1].widget)  # без прокрутки
 
         assert PARTS - 1 in _built(body)
 
@@ -184,7 +194,9 @@ async def test_service_lines_are_never_emptied():
         from textual.css.scalar import Unit
 
         assert str(head.render()) == "заголовок файла"
-        assert head.styles.height.unit is Unit.AUTO  # высотой распоряжается сам
+        assert (
+            head.styles.height.unit is Unit.AUTO
+        )  # высотой распоряжается сам
         assert body._slots[1].widget.styles.height.unit is Unit.CELLS
 
 
@@ -204,12 +216,13 @@ async def test_nothing_is_released_while_a_selection_is_alive():
         first = set(_built(body))
 
         from textual.widget import Selection
+
         app.screen.selections = {slots[0].widget: Selection(None, None)}
         body.scroll_end(animate=False)
         await pilot.pause()
 
-        assert first <= set(_built(body))           # ничего не отпущено
-        assert PARTS - 1 in _built(body)            # а хвост при этом собран
+        assert first <= set(_built(body))  # ничего не отпущено
+        assert PARTS - 1 in _built(body)  # а хвост при этом собран
 
 
 @pytest.mark.asyncio
@@ -227,7 +240,7 @@ async def test_keep_window_is_wider_than_the_build_window():
         await pilot.pause()
         first = set(_built(body))
 
-        body.scroll_to(y=PART_LINES, animate=False)   # шаг на один участок
+        body.scroll_to(y=PART_LINES, animate=False)  # шаг на один участок
         await pilot.pause()
 
-        assert first <= set(_built(body))             # прежнее осталось собранным
+        assert first <= set(_built(body))  # прежнее осталось собранным

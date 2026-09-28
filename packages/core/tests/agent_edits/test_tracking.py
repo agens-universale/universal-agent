@@ -4,6 +4,7 @@
 ничего не знает: ни снимков, ни журнала «тронутых путей» она больше не ведёт.
 Остальная поверхность бэкенда — чистое делегирование внутрь.
 """
+
 from __future__ import annotations
 
 import json
@@ -15,7 +16,10 @@ from types import SimpleNamespace
 import pytest
 
 from gc_core.agent_edits.journal import EditsJournal
-from gc_core.agent_edits.tracking import TrackingFsBackend, wrap_local_for_tracking
+from gc_core.agent_edits.tracking import (
+    TrackingFsBackend,
+    wrap_local_for_tracking,
+)
 from gc_core.backends.local import LocalFsBackend
 from gc_core.config_modules import env_vars
 from gc_core.execution_workspace import build_execution_workspace
@@ -84,15 +88,17 @@ async def test_tracking_backend_no_longer_writes_touched_journal(launch_root):
     ctx = _tool_ctx(root, threads)
 
     res = json.loads(
-        await WriteToFile(ctx=ctx, config_dict=ctx.config_dict, call_id="c1").acall(
-            path=str(target), content="changed\n"
-        )
+        await WriteToFile(
+            ctx=ctx, config_dict=ctx.config_dict, call_id="c1"
+        ).acall(path=str(target), content="changed\n")
     )
     assert res["ok"] is True
     assert not Path(touched_journal_path(str(threads), "tui", "t1")).exists()
     assert not (root / ".gc" / "diffs").exists()
     # Правка при этом записана — вторым каналом, из самого тула.
-    assert [(r.path, r.call_id) for r in _records(threads)] == [("src/foo.py", "c1")]
+    assert [(r.path, r.call_id) for r in _records(threads)] == [
+        ("src/foo.py", "c1")
+    ]
 
 
 async def test_tracking_backend_still_records_shell_delta(launch_root):
@@ -115,7 +121,9 @@ async def test_tracking_backend_still_records_shell_delta(launch_root):
     ]
 
 
-async def test_edits_of_a_raising_command_reach_the_journal(launch_root, monkeypatch):
+async def test_edits_of_a_raising_command_reach_the_journal(
+    launch_root, monkeypatch
+):
     """Команда успела написать файл и упала: отмена хода, обрыв транспорта.
 
     Правка уже на диске — журнал обязан её увидеть, иначе прерванная команда
@@ -131,13 +139,17 @@ async def test_edits_of_a_raising_command_reach_the_journal(launch_root, monkeyp
         (root / "half_done.txt").write_bytes(b"alpha\n")
         raise KeyboardInterrupt("ход отменён")
 
-    monkeypatch.setattr(ctx.os_backend._inner, "arun_python", _writes_then_raises)
+    monkeypatch.setattr(
+        ctx.os_backend._inner, "arun_python", _writes_then_raises
+    )
 
     with pytest.raises(KeyboardInterrupt):
         await ctx.os_backend.arun_python("что угодно", cwd=str(root))
 
     assert (root / "half_done.txt").is_file()
-    assert [(r.path, r.op) for r in _records(threads)] == [("half_done.txt", "create")]
+    assert [(r.path, r.op) for r in _records(threads)] == [
+        ("half_done.txt", "create")
+    ]
 
 
 #: Единственное, чего у обёртки нет намеренно: синхронные точки входа запуска
@@ -207,13 +219,13 @@ def test_tracking_backend_overrides_keep_the_inner_signature():
     narrowed = {}
     for name, own in vars(TrackingFsBackend).items():
         if name.startswith("_") or not inspect.isfunction(own):
-            continue                      # свойства и пробы сюда не попадают
+            continue  # свойства и пробы сюда не попадают
         inner_fn = inspect.getattr_static(LocalFsBackend, name, None)
         if not inspect.isfunction(inner_fn):
             continue
         own_params = inspect.signature(own).parameters
         if any(p.kind is p.VAR_KEYWORD for p in own_params.values()):
-            continue                      # **kwargs принимает всё
+            continue  # **kwargs принимает всё
         lost = set(inspect.signature(inner_fn).parameters) - set(own_params)
         if lost:
             narrowed[name] = sorted(lost)
@@ -249,7 +261,10 @@ def test_fs_tools_do_not_import_tui_or_legacy_packages():
         for line in src.splitlines():
             stripped = line.strip()
             if stripped.startswith(("import ", "from ")):
-                assert not stripped.split()[1].startswith("gc_tui"), (mod.__name__, line)
+                assert not stripped.split()[1].startswith("gc_tui"), (
+                    mod.__name__,
+                    line,
+                )
 
 
 async def test_exec_argv_delegates_without_shell(tmp_path):

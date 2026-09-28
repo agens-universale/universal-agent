@@ -34,6 +34,7 @@
 git-факты инжектируются протоколом ``GitFacts``, тесты обходятся без
 репозитория.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -53,28 +54,33 @@ class SessionStep:
     подписи целей по ``ts``/``commit_ref`` собирает сервис TUI.
     """
 
-    kind: str                # STEP_ACCEPTED | STEP_HEAD
-    content: bytes | None    # None — ступень «файла нет»: принятое отсутствие или удаление в HEAD
-    ts: float | None         # момент принятия (kind=STEP_ACCEPTED), иначе None
-    commit_ref: str | None   # сырой ref коммита (kind=STEP_HEAD), иначе None
+    kind: str  # STEP_ACCEPTED | STEP_HEAD
+    content: (
+        bytes | None
+    )  # None — ступень «файла нет»: принятое отсутствие или удаление в HEAD
+    ts: float | None  # момент принятия (kind=STEP_ACCEPTED), иначе None
+    commit_ref: str | None  # сырой ref коммита (kind=STEP_HEAD), иначе None
 
 
 class GitFacts(Protocol):
     """Git-факты, нужные лестнице. Реализует сервис (с кэшем); в тестах — стаб."""
 
-    def head_bytes(self, rel: str) -> bytes | None: ...      # head_bytes_like_disk(HEAD)
+    def head_bytes(
+        self, rel: str
+    ) -> bytes | None: ...  # head_bytes_like_disk(HEAD)
 
-    def head_oid(self, rel: str) -> str | None: ...          # из head_blob_oids
+    def head_oid(self, rel: str) -> str | None: ...  # из head_blob_oids
 
     def has_filter(self, rel: str) -> bool: ...
 
-    def head_ref(self, rel: str) -> str | None: ...          # сырой ref последнего коммита пути
+    def head_ref(
+        self, rel: str
+    ) -> str | None: ...  # сырой ref последнего коммита пути
 
-    def head_absent(self, rel: str) -> bool: ...             # пути ДОКАЗАННО нет в HEAD
+    def head_absent(self, rel: str) -> bool: ...  # пути ДОКАЗАННО нет в HEAD
 
 
 def session_step(
-    path_key: str,
     rel: str | None,
     accepted: AcceptedState | None,
     session_snapshot: bytes | None,
@@ -99,7 +105,10 @@ def session_step(
         head_bytes = git.head_bytes(rel)
         if head_bytes is not None and head_bytes != session_snapshot:
             head = SessionStep(
-                kind=STEP_HEAD, content=head_bytes, ts=None, commit_ref=git.head_ref(rel)
+                kind=STEP_HEAD,
+                content=head_bytes,
+                ts=None,
+                commit_ref=git.head_ref(rel),
             )
         elif head_bytes is None and git.head_absent(rel):
             # Коммит после снимка УДАЛИЛ путь: закоммиченное состояние — «файла
@@ -107,14 +116,20 @@ def session_step(
             # есть уходил ниже коммита. Голое «байтов нет» ступенью не считается:
             # так же выглядит отказ git, а откат к «файла нет» файл удаляет.
             head = SessionStep(
-                kind=STEP_HEAD, content=None, ts=None, commit_ref=git.head_ref(rel)
+                kind=STEP_HEAD,
+                content=None,
+                ts=None,
+                commit_ref=git.head_ref(rel),
             )
 
     if accepted is None:
         return head
 
     accepted_step = SessionStep(
-        kind=STEP_ACCEPTED, content=accepted.content, ts=accepted.ts, commit_ref=None
+        kind=STEP_ACCEPTED,
+        content=accepted.content,
+        ts=accepted.ts,
+        commit_ref=None,
     )
     if head is None:
         return accepted_step

@@ -172,8 +172,11 @@ def test_table_block_to_markdown_empty():
 
 # ---- Е2: вложенные ограды (CommonMark), пустой блок без сегмента ----
 
+
 def test_nested_fence_with_info_string_does_not_close_outer_block():
-    text = "Итог:\n```markdown\n# T\n\n```bash\npip install -e .\n```\n```\nхвост"
+    text = (
+        "Итог:\n```markdown\n# T\n\n```bash\npip install -e .\n```\n```\nхвост"
+    )
     segs = segment_answer(text)
     kinds = [s.kind for s in segs]
     assert kinds == ["prose", "code-block", "code-block"]

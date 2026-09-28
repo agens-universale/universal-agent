@@ -1,6 +1,6 @@
 import glob
-import logging
 import json
+import logging
 import os
 import re
 import threading
@@ -177,7 +177,9 @@ def touched_journal_path(
     return os.path.join(threads_dir, f"touched_{sys_norm}_{tid}.json")
 
 
-def edits_journal_path(threads_dir: str, system_id: str, thread_id: str) -> Path:
+def edits_journal_path(
+    threads_dir: str, system_id: str, thread_id: str
+) -> Path:
     """Путь журнала правок агента: edits_<system>_<thread_id>.jsonl."""
     sys_norm = sanitize_system_id(system_id)
     tid = validate_thread_id(thread_id)
@@ -250,9 +252,12 @@ def purge_thread_snapshots(
         snapshots_root,
         thread_key_from_journal_path,
     )
+
     try:
         journal = edits_journal_path(
-            threads_dir, sanitize_system_id(system_id), validate_thread_id(thread_id)
+            threads_dir,
+            sanitize_system_id(system_id),
+            validate_thread_id(thread_id),
         )
         SnapshotStore(
             snapshots_root(launch_root), thread_key_from_journal_path(journal)
@@ -292,8 +297,12 @@ def reset_thread_files(
     paths.extend(_thread_paths_legacy(threads_dir, normalized_thread_id))
     sidecar = subagent_trace_path(threads_dir, sys_norm, normalized_thread_id)
     paths.append(sidecar)
-    paths.append(touched_journal_path(threads_dir, sys_norm, normalized_thread_id))
-    edits_path = str(edits_journal_path(threads_dir, sys_norm, normalized_thread_id))
+    paths.append(
+        touched_journal_path(threads_dir, sys_norm, normalized_thread_id)
+    )
+    edits_path = str(
+        edits_journal_path(threads_dir, sys_norm, normalized_thread_id)
+    )
     paths.append(edits_path)
     # `file_lock` кладёт межпроцессный лок журнала рядом, как `<путь>.lock`
     # (gc_core.utils.file_lock); сам журнал сносим строкой выше, и без этой

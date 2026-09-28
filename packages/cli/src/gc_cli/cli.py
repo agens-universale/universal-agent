@@ -3,8 +3,8 @@ import sys
 from typing import Any
 
 from gc_core import config_sync, onboarding
-from gc_core.agent_executor import AgentExecutor
 from gc_core.agent_edits.ctx import RUN_MODE_CLI, RUN_MODE_KEY
+from gc_core.agent_executor import AgentExecutor
 from gc_core.config import (
     _bootstrap_user_config,
     apply_cli_overrides,

@@ -20,9 +20,19 @@
 Механизм ОДИН на оба экрана правок — вьюер файла и подтверждение отката: тело
 у них одной породы, и вторая копия этой арифметики разъехалась бы с первой.
 """
+
 from __future__ import annotations
 
-from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
+from typing import (
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+)
 
 from rich.text import Text
 from textual.containers import VerticalScroll
@@ -82,7 +92,7 @@ class LazyBody(VerticalScroll):
     def __init__(self, *children, **kwargs) -> None:
         super().__init__(*children, **kwargs)
         self._slots: List[BodySlot] = []
-        self._at: Dict[int, int] = {}       # id(виджета) → номер участка
+        self._at: Dict[int, int] = {}  # id(виджета) → номер участка
         self._built: Set[int] = set()
         self._places: Optional[List[Tuple[float, float]]] = None
 
@@ -97,7 +107,9 @@ class LazyBody(VerticalScroll):
         """
         self.remove_children()
         self._slots = list(slots)
-        self._at = {id(slot.widget): index for index, slot in enumerate(self._slots)}
+        self._at = {
+            id(slot.widget): index for index, slot in enumerate(self._slots)
+        }
         self._built = set()
         self._places = None
         for slot in self._slots:
@@ -150,8 +162,10 @@ class LazyBody(VerticalScroll):
         self._fill(
             top - reserve,
             top + viewport + reserve,
-            keep=(top - reserve * KEEP_FACTOR,
-                  top + viewport + reserve * KEEP_FACTOR),
+            keep=(
+                top - reserve * KEEP_FACTOR,
+                top + viewport + reserve * KEEP_FACTOR,
+            ),
         )
 
     def _fill(
@@ -190,7 +204,7 @@ class LazyBody(VerticalScroll):
         try:
             if self.screen.selections:
                 return
-        except Exception:                # экран уже снят — отпускать безопасно
+        except Exception:  # экран уже снят — отпускать безопасно
             pass
         self._built.discard(index)
         self._slots[index].widget.update("")
@@ -223,11 +237,13 @@ class LazyBody(VerticalScroll):
                 top, height = region.y, region.height
                 measured = True
             else:
-                top, height = cursor, (slot.lines if slot.render is not None
-                                       else META_LINES)
+                top, height = (
+                    cursor,
+                    (slot.lines if slot.render is not None else META_LINES),
+                )
             spans.append((top, top + height))
             cursor = top + height
-        if measured:                    # до раскладки запоминать нечего
+        if measured:  # до раскладки запоминать нечего
             self._places = spans
         return spans
 

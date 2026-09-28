@@ -141,8 +141,9 @@ def is_tool_group_start(mount_target) -> bool:
     эта tool-строка открывает новую группу и получает верхний отступ (CSS
     `.tool-group-start`). Подряд идущие tool-строки остаются компактными.
     Общий для live (main) и readonly (preview) путей."""
-    from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.diff_block import DiffBlock
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
     for child in reversed(list(mount_target.children)):
         if getattr(child, "id", None) == "brand-block":
             continue  # шапка трейса — не контент
@@ -265,7 +266,9 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
             # Показ — wire-имя реестра (Д11/R3); tool_name(канонический id) —
             # только фолбэк на случай, если wire_name не заполнен.
             tool_name=ev.wire_name or ev.tool_name or "<tool>",
-            args_summary=args_portion(ev.summary), event_no=ev.no)
+            args_summary=args_portion(ev.summary),
+            event_no=ev.no,
+        )
         if is_tool_group_start(mount_target):
             row.add_class(
                 "tool-group-start"

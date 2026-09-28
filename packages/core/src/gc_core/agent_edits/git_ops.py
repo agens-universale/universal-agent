@@ -18,6 +18,7 @@
 возвращается кодом (``-1`` — процесс не запустился/не ответил), решение
 принимает вызывающий.
 """
+
 from __future__ import annotations
 
 import logging
@@ -29,7 +30,10 @@ from datetime import datetime
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence, Tuple
 
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, decode_text_best_effort
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    decode_text_best_effort,
+)
 from gc_core.utils.win_console import preserve_console_mode
 
 _logger = logging.getLogger(__name__)
@@ -142,7 +146,9 @@ def status_entries_for(
     if not rels:
         return []
     outputs = _chunked_outputs(
-        launch_root, [*_STATUS_ARGS, "--"], [f":(literal){rel}" for rel in rels]
+        launch_root,
+        [*_STATUS_ARGS, "--"],
+        [f":(literal){rel}" for rel in rels],
     )
     if outputs is None:
         return None
@@ -171,9 +177,9 @@ def _rename_target(rest: str) -> str:
     """``old -> new`` → new (rename/copy: интересует новый путь)."""
     if rest.startswith('"'):
         end = _closing_quote(rest)
-        tail = rest[end + 1:] if end > 0 else ""
+        tail = rest[end + 1 :] if end > 0 else ""
         if tail.startswith(_RENAME_SEP):
-            return tail[len(_RENAME_SEP):]
+            return tail[len(_RENAME_SEP) :]
         return rest
     head, sep, tail = rest.partition(_RENAME_SEP)
     return tail if sep else head
@@ -222,7 +228,9 @@ def _unquote_c_path(raw: str) -> str:
             continue
         if escaped in _OCTAL_DIGITS:
             digits = escaped
-            while len(digits) < 3 and i < len(body) and body[i] in _OCTAL_DIGITS:
+            while (
+                len(digits) < 3 and i < len(body) and body[i] in _OCTAL_DIGITS
+            ):
                 digits += body[i]
                 i += 1
             out.append(int(digits, 8) & 0xFF)
@@ -264,7 +272,12 @@ def add_paths(launch_root: str, rels: Sequence[str]) -> tuple[int, str]:
     specs = _stdin_paths(f":(literal){rel}\x00" for rel in rels)
     proc = _run(
         launch_root,
-        [*_QUOTEPATH_OFF, "add", "--pathspec-from-file=-", "--pathspec-file-nul"],
+        [
+            *_QUOTEPATH_OFF,
+            "add",
+            "--pathspec-from-file=-",
+            "--pathspec-file-nul",
+        ],
         None,
         specs,
     )
@@ -289,7 +302,9 @@ def rev_parse_head(launch_root: str) -> str | None:
     return text or None
 
 
-def cat_file_filters(launch_root: str, rel: str, *, rev: str = "HEAD") -> bytes | None:
+def cat_file_filters(
+    launch_root: str, rel: str, *, rev: str = "HEAD"
+) -> bytes | None:
     """Содержимое пути в ФОРМЕ РАБОЧЕГО ДЕРЕВА — с eol/ident-фильтрами.
 
     ``rev="HEAD"`` (по умолчанию) читает объект ``HEAD:<rel>``; ``rev=""`` —
@@ -302,14 +317,20 @@ def cat_file_filters(launch_root: str, rel: str, *, rev: str = "HEAD") -> bytes 
     выкладки и форма файла НА ДИСКЕ совпадают не всегда.
     """
     obj = f"{rev}:{rel}" if rev else f":{rel}"
-    code, out = run_git(launch_root, [*_QUOTEPATH_OFF, "cat-file", "--filters", obj])
+    code, out = run_git(
+        launch_root, [*_QUOTEPATH_OFF, "cat-file", "--filters", obj]
+    )
     return out if code == 0 else None
 
 
-def cat_file_blob(launch_root: str, rel: str, *, rev: str = "HEAD") -> bytes | None:
+def cat_file_blob(
+    launch_root: str, rel: str, *, rev: str = "HEAD"
+) -> bytes | None:
     """Сырой блоб ``rev:<rel>`` — БЕЗ фильтров. ``None`` — пути на ступени нет / git отказал."""
     obj = f"{rev}:{rel}" if rev else f":{rel}"
-    code, out = run_git(launch_root, [*_QUOTEPATH_OFF, "cat-file", "blob", obj])
+    code, out = run_git(
+        launch_root, [*_QUOTEPATH_OFF, "cat-file", "blob", obj]
+    )
     return out if code == 0 else None
 
 
@@ -354,7 +375,10 @@ def blob_like_disk(blob: bytes, disk: bytes) -> bytes:
     Отдельно от чтения — для блобов, прочитанных пачкой (``blobs_at``). Бинарь —
     блоб как есть; диск без переводов строк — стиль самого блоба.
     """
-    if b"\x00" in blob[:BINARY_SAMPLE_BYTES] or b"\x00" in disk[:BINARY_SAMPLE_BYTES]:
+    if (
+        b"\x00" in blob[:BINARY_SAMPLE_BYTES]
+        or b"\x00" in disk[:BINARY_SAMPLE_BYTES]
+    ):
         return blob
     eol = disk_eol(disk) or disk_eol(blob) or b"\n"
     return with_eol(blob, eol)
@@ -377,7 +401,9 @@ def has_custom_filter(launch_root: str, rel: str) -> bool:
     «фильтр есть» — вызывающий тогда не читает точную базу через
     ``head_bytes_like_disk`` и остаётся на счётной.
     """
-    code, out = run_git(launch_root, ["check-attr", "-z", *_WORKTREE_ATTRS, "--", rel])
+    code, out = run_git(
+        launch_root, ["check-attr", "-z", *_WORKTREE_ATTRS, "--", rel]
+    )
     if code != 0:
         return True
     # ``-z`` печатает тройки «путь, атрибут, значение» — по одной на каждый
@@ -415,10 +441,12 @@ def custom_filter_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
     rels = list(rels)
     filtered: set[str] = set()
     for start in range(0, len(rels), _STDIN_CHUNK_PATHS):
-        chunk = rels[start:start + _STDIN_CHUNK_PATHS]
+        chunk = rels[start : start + _STDIN_CHUNK_PATHS]
         stdin = _stdin_paths(f"{rel}\x00" for rel in chunk)
         code, out = run_git(
-            launch_root, ["check-attr", "-z", "--stdin", *_WORKTREE_ATTRS], stdin=stdin
+            launch_root,
+            ["check-attr", "-z", "--stdin", *_WORKTREE_ATTRS],
+            stdin=stdin,
         )
         if code != 0:
             filtered.update(chunk)
@@ -428,9 +456,12 @@ def custom_filter_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
         for i in range(0, len(fields) - 2, 3):
             values.setdefault(fields[i], []).append(fields[i + 2])
         filtered.update(
-            rel for rel in chunk
+            rel
+            for rel in chunk
             if len(values.get(rel, ())) < len(_WORKTREE_ATTRS)
-            or any(value not in ("unspecified", "unset") for value in values[rel])
+            or any(
+                value not in ("unspecified", "unset") for value in values[rel]
+            )
         )
     return filtered
 
@@ -447,17 +478,22 @@ def ignored_paths(launch_root: str, rels: Sequence[str]) -> set[str]:
     rels = list(rels)
     ignored: set[str] = set()
     for start in range(0, len(rels), _STDIN_CHUNK_PATHS):
-        chunk = rels[start:start + _STDIN_CHUNK_PATHS]
+        chunk = rels[start : start + _STDIN_CHUNK_PATHS]
         stdin = _stdin_paths(f"{rel}\x00" for rel in chunk)
         code, out = run_git(
-            launch_root, ["check-ignore", "--no-index", "-z", "--stdin"], stdin=stdin
+            launch_root,
+            ["check-ignore", "--no-index", "-z", "--stdin"],
+            stdin=stdin,
         )
         # Код 1 — «ничего не игнорируется», штатный ответ, а не отказ.
         if code not in (0, 1):
             ignored.update(chunk)
             continue
         ignored.update(
-            name for name in out.decode("utf-8", errors="surrogateescape").split("\x00")
+            name
+            for name in out.decode("utf-8", errors="surrogateescape").split(
+                "\x00"
+            )
             if name
         )
     return ignored
@@ -482,14 +518,20 @@ def blobs_at(
     """
     rels = list(dict.fromkeys(rels))
     result: dict[str, bytes | None] = {
-        rel: cat_file_blob(launch_root, rel, rev=rev) for rel in rels if "\n" in rel
+        rel: cat_file_blob(launch_root, rel, rev=rev)
+        for rel in rels
+        if "\n" in rel
     }
     batch = [rel for rel in rels if "\n" not in rel]
     for start in range(0, len(batch), _STDIN_CHUNK_PATHS):
-        chunk = batch[start:start + _STDIN_CHUNK_PATHS]
-        stdin = "".join(f"{rev}:{rel}\n" if rev else f":{rel}\n" for rel in chunk)
+        chunk = batch[start : start + _STDIN_CHUNK_PATHS]
+        stdin = "".join(
+            f"{rev}:{rel}\n" if rev else f":{rel}\n" for rel in chunk
+        )
         code, out = run_git(
-            launch_root, [*_QUOTEPATH_OFF, "cat-file", "--batch"], stdin=_stdin_paths([stdin])
+            launch_root,
+            [*_QUOTEPATH_OFF, "cat-file", "--batch"],
+            stdin=_stdin_paths([stdin]),
         )
         blobs = _parse_cat_file_batch(out, len(chunk)) if code == 0 else None
         if blobs is not None:
@@ -518,8 +560,8 @@ def _parse_cat_file_batch(out: bytes, count: int) -> list[bytes | None] | None:
         if len(parts) != 3 or not parts[2].isdigit():
             return None
         size = int(parts[2])
-        content = out[pos:pos + size]
-        if len(content) != size or out[pos + size:pos + size + 1] != b"\n":
+        content = out[pos : pos + size]
+        if len(content) != size or out[pos + size : pos + size + 1] != b"\n":
             return None
         pos += size + 1
         items.append(content if parts[1] == b"blob" else None)
@@ -551,8 +593,12 @@ def split_patch_by_path(patch: bytes) -> tuple[dict[str, bytes], bool]:
     if patch and not starts:
         return {}, False
     for i, start in enumerate(starts):
-        section = patch[start:starts[i + 1] if i + 1 < len(starts) else len(patch)]
-        header = section.split(b"\n", 1)[0].decode("utf-8", errors="surrogateescape")
+        section = patch[
+            start : starts[i + 1] if i + 1 < len(starts) else len(patch)
+        ]
+        header = section.split(b"\n", 1)[0].decode(
+            "utf-8", errors="surrogateescape"
+        )
         path = _patch_header_path(header)
         if path is None or path in sections:
             clean = False
@@ -572,21 +618,24 @@ def _patch_header_path(header: str) -> Optional[str]:
     """
     for combined in ("diff --cc ", "diff --combined "):
         if header.startswith(combined):
-            rest = header[len(combined):]
+            rest = header[len(combined) :]
             return _unquote_c_path(rest) if rest.startswith('"') else rest
-    rest = header[len("diff --git "):]
+    rest = header[len("diff --git ") :]
     if rest.startswith('"'):
         end = _closing_quote(rest)
         if end < 0:
             return None
-        src = _unquote_c_path(rest[:end + 1])
-        dst = _unquote_c_path(rest[end + 2:])
-        if not (src.startswith("a/") and dst.startswith("b/")) or src[2:] != dst[2:]:
+        src = _unquote_c_path(rest[: end + 1])
+        dst = _unquote_c_path(rest[end + 2 :])
+        if (
+            not (src.startswith("a/") and dst.startswith("b/"))
+            or src[2:] != dst[2:]
+        ):
             return None
         return src[2:]
     if len(rest) < 5 or (len(rest) - 5) % 2:
         return None
-    path = rest[2:2 + (len(rest) - 5) // 2]
+    path = rest[2 : 2 + (len(rest) - 5) // 2]
     return path if rest == f"a/{path} b/{path}" else None
 
 
@@ -642,7 +691,9 @@ def ls_files_set(launch_root: str, rels: Sequence[str]) -> set[str]:
     outputs = _chunked_outputs(launch_root, ["ls-files", "-z", "--"], rels)
     if outputs is None:
         return set()
-    return {path for out in outputs for path in _decode(out).split("\x00") if path}
+    return {
+        path for out in outputs for path in _decode(out).split("\x00") if path
+    }
 
 
 def head_blob_oids(launch_root: str, rels: Sequence[str]) -> dict[str, str]:
@@ -671,11 +722,15 @@ def head_tree(launch_root: str, rels: Sequence[str]) -> dict[str, str] | None:
     rels = list(rels)
     if not rels:
         return {}
-    outputs = _chunked_outputs(launch_root, ["ls-tree", "-z", "HEAD", "--"], rels)
+    outputs = _chunked_outputs(
+        launch_root, ["ls-tree", "-z", "HEAD", "--"], rels
+    )
     if outputs is None:
         return None
     oids: dict[str, str] = {}
-    for record in (rec for out in outputs for rec in _decode(out).split("\x00")):
+    for record in (
+        rec for out in outputs for rec in _decode(out).split("\x00")
+    ):
         if not record:
             continue
         meta, sep, path = record.partition("\t")
@@ -706,11 +761,15 @@ def paths_committed_since(
         return set()
     specs = [f":(literal){rel}" for rel in rels]
     outputs = _chunked_outputs(
-        launch_root, [*_QUOTEPATH_OFF, "diff", "--name-only", "-z", rev, "HEAD", "--"], specs
+        launch_root,
+        [*_QUOTEPATH_OFF, "diff", "--name-only", "-z", rev, "HEAD", "--"],
+        specs,
     )
     if outputs is None:
         return set()
-    return {path for out in outputs for path in _decode(out).split("\x00") if path}
+    return {
+        path for out in outputs for path in _decode(out).split("\x00") if path
+    }
 
 
 def head_rev_from_files(launch_root: str) -> str | None:
@@ -748,7 +807,7 @@ def head_rev_from_files(launch_root: str) -> str | None:
             return None
         if not head.startswith("ref:"):
             return head if _is_oid(head) else None
-        ref = head[len("ref:"):].strip()
+        ref = head[len("ref:") :].strip()
         if not ref:
             return None
         common = _common_dir(git_dir)
@@ -780,7 +839,7 @@ def _git_dir(root: Path) -> Optional[Path]:
     text = _read_git_line(dot)
     if text is None or not text.startswith("gitdir:"):
         return None
-    target = Path(text[len("gitdir:"):].strip())
+    target = Path(text[len("gitdir:") :].strip())
     if not target.is_absolute():
         target = root / target
     return target if target.is_dir() else None
@@ -824,7 +883,9 @@ def _read_git_text(path: Path) -> Optional[str]:
 
 def _is_oid(text: str) -> bool:
     """40 hex (sha1) или 64 (репозиторий на sha256) — и ничего кроме."""
-    return len(text) in (40, 64) and all(ch in "0123456789abcdef" for ch in text)
+    return len(text) in (40, 64) and all(
+        ch in "0123456789abcdef" for ch in text
+    )
 
 
 def head_commit_ts(launch_root: str, rel: str) -> float | None:
@@ -917,36 +978,54 @@ def last_commits(
     rels = list(rels)
     if not rels:
         return {}
-    code, merges = run_git(launch_root, ["rev-list", "--merges", "-n", "1", f"{since}..HEAD"])
+    code, merges = run_git(
+        launch_root, ["rev-list", "--merges", "-n", "1", f"{since}..HEAD"]
+    )
     if code != 0:
         return {}
     if merges.strip():
-        answers = run_git_many(launch_root, [_last_commit_args(rel) for rel in rels])
+        answers = run_git_many(
+            launch_root, [_last_commit_args(rel) for rel in rels]
+        )
         return {
             rel: commit
             for rel, (answer_code, out) in zip(rels, answers)
-            if answer_code == 0 and (commit := _parse_last_commit(out)) is not None
+            if answer_code == 0
+            and (commit := _parse_last_commit(out)) is not None
         }
     wanted = set(rels)
     specs = [f":(literal){rel}" for rel in rels]
     outputs = _chunked_outputs(
         launch_root,
-        [*_QUOTEPATH_OFF, "log", "--format=%x01%h%x09%ct", "--name-only", "-z",
-         f"{since}..HEAD", "--"],
+        [
+            *_QUOTEPATH_OFF,
+            "log",
+            "--format=%x01%h%x09%ct",
+            "--name-only",
+            "-z",
+            f"{since}..HEAD",
+            "--",
+        ],
         specs,
     )
     found: dict[str, tuple[str, int]] = {}
     for out in outputs or ():
         commit: tuple[str, int] | None = None
         first_name = False
-        for token in out.decode("utf-8", errors="surrogateescape").split("\x00"):
+        for token in out.decode("utf-8", errors="surrogateescape").split(
+            "\x00"
+        ):
             if token.startswith("\x01"):
                 short_hash, _sep, ts_text = token[1:].partition("\t")
-                commit = (short_hash, int(ts_text)) if ts_text.isdigit() else None
+                commit = (
+                    (short_hash, int(ts_text)) if ts_text.isdigit() else None
+                )
                 first_name = True
                 continue
             # Первое имя после заголовка git отделяет переводом строки.
-            name = token[1:] if first_name and token.startswith("\n") else token
+            name = (
+                token[1:] if first_name and token.startswith("\n") else token
+            )
             first_name = False
             if commit is not None and name in wanted and name not in found:
                 found[name] = commit
@@ -973,10 +1052,17 @@ def run_git_many(
 
     def one(args: list[str]) -> tuple[int, bytes]:
         proc = _run_unguarded(launch_root, args, None, None)
-        return (-1, b"") if proc is None else (proc.returncode, proc.stdout or b"")
+        return (
+            (-1, b"")
+            if proc is None
+            else (proc.returncode, proc.stdout or b"")
+        )
 
     workers = min(_PARALLEL_GIT, len(argvs))
-    with preserve_console_mode(), ThreadPoolExecutor(max_workers=workers) as pool:
+    with (
+        preserve_console_mode(),
+        ThreadPoolExecutor(max_workers=workers) as pool,
+    ):
         return list(pool.map(one, argvs))
 
 
@@ -1013,4 +1099,6 @@ def _decode(data: bytes) -> str:
     """Байты git → текст: явный декод, без опоры на локаль."""
     if not data:
         return ""
-    return decode_text_best_effort(data) or data.decode("utf-8", errors="replace")
+    return decode_text_best_effort(data) or data.decode(
+        "utf-8", errors="replace"
+    )

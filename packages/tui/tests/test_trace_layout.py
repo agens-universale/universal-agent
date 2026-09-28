@@ -169,10 +169,15 @@ async def test_call_row_shows_wire_tool_name_not_canonical_id():
     async with TuiApp().run_test() as pilot:
         scr = pilot.app.screen
         ev = TraceEvent(
-            no=1, event_ts_utc_iso="2026-05-28T00:00:00Z", kind="call",
-            title="append_to_file", summary="append_to_file(path='x.py')",
-            tool_name="append_to_file", wire_name="fs_append_file",
-            call_id="c1", full_payload={},
+            no=1,
+            event_ts_utc_iso="2026-05-28T00:00:00Z",
+            kind="call",
+            title="append_to_file",
+            summary="append_to_file(path='x.py')",
+            tool_name="append_to_file",
+            wire_name="fs_append_file",
+            call_id="c1",
+            full_payload={},
         )
         scr._render_event(ev)
         await pilot.pause()

@@ -2,13 +2,16 @@
 
 Тексты достались от прежней механики отката как есть — тесты запирают именно их.
 """
+
 from __future__ import annotations
 
 from gc_core.agent_edits.feedback import (
     build_undo_feedback_body,
     build_undo_feedback_message,
 )
-from gc_core.message_policy.user_message_policy import is_technical_user_message_text
+from gc_core.message_policy.user_message_policy import (
+    is_technical_user_message_text,
+)
 
 
 def test_undo_message_lists_restored_and_deleted():
@@ -56,4 +59,6 @@ def test_undo_body_of_deleted_only_has_no_restored_section():
 def test_undo_message_is_none_without_keys():
     assert build_undo_feedback_message() is None
     assert build_undo_feedback_body() is None
-    assert build_undo_feedback_body(restored_keys=[""], deleted_keys=[""]) is None
+    assert (
+        build_undo_feedback_body(restored_keys=[""], deleted_keys=[""]) is None
+    )

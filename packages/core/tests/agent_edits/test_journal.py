@@ -2,14 +2,26 @@
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
-from gc_core.thread_store import delete_thread, edits_journal_path, reset_thread_files
+from gc_core.thread_store import (
+    delete_thread,
+    edits_journal_path,
+    reset_thread_files,
+)
 
 
 def make_rec(path="a.py", turn="t1", **kw):
     base = dict(
-        path=path, turn_id=turn, ts=1.0, call_id="c1", op="edit",
-        hunks="@@ -1 +1 @@\n-a\n+b\n", add=1, del_=1,
-        before_sha256="x", after_sha256="y", flags=[],
+        path=path,
+        turn_id=turn,
+        ts=1.0,
+        call_id="c1",
+        op="edit",
+        hunks="@@ -1 +1 @@\n-a\n+b\n",
+        add=1,
+        del_=1,
+        before_sha256="x",
+        after_sha256="y",
+        flags=[],
     )
     base.update(kw)
     return EditRecord(**base)
@@ -24,7 +36,9 @@ def test_append_and_read_roundtrip(tmp_path):
 
     assert [r.turn_id for r in recs] == ["t1", "t2"]
     assert recs[0].del_ == 1
-    assert '"del": 1' in (tmp_path / "edits_s_t.jsonl").read_text(encoding="utf-8")
+    assert '"del": 1' in (tmp_path / "edits_s_t.jsonl").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_torn_last_line_is_dropped(tmp_path):
@@ -42,7 +56,9 @@ def test_torn_middle_line_is_skipped_not_fatal(tmp_path):
     j = EditsJournal(p)
     j.append(make_rec(turn="t1"))
     with open(p, "a", encoding="utf-8") as fh:
-        fh.write('{"path": "obryv\n')  # битая строка в середине файла, не последняя
+        fh.write(
+            '{"path": "obryv\n'
+        )  # битая строка в середине файла, не последняя
     j.append(make_rec(turn="t3"))
 
     recs = j.read_all()
@@ -112,8 +128,12 @@ def test_reset_thread_files_removes_snapshots_of_that_thread(tmp_path):
     alien = SnapshotStore(snapshots_root(str(launch_root)), "cli_other-thread")
     alien.capture_session("a.py", b"old")
 
-    reset_thread_files(str(threads_dir), system_id="cli", thread_id="demo-thread",
-                       launch_root=str(launch_root))
+    reset_thread_files(
+        str(threads_dir),
+        system_id="cli",
+        thread_id="demo-thread",
+        launch_root=str(launch_root),
+    )
 
     assert not journal.exists()
     assert ours.session_baseline("a.py") is None
@@ -130,7 +150,9 @@ def test_reset_thread_files_removes_edits_journal(tmp_path):
     assert journal_path.exists()
 
     deleted = reset_thread_files(
-        str(threads_dir), system_id="cli", thread_id="demo-thread",
+        str(threads_dir),
+        system_id="cli",
+        thread_id="demo-thread",
         launch_root=str(tmp_path),
     )
 
@@ -151,7 +173,9 @@ def test_delete_thread_removes_edits_journal(tmp_path):
     assert not journal_path.exists()
 
 
-def test_journal_deleted_between_stat_and_open_reads_as_empty(tmp_path, monkeypatch):
+def test_journal_deleted_between_stat_and_open_reads_as_empty(
+    tmp_path, monkeypatch
+):
     """Журнал сносят из-под читателя — это пустой набор, а не падение.
 
     `gc-cli -t X -n` и второе окно TUI удаляют `edits_<ключ>.jsonl` в любой
@@ -163,13 +187,15 @@ def test_journal_deleted_between_stat_and_open_reads_as_empty(tmp_path, monkeypa
 
     p = tmp_path / "edits_s_t.jsonl"
     EditsJournal(p).append(make_rec())
-    reader = EditsJournal(p)      # свежий читатель: кэша нет, чтение пойдёт на диск
+    reader = EditsJournal(
+        p
+    )  # свежий читатель: кэша нет, чтение пойдёт на диск
 
     real_open = builtins.open
 
     def racing_open(file, *args, **kwargs):
         if Path(file) == p:
-            p.unlink()            # ровно то окно: stat уже прошёл, open ещё нет
+            p.unlink()  # ровно то окно: stat уже прошёл, open ещё нет
         return real_open(file, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "open", racing_open)
@@ -189,9 +215,9 @@ def test_unreadable_journal_does_not_poison_the_cache(tmp_path, monkeypatch):
 
     j = EditsJournal(tmp_path / "edits_s_t.jsonl")
     j.append(make_rec(path="a.py"))
-    assert [r.path for r in j.read_all()] == ["a.py"]      # кэш прогрет
+    assert [r.path for r in j.read_all()] == ["a.py"]  # кэш прогрет
 
-    j.append(make_rec(path="b.py"))                        # размер и время сменились
+    j.append(make_rec(path="b.py"))  # размер и время сменились
 
     real_open = builtins.open
 
@@ -211,7 +237,9 @@ def test_unreadable_journal_does_not_poison_the_cache(tmp_path, monkeypatch):
     )
 
 
-def test_command_paths_survives_the_roundtrip_and_old_lines_read_as_none(tmp_path):
+def test_command_paths_survives_the_roundtrip_and_old_lines_read_as_none(
+    tmp_path,
+):
     """`command_paths` — сколько путей тронула урезанная потолком команда.
 
     Экран изменений по нему признаётся, что список неполон. Строки журналов,
@@ -224,4 +252,7 @@ def test_command_paths_survives_the_roundtrip_and_old_lines_read_as_none(tmp_pat
     recs = j.read_all()
 
     assert [r.command_paths for r in recs] == [23456, None]
-    assert '"command_paths"' not in path.read_text(encoding="utf-8").splitlines()[1]
+    assert (
+        '"command_paths"'
+        not in path.read_text(encoding="utf-8").splitlines()[1]
+    )

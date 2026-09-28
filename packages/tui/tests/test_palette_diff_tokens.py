@@ -2,6 +2,7 @@
 присутствие в css_variables(), валидность hex, различимость на фоне выделения
 и внутри своей пары фон/акцент. Метрика различимости — переиспользуется из
 tests/tui/test_palette_sync.py (не изобретаем свою)."""
+
 from __future__ import annotations
 
 import re
@@ -46,19 +47,31 @@ def test_diff_tokens_are_valid_hex():
 def test_diff_row_backgrounds_distinguishable_from_selection():
     """Фон изменённой/удалённой строки не должен сливаться с выделением мышью."""
     for token in (palette.DIFF_ADD_BG, palette.DIFF_DEL_BG):
-        assert _distance(token, palette.SCREEN_SELECTION_BACKGROUND) >= _DISTANCE_THRESHOLD
+        assert (
+            _distance(token, palette.SCREEN_SELECTION_BACKGROUND)
+            >= _DISTANCE_THRESHOLD
+        )
 
 
 def test_diff_intraline_accents_brighter_than_row_backgrounds():
     """Intraline-акцент рисуется поверх фона строки — должен заметно выделяться."""
-    assert _distance(palette.DIFF_ADD_HL, palette.DIFF_ADD_BG) >= _DISTANCE_THRESHOLD
-    assert _distance(palette.DIFF_DEL_HL, palette.DIFF_DEL_BG) >= _DISTANCE_THRESHOLD
+    assert (
+        _distance(palette.DIFF_ADD_HL, palette.DIFF_ADD_BG)
+        >= _DISTANCE_THRESHOLD
+    )
+    assert (
+        _distance(palette.DIFF_DEL_HL, palette.DIFF_DEL_BG)
+        >= _DISTANCE_THRESHOLD
+    )
 
 
 def test_diff_add_and_del_backgrounds_distinguishable():
     """Самая важная пара: фон добавленной строки не должен сливаться с фоном
     удалённой — иначе цветовая дифференциация диффа теряет смысл."""
-    assert _distance(palette.DIFF_ADD_BG, palette.DIFF_DEL_BG) >= _DISTANCE_THRESHOLD
+    assert (
+        _distance(palette.DIFF_ADD_BG, palette.DIFF_DEL_BG)
+        >= _DISTANCE_THRESHOLD
+    )
 
 
 def test_diff_row_backgrounds_distinguishable_from_base_bg():
@@ -74,7 +87,9 @@ def test_gutter_tokens_readable_on_block_background():
     номера не должны читаться на этом фоне хуже него."""
     baseline = _distance(palette.DIFF_GUTTER, palette.BLOCK_BG)
     for name in _GUTTER_BY_KIND:
-        assert _distance(getattr(palette, name), palette.BLOCK_BG) >= baseline, name
+        assert (
+            _distance(getattr(palette, name), palette.BLOCK_BG) >= baseline
+        ), name
 
 
 def test_gutter_tokens_are_the_semantic_ok_err():
@@ -94,18 +109,28 @@ def test_gutter_tokens_differ_from_muted_context():
     Метрика — дистанция, а не светимость: ERR темнее серого MUTED, но отличается
     от него тоном, и на экране это читается мгновенно."""
     for name in _GUTTER_BY_KIND:
-        assert _distance(getattr(palette, name),
-                         palette.DIFF_GUTTER) >= _DISTANCE_THRESHOLD, name
+        assert (
+            _distance(getattr(palette, name), palette.DIFF_GUTTER)
+            >= _DISTANCE_THRESHOLD
+        ), name
 
 
 def test_gutter_add_and_del_distinguishable():
     """Иначе тип строки не считывается по колонке — вся затея бессмысленна."""
-    assert _distance(palette.DIFF_ADD_GUTTER,
-                     palette.DIFF_DEL_GUTTER) >= _DISTANCE_THRESHOLD
+    assert (
+        _distance(palette.DIFF_ADD_GUTTER, palette.DIFF_DEL_GUTTER)
+        >= _DISTANCE_THRESHOLD
+    )
 
 
 def test_markers_readable_on_their_row_backgrounds():
     """Маркер `+`/`-` красится цветом гаттера своей строки, но лежит уже НА
     заливке — контраст проверяется против неё, а не против фона блока."""
-    assert _distance(palette.DIFF_ADD_GUTTER, palette.DIFF_ADD_BG) >= _DISTANCE_THRESHOLD
-    assert _distance(palette.DIFF_DEL_GUTTER, palette.DIFF_DEL_BG) >= _DISTANCE_THRESHOLD
+    assert (
+        _distance(palette.DIFF_ADD_GUTTER, palette.DIFF_ADD_BG)
+        >= _DISTANCE_THRESHOLD
+    )
+    assert (
+        _distance(palette.DIFF_DEL_GUTTER, palette.DIFF_DEL_BG)
+        >= _DISTANCE_THRESHOLD
+    )

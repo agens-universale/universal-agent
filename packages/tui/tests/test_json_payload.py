@@ -94,7 +94,9 @@ def test_payload_blocks_use_block_bg():
 
     console = Console()
     widget = render_payload({"content": "первая\nвторая", "ok": True})
-    children = list(getattr(widget, "_pending_children", []) or widget.children)
+    children = list(
+        getattr(widget, "_pending_children", []) or widget.children
+    )
     backgrounds = {
         text.get_style_at_offset(console, offset).bgcolor
         for text in (child.content for child in children)

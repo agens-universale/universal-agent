@@ -1,7 +1,13 @@
 """session_step: выбор ступени лестницы отсчёта — чистые правила, без git."""
+
 from __future__ import annotations
 
-from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD, SessionStep, session_step
+from gc_core.agent_edits.ladder import (
+    STEP_ACCEPTED,
+    STEP_HEAD,
+    SessionStep,
+    session_step,
+)
 from gc_core.agent_edits.snapshots import AcceptedState
 
 
@@ -38,29 +44,51 @@ class _Git:
 
 
 def test_no_steps_returns_none():
-    assert session_step("a.py", None, None, None, None,
-                        committed_since_snapshot=False) is None
+    assert (
+        session_step(None, None, None, None, committed_since_snapshot=False)
+        is None
+    )
 
 
 def test_accepted_only():
     acc = AcceptedState(content=b"acc", ts=5.0, head_oid="oid1")
-    step = session_step("a.py", None, acc, None, None, committed_since_snapshot=False)
-    assert step == SessionStep(kind=STEP_ACCEPTED, content=b"acc", ts=5.0, commit_ref=None)
+    step = session_step(None, acc, None, None, committed_since_snapshot=False)
+    assert step == SessionStep(
+        kind=STEP_ACCEPTED, content=b"acc", ts=5.0, commit_ref=None
+    )
 
 
 def test_head_only_requires_snapshot_and_no_filter():
     # без session_snapshot → None; с фильтром → None; head==snapshot → None
     git = _Git(head=b"new", oid="oid1")
-    assert session_step("a.py", "a.py", None, None, git,
-                        committed_since_snapshot=True) is None
+    assert (
+        session_step("a.py", None, None, git, committed_since_snapshot=True)
+        is None
+    )
 
     filtered_git = _Git(head=b"new", oid="oid1", filtered=True)
-    assert session_step("a.py", "a.py", None, b"orig", filtered_git,
-                        committed_since_snapshot=True) is None
+    assert (
+        session_step(
+            "a.py",
+            None,
+            b"orig",
+            filtered_git,
+            committed_since_snapshot=True,
+        )
+        is None
+    )
 
     unchanged_git = _Git(head=b"orig", oid="oid1")
-    assert session_step("a.py", "a.py", None, b"orig", unchanged_git,
-                        committed_since_snapshot=True) is None
+    assert (
+        session_step(
+            "a.py",
+            None,
+            b"orig",
+            unchanged_git,
+            committed_since_snapshot=True,
+        )
+        is None
+    )
 
 
 def test_rel_none_with_valid_git_returns_none():
@@ -70,8 +98,10 @@ def test_rel_none_with_valid_git_returns_none():
     # отличие от прочих тестов файла) — регрессия на гварде `rel is not None`
     # иначе прошла бы незамеченной
     git = _Git(head=b"new", oid="oid1")
-    assert session_step("a.py", None, None, b"orig", git,
-                        committed_since_snapshot=True) is None
+    assert (
+        session_step(None, None, b"orig", git, committed_since_snapshot=True)
+        is None
+    )
 
 
 def test_head_bytes_none_returns_none():
@@ -79,44 +109,66 @@ def test_head_bytes_none_returns_none():
     # SessionStep(kind=STEP_HEAD, content=None): None != session_snapshot тоже
     # True, поэтому гвард `head_bytes is not None` обязателен отдельно
     git = _Git(head=None, oid="oid1")
-    assert session_step("a.py", "a.py", None, b"orig", git,
-                        committed_since_snapshot=True) is None
+    assert (
+        session_step("a.py", None, b"orig", git, committed_since_snapshot=True)
+        is None
+    )
 
 
 def test_head_only_wins_when_no_accepted():
     git = _Git(head=b"new", oid="oid1", ref="e5f2c1a")
-    step = session_step("a.py", "a.py", None, b"orig", git,
-                        committed_since_snapshot=True)
-    assert step == SessionStep(kind=STEP_HEAD, content=b"new", ts=None, commit_ref="e5f2c1a")
+    step = session_step(
+        "a.py", None, b"orig", git, committed_since_snapshot=True
+    )
+    assert step == SessionStep(
+        kind=STEP_HEAD, content=b"new", ts=None, commit_ref="e5f2c1a"
+    )
 
 
 def test_both_head_younger_by_oid():
     acc = AcceptedState(content=b"acc", ts=1.0, head_oid="old")
-    step = session_step("a.py", "a.py", acc, b"orig", _Git(head=b"new", oid="new"),
-                        committed_since_snapshot=True)
+    step = session_step(
+        "a.py",
+        acc,
+        b"orig",
+        _Git(head=b"new", oid="new"),
+        committed_since_snapshot=True,
+    )
     assert step.kind == STEP_HEAD
 
 
 def test_both_accepted_wins_when_oid_matches():
     acc = AcceptedState(content=b"acc", ts=1.0, head_oid="same")
-    step = session_step("a.py", "a.py", acc, b"orig", _Git(head=b"new", oid="same"),
-                        committed_since_snapshot=True)
-    assert step == SessionStep(kind=STEP_ACCEPTED, content=b"acc", ts=1.0, commit_ref=None)
+    step = session_step(
+        "a.py",
+        acc,
+        b"orig",
+        _Git(head=b"new", oid="same"),
+        committed_since_snapshot=True,
+    )
+    assert step == SessionStep(
+        kind=STEP_ACCEPTED, content=b"acc", ts=1.0, commit_ref=None
+    )
 
 
-def test_both_unresolvable_oid_falls_to_head():   # accepted.head_oid=None → HEAD
+def test_both_unresolvable_oid_falls_to_head():  # accepted.head_oid=None → HEAD
     acc = AcceptedState(content=b"acc", ts=1.0, head_oid=None)
     git = _Git(head=b"new", oid="new", ref="deadbee")
-    step = session_step("a.py", "a.py", acc, b"orig", git,
-                        committed_since_snapshot=True)
-    assert step == SessionStep(kind=STEP_HEAD, content=b"new", ts=None, commit_ref="deadbee")
+    step = session_step(
+        "a.py", acc, b"orig", git, committed_since_snapshot=True
+    )
+    assert step == SessionStep(
+        kind=STEP_HEAD, content=b"new", ts=None, commit_ref="deadbee"
+    )
 
 
 def test_accepted_absent_marker_flows_through():
     # принято «отсутствие» → SessionStep(content=None)
     acc = AcceptedState(content=None, ts=2.0, head_oid=None)
-    step = session_step("a.py", None, acc, None, None, committed_since_snapshot=False)
-    assert step == SessionStep(kind=STEP_ACCEPTED, content=None, ts=2.0, commit_ref=None)
+    step = session_step(None, acc, None, None, committed_since_snapshot=False)
+    assert step == SessionStep(
+        kind=STEP_ACCEPTED, content=None, ts=2.0, commit_ref=None
+    )
 
 
 def test_head_step_requires_recorded_commit_flag_not_content_difference():
@@ -130,13 +182,29 @@ def test_head_step_requires_recorded_commit_flag_not_content_difference():
     """
     git = _Git(head=b"committed", oid="oid1", ref="e5f2c1a")
 
-    assert session_step("a.py", "a.py", None, b"dirty-before-session", git,
-                        committed_since_snapshot=False) is None
+    assert (
+        session_step(
+            "a.py",
+            None,
+            b"dirty-before-session",
+            git,
+            committed_since_snapshot=False,
+        )
+        is None
+    )
 
-    step = session_step("a.py", "a.py", None, b"dirty-before-session", git,
-                        committed_since_snapshot=True)
+    step = session_step(
+        "a.py",
+        None,
+        b"dirty-before-session",
+        git,
+        committed_since_snapshot=True,
+    )
     assert step == SessionStep(
-        kind=STEP_HEAD, content=b"committed", ts=None, commit_ref="e5f2c1a",
+        kind=STEP_HEAD,
+        content=b"committed",
+        ts=None,
+        commit_ref="e5f2c1a",
     )
 
 
@@ -149,11 +217,15 @@ def test_empty_snapshot_of_a_created_file_still_gives_a_head_step():
     """
     git = _Git(head=b"committed", oid="oid1", ref="e5f2c1a")
 
-    step = session_step("new.py", "new.py", None, b"", git,
-                        committed_since_snapshot=True)
+    step = session_step(
+        "new.py", None, b"", git, committed_since_snapshot=True
+    )
 
     assert step == SessionStep(
-        kind=STEP_HEAD, content=b"committed", ts=None, commit_ref="e5f2c1a",
+        kind=STEP_HEAD,
+        content=b"committed",
+        ts=None,
+        commit_ref="e5f2c1a",
     )
 
 
@@ -163,10 +235,13 @@ def test_accepted_survives_without_commit_flag():
     acc = AcceptedState(content=b"acc", ts=5.0, head_oid=None)
     git = _Git(head=b"committed", oid="oid1", ref="e5f2c1a")
 
-    step = session_step("a.py", "a.py", acc, b"orig", git,
-                        committed_since_snapshot=False)
+    step = session_step(
+        "a.py", acc, b"orig", git, committed_since_snapshot=False
+    )
 
-    assert step == SessionStep(kind=STEP_ACCEPTED, content=b"acc", ts=5.0, commit_ref=None)
+    assert step == SessionStep(
+        kind=STEP_ACCEPTED, content=b"acc", ts=5.0, commit_ref=None
+    )
 
 
 def test_a_committed_deletion_is_a_head_step_of_absence():
@@ -178,21 +253,35 @@ def test_a_committed_deletion_is_a_head_step_of_absence():
     «байтов нет» бывает и отказом git, и ступень «удалить» по нему удалила бы
     файл пользователя."""
     git = _Git(head=None, absent=True, ref="d1e2l3")
-    step = session_step("a.py", "a.py", None, b"orig", git, committed_since_snapshot=True)
-    assert step == SessionStep(kind=STEP_HEAD, content=None, ts=None, commit_ref="d1e2l3")
+    step = session_step(
+        "a.py", None, b"orig", git, committed_since_snapshot=True
+    )
+    assert step == SessionStep(
+        kind=STEP_HEAD, content=None, ts=None, commit_ref="d1e2l3"
+    )
 
 
 def test_accepted_after_the_committed_deletion_wins():
     """Принятие при уже удалённом в HEAD пути (oid принятия пуст) — моложе коммита."""
     acc = AcceptedState(content=b"acc", ts=5.0, head_oid=None)
-    step = session_step("a.py", "a.py", acc, b"orig", _Git(head=None, absent=True),
-                        committed_since_snapshot=True)
+    step = session_step(
+        "a.py",
+        acc,
+        b"orig",
+        _Git(head=None, absent=True),
+        committed_since_snapshot=True,
+    )
     assert step.kind == STEP_ACCEPTED
 
 
 def test_deletion_committed_after_the_accept_wins():
     """Принятие при пути, ещё бывшем в HEAD, — коммит удаления моложе принятия."""
     acc = AcceptedState(content=b"acc", ts=5.0, head_oid="was-there")
-    step = session_step("a.py", "a.py", acc, b"orig", _Git(head=None, absent=True),
-                        committed_since_snapshot=True)
+    step = session_step(
+        "a.py",
+        acc,
+        b"orig",
+        _Git(head=None, absent=True),
+        committed_since_snapshot=True,
+    )
     assert step.kind == STEP_HEAD and step.content is None

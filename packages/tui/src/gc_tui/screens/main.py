@@ -363,15 +363,21 @@ class TraceScreen(Screen):
         self._active_calls: dict[str, ToolCallRow] = {}
         # Nested progress под subagent_*: live sink + reopen из data_subagents_*.
         self._subagent_progress = SubagentProgressConsumer()
-        self._nested_tool_rows: dict[str, ToolCallRow] = {}  # child tool_call_id → row
-        self._nested_widgets_by_parent: dict[str, list] = {}  # parent_call_id → widgets
-        self._nested_anchor: dict[str, Widget] = {}  # parent_call_id → last mounted nested
+        self._nested_tool_rows: dict[
+            str, ToolCallRow
+        ] = {}  # child tool_call_id → row
+        self._nested_widgets_by_parent: dict[
+            str, list
+        ] = {}  # parent_call_id → widgets
+        self._nested_anchor: dict[
+            str, Widget
+        ] = {}  # parent_call_id → last mounted nested
         # Durable parent rows for subagent_* (survive pop from _active_calls on result).
         self._subagent_parent_rows: dict[str, ToolCallRow] = {}
         self._reasoning_clock = ReasoningClock()
         # Журнал правок текущего треда для инлайн-диффов: один EditsLookup на
         # тред (внутри — кэш индекса), пересоздаётся при смене идентичности.
-        self._edits_lookup = None            # Optional[EditsLookup]
+        self._edits_lookup = None  # Optional[EditsLookup]
         self._edits_lookup_key: Optional[tuple] = None
         self._submit_solution_call_ids: set[str] = set()
         # Track submit_solution agent-line widgets, чтобы при повторе свернуть предыдущие.
@@ -594,7 +600,9 @@ class TraceScreen(Screen):
         насквозь и приводит к контейнеру #trace: клик по инлайн-диффу утаскивал
         фокус туда и сбивал позицию Tab. Правило — в `click_model`, здесь только
         подключение."""
-        return focus_target_at(self, x, y, super().get_focusable_widget_at(x, y))
+        return focus_target_at(
+            self, x, y, super().get_focusable_widget_at(x, y)
+        )
 
     def action_paste_to_input(self) -> None:
         """Ctrl+V → всегда в #cmdinput, даже если фокус ушёл в трейс (клик/Tab
@@ -2767,7 +2775,9 @@ class TraceScreen(Screen):
             mount_nested_todo=self._mount_nested_todo,
         )
 
-    def _nested_mount_after(self, parent_call_id: str, widget, after=None) -> None:
+    def _nested_mount_after(
+        self, parent_call_id: str, widget, after=None
+    ) -> None:
         """Смонтировать nested-виджет сразу после parent или последнего nested.
 
         `after` — явный якорь (строка своего тула): дифф правки встаёт под ней,
@@ -2788,7 +2798,9 @@ class TraceScreen(Screen):
             trace.mount(widget)
         if anchor is tail:
             self._nested_anchor[parent_call_id] = widget
-        self._nested_widgets_by_parent.setdefault(parent_call_id, []).append(widget)
+        self._nested_widgets_by_parent.setdefault(parent_call_id, []).append(
+            widget
+        )
 
     def _mount_nested_tool(
         self,
@@ -3011,8 +3023,9 @@ class TraceScreen(Screen):
             parent_row.resume()
         self._unmount_ask_human_banner()
 
-    
-    def _diff_thread_identity(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    def _diff_thread_identity(
+        self,
+    ) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """(threads_dir, system_id, thread_id) текущей сессии — для журнала правок."""
         threads_dir = getattr(self.app, "_threads_dir", None)
         system_id = getattr(self.app, "_system", None)
@@ -3040,6 +3053,7 @@ class TraceScreen(Screen):
         if not all(identity):
             return None
         from gc_tui.services.edits_view import diff_limits
+
         cfg = getattr(self.app, "_config", None) or {}
         launch_root = cfg.get("launch_root")
         launch_root = str(launch_root) if launch_root else None
@@ -3047,6 +3061,7 @@ class TraceScreen(Screen):
         key = (*identity, launch_root, max_source_bytes, hunk_context_lines)
         if self._edits_lookup_key != key:
             from gc_tui.services.edits_lookup import EditsLookup
+
             self._edits_lookup = EditsLookup(
                 *identity,
                 launch_root=launch_root,
@@ -3070,8 +3085,9 @@ class TraceScreen(Screen):
 
     def _trace_inline_max_lines(self) -> int:
         """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
-        return self._agent_edits_limit("trace_inline_max_lines",
-                                    DEFAULT_TRACE_INLINE_MAX_LINES)
+        return self._agent_edits_limit(
+            "trace_inline_max_lines", DEFAULT_TRACE_INLINE_MAX_LINES
+        )
 
     def _replay_expanded_turns(self) -> int:
         """Сколько последних ходов показывают дифф телом — `agent_edits.replay_expanded_turns`.
@@ -3081,18 +3097,24 @@ class TraceScreen(Screen):
         (отрицательное, `true`, строка) клампится общим правилом."""
         cfg = getattr(self.app, "_config", None) or {}
         section = cfg.get("agent_edits") or {}
-        raw = section.get("replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS)
+        raw = section.get(
+            "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
+        )
         if isinstance(raw, int) and not isinstance(raw, bool) and raw == 0:
             return -1
-        return self._agent_edits_limit("replay_expanded_turns",
-                                    DEFAULT_REPLAY_EXPANDED_TURNS)
+        return self._agent_edits_limit(
+            "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
+        )
 
     def _turn_summary_in_status(self) -> bool:
         """Показывать ли сводку правок в строке-итоге — `agent_edits.turn_summary_in_status`."""
         cfg = getattr(self.app, "_config", None) or {}
         section = cfg.get("agent_edits") or {}
-        return bool(section.get("turn_summary_in_status",
-                                DEFAULT_TURN_SUMMARY_IN_STATUS))
+        return bool(
+            section.get(
+                "turn_summary_in_status", DEFAULT_TURN_SUMMARY_IN_STATUS
+            )
+        )
 
     def _capture_edits_baseline(self) -> None:
         """Запомнить последний ход журнала правок ПЕРЕД началом нового.
@@ -3185,8 +3207,10 @@ class TraceScreen(Screen):
         if record is None:
             return None
         from gc_tui.widgets.diff_block import DiffBlock
+
         return DiffBlock.for_record(
-            record, event_no=event_no,
+            record,
+            event_no=event_no,
             collapsed_max_lines=self._trace_inline_max_lines(),
             compact=self._is_stale_edit_turn(lookup, record.turn_id),
         )
@@ -3820,9 +3844,14 @@ class TraceScreen(Screen):
                 _elapsed = int(time.monotonic() - self._thinking_started_at)
             self._store.update_tui_meta(
                 self._active_task_id,
-                {"status": _STATUS[outcome],
-                 "last_indicator": {"kind": _KIND[outcome], "elapsed": _elapsed,
-                                    "edits": list(_turn_edits) if _turn_edits else None}},
+                {
+                    "status": _STATUS[outcome],
+                    "last_indicator": {
+                        "kind": _KIND[outcome],
+                        "elapsed": _elapsed,
+                        "edits": list(_turn_edits) if _turn_edits else None,
+                    },
+                },
             )
             self.app.last_stop_requested = False
             self._update_terminal_title()
@@ -5545,6 +5574,7 @@ class TraceScreen(Screen):
         """Экран изменений. `source` задан — открыть сразу в нём (клик по сводке)."""
         from gc_tui.screens.diff import DiffScreen
         from gc_tui.services.edits_view import SOURCE_SESSION
+
         cfg = self.app.screen_config()
         launch_root = cfg.get("launch_root")
         if not launch_root:
@@ -6577,10 +6607,13 @@ class TraceScreen(Screen):
                     "нет args/output для этого nested-тула", seconds=3.0
                 )
             return
-        self.app.push_screen(ToolCallDetailScreen(
-            call_event=call_ev, result_event=result_ev,
-            edit_record=self._edit_record_for_call(message.call_id),
-        ))
+        self.app.push_screen(
+            ToolCallDetailScreen(
+                call_event=call_ev,
+                result_event=result_ev,
+                edit_record=self._edit_record_for_call(message.call_id),
+            )
+        )
 
     def _edit_record_for_call(self, call_id: str):
         """Запись журнала правок по call_id — карточке для рендера диффа.
@@ -6593,7 +6626,9 @@ class TraceScreen(Screen):
             lookup = self._edits_lookup_for_thread()
             return None if lookup is None else lookup.by_call_id(call_id)
         except Exception as exc:
-            self.log.warning(f"запись правки для карточки не прочитана: {exc!r}")
+            self.log.warning(
+                f"запись правки для карточки не прочитана: {exc!r}"
+            )
             return None
 
     def _resolve_nested_detail_events(self, call_id: str):

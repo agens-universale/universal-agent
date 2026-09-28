@@ -3,6 +3,7 @@
 Эксклюзивная блокировка через отдельный lock-файл ``<path>.lock`` рядом
 с целевым файлом: ``fcntl.flock`` на POSIX, ``msvcrt.locking`` на Windows.
 """
+
 import contextlib
 import sys
 import time
@@ -20,19 +21,18 @@ _POLL_INTERVAL = 0.05
 def file_lock(path, timeout: float = 5.0):
     lock_path = Path(str(path) + ".lock")
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    fh = open(lock_path, "a+b")
-    try:
+    with open(lock_path, "a+b") as fh:
         deadline = time.monotonic() + timeout
         while not _try_lock(fh):
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"Не удалось захватить лок за {timeout}с: {lock_path}")
+                raise TimeoutError(
+                    f"Не удалось захватить лок за {timeout}с: {lock_path}"
+                )
             time.sleep(_POLL_INTERVAL)
         try:
             yield
         finally:
             _unlock(fh)
-    finally:
-        fh.close()
 
 
 def _try_lock(fh) -> bool:

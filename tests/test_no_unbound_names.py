@@ -11,6 +11,7 @@
 связывание молчит, а вот прочитать несвязанное имя невозможно ни при каком
 порядке исполнения.
 """
+
 from __future__ import annotations
 
 import ast
@@ -36,9 +37,13 @@ def _bound_names(tree: ast.AST) -> set[str]:
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             for alias in node.names:
                 names.add((alias.asname or alias.name).split(".")[0])
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        elif isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+        ):
             names.add(node.name)
-        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        elif isinstance(node, ast.Name) and isinstance(
+            node.ctx, (ast.Store, ast.Del)
+        ):
             names.add(node.id)
         elif isinstance(node, ast.arg):
             names.add(node.arg)
@@ -47,9 +52,9 @@ def _bound_names(tree: ast.AST) -> set[str]:
         elif isinstance(node, (ast.Global, ast.Nonlocal)):
             names.update(node.names)
         elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
-            names.add(node.name)          # `case X as y` / `case [*rest]`
+            names.add(node.name)  # `case X as y` / `case [*rest]`
         elif isinstance(node, ast.MatchMapping) and node.rest:
-            names.add(node.rest)          # `case {..., **rest}`
+            names.add(node.rest)  # `case {..., **rest}`
     return names
 
 
@@ -71,11 +76,14 @@ def test_no_source_module_reads_an_unbound_name():
         # `from x import *` приносит имена, которых в дереве не видно — такой
         # модуль этой проверке не по зубам, и врать о нём мы не станем.
         if any(
-            isinstance(n, ast.ImportFrom) and any(a.name == "*" for a in n.names)
+            isinstance(n, ast.ImportFrom)
+            and any(a.name == "*" for a in n.names)
             for n in ast.walk(tree)
         ):
             continue
-        missing = sorted(_read_names(tree) - _bound_names(tree) - _ALWAYS_BOUND)
+        missing = sorted(
+            _read_names(tree) - _bound_names(tree) - _ALWAYS_BOUND
+        )
         if missing:
             offenders[str(path.relative_to(REPO))] = missing
     assert offenders == {}

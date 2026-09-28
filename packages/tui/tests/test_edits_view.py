@@ -4,6 +4,7 @@
 временном репозитории: подменять слой, ради которого сервис и существует,
 смысла нет.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,12 +43,29 @@ from gc_tui.services.edits_view import (
 
 
 def _rec(
-    path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1,
-    ts=1.0, hunks="", flags=None, before_sha256=None, after_sha256=None,
+    path="a.py",
+    turn="t1",
+    call_id="c1",
+    op="edit",
+    add=1,
+    del_=1,
+    ts=1.0,
+    hunks="",
+    flags=None,
+    before_sha256=None,
+    after_sha256=None,
 ):
     return EditRecord(
-        path=path, turn_id=turn, ts=ts, call_id=call_id, op=op, hunks=hunks,
-        add=add, del_=del_, before_sha256=before_sha256, after_sha256=after_sha256,
+        path=path,
+        turn_id=turn,
+        ts=ts,
+        call_id=call_id,
+        op=op,
+        hunks=hunks,
+        add=add,
+        del_=del_,
+        before_sha256=before_sha256,
+        after_sha256=after_sha256,
         flags=list(flags or []),
     )
 
@@ -86,7 +104,9 @@ class _Workspace:
         формата — для этого есть ``session_base_without_head_rev``.
         """
         self.store.capture_session(
-            rel, text.encode("utf-8"), head_rev=git_ops.head_rev_from_files(str(self.root)),
+            rel,
+            text.encode("utf-8"),
+            head_rev=git_ops.head_rev_from_files(str(self.root)),
         )
 
     def session_base_without_head_rev(self, rel: str, text: str) -> None:
@@ -99,7 +119,8 @@ class _Workspace:
         («пустая база не хранится»), и ревизию ступени HEAD несёт только она.
         """
         self.store.mark_created(
-            rel, head_rev=git_ops.head_rev_from_files(str(self.root)),
+            rel,
+            head_rev=git_ops.head_rev_from_files(str(self.root)),
         )
 
     def turn_base(self, rel: str, text: str, turn: str = "t1") -> None:
@@ -125,7 +146,9 @@ def _git_init(root: Path) -> None:
         ("config", "user.name", "test"),
         ("config", "core.autocrlf", "false"),
     ):
-        subprocess.run(["git", *args], cwd=str(root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", *args], cwd=str(root), check=True, capture_output=True
+        )
 
 
 # --- источники --------------------------------------------------------------
@@ -135,16 +158,21 @@ def test_session_source_lists_all_files_with_cumulative_counters(tmp_path):
     """Кумулятив: база сессии против диска, а не сумма записей журнала."""
     ws = _Workspace(tmp_path)
     ws.session_base("a.py", "a\nb\nc\n")
-    ws.write("a.py", "a\nB\nc\nd\n")               # +2 −1 от базы
-    ws.write("new.py", "one\ntwo\nthree\n")        # создан в наборе: +3
+    ws.write("a.py", "a\nB\nc\nd\n")  # +2 −1 от базы
+    ws.write("new.py", "one\ntwo\nthree\n")  # создан в наборе: +3
     ws.journal.append(_rec("a.py", turn="t1", ts=1.0, add=1, del_=1))
     ws.journal.append(_rec("a.py", turn="t2", ts=2.0, add=1, del_=0))
-    ws.journal.append(_rec("new.py", turn="t2", ts=3.0, op="create", add=3, del_=0))
+    ws.journal.append(
+        _rec("new.py", turn="t2", ts=3.0, op="create", add=3, del_=0)
+    )
 
     view = ws.view.session_view(SOURCE_SESSION)
 
     assert view.source == SOURCE_SESSION and view.turn_id is None
-    assert [row.entry.path for row in view.active] == ["new.py", "a.py"]   # по последней правке
+    assert [row.entry.path for row in view.active] == [
+        "new.py",
+        "a.py",
+    ]  # по последней правке
     assert (view.total_add, view.total_del) == (5, 1)
     a_entry = view.active[1].entry
     assert (a_entry.add, a_entry.del_, a_entry.exact) == (2, 1, True)
@@ -222,15 +250,16 @@ def test_turn_source_counts_shell_edit_via_counting_base(tmp_path):
     ws = _Workspace(tmp_path)
     ws.shell_turn_base("a.py", "a\nb\nc\n", "t1")
     ws.write("a.py", "a\nB\nc\n")
-    ws.journal.append(_rec("a.py", turn="t1", call_id=None, op="shell",
-                           add=9, del_=9))
+    ws.journal.append(
+        _rec("a.py", turn="t1", call_id=None, op="shell", add=9, del_=9)
+    )
 
     [row] = ws.view.session_view(SOURCE_TURN).active
     entry = row.entry
 
     assert (entry.exact, entry.add, entry.del_) == (True, 1, 1)
     assert entry.by_shell is True
-    assert entry.revertable is False        # счётная база откату не годится
+    assert entry.revertable is False  # счётная база откату не годится
 
 
 # --- тело диффа -------------------------------------------------------------
@@ -254,10 +283,24 @@ def test_file_diff_full_shows_whole_file(tmp_path):
 def test_file_diff_falls_back_to_journal_hunks_when_base_missing(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\nb\n")
-    ws.journal.append(_rec("a.py", ts=1.0, call_id=None, op="shell",
-                           hunks="@@ -1 +1 @@\n-a\n+A\n"))
-    ws.journal.append(_rec("a.py", ts=2.0, call_id=None, op="shell",
-                           hunks="@@ -2 +2 @@\n-b\n+B\n"))
+    ws.journal.append(
+        _rec(
+            "a.py",
+            ts=1.0,
+            call_id=None,
+            op="shell",
+            hunks="@@ -1 +1 @@\n-a\n+A\n",
+        )
+    )
+    ws.journal.append(
+        _rec(
+            "a.py",
+            ts=2.0,
+            call_id=None,
+            op="shell",
+            hunks="@@ -2 +2 @@\n-b\n+B\n",
+        )
+    )
 
     hunks, exact = ws.view.file_diff(SOURCE_TURN, "a.py")
 
@@ -273,7 +316,7 @@ def test_file_diff_of_created_file_never_uses_stale_snapshot(tmp_path):
     """
     ws = _Workspace(tmp_path)
     ws.write("new.py", "one\ntwo\n")
-    ws.session_base("new.py", "one\n")            # снимок «после первой правки»
+    ws.session_base("new.py", "one\n")  # снимок «после первой правки»
     ws.journal.append(_rec("new.py", ts=1.0, op="create", add=1, del_=0))
     ws.journal.append(_rec("new.py", ts=2.0, call_id="c2", add=1, del_=0))
 
@@ -283,7 +326,9 @@ def test_file_diff_of_created_file_never_uses_stale_snapshot(tmp_path):
     assert "+one\n" in hunks and "+two\n" in hunks
 
 
-def test_file_diff_of_created_then_accepted_file_uses_step_not_whole_file(tmp_path):
+def test_file_diff_of_created_then_accepted_file_uses_step_not_whole_file(
+    tmp_path,
+):
     """Создан -> принят (+40) -> дописан (+10): тело диффа — дельта от
     принятого (10 добавленных строк), а не весь файл (50) целиком.
 
@@ -303,11 +348,13 @@ def test_file_diff_of_created_then_accepted_file_uses_step_not_whole_file(tmp_pa
     hunks, exact = ws.view.file_diff(SOURCE_SESSION, "a.py")
 
     assert exact is True
-    assert "line0\n" not in hunks             # принятые 40 строк — не в дельте
+    assert "line0\n" not in hunks  # принятые 40 строк — не в дельте
     assert "+extra0\n" in hunks and "+extra9\n" in hunks
 
 
-def test_file_diff_of_settled_path_is_session_cumulative_not_record_sum(tmp_path):
+def test_file_diff_of_settled_path_is_session_cumulative_not_record_sum(
+    tmp_path,
+):
     """Enter на строке группы показывает КУМУЛЯТИВ СЕССИИ (§12/Р31), а не сумму
     записей журнала — и не помечает тело неточным при живом `.orig`.
 
@@ -319,18 +366,26 @@ def test_file_diff_of_settled_path_is_session_cumulative_not_record_sum(tmp_path
     ws.write("a.py", "a\nb\n")
     ws.journal.append(_rec("a.py", ts=1.0, hunks="@@ ЛИШНЕЕ-1 @@\n+b\n"))
     ws.write("a.py", "a\nb\nc\n")
-    ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", hunks="@@ ЛИШНЕЕ-2 @@\n+c\n"))
+    ws.journal.append(
+        _rec("a.py", ts=2.0, call_id="c2", hunks="@@ ЛИШНЕЕ-2 @@\n+c\n")
+    )
     ws.write("a.py", "a\nb\n")
-    ws.journal.append(_rec("a.py", ts=3.0, call_id="c3", hunks="@@ ЛИШНЕЕ-3 @@\n-c\n"))
-    ws.view.accept(["a.py"])                 # принят и чист → уходит в группу
+    ws.journal.append(
+        _rec("a.py", ts=3.0, call_id="c3", hunks="@@ ЛИШНЕЕ-3 @@\n-c\n")
+    )
+    ws.view.accept(["a.py"])  # принят и чист → уходит в группу
 
-    assert [row.path for row in ws.view.session_view(SOURCE_SESSION).settled] == ["a.py"]
+    assert [
+        row.path for row in ws.view.session_view(SOURCE_SESSION).settled
+    ] == ["a.py"]
 
     hunks, exact = ws.view.file_diff(SOURCE_SESSION, "a.py")
 
     assert exact is True
-    assert "ЛИШНЕЕ" not in hunks                        # не склейка записей журнала
-    assert "+b\n" in hunks and "+c\n" not in hunks      # ровно разница «до → сейчас»
+    assert "ЛИШНЕЕ" not in hunks  # не склейка записей журнала
+    assert (
+        "+b\n" in hunks and "+c\n" not in hunks
+    )  # ровно разница «до → сейчас»
 
 
 def test_file_diff_of_settled_created_file_shows_the_whole_file(tmp_path):
@@ -339,7 +394,7 @@ def test_file_diff_of_settled_created_file_shows_the_whole_file(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("new.py", "one\n")
     ws.journal.append(_rec("new.py", ts=1.0, op="create"))
-    ws.session_base("new.py", "one\n")        # снимок появился со ВТОРОЙ правки
+    ws.session_base("new.py", "one\n")  # снимок появился со ВТОРОЙ правки
     ws.write("new.py", "one\ntwo\n")
     ws.journal.append(_rec("new.py", ts=2.0, call_id="c2"))
     ws.view.accept(["new.py"])
@@ -364,24 +419,44 @@ def test_file_diff_of_settled_path_without_any_base_stays_journal(tmp_path):
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "line1\nline2\nline3\nline4\nline5\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "line1\nline2\nline3\nline4\nline5\n")
     for snap in snapshots_root(str(ws.root)).glob("*.orig"):
-        snap.unlink()                                    # снимки вычищены, отметка жива
+        snap.unlink()  # снимки вычищены, отметка жива
     ws.write("a.py", "line1\nline2\nline3x\nline4\nline5\n")
-    ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=1, hunks="@@ из журнала @@\n+line3\n"))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "коммит внутри сессии"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+    ws.journal.append(
+        _rec("a.py", ts=1.0, add=1, del_=1, hunks="@@ из журнала @@\n+line3\n")
+    )
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "коммит внутри сессии"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.view.invalidate()
-    assert list(snapshots_root(str(ws.root)).glob("*.orig")) == []   # снимков нет
+    assert (
+        list(snapshots_root(str(ws.root)).glob("*.orig")) == []
+    )  # снимков нет
 
     [row] = ws.view.session_view(SOURCE_SESSION).settled
-    assert (row.add, row.del_, row.exact) == (1, 1, False)   # числа из журнала
+    assert (row.add, row.del_, row.exact) == (1, 1, False)  # числа из журнала
 
     hunks, exact = ws.view.file_diff(SOURCE_SESSION, "a.py")
 
@@ -397,10 +472,22 @@ def test_file_diff_of_accepted_path_the_recorder_never_snapshotted(tmp_path):
     """
     ws = _Workspace(tmp_path)
     ws.write("a.py", "line1\nline2\nline3\nline4\nline5\n")
-    ws.journal.append(_rec("a.py", ts=1.0, call_id=None, op="shell", add=1, del_=1,
-                           hunks="@@ из журнала @@\n+line3\n", flags=["partial"]))
+    ws.journal.append(
+        _rec(
+            "a.py",
+            ts=1.0,
+            call_id=None,
+            op="shell",
+            add=1,
+            del_=1,
+            hunks="@@ из журнала @@\n+line3\n",
+            flags=["partial"],
+        )
+    )
     ws.view.accept(["a.py"])
-    assert ws.store.counting_session_baseline("a.py") is None    # базы нет ни одной породы
+    assert (
+        ws.store.counting_session_baseline("a.py") is None
+    )  # базы нет ни одной породы
 
     [row] = ws.view.session_view(SOURCE_SESSION).settled
     assert (row.add, row.del_, row.exact) == (1, 1, False)
@@ -418,7 +505,9 @@ def test_file_diff_of_settled_uncountable_path_falls_back_to_journal(tmp_path):
     ws.write("a.py", "ab\n")
     ws.journal.append(_rec("a.py", ts=1.0, hunks="@@ из журнала @@\n+ab\n"))
     ws.view.accept(["a.py"])
-    ws.write("a.py", "".join(f"line{i}\n" for i in range(20)))   # диск сверх капа
+    ws.write(
+        "a.py", "".join(f"line{i}\n" for i in range(20))
+    )  # диск сверх капа
 
     hunks, exact = ws.view.file_diff(SOURCE_SESSION, "a.py")
 
@@ -454,7 +543,10 @@ def test_revert_delta_counts_from_precise_baseline_not_counting_base(tmp_path):
     ws.journal.append(_rec("a.py", call_id=None, op="shell", ts=1.0))
     ws.journal.append(_rec("a.py", ts=2.0))
 
-    assert ws.view.file_diff(SOURCE_SESSION, "a.py") == ("", True)   # счётная база
+    assert ws.view.file_diff(SOURCE_SESSION, "a.py") == (
+        "",
+        True,
+    )  # счётная база
 
     delta = ws.view.revert_delta(SOURCE_SESSION, "a.py")
 
@@ -472,7 +564,7 @@ def test_revert_delta_of_created_file_is_the_whole_file(tmp_path):
     """
     ws = _Workspace(tmp_path)
     ws.write("new.py", "one\ntwo\n")
-    ws.session_base("new.py", "one\n")            # снимок после первой правки
+    ws.session_base("new.py", "one\n")  # снимок после первой правки
     ws.journal.append(_rec("new.py", op="create", ts=1.0, add=1, del_=0))
     ws.journal.append(_rec("new.py", ts=2.0, add=1, del_=0))
 
@@ -482,7 +574,9 @@ def test_revert_delta_of_created_file_is_the_whole_file(tmp_path):
     assert "+one" in delta.hunks and "+two" in delta.hunks
 
 
-def test_revert_delta_of_created_then_accepted_file_uses_step_not_whole_file(tmp_path):
+def test_revert_delta_of_created_then_accepted_file_uses_step_not_whole_file(
+    tmp_path,
+):
     """Тот же сценарий для превью отката: числа и хэнки — дельта от принятого
     (10/0), а не весь файл (50/0) — иначе подтверждение отката лжёт о
     масштабе перед разрушающим действием, хотя сам `revert()` уже писал
@@ -563,7 +657,9 @@ def test_revert_uses_precise_baseline_not_counting_base(tmp_path):
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
     assert row.entry.revertable is True
-    assert ws.store.counting_session_baseline("a.py") == "ИНДЕКС\n".encode("utf-8")
+    assert ws.store.counting_session_baseline("a.py") == "ИНДЕКС\n".encode(
+        "utf-8"
+    )
 
     outcome = ws.view.revert(SOURCE_SESSION, ["a.py"])
 
@@ -573,7 +669,9 @@ def test_revert_uses_precise_baseline_not_counting_base(tmp_path):
     assert "ИНДЕКС" not in text
 
 
-def test_revert_in_turn_source_uses_precise_baseline_not_counting_base(tmp_path):
+def test_revert_in_turn_source_uses_precise_baseline_not_counting_base(
+    tmp_path,
+):
     """Зеркало стража для «Хода»: у источника своя пара баз, и своя опасность.
 
     Форма та же — `.gitturn` с маркером «ИНДЕКС» записан РАНЬШЕ точного
@@ -593,7 +691,9 @@ def test_revert_in_turn_source_uses_precise_baseline_not_counting_base(tmp_path)
 
     [row] = ws.view.session_view(SOURCE_TURN).active
     assert row.entry.revertable is True
-    assert ws.store.counting_turn_baseline("a.py", "t1") == "ИНДЕКС\n".encode("utf-8")
+    assert ws.store.counting_turn_baseline("a.py", "t1") == "ИНДЕКС\n".encode(
+        "utf-8"
+    )
 
     outcome = ws.view.revert(SOURCE_TURN, ["a.py"])
 
@@ -670,7 +770,7 @@ def test_cache_hit_spawns_no_git_subprocess(tmp_path, monkeypatch):
     ws.session_base("a.py", "a\n")
     ws.write("a.py", "a\nb\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    ws.view.session_view(SOURCE_SESSION)          # первый вызов строит вид
+    ws.view.session_view(SOURCE_SESSION)  # первый вызов строит вид
 
     spawned = []
     real = git_ops.run_git
@@ -709,14 +809,15 @@ def test_view_cache_invalidated_by_journal_append(tmp_path, monkeypatch):
     ws.journal.append(_rec("b.py", ts=2.0, call_id="c2", op="create"))
 
     assert ws.view.session_view(SOURCE_SESSION).total_add == 2
-    assert len(calls) == 3          # пересчитаны оба пути
+    assert len(calls) == 3  # пересчитаны оба пути
 
 
 def test_invalidate_forces_recompute(tmp_path, monkeypatch):
     calls = []
     real = deltas.delta_vs_disk
     monkeypatch.setattr(
-        deltas, "delta_vs_disk",
+        deltas,
+        "delta_vs_disk",
         lambda *a, **k: (calls.append(1), real(*a, **k))[1],
     )
 
@@ -742,7 +843,9 @@ def test_limits_come_from_config_not_defaults(tmp_path):
     default_ws.write("a.py", after)
     default_ws.journal.append(_rec("a.py"))
 
-    tight_ws = _Workspace(tmp_path / "t", {"agent_edits": {"hunk_context_lines": 0}})
+    tight_ws = _Workspace(
+        tmp_path / "t", {"agent_edits": {"hunk_context_lines": 0}}
+    )
     tight_ws.session_base("a.py", before)
     tight_ws.write("a.py", after)
     tight_ws.journal.append(_rec("a.py"))
@@ -751,7 +854,9 @@ def test_limits_come_from_config_not_defaults(tmp_path):
     tight_hunks, _ = tight_ws.view.file_diff(SOURCE_SESSION, "a.py")
 
     assert " line3\n" in default_hunks
-    assert [line for line in tight_hunks.splitlines() if line.startswith(" ")] == []
+    assert [
+        line for line in tight_hunks.splitlines() if line.startswith(" ")
+    ] == []
 
 
 def test_source_bytes_cap_comes_from_config(tmp_path):
@@ -764,7 +869,7 @@ def test_source_bytes_cap_comes_from_config(tmp_path):
     entry = row.entry
 
     assert entry.countable is False
-    assert (entry.add, entry.del_) == (1, 1)      # счётчики из журнала
+    assert (entry.add, entry.del_) == (1, 1)  # счётчики из журнала
 
 
 def test_diff_limits_ignore_broken_config_values(tmp_path):
@@ -773,17 +878,19 @@ def test_diff_limits_ignore_broken_config_values(tmp_path):
         DEFAULT_MAX_DIFF_SOURCE_BYTES,
     )
 
-    assert diff_limits({}) == (DEFAULT_MAX_DIFF_SOURCE_BYTES,
-                               DEFAULT_HUNK_CONTEXT_LINES)
+    assert diff_limits({}) == (
+        DEFAULT_MAX_DIFF_SOURCE_BYTES,
+        DEFAULT_HUNK_CONTEXT_LINES,
+    )
     assert diff_limits({"agent_edits": {"hunk_context_lines": True}})[1] == (
         DEFAULT_HUNK_CONTEXT_LINES
     )
     assert diff_limits({"agent_edits": {"hunk_context_lines": -1}})[1] == (
         DEFAULT_HUNK_CONTEXT_LINES
     )
-    assert diff_limits({"agent_edits": {"max_diff_source_bytes": "мусор"}})[0] == (
-        DEFAULT_MAX_DIFF_SOURCE_BYTES
-    )
+    assert diff_limits({"agent_edits": {"max_diff_source_bytes": "мусор"}})[
+        0
+    ] == (DEFAULT_MAX_DIFF_SOURCE_BYTES)
     assert diff_limits({"agent_edits": {"hunk_context_lines": 0}})[1] == 0
 
 
@@ -797,7 +904,11 @@ def test_accept_shifts_base_and_stages(tmp_path):
     outcome = ws.view.accept(["a.py"])
 
     assert outcome.accepted == ["a.py"]
-    assert (outcome.staged, outcome.stage_error, outcome.skipped) == (1, None, [])
+    assert (outcome.staged, outcome.stage_error, outcome.skipped) == (
+        1,
+        None,
+        [],
+    )
     assert ws.store.accepted_state("a.py").content == b"hello\n"
     assert show_index_bytes(str(ws.root), "a.py") == b"hello\n"
 
@@ -808,14 +919,23 @@ def test_accept_head_oid_uses_one_batch_call(tmp_path, monkeypatch):
     ws.write("a.py", "v1\n")
     ws.write("b.py", "v1\n")
     for rel in ("a.py", "b.py"):
-        subprocess.run(["git", "add", "--", rel], cwd=str(ws.root), check=True,
-                       capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+        subprocess.run(
+            ["git", "add", "--", rel],
+            cwd=str(ws.root),
+            check=True,
+            capture_output=True,
+        )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     calls = []
     real = git_ops.head_blob_oids
     monkeypatch.setattr(
-        git_ops, "head_blob_oids",
+        git_ops,
+        "head_blob_oids",
         lambda root, rels: (calls.append(list(rels)), real(root, rels))[1],
     )
 
@@ -832,10 +952,18 @@ def test_accept_deleted_file_stages_deletion(tmp_path):
     """Файл удалён агентом → accept: маркер + git add фиксирует удаление в индексе."""
     ws = _Workspace(tmp_path, git=True)
     path = ws.write("a.py", "hello\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     path.unlink()
 
     outcome = ws.view.accept(["a.py"])
@@ -843,7 +971,9 @@ def test_accept_deleted_file_stages_deletion(tmp_path):
     assert outcome.accepted == ["a.py"]
     assert (outcome.staged, outcome.stage_error) == (1, None)
     assert ws.store.accepted_state("a.py").content is None
-    assert show_index_bytes(str(ws.root), "a.py") is None    # удаление застейджено
+    assert (
+        show_index_bytes(str(ws.root), "a.py") is None
+    )  # удаление застейджено
 
 
 def test_accept_batch_survives_a_path_git_never_heard_of(tmp_path):
@@ -853,12 +983,14 @@ def test_accept_batch_survives_a_path_git_never_heard_of(tmp_path):
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("real.py", "hello\n")
-    ws.journal.append(_rec("gone.py", ts=1.0, op="create"))     # создан и удалён агентом
+    ws.journal.append(
+        _rec("gone.py", ts=1.0, op="create")
+    )  # создан и удалён агентом
     ws.journal.append(_rec("real.py", ts=2.0, call_id="c2"))
 
     outcome = ws.view.accept(["gone.py", "real.py"])
 
-    assert outcome.accepted == ["gone.py", "real.py"]     # база сдвинута у обоих
+    assert outcome.accepted == ["gone.py", "real.py"]  # база сдвинута у обоих
     assert (outcome.staged, outcome.stage_error) == (1, None)
     assert show_index_bytes(str(ws.root), "real.py") == b"hello\n"
 
@@ -915,7 +1047,9 @@ def test_reset_store_failure_is_skipped_not_raised(tmp_path, monkeypatch):
     assert outcome.skipped == [("a.py", RESET_WRITE_FAILED)]
 
 
-def test_reset_targets_assume_a_lost_point_when_the_store_refuses(tmp_path, monkeypatch):
+def test_reset_targets_assume_a_lost_point_when_the_store_refuses(
+    tmp_path, monkeypatch
+):
     """Прочитать принятую базу не удалось — безопасная сторона: считаем точку
     отката теряемой. Времени принятия при этом нет — строка тела обязана
     прожить без него, а не соврать про час."""
@@ -982,8 +1116,15 @@ def test_accept_reports_external_files(tmp_path):
     ws.write("a.py", "v2\n")
     ws.write("b.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0, after_sha256="h1"))
-    ws.journal.append(_rec("a.py", ts=2.0, call_id="c2",
-                           before_sha256="ЧУЖОЙ", after_sha256="h2"))
+    ws.journal.append(
+        _rec(
+            "a.py",
+            ts=2.0,
+            call_id="c2",
+            before_sha256="ЧУЖОЙ",
+            after_sha256="h2",
+        )
+    )
     ws.journal.append(_rec("b.py", ts=1.0, call_id="c3"))
 
     outcome = ws.view.accept(["a.py", "b.py"])
@@ -1029,21 +1170,41 @@ def test_accept_skips_external_key_without_a_baseline(tmp_path):
 def test_reset_returns_to_head_flag(tmp_path):
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "agent commit"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "agent commit"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.view.accept(["a.py"])
 
     outcome = ws.view.reset_accept(["a.py"])
 
-    assert (outcome.reset, outcome.to_head, outcome.skipped) == (["a.py"], ["a.py"], [])
+    assert (outcome.reset, outcome.to_head, outcome.skipped) == (
+        ["a.py"],
+        ["a.py"],
+        [],
+    )
     assert ws.store.accepted_state("a.py") is None
 
 
@@ -1051,10 +1212,18 @@ def test_reset_without_committed_change_has_no_head_step(tmp_path):
     """Без коммита после начала сессии ступени HEAD нет — счёт падает на начало сессии."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
     ws.view.accept(["a.py"])
@@ -1071,16 +1240,32 @@ def test_reset_targets_names_the_committed_state_when_head_survives(tmp_path):
     что сброс решит пост-фактум (`ResetOutcome.to_head`)."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "agent commit"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "agent commit"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.view.accept(["a.py"])
 
     [reset] = ws.view.reset_targets(["a.py"])
@@ -1098,17 +1283,27 @@ def test_reset_targets_names_the_committed_state_when_head_survives(tmp_path):
     assert outcome.to_head == ["a.py"]
 
 
-def test_reset_targets_names_session_start_without_a_surviving_commit(tmp_path):
+def test_reset_targets_names_session_start_without_a_surviving_commit(
+    tmp_path,
+):
     """Без коммита ПОСЛЕ начала сессии ступени HEAD нет — цель сброса
     называет начало сессии, тот же сетап, что у
     `test_reset_without_committed_change_has_no_head_step`, только ДО сброса.
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
     ws.view.accept(["a.py"])
@@ -1116,7 +1311,9 @@ def test_reset_targets_names_session_start_without_a_surviving_commit(tmp_path):
     [reset] = ws.view.reset_targets(["a.py"])
 
     assert (reset.path, reset.target.kind, reset.target.label) == (
-        "a.py", "session", TARGET_SESSION_START,
+        "a.py",
+        "session",
+        TARGET_SESSION_START,
     )
     assert (reset.target.skip_reason, reset.target.warns) == (None, ())
 
@@ -1131,7 +1328,9 @@ def test_reset_skips_path_without_accepted_state(tmp_path):
     assert outcome.skipped == [("a.py", RESET_NOT_ACCEPTED)]
 
 
-def test_reset_targets_lose_the_point_only_when_the_delta_is_nonempty(tmp_path):
+def test_reset_targets_lose_the_point_only_when_the_delta_is_nonempty(
+    tmp_path,
+):
     """Дельта от принятой базы пуста → терять нечего; непуста → точка отката
     теряется (Д5 второго смоука: и гейт подтверждения, и строка тела читают
     ОДИН этот признак). Путь без принятой базы не теряет ничего и времени
@@ -1150,7 +1349,10 @@ def test_reset_targets_lose_the_point_only_when_the_delta_is_nonempty(tmp_path):
     assert targets["a.py"].loses_point is False
     assert targets["b.py"].loses_point is True
     assert targets["b.py"].accepted_ts == ws.store.accepted_state("b.py").ts
-    assert (targets["c.py"].loses_point, targets["c.py"].accepted_ts) == (False, None)
+    assert (targets["c.py"].loses_point, targets["c.py"].accepted_ts) == (
+        False,
+        None,
+    )
 
 
 def test_reset_targets_treat_uncountable_delta_as_a_lost_point(tmp_path):
@@ -1179,30 +1381,54 @@ def test_accepted_clean_file_moves_to_settled_manual(tmp_path):
 
     assert view.active == []
     [row] = view.settled
-    assert (row.path, row.kind, row.reason) == ("a.py", "modified", SETTLED_MANUAL)
+    assert (row.path, row.kind, row.reason) == (
+        "a.py",
+        "modified",
+        SETTLED_MANUAL,
+    )
 
 
 def test_committed_clean_file_moves_to_settled_commit(tmp_path):
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "agent commit"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "agent commit"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     view = ws.view.session_view(SOURCE_SESSION)
 
     assert view.active == []
     [row] = view.settled
     assert (row.path, row.add, row.del_, row.kind, row.reason) == (
-        "a.py", 1, 1, "modified", SETTLED_COMMIT,
+        "a.py",
+        1,
+        1,
+        "modified",
+        SETTLED_COMMIT,
     )
 
 
@@ -1228,17 +1454,33 @@ def test_partially_committed_counts_from_head(tmp_path):
     """Закоммичено +40, поверх +10 → active (10, 0); откатная цель — HEAD (Задача 9)."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "orig\n")
     ws.write("a.py", "orig\n" + "".join(f"line{i}\n" for i in range(40)))
     ws.journal.append(_rec("a.py", ts=1.0, add=40, del_=0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit +40"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit +40"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     with open(ws.root / "a.py", "a", encoding="utf-8", newline="\n") as fh:
         fh.write("".join(f"more{i}\n" for i in range(10)))
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", add=10, del_=0))
@@ -1254,10 +1496,18 @@ def test_untracked_never_settles_by_git_rule(tmp_path):
     """Ignored/untracked путь чист «по porcelain», но не в ls-files → активен."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("committed.py", "seed\n")
-    subprocess.run(["git", "add", "--", "committed.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "committed.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.write(".gitignore", "ignored.py\n")
     ws.write("ignored.py", "x\n")
     ws.journal.append(_rec("ignored.py", ts=1.0))
@@ -1282,14 +1532,14 @@ def test_settled_cumulative_not_record_sum(tmp_path):
 
     [row] = ws.view.session_view(SOURCE_SESSION).settled
 
-    assert (row.add, row.del_) == (3, 0)   # от начала сессии до диска, не 27/27
+    assert (row.add, row.del_) == (3, 0)  # от начала сессии до диска, не 27/27
 
 
 def test_header_totals_are_active_only(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "x\n")
     ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=0))
-    ws.view.accept(["a.py"])                # a.py уходит в settled
+    ws.view.accept(["a.py"])  # a.py уходит в settled
     ws.write("b.py", "y\n")
     ws.journal.append(_rec("b.py", ts=2.0, call_id="c2", add=1, del_=0))
 
@@ -1304,10 +1554,18 @@ def test_commit_invalidates_done_cache(tmp_path):
     """Git commit при живом кэше → файл уезжает в settled без изменения журнала."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
     ws.journal.append(_rec("a.py", ts=1.0))
@@ -1316,10 +1574,18 @@ def test_commit_invalidates_done_cache(tmp_path):
     assert [row.entry.path for row in before.active] == ["a.py"]
     assert before.settled == []
 
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit outside"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit outside"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     after = ws.view.session_view(SOURCE_SESSION)
 
@@ -1331,46 +1597,78 @@ def test_commit_invalidates_done_cache(tmp_path):
 def test_turn_source_has_no_settled_and_no_ladder(tmp_path):
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.turn_base("a.py", "v1\n", "t1")
     ws.write("a.py", "v2\n")
     ws.journal.append(_rec("a.py", turn="t1"))
     # Закоммичено сразу — чисто относительно HEAD, но «Ход» разобранность не видит.
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit v2"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit v2"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     view = ws.view.session_view(SOURCE_TURN)
 
     assert view.settled == []
     assert [row.entry.path for row in view.active] == ["a.py"]
-    assert (view.total_add, view.total_del) == (1, 1)   # "v1\n" -> "v2\n": строка иная целиком
+    assert (view.total_add, view.total_del) == (
+        1,
+        1,
+    )  # "v1\n" -> "v2\n": строка иная целиком
 
 
 def test_dirty_pre_session_user_edits_not_counted_as_head_step(tmp_path):
     """HEAD == снимок начала сессии → ступени HEAD нет (до-сессионные правки не искажаются)."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "line1\nline2\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "pre-session history"], cwd=str(ws.root),
-                   check=True, capture_output=True)
-    ws.session_base("a.py", "line1\nline2\n")     # .orig == HEAD: ступени нет
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "pre-session history"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.session_base("a.py", "line1\nline2\n")  # .orig == HEAD: ступени нет
     ws.write("a.py", "line1\nline2\nline3\n")
     ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=0))
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
 
     assert row.entry.exact is True
-    assert (row.entry.add, row.entry.del_) == (1, 0)   # от начала сессии, не от HEAD
+    assert (row.entry.add, row.entry.del_) == (
+        1,
+        0,
+    )  # от начала сессии, не от HEAD
     assert row.step is None
 
 
-def test_settled_reason_follows_accepted_state_liveness_not_which_rule_matched(tmp_path):
+def test_settled_reason_follows_accepted_state_liveness_not_which_rule_matched(
+    tmp_path,
+):
     """`reason` = «вручную» при живом ``accepted_state`` — даже если settled сработал по (б).
 
     Живой сценарий из §4.2 спеки: файл принят, а ПОВЕРХ принятого закоммичен
@@ -1381,46 +1679,84 @@ def test_settled_reason_follows_accepted_state_liveness_not_which_rule_matched(t
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "x\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    ws.session_base("a.py", "x\n")     # снимок начала сессии: в проде он есть всегда
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.session_base(
+        "a.py", "x\n"
+    )  # снимок начала сессии: в проде он есть всегда
     ws.write("a.py", "x-accepted\n")
     ws.journal.append(_rec("a.py", ts=1.0))
     ws.view.accept(["a.py"])
     ws.write("a.py", "y-committed\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "further commit"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "further commit"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     [row] = ws.view.session_view(SOURCE_SESSION).settled
 
     assert row.reason == SETTLED_MANUAL
 
 
-def test_ladder_head_bytes_not_refetched_across_rebuilds_without_commit(tmp_path, monkeypatch):
+def test_ladder_head_bytes_not_refetched_across_rebuilds_without_commit(
+    tmp_path, monkeypatch
+):
     """Кэш ступени по (rel, HEAD): дозапись журнала пересобирает вид, но
     `cat-file --filters` на неизменившийся файл повторно не зовётся (§3.2 спеки).
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "orig\n")
     # Ступень HEAD заводит только коммит ПОСЛЕ снимка (фикс C1); правка поверх
     # коммита оставляет файл активным.
     ws.write("a.py", "orig\ncommitted\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit inside session"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit inside session"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.write("a.py", "orig\ncommitted\ndirty\n")
-    ws.view.session_view(SOURCE_SESSION)      # первая сборка — ступень HEAD посчитана
+    ws.view.session_view(
+        SOURCE_SESSION
+    )  # первая сборка — ступень HEAD посчитана
 
     calls = []
     real = git_ops.cat_file_filters
@@ -1434,15 +1770,22 @@ def test_ladder_head_bytes_not_refetched_across_rebuilds_without_commit(tmp_path
 
     ws.write("b.py", "new\n")
     ws.journal.append(_rec("b.py", ts=2.0, call_id="c2", op="create"))
-    view = ws.view.session_view(SOURCE_SESSION)   # вторая сборка — журнал ДРУГОГО файла
+    view = ws.view.session_view(
+        SOURCE_SESSION
+    )  # вторая сборка — журнал ДРУГОГО файла
 
     assert calls == []
     [a_row] = [row for row in view.active if row.entry.path == "a.py"]
     assert a_row.entry.exact is True
-    assert (a_row.entry.add, a_row.entry.del_) == (1, 0)   # от ступени HEAD, не от начала
+    assert (a_row.entry.add, a_row.entry.del_) == (
+        1,
+        0,
+    )  # от ступени HEAD, не от начала
 
 
-def test_dirty_before_session_is_not_a_head_step_and_revert_keeps_user_work(tmp_path):
+def test_dirty_before_session_is_not_a_head_step_and_revert_keeps_user_work(
+    tmp_path,
+):
     """C1: файл закоммичен, пользователь правил его РУКАМИ и не коммитил, потом
     его правит агент — коммита в этой сессии не было.
 
@@ -1454,18 +1797,31 @@ def test_dirty_before_session_is_not_a_head_step_and_revert_keeps_user_work(tmp_
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "committed\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     user_work = "committed\nuser-work\n"
-    ws.write("a.py", user_work)          # правка пользователя вне агента, без коммита
-    ws.session_base("a.py", user_work)   # снимок агента снят с диска — с этой правкой
+    ws.write("a.py", user_work)  # правка пользователя вне агента, без коммита
+    ws.session_base(
+        "a.py", user_work
+    )  # снимок агента снят с диска — с этой правкой
     ws.write("a.py", user_work + "agent\n")
     ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=0))
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
-    assert (row.entry.add, row.entry.del_) == (1, 0)   # от начала сессии, не от HEAD
+    assert (row.entry.add, row.entry.del_) == (
+        1,
+        0,
+    )  # от начала сессии, не от HEAD
 
     [target] = ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
     assert target.kind == "session"
@@ -1481,22 +1837,41 @@ def test_snapshot_without_recorded_rev_never_gets_a_head_step(tmp_path):
     коммит в сессии был, но ступени HEAD у пути нет — счёт от начала сессии."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base_without_head_rev("a.py", "orig\n")
     ws.write("a.py", "orig\ncommitted\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit inside session"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit inside session"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.write("a.py", "orig\ncommitted\ndirty\n")
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
 
-    assert (row.entry.add, row.entry.del_) == (2, 0)   # от `.orig`, а ступень HEAD дала бы (1, 0)
+    assert (row.entry.add, row.entry.del_) == (
+        2,
+        0,
+    )  # от `.orig`, а ступень HEAD дала бы (1, 0)
     [target] = ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
     assert target.kind == "session"
 
@@ -1512,20 +1887,38 @@ def test_created_then_committed_then_edited_counts_from_head(tmp_path):
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("seed.txt", "seed\n")
-    subprocess.run(["git", "add", "--", "seed.txt"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "seed.txt"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     committed = "".join(f"line{i}\n" for i in range(40))
-    ws.created_mark("new.py")                  # запись create: снимка нет, есть отметка
+    ws.created_mark("new.py")  # запись create: снимка нет, есть отметка
     ws.write("new.py", committed)
     ws.journal.append(_rec("new.py", ts=1.0, op="create", add=40, del_=0))
-    subprocess.run(["git", "add", "--", "new.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "add new.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    ws.session_base("new.py", committed)       # вторая правка: `.orig` уже пост-коммитный
+    subprocess.run(
+        ["git", "add", "--", "new.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "add new.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.session_base(
+        "new.py", committed
+    )  # вторая правка: `.orig` уже пост-коммитный
     with open(ws.root / "new.py", "a", encoding="utf-8", newline="\n") as fh:
         fh.write("".join(f"more{i}\n" for i in range(10)))
     ws.journal.append(_rec("new.py", ts=2.0, call_id="c2", add=10, del_=0))
@@ -1536,7 +1929,7 @@ def test_created_then_committed_then_edited_counts_from_head(tmp_path):
     [row] = view.active
     assert row.step is not None and row.step.kind == STEP_HEAD
     assert (row.entry.kind, row.entry.exact) == ("modified", True)
-    assert (row.entry.add, row.entry.del_) == (10, 0)   # не весь файл
+    assert (row.entry.add, row.entry.del_) == (10, 0)  # не весь файл
 
     outcome = ws.view.revert(SOURCE_SESSION, ["new.py"])
 
@@ -1544,7 +1937,9 @@ def test_created_then_committed_then_edited_counts_from_head(tmp_path):
     assert (ws.root / "new.py").read_text(encoding="utf-8") == committed
 
 
-def test_created_then_committed_counts_from_head_with_lf_disk_under_autocrlf(tmp_path):
+def test_created_then_committed_counts_from_head_with_lf_disk_under_autocrlf(
+    tmp_path,
+):
     """Е1: репозиторий с ``core.autocrlf=true``, файл на диске с LF.
 
     Ступень коммита читалась в форме выкладки (CRLF), и на дописанной строке
@@ -1552,21 +1947,41 @@ def test_created_then_committed_counts_from_head_with_lf_disk_under_autocrlf(tmp
     — после чего git считал файл изменённым. База обязана следовать диску.
     """
     ws = _Workspace(tmp_path, git=True)
-    subprocess.run(["git", "config", "core.autocrlf", "true"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "true"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.write("seed.txt", "seed\n")
-    subprocess.run(["git", "add", "--", "seed.txt"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "seed.txt"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
-    ws.created_mark("tools.md")                # запись create: снимка нет, есть отметка
-    ws.write("tools.md", "# t\n\nline\n")      # LF, как пишет агент
+    ws.created_mark("tools.md")  # запись create: снимка нет, есть отметка
+    ws.write("tools.md", "# t\n\nline\n")  # LF, как пишет агент
     ws.journal.append(_rec("tools.md", ts=1.0, op="create", add=3, del_=0))
-    subprocess.run(["git", "add", "--", "tools.md"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "smoke: tools.md"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "tools.md"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "smoke: tools.md"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.write("tools.md", "# t\n\nline\nappended\n")
     ws.journal.append(_rec("tools.md", ts=2.0, call_id="c2", add=1, del_=0))
 
@@ -1574,15 +1989,22 @@ def test_created_then_committed_counts_from_head_with_lf_disk_under_autocrlf(tmp
 
     [row] = view.active
     assert row.step is not None and row.step.kind == STEP_HEAD
-    assert (row.entry.add, row.entry.del_) == (1, 0)      # не «весь файл заменён»
+    assert (row.entry.add, row.entry.del_) == (1, 0)  # не «весь файл заменён»
 
     outcome = ws.view.revert(SOURCE_SESSION, ["tools.md"])
 
     assert outcome.restored == ["tools.md"]
-    assert (ws.root / "tools.md").read_bytes() == b"# t\n\nline\n"    # LF сохранён
-    status = subprocess.run(["git", "status", "--porcelain", "--", "tools.md"],
-                            cwd=str(ws.root), check=True, capture_output=True, text=True)
-    assert status.stdout == ""                            # git считает файл чистым
+    assert (
+        ws.root / "tools.md"
+    ).read_bytes() == b"# t\n\nline\n"  # LF сохранён
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--", "tools.md"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert status.stdout == ""  # git считает файл чистым
 
 
 def test_ladder_head_bytes_skips_reading_oversized_file(tmp_path):
@@ -1593,9 +2015,13 @@ def test_ladder_head_bytes_skips_reading_oversized_file(tmp_path):
     файл, который на дефолтном лимите не прошёл бы, — иначе «весь файл заменён»
     возвращается через настройку.
     """
+
     def _facts(root: Path, cap: int):
         view = EditsView(
-            str(tmp_path / "threads"), "cli", "th1", str(root),
+            str(tmp_path / "threads"),
+            "cli",
+            "th1",
+            str(root),
             {"agent_edits": {"max_diff_source_bytes": cap}},
         )
         facts = view._ladder_facts
@@ -1603,13 +2029,25 @@ def test_ladder_head_bytes_skips_reading_oversized_file(tmp_path):
         return facts
 
     ws = _Workspace(tmp_path, git=True)
-    subprocess.run(["git", "config", "core.autocrlf", "true"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "core.autocrlf", "true"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.write("a.txt", "one\ntwo\n")
-    subprocess.run(["git", "add", "--", "a.txt"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.txt"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     # Кап опущен ниже размера файла — читать нечего, база в форме выкладки.
     assert _facts(ws.root, 4).head_bytes("a.txt") == b"one\r\ntwo\r\n"
@@ -1629,7 +2067,7 @@ def test_ladder_git_facts_prime_empty_oids_keeps_prepared_batch(tmp_path):
     facts = _LadderGitFacts(str(tmp_path), 10_000_000)
     facts.prime("deadbeef", {"a.py": "oid-a"})
 
-    facts.prime("deadbeef", {})    # `_head_step`: та же ревизия, батч не свой
+    facts.prime("deadbeef", {})  # `_head_step`: та же ревизия, батч не свой
 
     assert facts.head_oid("a.py") == "oid-a"
 
@@ -1652,16 +2090,24 @@ def test_created_uncommitted_keeps_empty_base(tmp_path):
     даёт: ступень объявляется только по факту коммита ПОСЛЕ создания."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("seed.txt", "seed\n")
-    subprocess.run(["git", "add", "--", "seed.txt"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "seed.txt"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     created = "".join(f"line{i}\n" for i in range(3))
     ws.created_mark("new.py")
     ws.write("new.py", created)
     ws.journal.append(_rec("new.py", ts=1.0, op="create", add=3, del_=0))
-    ws.session_base("new.py", created)         # вторая правка тем же инструментом
+    ws.session_base("new.py", created)  # вторая правка тем же инструментом
     ws.write("new.py", created + "extra\n")
     ws.journal.append(_rec("new.py", ts=2.0, call_id="c2", add=1, del_=0))
 
@@ -1687,24 +2133,44 @@ def test_snapshot_taken_earlier_beats_a_later_creation_mark(tmp_path):
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("notes.md", "user work\n")
-    subprocess.run(["git", "add", "--", "notes.md"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "notes.md"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
-    ws.session_base("notes.md", "user work\n")   # шелл усёк файл: «до» снято честно
+    ws.session_base(
+        "notes.md", "user work\n"
+    )  # шелл усёк файл: «до» снято честно
     ws.write("notes.md", "")
     ws.journal.append(_rec("notes.md", ts=1.0, op="shell", add=0, del_=1))
-    subprocess.run(["git", "commit", "-am", "truncate notes.md"], cwd=str(ws.root),
-                   check=True, capture_output=True)
-    ws.created_mark("notes.md")                  # append_to_file: `size == 0` → create
+    subprocess.run(
+        ["git", "commit", "-am", "truncate notes.md"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.created_mark("notes.md")  # append_to_file: `size == 0` → create
     ws.write("notes.md", "appended\n")
-    ws.journal.append(_rec("notes.md", ts=2.0, call_id="c2", op="create", add=1, del_=0))
+    ws.journal.append(
+        _rec("notes.md", ts=2.0, call_id="c2", op="create", add=1, del_=0)
+    )
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
 
     assert row.step is not None and row.step.kind == STEP_HEAD
-    assert (row.entry.kind, row.entry.add, row.entry.del_) == ("modified", 1, 0)
+    assert (row.entry.kind, row.entry.add, row.entry.del_) == (
+        "modified",
+        1,
+        0,
+    )
     [target] = ws.view.revert_targets(SOURCE_SESSION, ["notes.md"])
     assert target.kind == "head"
 
@@ -1732,17 +2198,33 @@ def test_target_head_for_partially_committed(tmp_path):
     """Закоммичено +40, поверх +10 → откатная цель — HEAD, не начало сессии."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "orig\n")
     ws.write("a.py", "orig\n" + "".join(f"line{i}\n" for i in range(40)))
     ws.journal.append(_rec("a.py", ts=1.0, add=40, del_=0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit +40"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit +40"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     with open(ws.root / "a.py", "a", encoding="utf-8", newline="\n") as fh:
         fh.write("".join(f"more{i}\n" for i in range(10)))
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", add=10, del_=0))
@@ -1759,18 +2241,34 @@ def test_revert_restores_to_head_bytes(tmp_path):
     """Закоммичено X, агент правил → откат → на диске байты HEAD (форма worktree)."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "orig\n")
     committed = "orig\n" + "".join(f"line{i}\n" for i in range(40))
     ws.write("a.py", committed)
     ws.journal.append(_rec("a.py", ts=1.0, add=40, del_=0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit +40"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit +40"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     with open(ws.root / "a.py", "a", encoding="utf-8", newline="\n") as fh:
         fh.write("dirty\n")
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
@@ -1816,12 +2314,15 @@ def test_revert_accepted_absent_deletes_file(tmp_path):
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", op="delete"))
     ws.view.accept(["a.py"])
     assert ws.store.accepted_state("a.py").content is None
-    ws.write("a.py", "recreated\n")   # файл возвращается на диск помимо принятого
+    ws.write(
+        "a.py", "recreated\n"
+    )  # файл возвращается на диск помимо принятого
     ws.journal.append(_rec("a.py", ts=3.0, call_id="c3", op="create"))
 
     [target] = ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
     assert (target.kind, target.label) == (
-        "delete", "будет удалён (принято отсутствие файла)",
+        "delete",
+        "будет удалён (принято отсутствие файла)",
     )
 
     outcome = ws.view.revert(SOURCE_SESSION, ["a.py"])
@@ -1841,24 +2342,34 @@ def test_accepted_absent_then_recreated_counts_from_emptiness(tmp_path):
     ws = _Workspace(tmp_path)
     ws.session_base("a.py", "до сессии\n")
     ws.write("a.py", "правка агента\n")
-    ws.journal.append(_rec("a.py", ts=1.0, add=7, del_=7))     # числа журнала — не про диск
+    ws.journal.append(
+        _rec("a.py", ts=1.0, add=7, del_=7)
+    )  # числа журнала — не про диск
     (ws.root / "a.py").unlink()
-    ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", op="delete", add=7, del_=7))
+    ws.journal.append(
+        _rec("a.py", ts=2.0, call_id="c2", op="delete", add=7, del_=7)
+    )
     ws.view.accept(["a.py"])
     assert ws.store.accepted_state("a.py").content is None
     ws.write("a.py", "снова\nсоздан\nагентом\n")
-    ws.journal.append(_rec("a.py", ts=3.0, call_id="c3", op="create", add=7, del_=7))
+    ws.journal.append(
+        _rec("a.py", ts=3.0, call_id="c3", op="create", add=7, del_=7)
+    )
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
 
     assert (row.entry.kind, row.entry.exact) == ("created", True)
-    assert (row.entry.add, row.entry.del_) == (3, 0)    # от пустоты, а не 21/21 из журнала
+    assert (row.entry.add, row.entry.del_) == (
+        3,
+        0,
+    )  # от пустоты, а не 21/21 из журнала
     assert row.entry.revertable is True
 
     # Числа отвечают на вопрос «что отменит `r`»: превью и сам откат — удаление.
     [target] = ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
     assert (target.kind, target.label) == (
-        "delete", "будет удалён (принято отсутствие файла)",
+        "delete",
+        "будет удалён (принято отсутствие файла)",
     )
     assert ws.view.revert(SOURCE_SESSION, ["a.py"]).deleted == ["a.py"]
 
@@ -1896,13 +2407,22 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
 
     def commit_at(msg: str, when: str) -> None:
         env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
-        subprocess.run(["git", "commit", "-m", msg], cwd=str(ws.root), check=True,
-                       capture_output=True, env=env)
+        subprocess.run(
+            ["git", "commit", "-m", msg],
+            cwd=str(ws.root),
+            check=True,
+            capture_output=True,
+            env=env,
+        )
 
     # a.py: коммит, задевающий путь, случится ПОСЛЕ первой записи хода — предупреждение есть.
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     commit_at("seed a", before_turn)
     ws.session_base("a.py", "orig\n")
     ws.turn_base("a.py", "orig\n", "t1")
@@ -1910,13 +2430,21 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
     # c.py: коммит, задевающий путь, случился ДО начала хода — предупреждать не о чем,
     # хотя ступень HEAD у пути жива (HEAD отличается от начала сессии).
     ws.write("c.py", "c0\n")
-    subprocess.run(["git", "add", "--", "c.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "c.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     commit_at("seed c", before_turn)
     ws.session_base("c.py", "c0\n")
     ws.write("c.py", "c1\n")
-    subprocess.run(["git", "add", "--", "c.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "c.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     commit_at("commit before turn", before_turn)
     ws.turn_base("c.py", "c1\n", "t1")
 
@@ -1928,43 +2456,68 @@ def test_turn_warns_on_post_start_accept_and_commit(tmp_path):
     ws.journal.append(_rec("a.py", turn="t1", ts=turn_start_ts))
     ws.journal.append(_rec("b.py", turn="t1", ts=turn_start_ts, call_id="c2"))
     ws.journal.append(_rec("c.py", turn="t1", ts=turn_start_ts, call_id="c3"))
-    ws.write("c.py", "c1\nagent\n")   # правка внутри хода, без нового коммита
+    ws.write("c.py", "c1\nagent\n")  # правка внутри хода, без нового коммита
 
     ws.write("a.py", "orig\nagent\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     commit_at("commit inside turn", after_turn)
     ws.write("b.py", "b2\n")
     ws.view.accept(["b.py"])
 
     [a_target, b_target, c_target] = ws.view.revert_targets(
-        SOURCE_TURN, ["a.py", "b.py", "c.py"],
+        SOURCE_TURN,
+        ["a.py", "b.py", "c.py"],
     )
 
-    assert any("заденет коммит" in w and "начала хода" in w for w in a_target.warns)
+    assert any(
+        "заденет коммит" in w and "начала хода" in w for w in a_target.warns
+    )
     accepted_ts = ws.store.accepted_state("b.py").ts
     expected_hhmm = f"{datetime.fromtimestamp(accepted_ts):%H:%M}"
     assert b_target.warns == (
         f"заденет принятое вами состояние (принято в {expected_hhmm})",
     )
-    assert c_target.warns == ()   # коммит раньше начала хода — предупреждать не о чем
+    assert (
+        c_target.warns == ()
+    )  # коммит раньше начала хода — предупреждать не о чем
 
 
 def test_turn_revert_can_go_below_head(tmp_path):
     """Ход: правка → коммит командой → правка; откат хода возвращает к началу хода."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.turn_base("a.py", "orig\n", "t1")
     ws.write("a.py", "orig\nagent1\n")
     ws.journal.append(_rec("a.py", turn="t1", ts=1.0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit inside turn"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit inside turn"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.write("a.py", "orig\nagent1\nagent2\n")
     ws.journal.append(_rec("a.py", turn="t1", ts=2.0, call_id="c2"))
 
@@ -1978,7 +2531,9 @@ def test_settled_paths_are_skip_targets(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    ws.view.accept(["a.py"])   # a.py уходит в разобранные (чист относительно принятого)
+    ws.view.accept(
+        ["a.py"]
+    )  # a.py уходит в разобранные (чист относительно принятого)
 
     [target] = ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
 
@@ -2060,17 +2615,33 @@ def test_session_row_carries_head_step_with_ref(tmp_path):
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "orig\n")
     ws.write("a.py", "orig\n" + "".join(f"line{i}\n" for i in range(40)))
     ws.journal.append(_rec("a.py", ts=1.0, add=40, del_=0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit +40"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit +40"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     with open(ws.root / "a.py", "a", encoding="utf-8", newline="\n") as fh:
         fh.write("".join(f"more{i}\n" for i in range(10)))
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", add=10, del_=0))
@@ -2117,19 +2688,35 @@ def test_head_commit_label_called_once_per_view_build(tmp_path, monkeypatch):
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
     ws.write("b.py", "orig\n")
-    subprocess.run(["git", "add", "--", "a.py", "b.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py", "b.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     for rel in ("a.py", "b.py"):
         ws.session_base(rel, "orig\n")
         ws.write(rel, "orig\n" + "".join(f"line{i}\n" for i in range(40)))
     ws.journal.append(_rec("a.py", ts=1.0, add=40, del_=0))
     ws.journal.append(_rec("b.py", ts=1.0, call_id="c2", add=40, del_=0))
-    subprocess.run(["git", "add", "--", "a.py", "b.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit +40"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py", "b.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit +40"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     for rel in ("a.py", "b.py"):
         with open(ws.root / rel, "a", encoding="utf-8", newline="\n") as fh:
             fh.write("more\n")
@@ -2139,13 +2726,14 @@ def test_head_commit_label_called_once_per_view_build(tmp_path, monkeypatch):
     calls: list[str] = []
     real = git_ops.head_commit_label
     monkeypatch.setattr(
-        git_ops, "head_commit_label",
+        git_ops,
+        "head_commit_label",
         lambda root, rel: (calls.append(rel), real(root, rel))[1],
     )
 
     view = ws.view.session_view(SOURCE_SESSION)
     for row in view.active:
-        assert row.step is not None and row.step.ref     # чтение — не новый вызов
+        assert row.step is not None and row.step.ref  # чтение — не новый вызов
 
     assert calls == []
 
@@ -2163,8 +2751,17 @@ def test_accepted_undecodable_file_settles(tmp_path):
     ws = _Workspace(tmp_path)
     content = "привет\n".encode("cp1251")
     (ws.root / "a.py").write_bytes(content)
-    ws.journal.append(_rec("a.py", ts=1.0, call_id=None, op="shell", add=1, del_=1,
-                           flags=["partial"]))
+    ws.journal.append(
+        _rec(
+            "a.py",
+            ts=1.0,
+            call_id=None,
+            op="shell",
+            add=1,
+            del_=1,
+            flags=["partial"],
+        )
+    )
 
     [row] = ws.view.session_view(SOURCE_SESSION).active
     assert row.entry.exact is False
@@ -2200,18 +2797,26 @@ def test_path_returned_to_the_session_baseline_leaves_the_screen(tmp_path):
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
     ws.journal.append(_rec("a.py", ts=1.0))
 
     view = ws.view.session_view(SOURCE_SESSION)
-    assert [row.entry.path for row in view.active] == ["a.py"]      # правка живая
+    assert [row.entry.path for row in view.active] == ["a.py"]  # правка живая
 
-    ws.write("a.py", "v1\n")            # вернули к началу сессии — как делает откат
+    ws.write("a.py", "v1\n")  # вернули к началу сессии — как делает откат
     ws.view.invalidate()
     view = ws.view.session_view(SOURCE_SESSION)
 
@@ -2227,23 +2832,41 @@ def test_a_really_committed_path_still_shows_as_committed(tmp_path):
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "agent commit"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "agent commit"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.view.invalidate()
 
     view = ws.view.session_view(SOURCE_SESSION)
 
     assert [row.entry.path for row in view.active] == []
-    assert [(row.path, row.reason) for row in view.settled] == [("a.py", SETTLED_COMMIT)]
+    assert [(row.path, row.reason) for row in view.settled] == [
+        ("a.py", SETTLED_COMMIT)
+    ]
 
 
 def test_created_empty_path_returned_to_its_snapshot_is_not_hidden(tmp_path):
@@ -2256,18 +2879,18 @@ def test_created_empty_path_returned_to_its_snapshot_is_not_hidden(tmp_path):
     пользователя единственный способ это сделать.
     """
     ws = _Workspace(tmp_path, git=True)
-    ws.write("new.txt", "")                       # агент создал файл пустым
+    ws.write("new.txt", "")  # агент создал файл пустым
     ws.journal.append(_rec("new.txt", op="create", ts=1.0, add=0, del_=0))
-    ws.session_base("new.txt", "")                # `.orig` лёг со ВТОРОЙ правкой
+    ws.session_base("new.txt", "")  # `.orig` лёг со ВТОРОЙ правкой
     ws.write("new.txt", "нечто\n")
     ws.journal.append(_rec("new.txt", ts=2.0, call_id="c2"))
-    ws.write("new.txt", "")                       # вернули к `.orig`
+    ws.write("new.txt", "")  # вернули к `.orig`
     ws.view.invalidate()
 
     view = ws.view.session_view(SOURCE_SESSION)
 
     assert [row.entry.path for row in view.active] == ["new.txt"]
-    assert view.active[0].entry.kind == "created"      # откат = удаление
+    assert view.active[0].entry.kind == "created"  # откат = удаление
 
 
 def test_deleted_path_with_an_empty_baseline_is_not_hidden(tmp_path):
@@ -2282,7 +2905,7 @@ def test_deleted_path_with_an_empty_baseline_is_not_hidden(tmp_path):
     ws.session_base("empty.txt", "")
     ws.write("empty.txt", "стало непусто\n")
     ws.journal.append(_rec("empty.txt", ts=1.0))
-    (ws.root / "empty.txt").unlink()              # путь удалён
+    (ws.root / "empty.txt").unlink()  # путь удалён
     ws.view.invalidate()
 
     view = ws.view.session_view(SOURCE_SESSION)
@@ -2301,8 +2924,8 @@ def test_path_with_a_nonzero_counting_delta_is_not_hidden(tmp_path):
     ws.write("a.py", "A\nB\n")
     # Точная база — первой: поверх счётной API её больше не пишет. Пара «счётная
     # старше, точная моложе» — наследие хранилищ до этого правила; времена ниже явные.
-    ws.session_base("a.py", "A\nB\n")         # точная: совпала с диском
-    ws.shell_session_base("a.py", "A\n")        # счётная: диск от неё отличается
+    ws.session_base("a.py", "A\nB\n")  # точная: совпала с диском
+    ws.shell_session_base("a.py", "A\n")  # счётная: диск от неё отличается
     now = time.time()
     os.utime(ws.snapshot_path(".gitorig"), (now - 30, now - 30))
     os.utime(ws.snapshot_path(".orig"), (now - 10, now - 10))
@@ -2312,10 +2935,12 @@ def test_path_with_a_nonzero_counting_delta_is_not_hidden(tmp_path):
     view = ws.view.session_view(SOURCE_SESSION)
 
     assert [row.entry.path for row in view.active] == ["a.py"]
-    assert (view.total_add, view.total_del) == (1, 0)   # числа на месте
+    assert (view.total_add, view.total_del) == (1, 0)  # числа на месте
 
 
-def test_agent_writing_the_committed_version_over_dirty_work_stays_revertable(tmp_path):
+def test_agent_writing_the_committed_version_over_dirty_work_stays_revertable(
+    tmp_path,
+):
     """Агент затёр несохранённую работу версией из коммита — строка обязана жить.
 
     Файл совпал с HEAD, но коммита за сессию НЕ БЫЛО: совпадение получилось
@@ -2326,13 +2951,21 @@ def test_agent_writing_the_committed_version_over_dirty_work_stays_revertable(tm
     """
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "закоммиченное\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    ws.write("a.py", "работа пользователя\n")          # несохранённая работа
-    ws.session_base("a.py", "работа пользователя\n")   # с неё началась сессия
-    ws.write("a.py", "закоммиченное\n")                # агент затёр её версией из коммита
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.write("a.py", "работа пользователя\n")  # несохранённая работа
+    ws.session_base("a.py", "работа пользователя\n")  # с неё началась сессия
+    ws.write("a.py", "закоммиченное\n")  # агент затёр её версией из коммита
     ws.journal.append(_rec("a.py", ts=1.0))
 
     view = ws.view.session_view(SOURCE_SESSION)
@@ -2342,7 +2975,9 @@ def test_agent_writing_the_committed_version_over_dirty_work_stays_revertable(tm
 
     ws.view.revert(SOURCE_SESSION, ["a.py"])
 
-    assert (ws.root / "a.py").read_text(encoding="utf-8") == "работа пользователя\n"
+    assert (ws.root / "a.py").read_text(
+        encoding="utf-8"
+    ) == "работа пользователя\n"
 
 
 def test_turn_hides_a_row_whose_turn_left_nothing(tmp_path):
@@ -2374,7 +3009,9 @@ def test_turn_hides_a_row_whose_turn_left_nothing(tmp_path):
     assert turn.active == []
 
     session = ws.view.session_view(SOURCE_SESSION)
-    assert [(r.entry.path, r.has_accepted_base) for r in session.active] == [("a.py", True)]
+    assert [(r.entry.path, r.has_accepted_base) for r in session.active] == [
+        ("a.py", True)
+    ]
 
 
 def test_a_command_cut_by_the_cap_leaves_its_real_size_in_the_view(tmp_path):
@@ -2389,11 +3026,19 @@ def test_a_command_cut_by_the_cap_leaves_its_real_size_in_the_view(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\n")
     ws.write("b.py", "b\n")
-    ws.journal.append(replace(_rec("a.py", turn="t1", call_id=None, op="shell"),
-                              command_paths=23456))
-    ws.journal.append(_rec("b.py", turn="t2", call_id=None, op="shell", ts=2.0))
+    ws.journal.append(
+        replace(
+            _rec("a.py", turn="t1", call_id=None, op="shell"),
+            command_paths=23456,
+        )
+    )
+    ws.journal.append(
+        _rec("b.py", turn="t2", call_id=None, op="shell", ts=2.0)
+    )
 
-    assert ws.view.session_view(SOURCE_SESSION).cut_commands == (("t1", 23456),)
+    assert ws.view.session_view(SOURCE_SESSION).cut_commands == (
+        ("t1", 23456),
+    )
     assert ws.view.session_view(SOURCE_TURN).cut_commands == ()
 
 
@@ -2402,16 +3047,28 @@ def _committed_workspace(tmp_path, n: int) -> "_Workspace":
     ws = _Workspace(tmp_path, git=True)
     for i in range(n):
         ws.write(f"p{i}.py", "orig\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     for i in range(n):
         ws.session_base(f"p{i}.py", "orig\n")
         ws.turn_base(f"p{i}.py", "orig\n", "t1")
         ws.write(f"p{i}.py", "orig\nnew\n")
-        ws.journal.append(_rec(f"p{i}.py", ts=float(i), call_id=f"c{i}", add=1, del_=0))
-    subprocess.run(["git", "commit", "-qam", "commit edits"], cwd=str(ws.root),
-                   check=True, capture_output=True)
+        ws.journal.append(
+            _rec(f"p{i}.py", ts=float(i), call_id=f"c{i}", add=1, del_=0)
+        )
+    subprocess.run(
+        ["git", "commit", "-qam", "commit edits"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     return ws
 
 
@@ -2419,8 +3076,11 @@ def _count_git(monkeypatch) -> list:
     """Каждый запуск процесса git — и одиночный, и из параллельной пачки (`run_git_many`)."""
     calls = []
     real = git_ops._run_unguarded
-    monkeypatch.setattr(git_ops, "_run_unguarded",
-                        lambda *a, **k: (calls.append(a[1]), real(*a, **k))[1])
+    monkeypatch.setattr(
+        git_ops,
+        "_run_unguarded",
+        lambda *a, **k: (calls.append(a[1]), real(*a, **k))[1],
+    )
     return calls
 
 
@@ -2449,7 +3109,7 @@ def test_view_after_committing_many_paths_costs_a_constant_number_of_git_calls(
 
     view = ws.view.session_view(SOURCE_SESSION)
 
-    assert len(view.settled) == 12                       # всё ушло в коммит — разобрано
+    assert len(view.settled) == 12  # всё ушло в коммит — разобрано
     assert len(calls) <= 8, [c[:4] for c in calls]
 
 
@@ -2469,7 +3129,9 @@ def test_turn_revert_targets_of_many_committed_paths_cost_a_constant_number_of_g
     assert len(calls) <= 8, [c[:4] for c in calls]
 
 
-def test_prefetch_does_not_read_blobs_the_ladder_never_looks_at(tmp_path, monkeypatch):
+def test_prefetch_does_not_read_blobs_the_ladder_never_looks_at(
+    tmp_path, monkeypatch
+):
     """Блоб HEAD файла сверх `max_diff_source_bytes` пачкой не читается.
 
     Лестница такой файл с диска не читает (`head_bytes` берёт форму выкладки),
@@ -2482,10 +3144,20 @@ def test_prefetch_does_not_read_blobs_the_ladder_never_looks_at(tmp_path, monkey
     facts.prime(git_ops.head_rev_from_files(str(ws.root)), {})
     asked = []
     real = git_ops.blobs_at
-    monkeypatch.setattr(git_ops, "blobs_at",
-                        lambda root, rels, **kw: (asked.extend(rels), real(root, rels, **kw))[1])
-    since = subprocess.run(["git", "rev-parse", "HEAD~1"], cwd=str(ws.root),
-                           capture_output=True, text=True, check=True).stdout.strip()
+    monkeypatch.setattr(
+        git_ops,
+        "blobs_at",
+        lambda root, rels, **kw: (asked.extend(rels), real(root, rels, **kw))[
+            1
+        ],
+    )
+    since = subprocess.run(
+        ["git", "rev-parse", "HEAD~1"],
+        cwd=str(ws.root),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
 
     facts.prefetch({since: ["p0.py", "p1.py"]})
 
@@ -2501,7 +3173,9 @@ def test_reset_targets_survive_a_busy_snapshot_index(tmp_path, monkeypatch):
     экран на `u`."""
     ws = _committed_workspace(tmp_path, 3)
     keys = [f"p{i}.py" for i in range(3)]
-    _busy_snapshot_index(monkeypatch)                     # вид не собираем: превью `u` его не зовёт
+    _busy_snapshot_index(
+        monkeypatch
+    )  # вид не собираем: превью `u` его не зовёт
 
     assert len(ws.view.reset_targets(keys)) == 3
 
@@ -2517,7 +3191,9 @@ def test_resetting_many_accepted_committed_paths_costs_a_constant_number_of_git_
     ws = _committed_workspace(tmp_path, 12)
     keys = [f"p{i}.py" for i in range(12)]
     for key in keys:
-        ws.store.capture_accepted(key, (ws.root / key).read_bytes(), head_oid=None)
+        ws.store.capture_accepted(
+            key, (ws.root / key).read_bytes(), head_oid=None
+        )
     calls = _count_git(monkeypatch)
 
     outcome = ws.view.reset_accept(keys)
@@ -2526,7 +3202,9 @@ def test_resetting_many_accepted_committed_paths_costs_a_constant_number_of_git_
     assert len(calls) <= 8, [c[:4] for c in calls]
 
 
-def test_turn_revert_targets_survive_a_busy_snapshot_index(tmp_path, monkeypatch):
+def test_turn_revert_targets_survive_a_busy_snapshot_index(
+    tmp_path, monkeypatch
+):
     """При СОБРАННОМ виде превью отката «Хода» на занятом индексе деградирует по путям.
 
     Без предупреждений «заденет коммит» и «заденет принятое», но с целью на
@@ -2535,7 +3213,7 @@ def test_turn_revert_targets_survive_a_busy_snapshot_index(tmp_path, monkeypatch
     (`test_diff_screen.test_actions_on_a_busy_snapshot_index_warn_instead_of_crashing`)."""
     ws = _committed_workspace(tmp_path, 3)
     keys = [f"p{i}.py" for i in range(3)]
-    ws.view.session_view(SOURCE_TURN)                     # вид собран до занятого замка
+    ws.view.session_view(SOURCE_TURN)  # вид собран до занятого замка
     _busy_snapshot_index(monkeypatch)
 
     assert len(ws.view.revert_targets(SOURCE_TURN, keys)) == 3
@@ -2558,7 +3236,9 @@ def test_a_failed_warm_up_keeps_the_committed_set(tmp_path, monkeypatch):
     assert ws.view._prepare_head_steps(keys, head_rev) == set(keys)
 
 
-def test_revert_preview_of_many_paths_builds_the_view_once(tmp_path, monkeypatch):
+def test_revert_preview_of_many_paths_builds_the_view_once(
+    tmp_path, monkeypatch
+):
     """Дельты превью массового отката — пачкой: вид и подпись диска считаются один раз.
 
     Превью звало `revert_delta` на каждый путь, а тот перебирал все записи
@@ -2577,8 +3257,11 @@ def test_revert_preview_of_many_paths_builds_the_view_once(tmp_path, monkeypatch
     ws.view.invalidate()
     signatures = []
     real = edits_view_mod.disk_signature
-    monkeypatch.setattr(edits_view_mod, "disk_signature",
-                        lambda *a, **k: (signatures.append(1), real(*a, **k))[1])
+    monkeypatch.setattr(
+        edits_view_mod,
+        "disk_signature",
+        lambda *a, **k: (signatures.append(1), real(*a, **k))[1],
+    )
 
     assert ws.view.revert_deltas(SOURCE_SESSION, keys) == expected
     assert len(signatures) == 1
@@ -2596,8 +3279,17 @@ def test_a_created_then_reverted_binary_leaves_no_row(tmp_path):
     ws.write("keep.py", "new\n")
     ws.session_base("keep.py", "old\n")
     ws.journal.append(_rec("keep.py", ts=1.0, call_id="c1"))
-    ws.journal.append(_rec("gone.bin", ts=2.0, call_id=None, op="create",
-                           add=0, del_=0, flags=["no_diff"]))
+    ws.journal.append(
+        _rec(
+            "gone.bin",
+            ts=2.0,
+            call_id=None,
+            op="create",
+            add=0,
+            del_=0,
+            flags=["no_diff"],
+        )
+    )
     # gone.bin создан командой и уже удалён откатом — на диске его нет
 
     for source in (SOURCE_SESSION, SOURCE_TURN):
@@ -2616,7 +3308,9 @@ def test_a_created_then_reverted_file_leaves_no_row(tmp_path):
     ws.write("keep.py", "new\n")
     ws.session_base("keep.py", "old\n")
     ws.journal.append(_rec("keep.py", ts=1.0, call_id="c1"))
-    ws.journal.append(_rec("gone.py", ts=2.0, call_id=None, op="create", add=1, del_=0))
+    ws.journal.append(
+        _rec("gone.py", ts=2.0, call_id=None, op="create", add=1, del_=0)
+    )
     # gone.py создан командой и уже удалён откатом — на диске его нет
 
     for source in (SOURCE_SESSION, SOURCE_TURN):
@@ -2635,7 +3329,9 @@ def test_an_accept_by_another_instance_invalidates_the_cached_view(tmp_path):
     ws.session_base("a.py", "original\n")
     ws.write("a.py", "agent\n")
     ws.journal.append(_rec("a.py"))
-    assert [row.entry.path for row in ws.view.session_view(SOURCE_SESSION).active] == ["a.py"]
+    assert [
+        row.entry.path for row in ws.view.session_view(SOURCE_SESSION).active
+    ] == ["a.py"]
 
     other = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), {})
     other.accept(["a.py"])
@@ -2645,7 +3341,9 @@ def test_an_accept_by_another_instance_invalidates_the_cached_view(tmp_path):
     assert [row.path for row in view.settled] == ["a.py"]
 
 
-def test_revert_state_catches_an_edit_that_kept_the_modification_time(tmp_path):
+def test_revert_state_catches_an_edit_that_kept_the_modification_time(
+    tmp_path,
+):
     """Правка того же размера с сохранённым временем изменения — подпись другая.
 
     Время изменения выставляет кто угодно (`cp -p`, `rsync -a`, `os.utime`), а
@@ -2670,20 +3368,36 @@ def _deleted_and_committed(tmp_path) -> "_Workspace":
     """Файл правили в сессии, затем удалили и закоммитили удаление."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("a.py", "orig\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("a.py", "orig\n")
     ws.write("a.py", "orig\nnew\n")
     ws.journal.append(_rec("a.py", ts=1.0, add=1, del_=0))
-    subprocess.run(["git", "rm", "-qf", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "drop a"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "rm", "-qf", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "drop a"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     return ws
 
 
-def test_a_committed_deletion_settles_the_file_instead_of_offering_its_old_copy(tmp_path):
+def test_a_committed_deletion_settles_the_file_instead_of_offering_its_old_copy(
+    tmp_path,
+):
     """Удаление закоммичено — откатывать сессии нечего: файл уходит в разобранные.
 
     Прежде откат сессии восстанавливал старую копию — уходил ниже коммита
@@ -2696,7 +3410,9 @@ def test_a_committed_deletion_settles_the_file_instead_of_offering_its_old_copy(
     assert [row.path for row in view.settled] == ["a.py"]
 
 
-def test_a_file_back_on_disk_after_its_committed_deletion_is_never_deleted(tmp_path):
+def test_a_file_back_on_disk_after_its_committed_deletion_is_never_deleted(
+    tmp_path,
+):
     """Файл снова на диске после закоммиченного удаления — откат его не удаляет.
 
     Ступень «удаление закоммичено» строится, только если файла нет и на диске:
@@ -2705,10 +3421,15 @@ def test_a_file_back_on_disk_after_its_committed_deletion_is_never_deleted(tmp_p
     пользователя (ревью починок). Откат возвращает содержимое, ничего не удаляя."""
     ws = _deleted_and_committed(tmp_path)
     ws.write("a.py", "again\n")
-    ws.journal.append(_rec("a.py", ts=2.0, call_id="c2", op="create", add=1, del_=0))
+    ws.journal.append(
+        _rec("a.py", ts=2.0, call_id="c2", op="create", add=1, del_=0)
+    )
 
     ws.view.session_view(SOURCE_SESSION)
-    assert all(t.kind != "delete" for t in ws.view.revert_targets(SOURCE_SESSION, ["a.py"]))
+    assert all(
+        t.kind != "delete"
+        for t in ws.view.revert_targets(SOURCE_SESSION, ["a.py"])
+    )
 
     ws.view.revert(SOURCE_SESSION, ["a.py"])
     assert (ws.root / "a.py").exists()
@@ -2719,20 +3440,36 @@ def test_an_untracked_but_kept_file_is_never_deleted_by_revert(tmp_path):
     его не удаляет (ревью починок, находка 2)."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("config.local", "orig\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("config.local", "orig\n")
     ws.write("config.local", "orig\nmine\n")
     ws.journal.append(_rec("config.local", ts=1.0, add=1, del_=0))
-    subprocess.run(["git", "rm", "-q", "--cached", "config.local"], cwd=str(ws.root),
-                   check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "untrack"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "rm", "-q", "--cached", "config.local"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "untrack"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     ws.view.session_view(SOURCE_SESSION)
-    assert all(t.kind != "delete"
-               for t in ws.view.revert_targets(SOURCE_SESSION, ["config.local"]))
+    assert all(
+        t.kind != "delete"
+        for t in ws.view.revert_targets(SOURCE_SESSION, ["config.local"])
+    )
     ws.view.revert(SOURCE_SESSION, ["config.local"])
     assert (ws.root / "config.local").exists()
 
@@ -2744,21 +3481,38 @@ def test_a_committed_case_only_directory_rename_is_not_a_deletion(tmp_path):
     как прежде, а `ls-tree` его не находит (ревью починок, находка 1)."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("Docs/a.md", "orig\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("Docs/a.md", "orig\n")
     ws.write("Docs/a.md", "orig\nnew\n")
     ws.journal.append(_rec("Docs/a.md", ts=1.0, add=1, del_=0))
     # В два шага: на файловой системе без различия регистра `git mv Docs docs` отказывает.
     for src, dst in (("Docs", "docs-tmp"), ("docs-tmp", "docs")):
-        subprocess.run(["git", "mv", src, dst], cwd=str(ws.root), check=True,
-                       capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "rename dir"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+        subprocess.run(
+            ["git", "mv", src, dst],
+            cwd=str(ws.root),
+            check=True,
+            capture_output=True,
+        )
+    subprocess.run(
+        ["git", "commit", "-qm", "rename dir"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     ws.view.session_view(SOURCE_SESSION)
-    assert all(t.kind != "delete" for t in ws.view.revert_targets(SOURCE_SESSION, ["Docs/a.md"]))
+    assert all(
+        t.kind != "delete"
+        for t in ws.view.revert_targets(SOURCE_SESSION, ["Docs/a.md"])
+    )
     ws.view.revert(SOURCE_SESSION, ["Docs/a.md"])
     assert (ws.root / "docs" / "a.md").exists()
 
@@ -2772,16 +3526,30 @@ def test_a_committed_case_only_rename_is_not_a_deletion(tmp_path):
     «файла нет» УДАЛЯЛ закоммиченный `README.md` (ревью починок, находка 2)."""
     ws = _Workspace(tmp_path, git=True)
     ws.write("Readme.md", "orig\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "-A"], cwd=str(ws.root), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.session_base("Readme.md", "orig\n")
     ws.write("Readme.md", "orig\nnew\n")
     ws.journal.append(_rec("Readme.md", ts=1.0, add=1, del_=0))
-    subprocess.run(["git", "mv", "Readme.md", "README.md"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-qm", "rename"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "mv", "Readme.md", "README.md"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "rename"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
 
     ws.view.session_view(SOURCE_SESSION)
     targets = ws.view.revert_targets(SOURCE_SESSION, ["Readme.md"])
@@ -2789,7 +3557,9 @@ def test_a_committed_case_only_rename_is_not_a_deletion(tmp_path):
     assert all(target.kind != "delete" for target in targets)
 
 
-def test_view_after_a_commit_asks_git_status_only_about_journal_paths(tmp_path, monkeypatch):
+def test_view_after_a_commit_asks_git_status_only_about_journal_paths(
+    tmp_path, monkeypatch
+):
     """Экран изменений спрашивает `git status` ТОЛЬКО по путям журнала.
 
     Статус нужен, чтобы понять, какие файлы ушли в коммит, — а их десятки. Полный
@@ -2806,5 +3576,7 @@ def test_view_after_a_commit_asks_git_status_only_about_journal_paths(tmp_path, 
     assert status_calls, calls
     for args in status_calls:
         assert "--" in args, args
-        tail = args[args.index("--") + 1:]
-        assert tail and all("p" in spec and "unrelated" not in spec for spec in tail), args
+        tail = args[args.index("--") + 1 :]
+        assert tail and all(
+            "p" in spec and "unrelated" not in spec for spec in tail
+        ), args

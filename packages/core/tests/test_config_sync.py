@@ -278,8 +278,8 @@ def test_sync_keeps_new_template_keys_when_user_has_key_outside_template(
     assert "http://real/v1" in out  # значения юзера целы
     assert "/etc/ssl/client.crt" in out  # ключ вне шаблона сохранён
     assert "/etc/ssl/client.key" in out
-    assert "request_timeout_sec: 600" in out             # новый ключ шаблона не потерян
-    assert config_sync.needs_sync(out, tmpl) is False    # и sync идемпотентен
+    assert "request_timeout_sec: 600" in out  # новый ключ шаблона не потерян
+    assert config_sync.needs_sync(out, tmpl) is False  # и sync идемпотентен
 
 
 def test_sync_moves_the_old_diff_tui_section_to_agent_edits(tmp_path):

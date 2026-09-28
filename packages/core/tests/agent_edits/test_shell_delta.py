@@ -3,6 +3,7 @@
 Тесты идут на настоящем временном git-репозитории (`git init` в tmp_path):
 git не мокается — иначе не проверить ни quotepath, ни `--no-index`, ни хуки.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -25,7 +26,9 @@ from gc_core.thread_store import edits_journal_path
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=str(root), check=True, capture_output=True)
+    subprocess.run(
+        ["git", *args], cwd=str(root), check=True, capture_output=True
+    )
 
 
 def _marker_script(root: Path, marker: Path) -> str:
@@ -42,8 +45,12 @@ def _marker_script(root: Path, marker: Path) -> str:
 
 def _run_command(root: Path, code: str, *, returncode: int = 0) -> None:
     """Shell-команда агента: отдельный процесс, реальные правки на диске."""
-    proc = subprocess.run([sys.executable, "-c", code], cwd=str(root), capture_output=True)
-    assert proc.returncode == returncode, proc.stderr.decode("utf-8", "replace")
+    proc = subprocess.run(
+        [sys.executable, "-c", code], cwd=str(root), capture_output=True
+    )
+    assert proc.returncode == returncode, proc.stderr.decode(
+        "utf-8", "replace"
+    )
 
 
 def _link_dir_for_platform(link: Path, target: Path) -> bool:
@@ -76,7 +83,9 @@ def repo(tmp_path, monkeypatch):
     _git(launch_root, "config", "user.email", "test@example.com")
     _git(launch_root, "config", "user.name", "test")
     _git(launch_root, "config", "core.autocrlf", "false")
-    _git(launch_root, "config", "core.quotepath", "true")  # дефолт git — пиним явно
+    _git(
+        launch_root, "config", "core.quotepath", "true"
+    )  # дефолт git — пиним явно
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2\n")
     _git(launch_root, "add", "-A")
     _git(launch_root, "commit", "-m", "init")
@@ -85,7 +94,7 @@ def repo(tmp_path, monkeypatch):
 
 def _ctx(launch_root, threads_dir, *, shell_tracking=True, turn_id="turn-1"):
     return SimpleNamespace(
-        is_tui=True,             # режим с записью правок по умолчанию
+        is_tui=True,  # режим с записью правок по умолчанию
         config_dict={
             "launch_root": str(launch_root),
             "agent_edits": {"shell_tracking": shell_tracking},
@@ -98,17 +107,27 @@ def _ctx(launch_root, threads_dir, *, shell_tracking=True, turn_id="turn-1"):
 
 
 def _records(threads_dir, *, system_id="cli", thread_id="th1"):
-    return EditsJournal(edits_journal_path(str(threads_dir), system_id, thread_id)).read_all()
+    return EditsJournal(
+        edits_journal_path(str(threads_dir), system_id, thread_id)
+    ).read_all()
 
 
-def _snapshot_store(launch_root, *, system_id="cli", thread_id="th1") -> SnapshotStore:
+def _snapshot_store(
+    launch_root, *, system_id="cli", thread_id="th1"
+) -> SnapshotStore:
     """Стор того же треда, что пишет канал (thread_key = имя журнала без префикса)."""
-    return SnapshotStore(snapshots_root(str(launch_root)), f"{system_id}_{thread_id}")
+    return SnapshotStore(
+        snapshots_root(str(launch_root)), f"{system_id}_{thread_id}"
+    )
 
 
 def _snapshot_names(launch_root, suffix: str) -> list[str]:
     root = snapshots_root(str(launch_root))
-    return sorted(p.name for p in root.glob(f"*{suffix}")) if root.is_dir() else []
+    return (
+        sorted(p.name for p in root.glob(f"*{suffix}"))
+        if root.is_dir()
+        else []
+    )
 
 
 def _seed_known_file(
@@ -171,7 +190,9 @@ def test_command_creating_untracked_file_records_create_with_hunks(repo):
 def test_command_modifying_tracked_file_records_shell_with_hunks(repo):
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
     recs = _records(threads_dir)
@@ -303,7 +324,9 @@ def test_conflicted_merge_by_command_is_not_a_creation(repo):
 
     recs = [r for r in _records(threads_dir) if r.path == "both.txt"]
     assert recs, "конфликтный путь обязан попасть в журнал"
-    assert [r.op for r in recs] == ["shell"], "создание — это удаление при откате"
+    assert [r.op for r in recs] == ["shell"], (
+        "создание — это удаление при откате"
+    )
 
 
 def test_command_deleting_tracked_file_records_delete(repo):
@@ -468,7 +491,11 @@ def test_recreated_path_after_delete_is_recorded_again(repo):
         _run_command(launch_root, code)
         delta.after_and_record()
 
-    assert [r.op for r in _records(threads_dir)] == ["create", "delete", "create"]
+    assert [r.op for r in _records(threads_dir)] == [
+        "create",
+        "delete",
+        "create",
+    ]
 
 
 async def test_wrapper_keeps_dedup_map_across_commands(repo):
@@ -527,17 +554,30 @@ def test_external_diff_driver_is_not_executed(repo):
     """`diff.external` из конфига репо не должен исполняться нашим диффом."""
     launch_root, threads_dir = repo
     marker = launch_root.parent / "ext-diff-ran.txt"
-    _git(launch_root, "config", "diff.external", _marker_script(launch_root, marker))
+    _git(
+        launch_root,
+        "config",
+        "diff.external",
+        _marker_script(launch_root, marker),
+    )
 
     # контроль: обычный git diff драйвер зовёт — иначе гвард ничего не доказывает
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2-control\n")
-    subprocess.run(["git", "diff", "--", "tracked.txt"], cwd=str(launch_root), capture_output=True)
+    subprocess.run(
+        ["git", "diff", "--", "tracked.txt"],
+        cwd=str(launch_root),
+        capture_output=True,
+    )
     if not marker.exists():
-        pytest.skip("git не зовёт diff.external в этой среде — гвард непроверяем")
+        pytest.skip(
+            "git не зовёт diff.external в этой среде — гвард непроверяем"
+        )
     marker.unlink()
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2-safe\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2-safe\\n')"
+    )
     delta.after_and_record()
 
     assert not marker.exists()
@@ -549,19 +589,30 @@ def test_textconv_driver_is_not_executed(repo):
     """`diff.<driver>.textconv` из конфига репо не должен исполняться."""
     launch_root, threads_dir = repo
     marker = launch_root.parent / "textconv-ran.txt"
-    _git(launch_root, "config", "diff.marker.textconv", _marker_script(launch_root, marker))
+    _git(
+        launch_root,
+        "config",
+        "diff.marker.textconv",
+        _marker_script(launch_root, marker),
+    )
     (launch_root / ".gitattributes").write_text(
         "*.txt diff=marker\n", encoding="utf-8", newline="\n"
     )
 
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2-control\n")
-    subprocess.run(["git", "diff", "--", "tracked.txt"], cwd=str(launch_root), capture_output=True)
+    subprocess.run(
+        ["git", "diff", "--", "tracked.txt"],
+        cwd=str(launch_root),
+        capture_output=True,
+    )
     if not marker.exists():
         pytest.skip("git не зовёт textconv в этой среде — гвард непроверяем")
     marker.unlink()
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2-safe\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2-safe\\n')"
+    )
     delta.after_and_record()
 
     assert not marker.exists()
@@ -574,7 +625,9 @@ def test_touch_without_content_change_writes_nothing(repo):
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2x\n")
     _git(launch_root, "add", "tracked.txt")  # worktree == index: git diff пуст
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "import os; os.utime('tracked.txt', (1000000, 1000000))")
+    _run_command(
+        launch_root, "import os; os.utime('tracked.txt', (1000000, 1000000))"
+    )
     delta.after_and_record()
 
     assert _records(threads_dir) == []
@@ -598,16 +651,21 @@ def test_recreated_file_is_recorded_again_after_it_disappeared(repo):
     delta = ShellDelta.begin(ctx, seen=seen)
     _run_command(launch_root, "open('gen.py','wb').write(b'print(1)')")
     delta.after_and_record()
-    assert [(r.path, r.op) for r in _records(threads_dir)] == [("gen.py", "create")]
+    assert [(r.path, r.op) for r in _records(threads_dir)] == [
+        ("gen.py", "create")
+    ]
 
-    (launch_root / "gen.py").unlink()          # откат на экране: файл удалён мимо канала
+    (
+        launch_root / "gen.py"
+    ).unlink()  # откат на экране: файл удалён мимо канала
 
     delta = ShellDelta.begin(ctx, seen=seen)
     _run_command(launch_root, "open('gen.py','wb').write(b'print(1)')")
     delta.after_and_record()
 
     assert [(r.path, r.op) for r in _records(threads_dir)] == [
-        ("gen.py", "create"), ("gen.py", "create"),
+        ("gen.py", "create"),
+        ("gen.py", "create"),
     ]
 
 
@@ -621,7 +679,9 @@ def test_binary_file_follows_recorder_contract(repo):
     """
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('blob.bin','wb').write(b'\\x00\\x01\\x02binary')")
+    _run_command(
+        launch_root, "open('blob.bin','wb').write(b'\\x00\\x01\\x02binary')"
+    )
     delta.after_and_record()
 
     recs = _records(threads_dir)
@@ -632,7 +692,9 @@ def test_binary_file_follows_recorder_contract(repo):
     assert rec.hunks == ""
     assert rec.add == 0
     assert rec.del_ == 0
-    assert rec.after_sha256 == hashlib.sha256(b"\x00\x01\x02binary").hexdigest()
+    assert (
+        rec.after_sha256 == hashlib.sha256(b"\x00\x01\x02binary").hexdigest()
+    )
 
 
 def test_file_over_source_cap_is_recorded_without_diffing(repo, monkeypatch):
@@ -707,7 +769,9 @@ def test_a_command_under_the_cap_is_not_marked(repo):
 
 def test_shell_tracking_false_writes_nothing(repo):
     launch_root, threads_dir = repo
-    delta = ShellDelta.begin(_ctx(launch_root, threads_dir, shell_tracking=False))
+    delta = ShellDelta.begin(
+        _ctx(launch_root, threads_dir, shell_tracking=False)
+    )
     _run_command(launch_root, "open('new.txt','wb').write(b'alpha\\n')")
 
     assert delta is None
@@ -752,7 +816,9 @@ def test_repo_hooks_are_not_executed(repo):
     а запись индекса зовёт post-index-change (контроль ниже это подтверждает).
     """
     launch_root, threads_dir = repo
-    marker = launch_root.parent / "hook-ran.txt"  # вне репо: иначе сам попадёт в status
+    marker = (
+        launch_root.parent / "hook-ran.txt"
+    )  # вне репо: иначе сам попадёт в status
     hook = launch_root / ".git" / "hooks" / "post-index-change"
     hook.parent.mkdir(parents=True, exist_ok=True)
     hook.write_text(
@@ -765,13 +831,19 @@ def test_repo_hooks_are_not_executed(repo):
     # контроль: обычный git status хук выполняет — иначе гвард ничего не доказывает
     os.utime(launch_root / "tracked.txt", None)
     subprocess.run(
-        ["git", "status", "--porcelain", "-u"], cwd=str(launch_root), capture_output=True
+        ["git", "status", "--porcelain", "-u"],
+        cwd=str(launch_root),
+        capture_output=True,
     )
     if not marker.exists():
-        pytest.skip("git не выполняет post-index-change в этой среде — гвард непроверяем")
+        pytest.skip(
+            "git не выполняет post-index-change в этой среде — гвард непроверяем"
+        )
     marker.unlink()
 
-    os.utime(launch_root / "tracked.txt", None)  # тот же триггер для наших вызовов
+    os.utime(
+        launch_root / "tracked.txt", None
+    )  # тот же триггер для наших вызовов
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, "open('new.txt','wb').write(b'alpha\\n')")
     delta.after_and_record()
@@ -813,14 +885,19 @@ def test_preexisting_untracked_file_is_not_treated_as_created(repo):
     assert [(r.path, r.op) for r in recs] == [("notes.txt", "shell")]
     # В индексе пути нет, зато байты сняты ПЕРЕД командой: база точная и
     # честная — «first», а не пустота.
-    assert _snapshot_store(launch_root).session_baseline("notes.txt") == b"first\n"
+    assert (
+        _snapshot_store(launch_root).session_baseline("notes.txt")
+        == b"first\n"
+    )
 
 
 def test_clean_tracked_file_modified_by_command_is_not_created(repo):
     """Чистого tracked-файла в `git status` нет вовсе: «нет в before» ещё не создание."""
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
     recs = _records(threads_dir)
@@ -838,12 +915,16 @@ def test_dirty_before_command_gets_a_precise_base_from_real_bytes(repo):
     launch_root, threads_dir = repo
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2-dirty\n")
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
     store = _snapshot_store(launch_root)
     assert store.session_baseline("tracked.txt") == b"line1\nline2-dirty\n"
-    assert store.turn_baseline("tracked.txt", "turn-1") == b"line1\nline2-dirty\n"
+    assert (
+        store.turn_baseline("tracked.txt", "turn-1") == b"line1\nline2-dirty\n"
+    )
     assert store.has_session_baseline("tracked.txt") is True
 
 
@@ -858,10 +939,14 @@ def test_protected_path_dirty_before_command_stays_out_of_the_pocket(repo):
     """
     launch_root, threads_dir = repo
     (launch_root / ".gc").mkdir()
-    (launch_root / ".gc" / "notes.txt").write_bytes(b"secret\n")   # ?? в porcelain
+    (launch_root / ".gc" / "notes.txt").write_bytes(
+        b"secret\n"
+    )  # ?? в porcelain
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('.gc/notes.txt','wb').write(b'changed\\n')")
+    _run_command(
+        launch_root, "open('.gc/notes.txt','wb').write(b'changed\\n')"
+    )
     delta.after_and_record()
 
     assert [r.path for r in _records(threads_dir)] == []
@@ -895,7 +980,9 @@ def test_symlink_out_of_the_perimeter_stays_out_of_the_pocket(repo, tmp_path):
     assert _snapshot_names(launch_root, ".orig") == []
 
 
-def test_external_path_known_to_the_journal_stays_out_of_the_pocket(repo, tmp_path):
+def test_external_path_known_to_the_journal_stays_out_of_the_pocket(
+    repo, tmp_path
+):
     """У кармана ДВА источника кандидатов, и фильтр нужен обоим.
 
     Первый — грязные пути `_at_risk_keys` (сама она внешние ключи больше не
@@ -918,9 +1005,17 @@ def test_external_path_known_to_the_journal_stays_out_of_the_pocket(repo, tmp_pa
 
     EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1")).append(
         EditRecord(
-            path=key, turn_id="turn-0", ts=1.0, call_id="seed", op="write",
-            hunks="", add=0, del_=0, before_sha256=None,
-            after_sha256=hashlib.sha256(b"a: 1\n").hexdigest(), flags=[],
+            path=key,
+            turn_id="turn-0",
+            ts=1.0,
+            call_id="seed",
+            op="write",
+            hunks="",
+            add=0,
+            del_=0,
+            before_sha256=None,
+            after_sha256=hashlib.sha256(b"a: 1\n").hexdigest(),
+            flags=[],
         )
     )
 
@@ -928,12 +1023,14 @@ def test_external_path_known_to_the_journal_stays_out_of_the_pocket(repo, tmp_pa
     _run_command(launch_root, f"open({str(outside)!r},'wb').write(b'a: 2\\n')")
     delta.after_and_record()
 
-    assert [r.path for r in _records(threads_dir)] == [key]   # только засев
+    assert [r.path for r in _records(threads_dir)] == [key]  # только засев
     assert _snapshot_names(launch_root, ".orig") == []
     assert _snapshot_names(launch_root, ".turn") == []
 
 
-def test_external_key_reaching_build_record_stays_out_of_the_journal(repo, tmp_path):
+def test_external_key_reaching_build_record_stays_out_of_the_journal(
+    repo, tmp_path
+):
     """Единственная доступная связка, которая доводит внешний ключ до гварда
     git-подканала (`_build_record`), а не до кармана.
 
@@ -983,7 +1080,9 @@ def test_file_created_by_command_gets_no_precise_snapshot(repo):
     _run_command(launch_root, "open('new.txt','wb').write(b'alpha\\n')")
     delta.after_and_record()
 
-    assert [(r.path, r.op) for r in _records(threads_dir)] == [("new.txt", "create")]
+    assert [(r.path, r.op) for r in _records(threads_dir)] == [
+        ("new.txt", "create")
+    ]
     assert _snapshot_names(launch_root, ".orig") == []
     assert _snapshot_names(launch_root, ".turn") == []
 
@@ -999,11 +1098,15 @@ def test_counting_base_prefers_the_earlier_of_two_bases(repo):
     launch_root, threads_dir = repo
     (launch_root / "tracked.txt").write_bytes(b"line1\nline2-dirty\n")
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
     store = _snapshot_store(launch_root)
-    store.capture_session("tracked.txt", (launch_root / "tracked.txt").read_bytes())
+    store.capture_session(
+        "tracked.txt", (launch_root / "tracked.txt").read_bytes()
+    )
 
     assert store.session_baseline("tracked.txt") == b"line1\nline2-dirty\n"
 
@@ -1022,10 +1125,14 @@ def test_counting_base_is_not_written_when_git_show_fails(repo, monkeypatch):
 
     monkeypatch.setattr(git_ops, "show_index_bytes", _boom)
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
-    assert [(r.path, r.op) for r in _records(threads_dir)] == [("tracked.txt", "shell")]
+    assert [(r.path, r.op) for r in _records(threads_dir)] == [
+        ("tracked.txt", "shell")
+    ]
     assert _snapshot_names(launch_root, ".gitorig") == []
 
 
@@ -1034,7 +1141,9 @@ def test_no_snapshot_for_binary_record(repo):
     (launch_root / "blob.bin").write_bytes(b"\x00\x01old")
     _git(launch_root, "add", "blob.bin")
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('blob.bin','wb').write(b'\\x00\\x01\\x02new')")
+    _run_command(
+        launch_root, "open('blob.bin','wb').write(b'\\x00\\x01\\x02new')"
+    )
     delta.after_and_record()
 
     # Файл СУЩЕСТВОВАЛ до команды, значит вид правки — `shell`, а бинарность
@@ -1081,16 +1190,22 @@ def test_shell_channel_evicts_when_it_wrote_a_new_base(repo, monkeypatch):
     ctx.config_dict["agent_edits"]["snapshots_max_files"] = 7
     calls: list[int] = []
     monkeypatch.setattr(
-        SnapshotStore, "evict_lru", lambda self, max_files: calls.append(max_files)
+        SnapshotStore,
+        "evict_lru",
+        lambda self, max_files: calls.append(max_files),
     )
 
     delta = ShellDelta.begin(ctx)
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
     assert calls == [7]
 
     delta = ShellDelta.begin(ctx)
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2y\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2y\\n')"
+    )
     delta.after_and_record()
     assert calls == [7]  # база уже есть — второго обхода каталога нет
 
@@ -1150,7 +1265,9 @@ def test_an_ignored_file_that_existed_is_not_treated_as_created(repo):
     assert recs and all(r.op != "create" for r in recs)
 
 
-def _ignored_existing_file(launch_root, rule_file=".gitignore", rel="secret.txt"):
+def _ignored_existing_file(
+    launch_root, rule_file=".gitignore", rel="secret.txt"
+):
     """Файл пользователя, лежавший ДО команды и скрытый правилом игнорирования."""
     rule = launch_root / rule_file
     rule.parent.mkdir(parents=True, exist_ok=True)
@@ -1168,7 +1285,9 @@ def _op_of(threads_dir, rel):
 
 
 @pytest.mark.parametrize("force_add", [False, True])
-def test_a_file_unignored_by_the_same_command_is_not_treated_as_created(repo, force_add):
+def test_a_file_unignored_by_the_same_command_is_not_treated_as_created(
+    repo, force_add
+):
     """Команда сама убрала правило из `.gitignore` и поправила файл — не «создан».
 
     Проверка правил после команды видит уже ослабленные правила: файл выглядел
@@ -1178,7 +1297,11 @@ def test_a_file_unignored_by_the_same_command_is_not_treated_as_created(repo, fo
     launch_root, threads_dir = repo
     _ignored_existing_file(launch_root)
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    add = " subprocess.run(['git','add','-f','secret.txt'], check=True);" if force_add else ""
+    add = (
+        " subprocess.run(['git','add','-f','secret.txt'], check=True);"
+        if force_add
+        else ""
+    )
     _run_command(
         launch_root,
         "import subprocess, pathlib; pathlib.Path('.gitignore').write_text('');"
@@ -1186,7 +1309,9 @@ def test_a_file_unignored_by_the_same_command_is_not_treated_as_created(repo, fo
     )
     delta.after_and_record()
 
-    assert _op_of(threads_dir, "secret.txt") and "create" not in _op_of(threads_dir, "secret.txt")
+    assert _op_of(threads_dir, "secret.txt") and "create" not in _op_of(
+        threads_dir, "secret.txt"
+    )
 
 
 def test_a_negation_in_a_new_gitignore_is_a_loosened_rule(repo):
@@ -1235,10 +1360,14 @@ def test_a_new_gitignore_without_negations_keeps_created_files_created(repo):
     assert _op_of(threads_dir, "main.py") == ["create"]
 
 
-def test_a_changed_nested_gitignore_does_not_touch_files_outside_its_folder(repo):
+def test_a_changed_nested_gitignore_does_not_touch_files_outside_its_folder(
+    repo,
+):
     """Правило каталога действует только ниже него: созданное рядом — созданное."""
     launch_root, threads_dir = repo
-    _ignored_existing_file(launch_root, rule_file="sub/.gitignore", rel="sub/secret.txt")
+    _ignored_existing_file(
+        launch_root, rule_file="sub/.gitignore", rel="sub/secret.txt"
+    )
     _git(launch_root, "add", "sub/.gitignore")
     _git(launch_root, "commit", "-qm", "nested ignore")
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
@@ -1282,7 +1411,9 @@ def test_clean_tracked_gets_precise_base_and_is_revertable(repo):
     такая правка становится откатываемой."""
     launch_root, threads_dir = repo
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
     recs = _records(threads_dir)
@@ -1347,7 +1478,9 @@ def test_git_reset_hard_over_staged_work_is_recorded_and_revertable(repo):
     assert base == "В ИНДЕКСЕ\n".encode("utf-8")
 
 
-def test_unsaved_work_keeps_its_place_in_the_pocket_ahead_of_staged_files(repo):
+def test_unsaved_work_keeps_its_place_in_the_pocket_ahead_of_staged_files(
+    repo,
+):
     """Проиндексированные файлы не вытесняют из кармана несохранённую работу.
 
     Карман обрезается потолком путей, а статус идёт по алфавиту: 150
@@ -1378,7 +1511,9 @@ def test_unsaved_work_keeps_its_place_in_the_pocket_ahead_of_staged_files(repo):
     assert base == "НЕСОХРАН\n".encode("utf-8")
 
 
-def test_a_known_ignored_file_keeps_its_place_in_the_pocket_ahead_of_staged_files(repo):
+def test_a_known_ignored_file_keeps_its_place_in_the_pocket_ahead_of_staged_files(
+    repo,
+):
     """Файл, который журнал уже знает, идёт в карман раньше только проиндексированных.
 
     Игнорируемый `.env`, правленный агентом раньше, другого источника «до» не
@@ -1400,7 +1535,9 @@ def test_a_known_ignored_file_keeps_its_place_in_the_pocket_ahead_of_staged_file
     _run_command(launch_root, "open('.env','wb').write(b'SECRET=2\\n')")
     delta.after_and_record()
 
-    assert [r.op for r in _records(threads_dir) if r.path == ".env"][1:] == ["shell"]
+    assert [r.op for r in _records(threads_dir) if r.path == ".env"][1:] == [
+        "shell"
+    ]
 
 
 def test_command_that_commits_falls_back_to_counting(repo):
@@ -1460,7 +1597,9 @@ def test_precise_base_respects_eol_form(repo):
     _git(launch_root, "commit", "-m", "add eol.txt")
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('eol.txt','wb').write(b'one\\r\\nTWO\\r\\n')")
+    _run_command(
+        launch_root, "open('eol.txt','wb').write(b'one\\r\\nTWO\\r\\n')"
+    )
     delta.after_and_record()
 
     store = _snapshot_store(launch_root)
@@ -1499,11 +1638,18 @@ def test_existing_orig_not_clobbered_by_shell_precise(repo):
     store.capture_turn("tracked.txt", b"earlier turn baseline\n", "turn-1")
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
-    assert store.session_baseline("tracked.txt") == b"earlier session baseline\n"
-    assert store.turn_baseline("tracked.txt", "turn-1") == b"earlier turn baseline\n"
+    assert (
+        store.session_baseline("tracked.txt") == b"earlier session baseline\n"
+    )
+    assert (
+        store.turn_baseline("tracked.txt", "turn-1")
+        == b"earlier turn baseline\n"
+    )
 
 
 # --- карманный канал: снимок набора перед командой (Р33) ----------------------
@@ -1518,11 +1664,15 @@ def test_pocket_records_edit_in_plain_folder(tmp_path, monkeypatch):
     threads_dir.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     ctx = _ctx(launch_root, threads_dir)
-    _seed_known_file(threads_dir, launch_root, "known.txt", b"line1\nline2\n", ts=1.0)
+    _seed_known_file(
+        threads_dir, launch_root, "known.txt", b"line1\nline2\n", ts=1.0
+    )
 
     delta = ShellDelta.begin(ctx)
     assert delta is not None
-    _run_command(launch_root, "open('known.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('known.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
 
     recs = [r for r in _records(threads_dir) if r.call_id is None]
@@ -1542,11 +1692,15 @@ def test_pocket_records_edit_in_plain_folder(tmp_path, monkeypatch):
     assert store.has_session_baseline("known.txt") is True
 
     # откат: точная база и правда восстанавливает исходное содержимое
-    (launch_root / "known.txt").write_bytes(store.session_baseline("known.txt"))
+    (launch_root / "known.txt").write_bytes(
+        store.session_baseline("known.txt")
+    )
     assert (launch_root / "known.txt").read_bytes() == b"line1\nline2\n"
 
 
-def test_pocket_record_carries_the_hash_of_the_bytes_before(tmp_path, monkeypatch):
+def test_pocket_record_carries_the_hash_of_the_bytes_before(
+    tmp_path, monkeypatch
+):
     """У карманной записи «до» ИЗВЕСТНО — байты сняты перед командой.
 
     `before_sha256` шелл-канала пуст не по забывчивости: git-подканал видит
@@ -1561,7 +1715,9 @@ def test_pocket_record_carries_the_hash_of_the_bytes_before(tmp_path, monkeypatc
     threads_dir.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     before_bytes = b"one\ntwo\n"
-    _seed_known_file(threads_dir, launch_root, "known.txt", before_bytes, ts=1.0)
+    _seed_known_file(
+        threads_dir, launch_root, "known.txt", before_bytes, ts=1.0
+    )
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, "open('known.txt','wb').write(b'one\\nTWO\\n')")
@@ -1581,7 +1737,9 @@ def test_pocket_takes_priority_over_git_channel(repo, monkeypatch):
     # первая правка: журнал ещё пуст, "tracked.txt" не кандидат карманного
     # подканала — её видит git-подканал, как раньше.
     delta = ShellDelta.begin(ctx)
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2x\\n')"
+    )
     delta.after_and_record()
     assert [r.path for r in _records(threads_dir)] == ["tracked.txt"]
 
@@ -1597,7 +1755,9 @@ def test_pocket_takes_priority_over_git_channel(repo, monkeypatch):
     # вторая правка: "tracked.txt" теперь известна журналу — карманный
     # подканал обязан отработать её сам, не отдавая git-подканалу.
     delta = ShellDelta.begin(ctx)
-    _run_command(launch_root, "open('tracked.txt','wb').write(b'line1\\nline2y\\n')")
+    _run_command(
+        launch_root, "open('tracked.txt','wb').write(b'line1\\nline2y\\n')"
+    )
     delta.after_and_record()
 
     assert diff_calls == []
@@ -1673,7 +1833,9 @@ def test_pocket_detects_deletion_of_known_file(tmp_path, monkeypatch):
     threads_dir.mkdir()
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     ctx = _ctx(launch_root, threads_dir)
-    _seed_known_file(threads_dir, launch_root, "known.txt", b"line1\nline2\n", ts=1.0)
+    _seed_known_file(
+        threads_dir, launch_root, "known.txt", b"line1\nline2\n", ts=1.0
+    )
 
     delta = ShellDelta.begin(ctx)
     _run_command(launch_root, "import os; os.remove('known.txt')")
@@ -1721,7 +1883,11 @@ def test_pocket_append_failure_on_one_path_does_not_lose_dedup_for_another(
         # Только ПЕРВЫЙ такой вызов — это попытка карманного подканала;
         # повторный (если он случится) — уже от git-подканала, ему сбоить не
         # нужно: тест проверяет потерю дедупликации, а не второй сбой подряд.
-        if rec.path == "b.txt" and rec.op == "delete" and not failed_once["done"]:
+        if (
+            rec.path == "b.txt"
+            and rec.op == "delete"
+            and not failed_once["done"]
+        ):
             failed_once["done"] = True
             # ровно тот тип исключения, что кидает file_lock по таймауту.
             raise TimeoutError("file_lock timeout")
@@ -1729,7 +1895,9 @@ def test_pocket_append_failure_on_one_path_does_not_lose_dedup_for_another(
 
     monkeypatch.setattr(EditsJournal, "append", _flaky_append)
 
-    _run_command(launch_root, "import os; os.remove('a.txt'); os.remove('b.txt')")
+    _run_command(
+        launch_root, "import os; os.remove('a.txt'); os.remove('b.txt')"
+    )
     delta.after_and_record()
 
     recs = _records(threads_dir)
@@ -1759,9 +1927,14 @@ def test_pocket_does_not_clobber_existing_orig(tmp_path, monkeypatch):
     delta.after_and_record()
 
     assert store.session_baseline("known.txt") == b"earlier session baseline\n"
-    assert store.turn_baseline("known.txt", "turn-1") == b"earlier turn baseline\n"
+    assert (
+        store.turn_baseline("known.txt", "turn-1")
+        == b"earlier turn baseline\n"
+    )
     # запись про правку всё равно есть — «только если ещё нет» не про журнал
-    assert [r.op for r in _records(threads_dir) if r.call_id is None] == ["shell"]
+    assert [r.op for r in _records(threads_dir) if r.call_id is None] == [
+        "shell"
+    ]
 
 
 def test_pocket_paths_cache_hits_by_journal_signature(tmp_path, monkeypatch):
@@ -1826,7 +1999,11 @@ def test_pocket_diff_of_cp1251_file_is_not_no_diff(repo):
     который агент читает как cp1251, не имеет права стать `binary`/`no_diff`."""
     launch_root, threads_dir = repo
     _seed_known_file(
-        threads_dir, launch_root, "ru.txt", "первая\nвторая\n".encode("cp1251"), ts=1.0
+        threads_dir,
+        launch_root,
+        "ru.txt",
+        "первая\nвторая\n".encode("cp1251"),
+        ts=1.0,
     )
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
@@ -1859,7 +2036,9 @@ def test_command_created_file_gets_the_creation_mark(repo):
     assert store.session_baseline("new.txt") is None
 
 
-def test_creation_mark_failure_does_not_drop_the_rest_of_the_command(repo, monkeypatch):
+def test_creation_mark_failure_does_not_drop_the_rest_of_the_command(
+    repo, monkeypatch
+):
     """Сбой отметки создания на одном пути не уносит из журнала остальные пути
     команды: `file_lock` индекса при конкуренции (сабагенты, swarm в одном
     проекте) отвечает таймаутом, и без своего `try` исключение уходит во
@@ -1900,7 +2079,9 @@ def test_ignored_file_in_set_visible_via_pocket(repo):
         "secret.env\n", encoding="utf-8", newline="\n"
     )
     ctx = _ctx(launch_root, threads_dir)
-    _seed_known_file(threads_dir, launch_root, "secret.env", b"TOKEN=old\n", ts=1.0)
+    _seed_known_file(
+        threads_dir, launch_root, "secret.env", b"TOKEN=old\n", ts=1.0
+    )
 
     delta = ShellDelta.begin(ctx)
     _run_command(launch_root, "open('secret.env','wb').write(b'TOKEN=new\\n')")
@@ -1948,18 +2129,34 @@ def _awkward_changes(repo):
         "old_name.py": b"".join(b"line %d\n" % i for i in range(30)),
     }
     if os.name != "nt":
-        tracked.update({'quo"te.txt': b"q\n", "back\\slash.txt": b"b\n", "tab\tname.txt": b"t\n"})
+        tracked.update(
+            {
+                'quo"te.txt': b"q\n",
+                "back\\slash.txt": b"b\n",
+                "tab\tname.txt": b"t\n",
+            }
+        )
     for rel, data in tracked.items():
         (launch_root / rel).write_bytes(data)
     _git(launch_root, "add", "-A")
     _git(launch_root, "commit", "-qm", "awkward")
     for rel, data in tracked.items():
-        (launch_root / rel).write_bytes(data.replace(b"\n", b"!\n") + b"more\n")
+        (launch_root / rel).write_bytes(
+            data.replace(b"\n", b"!\n") + b"more\n"
+        )
     moved = (launch_root / "old_name.py").read_bytes()
     (launch_root / "old_name.py").unlink()
-    (launch_root / "new_name.py").write_bytes(moved)       # содержимое то же — git склеил бы
-    _git(launch_root, "add", "--", "plain.py", "crlf.txt")  # индекс ≠ HEAD у части путей
-    untracked = {"fresh.py": b"n = 1\n", "свежий.txt": "да\n".encode("utf-8"), "empty.txt": b""}
+    (launch_root / "new_name.py").write_bytes(
+        moved
+    )  # содержимое то же — git склеил бы
+    _git(
+        launch_root, "add", "--", "plain.py", "crlf.txt"
+    )  # индекс ≠ HEAD у части путей
+    untracked = {
+        "fresh.py": b"n = 1\n",
+        "свежий.txt": "да\n".encode("utf-8"),
+        "empty.txt": b"",
+    }
     for rel, data in untracked.items():
         (launch_root / rel).write_bytes(data)
     return launch_root, [*tracked, "new_name.py"], list(untracked)
@@ -1973,9 +2170,16 @@ def test_batched_diff_matches_the_per_path_diff(repo, against_head):
     пофайловым вызовом хоть в заголовке — поехали бы и они."""
     launch_root, tracked, _untracked = _awkward_changes(repo)
     delta = ShellDelta(str(launch_root), _ctx(*repo))
-    base = git_ops.head_rev_from_files(str(launch_root)) if against_head else None
-    expected = {rel: delta._diff(rel, untracked=False, base_rev=base) for rel in tracked}
-    assert expected["with space.txt"] and expected["кириллица.md"]   # предмет не пуст
+    base = (
+        git_ops.head_rev_from_files(str(launch_root)) if against_head else None
+    )
+    expected = {
+        rel: delta._diff(rel, untracked=False, base_rev=base)
+        for rel in tracked
+    }
+    assert (
+        expected["with space.txt"] and expected["кириллица.md"]
+    )  # предмет не пуст
     assert delta._diff_many(tracked, base_rev=base) == expected
 
 
@@ -1986,7 +2190,10 @@ def test_batched_diff_survives_splitting_into_chunks(repo, monkeypatch):
     пачке может быть тысячи."""
     launch_root, tracked, _untracked = _awkward_changes(repo)
     delta = ShellDelta(str(launch_root), _ctx(*repo))
-    expected = {rel: delta._diff(rel, untracked=False, base_rev=None) for rel in tracked}
+    expected = {
+        rel: delta._diff(rel, untracked=False, base_rev=None)
+        for rel in tracked
+    }
     monkeypatch.setattr(git_ops, "ARGV_CHUNK_CHARS", 40)
     assert delta._diff_many(tracked, base_rev=None) == expected
 
@@ -1997,7 +2204,9 @@ def test_batched_diff_costs_one_git_process_per_chunk(repo, monkeypatch):
     delta = ShellDelta(str(launch_root), _ctx(*repo))
     calls = []
     real = git_ops._run
-    monkeypatch.setattr(git_ops, "_run", lambda *a, **k: (calls.append(1), real(*a, **k))[1])
+    monkeypatch.setattr(
+        git_ops, "_run", lambda *a, **k: (calls.append(1), real(*a, **k))[1]
+    )
     delta._diff_many(tracked, base_rev=None)
     assert len(calls) == 1
 
@@ -2009,12 +2218,17 @@ def test_untracked_diffs_match_the_per_path_diff(repo):
     индекс исполнил бы фильтры репозитория, которые канал нарочно не исполняет."""
     launch_root, _tracked, untracked = _awkward_changes(repo)
     delta = ShellDelta(str(launch_root), _ctx(*repo))
-    expected = {rel: delta._diff(rel, untracked=True, base_rev=None) for rel in untracked}
-    assert all(expected.values())                     # и пустой файл даёт заголовок
+    expected = {
+        rel: delta._diff(rel, untracked=True, base_rev=None)
+        for rel in untracked
+    }
+    assert all(expected.values())  # и пустой файл даёт заголовок
     assert delta._untracked_diffs(untracked) == expected
 
 
-def test_recording_a_wide_command_costs_a_constant_number_of_git_processes(repo, monkeypatch):
+def test_recording_a_wide_command_costs_a_constant_number_of_git_processes(
+    repo, monkeypatch
+):
     """Команда, тронувшая много файлов, стоит постоянного числа запусков git.
 
     Пофайловые запуски (дифф, атрибуты, прежняя версия — три на путь) делали
@@ -2023,7 +2237,9 @@ def test_recording_a_wide_command_costs_a_constant_number_of_git_processes(repo,
     на вид вопроса, плюс параллельные диффы новых файлов."""
     launch_root, threads_dir = repo
     for i in range(30):
-        (launch_root / f"m{i}.py").write_bytes(b"".join(b"x_%d = %d\n" % (j, j) for j in range(10)))
+        (launch_root / f"m{i}.py").write_bytes(
+            b"".join(b"x_%d = %d\n" % (j, j) for j in range(10))
+        )
     _git(launch_root, "add", "-A")
     _git(launch_root, "commit", "-qm", "wide")
     ctx = _ctx(launch_root, threads_dir)
@@ -2035,13 +2251,17 @@ def test_recording_a_wide_command_costs_a_constant_number_of_git_processes(repo,
         (launch_root / f"new{i}.py").write_bytes(b"n = %d\n" % i)
     calls = []
     real = git_ops._run
-    monkeypatch.setattr(git_ops, "_run", lambda *a, **k: (calls.append(a[1]), real(*a, **k))[1])
+    monkeypatch.setattr(
+        git_ops, "_run", lambda *a, **k: (calls.append(a[1]), real(*a, **k))[1]
+    )
     delta.after_and_record()
 
     records = _records(threads_dir)
     assert len(records) == 40
     store = _snapshot_store(launch_root)
-    assert all(store.session_baseline(f"m{i}.py") is not None for i in range(30))
+    assert all(
+        store.session_baseline(f"m{i}.py") is not None for i in range(30)
+    )
     assert len(calls) <= 8, [args[:6] for args in calls]
 
 
@@ -2062,14 +2282,18 @@ def test_batched_diff_keeps_a_merge_conflict_path(repo):
     _git(launch_root, "checkout", "-q", "main")
     (launch_root / "c.txt").write_bytes(b"ours\n")
     _git(launch_root, "commit", "-qam", "ours")
-    subprocess.run(["git", "merge", "other"], cwd=str(launch_root), capture_output=True)
+    subprocess.run(
+        ["git", "merge", "other"], cwd=str(launch_root), capture_output=True
+    )
     (launch_root / "a.txt").write_bytes(b"base\nmore\n")
     (launch_root / "z.txt").write_bytes(b"base\nmore\n")
     delta = ShellDelta(str(launch_root), _ctx(launch_root, threads_dir))
     rels = ["a.txt", "c.txt", "z.txt"]
 
-    expected = {rel: delta._diff(rel, untracked=False, base_rev=None) for rel in rels}
-    assert expected["c.txt"].startswith("diff --cc")          # предмет теста на месте
+    expected = {
+        rel: delta._diff(rel, untracked=False, base_rev=None) for rel in rels
+    }
+    assert expected["c.txt"].startswith("diff --cc")  # предмет теста на месте
     assert delta._diff_many(rels, base_rev=None) == expected
 
 
@@ -2080,13 +2304,19 @@ def test_batched_diff_does_not_trust_output_of_a_failed_git(repo, monkeypatch):
     легли бы в журнал неверными."""
     launch_root, tracked, _untracked = _awkward_changes(repo)
     delta = ShellDelta(str(launch_root), _ctx(*repo))
-    expected = {rel: delta._diff(rel, untracked=False, base_rev=None) for rel in tracked}
+    expected = {
+        rel: delta._diff(rel, untracked=False, base_rev=None)
+        for rel in tracked
+    }
     real = git_ops.run_git
 
     def broken_batch(root, args, **kw):
         code, out = real(root, args, **kw)
-        if "diff" in args and sum(1 for a in args if a.startswith(":(literal)")) > 1:
-            return 128, out[: len(out) // 2]              # оборвано посреди вывода
+        if (
+            "diff" in args
+            and sum(1 for a in args if a.startswith(":(literal)")) > 1
+        ):
+            return 128, out[: len(out) // 2]  # оборвано посреди вывода
         return code, out
 
     monkeypatch.setattr(git_ops, "run_git", broken_batch)
@@ -2109,7 +2339,9 @@ def _wide_command(repo, n: int):
     return delta, launch_root, threads_dir
 
 
-def test_a_failed_batch_of_base_facts_costs_nothing_but_speed(repo, monkeypatch):
+def test_a_failed_batch_of_base_facts_costs_nothing_but_speed(
+    repo, monkeypatch
+):
     """Отказ пакетного сбора фактов не лишает баз всю команду — они снимаются по одной.
 
     Записи в журнал к этому моменту уже легли: без баз пользователь видел бы
@@ -2124,10 +2356,14 @@ def test_a_failed_batch_of_base_facts_costs_nothing_but_speed(repo, monkeypatch)
 
     store = _snapshot_store(launch_root)
     assert len(_records(threads_dir)) == 5
-    assert all(store.session_baseline(f"w{i}.py") == b"a = 1\n" for i in range(5))
+    assert all(
+        store.session_baseline(f"w{i}.py") == b"a = 1\n" for i in range(5)
+    )
 
 
-def test_batched_git_calls_never_take_more_than_a_slice_of_paths(repo, monkeypatch):
+def test_batched_git_calls_never_take_more_than_a_slice_of_paths(
+    repo, monkeypatch
+):
     """Команда пишется кусками: ни один пакетный вызов git не берёт больше куска путей.
 
     Иначе и память (все диффы и блобы команды разом), и время одного запуска git
@@ -2139,15 +2375,23 @@ def test_batched_git_calls_never_take_more_than_a_slice_of_paths(repo, monkeypat
 
     def spy(root, args, **kw):
         stdin = kw.get("stdin") or b""
-        widths.append(max(stdin.count(b"\x00"), stdin.count(b"\n"),
-                          sum(1 for a in args if a.startswith(":(literal)"))))
+        widths.append(
+            max(
+                stdin.count(b"\x00"),
+                stdin.count(b"\n"),
+                sum(1 for a in args if a.startswith(":(literal)")),
+            )
+        )
         return real(root, args, **kw)
 
     monkeypatch.setattr(git_ops, "run_git", spy)
     delta.after_and_record()
 
     assert len(_records(threads_dir)) == 7
-    assert all(_snapshot_store(launch_root).session_baseline(f"w{i}.py") for i in range(7))
+    assert all(
+        _snapshot_store(launch_root).session_baseline(f"w{i}.py")
+        for i in range(7)
+    )
     assert max(widths) <= 3
 
 
@@ -2165,15 +2409,31 @@ def test_protected_path_never_reaches_git(repo, monkeypatch):
     (launch_root / "tracked.txt").write_bytes(b"changed\n")
     seen = []
     real_one, real_many = git_ops.run_git, git_ops.run_git_many
-    monkeypatch.setattr(git_ops, "run_git", lambda root, args, **kw: (
-        seen.append(" ".join(args) + (kw.get("stdin") or b"").decode("utf-8", "replace")),
-        real_one(root, args, **kw))[1])
-    monkeypatch.setattr(git_ops, "run_git_many", lambda root, argvs: (
-        seen.extend(" ".join(a) for a in argvs), real_many(root, argvs))[1])
+    monkeypatch.setattr(
+        git_ops,
+        "run_git",
+        lambda root, args, **kw: (
+            seen.append(
+                " ".join(args)
+                + (kw.get("stdin") or b"").decode("utf-8", "replace")
+            ),
+            real_one(root, args, **kw),
+        )[1],
+    )
+    monkeypatch.setattr(
+        git_ops,
+        "run_git_many",
+        lambda root, argvs: (
+            seen.extend(" ".join(a) for a in argvs),
+            real_many(root, argvs),
+        )[1],
+    )
     delta.after_and_record()
 
     assert [r.path for r in _records(threads_dir)] == ["tracked.txt"]
-    assert not [call for call in seen if "AGENTS.md" in call and "status" not in call]
+    assert not [
+        call for call in seen if "AGENTS.md" in call and "status" not in call
+    ]
 
 
 def test_file_facts_are_read_once_per_path(repo, monkeypatch):
@@ -2184,13 +2444,17 @@ def test_file_facts_are_read_once_per_path(repo, monkeypatch):
     delta, _launch_root, _threads_dir = _wide_command(repo, 4)
     calls = []
     real = shell_delta._is_binary_file
-    monkeypatch.setattr(shell_delta, "_is_binary_file", lambda p: (calls.append(p), real(p))[1])
+    monkeypatch.setattr(
+        shell_delta, "_is_binary_file", lambda p: (calls.append(p), real(p))[1]
+    )
     delta.after_and_record()
 
     assert len(calls) == 4
 
 
-@pytest.mark.skipif(os.name == "nt", reason="симлинки без прав разработчика на Windows")
+@pytest.mark.skipif(
+    os.name == "nt", reason="симлинки без прав разработчика на Windows"
+)
 def test_a_repointed_symlink_never_passes_for_an_edit_of_its_target(repo):
     """Перенаправленный симлинк не выдаётся за правку файла-цели.
 
@@ -2214,7 +2478,9 @@ def test_a_repointed_symlink_never_passes_for_an_edit_of_its_target(repo):
     assert (launch_root / "b.txt").read_bytes() == b"beta\n"
 
 
-@pytest.mark.skipif(os.name == "nt", reason="симлинки без прав разработчика на Windows")
+@pytest.mark.skipif(
+    os.name == "nt", reason="симлинки без прав разработчика на Windows"
+)
 def test_a_symlink_repointed_at_a_missing_target_is_not_recorded(repo):
     """Висячий симлинк — тоже ссылка: git-подканал его не записывает.
 
@@ -2235,7 +2501,9 @@ def test_a_symlink_repointed_at_a_missing_target_is_not_recorded(repo):
     assert _snapshot_store(launch_root).session_baseline("link") is None
 
 
-def test_a_path_whose_key_differs_only_by_case_is_still_recorded(repo, monkeypatch):
+def test_a_path_whose_key_differs_only_by_case_is_still_recorded(
+    repo, monkeypatch
+):
     """Ключ, отличный от пути из git только регистром, — не повод терять правку.
 
     На Windows `resolve()` отдаёт регистр с диска, а `git status` — из индекса:
@@ -2248,9 +2516,11 @@ def test_a_path_whose_key_differs_only_by_case_is_still_recorded(repo, monkeypat
     _git(launch_root, "commit", "-qm", "readme")
     real_key = shell_delta.canonical_path_key
     monkeypatch.setattr(
-        shell_delta, "canonical_path_key",
-        lambda path, root, **kw: (lambda k: "README.md" if k == "Readme.md" else k)(
-            real_key(path, root, **kw)),
+        shell_delta,
+        "canonical_path_key",
+        lambda path, root, **kw: (
+            lambda k: "README.md" if k == "Readme.md" else k
+        )(real_key(path, root, **kw)),
     )
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     (launch_root / "Readme.md").write_bytes(b"new\n")
@@ -2272,19 +2542,24 @@ def test_a_path_through_a_junction_is_not_recorded(repo, monkeypatch):
     _git(launch_root, "commit", "-qm", "dir")
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     import shutil
+
     shutil.rmtree(launch_root / "d")
     junction = launch_root / "d"
     junction.mkdir()
     from gc_core.agent_edits import paths as paths_mod
 
     real_is_link = paths_mod._is_link
-    monkeypatch.setattr(paths_mod, "_is_link", lambda n: Path(n) == junction or real_is_link(n))
+    monkeypatch.setattr(
+        paths_mod, "_is_link", lambda n: Path(n) == junction or real_is_link(n)
+    )
     delta.after_and_record()
 
     assert "d/a.txt" not in [r.path for r in _records(threads_dir)]
 
 
-@pytest.mark.skipif(os.name == "nt", reason="симлинки без прав разработчика на Windows")
+@pytest.mark.skipif(
+    os.name == "nt", reason="симлинки без прав разработчика на Windows"
+)
 def test_a_path_through_a_directory_turned_symlink_is_not_recorded(repo):
     """Путь через папку, ставшую ссылкой, не выдаётся за правку чужого файла.
 
@@ -2301,6 +2576,7 @@ def test_a_path_through_a_directory_turned_symlink_is_not_recorded(repo):
     _git(launch_root, "commit", "-qm", "two dirs")
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     import shutil
+
     shutil.rmtree(launch_root / "d")
     os.symlink("other", launch_root / "d")
     delta.after_and_record()

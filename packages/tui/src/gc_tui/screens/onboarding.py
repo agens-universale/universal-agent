@@ -20,7 +20,6 @@ from textual.widgets import Static
 from gc_tui import branding
 from gc_tui.form_frame import (
     FOOTER_SCROLL,
-    KEEP_IN_VIEW,
     body_scrollable,
     cap_frame_height,
     reveal,
@@ -159,7 +158,6 @@ _VOICE_FIELD_KEYS = ("url", "token", "model")
 
 
 class OnboardingScreen(Screen):
-
     # Модальный экран: конфига ещё нет, глобальная навигация (F1/F4/…) поверх мастера
     # показывала бы справку с неработающими клавишами и уведомления по незаписанному
     # конфигу. Гейт — TuiApp.check_action.
@@ -269,7 +267,9 @@ class OnboardingScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="onb-header"):
-                yield Static(self._title_text(), id="header-left", markup=False)
+                yield Static(
+                    self._title_text(), id="header-left", markup=False
+                )
             # Фокус у области прокрутки не отнимаем (Р17): на нём держится
             # клавиатурная прокрутка. Свои клавиши шаг забирает раньше — `on_key`
             # предка отрабатывает ДО проверки биндингов, — контейнеру достаётся
@@ -564,7 +564,11 @@ class OnboardingScreen(Screen):
         # Клавиша прокрутки называется, только пока карточка не влезает в кадр
         # (наша правка поверх канона develop: подсказка не врёт про то, чего нет).
         base = self._footer_base()
-        return base + FOOTER_SCROLL if body_scrollable(self, "#onb-scroll") else base
+        return (
+            base + FOOTER_SCROLL
+            if body_scrollable(self, "#onb-scroll")
+            else base
+        )
 
     def _sync_footer(self) -> None:
         try:
@@ -2140,7 +2144,9 @@ class OnboardingScreen(Screen):
     def on_key(self, event: events.Key) -> None:
         if event.key in ("ctrl+up", "ctrl+down"):
             event.stop()
-            scroll_body(self, "#onb-scroll", -1 if event.key == "ctrl+up" else 1)
+            scroll_body(
+                self, "#onb-scroll", -1 if event.key == "ctrl+up" else 1
+            )
             return
         if event.key in ("up", "down"):
             # Кадр едет за курсором шага; PgUp тут занят возвратом назад, а

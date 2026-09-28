@@ -12,6 +12,7 @@ unified diff, sha256 обеих сторон, снимает session/turn-сна
 Soft-fail: любое исключение внутри логируется и глотается — правка файла
 уже произошла, запись в журнал вторична и не должна ронять тул.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -21,11 +22,18 @@ import time
 from pathlib import Path
 from typing import Any
 
-from gc_core.agent_edits.ctx import (identity_from_ctx,
-                                     launch_root_from_ctx, limit,
-                                     protected_extra_from_ctx,
-                                     recording_enabled)
-from gc_core.agent_edits.deltas import truncate_hunks, build_diff, decode_edit_text
+from gc_core.agent_edits.ctx import (
+    identity_from_ctx,
+    launch_root_from_ctx,
+    limit,
+    protected_extra_from_ctx,
+    recording_enabled,
+)
+from gc_core.agent_edits.deltas import (
+    build_diff,
+    decode_edit_text,
+    truncate_hunks,
+)
 from gc_core.agent_edits.git_ops import head_rev_from_files
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.paths import canonical_path_key, is_external_key
@@ -42,7 +50,10 @@ from gc_core.config_modules.agent_edits import (
 )
 from gc_core.thread_store import edits_journal_path
 from gc_core.tools.subagents.sidecar import current_turn_id
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    classify_content_from_sample,
+)
 
 _logger = logging.getLogger(__name__)
 
@@ -114,7 +125,9 @@ async def record_edit(
             max_diff_chars=max_diff_chars,
         )
     except Exception:
-        _logger.exception("record_edit failed: abs_path=%s op=%s", abs_path, op)
+        _logger.exception(
+            "record_edit failed: abs_path=%s op=%s", abs_path, op
+        )
 
 
 def _record_edit(
@@ -143,12 +156,20 @@ def _record_edit(
         return
 
     max_diff_source_bytes = limit(
-        max_diff_source_bytes, ctx, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES
+        max_diff_source_bytes,
+        ctx,
+        "max_diff_source_bytes",
+        DEFAULT_MAX_DIFF_SOURCE_BYTES,
     )
     hunk_context_lines = limit(
-        hunk_context_lines, ctx, "hunk_context_lines", DEFAULT_HUNK_CONTEXT_LINES
+        hunk_context_lines,
+        ctx,
+        "hunk_context_lines",
+        DEFAULT_HUNK_CONTEXT_LINES,
     )
-    max_diff_chars = limit(max_diff_chars, ctx, "max_diff_chars", DEFAULT_MAX_DIFF_CHARS)
+    max_diff_chars = limit(
+        max_diff_chars, ctx, "max_diff_chars", DEFAULT_MAX_DIFF_CHARS
+    )
 
     threads_dir, system_id, thread_id = identity
     journal_path = edits_journal_path(threads_dir, system_id, thread_id)
@@ -177,10 +198,11 @@ def _record_edit(
     take_snapshot = False
     take_created_mark = False
 
-    if _is_binary_side(abs_path, old_bytes) or _is_binary_side(abs_path, new_bytes):
-        flags = ["no_diff"]
-    elif _exceeds_cap(old_bytes, max_diff_source_bytes) or _exceeds_cap(
-        new_bytes, max_diff_source_bytes
+    if (
+        _is_binary_side(abs_path, old_bytes)
+        or _is_binary_side(abs_path, new_bytes)
+        or _exceeds_cap(old_bytes, max_diff_source_bytes)
+        or _exceeds_cap(new_bytes, max_diff_source_bytes)
     ):
         flags = ["no_diff"]
     else:
@@ -189,7 +211,9 @@ def _record_edit(
         if old_text is None or new_text is None:
             flags = ["no_diff"]
         else:
-            hunks, add, del_ = build_diff(old_text, new_text, hunk_context_lines)
+            hunks, add, del_ = build_diff(
+                old_text, new_text, hunk_context_lines
+            )
             hunks, flags = truncate_hunks(hunks, max_diff_chars)
             # Взаимоисключающие ветки одного вопроса «что было до правки»: был
             # контент — снимаем его; не было И вызывающий сказал «create» —
@@ -267,7 +291,8 @@ def _record_edit(
             # уже лечь, а упасть — следующий за ним снимок хода. Обнулив флаг,
             # мы пропустили бы эвикцию, и хранилище переросло бы свой лимит.
             _logger.warning(
-                "снимок базы не снят, запись всё равно идёт path=%r", path_key,
+                "снимок базы не снят, запись всё равно идёт path=%r",
+                path_key,
                 exc_info=True,
             )
 
@@ -293,7 +318,9 @@ def _record_edit(
     # оказались бы кандидатами на вытеснение.
     if wrote_session and store is not None:
         store.evict_lru(
-            limit(None, ctx, "snapshots_max_files", DEFAULT_SNAPSHOTS_MAX_FILES)
+            limit(
+                None, ctx, "snapshots_max_files", DEFAULT_SNAPSHOTS_MAX_FILES
+            )
         )
 
 

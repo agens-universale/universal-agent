@@ -3,6 +3,7 @@
 Общий расчёт для сводки хода и экрана обзора: не сумма пошаговых счётчиков
 журнала, а разница между снимком и тем, что лежит на диске сейчас.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -20,13 +21,28 @@ from gc_core.utils.file_text import sha256_hex_of_bytes
 
 
 def _rec(
-    path="a.py", op="edit", add=1, del_=1, flags=None,
-    *, ts=1.0, call_id="c1", before_sha256=None, after_sha256=None,
+    path="a.py",
+    op="edit",
+    add=1,
+    del_=1,
+    flags=None,
+    *,
+    ts=1.0,
+    call_id="c1",
+    before_sha256=None,
+    after_sha256=None,
 ):
     return EditRecord(
-        path=path, turn_id="t1", ts=ts, call_id=call_id, op=op,
-        hunks="", add=add, del_=del_,
-        before_sha256=before_sha256, after_sha256=after_sha256,
+        path=path,
+        turn_id="t1",
+        ts=ts,
+        call_id=call_id,
+        op=op,
+        hunks="",
+        add=add,
+        del_=del_,
+        before_sha256=before_sha256,
+        after_sha256=after_sha256,
         flags=list(flags or []),
     )
 
@@ -82,7 +98,9 @@ def test_delta_zero_when_disk_side_exceeds_cap(tmp_path):
 def test_delta_zero_when_snapshot_side_exceeds_cap(tmp_path):
     disk = _write(tmp_path / "a.py", "x\n")
 
-    assert delta_vs_disk(b"y\n" * 100, disk, max_source_bytes=10) == EMPTY_DELTA
+    assert (
+        delta_vs_disk(b"y\n" * 100, disk, max_source_bytes=10) == EMPTY_DELTA
+    )
 
 
 def test_delta_zero_for_binary_disk_content(tmp_path):
@@ -124,7 +142,10 @@ def test_identical_bytes_are_countable_even_when_undecodable(tmp_path):
 
 
 def test_abs_path_for_relative_key_is_under_launch_root(tmp_path):
-    assert abs_path_for_key(str(tmp_path), "pkg/a.py") == tmp_path / "pkg" / "a.py"
+    assert (
+        abs_path_for_key(str(tmp_path), "pkg/a.py")
+        == tmp_path / "pkg" / "a.py"
+    )
 
 
 def test_abs_path_for_absolute_key_kept_as_is(tmp_path):
@@ -183,7 +204,9 @@ def test_net_summary_empty_records(tmp_path):
 # --- net_summary: снимка нет — база пуста только у создания ------------------
 
 
-def test_net_summary_shell_edit_without_snapshot_takes_journal_counters(tmp_path):
+def test_net_summary_shell_edit_without_snapshot_takes_journal_counters(
+    tmp_path,
+):
     """Команда переформатировала существующий файл: снимка нет, но и создан он
     в этом ходе не был.
 
@@ -230,7 +253,9 @@ def test_net_summary_created_file_without_snapshot_counts_whole_file(tmp_path):
     assert summary == (1, 3, 0)
 
 
-def test_net_summary_create_after_earlier_record_is_not_an_empty_baseline(tmp_path):
+def test_net_summary_create_after_earlier_record_is_not_an_empty_baseline(
+    tmp_path,
+):
     """Создание ПОСЛЕ более ранней записи по тому же пути пустой базы не даёт.
 
     Команда снесла файл и пересоздала его fs-тулом: до хода файл был, и его
@@ -281,7 +306,12 @@ def test_file_entries_marks_inexact_when_baseline_missing(tmp_path):
         str(tmp_path),
     )
 
-    assert (entry.exact, entry.add, entry.del_, entry.by_shell) == (False, 5, 1, True)
+    assert (entry.exact, entry.add, entry.del_, entry.by_shell) == (
+        False,
+        5,
+        1,
+        True,
+    )
 
 
 def test_file_entries_exact_uses_disk_delta_not_record_sum(tmp_path):
@@ -294,7 +324,12 @@ def test_file_entries_exact_uses_disk_delta_not_record_sum(tmp_path):
         str(tmp_path),
     )
 
-    assert (entry.exact, entry.add, entry.del_, entry.kind) == (True, 1, 1, "modified")
+    assert (entry.exact, entry.add, entry.del_, entry.kind) == (
+        True,
+        1,
+        1,
+        "modified",
+    )
 
 
 def test_shell_record_with_counting_base_is_not_revertable(tmp_path):
@@ -335,7 +370,10 @@ def test_created_file_on_disk_is_revertable_without_predicate(tmp_path):
     )
 
     assert (entry.kind, entry.exact, entry.add, entry.revertable) == (
-        "created", True, 1, True,
+        "created",
+        True,
+        1,
+        True,
     )
 
 
@@ -360,7 +398,7 @@ def test_created_file_ignores_later_snapshot_and_counts_whole_file(tmp_path):
     )
 
     assert (entry.exact, entry.add, entry.del_) == (True, 3, 0)
-    assert calls == []   # снимок созданного файла даже не читается
+    assert calls == []  # снимок созданного файла даже не читается
 
 
 # --- file_entries: ступень выше отменяет created-обход ------------------------
@@ -369,17 +407,23 @@ def test_created_file_ignores_later_snapshot_and_counts_whole_file(tmp_path):
 def test_created_with_step_counts_from_step_and_is_modified(tmp_path):
     (tmp_path / "new.py").write_text("v2\n", encoding="utf-8")
     recs = [_rec("new.py", op="create"), _rec("new.py", op="edit")]
-    [e] = file_entries(recs, lambda k: b"v1\n", str(tmp_path),
-                       stepped=lambda k: True)
+    [e] = file_entries(
+        recs, lambda k: b"v1\n", str(tmp_path), stepped=lambda k: True
+    )
     assert (e.kind, e.revertable) == ("modified", True)
-    assert (e.add, e.del_) == (1, 1)          # дельта от ступени, не «весь файл добавлен»
+    assert (e.add, e.del_) == (
+        1,
+        1,
+    )  # дельта от ступени, не «весь файл добавлен»
 
 
 def test_created_without_step_keeps_wave3_contract(tmp_path):
     calls = []
     recs = [_rec("new.py", op="create")]
     (tmp_path / "new.py").write_text("x\n", encoding="utf-8")
-    [e] = file_entries(recs, lambda k: calls.append(k), str(tmp_path), stepped=None)
+    [e] = file_entries(
+        recs, lambda k: calls.append(k), str(tmp_path), stepped=None
+    )
     assert calls == [] and e.kind == "created"
 
 
@@ -399,11 +443,16 @@ def test_created_and_deleted_ignores_snapshot_and_is_not_revertable(tmp_path):
     )
 
     assert (entry.kind, entry.add, entry.del_, entry.revertable) == (
-        "deleted", 0, 0, False,
+        "deleted",
+        0,
+        0,
+        False,
     )
 
 
-def test_deleted_file_counts_snapshot_as_removed_and_stays_revertable(tmp_path):
+def test_deleted_file_counts_snapshot_as_removed_and_stays_revertable(
+    tmp_path,
+):
     [entry] = file_entries(
         [_rec("gone.py", op="delete", add=0, del_=9)],
         lambda key: b"one\ntwo\n",
@@ -412,7 +461,10 @@ def test_deleted_file_counts_snapshot_as_removed_and_stays_revertable(tmp_path):
     )
 
     assert (entry.kind, entry.add, entry.del_, entry.revertable) == (
-        "deleted", 0, 2, True,
+        "deleted",
+        0,
+        2,
+        True,
     )
 
 
@@ -440,9 +492,16 @@ def test_no_diff_path_is_listed_with_zero_counters(tmp_path):
         revertable_for=lambda key: True,
     )
 
-    assert (entry.add, entry.del_, entry.exact, entry.kind) == (0, 0, False, "modified")
-    assert entry.countable is False   # дельту считать было нечем — нули не «точный ноль»
-    assert entry.revertable is True   # доступность отката — по снимку, не по op
+    assert (entry.add, entry.del_, entry.exact, entry.kind) == (
+        0,
+        0,
+        False,
+        "modified",
+    )
+    assert (
+        entry.countable is False
+    )  # дельту считать было нечем — нули не «точный ноль»
+    assert entry.revertable is True  # доступность отката — по снимку, не по op
 
 
 def test_oversize_path_is_not_countable_and_takes_journal_counters(tmp_path):
@@ -456,13 +515,20 @@ def test_oversize_path_is_not_countable_and_takes_journal_counters(tmp_path):
         max_source_bytes=10,
     )
 
-    assert (entry.countable, entry.exact, entry.add, entry.del_) == (False, False, 7, 2)
+    assert (entry.countable, entry.exact, entry.add, entry.del_) == (
+        False,
+        False,
+        7,
+        2,
+    )
 
 
 def test_countable_path_says_so(tmp_path):
     _write(tmp_path / "a.py", "a\nB\n")
 
-    [entry] = file_entries([_rec("a.py")], lambda key: b"a\nb\n", str(tmp_path))
+    [entry] = file_entries(
+        [_rec("a.py")], lambda key: b"a\nb\n", str(tmp_path)
+    )
 
     assert (entry.countable, entry.exact) == (True, True)
 
@@ -498,7 +564,9 @@ def test_file_entries_detects_external_edit(tmp_path):
         _rec("a.py", before_sha256="ЧУЖОЙ", after_sha256="h2"),
     ]
 
-    assert file_entries(recs, lambda key: b"", str(tmp_path))[0].external is True
+    assert (
+        file_entries(recs, lambda key: b"", str(tmp_path))[0].external is True
+    )
 
 
 def test_file_entries_none_hash_is_not_a_break(tmp_path):
@@ -509,7 +577,9 @@ def test_file_entries_none_hash_is_not_a_break(tmp_path):
         _rec("a.py", before_sha256="h2", after_sha256=None),
     ]
 
-    assert file_entries(recs, lambda key: b"", str(tmp_path))[0].external is False
+    assert (
+        file_entries(recs, lambda key: b"", str(tmp_path))[0].external is False
+    )
 
 
 def test_created_and_deleted_in_session_is_noop(tmp_path):
@@ -518,7 +588,10 @@ def test_created_and_deleted_in_session_is_noop(tmp_path):
     [entry] = file_entries(recs, lambda key: None, str(tmp_path))
 
     assert (entry.kind, entry.add, entry.del_, entry.revertable) == (
-        "deleted", 0, 0, False,
+        "deleted",
+        0,
+        0,
+        False,
     )
 
 
@@ -591,19 +664,35 @@ def test_foreign_content_on_disk_is_external_before_the_next_record(tmp_path):
     это содержимое как правку агента — ложное авторство (смок 2026-09-10).
     """
     _write(tmp_path / "a.py", "AGENT\nЧУЖАЯ СТРОКА\n")
-    recs = [_rec("a.py", before_sha256=_sha(b"OLD\n"),
-                 after_sha256=_sha("AGENT\n".encode()))]
+    recs = [
+        _rec(
+            "a.py",
+            before_sha256=_sha(b"OLD\n"),
+            after_sha256=_sha("AGENT\n".encode()),
+        )
+    ]
 
-    assert file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external is True
+    assert (
+        file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external
+        is True
+    )
 
 
 def test_disk_left_by_the_agent_is_not_external(tmp_path):
     """Диск ровно такой, каким его оставил агент, — чужого тут нет."""
     _write(tmp_path / "a.py", "AGENT\n")
-    recs = [_rec("a.py", before_sha256=_sha(b"OLD\n"),
-                 after_sha256=_sha("AGENT\n".encode()))]
+    recs = [
+        _rec(
+            "a.py",
+            before_sha256=_sha(b"OLD\n"),
+            after_sha256=_sha("AGENT\n".encode()),
+        )
+    ]
 
-    assert file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external is False
+    assert (
+        file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external
+        is False
+    )
 
 
 def test_disk_returned_to_the_baseline_is_not_external(tmp_path):
@@ -615,9 +704,14 @@ def test_disk_returned_to_the_baseline_is_not_external(tmp_path):
     предикат.
     """
     _write(tmp_path / "a.py", "OLD\n")
-    recs = [_rec("a.py", before_sha256=None, after_sha256=_sha("AGENT\n".encode()))]
+    recs = [
+        _rec("a.py", before_sha256=None, after_sha256=_sha("AGENT\n".encode()))
+    ]
 
-    assert file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external is False
+    assert (
+        file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external
+        is False
+    )
 
 
 def test_unknown_last_write_cannot_claim_the_disk_is_foreign(tmp_path):
@@ -625,7 +719,10 @@ def test_unknown_last_write_cannot_claim_the_disk_is_foreign(tmp_path):
     _write(tmp_path / "a.py", "ЧТО УГОДНО\n")
     recs = [_rec("a.py", before_sha256=_sha(b"OLD\n"), after_sha256=None)]
 
-    assert file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external is False
+    assert (
+        file_entries(recs, lambda key: b"OLD\n", str(tmp_path))[0].external
+        is False
+    )
 
 
 def test_return_to_a_known_state_is_not_an_external_edit(tmp_path):
@@ -638,13 +735,19 @@ def test_return_to_a_known_state_is_not_an_external_edit(tmp_path):
     """
     recs = [
         _rec("a.py", before_sha256="h0", after_sha256="h1"),
-        _rec("a.py", before_sha256="h0", after_sha256="h1"),   # после отката к h0
+        _rec(
+            "a.py", before_sha256="h0", after_sha256="h1"
+        ),  # после отката к h0
     ]
 
-    assert file_entries(recs, lambda key: b"", str(tmp_path))[0].external is False
+    assert (
+        file_entries(recs, lambda key: b"", str(tmp_path))[0].external is False
+    )
 
 
-def test_return_to_the_baseline_after_a_shell_edit_is_not_an_external_edit(tmp_path):
+def test_return_to_the_baseline_after_a_shell_edit_is_not_an_external_edit(
+    tmp_path,
+):
     """Откат к БАЗЕ после правки команды — не «извне», даже если «до» команды неизвестно.
 
     Смок 2026-09-24: команда правит файл (git-подканал «до» не знает — `before`
@@ -655,20 +758,35 @@ def test_return_to_the_baseline_after_a_shell_edit_is_not_an_external_edit(tmp_p
     base, edited = b"x_3 = 3\n", b"x_3 = 33\n"
     (tmp_path / "a.py").write_bytes(edited)
     recs = [
-        _rec("a.py", ts=1.0, call_id=None, op="shell", before_sha256=None,
-             after_sha256=_sha(edited)),
-        _rec("a.py", ts=2.0, call_id=None, op="shell", before_sha256=_sha(base),
-             after_sha256=_sha(edited)),                  # после отката к базе
+        _rec(
+            "a.py",
+            ts=1.0,
+            call_id=None,
+            op="shell",
+            before_sha256=None,
+            after_sha256=_sha(edited),
+        ),
+        _rec(
+            "a.py",
+            ts=2.0,
+            call_id=None,
+            op="shell",
+            before_sha256=_sha(base),
+            after_sha256=_sha(edited),
+        ),  # после отката к базе
     ]
 
-    assert file_entries(recs, lambda key: base, str(tmp_path))[0].external is False
+    assert (
+        file_entries(recs, lambda key: base, str(tmp_path))[0].external
+        is False
+    )
 
 
 # Цепочка одного пути живыми байтами: база сессии, правка агента, ручная правка
 # поверх неё, и ещё две правки агента сверху.
 _B = b"base\n"
 _A1 = _B + b"agent1\n"
-_M = _A1 + b"mine\n"            # эту строку агент не писал
+_M = _A1 + b"mine\n"  # эту строку агент не писал
 _A2 = _M + b"agent2\n"
 _A3 = _A2 + b"agent3\n"
 
@@ -698,7 +816,9 @@ def test_external_mark_holds_while_the_foreign_lines_are_still_shown(tmp_path):
     assert "mine" in (tmp_path / "a.py").read_text(encoding="utf-8")
 
 
-def test_external_mark_clears_when_the_base_moved_past_the_foreign_edit(tmp_path):
+def test_external_mark_clears_when_the_base_moved_past_the_foreign_edit(
+    tmp_path,
+):
     """Уходит она не от новой правки, а от сдвига БАЗЫ.
 
     Приняли состояние, в котором чужая строка уже есть, — она перестала быть
@@ -726,7 +846,9 @@ def test_history_below_the_base_is_not_read_at_all(tmp_path):
 
     # база = _A2: последнее её вхождение — запись 4, значит читается только
     # запись 5, а она с разрывом.
-    assert file_entries(recs, lambda key: _A2, str(tmp_path))[0].external is True
+    assert (
+        file_entries(recs, lambda key: _A2, str(tmp_path))[0].external is True
+    )
 
 
 def test_external_key_does_not_reach_the_screen_or_the_counters(tmp_path):
@@ -747,11 +869,15 @@ def test_external_key_does_not_reach_the_screen_or_the_counters(tmp_path):
     entries = file_entries(records, lambda key: None, str(launch_root))
     assert [e.path for e in entries] == ["own.py"]
 
-    files, _add, _del = net_summary(records, lambda key: None, str(launch_root))
+    files, _add, _del = net_summary(
+        records, lambda key: None, str(launch_root)
+    )
     assert files == 1
 
 
-def test_external_key_with_a_live_baseline_still_stays_off_the_screen(tmp_path):
+def test_external_key_with_a_live_baseline_still_stays_off_the_screen(
+    tmp_path,
+):
     """Старый тред: абсолютный ключ и ЖИВОЙ снимок от прежней версии.
 
     Миграции у этой работы нет — согласованность даёт форма ключа. Значит путь,

@@ -33,12 +33,15 @@ from rich.text import Text
 from textual import events
 from textual.widgets import Static
 
-from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.messages import OpenEditsScreenRequest
+
 # `_HOVER` — ровно тот `$accent`, которым база красит наведение на служебные
 # элементы блоков (`.diff-more:hover` / `.block-copy:hover` в styles.tcss).
 # `_ACCENT` здесь занят янтарным цветом РАБОТЫ (RUN_COLOR) — это другой смысл.
-from gc_tui.palette import ACCENT as _HOVER, DEEP_DIM as _DIM, RUN_COLOR as _ACCENT
+from gc_tui.palette import ACCENT as _HOVER
+from gc_tui.palette import DEEP_DIM as _DIM
+from gc_tui.palette import RUN_COLOR as _ACCENT
+from gc_tui.services.duration_format import format_compact_int, format_duration
 from gc_tui.services.plural import files_word
 
 THINKING_PHRASES = [
@@ -241,7 +244,10 @@ _TERMINAL_ENDINGS = {
     _STATE_STOPPED_STEPS: ("⏹", "Остановлено: превышен лимит шагов"),
     _STATE_STOPPED_ERRORS: ("⏹", "Остановлено: превышен лимит ошибок"),
     _STATE_STOPPED_TOKENS: ("⏹", "Остановлено: превышен лимит токенов"),
-    _STATE_STOPPED_TOOL_CALLS: ("⏹", "Остановлено: превышен лимит вызовов инструментов"),
+    _STATE_STOPPED_TOOL_CALLS: (
+        "⏹",
+        "Остановлено: превышен лимит вызовов инструментов",
+    ),
 }
 
 
@@ -400,7 +406,9 @@ class ThinkingIndicator(Static):
         начала строки с отпусканием на сводке даёт `Click` ровно там же, где
         и настоящее нажатие: отличить их можно только по началу жеста.
         """
-        self._pressed_in_summary = event.button == 1 and self._in_summary(event)
+        self._pressed_in_summary = event.button == 1 and self._in_summary(
+            event
+        )
 
     def on_click(self, event: events.Click) -> None:
         """Клик по сводке — экран изменений сразу в источнике «Ход».

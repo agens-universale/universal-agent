@@ -103,9 +103,19 @@ class _DiffBlockHost(App):
 async def test_diff_block_copy_carries_an_applicable_diff():
     """Копирование блока правок шлёт хэнки С именем файла (Ж5 батча 4) — без
     него `git apply`/`patch` скопированному диффу отказывают."""
-    record = EditRecord(path="src/app.py", turn_id="t1", ts=0.0, call_id="c1",
-                        op="edit", hunks=_DIFFLIB_HUNKS, add=1, del_=1,
-                        before_sha256=None, after_sha256=None, flags=[])
+    record = EditRecord(
+        path="src/app.py",
+        turn_id="t1",
+        ts=0.0,
+        call_id="c1",
+        op="edit",
+        hunks=_DIFFLIB_HUNKS,
+        add=1,
+        del_=1,
+        before_sha256=None,
+        after_sha256=None,
+        flags=[],
+    )
     block = DiffBlock.for_record(record, event_no=1, collapsed_max_lines=5)
     app = _DiffBlockHost(block)
     async with app.run_test(size=(70, 20)) as pilot:

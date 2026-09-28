@@ -102,7 +102,9 @@ class TestAgentExecutorBindsFreshTurnIdPerRun:
         assert seen[0] and seen[1]
         assert seen[0] != seen[1]
 
-    async def test_each_run_gets_fresh_turn_id_with_same_thread(self, tmp_path):
+    async def test_each_run_gets_fresh_turn_id_with_same_thread(
+        self, tmp_path
+    ):
         ctx = await acreate_run_context(_config(tmp_path))
         seen = []
 
@@ -116,10 +118,16 @@ class TestAgentExecutorBindsFreshTurnIdPerRun:
         ):
             executor = agent_executor_module.AgentExecutor(ctx)
             await executor.arun(
-                ["первый ход"], thread_id="thr-turn", system="cli", verbose=False
+                ["первый ход"],
+                thread_id="thr-turn",
+                system="cli",
+                verbose=False,
             )
             await executor.arun(
-                ["второй ход"], thread_id="thr-turn", system="cli", verbose=False
+                ["второй ход"],
+                thread_id="thr-turn",
+                system="cli",
+                verbose=False,
             )
 
         assert len(seen) == 2
@@ -150,7 +158,9 @@ def _subagent_parent_ctx(tmp_path, monkeypatch, *, turn_id: str | None):
         "model": "m",
         "system_prompt_id": "p",
         "launch_root": str(launch_root),
-        "chat_completions_params": {"llm": {"max_tokens": 128, "completion_kwargs": {}}},
+        "chat_completions_params": {
+            "llm": {"max_tokens": 128, "completion_kwargs": {}}
+        },
     }
     parent = local_ctx(cfg)
     # Режим с записью правок: дочерний ctx субагента наследует его от родителя.
@@ -197,7 +207,9 @@ async def _child_ctx(parent, cfg):
 class TestSubagentEditsCarryParentTurnId:
     """Спека §5: правки субагента ложатся в журнал ходом РОДИТЕЛЯ."""
 
-    async def test_child_ctx_inherits_parent_turn_id(self, tmp_path, monkeypatch):
+    async def test_child_ctx_inherits_parent_turn_id(
+        self, tmp_path, monkeypatch
+    ):
         parent, cfg, _launch_root, _threads_dir = _subagent_parent_ctx(
             tmp_path, monkeypatch, turn_id="turn-parent"
         )
@@ -205,24 +217,32 @@ class TestSubagentEditsCarryParentTurnId:
 
         assert current_turn_id(child) == "turn-parent"
 
-    async def test_subagent_edit_lands_with_parent_turn_id(self, tmp_path, monkeypatch):
+    async def test_subagent_edit_lands_with_parent_turn_id(
+        self, tmp_path, monkeypatch
+    ):
         parent, cfg, launch_root, threads_dir = _subagent_parent_ctx(
             tmp_path, monkeypatch, turn_id="turn-parent"
         )
         child = await _child_ctx(parent, cfg)
         target = launch_root / "child.py"
 
-        tool = WriteToFile(ctx=child, config_dict=child.config_dict, call_id="call-child")
+        tool = WriteToFile(
+            ctx=child, config_dict=child.config_dict, call_id="call-child"
+        )
         raw = await tool.acall(path=str(target), content="hello\n")
         assert json.loads(raw)["ok"] is True
 
-        recs = EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1")).read_all()
+        recs = EditsJournal(
+            edits_journal_path(str(threads_dir), "cli", "th1")
+        ).read_all()
         assert [r.turn_id for r in recs] == ["turn-parent"]
         # call_id — СВОЙ, вложенного тула: по нему интерфейс находит запись и
         # рисует инлайн-дифф под nested-строкой (EditsLookup.by_call_id).
         assert [r.call_id for r in recs] == ["call-child"]
 
-    async def test_child_ctx_without_parent_turn_id_stays_empty(self, tmp_path, monkeypatch):
+    async def test_child_ctx_without_parent_turn_id_stays_empty(
+        self, tmp_path, monkeypatch
+    ):
         parent, cfg, _launch_root, _threads_dir = _subagent_parent_ctx(
             tmp_path, monkeypatch, turn_id=None
         )

@@ -12,9 +12,9 @@ from gc_core.config_modules.agent import (
     DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
     AgentConfig,
 )
+from gc_core.config_modules.agent_edits import AgentEditsConfig
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
-from gc_core.config_modules.agent_edits import AgentEditsConfig
 from gc_core.config_modules.endpoint_presets import (
     EndpointPreset,
     default_endpoint_presets,

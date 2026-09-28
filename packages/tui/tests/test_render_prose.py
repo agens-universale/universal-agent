@@ -44,8 +44,12 @@ def test_heading_is_accent_bold():
 def test_para_bold_and_code_styled_spans():
     t = render_prose("есть **bold** и `code`")
     assert "**" not in t.plain and "`" not in t.plain
-    assert any("54b3a6" in str(s.style).lower() for s in t.spans)   # accent (bold)
-    assert any("afbdff" in str(s.style).lower() for s in t.spans)   # code (slate)
+    assert any(
+        "54b3a6" in str(s.style).lower() for s in t.spans
+    )  # accent (bold)
+    assert any(
+        "afbdff" in str(s.style).lower() for s in t.spans
+    )  # code (slate)
 
 
 def test_prose_fence_state_ignores_inner_fence_with_info_string():

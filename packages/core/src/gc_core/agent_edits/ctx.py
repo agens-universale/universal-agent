@@ -6,6 +6,7 @@
 оказался файл, который первым его записал. Правило репозитория требует
 названного владельца; он здесь.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -20,6 +21,7 @@ def agent_edits_config(ctx: Any) -> dict:
     """Секция ``agent_edits`` конфига на ctx — общая для обоих каналов записи."""
     section = config_from_ctx(ctx).get("agent_edits") or {}
     return section if isinstance(section, dict) else {}
+
 
 # Служебный ключ конфига: режим запуска, объявленный фронтендом (в файле конфига
 # его нет, как и `launch_root`). TUI узнаётся по признаку контекста `is_tui` —
@@ -65,6 +67,7 @@ def identity_from_ctx(ctx: Any) -> tuple[str, str, str] | None:
         return None
     return threads_dir.strip(), system_id.strip(), thread_id.strip()
 
+
 def launch_root_from_ctx(ctx: Any) -> str:
     launch_root = config_from_ctx(ctx).get("launch_root") or ""
     if isinstance(launch_root, str) and launch_root.strip():
@@ -72,6 +75,7 @@ def launch_root_from_ctx(ctx: Any) -> str:
     workspace = getattr(ctx, "workspace", None)
     root = getattr(workspace, "root", None)
     return str(root) if root else ""
+
 
 # Нижняя граница значения по ключу; всё, что ниже, — мусор, и читается дефолт
 # схемы. Границы разные, потому что разный смысл нуля: `hunk_context_lines: 0`
@@ -90,6 +94,7 @@ _MINIMUMS = {
     "snapshots_max_files": 0,
 }
 _DEFAULT_MINIMUM = 1
+
 
 def limit(explicit: int | None, ctx: Any, key: str, default: int) -> int:
     """Явно переданный лимит побеждает конфиг, конфиг — дефолт схемы.
@@ -111,7 +116,7 @@ def limit(explicit: int | None, ctx: Any, key: str, default: int) -> int:
     if explicit is not None:
         return explicit
     raw = agent_edits_config(ctx).get(key, default)
-    if isinstance(raw, bool):       # `true` в yaml — не «единица», а мусор
+    if isinstance(raw, bool):  # `true` в yaml — не «единица», а мусор
         return default
     try:
         value = int(raw)
@@ -119,6 +124,11 @@ def limit(explicit: int | None, ctx: Any, key: str, default: int) -> int:
         return default
     return value if value >= _MINIMUMS.get(key, _DEFAULT_MINIMUM) else default
 
+
 def protected_extra_from_ctx(ctx: Any) -> list:
     protected = config_from_ctx(ctx).get("protected_paths") or {}
-    return list(protected.get("extra") or []) if isinstance(protected, dict) else []
+    return (
+        list(protected.get("extra") or [])
+        if isinstance(protected, dict)
+        else []
+    )

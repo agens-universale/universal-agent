@@ -557,7 +557,9 @@ class ApplyFileEdits(AbstractSimpleTool):
                 error=write_error[1],
             )
 
-        from gc_core.agent_edits.recorder import record_edit  # nested: cycle with thread_store
+        from gc_core.agent_edits.recorder import (
+            record_edit,  # nested: cycle with thread_store
+        )
 
         await record_edit(
             self._ctx,

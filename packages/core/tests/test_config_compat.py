@@ -64,7 +64,12 @@ def test_untouched_config_yields_no_facts():
 
 def test_removed_agent_edits_keys_are_dropped_with_notice():
     """Ключи умершего visual-diff не роняют старый config.yml (extra=forbid)."""
-    raw = {"agent_edits": {"preview_context_lines": 50, "full_file_max_lines": 300}}
+    raw = {
+        "agent_edits": {
+            "preview_context_lines": 50,
+            "full_file_max_lines": 300,
+        }
+    }
     facts = compat.apply_compat(raw)
     assert raw["agent_edits"] == {}
     assert len(facts) == 2
@@ -151,7 +156,9 @@ def test_old_diff_tui_section_moves_to_agent_edits():
     Запись правок давно в ядре и идёт не только в TUI: имя секции врало."""
     raw = {"diff_tui": {"hunk_context_lines": 5, "shell_tracking": False}}
     facts = compat.apply_compat(raw)
-    assert raw == {"agent_edits": {"hunk_context_lines": 5, "shell_tracking": False}}
+    assert raw == {
+        "agent_edits": {"hunk_context_lines": 5, "shell_tracking": False}
+    }
     assert any("diff_tui" in f and "agent_edits" in f for f in facts)
 
 
@@ -170,11 +177,15 @@ def test_old_section_merges_under_the_new_one_new_wins():
         "agent_edits": {"hunk_context_lines": 9},
     }
     facts = compat.apply_compat(raw)
-    assert raw == {"agent_edits": {"hunk_context_lines": 9, "shell_tracking": False}}
+    assert raw == {
+        "agent_edits": {"hunk_context_lines": 9, "shell_tracking": False}
+    }
     assert facts
 
 
-def test_old_section_in_a_higher_layer_still_overrides_the_new_one_below(tmp_path, monkeypatch):
+def test_old_section_in_a_higher_layer_still_overrides_the_new_one_below(
+    tmp_path, monkeypatch
+):
     """Старая `diff_tui:` в ПРОЕКТНОМ слое побеждает новую `agent_edits:` в
     пользовательском — как побеждала бы под одним именем.
 
@@ -208,7 +219,9 @@ def test_old_section_in_a_higher_layer_still_overrides_the_new_one_below(tmp_pat
 
     assert cfg["agent_edits"]["trace_inline_max_lines"] == 50
     assert cfg["agent_edits"]["snapshots_max_files"] == 42
-    assert any("config.yml" in n and "diff_tui" in n for n in cfg["compat_notices"])
+    assert any(
+        "config.yml" in n and "diff_tui" in n for n in cfg["compat_notices"]
+    )
 
 
 def test_overrides_with_the_old_section_name_still_apply():
@@ -221,14 +234,18 @@ def test_overrides_with_the_old_section_name_still_apply():
     from gc_core.config import apply_cli_overrides
 
     cfg = {"agent_edits": {"trace_inline_max_lines": 30}, "compat_notices": []}
-    apply_cli_overrides(cfg, extra_overrides={"diff_tui": {"trace_inline_max_lines": 50}})
+    apply_cli_overrides(
+        cfg, extra_overrides={"diff_tui": {"trace_inline_max_lines": 50}}
+    )
 
     assert "diff_tui" not in cfg
     assert cfg["agent_edits"] == {"trace_inline_max_lines": 50}
     assert any("diff_tui" in n for n in cfg["compat_notices"])
 
 
-def test_old_name_in_the_base_and_above_keeps_the_base_values(tmp_path, monkeypatch):
+def test_old_name_in_the_base_and_above_keeps_the_base_values(
+    tmp_path, monkeypatch
+):
     """Старое имя и в базе, и в слое выше: значения базы, не перекрытые сверху,
     не теряются.
 
@@ -252,7 +269,8 @@ def test_old_name_in_the_base_and_above_keeps_the_base_values(tmp_path, monkeypa
     proj = tmp_path / "proj"
     (proj / ".gc").mkdir(parents=True)
     (proj / ".gc" / "config.yml").write_text(
-        "chat_completions:\n  llm:\n    max_tokens: 4096\n", encoding="utf-8",
+        "chat_completions:\n  llm:\n    max_tokens: 4096\n",
+        encoding="utf-8",
     )
     monkeypatch.chdir(proj)
 

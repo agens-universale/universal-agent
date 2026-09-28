@@ -24,4 +24,6 @@ class TuiState:
     active_task_id: Optional[str] = None
     pending_skill_id: Optional[str] = None
     ask_human_state: Optional[AskHumanState] = None
-    dismissed_cut_commands: Set[Tuple[str, str, str, int]] = field(default_factory=set)
+    dismissed_cut_commands: Set[Tuple[str, str, str, int]] = field(
+        default_factory=set
+    )

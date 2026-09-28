@@ -616,7 +616,6 @@ async def test_voice_remove_confirm_is_pulled_into_view(tmp_path):
         await _assert_revealed(pilot, scr, ".set-voicehint")
 
 
-
 def _block_app(*, lines_above_field: int, lines_below_field: int):
     """Прокрутка на 8 строк, в ней блок `REVEAL_WITH_TAIL`: строки, поле, строки.
 
@@ -651,6 +650,7 @@ def _block_app(*, lines_above_field: int, lines_below_field: int):
 
 async def _reveal_field(pilot, app):
     from gc_tui.form_frame import reveal_focus
+
     field = app.query_one("#field")
     field.focus()
     await pilot.pause()
@@ -674,9 +674,11 @@ async def test_field_is_revealed_with_its_lines_under_the_frame():
         field = app.query_one("#field")
         last = app.query(".under").last()
         assert body.region.contains_region(field.region), (
-            f"поле за краем: {field.region} ⊄ {body.region}")
+            f"поле за краем: {field.region} ⊄ {body.region}"
+        )
         assert body.region.contains_region(last.region), (
-            f"строка под рамкой за краем: {last.region} ⊄ {body.region}")
+            f"строка под рамкой за краем: {last.region} ⊄ {body.region}"
+        )
 
 
 async def test_tail_that_does_not_fit_yields_to_the_cursor():
@@ -689,7 +691,8 @@ async def test_tail_that_does_not_fit_yields_to_the_cursor():
         body = await _reveal_field(pilot, app)
         field = app.query_one("#field")
         assert body.region.contains_region(field.region), (
-            f"поле за краем: {field.region} ⊄ {body.region}")
+            f"поле за краем: {field.region} ⊄ {body.region}"
+        )
 
 
 async def _connection_at_the_cursor(pilot, tmp_path):
@@ -700,22 +703,33 @@ async def _connection_at_the_cursor(pilot, tmp_path):
     устоявшаяся исходная точка, а не исход той гонки."""
     from gc_tui.form_frame import reveal_focus
     from gc_tui.screens.settings import SettingsScreen
-    scr = SettingsScreen(config=_cfg(), config_path=str(tmp_path / "config.yml"),
-                         on_apply=lambda: None, probe_fn=ok_probe())
+
+    scr = SettingsScreen(
+        config=_cfg(),
+        config_path=str(tmp_path / "config.yml"),
+        on_apply=lambda: None,
+        probe_fn=ok_probe(),
+    )
     await pilot.app.push_screen(scr)
     await pilot.pause()
     open_settings_section(scr, "Подключение")
-    await wait_until(pilot, lambda: scr._draft_checked is not None,
-                     "автопроверка входа отработала")
+    await wait_until(
+        pilot,
+        lambda: scr._draft_checked is not None,
+        "автопроверка входа отработала",
+    )
     reveal_focus(scr)
     await _assert_revealed(pilot, scr, "#conn-url")
     scroll = scr.query_one("#set-scroll")
-    assert not scroll.region.contains_region(_target(scr, ".set-probe").region), (
-        "предусловие: вердикт под сгибом")
+    assert not scroll.region.contains_region(
+        _target(scr, ".set-probe").region
+    ), "предусловие: вердикт под сгибом"
     return scr
 
 
-async def test_automatic_probe_verdict_leaves_the_frame_at_the_cursor(tmp_path):
+async def test_automatic_probe_verdict_leaves_the_frame_at_the_cursor(
+    tmp_path,
+):
     """Вердикт АВТОпроверки кадр не двигает: в кадре остаётся поле под курсором.
 
     Автопроверку запускает не человек, а вход в секцию или уход с поля — он в это
@@ -725,16 +739,24 @@ async def test_automatic_probe_verdict_leaves_the_frame_at_the_cursor(tmp_path):
     и проходил на перезапуске). Медленная сеть здесь — вердикт, пришедший, когда
     кадр уже устоялся."""
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg())
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg()
+    )
     async with app.run_test(size=(100, 12)) as pilot:
         scr = await _connection_at_the_cursor(pilot, tmp_path)
-        scr._on_draft_probe(scr._draft_checked, gen=scr._draft_gen,
-                            section=scr._view, on_done=None)
+        scr._on_draft_probe(
+            scr._draft_checked,
+            gen=scr._draft_gen,
+            section=scr._view,
+            on_done=None,
+        )
         for _ in range(20):
             await pilot.pause()
         field = _target(scr, "#conn-url")
-        assert scr.query_one("#set-scroll").region.contains_region(field.region), (
-            "вердикт автопроверки увёл кадр из-под курсора")
+        assert scr.query_one("#set-scroll").region.contains_region(
+            field.region
+        ), "вердикт автопроверки увёл кадр из-под курсора"
 
 
 async def test_manual_probe_verdict_is_pulled_into_view(tmp_path):
@@ -743,13 +765,19 @@ async def test_manual_probe_verdict_is_pulled_into_view(tmp_path):
     Строка вердикта стоит последней в карточке, и на низком окне ответ на нажатие
     оказывался бы под сгибом — выглядело бы как «проверка ничего не сделала»."""
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg())
+
+    app = TuiApp(
+        threads_dir=str(tmp_path / "threads"), system="cli", config=_cfg()
+    )
     async with app.run_test(size=(100, 12)) as pilot:
         scr = await _connection_at_the_cursor(pilot, tmp_path)
         before = scr._draft_gen
         await pilot.press("ctrl+space")
-        await wait_until(pilot, lambda: scr._draft_gen > before
-                         and scr._draft_checked is not None, "ручная проверка отработала")
+        await wait_until(
+            pilot,
+            lambda: scr._draft_gen > before and scr._draft_checked is not None,
+            "ручная проверка отработала",
+        )
         await _assert_revealed(pilot, scr, ".set-probe")
 
 
@@ -761,12 +789,16 @@ async def test_manual_voice_probe_verdict_is_pulled_into_view(tmp_path):
     from test_settings_voice import CLOUD_CONFIG, OFF, _mk_screen, _open_cloud
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import ProbeResult
+
     app = TuiApp(config={"model": "M"})
     async with app.run_test(size=(80, 12)) as pilot:
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.probe_result = ProbeResult(ok=True, latency_ms=42, error=None)
         await _open_cloud(app, scr, pilot)
         await pilot.press("ctrl+space")
-        await wait_until(pilot, lambda: scr._voice_probe_result is not None,
-                         "ручная проверка голоса отработала")
+        await wait_until(
+            pilot,
+            lambda: scr._voice_probe_result is not None,
+            "ручная проверка голоса отработала",
+        )
         await _assert_revealed(pilot, scr, ".set-probe")

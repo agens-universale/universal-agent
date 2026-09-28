@@ -11,6 +11,7 @@
 * после отката данные перечитываются, а агент получает technical-сообщение —
   иначе следующая правка ляжет поверх выдуманного состояния файла.
 """
+
 from __future__ import annotations
 
 import os
@@ -73,11 +74,30 @@ def _sha(text: str) -> str:
     return sha256_hex_of_bytes(text.encode("utf-8"))
 
 
-def _rec(path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1,
-         ts=1.0, hunks="", before=None, after=None) -> EditRecord:
+def _rec(
+    path="a.py",
+    turn="t1",
+    call_id="c1",
+    op="edit",
+    add=1,
+    del_=1,
+    ts=1.0,
+    hunks="",
+    before=None,
+    after=None,
+) -> EditRecord:
     return EditRecord(
-        path=path, turn_id=turn, ts=ts, call_id=call_id, op=op, hunks=hunks,
-        add=add, del_=del_, before_sha256=before, after_sha256=after, flags=[],
+        path=path,
+        turn_id=turn,
+        ts=ts,
+        call_id=call_id,
+        op=op,
+        hunks=hunks,
+        add=add,
+        del_=del_,
+        before_sha256=before,
+        after_sha256=after,
+        flags=[],
     )
 
 
@@ -178,7 +198,9 @@ def _git_init(root: Path) -> None:
         ("config", "user.name", "test"),
         ("config", "core.autocrlf", "false"),
     ):
-        subprocess.run(["git", *args], cwd=str(root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", *args], cwd=str(root), check=True, capture_output=True
+        )
 
 
 def _plain(widget) -> str:
@@ -203,7 +225,9 @@ def _tree_rows(screen) -> list[tuple[str, str]]:
     return [
         (
             _DIFF_PART if widget.has_class("diff-hunk") else _plain(widget),
-            " ".join(sorted(c for c in widget.classes if c.startswith("tree-"))),
+            " ".join(
+                sorted(c for c in widget.classes if c.startswith("tree-"))
+            ),
         )
         for widget in screen.query("#trace > Static")
     ]
@@ -233,13 +257,17 @@ def test_title_of_many_files_counts_them():
 
 
 def test_title_marks_inexact_numbers():
-    title = build_revert_title(["uv.lock"], add=3, del_=1, exact=False, width=100)
+    title = build_revert_title(
+        ["uv.lock"], add=3, del_=1, exact=False, width=100
+    )
     assert f"{APPROX} +3 −1" in title
 
 
 def test_title_drops_zero_counters():
     """`countable=False` даёт нули — подавать их как «отменяется 0 строк» нельзя."""
-    title = build_revert_title(["logo.png"], add=0, del_=0, exact=True, width=100)
+    title = build_revert_title(
+        ["logo.png"], add=0, del_=0, exact=True, width=100
+    )
     assert title == "откат · logo.png"
     assert "отменено" not in title
 
@@ -263,7 +291,9 @@ def test_title_truncates_long_path_from_the_left():
 def test_reset_title_names_the_single_file():
     """`u` — тот же жанр, что у одиночного отката: имя файла, без счётчиков
     (сброс не пишет на диск, отменять в строках нечего, задача 4 доп.)."""
-    title = build_reset_title(["src/tui/screens/diff.py"], mass=False, width=100)
+    title = build_reset_title(
+        ["src/tui/screens/diff.py"], mass=False, width=100
+    )
     assert title == "Сброс принятия · src/tui/screens/diff.py"
 
 
@@ -271,28 +301,43 @@ def test_reset_title_counts_files_in_genitive_after_the_mass_gesture():
     """`Ctrl+U` считает файлы ВСЕГДА, даже на одном (старый гейт `mass`,
     докстринг бывшего `reset_confirm_message`) — родительным падежом ПОСЛЕ
     ПРЕДЛОГА («у 1 файла»/«у 2 файлов», не «у 1 файл»/«у 2 файла»)."""
-    assert build_reset_title(["a.py"], mass=True, width=100) == "Сброс принятия у 1 файла"
-    assert build_reset_title(
-        ["a.py", "b.py"], mass=True, width=100
-    ) == "Сброс принятия у 2 файлов"
+    assert (
+        build_reset_title(["a.py"], mass=True, width=100)
+        == "Сброс принятия у 1 файла"
+    )
+    assert (
+        build_reset_title(["a.py", "b.py"], mass=True, width=100)
+        == "Сброс принятия у 2 файлов"
+    )
 
 
 def test_ack_names_the_single_file_and_what_happened_to_it():
     assert revert_ack(RevertOutcome(restored=["src/a.py"])) == (
         "откат · восстановлено: src/a.py"
     )
-    assert revert_ack(RevertOutcome(deleted=["new.py"])) == "откат · удалено: new.py"
+    assert (
+        revert_ack(RevertOutcome(deleted=["new.py"]))
+        == "откат · удалено: new.py"
+    )
 
 
 def test_ack_counts_files_when_there_are_many():
-    outcome = RevertOutcome(restored=["a.py", "b.py"], deleted=["c.py", "d.py", "e.py"])
-    assert revert_ack(outcome) == "откат · восстановлено: 2 файла · удалено: 3 файла"
+    outcome = RevertOutcome(
+        restored=["a.py", "b.py"], deleted=["c.py", "d.py", "e.py"]
+    )
+    assert (
+        revert_ack(outcome)
+        == "откат · восстановлено: 2 файла · удалено: 3 файла"
+    )
 
 
 def test_ack_explains_every_skipped_reason():
     outcome = RevertOutcome(
         restored=["a.py"],
-        skipped=[("uv.lock", REASON_NOT_REVERTABLE), ("b.py", REASON_NO_BASELINE)],
+        skipped=[
+            ("uv.lock", REASON_NOT_REVERTABLE),
+            ("b.py", REASON_NO_BASELINE),
+        ],
     )
     ack = revert_ack(outcome)
     assert ack.startswith("откат · восстановлено: a.py · ")
@@ -314,7 +359,8 @@ def test_every_skip_reason_has_a_human_text():
     from gc_core.agent_edits import revert as revert_module
 
     codes = {
-        value for name, value in vars(revert_module).items()
+        value
+        for name, value in vars(revert_module).items()
         if name.startswith("REASON_")
     }
     assert len(codes) >= 5
@@ -370,7 +416,7 @@ def test_confirm_body_is_cut_into_even_chunks_not_into_edits():
     by_edits = split_body(hunks, path="a.py", fill_width=None)
 
     assert len(even) == ceil(len(whole.splitlines()) / CONTEXT_CHUNK)
-    assert len(by_edits) > 10 * len(even)          # ради этого куски и ровные
+    assert len(by_edits) > 10 * len(even)  # ради этого куски и ровные
     assert all(part.edit is None for part in even)
     assert "\n".join(part.text.plain for part in even) == whole
 
@@ -405,8 +451,13 @@ def test_confirm_footer_carries_the_count_in_dialog_form():
     # `n`/`p` ушли из клавиш — и из полосы вместе с ними.
     assert "n след" not in confirm_footer(count=3)
     # Канон словаря для стражей — тот же сбор, а не вторая его редакция.
-    assert CONFIRM_FOOTER == "Enter откатить 1 файл · ↑↓ PgUp PgDn · Esc отмена"
-    assert RESET_CONFIRM_FOOTER == "Enter сбросить 1 файл · ↑↓ PgUp PgDn · Esc отмена"
+    assert (
+        CONFIRM_FOOTER == "Enter откатить 1 файл · ↑↓ PgUp PgDn · Esc отмена"
+    )
+    assert (
+        RESET_CONFIRM_FOOTER
+        == "Enter сбросить 1 файл · ↑↓ PgUp PgDn · Esc отмена"
+    )
 
 
 def test_confirm_footer_drops_scrolling_when_the_body_fits_the_frame():
@@ -469,18 +520,32 @@ def test_revert_texts_keep_the_screen_vocabulary():
         assert dead not in source, dead
 
     target = RevertTarget(
-        "a.py", "turn", "начало хода", None,
+        "a.py",
+        "turn",
+        "начало хода",
+        None,
         ("заденет коммит e5f2c1a, сделанный после начала хода",),
     )
     texts = [
-        WARN_EXTERNAL, PREVIEW_NOTHING, CONFIRM_FOOTER, BUSY_REVERT, NOT_REVERTABLE,
-        confirm_footer(count=2, reset=True), file_caption("a.py", 1, 0),
+        WARN_EXTERNAL,
+        PREVIEW_NOTHING,
+        CONFIRM_FOOTER,
+        BUSY_REVERT,
+        NOT_REVERTABLE,
+        confirm_footer(count=2, reset=True),
+        file_caption("a.py", 1, 0),
         SKIPPED_LINE,
         build_revert_title(["a.py"], add=1, del_=1, exact=True, width=80),
-        revert_ack(RevertOutcome(restored=["a.py"],
-                                 skipped=[("b.py", REASON_NOT_REVERTABLE)])),
-        revert_target_line(RevertTarget(
-            "a.py", "accepted", "принятое состояние (14:32)", None, ())),
+        revert_ack(
+            RevertOutcome(
+                restored=["a.py"], skipped=[("b.py", REASON_NOT_REVERTABLE)]
+            )
+        ),
+        revert_target_line(
+            RevertTarget(
+                "a.py", "accepted", "принятое состояние (14:32)", None, ()
+            )
+        ),
         revert_target_arrow(target),
         *revert_target_warnings(target),
     ]
@@ -530,14 +595,20 @@ async def test_r_shows_fullscreen_confirm_not_modal(tmp_path):
         assert span_style(painted, "+1") == OK
         assert span_style(painted, "−1") == ERR
         # Р16: тело в рамке на всю высоту между шапкой и футером
-        lines = ["".join(seg.text for seg in strip).rstrip()
-                 for strip in pilot.app.screen._compositor.render_strips()]
+        lines = [
+            "".join(seg.text for seg in strip).rstrip()
+            for strip in pilot.app.screen._compositor.render_strips()
+        ]
         top = next(i for i, line in enumerate(lines) if line.startswith("╭"))
-        bottom = next(i for i, line in enumerate(lines) if line.startswith("╰"))
+        bottom = next(
+            i for i, line in enumerate(lines) if line.startswith("╰")
+        )
         assert top == 2, lines
         footer_h = confirm.query_one("#footer").outer_size.height
         assert bottom == len(lines) - footer_h - 1, lines
-        assert any("+B" in line and line.startswith("│") for line in lines), lines
+        assert any("+B" in line and line.startswith("│") for line in lines), (
+            lines
+        )
 
 
 @pytest.mark.asyncio
@@ -557,7 +628,7 @@ async def test_confirm_shows_direct_diff_of_what_disappears(tmp_path):
         await pilot.pause()
         body = _body(pilot.app.screen)
         assert "+новое" in body and "-старое" in body
-        assert "мусор" not in body          # тело не из журнала, а «база → диск»
+        assert "мусор" not in body  # тело не из журнала, а «база → диск»
 
 
 @pytest.mark.asyncio
@@ -579,7 +650,7 @@ async def test_confirm_enter_restores_file_content(tmp_path):
         await pilot.pause()
 
         assert ws.read("a.py") == "исходное\n"
-        assert pilot.app.screen is scr              # вернулись к списку
+        assert pilot.app.screen is scr  # вернулись к списку
         assert ws.acks == ["откат · восстановлено: a.py"]
 
 
@@ -642,11 +713,14 @@ async def test_external_edit_shows_warning(tmp_path):
     # поднялось бы вторым наблюдением (чужое содержимое на диске), и проверка
     # шла бы мимо цели.
     ws.journal.append(_rec("a.py", ts=1.0, before="aa", after="bb"))
-    ws.journal.append(_rec("a.py", ts=2.0, before="ЧУЖОЕ", after=_sha("a\nb\n")))
+    ws.journal.append(
+        _rec("a.py", ts=2.0, before="ЧУЖОЕ", after=_sha("a\nb\n"))
+    )
     ws.base("clean.py", "x\n")
     ws.write("clean.py", "x\ny\n")
-    ws.journal.append(_rec("clean.py", ts=3.0, before=_sha("x\n"),
-                           after=_sha("x\ny\n")))
+    ws.journal.append(
+        _rec("clean.py", ts=3.0, before=_sha("x\n"), after=_sha("x\ny\n"))
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -654,7 +728,7 @@ async def test_external_edit_shows_warning(tmp_path):
         scr = await _open(pilot, ws.screen())
         assert [e.path for e in scr._entries] == ["clean.py", "a.py"]
 
-        await pilot.press("r")                       # чистый файл — без предупреждения
+        await pilot.press("r")  # чистый файл — без предупреждения
         await pilot.pause()
         assert WARN_EXTERNAL not in _body(pilot.app.screen)
         await pilot.press("escape")
@@ -712,7 +786,9 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
     ws.base("big.py", "".join(f"line{n:04d}\n" for n in range(600)))
     ws.write(
         "big.py",
-        "".join(f"{'LINE' if n % 20 == 0 else 'line'}{n:04d}\n" for n in range(600)),
+        "".join(
+            f"{'LINE' if n % 20 == 0 else 'line'}{n:04d}\n" for n in range(600)
+        ),
     )
     ws.journal.append(_rec("big.py", add=30, del_=30))
 
@@ -723,11 +799,14 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
         await pilot.press("r")
         await pilot.pause()
         confirm = pilot.app.screen
-        blocks = [w for w in confirm.query("#trace > Static")
-                  if w.has_class("diff-hunk")]
+        blocks = [
+            w
+            for w in confirm.query("#trace > Static")
+            if w.has_class("diff-hunk")
+        ]
         _path, delta = confirm._preview[0]
         rows = len(row_kinds(delta.hunks))
-        assert rows > 200                       # прежний потолок остался позади
+        assert rows > 200  # прежний потолок остался позади
         # Место под тело — всё, до последней строки: полоса прокрутки честна.
         assert sum(int(w.styles.height.value) for w in blocks) == rows
         # Задача 13: над телом стоит строка цели («вернёт к началу сессии») —
@@ -735,7 +814,9 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
         # высота полотна обязана включать и место под неё же. Место перед
         # первым блоком диффа — это ровно она: в этом наборе (один файл, без
         # предупреждений) больше ничего над телом не стоит.
-        assert any("вернёт к" in _plain(w) for w in confirm.query("#trace > Static"))
+        assert any(
+            "вернёт к" in _plain(w) for w in confirm.query("#trace > Static")
+        )
         assert confirm.query_one("#trace").virtual_size.height == (
             rows + blocks[0].virtual_region.y
         )
@@ -747,12 +828,15 @@ async def test_huge_diff_is_shown_whole_and_cut_into_parts(tmp_path):
         assert 0 < len(built) < len(blocks)
         body = _body(confirm)
         assert "… и ещё" not in body
-        assert "+LINE0000" in body              # начало собрано сразу
+        assert "+LINE0000" in body  # начало собрано сразу
 
         # ... а хвост подъезжает прокруткой (она плавная — ждём наблюдаемое).
         await pilot.press("end")
-        await wait_until(pilot, lambda: "+LINE0580" in _body(confirm),
-                         "последняя строка превью собралась")
+        await wait_until(
+            pilot,
+            lambda: "+LINE0580" in _body(confirm),
+            "последняя строка превью собралась",
+        )
 
 
 @pytest.mark.asyncio
@@ -775,7 +859,9 @@ async def test_preview_fill_reaches_right_edge_minus_scrollbar(tmp_path):
 
     def _filled(confirm) -> set[int]:
         blocks = [
-            w for w in confirm.query("#trace > Static") if w.has_class("diff-hunk")
+            w
+            for w in confirm.query("#trace > Static")
+            if w.has_class("diff-hunk")
         ]
         return {
             len(line)
@@ -798,7 +884,8 @@ async def test_preview_fill_reaches_right_edge_minus_scrollbar(tmp_path):
         await pilot.resize_terminal(90, 20)
         await pilot.pause()
         assert _filled(confirm) == {
-            body.size.width - SCROLLBAR_COLUMN - BODY_INDENT}
+            body.size.width - SCROLLBAR_COLUMN - BODY_INDENT
+        }
 
 
 @pytest.mark.asyncio
@@ -837,8 +924,11 @@ async def test_a_long_file_does_not_eat_the_files_behind_it(tmp_path):
 
         # Хвост набора — за тысячу строк диффа; до него доезжает прокрутка.
         await pilot.press("end")
-        await wait_until(pilot, lambda: "+после-c.py" in _body(confirm),
-                         "последний файл набора собрался")
+        await wait_until(
+            pilot,
+            lambda: "+после-c.py" in _body(confirm),
+            "последний файл набора собрался",
+        )
         assert "+после-b.py" in _body(confirm)
 
 
@@ -868,10 +958,10 @@ async def test_every_file_of_the_set_is_shown_with_its_own_counters(tmp_path):
         body = _body(confirm)
 
         heads = list(confirm.query("#trace > .tree-head"))
-        assert len(heads) == 12                        # строки имён всех файлов
+        assert len(heads) == 12  # строки имён всех файлов
         for idx in range(12):
             assert f"f{idx:02d}.py · +{idx + 1} −1" in body
-            assert f"+после{idx}-{idx}" in body        # и последняя строка файла
+            assert f"+после{idx}-{idx}" in body  # и последняя строка файла
         header = _plain(confirm.query_one("#header-left"))
         assert f"будет отменено +{sum(range(1, 13))} −12" in header
 
@@ -914,8 +1004,8 @@ async def test_revert_confirm_has_no_file_cursor_and_ignores_n_p(tmp_path):
         await pilot.press("n")
         await pilot.pause()
         assert confirm.query("#trace > .cursor").nodes == []
-        assert trace.scroll_y == 0                    # прыжка по файлам нет
-        assert pilot.app.screen is confirm            # и «нет» тут не живёт
+        assert trace.scroll_y == 0  # прыжка по файлам нет
+        assert pilot.app.screen is confirm  # и «нет» тут не живёт
 
         await pilot.press("p")
         await pilot.pause()
@@ -927,14 +1017,21 @@ async def test_revert_confirm_has_no_file_cursor_and_ignores_n_p(tmp_path):
         # Строка имени и тело под ней стоят на одной вертикали: отступ дерева
         # (`tree-head`) набирает те же две колонки, что кромка и паддинг у
         # участка диффа, — снятая кромка курсора место не сдвинула.
-        block = next(w for w in confirm.query("#trace > Static")
-                     if w.has_class("diff-hunk"))
-        assert (confirm.query_one("#trace > .tree-head").content_region.x
-                == block.content_region.x)
+        block = next(
+            w
+            for w in confirm.query("#trace > Static")
+            if w.has_class("diff-hunk")
+        )
+        assert (
+            confirm.query_one("#trace > .tree-head").content_region.x
+            == block.content_region.x
+        )
 
         # Прокрутка на месте — она и есть единственный способ дойти до хвоста.
         await pilot.press("down")
-        await wait_until(pilot, lambda: trace.scroll_y > 0, "тело прокрутилось")
+        await wait_until(
+            pilot, lambda: trace.scroll_y > 0, "тело прокрутилось"
+        )
 
 
 @pytest.mark.asyncio
@@ -998,7 +1095,8 @@ async def test_revert_tree_lists_skipped_files_as_blocks(tmp_path):
     ).run_test() as pilot:
         scr = await _open(pilot, ws.screen())
         assert [(e.path, e.revertable) for e in scr._entries] == [
-            ("readme.md", True), ("app.py", False),
+            ("readme.md", True),
+            ("app.py", False),
         ]
 
         await pilot.press("ctrl+r")
@@ -1071,10 +1169,12 @@ async def test_revert_external_warning_lives_inside_its_block(tmp_path):
         # Единственный зазор в теле — сама пустая строка между блоками: все
         # строки стоят вплотную, отступа сверху не носит ни одна.
         placed = [
-            (w.region.y, w.region.height) for w in confirm.query("#trace > Static")
+            (w.region.y, w.region.height)
+            for w in confirm.query("#trace > Static")
         ]
         assert all(
-            y + height == nxt for (y, height), (nxt, _) in zip(placed, placed[1:])
+            y + height == nxt
+            for (y, height), (nxt, _) in zip(placed, placed[1:])
         ), placed
 
 
@@ -1131,7 +1231,7 @@ async def test_ctrl_r_reverts_whole_source_and_lists_skipped(tmp_path):
         confirm = pilot.app.screen
         assert isinstance(confirm, RevertConfirmScreen)
         header = _plain(confirm.query_one("#header-left"))
-        assert header.startswith("откат · 2 файла")     # шелловый не в счёт
+        assert header.startswith("откат · 2 файла")  # шелловый не в счёт
         body = _body(confirm)
         # Пропущенный — свой блок: имя и под ним причина, и назван он один раз.
         assert f"shell.py\n{SKIPPED_LINE}" in body
@@ -1141,7 +1241,9 @@ async def test_ctrl_r_reverts_whole_source_and_lists_skipped(tmp_path):
         await pilot.pause()
         assert ws.read("a.py") == "a-до\n"
         assert not (ws.root / "new.py").exists()
-        assert ws.read("shell.py") == "рабочая копия\n"   # счётная база на диск не поехала
+        assert (
+            ws.read("shell.py") == "рабочая копия\n"
+        )  # счётная база на диск не поехала
         ack = ws.acks[0]
         assert "восстановлено: a.py" in ack and "удалено: new.py" in ack
         assert f"пропущено: shell.py — {NOT_REVERTABLE}" in ack
@@ -1171,11 +1273,13 @@ async def test_uncountable_file_says_preview_is_unavailable(tmp_path):
         confirm = pilot.app.screen
         assert VIEWER_NO_PREVIEW in _body(confirm)
         header = _plain(confirm.query_one("#header-left"))
-        assert header == "откат · logo.png"              # нулей в заголовке нет
+        assert header == "откат · logo.png"  # нулей в заголовке нет
 
         await pilot.press("enter")
         await pilot.pause()
-        assert (ws.root / "logo.png").read_bytes() == "\x00\x01ЗАГЛУШКА".encode("utf-8")
+        assert (
+            ws.root / "logo.png"
+        ).read_bytes() == "\x00\x01ЗАГЛУШКА".encode("utf-8")
 
 
 @pytest.mark.asyncio
@@ -1194,10 +1298,12 @@ async def test_preview_is_built_from_the_baseline_the_revert_writes(tmp_path):
     ws.write("a.py", "A\nB\nC\n")
     # Точная база — первой: поверх счётной API её больше не пишет. Пара «счётная
     # старше, точная моложе» — наследие хранилищ до этого правила; времена ниже явные.
-    ws.base("a.py", "A\nC\n")                   # точный снимок: перед правкой тула
-    ws.counting_base("a.py", "A\nB\nC\n")       # индекс до команды
+    ws.base("a.py", "A\nC\n")  # точный снимок: перед правкой тула
+    ws.counting_base("a.py", "A\nB\nC\n")  # индекс до команды
     ws.counting_base_is_older()
-    ws.journal.append(_rec("a.py", call_id=None, op="shell", ts=1.0, add=0, del_=1))
+    ws.journal.append(
+        _rec("a.py", call_id=None, op="shell", ts=1.0, add=0, del_=1)
+    )
     ws.journal.append(_rec("a.py", ts=2.0, add=1, del_=0))
 
     async with TuiApp(
@@ -1213,13 +1319,13 @@ async def test_preview_is_built_from_the_baseline_the_revert_writes(tmp_path):
         assert isinstance(confirm, RevertConfirmScreen)
         body = _body(confirm)
         assert PREVIEW_NOTHING not in body
-        assert "+B" in body                       # вот что исчезнет
+        assert "+B" in body  # вот что исчезнет
         header = _plain(confirm.query_one("#header-left"))
         assert header == "откат · a.py · будет отменено +1 −0"
 
         await pilot.press("enter")
         await pilot.pause()
-        assert ws.read("a.py") == "A\nC\n"         # ровно то, что показали
+        assert ws.read("a.py") == "A\nC\n"  # ровно то, что показали
 
 
 @pytest.mark.asyncio
@@ -1243,7 +1349,7 @@ async def test_uncountable_path_promises_no_numbers(tmp_path):
         scr = await _open(pilot, ws.screen())
         entry = scr._entries[0]
         assert entry.countable is False
-        assert (entry.add, entry.del_) == (1, 1)   # счётчики журнала, не дельта
+        assert (entry.add, entry.del_) == (1, 1)  # счётчики журнала, не дельта
 
         await pilot.press("r")
         await pilot.pause()
@@ -1275,14 +1381,16 @@ async def test_confirm_header_survives_resize(tmp_path):
 
         await pilot.resize_terminal(50, 24)
         await pilot.pause()
-        assert head.size.height == 1               # полоса шапки — одна строка
+        assert head.size.height == 1  # полоса шапки — одна строка
         text = _plain(head)
         assert "будет отменено +1 −0" in text
         assert "engine.py" in text and "…" in text
 
 
 @pytest.mark.asyncio
-async def test_preview_says_nothing_to_undo_when_only_the_counting_base_differs(tmp_path):
+async def test_preview_says_nothing_to_undo_when_only_the_counting_base_differs(
+    tmp_path,
+):
     """Строка видна по СЧЁТНОЙ базе, а откату писать нечего — точная совпала.
 
     Прежний сценарий этой плашки (файл вернули руками к базе начала сессии) с
@@ -1295,8 +1403,8 @@ async def test_preview_says_nothing_to_undo_when_only_the_counting_base_differs(
     ws = _Workspace(tmp_path)
     # Точная база — первой: поверх счётной API её больше не пишет. Пара «счётная
     # старше, точная моложе» — наследие хранилищ до этого правила; времена ниже явные.
-    ws.base("a.py", "правленое\n")             # а откат вернёт то же самое
-    ws.counting_base("a.py", "исходное\n")     # по ней строка видна
+    ws.base("a.py", "правленое\n")  # а откат вернёт то же самое
+    ws.counting_base("a.py", "исходное\n")  # по ней строка видна
     ws.counting_base_is_older()
     ws.write("a.py", "правленое\n")
     ws.journal.append(_rec("a.py"))
@@ -1324,17 +1432,27 @@ async def test_preview_names_target_per_step_kind(tmp_path):
     from gc_tui.screens.diff import revert_target_line
     from gc_tui.services.edits_view import EditsView, RevertTarget
 
-    accepted = RevertTarget("a.py", "accepted", "принятое состояние (14:32)", None, ())
-    assert revert_target_line(accepted) == "вернёт к принятому состоянию (14:32)"
+    accepted = RevertTarget(
+        "a.py", "accepted", "принятое состояние (14:32)", None, ()
+    )
+    assert (
+        revert_target_line(accepted) == "вернёт к принятому состоянию (14:32)"
+    )
 
     head_with_ref = RevertTarget(
-        "a.py", "head", "закоммиченное состояние (e5f2c1a · 14:20)", None, (),
+        "a.py",
+        "head",
+        "закоммиченное состояние (e5f2c1a · 14:20)",
+        None,
+        (),
     )
     assert revert_target_line(head_with_ref) == (
         "вернёт к закоммиченному состоянию (e5f2c1a · 14:20)"
     )
 
-    head_bare = RevertTarget("a.py", "head", "закоммиченное состояние", None, ())
+    head_bare = RevertTarget(
+        "a.py", "head", "закоммиченное состояние", None, ()
+    )
     assert revert_target_line(head_bare) == "вернёт к закоммиченному состоянию"
 
     session = RevertTarget("a.py", "session", "начало сессии", None, ())
@@ -1347,7 +1465,9 @@ async def test_preview_names_target_per_step_kind(tmp_path):
     ws = _Workspace(tmp_path / "accepted")
     ws.write("acc.py", "v1\n")
     ws.journal.append(_rec("acc.py", ts=1.0, op="create"))
-    view = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config)
+    view = EditsView(
+        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+    )
     view.accept(["acc.py"])
     accepted_hhmm = (
         f"{datetime.fromtimestamp(ws.store.accepted_state('acc.py').ts):%H:%M}"
@@ -1367,7 +1487,9 @@ async def test_preview_names_target_per_step_kind(tmp_path):
         assert expected in body
 
         line = next(
-            w for w in confirm.query("#trace > Static") if expected in _plain(w)
+            w
+            for w in confirm.query("#trace > Static")
+            if expected in _plain(w)
         )
         assert span_style(line.content, "вернёт") == ACCENT
 
@@ -1381,17 +1503,33 @@ async def test_preview_names_target_per_step_kind(tmp_path):
     wsh = _Workspace(tmp_path / "head")
     _git_init(wsh.root)
     wsh.write("head.py", "orig\n")
-    subprocess.run(["git", "add", "--", "head.py"], cwd=str(wsh.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(wsh.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "head.py"],
+        cwd=str(wsh.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(wsh.root),
+        check=True,
+        capture_output=True,
+    )
     wsh.base("head.py", "orig\n")
     wsh.write("head.py", "orig\n" + "".join(f"line{i}\n" for i in range(40)))
     wsh.journal.append(_rec("head.py", ts=1.0, add=40, del_=0))
-    subprocess.run(["git", "add", "--", "head.py"], cwd=str(wsh.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit +40"], cwd=str(wsh.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "head.py"],
+        cwd=str(wsh.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit +40"],
+        cwd=str(wsh.root),
+        check=True,
+        capture_output=True,
+    )
     with open(wsh.root / "head.py", "a", encoding="utf-8", newline="\n") as fh:
         fh.write("".join(f"more{i}\n" for i in range(10)))
     wsh.journal.append(_rec("head.py", ts=2.0, call_id="c2", add=10, del_=0))
@@ -1403,9 +1541,8 @@ async def test_preview_names_target_per_step_kind(tmp_path):
         await _open(pilot, wsh.screen())
         await pilot.press("r")
         await pilot.pause()
-        assert (
-            f"вернёт к закоммиченному состоянию ({expected_ref})"
-            in _body(pilot.app.screen)
+        assert f"вернёт к закоммиченному состоянию ({expected_ref})" in _body(
+            pilot.app.screen
         )
 
     # ...и живьём — для «начало хода» (Р13 ревью: одиночный `r`, не только
@@ -1432,19 +1569,28 @@ def test_reset_target_line_names_the_remaining_step():
     from gc_tui.services.edits_view import RevertTarget
 
     head_with_ref = RevertTarget(
-        "a.py", "head", "закоммиченное состояние (e5f2c1a · 14:20)", None, (),
+        "a.py",
+        "head",
+        "закоммиченное состояние (e5f2c1a · 14:20)",
+        None,
+        (),
     )
     assert reset_target_line(head_with_ref) == (
         "после сброса счёт пойдёт от закоммиченного состояния (e5f2c1a · 14:20)"
     )
 
-    head_bare = RevertTarget("a.py", "head", "закоммиченное состояние", None, ())
+    head_bare = RevertTarget(
+        "a.py", "head", "закоммиченное состояние", None, ()
+    )
     assert reset_target_line(head_bare) == (
         "после сброса счёт пойдёт от закоммиченного состояния"
     )
 
     session = RevertTarget("a.py", "session", "начало сессии", None, ())
-    assert reset_target_line(session) == "после сброса счёт пойдёт от начала сессии"
+    assert (
+        reset_target_line(session)
+        == "после сброса счёт пойдёт от начала сессии"
+    )
 
 
 def test_reset_loss_line_names_the_price_of_the_reset():
@@ -1464,7 +1610,10 @@ def test_reset_loss_line_names_the_price_of_the_reset():
     assert reset_loss_line(ResetTarget("a.py", session, True, ts)) == (
         "точка отката к принятому состоянию (14:20) будет потеряна"
     )
-    assert reset_loss_line(ResetTarget("a.py", session, False, ts)) == "терять нечего"
+    assert (
+        reset_loss_line(ResetTarget("a.py", session, False, ts))
+        == "терять нечего"
+    )
     assert reset_loss_line(ResetTarget("a.py", session, True, None)) == (
         "точка отката к принятому состоянию будет потеряна"
     )
@@ -1482,7 +1631,12 @@ def test_target_dative_stem_covers_every_ladder_kind():
     from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD
     from gc_tui.screens.diff import _TARGET_DATIVE_STEM
 
-    assert set(_TARGET_DATIVE_STEM) == {STEP_ACCEPTED, STEP_HEAD, "session", "turn"}
+    assert set(_TARGET_DATIVE_STEM) == {
+        STEP_ACCEPTED,
+        STEP_HEAD,
+        "session",
+        "turn",
+    }
 
 
 def test_reset_target_genitive_stem_covers_every_reachable_kind():
@@ -1500,7 +1654,9 @@ def test_reset_target_genitive_stem_covers_every_reachable_kind():
 
 
 def _accepted_hhmm(ws: _Workspace, rel: str) -> str:
-    return time.strftime("%H:%M", time.localtime(ws.store.accepted_state(rel).ts))
+    return time.strftime(
+        "%H:%M", time.localtime(ws.store.accepted_state(rel).ts)
+    )
 
 
 @pytest.mark.asyncio
@@ -1518,7 +1674,7 @@ async def test_single_u_screen_has_no_name_row_and_names_the_loss(tmp_path):
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
     ws.accept("a.py", "v1\n")
-    ws.write("a.py", "v2\n")               # дописано после принятия — точка теряется
+    ws.write("a.py", "v2\n")  # дописано после принятия — точка теряется
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1528,7 +1684,10 @@ async def test_single_u_screen_has_no_name_row_and_names_the_loss(tmp_path):
         await pilot.pause()
 
         confirm = pilot.app.screen
-        assert _plain(confirm.query_one("#header-left")) == "Сброс принятия · a.py"
+        assert (
+            _plain(confirm.query_one("#header-left"))
+            == "Сброс принятия · a.py"
+        )
         lines = [line for line in _body(confirm).splitlines() if line.strip()]
         assert lines == [
             f"точка отката к принятому состоянию ({_accepted_hhmm(ws, 'a.py')})"
@@ -1557,11 +1716,11 @@ async def test_reset_tree_lists_every_file_as_a_block_without_dashes(tmp_path):
     ws.write("lost.py", "v1\n")
     ws.journal.append(_rec("lost.py", ts=2.0))
     ws.accept("lost.py", "v1\n")
-    ws.write("lost.py", "v2\n")            # дельта непуста — точка отката теряется
+    ws.write("lost.py", "v2\n")  # дельта непуста — точка отката теряется
 
     ws.write("kept.py", "v1\n")
     ws.journal.append(_rec("kept.py", ts=1.0, call_id="c2"))
-    ws.accept("kept.py", "v1\n")           # диск равен принятому — терять нечего
+    ws.accept("kept.py", "v1\n")  # диск равен принятому — терять нечего
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1571,21 +1730,31 @@ async def test_reset_tree_lists_every_file_as_a_block_without_dashes(tmp_path):
         await pilot.pause()
 
         confirm = pilot.app.screen
-        assert _plain(confirm.query_one("#header-left")) == "Сброс принятия у 2 файлов"
+        assert (
+            _plain(confirm.query_one("#header-left"))
+            == "Сброс принятия у 2 файлов"
+        )
         loss = (
             f"точка отката к принятому состоянию ({_accepted_hhmm(ws, 'lost.py')})"
             " будет потеряна"
         )
         goes_from = "после сброса счёт пойдёт от начала сессии"
-        assert [line for line in _body(confirm).splitlines() if line.strip()] == [
-            "lost.py", loss, goes_from,
-            "kept.py", "терять нечего", goes_from,
+        assert [
+            line for line in _body(confirm).splitlines() if line.strip()
+        ] == [
+            "lost.py",
+            loss,
+            goes_from,
+            "kept.py",
+            "терять нечего",
+            goes_from,
         ]
         # Ни одна строка не обрамлена тире — блок держится отступом, не рамкой.
         assert all(
             not line.startswith("— ") and not line.endswith(" —")
             for line in _body(confirm).splitlines()
         )
+
         # Классы дерева: имя — голова блока, цена — предупреждение (только там,
         # где действительно теряют), последствие — вложенная строка под ними.
         # Класс дерева на виджете РОВНО один: отступы задаёт он один своим
@@ -1596,11 +1765,15 @@ async def test_reset_tree_lists_every_file_as_a_block_without_dashes(tmp_path):
             return kinds[0]
 
         assert [
-            (_plain(w), _tree_class(w)) for w in confirm.query("#trace > Static")
+            (_plain(w), _tree_class(w))
+            for w in confirm.query("#trace > Static")
         ] == [
-            ("lost.py", "tree-head"), (loss, "tree-warn"), (goes_from, "tree-sub"),
+            ("lost.py", "tree-head"),
+            (loss, "tree-warn"),
+            (goes_from, "tree-sub"),
             ("", "tree-gap"),
-            ("kept.py", "tree-head"), ("терять нечего", "tree-line"),
+            ("kept.py", "tree-head"),
+            ("терять нечего", "tree-line"),
             (goes_from, "tree-sub"),
         ]
         # Между блоками ровно одна пустая строка — её и даёт `tree-gap`.
@@ -1617,7 +1790,9 @@ async def test_reset_tree_lists_every_file_as_a_block_without_dashes(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_reset_confirm_advertises_scrolling_only_when_the_body_scrolls(tmp_path):
+async def test_reset_confirm_advertises_scrolling_only_when_the_body_scrolls(
+    tmp_path,
+):
     """Д5: `↑↓ PgUp PgDn` в полосе — только когда телу есть куда ехать.
 
     Замер, а не догадка: тело из шести файлов в кадр не влезает — прокрутка
@@ -1691,7 +1866,7 @@ async def test_reset_screen_has_no_cursor_and_ignores_n_p(tmp_path):
         await pilot.press("n")
         await pilot.pause()
         assert confirm.query("#trace > .cursor").nodes == []
-        assert trace.scroll_y == 0                    # прыжка по файлам нет
+        assert trace.scroll_y == 0  # прыжка по файлам нет
         assert pilot.app.screen is confirm
 
         await pilot.press("p")
@@ -1720,11 +1895,11 @@ async def test_bulk_preview_targets_and_warns(tmp_path):
 
     ws1.write("acc.py", "v1\n")
     ws1.journal.append(_rec("acc.py", ts=1.0, op="create"))
-    view1 = EditsView(str(ws1.threads_dir), "cli", "th1", str(ws1.root), ws1.config)
-    view1.accept(["acc.py"])
-    accepted_hhmm = (
-        f"{datetime.fromtimestamp(ws1.store.accepted_state('acc.py').ts):%H:%M}"
+    view1 = EditsView(
+        str(ws1.threads_dir), "cli", "th1", str(ws1.root), ws1.config
     )
+    view1.accept(["acc.py"])
+    accepted_hhmm = f"{datetime.fromtimestamp(ws1.store.accepted_state('acc.py').ts):%H:%M}"
     ws1.write("acc.py", "v2\n")
     ws1.journal.append(_rec("acc.py", ts=2.0, call_id="c2"))
 
@@ -1748,7 +1923,9 @@ async def test_bulk_preview_targets_and_warns(tmp_path):
     ws2.write("b.py", "now-b\n")
     ws2.journal.append(_rec("b.py", turn="t1", ts=1.0, call_id="c2"))
 
-    view2 = EditsView(str(ws2.threads_dir), "cli", "th1", str(ws2.root), ws2.config)
+    view2 = EditsView(
+        str(ws2.threads_dir), "cli", "th1", str(ws2.root), ws2.config
+    )
     view2.accept(["b.py"])
     accepted_hhmm2 = (
         f"{datetime.fromtimestamp(ws2.store.accepted_state('b.py').ts):%H:%M}"
@@ -1762,7 +1939,9 @@ async def test_bulk_preview_targets_and_warns(tmp_path):
         await pilot.pause()
         body = _body(pilot.app.screen)
         assert body.count("→ начало хода") == 2
-        warn = f"⚠ заденет принятое вами состояние (принято в {accepted_hhmm2})"
+        warn = (
+            f"⚠ заденет принятое вами состояние (принято в {accepted_hhmm2})"
+        )
         assert body.count(warn) == 1
 
 
@@ -1777,7 +1956,9 @@ async def test_session_preview_never_warns(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("acc.py", "v1\n")
     ws.journal.append(_rec("acc.py", ts=1.0, op="create"))
-    view = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config)
+    view = EditsView(
+        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+    )
     view.accept(["acc.py"])
     ws.write("acc.py", "v2\n")
     ws.journal.append(_rec("acc.py", ts=2.0, call_id="c2"))
@@ -1815,7 +1996,8 @@ async def test_absent_target_says_delete(tmp_path):
         assert "вернёт" not in body
 
         line = next(
-            w for w in confirm.query("#trace > Static")
+            w
+            for w in confirm.query("#trace > Static")
             if "будет удалён" in _plain(w)
         )
         assert span_style(line.content, "будет удалён") == ACCENT
@@ -1840,11 +2022,13 @@ async def test_revert_blocked_while_run_is_active(tmp_path):
         scr = await _open(pilot, ws.screen())
         pilot.app.active_runner = SimpleNamespace(is_running=lambda: True)
         notes: list[tuple[str, str]] = []
-        pilot.app.notify = lambda text, **kw: notes.append((text, kw.get("severity")))
+        pilot.app.notify = lambda text, **kw: notes.append(
+            (text, kw.get("severity"))
+        )
 
         await pilot.press("r")
         await pilot.pause()
-        assert pilot.app.screen is scr                  # подтверждения нет
+        assert pilot.app.screen is scr  # подтверждения нет
         await pilot.press("ctrl+r")
         await pilot.pause()
         assert pilot.app.screen is scr
@@ -1885,7 +2069,9 @@ async def test_list_refreshes_after_revert(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_confirm_does_not_overwrite_an_edit_made_after_the_preview(tmp_path):
+async def test_confirm_does_not_overwrite_an_edit_made_after_the_preview(
+    tmp_path,
+):
     """Файл поправили, пока открыто подтверждение, — `Enter` его не затирает.
 
     Превью показывало одно, а откат записал бы базу поверх того, чего
@@ -1923,7 +2109,9 @@ async def test_confirm_does_not_overwrite_an_edit_made_after_the_preview(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_confirm_does_not_revert_when_the_target_changed_after_the_preview(tmp_path):
+async def test_confirm_does_not_revert_when_the_target_changed_after_the_preview(
+    tmp_path,
+):
     """Цель отката сменилась в другом окне — `Enter` не пишет ничего.
 
     Диск не менялся, а цель — да: превью обещало вернуть файл к принятому
@@ -1976,7 +2164,7 @@ async def test_revert_from_viewer_returns_to_list(tmp_path):
         scr = await _open(pilot, ws.screen())
         await pilot.press("enter")
         await pilot.pause()
-        await pilot.press("right")               # ушли на a.py
+        await pilot.press("right")  # ушли на a.py
         await pilot.pause()
         viewer = pilot.app.screen
         assert isinstance(viewer, DiffFileViewer)
@@ -1988,7 +2176,7 @@ async def test_revert_from_viewer_returns_to_list(tmp_path):
         await pilot.press("enter")
         await pilot.pause()
 
-        assert pilot.app.screen is scr           # вьюер закрылся сам
+        assert pilot.app.screen is scr  # вьюер закрылся сам
         assert ws.read("a.py") == "исходное\n"
         # Откаченный файл ушёл со списка целиком — остался только соседний.
         assert [e.path for e in scr._entries] == ["b.py"]
@@ -2023,7 +2211,7 @@ async def test_ctrl_r_is_not_a_viewer_key_but_stays_on_the_list(tmp_path):
         await pilot.press("ctrl+r")
         await pilot.pause()
 
-        assert pilot.app.screen is viewer            # подтверждения нет
+        assert pilot.app.screen is viewer  # подтверждения нет
         assert ws.read("a.py") == "a-после\n"
         assert ws.read("b.py") == "b-после\n"
 
@@ -2088,14 +2276,22 @@ async def test_turn_source_reverts_to_the_turn_baseline(tmp_path):
 @pytest.mark.asyncio
 async def test_undo_feedback_reaches_the_thread_as_technical_message(tmp_path):
     """T15: после отката агент обязан узнать, что его картина мира устарела."""
-    from gc_core.message_policy.user_message_policy import is_technical_user_message_text
-    from gc_core.thread_store import append_new_thread_messages, load_thread_messages
+    from gc_core.message_policy.user_message_policy import (
+        is_technical_user_message_text,
+    )
+    from gc_core.thread_store import (
+        append_new_thread_messages,
+        load_thread_messages,
+    )
     from gc_tui.app import TuiApp
 
     ws = _Workspace(tmp_path)
     append_new_thread_messages(
-        str(ws.threads_dir), "cli", "th1",
-        [{"role": "user", "content": "привет", "id": "m1"}], set(),
+        str(ws.threads_dir),
+        "cli",
+        "th1",
+        [{"role": "user", "content": "привет", "id": "m1"}],
+        set(),
     )
     ws.base("a.py", "исходное\n")
     ws.write("a.py", "правленое\n")
@@ -2107,18 +2303,25 @@ async def test_undo_feedback_reaches_the_thread_as_technical_message(tmp_path):
         trace = pilot.app.screen
         trace.attach_active_task("th1")
         await pilot.pause()
-        await _open(pilot, ws.screen(
-            on_undo_feedback=trace._on_diff_undo_feedback,
-            on_ui_ack=trace._on_diff_ui_ack,
-        ))
+        await _open(
+            pilot,
+            ws.screen(
+                on_undo_feedback=trace._on_diff_undo_feedback,
+                on_ui_ack=trace._on_diff_ui_ack,
+            ),
+        )
         await pilot.press("r")
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
 
-        msgs, _keys, _seq = load_thread_messages(str(ws.threads_dir), "cli", "th1")
+        msgs, _keys, _seq = load_thread_messages(
+            str(ws.threads_dir), "cli", "th1"
+        )
         technical = [
-            m for m in msgs if is_technical_user_message_text(m.get("content", ""))
+            m
+            for m in msgs
+            if is_technical_user_message_text(m.get("content", ""))
         ]
         assert len(technical) == 1
         assert "a.py" in technical[0]["content"]
@@ -2126,7 +2329,9 @@ async def test_undo_feedback_reaches_the_thread_as_technical_message(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_text_file_overwritten_by_binary_is_restorable(tmp_path, monkeypatch):
+async def test_text_file_overwritten_by_binary_is_restorable(
+    tmp_path, monkeypatch
+):
     """Сквозной путь на настоящем рекордере: право на откат даёт снимок, не `op`.
 
     Тул правит текстовый файл — рекордер снимает точный `.orig`; следом тот же
@@ -2142,23 +2347,42 @@ async def test_text_file_overwritten_by_binary_is_restorable(tmp_path, monkeypat
     ctx = SimpleNamespace(
         is_tui=True,
         config_dict={"launch_root": str(ws.root)},
-        threads_dir=str(ws.threads_dir), system_id="cli", thread_id="th1",
+        threads_dir=str(ws.threads_dir),
+        system_id="cli",
+        thread_id="th1",
         turn_id="t1",
     )
     target = ws.root / "a.txt"
     old = "текст\n".encode("utf-8")
     new = "текст\nдописано\n".encode("utf-8")
     target.write_bytes(new)
-    await record_edit(ctx, abs_path=str(target), old_bytes=old, new_bytes=new,
-                       op="edit", call_id="c1")
+    await record_edit(
+        ctx,
+        abs_path=str(target),
+        old_bytes=old,
+        new_bytes=new,
+        op="edit",
+        call_id="c1",
+    )
     binary = b"\x89PNG\r\n\x1a\n\x00\x01"
     target.write_bytes(binary)
-    await record_edit(ctx, abs_path=str(target), old_bytes=new, new_bytes=binary,
-                       op="edit", call_id="c2")
+    await record_edit(
+        ctx,
+        abs_path=str(target),
+        old_bytes=new,
+        new_bytes=binary,
+        op="edit",
+        call_id="c2",
+    )
 
-    view = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config)
-    entry = next(row.entry for row in view.session_view(SOURCE_SESSION).active
-                if row.entry.path == "a.txt")
+    view = EditsView(
+        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+    )
+    entry = next(
+        row.entry
+        for row in view.session_view(SOURCE_SESSION).active
+        if row.entry.path == "a.txt"
+    )
     assert entry.countable is False and entry.revertable is True
 
     outcome = view.revert(SOURCE_SESSION, ["a.txt"])
@@ -2236,8 +2460,12 @@ def test_compact_revert_keeps_every_note_of_the_full_view():
     from gc_tui.palette import WARN
 
     screen = RevertConfirmScreen(
-        paths=["a.bin", "same.py", "c.py"], add=1, del_=1, exact=False,
-        skipped=["s.py"], external=["c.py"],
+        paths=["a.bin", "same.py", "c.py"],
+        add=1,
+        del_=1,
+        exact=False,
+        skipped=["s.py"],
+        external=["c.py"],
         preview=[
             ("a.bin", FileDelta(0, 0, "", countable=False)),
             ("same.py", FileDelta(0, 0, "")),
@@ -2249,10 +2477,14 @@ def test_compact_revert_keeps_every_note_of_the_full_view():
     lines = screen._compact_revert_lines()
 
     assert [line.plain for line in lines] == [
-        "a.bin  → начало сессии", f"  {VIEWER_NO_PREVIEW}",
-        "same.py · +0 −0  → начало сессии", f"  {PREVIEW_NOTHING}",
-        "c.py · +1 −1  → начало сессии", f"  {WARN_EXTERNAL}",
-        "s.py", f"  {SKIPPED_LINE}",
+        "a.bin  → начало сессии",
+        f"  {VIEWER_NO_PREVIEW}",
+        "same.py · +0 −0  → начало сессии",
+        f"  {PREVIEW_NOTHING}",
+        "c.py · +1 −1  → начало сессии",
+        f"  {WARN_EXTERNAL}",
+        "s.py",
+        f"  {SKIPPED_LINE}",
     ]
     assert lines[5].style == WARN
 
@@ -2269,14 +2501,18 @@ def test_compact_reset_has_the_same_form_as_compact_revert():
     losing = ResetTarget("a.py", _session_target("a.py"), True, None)
     nothing = ResetTarget("b.py", _session_target("b.py"), False, None)
     screen = RevertConfirmScreen.for_reset(
-        paths=["a.py", "b.py"], targets=[losing, nothing], mass=True,
+        paths=["a.py", "b.py"],
+        targets=[losing, nothing],
+        mass=True,
     )
 
     lines = screen._compact_reset_lines()
 
     assert [line.plain for line in lines] == [
-        f"a.py  {reset_target_line(losing.target)}", f"  {reset_loss_line(losing)}",
-        f"b.py  {reset_target_line(nothing.target)}", f"  {reset_loss_line(nothing)}",
+        f"a.py  {reset_target_line(losing.target)}",
+        f"  {reset_loss_line(losing)}",
+        f"b.py  {reset_target_line(nothing.target)}",
+        f"  {reset_loss_line(nothing)}",
     ]
     assert lines[1].style == WARN
     assert lines[3].style != WARN

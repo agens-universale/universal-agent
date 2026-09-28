@@ -34,7 +34,9 @@ from textual.message import Message
 from textual.widget import Widget
 
 
-def focus_target_at(screen, x: int, y: int, default: Optional[Widget]) -> Optional[Widget]:
+def focus_target_at(
+    screen, x: int, y: int, default: Optional[Widget]
+) -> Optional[Widget]:
     """Кого Textual сфокусирует нажатием в точке (x, y) — с учётом отказников.
 
     Textual на MouseDown ищет фокусируемого ПРЕДКА нажатого виджета

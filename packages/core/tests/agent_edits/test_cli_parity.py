@@ -4,6 +4,7 @@
 попадают в тот же журнал треда. Единственный гейт записи — thread-identity
 (в CLI она есть только при ``-t``): без неё не пишется ничего и git не зовётся.
 """
+
 from __future__ import annotations
 
 import json
@@ -49,16 +50,31 @@ def git_roots(roots):
         ("config", "user.name", "test"),
         ("config", "core.autocrlf", "false"),
     ):
-        subprocess.run(["git", *args], cwd=str(launch_root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", *args],
+            cwd=str(launch_root),
+            check=True,
+            capture_output=True,
+        )
     (launch_root / "tracked.txt").write_bytes(b"line1\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(launch_root), check=True, capture_output=True)
     subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=str(launch_root), check=True, capture_output=True
+        ["git", "add", "-A"],
+        cwd=str(launch_root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "init"],
+        cwd=str(launch_root),
+        check=True,
+        capture_output=True,
     )
     return launch_root, threads_dir
 
 
-async def _cli_ctx(launch_root: Path, threads_dir: Path, *, identity: bool = True):
+async def _cli_ctx(
+    launch_root: Path, threads_dir: Path, *, identity: bool = True
+):
     """RunContext так, как его собирает gc-cli с ВКЛЮЧЁННОЙ записью правок
     (`agent_edits.record.cli`): is_tui не передаётся (False), режим — `cli`.
 
@@ -85,7 +101,9 @@ async def _cli_ctx(launch_root: Path, threads_dir: Path, *, identity: bool = Tru
 
 
 def _records(threads_dir: Path):
-    return EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1")).read_all()
+    return EditsJournal(
+        edits_journal_path(str(threads_dir), "cli", "th1")
+    ).read_all()
 
 
 def _count_shell_git(monkeypatch) -> list[list[str]]:
@@ -143,7 +161,9 @@ async def test_cli_context_without_identity_writes_no_journal(roots):
     assert list(threads_dir.iterdir()) == []
 
 
-async def test_shell_command_from_cli_context_lands_in_journal(git_roots, monkeypatch):
+async def test_shell_command_from_cli_context_lands_in_journal(
+    git_roots, monkeypatch
+):
     launch_root, threads_dir = git_roots
     ctx = await _cli_ctx(launch_root, threads_dir)
     shell_git = _count_shell_git(monkeypatch)
@@ -157,7 +177,9 @@ async def test_shell_command_from_cli_context_lands_in_journal(git_roots, monkey
     assert shell_git != []
 
 
-async def test_shell_channel_calls_no_git_without_identity(git_roots, monkeypatch):
+async def test_shell_channel_calls_no_git_without_identity(
+    git_roots, monkeypatch
+):
     launch_root, threads_dir = git_roots
     ctx = await _cli_ctx(launch_root, threads_dir, identity=False)
     shell_git = _count_shell_git(monkeypatch)

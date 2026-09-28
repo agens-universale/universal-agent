@@ -85,6 +85,7 @@ add принятие МЕНЯЕТ данные экрана — база сдв�
 показа подтверждения и собирает пользовательские тексты из машинных кодов
 отказа.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -92,18 +93,17 @@ import functools
 import logging
 import re
 import time
-from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple, Union
+from typing import (
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
-from rich.text import Text
-from textual import events
-from textual.app import ComposeResult
-from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
-from textual.css.query import NoMatches
-from textual.screen import Screen
-from textual.widgets import Static
-
-from gc_tui.palette import (ACCENT, BRIGHT, DEEP_DIM, ERR, INK, MUTED, OK, WARN)
 from gc_core.agent_edits.deltas import FileEntry
 from gc_core.agent_edits.journal import EditRecord
 from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD
@@ -116,6 +116,16 @@ from gc_core.agent_edits.revert import (
     REASON_WRITE_FAILED,
     RevertOutcome,
 )
+from rich.text import Text
+from textual import events
+from textual.app import ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.css.query import NoMatches
+from textual.screen import Screen
+from textual.widgets import Static
+
+from gc_tui.palette import ACCENT, BRIGHT, DEEP_DIM, ERR, INK, MUTED, OK, WARN
 from gc_tui.services.diff_render import HunkBody
 from gc_tui.services.edits_view import (
     ACCEPT_READ_FAILED,
@@ -144,7 +154,9 @@ from gc_tui.widgets.lazy_body import BodySlot, LazyBody
 
 _logger = logging.getLogger(__name__)
 
-UndoFeedbackFn = Callable[[Sequence[str], Sequence[str]], None]  # restored, deleted
+UndoFeedbackFn = Callable[
+    [Sequence[str], Sequence[str]], None
+]  # restored, deleted
 UiAckFn = Callable[[str], None]
 
 # --- словарь экрана ---------------------------------------------------------
@@ -156,8 +168,15 @@ SCREEN_WORD = "изменения"
 # записей и вовсе невидим. Подпись «последний ход» обещала буквально
 # последний и вводила в заблуждение: после хода-вопроса экран показывал
 # предыдущий (находка смоука синхронизации).
-_SOURCE_LABELS = {SOURCE_SESSION: "сессия", SOURCE_TURN: "последний ход с правками"}
-_KIND_LABELS = {"created": "создан", "deleted": "удалён", "modified": "изменён"}
+_SOURCE_LABELS = {
+    SOURCE_SESSION: "сессия",
+    SOURCE_TURN: "последний ход с правками",
+}
+_KIND_LABELS = {
+    "created": "создан",
+    "deleted": "удалён",
+    "modified": "изменён",
+}
 
 # Шапка экрана источника «Ход» называет свою базу счёта (С5 смоука волны 4)
 # — там она ОДНА на весь список, в отличие от «Сессии», где у каждого файла
@@ -173,7 +192,7 @@ MARK_SHELL = "командой"
 MARK_ACCEPTED = "принят"
 MARK_EXTERNAL = "извне"
 _MARK_SEP = " · "
-APPROX = "≈"          # числа неточные (FileEntry.exact is False)
+APPROX = "≈"  # числа неточные (FileEntry.exact is False)
 
 # Глиф принятой базы (§13 спеки волны 4) — активный файл, чья действующая
 # ступень «Сессии» (`ActiveRow.step.kind`) — `accepted`: счёт и откат идут от
@@ -232,6 +251,7 @@ def accepted_caption(ts: float) -> str:
     """«счёт от принятого состояния (HH:MM)» — расшифровка глифа `↺` в шапке вьюера."""
     return f"{ACCEPTED_CAPTION_STEM} ({_hhmm(ts)})"
 
+
 # Симметричная расшифровка для ступени HEAD (С8 смоука волны 4) — тот же
 # слот шапки вьюера, тот же способ (сразу после счётчиков), что и у
 # `ACCEPTED_CAPTION_STEM`/`accepted_caption`. Текст берёт готовую подпись
@@ -245,6 +265,7 @@ def head_caption(ref: str) -> str:
     """«счёт от закоммиченного состояния (e5f2c1a · 14:20)» — расшифровка
     короткого хэша (С9) в шапке вьюера, симметрично `accepted_caption`."""
     return f"{HEAD_CAPTION_STEM} ({ref})"
+
 
 # Группа «принято» (§4.1/§4.2 спеки волны 4) — разобранные файлы (нечего
 # смотреть: принято и чисто, либо чисто закоммичено) сворачиваются в одну
@@ -267,7 +288,10 @@ _GROUP_EXPANDED = "▾"
 # грамматическое семейство, что и `_KIND_LABELS` активных строк), у сводки
 # шапки — счётное слово БЕЗ подразумеваемого субъекта («принято 3»).
 _SETTLED_REASON_ROW = {SETTLED_MANUAL: "принят", SETTLED_COMMIT: "закоммичен"}
-_SETTLED_REASON_GROUP = {SETTLED_MANUAL: GROUP_LABEL, SETTLED_COMMIT: "закоммичено"}
+_SETTLED_REASON_GROUP = {
+    SETTLED_MANUAL: GROUP_LABEL,
+    SETTLED_COMMIT: "закоммичено",
+}
 
 EMPTY_SESSION = "Изменений в этой сессии не было."
 EMPTY_TURN = "В этом ходе изменений не было."
@@ -291,9 +315,11 @@ def overflow_note(paths: int) -> str:
     изменённым. Числа потолка в тексте нет: сколько файлов в списке, и так
     говорит шапка.
     """
-    return (f"⚠ Одна из команд этой сессии изменила {paths} {files_word(paths)} — "
-            "в список попали не все: остальные здесь не видны, откатить их "
-            "отсюда нельзя.")
+    return (
+        f"⚠ Одна из команд этой сессии изменила {paths} {files_word(paths)} — "
+        "в список попали не все: остальные здесь не видны, откатить их "
+        "отсюда нельзя."
+    )
 
 
 # Подсказка скрытия — в самой строке, а не в футере: живёт ровно столько же,
@@ -375,7 +401,9 @@ EDITS_UNREADABLE = "правки сейчас не прочитать — инд
 # Хвост действия, уже изменившего файлы: откат (принятие, сброс) состоялся, а
 # рассказать о нём до конца не вышло — занят файл треда, отказала ФС. Совета
 # «повторите» здесь нет намеренно: повтор повторил бы само изменение.
-EDITS_CHANGED_UNREPORTED = "правки применены, но сообщить о них до конца не удалось"
+EDITS_CHANGED_UNREPORTED = (
+    "правки применены, но сообщить о них до конца не удалось"
+)
 
 
 def _survives_unreadable_edits(action):
@@ -394,15 +422,20 @@ def _survives_unreadable_edits(action):
     модель с устаревшим представлением (§7). Хвост меняющих действий живёт под
     своей защитой — `DiffScreen._after_the_change`.
     """
+
     @functools.wraps(action)
     def guarded(self, *args, **kwargs):
         try:
             return action(self, *args, **kwargs)
         except (OSError, TimeoutError):
-            _logger.warning("действие над правками не выполнено", exc_info=True)
+            _logger.warning(
+                "действие над правками не выполнено", exc_info=True
+            )
             self.app.notify(EDITS_UNREADABLE, severity="warning")
             return None
+
     return guarded
+
 
 # Футер v3 (§13 плана волны 4): две строки — навигация (одна на все состояния)
 # и действия (зависят от строки под курсором). Слова «git add» здесь больше
@@ -507,7 +540,11 @@ _MASS_RESET = "Ctrl+U сбросить все принятия"
 def mass_tail(*, accept: bool, revert: bool, reset: bool) -> str:
     """Массовые клавиши — уровень ПРЕДСТАВЛЕНИЯ, не строки (Е4): хвост один на
     все строки, каждая клавиша названа глаголом, мёртвая не рекламируется."""
-    segments = ((_MASS_ACCEPT, accept), (_MASS_REVERT, revert), (_MASS_RESET, reset))
+    segments = (
+        (_MASS_ACCEPT, accept),
+        (_MASS_REVERT, revert),
+        (_MASS_RESET, reset),
+    )
     return " · ".join(seg for seg, live in segments if live)
 
 
@@ -517,7 +554,7 @@ def mass_tail(*, accept: bool, revert: bool, reset: bool) -> str:
 # одно состояние на двоих обещало бы клавишу, которой на нём нет.
 ROW_PLAIN = "plain"
 ROW_ACCEPTED = "accepted"
-ROW_GROUP = "group"            # заголовок группы «принято»
+ROW_GROUP = "group"  # заголовок группы «принято»
 ROW_GROUP_FILE = "group-file"  # файл внутри раскрытой группы
 
 # --- словарь принятия и сброса (§13 плана волны 4) ----------------------------
@@ -529,7 +566,9 @@ ACCEPT_STAGE_PLAIN = "файл добавлен в индекс git"
 # Только когда среди принятых есть файл с `entry.external` — плашка не имеет
 # права упоминать ручные правки, которых не было (§7 спеки: «правда по
 # ситуации»). «вне агента», не «мимо агента» — словарь §13.
-ACCEPT_STAGE_EXTERNAL = "в индекс git вошли и ваши правки, сделанные вне агента"
+ACCEPT_STAGE_EXTERNAL = (
+    "в индекс git вошли и ваши правки, сделанные вне агента"
+)
 # Отказ стейджинга описывается СОБЫТИЕМ, а не результатом: `git add` на
 # ignored-путь отвечает кодом 1, но остальные пути батча при этом СТЕЙДЖИТ
 # (проверено на живом git), и «в индекс не попал» выдавало бы частичный отказ
@@ -549,7 +588,9 @@ _ACCEPT_REASON_TEXTS = {
 # остаётся на месте. Молчать об этом значило бы обещать эффект там, где
 # взгляд экрана его никогда не покажет — плашка обязана назвать источник, где
 # сдвиг реально виден.
-ACCEPT_TURN_NOTE = "эффект виден в «Сессии» — «Ход» по-прежнему считает от начала хода"
+ACCEPT_TURN_NOTE = (
+    "эффект виден в «Сессии» — «Ход» по-прежнему считает от начала хода"
+)
 
 # Тот же текст, что у принятия (`ACCEPT_TURN_NOTE`) — то же явление: сброс из
 # «Хода» тоже двигает только базу «Сессии» (`.accepted` — глобальный маркер,
@@ -577,14 +618,14 @@ _RESET_REASON_TEXTS = {
 
 # --- метрики сетки ----------------------------------------------------------
 
-_MARKER_W = 2       # «▸ » или два пробела
-_KIND_GAP = 3       # зазор «вид правки» → путь
+_MARKER_W = 2  # «▸ » или два пробела
+_KIND_GAP = 3  # зазор «вид правки» → путь
 # Зазор с ОБЕИХ сторон колонки пометок, а без неё — перед счётчиками: путь
 # занимает свою колонку до последнего символа и без зазора склеился бы с
 # соседом («…/engine.pyкомандой», «…/engine.py≈+1284»).
 _MARKS_GAP = 3
-_COUNTER_GAP = 2    # зазор `+N` → `−M`
-_PATH_MIN = 12      # уже этого путь неразличим — дальше жертвуем пометками
+_COUNTER_GAP = 2  # зазор `+N` → `−M`
+_PATH_MIN = 12  # уже этого путь неразличим — дальше жертвуем пометками
 # Ширина, когда измерить нельзя (экран ещё не разложен) — та же страховка, что
 # у адаптивного футера и статусной строки индикатора.
 FALLBACK_WIDTH = 80
@@ -609,19 +650,46 @@ EDIT_EDGE = 2
 # ЙЦУКЕН / Caps Lock: регистр и раскладка не меняют смысла клавиши.
 # «всё» — только через Ctrl (иначе CapsLock+ф откатывал бы весь набор).
 _KEY_ALIASES = {
-    "a": "a", "A": "a", "ф": "a", "Ф": "a",
-    "r": "r", "R": "r", "к": "r", "К": "r",
-    "u": "u", "U": "u", "г": "u", "Г": "u",
-    "f": "f", "F": "f", "а": "f", "А": "f",
-    "n": "n", "N": "n", "т": "n", "Т": "n",
-    "p": "p", "P": "p", "з": "p", "З": "p",
-    "x": "x", "X": "x", "ч": "x", "Ч": "x",
-    "ctrl+a": "ctrl+a", "ctrl+A": "ctrl+a",
-    "ctrl+ф": "ctrl+a", "ctrl+Ф": "ctrl+a",
-    "ctrl+r": "ctrl+r", "ctrl+R": "ctrl+r",
-    "ctrl+к": "ctrl+r", "ctrl+К": "ctrl+r",
-    "ctrl+u": "ctrl+u", "ctrl+U": "ctrl+u",
-    "ctrl+г": "ctrl+u", "ctrl+Г": "ctrl+u",
+    "a": "a",
+    "A": "a",
+    "ф": "a",
+    "Ф": "a",
+    "r": "r",
+    "R": "r",
+    "к": "r",
+    "К": "r",
+    "u": "u",
+    "U": "u",
+    "г": "u",
+    "Г": "u",
+    "f": "f",
+    "F": "f",
+    "а": "f",
+    "А": "f",
+    "n": "n",
+    "N": "n",
+    "т": "n",
+    "Т": "n",
+    "p": "p",
+    "P": "p",
+    "з": "p",
+    "З": "p",
+    "x": "x",
+    "X": "x",
+    "ч": "x",
+    "Ч": "x",
+    "ctrl+a": "ctrl+a",
+    "ctrl+A": "ctrl+a",
+    "ctrl+ф": "ctrl+a",
+    "ctrl+Ф": "ctrl+a",
+    "ctrl+r": "ctrl+r",
+    "ctrl+R": "ctrl+r",
+    "ctrl+к": "ctrl+r",
+    "ctrl+К": "ctrl+r",
+    "ctrl+u": "ctrl+u",
+    "ctrl+U": "ctrl+u",
+    "ctrl+г": "ctrl+u",
+    "ctrl+Г": "ctrl+u",
 }
 
 
@@ -709,7 +777,9 @@ def footer_text(
         if accepted or can_reset:
             parts.append(words.reset)
         if can_revert:
-            parts.append(words.revert.format(target=_revert_target(source, step)))
+            parts.append(
+                words.revert.format(target=_revert_target(source, step))
+            )
     tail = mass_tail(accept=mass_accept, revert=mass_revert, reset=mass_reset)
     if tail:
         parts.append(tail)
@@ -802,7 +872,7 @@ def paint_counters(line: str) -> Text:
     text.append(match.group(1), style=OK)
     text.append(match.group(2))
     text.append(match.group(3), style=ERR)
-    text.append(line[match.end():])
+    text.append(line[match.end() :])
     return text
 
 
@@ -859,12 +929,18 @@ def build_header(
     stages = [(full, marker)] if marker else []
     stages.append((full, ""))
     if legend:
-        stages.append(([SCREEN_WORD, label] + turn_base + files_seg + [tail], ""))
-    stages.append(([label] + turn_base + files_seg + [tail], ""))   # без слова экрана
+        stages.append(
+            ([SCREEN_WORD, label] + turn_base + files_seg + [tail], "")
+        )
+    stages.append(
+        ([label] + turn_base + files_seg + [tail], "")
+    )  # без слова экрана
     if turn_base:
-        stages.append(([label] + files_seg + [tail], ""))           # без «от начала хода»
+        stages.append(
+            ([label] + files_seg + [tail], "")
+        )  # без «от начала хода»
     if files > 0:
-        stages.append(([label, tail], ""))                          # без «N файлов»
+        stages.append(([label, tail], ""))  # без «N файлов»
 
     for parts, right in stages:
         left = " · ".join(parts)
@@ -911,7 +987,9 @@ def build_viewer_header(
     Одна строка на оба экрана: расходиться этим двум формулировкам не о чем.
     """
     label = _SOURCE_LABELS.get(source, source)
-    counters = ("" if entry.exact else APPROX + " ") + f"+{entry.add} −{entry.del_}"
+    counters = (
+        "" if entry.exact else APPROX + " "
+    ) + f"+{entry.add} −{entry.del_}"
     if accepted_ts is not None:
         caption = [accepted_caption(accepted_ts)]
     elif head_ref is not None:
@@ -938,7 +1016,7 @@ def build_viewer_header(
         text = " · ".join(head + [entry.path] + parts)
         if len(text) <= width:
             return text
-    fixed = " · ".join([""] + stages[-1][1])          # « · +84 −12 · весь файл»
+    fixed = " · ".join([""] + stages[-1][1])  # « · +84 −12 · весь файл»
     room = max(_PATH_MIN, width - len(fixed))
     return truncate_path_left(entry.path, room) + fixed
 
@@ -970,7 +1048,9 @@ def build_revert_title(
     return head + truncate_path_left(what, room) + tail
 
 
-def build_reset_title(path_keys: Sequence[str], *, mass: bool, width: int) -> str:
+def build_reset_title(
+    path_keys: Sequence[str], *, mass: bool, width: int
+) -> str:
     """Шапка подтверждения сброса (задача 4 доп., С7): `u` называет ЕДИНСТВЕННЫЙ
     файл по имени — тот же жанр, что у одиночного отката; `Ctrl+U` называет
     ЧИСЛО задетых файлов ВСЕГДА, даже когда оно оказалось единственным —
@@ -1016,7 +1096,9 @@ def revert_target_line(target: RevertTarget) -> str:
     stem = _TARGET_DATIVE_STEM.get(target.kind)
     if stem is None:
         return target.label
-    suffix = target.label[target.label.find("("):] if "(" in target.label else ""
+    suffix = (
+        target.label[target.label.find("(") :] if "(" in target.label else ""
+    )
     return f"{REVERT_TARGET_HEAD} {stem}" + (f" {suffix}" if suffix else "")
 
 
@@ -1049,7 +1131,9 @@ def reset_target_line(target: RevertTarget) -> str:
     stem = _RESET_TARGET_GENITIVE_STEM.get(target.kind)
     if stem is None:
         return target.label
-    suffix = target.label[target.label.find("("):] if "(" in target.label else ""
+    suffix = (
+        target.label[target.label.find("(") :] if "(" in target.label else ""
+    )
     return f"{RESET_TARGET_HEAD} {stem}" + (f" {suffix}" if suffix else "")
 
 
@@ -1073,7 +1157,11 @@ def reset_loss_line(target: ResetTarget) -> str:
     (HH:MM) будет потеряна» либо «терять нечего» (Д5)."""
     if not target.loses_point:
         return RESET_NOTHING_LOST
-    stamp = f" ({_hhmm(target.accepted_ts)})" if target.accepted_ts is not None else ""
+    stamp = (
+        f" ({_hhmm(target.accepted_ts)})"
+        if target.accepted_ts is not None
+        else ""
+    )
     return f"{RESET_LOSS_STEM}{stamp} {RESET_LOSS_TAIL}"
 
 
@@ -1098,7 +1186,9 @@ def revert_ack(outcome: RevertOutcome) -> str:
             f"{_files_phrase('пропущено', keys)}"
             f" — {_REASON_TEXTS.get(reason, reason)}"
         )
-    head = REVERT_HEAD if (outcome.restored or outcome.deleted) else REVERT_FAILED
+    head = (
+        REVERT_HEAD if (outcome.restored or outcome.deleted) else REVERT_FAILED
+    )
     return " · ".join([head] + parts)
 
 
@@ -1155,7 +1245,8 @@ def accept_ack(
             tail = ""
             if is_git and outcome.staged:
                 note = (
-                    ACCEPT_STAGE_EXTERNAL if outcome.with_external
+                    ACCEPT_STAGE_EXTERNAL
+                    if outcome.with_external
                     else ACCEPT_STAGE_PLAIN
                 )
                 tail = f"; {note}"
@@ -1307,11 +1398,15 @@ def build_rows(
     if not entries:
         return []
 
-    row_steps = [steps[idx] if steps and idx < len(steps) else None
-                 for idx in range(len(entries))]
+    row_steps = [
+        steps[idx] if steps and idx < len(steps) else None
+        for idx in range(len(entries))
+    ]
     marked = [_step_is_accepted(step) for step in row_steps]
-    row_accepted = [bool(accepted[idx]) if accepted and idx < len(accepted) else False
-                    for idx in range(len(entries))]
+    row_accepted = [
+        bool(accepted[idx]) if accepted and idx < len(accepted) else False
+        for idx in range(len(entries))
+    ]
     hashes = [_commit_hash(step) for step in row_steps]
     kinds = [_KIND_LABELS.get(entry.kind, entry.kind) for entry in entries]
     pluses = [f"+{entry.add}" for entry in entries]
@@ -1326,7 +1421,8 @@ def build_rows(
     # одной строки, и шириной по САМОМУ ШИРОКОМУ из них — короткий глиф в
     # наборе с хэшем получает свою же долю пробелов справа (см. цикл ниже).
     markers_with_hash = [
-        ACCEPTED_GLYPH if marked[idx] else hashes[idx] for idx in range(len(entries))
+        ACCEPTED_GLYPH if marked[idx] else hashes[idx]
+        for idx in range(len(entries))
     ]
     markers_glyph_only = [
         ACCEPTED_GLYPH if marked[idx] else None for idx in range(len(entries))
@@ -1460,7 +1556,10 @@ def build_group_row(settled: Sequence[SettledRow], *, expanded: bool) -> Text:
 
 
 def build_settled_rows(
-    settled: Sequence[SettledRow], *, selected: int, width: int = FALLBACK_WIDTH,
+    settled: Sequence[SettledRow],
+    *,
+    selected: int,
+    width: int = FALLBACK_WIDTH,
 ) -> List[Text]:
     """Строки раскрытой группы: та же сетка, что у активных, причина — в
     колонке вида (`принят`/`закоммичен` — С3 смоука волны 4). Марок нет:
@@ -1485,7 +1584,7 @@ def build_settled_rows(
     plus_w = max(len(plus) for plus in pluses)
     minus_w = max(len(minus) for minus in minuses)
     head_w = _MARKER_W + kind_w + _KIND_GAP
-    tail_w = 1 + plus_w + _COUNTER_GAP + minus_w          # 1 — слот `≈`
+    tail_w = 1 + plus_w + _COUNTER_GAP + minus_w  # 1 — слот `≈`
     path_w = max(_PATH_MIN, width - head_w - tail_w - _MARKS_GAP)
 
     rows: List[Text] = []
@@ -1494,7 +1593,9 @@ def build_settled_rows(
         text = Text(no_wrap=True, overflow="ellipsis")
         text.append("▸ " if is_selected else "  ", style=ACCENT)
         text.append(reasons[idx].ljust(kind_w) + " " * _KIND_GAP, style=MUTED)
-        text.append(truncate_path_left(row.path, path_w).ljust(path_w), style=MUTED)
+        text.append(
+            truncate_path_left(row.path, path_w).ljust(path_w), style=MUTED
+        )
         text.append(" " * _MARKS_GAP)
         text.append(APPROX if not row.exact else " ", style=DEEP_DIM)
         text.append(pluses[idx].rjust(plus_w), style=SETTLED_OK)
@@ -1517,9 +1618,16 @@ def _settled_entry(row: SettledRow) -> FileEntry:
     историю журнала сам (`DiffFileViewer._build_body`).
     """
     return FileEntry(
-        path=row.path, add=row.add, del_=row.del_, kind=row.kind,
-        exact=row.exact, countable=True, by_shell=False, external=False,
-        revertable=False, last_ts=0.0,
+        path=row.path,
+        add=row.add,
+        del_=row.del_,
+        kind=row.kind,
+        exact=row.exact,
+        countable=True,
+        by_shell=False,
+        external=False,
+        revertable=False,
+        last_ts=0.0,
     )
 
 
@@ -1543,7 +1651,9 @@ def _has_accepted_base(row: ActiveRow) -> bool:
 # спокойной нет вовсе — ✓ обещал бы сделанное, ⚠ пугал бы поломкой.
 _FLASH_GLYPHS = {"ok": "✓ ", "warn": "⚠ ", "note": ""}
 _FLASH_CLASSES = {
-    "ok": "set-flash-ok", "warn": "set-flash-warn", "note": "set-flash-note",
+    "ok": "set-flash-ok",
+    "warn": "set-flash-warn",
+    "note": "set-flash-note",
 }
 
 
@@ -1592,7 +1702,9 @@ class _ActionFlash:
             flash = self.query_one("#diff-flash", Static)
         except NoMatches:
             self.query_one("#root", Vertical).mount(
-                Static(glyph + text, id="diff-flash", classes=cls, markup=False),
+                Static(
+                    glyph + text, id="diff-flash", classes=cls, markup=False
+                ),
                 before=self.query_one("#footer", Static),
             )
             return
@@ -1670,8 +1782,11 @@ class DiffScreen(_ActionFlash, Screen):
         self._thread_ident = (str(system_id), str(thread_id))
         if all((threads_dir, system_id, thread_id)):
             self._edits = EditsView(
-                str(threads_dir), str(system_id), str(thread_id),
-                str(launch_root), self._config,
+                str(threads_dir),
+                str(system_id),
+                str(thread_id),
+                str(launch_root),
+                self._config,
             )
 
     @property
@@ -1719,13 +1834,15 @@ class DiffScreen(_ActionFlash, Screen):
         self._view = self._current_view()
         self._entries = [row.entry for row in self._view.active]
         self._settled = self._view.settled
-        self._selected_idx = min(max(self._selected_idx, 0), max(0, self._row_count() - 1))
+        self._selected_idx = min(
+            max(self._selected_idx, 0), max(0, self._row_count() - 1)
+        )
         self._render_screen()
 
     def _current_view(self) -> SessionView:
         try:
             return self._edits.session_view(self._source)
-        except Exception as exc:      # битый журнал не должен ронять весь TUI
+        except Exception as exc:  # битый журнал не должен ронять весь TUI
             _logger.warning("изменения не прочитаны: %r", exc)
             return SessionView(self._source, None, [], [], 0, 0)
 
@@ -1781,7 +1898,9 @@ class DiffScreen(_ActionFlash, Screen):
             legend_commit=any(
                 _commit_hash(row.step) for row in self._view.active
             ),
-            legend_external=any(row.entry.external for row in self._view.active),
+            legend_external=any(
+                row.entry.external for row in self._view.active
+            ),
         )
         self.query_one("#header-left", Static).update(paint_counters(left))
         self.query_one("#header-right", Static).update(right)
@@ -1799,18 +1918,20 @@ class DiffScreen(_ActionFlash, Screen):
         if cut:
             # Не строка списка: курсор на неё не встаёт, жесты её не касаются.
             widest = max(paths for _, paths in cut)
-            self._cut_note = meta_line(Text.assemble(
-                (overflow_note(widest), WARN), "  ", (CUT_NOTE_HIDE, MUTED),
-            ))
+            self._cut_note = meta_line(
+                Text.assemble(
+                    (overflow_note(widest), WARN),
+                    "  ",
+                    (CUT_NOTE_HIDE, MUTED),
+                )
+            )
             widgets.append(self._cut_note)
         # Пустое состояние — только когда нет НИ активных, НИ группы (§4.2):
         # непустая группа при нуле активных — валидный экран, а не пустой.
         if not self._entries and not self._settled:
             empty = EMPTY_SESSION
             if self._source == SOURCE_TURN:
-                empty = (
-                    EMPTY_TURN_UNDONE if self._view.turn_id else EMPTY_TURN
-                )
+                empty = EMPTY_TURN_UNDONE if self._view.turn_id else EMPTY_TURN
             widgets.append(Static(empty, classes="line-meta", markup=False))
             trace.mount(*widgets)
             return
@@ -1838,8 +1959,11 @@ class DiffScreen(_ActionFlash, Screen):
 
     def _shown_cut_commands(self) -> List[Tuple[str, int]]:
         dismissed = self._dismissed_cut_commands()
-        return [cmd for cmd in self._view.cut_commands
-                if (*self._thread_ident, *cmd) not in dismissed]
+        return [
+            cmd
+            for cmd in self._view.cut_commands
+            if (*self._thread_ident, *cmd) not in dismissed
+        ]
 
     def _hide_cut_note(self) -> None:
         """`x`: скрыть строку про урезанные команды — все, о которых она сейчас."""
@@ -1901,8 +2025,11 @@ class DiffScreen(_ActionFlash, Screen):
             return ROW_GROUP
         if self._settled_index(self._selected_idx) is not None:
             return ROW_GROUP_FILE
-        if (0 <= self._selected_idx < len(self._entries)
-                and self._counts_from_accepted(self._entries[self._selected_idx].path)):
+        if 0 <= self._selected_idx < len(
+            self._entries
+        ) and self._counts_from_accepted(
+            self._entries[self._selected_idx].path
+        ):
             return ROW_ACCEPTED
         return ROW_PLAIN
 
@@ -1964,9 +2091,15 @@ class DiffScreen(_ActionFlash, Screen):
 
     def _active_texts(self) -> List[Text]:
         width = self._row_width()
-        sel = self._selected_idx if self._selected_idx < len(self._entries) else -1
+        sel = (
+            self._selected_idx
+            if self._selected_idx < len(self._entries)
+            else -1
+        )
         return build_rows(
-            self._entries, selected=sel, width=width,
+            self._entries,
+            selected=sel,
+            width=width,
             steps=[row.step for row in self._view.active],
             accepted=[row.accepted_now for row in self._view.active],
         )
@@ -1977,7 +2110,9 @@ class DiffScreen(_ActionFlash, Screen):
     def _settled_texts(self) -> List[Text]:
         base = len(self._entries) + 1
         sel = self._selected_idx - base if self._selected_idx >= base else -1
-        return build_settled_rows(self._settled, selected=sel, width=self._row_width())
+        return build_settled_rows(
+            self._settled, selected=sel, width=self._row_width()
+        )
 
     def _scroll_to_cursor(self) -> None:
         if 0 <= self._selected_idx < len(self._rows):
@@ -2002,8 +2137,11 @@ class DiffScreen(_ActionFlash, Screen):
         content-region, из неё Textual рамку с паддингом вычел сам.
         """
         try:
-            width = (self.query_one("#trace", VerticalScroll).size.width
-                     - ROW_PADDING - SCROLLBAR_COLUMN)
+            width = (
+                self.query_one("#trace", VerticalScroll).size.width
+                - ROW_PADDING
+                - SCROLLBAR_COLUMN
+            )
         except Exception:
             width = 0
         return width if width >= _PATH_MIN else FALLBACK_WIDTH
@@ -2042,12 +2180,14 @@ class DiffScreen(_ActionFlash, Screen):
             selected = idx == self._selected_idx
             if row.has_class("selected") != selected:
                 row.set_class(selected, "selected")
-        self._update_footer()          # строка действий зависит от курсора (§13)
+        self._update_footer()  # строка действий зависит от курсора (§13)
         self._scroll_to_cursor()
 
     def _page(self) -> int:
         try:
-            height = self.query_one("#trace", VerticalScroll).content_size.height
+            height = self.query_one(
+                "#trace", VerticalScroll
+            ).content_size.height
         except Exception:
             height = 0
         return max(1, height - 1)
@@ -2059,7 +2199,9 @@ class DiffScreen(_ActionFlash, Screen):
         # него. После отката плашка обязана пережить перечитывание — там она
         # про него и есть.
         self._clear_flash()
-        self._source = SOURCE_TURN if self._source == SOURCE_SESSION else SOURCE_SESSION
+        self._source = (
+            SOURCE_TURN if self._source == SOURCE_SESSION else SOURCE_SESSION
+        )
         self._selected_idx = 0
         self._reload()
 
@@ -2087,7 +2229,9 @@ class DiffScreen(_ActionFlash, Screen):
         if self._cursor_in_group():
             settled_idx = self._settled_index(self._selected_idx)
             self._group_cursor_memory = (
-                self._settled[settled_idx].path if settled_idx is not None else None
+                self._settled[settled_idx].path
+                if settled_idx is not None
+                else None
             )
             self._move(min(self._active_cursor_memory, len(self._entries) - 1))
         else:
@@ -2224,15 +2368,20 @@ class DiffScreen(_ActionFlash, Screen):
         # вовсе, а `self._session_ladder` мог остаться от ПРЕДЫДУЩЕГО
         # переключения в «Сессию» — спрашивать его в «Ходе» вслепую нельзя.
         accepted_ts = (
-            [self._edits.accepted_step_ts(entry.path) for entry in self._entries]
-            if self._source == SOURCE_SESSION else None
+            [
+                self._edits.accepted_step_ts(entry.path)
+                for entry in self._entries
+            ]
+            if self._source == SOURCE_SESSION
+            else None
         )
         # Симметричный параллельный список для ступени HEAD (С8) — тем же
         # путём, что и `accepted_ts`: из уже посчитанной `self._view.active`
         # (задача 1), без нового обращения к сервису.
         head_refs = (
             [_head_ref(row.step) for row in self._view.active]
-            if self._source == SOURCE_SESSION else None
+            if self._source == SOURCE_SESSION
+            else None
         )
         self._viewer = DiffFileViewer(
             view=self._edits,
@@ -2327,7 +2476,9 @@ class DiffScreen(_ActionFlash, Screen):
         self._accept([path_key], from_viewer=True)
 
     @_survives_unreadable_edits
-    def _accept(self, path_keys: Sequence[str], *, from_viewer: bool = False) -> None:
+    def _accept(
+        self, path_keys: Sequence[str], *, from_viewer: bool = False
+    ) -> None:
         """Принять пути: без подтверждения — обратимо `u` (Р26/Р29, пересмотр Р9).
 
         В отличие от старого `git add` принятие МЕНЯЕТ данные экрана: база
@@ -2380,9 +2531,13 @@ class DiffScreen(_ActionFlash, Screen):
         `↺` не обязателен — тай-брейк Р28 и источник «Ход» могут его гасить,
         не трогая саму базу, финальный фикс волны 4) и разобранные «вручную»."""
         active = [
-            row.entry.path for row in self._view.active if _has_accepted_base(row)
+            row.entry.path
+            for row in self._view.active
+            if _has_accepted_base(row)
         ]
-        settled = [row.path for row in self._settled if row.reason == SETTLED_MANUAL]
+        settled = [
+            row.path for row in self._settled if row.reason == SETTLED_MANUAL
+        ]
         return active + settled
 
     def _reset_selected(self) -> None:
@@ -2404,7 +2559,11 @@ class DiffScreen(_ActionFlash, Screen):
 
     @_survives_unreadable_edits
     def _ask_reset(
-        self, path_keys: Sequence[str], *, mass: bool, from_viewer: bool = False
+        self,
+        path_keys: Sequence[str],
+        *,
+        mass: bool,
+        from_viewer: bool = False,
     ) -> None:
         """Спрашиваем, пока хоть один путь теряет точку отката к принятому
         состоянию (`ResetTarget.loses_point`, §4.3): не теряет НИКТО — сброс
@@ -2436,13 +2595,17 @@ class DiffScreen(_ActionFlash, Screen):
 
         self.app.push_screen(
             RevertConfirmScreen.for_reset(
-                paths=path_keys, targets=targets, mass=mass,
+                paths=path_keys,
+                targets=targets,
+                mass=mass,
             ),
             _on_result,
         )
 
     @_survives_unreadable_edits
-    def _apply_reset(self, path_keys: Sequence[str], *, from_viewer: bool) -> None:
+    def _apply_reset(
+        self, path_keys: Sequence[str], *, from_viewer: bool
+    ) -> None:
         """Снять принятие и рассказать об этом (§13)."""
         # Проверка ПОВТОРЯЕТСЯ здесь, а не только перед вопросом: окно
         # подтверждения и есть та щель, ради которой она заводилась — пока
@@ -2519,7 +2682,8 @@ class DiffScreen(_ActionFlash, Screen):
         def _on_result(confirmed: bool) -> None:
             if confirmed:
                 self._apply_revert(
-                    path_keys, from_viewer=from_viewer,
+                    path_keys,
+                    from_viewer=from_viewer,
                     shown_state=(target_paths, shown_state),
                 )
 
@@ -2529,9 +2693,12 @@ class DiffScreen(_ActionFlash, Screen):
         # ЦЕЛИКОМ: там показывается весь набор (Р22) — с диффом каждого файла,
         # а выше порога компактного вида без тел, — и счётчики каждой дельты
         # становятся заголовком её файла.
-        deltas = list(zip(
-            target_paths, self._edits.revert_deltas(self._source, target_paths)
-        ))
+        deltas = list(
+            zip(
+                target_paths,
+                self._edits.revert_deltas(self._source, target_paths),
+            )
+        )
         # Цели — тот же расчёт, что исполнит откат (задача 9): превью не
         # вправе назвать ступень иначе, чем реально вернёт `r`/`Ctrl+R`.
         preview_targets = self._edits.revert_targets(
@@ -2675,10 +2842,10 @@ class _BodyPart(NamedTuple):
     рода тела, объяснение вместо тела.
     """
 
-    meta: Optional[str]     # текст служебной строки; None — это участок тела
-    lines: int              # высота участка в строках — известна ДО рендера
-    edit: Optional[int]     # номер правки или None
-    render: Optional[Callable[[], Text]] = None   # содержимое по требованию
+    meta: Optional[str]  # текст служебной строки; None — это участок тела
+    lines: int  # высота участка в строках — известна ДО рендера
+    edit: Optional[int]  # номер правки или None
+    render: Optional[Callable[[], Text]] = None  # содержимое по требованию
 
     @property
     def text(self) -> Optional[Text]:
@@ -2730,13 +2897,17 @@ def split_body(
     один раз на файл — участки не могут разъехаться гаттером и раскраской.
     """
     body = HunkBody(hunks, path=path, fill_width=fill_width)
-    if not body.shown_lines:                        # рисовать нечего
+    if not body.shown_lines:  # рисовать нечего
         return []
     kinds = body.kinds
     bounds = _part_bounds(kinds) if by_edits else _even_bounds(len(kinds))
     return [
-        _BodyPart(None, end - begin, edit,
-                  lambda first=begin, last=end: body.render(first, last))
+        _BodyPart(
+            None,
+            end - begin,
+            edit,
+            lambda first=begin, last=end: body.render(first, last),
+        )
         for begin, end, edit in bounds
     ]
 
@@ -2754,7 +2925,9 @@ def _part_bounds(kinds: Sequence[str]) -> List[Tuple[int, int, Optional[int]]]:
     edits = 0
     start = 0
     for index in range(1, len(kinds) + 1):
-        if index < len(kinds) and _is_edit(kinds[index]) == _is_edit(kinds[start]):
+        if index < len(kinds) and _is_edit(kinds[index]) == _is_edit(
+            kinds[start]
+        ):
             continue
         if _is_edit(kinds[start]):
             for pos in range(start, index, CONTEXT_CHUNK):
@@ -2773,8 +2946,10 @@ def _even_bounds(rows: int) -> List[Tuple[int, int, Optional[int]]]:
     Номера правки у кусков нет: метить курсором на таком теле нечего, а по
     файлам подтверждение ходит своими заголовками.
     """
-    return [(pos, min(pos + CONTEXT_CHUNK, rows), None)
-            for pos in range(0, rows, CONTEXT_CHUNK)]
+    return [
+        (pos, min(pos + CONTEXT_CHUNK, rows), None)
+        for pos in range(0, rows, CONTEXT_CHUNK)
+    ]
 
 
 def _is_edit(kind: str) -> bool:
@@ -2825,17 +3000,29 @@ class DiffFileViewer(_ActionFlash, Screen):
     # `←`/`→` у `VerticalScroll` заняты своей прокруткой, а фокус на старте
     # уезжает именно в него: без priority экран этих клавиш не увидит вовсе.
     BINDINGS = [
-        Binding("left", "prev_file", "предыдущий файл", show=False, priority=True),
-        Binding("right", "next_file", "следующий файл", show=False, priority=True),
+        Binding(
+            "left", "prev_file", "предыдущий файл", show=False, priority=True
+        ),
+        Binding(
+            "right", "next_file", "следующий файл", show=False, priority=True
+        ),
         # Ctrl+стрелка = «двигать кадр» — та же идиома, что у Ctrl+вверх/вниз в
         # экранах форм. Простые стрелки заняты переключением файла, а строка
         # тела здесь не переносится (иначе рассыплется ленивая сборка), поэтому
         # хвост длинной строки достаётся прокруткой вбок.
-        Binding("ctrl+left", "scroll_body_left", "влево", show=False, priority=True),
-        Binding("ctrl+right", "scroll_body_right", "вправо", show=False, priority=True),
+        Binding(
+            "ctrl+left", "scroll_body_left", "влево", show=False, priority=True
+        ),
+        Binding(
+            "ctrl+right",
+            "scroll_body_right",
+            "вправо",
+            show=False,
+            priority=True,
+        ),
     ]
 
-    def _body_scroll(self) -> "LazyBody | None":
+    def _body_scroll(self) -> LazyBody | None:
         try:
             return self.query_one("#trace", LazyBody)
         except NoMatches:
@@ -2877,7 +3064,9 @@ class DiffFileViewer(_ActionFlash, Screen):
         # Параллельный `files` список (образец — `accepted` в `build_rows`):
         # `True` — у файла этого индекса есть принятая база, `u` применим.
         self._reset_flags = (
-            list(can_reset) if can_reset is not None else [False] * len(self._files)
+            list(can_reset)
+            if can_reset is not None
+            else [False] * len(self._files)
         )
         # Тот же приём для `r` (Е5, задача 5 фикса волны 4): `True` — у файла
         # этого индекса есть достоверная база отката. Раньше вьюер спрашивал
@@ -2888,16 +3077,20 @@ class DiffFileViewer(_ActionFlash, Screen):
         # `.accepted` (обычный файл, ступень HEAD, либо вьюер группы, где
         # звонящий этот параметр вовсе не передаёт) — шапка тогда без подписи.
         self._accepted_ts = (
-            list(accepted_ts) if accepted_ts is not None else [None] * len(self._files)
+            list(accepted_ts)
+            if accepted_ts is not None
+            else [None] * len(self._files)
         )
         # Симметричный параллельный список для ступени HEAD (С8 смоука
         # волны 4) — тот же приём: `None` у файла, чья ступень сейчас не
         # `head`, либо у вьюера группы, который этот параметр не передаёт.
         self._head_refs = (
-            list(head_refs) if head_refs is not None else [None] * len(self._files)
+            list(head_refs)
+            if head_refs is not None
+            else [None] * len(self._files)
         )
         self._full = False
-        self._fill = BODY_UNBUILT           # ширина, на которую собрано тело
+        self._fill = BODY_UNBUILT  # ширина, на которую собрано тело
         # Виджеты каждой правки: подпись и тело одной правки метятся курсором
         # разом, поэтому список списков, а не плоский.
         self._edits: List[List[Static]] = []
@@ -2905,7 +3098,9 @@ class DiffFileViewer(_ActionFlash, Screen):
         # Кэш готового тела по (путь, режим, ширина) — образец `DiffBlock._cache`.
         # Тело «весь файл» на крупном файле считается заметно, а возвращаются к
         # нему постоянно: тогл `f`, соседний файл и обратно, прежняя ширина.
-        self._cache: Dict[Tuple[str, bool, Optional[int]], List[_BodyPart]] = {}
+        self._cache: Dict[
+            Tuple[str, bool, Optional[int]], List[_BodyPart]
+        ] = {}
 
     @property
     def index(self) -> int:
@@ -3035,7 +3230,9 @@ class DiffFileViewer(_ActionFlash, Screen):
                 widget = meta_line(part.meta, "diff-part")
                 slots.append(BodySlot(widget))
             else:
-                widget = Static("", classes="diff-hunk diff-part", markup=False)
+                widget = Static(
+                    "", classes="diff-hunk diff-part", markup=False
+                )
                 slots.append(BodySlot(widget, part.lines, part.render))
             if part.edit is not None:
                 while len(self._edits) <= part.edit:
@@ -3054,19 +3251,25 @@ class DiffFileViewer(_ActionFlash, Screen):
         if cached is None:
             # Записи прошлых ширин выбрасываем: протяжка рамки иначе копила бы
             # по полному телу на каждый свой шаг (приём `DiffBlock._cache`).
-            self._cache = {k: v for k, v in self._cache.items() if k[2] == width}
+            self._cache = {
+                k: v for k, v in self._cache.items() if k[2] == width
+            }
             try:
                 cached = self._build_body(entry, width)
             except (OSError, TimeoutError):
                 # Тело строится лениво, при отрисовке, — до границы действий
                 # (`_survives_unreadable_edits`) отказ отсюда не доходит. Строка
                 # вместо тела и без кэша: следующая отрисовка попробует снова.
-                _logger.warning("тело файла не прочитано: %s", entry.path, exc_info=True)
+                _logger.warning(
+                    "тело файла не прочитано: %s", entry.path, exc_info=True
+                )
                 return [_BodyPart(EDITS_UNREADABLE, 0, None)]
             self._cache[key] = cached
         return cached
 
-    def _build_body(self, entry: FileEntry, width: Optional[int]) -> List[_BodyPart]:
+    def _build_body(
+        self, entry: FileEntry, width: Optional[int]
+    ) -> List[_BodyPart]:
         if not entry.countable:
             return [_BodyPart(VIEWER_NO_PREVIEW, 0, None)]
         if not entry.exact:
@@ -3087,7 +3290,9 @@ class DiffFileViewer(_ActionFlash, Screen):
             return [_BodyPart(_NO_COUNTERS, 0, None)]
         return parts
 
-    def _journal_body(self, entry: FileEntry, width: Optional[int]) -> List[_BodyPart]:
+    def _journal_body(
+        self, entry: FileEntry, width: Optional[int]
+    ) -> List[_BodyPart]:
         """Тело без точной базы: правки подряд, каждая со своей подписью.
 
         Правка здесь — запись журнала целиком: и подпись, и тело метятся
@@ -3099,11 +3304,17 @@ class DiffFileViewer(_ActionFlash, Screen):
         records = self._view.file_records(self._source, entry.path)
         parts = [_BodyPart(inexact_note(records), 0, None)]
         for number, record in enumerate(records, start=1):
-            parts.append(_BodyPart(edit_caption(number, record), 0, number - 1))
+            parts.append(
+                _BodyPart(edit_caption(number, record), 0, number - 1)
+            )
             parts.extend(
                 part._replace(edit=number - 1)
-                for part in split_body(record.hunks, path=entry.path,
-                                       fill_width=width, by_edits=False)
+                for part in split_body(
+                    record.hunks,
+                    path=entry.path,
+                    fill_width=width,
+                    by_edits=False,
+                )
             )
         return parts
 
@@ -3216,7 +3427,7 @@ class DiffFileViewer(_ActionFlash, Screen):
             return
         self._edit_idx = index % len(self._edits)
         self._paint_cursor()
-        self._render_chrome()               # «правка 2/4» переехала
+        self._render_chrome()  # «правка 2/4» переехала
         self._reveal_cursor()
 
     def _paint_cursor(self) -> None:
@@ -3240,7 +3451,10 @@ class DiffFileViewer(_ActionFlash, Screen):
         прокрутка наполнила бы его лишь следующим тактом, и прыжок к далёкой
         правке показал бы пустое место.
         """
-        if 0 <= self._edit_idx < len(self._edits) and self._edits[self._edit_idx]:
+        if (
+            0 <= self._edit_idx < len(self._edits)
+            and self._edits[self._edit_idx]
+        ):
             target = self._edits[self._edit_idx][0]
             self.query_one("#trace", LazyBody).ensure(target)
             self.call_after_refresh(target.scroll_visible, animate=False)
@@ -3257,8 +3471,8 @@ class DiffFileViewer(_ActionFlash, Screen):
         self._clear_flash()
         self._index = (self._index + step) % len(self._files)
         if not self._can_full():
-            self._full = False       # у нового файла режима «весь файл» нет
-        self._edit_idx = 0           # новый файл читают с первой его правки
+            self._full = False  # у нового файла режима «весь файл» нет
+        self._edit_idx = 0  # новый файл читают с первой его правки
         self._render_screen()
         # Новый файл читают с начала. Textual сам ужимает прокрутку только под
         # размер нового тела: с длинного файла на длинный она осталась бы

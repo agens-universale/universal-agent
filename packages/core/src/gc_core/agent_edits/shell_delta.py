@@ -47,20 +47,16 @@
 выражается записью ``op="create"``, а ревизию для ступени HEAD несёт отметка
 создания в сторе (``SnapshotStore.mark_created``, ревизия ДО команды).
 """
+
 from __future__ import annotations
 
 import logging
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from gc_core.agent_edits import git_ops
-from gc_core.agent_edits.deltas import truncate_hunks, abs_path_for_key, build_diff, decode_edit_text
-from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.agent_edits.mode import resolve_mode
-from gc_core.agent_edits.paths import canonical_path_key, goes_through_link, is_external_key
 
 # Приватные хелперы рекордера переиспользуются намеренно: периметр правки и
 # thread-identity обязаны считаться в обоих каналах записи одинаково.
@@ -70,6 +66,19 @@ from gc_core.agent_edits.ctx import (
     launch_root_from_ctx,
     limit,
     protected_extra_from_ctx,
+)
+from gc_core.agent_edits.deltas import (
+    abs_path_for_key,
+    build_diff,
+    decode_edit_text,
+    truncate_hunks,
+)
+from gc_core.agent_edits.journal import EditRecord, EditsJournal
+from gc_core.agent_edits.mode import resolve_mode
+from gc_core.agent_edits.paths import (
+    canonical_path_key,
+    goes_through_link,
+    is_external_key,
 )
 from gc_core.agent_edits.recorder import is_recording
 from gc_core.agent_edits.snapshots import (
@@ -149,8 +158,14 @@ _MTIME_TOLERANCE_NS = 20_000_000
 # `diff.renames` склеил бы удалённый и созданный пути в одну секцию. Ответу
 # пофайлового вызова это не меняет ничего: у одного пути пары для склейки нет.
 _GIT_DIFF_ARGS = (
-    "-c", "core.quotepath=false", "diff", "--no-ext-diff", "--no-textconv",
-    "--no-renames", "--src-prefix=a/", "--dst-prefix=b/",
+    "-c",
+    "core.quotepath=false",
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--no-renames",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
 )
 
 # git спецкейсит именно "/dev/null" внутри --no-index — и на Windows тоже.
@@ -191,7 +206,9 @@ class _BaseFacts:
     index: dict[str, bytes | None]
 
 
-def _diff_args(rel: str, *, untracked: bool, base_rev: str | None) -> list[str]:
+def _diff_args(
+    rel: str, *, untracked: bool, base_rev: str | None
+) -> list[str]:
     """Аргументы пофайлового диффа пути — общие для ``_diff`` и параллельной пачки."""
     if untracked:
         # Для untracked обычный `git diff` пуст — сравниваем с /dev/null.
@@ -225,8 +242,8 @@ _STAGED_ADD_XY = frozenset({"A ", "AM", "AT", "AD"})
 def _loosened_ignore_scopes(
     launch_root: str,
     changed: list[str],
-    before: dict[str, "_StatusEntry"],
-    after: dict[str, "_StatusEntry"],
+    before: dict[str, _StatusEntry],
+    after: dict[str, _StatusEntry],
 ) -> list[str]:
     """Каталоги, где команда могла ОСЛАБИТЬ правила игнорирования: ``"sub/"``, ``""`` — весь проект.
 
@@ -305,7 +322,8 @@ class ShellDelta:
         launch_root: str,
         ctx: Any,
         seen: dict[str, tuple[str, tuple[int, int] | None]] | None = None,
-        pocket_cache: dict[Path, tuple[tuple[int, int], list[str]]] | None = None,
+        pocket_cache: dict[Path, tuple[tuple[int, int], list[str]]]
+        | None = None,
     ) -> None:
         self._launch_root = launch_root
         self._ctx = ctx
@@ -327,8 +345,9 @@ class ShellDelta:
         ctx: Any,
         *,
         seen: dict[str, tuple[str, tuple[int, int] | None]] | None = None,
-        pocket_cache: dict[Path, tuple[tuple[int, int], list[str]]] | None = None,
-    ) -> "ShellDelta | None":
+        pocket_cache: dict[Path, tuple[tuple[int, int], list[str]]]
+        | None = None,
+    ) -> ShellDelta | None:
         """Снимок «до» команды. ``None`` — канал неактивен целиком, звать нечего.
 
         Контракт (Р33): объект живёт при ``is_recording ∧ shell_tracking`` —
@@ -395,7 +414,10 @@ class ShellDelta:
         """
         for key in list(self._seen):
             _, signature = self._seen[key]
-            if _file_signature(abs_path_for_key(self._launch_root, key)) != signature:
+            if (
+                _file_signature(abs_path_for_key(self._launch_root, key))
+                != signature
+            ):
                 self._seen.pop(key, None)
 
     def _pocket_before(self) -> None:
@@ -435,7 +457,9 @@ class ShellDelta:
             # `r`.
             diverged, staged_only = self._at_risk_keys()
             merged = _dedup(diverged + known + staged_only)
-            candidates = [k for k in merged if not is_external_key(k)][:POCKET_MAX_PATHS]
+            candidates = [k for k in merged if not is_external_key(k)][
+                :POCKET_MAX_PATHS
+            ]
             total = 0
             for key in candidates:
                 try:
@@ -455,7 +479,9 @@ class ShellDelta:
                     before_signature=(st.st_size, st.st_mtime_ns),
                 )
         except Exception:
-            _logger.warning("shell delta: карманный снимок «до» не снят", exc_info=True)
+            _logger.warning(
+                "shell delta: карманный снимок «до» не снят", exc_info=True
+            )
             pocket = {}
         self._pocket = pocket
 
@@ -495,8 +521,12 @@ class ShellDelta:
         """
         if self._before is None:
             return [], []
-        diverged = [rel for rel, entry in self._before.items() if entry.xy[1:2] != " "]
-        staged_only = [rel for rel, entry in self._before.items() if entry.xy[1:2] == " "]
+        diverged = [
+            rel for rel, entry in self._before.items() if entry.xy[1:2] != " "
+        ]
+        staged_only = [
+            rel for rel, entry in self._before.items() if entry.xy[1:2] == " "
+        ]
         return diverged, staged_only
 
     def _at_risk_keys(self) -> tuple[list[str], list[str]]:
@@ -553,7 +583,9 @@ class ShellDelta:
             self._head_after = git_ops.head_rev_from_files(self._launch_root)
             self._record(self._before, after, skip=recorded)
         except Exception:
-            _logger.warning("shell delta: правки команды не записаны", exc_info=True)
+            _logger.warning(
+                "shell delta: правки команды не записаны", exc_info=True
+            )
 
     def _record(
         self,
@@ -564,7 +596,11 @@ class ShellDelta:
     ) -> None:
         changed = sorted(
             (
-                {path for path, entry in after.items() if before.get(path) != entry}
+                {
+                    path
+                    for path, entry in after.items()
+                    if before.get(path) != entry
+                }
                 | {path for path in before if path not in after}
             )
             - skip
@@ -606,8 +642,13 @@ class ShellDelta:
         with store.deferred_index():
             for start in range(0, len(changed), _RECORD_SLICE_PATHS):
                 wrote_base |= self._record_slice(
-                    changed[start:start + _RECORD_SLICE_PATHS],
-                    before, after, journal, store, turn_id, command_paths,
+                    changed[start : start + _RECORD_SLICE_PATHS],
+                    before,
+                    after,
+                    journal,
+                    store,
+                    turn_id,
+                    command_paths,
                 )
 
         # Эвикция — только к факту записи новой базы (она обходит каталог целиком)
@@ -643,11 +684,19 @@ class ShellDelta:
             created = rel in created_rels
             try:
                 record = self._build_record(
-                    rel, entry, turn_id, created=created, clean_before=clean_before,
-                    hunks=diffs.get(rel), key=key, file=file,
+                    rel,
+                    entry,
+                    turn_id,
+                    created=created,
+                    clean_before=clean_before,
+                    hunks=diffs.get(rel),
+                    key=key,
+                    file=file,
                 )
             except Exception:
-                _logger.warning("shell delta: путь пропущен rel=%r", rel, exc_info=True)
+                _logger.warning(
+                    "shell delta: путь пропущен rel=%r", rel, exc_info=True
+                )
                 continue
             if record is None:
                 continue
@@ -683,13 +732,19 @@ class ShellDelta:
             # Пачка не собралась — базы куска снимаются по одной, как до пачек:
             # отказ стоит скорости, а не права на откат.
             _logger.warning(
-                "shell delta: пакетный сбор баз не удался, снимаем по одной", exc_info=True
+                "shell delta: пакетный сбор баз не удался, снимаем по одной",
+                exc_info=True,
             )
             facts = None
         wrote_base = False
         for rel, key, clean_before in needs_base:
             wrote_base |= self._capture_base(
-                store, rel, key, turn_id, clean_before=clean_before, facts=facts
+                store,
+                rel,
+                key,
+                turn_id,
+                clean_before=clean_before,
+                facts=facts,
             )
         return wrote_base
 
@@ -719,8 +774,14 @@ class ShellDelta:
         planned: list[tuple[str, str, _FileFacts]] = []
         for rel in part:
             abs_path = self._abs(rel)
-            key = canonical_path_key(str(abs_path), self._launch_root, protected_extra=extra)
-            if key is None or is_external_key(key) or goes_through_link(self._launch_root, rel):
+            key = canonical_path_key(
+                str(abs_path), self._launch_root, protected_extra=extra
+            )
+            if (
+                key is None
+                or is_external_key(key)
+                or goes_through_link(self._launch_root, rel)
+            ):
                 continue
             planned.append((rel, key, _file_facts(abs_path)))
         return planned
@@ -743,18 +804,27 @@ class ShellDelta:
         by_rev: dict[str | None, list[str]] = {}
         for rel, _key, file in planned:
             entry = after.get(rel)
-            if entry is None or not file.is_file or file.binary or file.size > max_source:
+            if (
+                entry is None
+                or not file.is_file
+                or file.binary
+                or file.size > max_source
+            ):
                 continue
             if entry.xy == "??":
                 untracked.append(rel)
             else:
-                by_rev.setdefault(self._diff_base_rev(rel not in before), []).append(rel)
+                by_rev.setdefault(
+                    self._diff_base_rev(rel not in before), []
+                ).append(rel)
         diffs = self._untracked_diffs(untracked)
         for rev, rels in by_rev.items():
             diffs.update(self._diff_many(rels, base_rev=rev))
         return diffs
 
-    def _base_facts(self, needs_base: list[tuple[str, str, bool]]) -> _BaseFacts:
+    def _base_facts(
+        self, needs_base: list[tuple[str, str, bool]]
+    ) -> _BaseFacts:
         """Ответы git для ``_capture_base`` по всем путям сразу — тремя запусками.
 
         Точная ступень (путь чист до команды, HEAD неподвижен): сперва атрибуты
@@ -762,12 +832,18 @@ class ShellDelta:
         HEAD без фильтра. Всем остальным и тем, кого HEAD не прочитал, — блобы
         индекса для счётной базы.
         """
-        exact = [rel for rel, _key, clean in needs_base if self._exact_step(clean)]
+        exact = [
+            rel for rel, _key, clean in needs_base if self._exact_step(clean)
+        ]
         filtered = git_ops.custom_filter_paths(self._launch_root, exact)
         head = git_ops.blobs_at(
-            self._launch_root, [rel for rel in exact if rel not in filtered], rev="HEAD"
+            self._launch_root,
+            [rel for rel in exact if rel not in filtered],
+            rev="HEAD",
         )
-        index_rels = [rel for rel, _key, _clean in needs_base if head.get(rel) is None]
+        index_rels = [
+            rel for rel, _key, _clean in needs_base if head.get(rel) is None
+        ]
         index = git_ops.blobs_at(self._launch_root, index_rels, rev="")
         return _BaseFacts(filtered=filtered, head=head, index=index)
 
@@ -791,7 +867,9 @@ class ShellDelta:
         try:
             return self._record_pocket()
         except Exception:
-            _logger.warning("shell delta: карманные правки не записаны", exc_info=True)
+            _logger.warning(
+                "shell delta: карманные правки не записаны", exc_info=True
+            )
             return frozenset()
 
     def _record_pocket(self) -> frozenset[str]:
@@ -823,9 +901,15 @@ class ShellDelta:
                 self._remember(record)
                 recorded.add(key)
                 if base_bytes is not None:
-                    wrote_base |= self._pocket_capture_base(store, key, base_bytes, turn_id)
+                    wrote_base |= self._pocket_capture_base(
+                        store, key, base_bytes, turn_id
+                    )
             except Exception:
-                _logger.warning("shell delta: карманный путь пропущен key=%r", key, exc_info=True)
+                _logger.warning(
+                    "shell delta: карманный путь пропущен key=%r",
+                    key,
+                    exc_info=True,
+                )
                 continue
 
         if wrote_base:
@@ -854,8 +938,11 @@ class ShellDelta:
 
         if st is None or not exists_as_file:
             record = _edit_record(
-                key, turn_id, op="delete",
-                before_sha256=before_sha256, flags=["no_diff"],
+                key,
+                turn_id,
+                op="delete",
+                before_sha256=before_sha256,
+                flags=["no_diff"],
             )
             return record, entry.before_bytes
 
@@ -866,8 +953,11 @@ class ShellDelta:
         if st.st_size > max_source:
             after_sha256 = _sha256_of_file(abs_path)
             record = _edit_record(
-                key, turn_id, op="shell",
-                before_sha256=before_sha256, after_sha256=after_sha256,
+                key,
+                turn_id,
+                op="shell",
+                before_sha256=before_sha256,
+                after_sha256=after_sha256,
                 flags=["no_diff"],
             )
             return record, None
@@ -877,9 +967,14 @@ class ShellDelta:
         except OSError:
             return None, None
         if after_bytes == entry.before_bytes:
-            return None, None  # изменился только mtime (та же дыра, что у git-подканала)
+            return (
+                None,
+                None,
+            )  # изменился только mtime (та же дыра, что у git-подканала)
 
-        if _is_binary_bytes(entry.before_bytes) or _is_binary_bytes(after_bytes):
+        if _is_binary_bytes(entry.before_bytes) or _is_binary_bytes(
+            after_bytes
+        ):
             record = _edit_record(
                 key,
                 turn_id,
@@ -903,9 +998,14 @@ class ShellDelta:
             )
             return record, None
 
-        diff_body, add, deleted = build_diff(old_text, new_text, _hunk_context_lines(self._ctx))
+        diff_body, add, deleted = build_diff(
+            old_text, new_text, _hunk_context_lines(self._ctx)
+        )
         if not diff_body:
-            return None, None  # текст совпал несмотря на разные байты (иная кодировка)
+            return (
+                None,
+                None,
+            )  # текст совпал несмотря на разные байты (иная кодировка)
         # Синтетический git-заголовок — форма совпадает с остальными записями
         # шелл-канала (докстринг ``journal.py``), тело — как у рекордера.
         hunks = f"diff --git a/{key} b/{key}\n{diff_body}"
@@ -944,7 +1044,9 @@ class ShellDelta:
             # Ревизия — та, что была НА МОМЕНТ съёма карманных байт (до
             # команды), даже если команда сама коммитила: признак ступени
             # HEAD отвечает за «коммит после снимка» (§3.2).
-            wrote = store.capture_session(key, before_bytes, head_rev=self._head_before)
+            wrote = store.capture_session(
+                key, before_bytes, head_rev=self._head_before
+            )
         # Пустой turn_id — снимка хода не бывает: без этой проверки подканал
         # писал снимок под ПУСТЫМ ключом хода (та же защита, что в
         # `_capture_base`; там она уже стоит, здесь её забыли поставить).
@@ -976,7 +1078,8 @@ class ShellDelta:
         правит разве что нарочно.
         """
         candidates = [
-            rel for rel, _key, _file in planned
+            rel
+            for rel, _key, _file in planned
             if self._created_by_command(rel, after.get(rel), before)
         ]
         if not candidates:
@@ -985,12 +1088,17 @@ class ShellDelta:
         if self._info_exclude_changed():
             scopes.append("")
         candidates = [
-            rel for rel in candidates
-            if not any(scope == "" or rel.startswith(scope) for scope in scopes)
+            rel
+            for rel in candidates
+            if not any(
+                scope == "" or rel.startswith(scope) for scope in scopes
+            )
         ]
         if not candidates:
             return set()
-        return set(candidates) - git_ops.ignored_paths(self._launch_root, candidates)
+        return set(candidates) - git_ops.ignored_paths(
+            self._launch_root, candidates
+        )
 
     def _info_exclude_signature(self) -> object:
         """Подпись ``info/exclude`` (размер, время, номер файла); ``"missing"`` — файла нет."""
@@ -1014,7 +1122,11 @@ class ShellDelta:
         отката удалением, а не удаляет файл пользователя.
         """
         now = self._info_exclude_signature()
-        return now is None or self._info_exclude_before is None or now != self._info_exclude_before
+        return (
+            now is None
+            or self._info_exclude_before is None
+            or now != self._info_exclude_before
+        )
 
     def _created_by_command(
         self,
@@ -1096,7 +1208,8 @@ class ShellDelta:
         """
         try:
             if self._exact_step(clean_before) and not (
-                rel in facts.filtered if facts is not None
+                rel in facts.filtered
+                if facts is not None
                 else git_ops.has_custom_filter(self._launch_root, rel)
             ):
                 disk = _read_bytes(self._abs(rel))
@@ -1105,14 +1218,23 @@ class ShellDelta:
                     # после команды («родной» формы не узнать — форма выкладки)
                     # — по одному.
                     content = git_ops.head_bytes_like_disk(
-                        self._launch_root, rel, disk, rev="HEAD",
+                        self._launch_root,
+                        rel,
+                        disk,
+                        rev="HEAD",
                     )
                 else:
                     blob = facts.head[rel]
-                    content = None if blob is None else git_ops.blob_like_disk(blob, disk)
+                    content = (
+                        None
+                        if blob is None
+                        else git_ops.blob_like_disk(blob, disk)
+                    )
                 if content is not None:
                     wrote = store.capture_session(
-                        key, content, head_rev=self._head_before,
+                        key,
+                        content,
+                        head_rev=self._head_before,
                     )
                     if turn_id:
                         # Та же проверка, что и в счётной ветке ниже: без неё
@@ -1121,7 +1243,8 @@ class ShellDelta:
                     return wrote
                 # HEAD не читает путь (например, свежий rename) — счётный путь ниже.
             before = (
-                facts.index[rel] if facts is not None and rel in facts.index
+                facts.index[rel]
+                if facts is not None and rel in facts.index
                 else git_ops.show_index_bytes(self._launch_root, rel)
             )
             if before is None:
@@ -1131,7 +1254,9 @@ class ShellDelta:
                 store.capture_shell_turn(key, before, turn_id)
             return wrote
         except Exception:
-            _logger.warning("shell delta: база не снята rel=%r", rel, exc_info=True)
+            _logger.warning(
+                "shell delta: база не снята rel=%r", rel, exc_info=True
+            )
             return False
 
     def _remember(self, record: EditRecord) -> None:
@@ -1147,7 +1272,9 @@ class ShellDelta:
         elif record.after_sha256 is not None:
             self._seen[record.path] = (
                 record.after_sha256,
-                _file_signature(abs_path_for_key(self._launch_root, record.path)),
+                _file_signature(
+                    abs_path_for_key(self._launch_root, record.path)
+                ),
             )
 
     def _build_record(
@@ -1192,7 +1319,11 @@ class ShellDelta:
 
         after_sha256 = _sha256_of_file(abs_path)
         remembered = self._seen.get(key)
-        if after_sha256 is not None and remembered is not None and remembered[0] == after_sha256:
+        if (
+            after_sha256 is not None
+            and remembered is not None
+            and remembered[0] == after_sha256
+        ):
             # Содержимое то же, что в прошлой записи об этом пути: команда
             # перезаписала файл теми же байтами (агент повторил команду). У
             # untracked дифф с /dev/null НИКОГДА не пуст, поэтому такой дубль
@@ -1206,15 +1337,19 @@ class ShellDelta:
         # ревью, находка 5).
         if file.binary:
             return _edit_record(
-                key, turn_id,
+                key,
+                turn_id,
                 op="create" if created else "shell",
-                after_sha256=after_sha256, flags=["no_diff"],
+                after_sha256=after_sha256,
+                flags=["no_diff"],
             )
         if file.size > _max_diff_source_bytes(self._ctx):
             return _edit_record(
-                key, turn_id,
+                key,
+                turn_id,
                 op="create" if created else "shell",
-                after_sha256=after_sha256, flags=["no_diff"],
+                after_sha256=after_sha256,
+                flags=["no_diff"],
             )
 
         if hunks is None:
@@ -1293,11 +1428,14 @@ class ShellDelta:
         # Код возврата здесь намеренно не читается: у --no-index exit 1 значит
         # «файлы различаются» — это норма, а не отказ.
         _, out = git_ops.run_git(
-            self._launch_root, _diff_args(rel, untracked=untracked, base_rev=base_rev)
+            self._launch_root,
+            _diff_args(rel, untracked=untracked, base_rev=base_rev),
         )
         return _decode_git_output(out)
 
-    def _diff_many(self, rels: list[str], *, base_rev: str | None) -> dict[str, str]:
+    def _diff_many(
+        self, rels: list[str], *, base_rev: str | None
+    ) -> dict[str, str]:
         """Дифф отслеживаемых путей ПАЧКОЙ — ``{путь: то же, что дал бы _diff}``.
 
         Один запуск git на кусок командной строки вместо запуска на путь (замер:
@@ -1308,21 +1446,32 @@ class ShellDelta:
         """
         diffs: dict[str, str] = {}
         rev = [base_rev] if base_rev else []
-        for chunk in git_ops.argv_chunks(rels, size=lambda rel: len(_literal(rel))):
+        for chunk in git_ops.argv_chunks(
+            rels, size=lambda rel: len(_literal(rel))
+        ):
             code, out = git_ops.run_git(
                 self._launch_root,
-                [*_GIT_DIFF_ARGS, *rev, "--", *(_literal(rel) for rel in chunk)],
+                [
+                    *_GIT_DIFF_ARGS,
+                    *rev,
+                    "--",
+                    *(_literal(rel) for rel in chunk),
+                ],
             )
             # Отказ git — ни одной секции не верим: напечатанная до отказа может
             # быть оборвана посреди хэнка, и счётчики легли бы в журнал неверными.
-            sections, clean = git_ops.split_patch_by_path(out) if code == 0 else ({}, False)
+            sections, clean = (
+                git_ops.split_patch_by_path(out) if code == 0 else ({}, False)
+            )
             for rel in chunk:
                 if rel in sections:
                     diffs[rel] = _decode_git_output(sections[rel])
                 elif clean:
                     diffs[rel] = ""
                 else:
-                    diffs[rel] = self._diff(rel, untracked=False, base_rev=base_rev)
+                    diffs[rel] = self._diff(
+                        rel, untracked=False, base_rev=base_rev
+                    )
         return diffs
 
     def _untracked_diffs(self, rels: list[str]) -> dict[str, str]:
@@ -1336,7 +1485,10 @@ class ShellDelta:
             self._launch_root,
             [_diff_args(rel, untracked=True, base_rev=None) for rel in rels],
         )
-        return {rel: _decode_git_output(out) for rel, (_code, out) in zip(rels, answers)}
+        return {
+            rel: _decode_git_output(out)
+            for rel, (_code, out) in zip(rels, answers)
+        }
 
     def _abs(self, rel: str) -> Path:
         return Path(self._launch_root) / rel
@@ -1386,7 +1538,9 @@ def _edit_record(
 
 
 def _shell_tracking_enabled(ctx: Any) -> bool:
-    return bool(agent_edits_config(ctx).get("shell_tracking", DEFAULT_SHELL_TRACKING))
+    return bool(
+        agent_edits_config(ctx).get("shell_tracking", DEFAULT_SHELL_TRACKING)
+    )
 
 
 def _max_diff_chars(ctx: Any) -> int:
@@ -1394,7 +1548,9 @@ def _max_diff_chars(ctx: Any) -> int:
 
 
 def _max_diff_source_bytes(ctx: Any) -> int:
-    return limit(None, ctx, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES)
+    return limit(
+        None, ctx, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES
+    )
 
 
 def _snapshots_max_files(ctx: Any) -> int:
@@ -1463,7 +1619,9 @@ def _is_binary_file(path: Path) -> bool:
 def _is_binary_bytes(data: bytes) -> bool:
     """Тот же классификатор, что у рекордера, но по байтам уже в памяти
     (карманный подканал их и так читает — второго чтения файла не нужно)."""
-    return classify_content_from_sample("", data[:BINARY_SAMPLE_BYTES]).is_binary
+    return classify_content_from_sample(
+        "", data[:BINARY_SAMPLE_BYTES]
+    ).is_binary
 
 
 def _file_size(path: Path) -> int:

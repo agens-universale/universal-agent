@@ -7,8 +7,8 @@ import re
 from typing import Any, Optional
 
 from gc_tui.models import TraceEvent
-from gc_tui.services.tool_identity import tool_id
 from gc_tui.services.path_display import truncate_path
+from gc_tui.services.tool_identity import tool_id
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
@@ -516,7 +516,9 @@ def _extract_ask_human_response(output: Any) -> Optional[str]:
 
 # Аргумент с таким именем — путь (Е6 батча 3): показывается всегда; свёртка
 # `<N chars>` — только для содержимого.
-_PATH_KEYS = frozenset({"path", "file", "file_path", "dir", "directory", "cwd", "src", "dst"})
+_PATH_KEYS = frozenset(
+    {"path", "file", "file_path", "dir", "directory", "cwd", "src", "dst"}
+)
 
 # Путь показывается ЦЕЛИКОМ (Ж2 батча 4): строка ленты переносится по ширине,
 # как это уже происходит с длинным текстом ошибки, и фиксированный бюджет
@@ -644,7 +646,11 @@ def _arg_summary(name: str, args: dict) -> str:
     # default: name + 1-3 short scalars
     pairs = []
     for k, v in list(args.items())[:3]:
-        shown = _path_preview(v) if (k in _PATH_KEYS and isinstance(v, str)) else _scalar_preview(v)
+        shown = (
+            _path_preview(v)
+            if (k in _PATH_KEYS and isinstance(v, str))
+            else _scalar_preview(v)
+        )
         pairs.append(f"{k}={shown}")
     return ", ".join(pairs)
 
@@ -779,10 +785,16 @@ def _map_function_event(
         args = coerce_args(msg.get("arguments"))
         summary = f"{name or '<tool>'}({_arg_summary(name or '', args)})"
         return TraceEvent(
-            no=no, event_ts_utc_iso=ts, kind="call",
-            title=name or "", summary=summary,
-            full_payload=msg, message_id=mid,
-            call_id=call_id, tool_name=name, wire_name=wire_name,
+            no=no,
+            event_ts_utc_iso=ts,
+            kind="call",
+            title=name or "",
+            summary=summary,
+            full_payload=msg,
+            message_id=mid,
+            call_id=call_id,
+            tool_name=name,
+            wire_name=wire_name,
         )
 
     if typ == "function_call_output":

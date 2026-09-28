@@ -916,10 +916,14 @@ async def test_cloud_field_placeholders_and_default_language(tmp_path):
 
 def _footer(scr):
     from textual.widgets import Static
+
     # Хвост подсказки прокрутки снимаем: он зависит от того, влезло ли
     # содержимое в окно теста, и к предмету этих сверок не относится.
     from gc_tui.form_frame import FOOTER_SCROLL
-    return str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
+
+    return str(scr.query_one("#set-footer", Static).render()).replace(
+        FOOTER_SCROLL, ""
+    )
 
 
 @pytest.mark.asyncio

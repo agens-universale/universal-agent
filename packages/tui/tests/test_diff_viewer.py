@@ -5,6 +5,7 @@
 навигация по ним и по файлам, режим «весь файл», честность шапки и футера в
 режимах, где точной базы нет.
 """
+
 from __future__ import annotations
 
 import time
@@ -48,22 +49,55 @@ pytest.importorskip("textual")
 # --- фикстуры данных ---------------------------------------------------------
 
 
-def _rec(path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1,
-         ts=1.0, hunks="", flags=None) -> EditRecord:
+def _rec(
+    path="a.py",
+    turn="t1",
+    call_id="c1",
+    op="edit",
+    add=1,
+    del_=1,
+    ts=1.0,
+    hunks="",
+    flags=None,
+) -> EditRecord:
     return EditRecord(
-        path=path, turn_id=turn, ts=ts, call_id=call_id, op=op, hunks=hunks,
-        add=add, del_=del_, before_sha256=None, after_sha256=None,
+        path=path,
+        turn_id=turn,
+        ts=ts,
+        call_id=call_id,
+        op=op,
+        hunks=hunks,
+        add=add,
+        del_=del_,
+        before_sha256=None,
+        after_sha256=None,
         flags=list(flags or []),
     )
 
 
-def _entry(path="a.py", add=1, del_=1, kind="modified", exact=True,
-           countable=True, by_shell=False, external=False, revertable=True,
-           last_ts=1.0) -> FileEntry:
+def _entry(
+    path="a.py",
+    add=1,
+    del_=1,
+    kind="modified",
+    exact=True,
+    countable=True,
+    by_shell=False,
+    external=False,
+    revertable=True,
+    last_ts=1.0,
+) -> FileEntry:
     return FileEntry(
-        path=path, add=add, del_=del_, kind=kind, exact=exact,
-        countable=countable, by_shell=by_shell, external=external,
-        revertable=revertable, last_ts=last_ts,
+        path=path,
+        add=add,
+        del_=del_,
+        kind=kind,
+        exact=exact,
+        countable=countable,
+        by_shell=by_shell,
+        external=external,
+        revertable=revertable,
+        last_ts=last_ts,
     )
 
 
@@ -157,16 +191,20 @@ def _body(screen: DiffFileViewer) -> str:
 
 def _screen_lines(app) -> list[str]:
     """Текстовый слепок экрана строками композитора (приём тестов блоков)."""
-    return ["".join(seg.text for seg in strip).rstrip()
-            for strip in app.screen._compositor.render_strips()]
+    return [
+        "".join(seg.text for seg in strip).rstrip()
+        for strip in app.screen._compositor.render_strips()
+    ]
 
 
 # --- чистые функции ----------------------------------------------------------
 
 
 def _parts_plain(parts):
-    return [(str(part.text) if part.text is not None else part.meta, part.edit)
-            for part in parts]
+    return [
+        (str(part.text) if part.text is not None else part.meta, part.edit)
+        for part in parts
+    ]
 
 
 def test_split_body_cuts_context_edit_context():
@@ -210,8 +248,9 @@ def test_split_body_keeps_one_gutter_width_for_the_whole_file():
     lines = [f" line{n}\n" for n in range(1, 130)]
     lines[8] = "-line9\n"
     lines[120] = "+line121\n"
-    parts = split_body("@@ -1,129 +1,129 @@\n" + "".join(lines),
-                       path="a.py", fill_width=None)
+    parts = split_body(
+        "@@ -1,129 +1,129 @@\n" + "".join(lines), path="a.py", fill_width=None
+    )
     starts = {
         line.split(" ")[0] and len(line) - len(line.lstrip(" "))
         for part in parts
@@ -229,9 +268,10 @@ def test_split_body_keeps_one_gutter_width_for_the_whole_file():
 def test_split_body_chunks_long_context(tmp_path):
     """Длинный контекст режется на куски — ради него тело и разрезано."""
     body = "".join(f" line{n}\n" for n in range(1, 501))
-    parts = split_body("@@ -1,500 +1,500 @@\n" + body, path="a.py",
-                       fill_width=None)
-    assert len(parts) == 5                       # 500 / CONTEXT_CHUNK
+    parts = split_body(
+        "@@ -1,500 +1,500 @@\n" + body, path="a.py", fill_width=None
+    )
+    assert len(parts) == 5  # 500 / CONTEXT_CHUNK
     assert all(part.edit is None for part in parts)
     assert sum(len(str(part.text).splitlines()) for part in parts) == 500
 
@@ -280,17 +320,23 @@ def test_viewer_footer_drops_accept_when_unavailable():
     blocked = viewer_footer(full=False, can_full=True, can_add=False)
     assert "принять" not in blocked
     assert "r откат · ↑↓ PgUp PgDn · Esc" in blocked
-    assert blocked.startswith("n след. правка · p пред. · ←/→ файл · f весь файл")
+    assert blocked.startswith(
+        "n след. правка · p пред. · ←/→ файл · f весь файл"
+    )
 
 
 def test_viewer_footer_shows_reset_only_when_applicable():
     """`u сброс` — только когда явно затребован; порядок сегментов `a → u → r`."""
     footer = viewer_footer(full=False, can_full=True, can_reset=True)
     assert "u сброс" in footer
-    assert footer.index("a принять") < footer.index("u сброс") < footer.index("r откат")
+    assert (
+        footer.index("a принять")
+        < footer.index("u сброс")
+        < footer.index("r откат")
+    )
 
     default = viewer_footer(full=False, can_full=True)
-    assert "u сброс" not in default            # старые вызовы не рекламируют лишнего
+    assert "u сброс" not in default  # старые вызовы не рекламируют лишнего
 
 
 def test_viewer_footer_keeps_np_until_the_file_has_a_single_edit():
@@ -354,8 +400,9 @@ def test_viewer_header_carries_the_external_warning():
     from gc_tui.screens.diff import LEGEND_EXTERNAL
 
     def header(external):
-        return build_viewer_header(SOURCE_SESSION, _entry(external=external),
-                                   full=False, width=160)
+        return build_viewer_header(
+            SOURCE_SESSION, _entry(external=external), full=False, width=160
+        )
 
     assert LEGEND_EXTERNAL in header(True)
     assert LEGEND_EXTERNAL not in header(False)
@@ -371,8 +418,14 @@ def test_viewer_header_gives_up_the_screen_word_before_the_external_warning():
     from gc_tui.screens.diff import LEGEND_EXTERNAL, SCREEN_WORD
 
     def header(external, width):
-        return build_viewer_header(SOURCE_SESSION, _entry("a.py", external=external),
-                                   full=False, width=width, edit=0, edits=1)
+        return build_viewer_header(
+            SOURCE_SESSION,
+            _entry("a.py", external=external),
+            full=False,
+            width=width,
+            edit=0,
+            edits=1,
+        )
 
     plain, warned = header(False, 300), header(True, 300)
     assert LEGEND_EXTERNAL in warned and len(warned) > len(plain)
@@ -388,14 +441,18 @@ def test_viewer_header_gives_up_the_screen_word_before_the_external_warning():
 def test_viewer_header_shows_where_the_cursor_is_among_edits():
     """Р18: счётчик правок стоит последним — и в режиме «весь файл» тоже."""
     entry = _entry("calc.py", add=27, del_=4)
-    left = build_viewer_header(SOURCE_SESSION, entry, full=False, width=100,
-                               edit=1, edits=4)
+    left = build_viewer_header(
+        SOURCE_SESSION, entry, full=False, width=100, edit=1, edits=4
+    )
     assert left == "изменения · сессия · calc.py · +27 −4 · правка 2/4"
 
-    full = build_viewer_header(SOURCE_SESSION, entry, full=True, width=100,
-                               edit=0, edits=4)
-    assert full == f"изменения · сессия · calc.py · +27 −4 · {FULL_SUFFIX}" \
-                   " · правка 1/4"
+    full = build_viewer_header(
+        SOURCE_SESSION, entry, full=True, width=100, edit=0, edits=4
+    )
+    assert (
+        full == f"изменения · сессия · calc.py · +27 −4 · {FULL_SUFFIX}"
+        " · правка 1/4"
+    )
     # Правок нет вовсе (бинарь, «различий нет») — счётчику неоткуда взяться.
     assert "правка" not in build_viewer_header(
         SOURCE_SESSION, entry, full=False, width=100, edit=0, edits=0
@@ -416,24 +473,33 @@ def test_viewer_header_names_the_accepted_step():
     ts = 1723200000.0
     stamp = time.strftime("%H:%M", time.localtime(ts))
 
-    left = build_viewer_header(SOURCE_SESSION, entry, full=False, width=100,
-                               accepted_ts=ts)
+    left = build_viewer_header(
+        SOURCE_SESSION, entry, full=False, width=100, accepted_ts=ts
+    )
     assert left == (
         f"изменения · сессия · calc.py · +27 −4 · {ACCEPTED_CAPTION_STEM} ({stamp})"
     )
     assert accepted_caption(ts) in left
 
-    full = build_viewer_header(SOURCE_SESSION, entry, full=True, width=100,
-                               accepted_ts=ts, edit=0, edits=2)
+    full = build_viewer_header(
+        SOURCE_SESSION,
+        entry,
+        full=True,
+        width=100,
+        accepted_ts=ts,
+        edit=0,
+        edits=2,
+    )
     assert full == (
         f"изменения · сессия · calc.py · +27 −4 · {ACCEPTED_CAPTION_STEM}"
         f" ({stamp}) · {FULL_SUFFIX} · правка 1/2"
     )
 
     # Без `accepted_ts` (дефолт) — байт-в-байт прежний текст.
-    assert build_viewer_header(
-        SOURCE_SESSION, entry, full=False, width=100
-    ) == "изменения · сессия · calc.py · +27 −4"
+    assert (
+        build_viewer_header(SOURCE_SESSION, entry, full=False, width=100)
+        == "изменения · сессия · calc.py · +27 −4"
+    )
 
 
 def test_viewer_header_names_the_head_step():
@@ -444,40 +510,54 @@ def test_viewer_header_names_the_head_step():
     entry = _entry("calc.py", add=27, del_=4)
     ref = "e5f2c1a · 14:20"
 
-    left = build_viewer_header(SOURCE_SESSION, entry, full=False, width=120,
-                               head_ref=ref)
+    left = build_viewer_header(
+        SOURCE_SESSION, entry, full=False, width=120, head_ref=ref
+    )
     assert left == (
         f"изменения · сессия · calc.py · +27 −4 · {HEAD_CAPTION_STEM} ({ref})"
     )
     assert head_caption(ref) in left
-    assert ACCEPTED_CAPTION_STEM not in left       # ступени взаимоисключающие
+    assert ACCEPTED_CAPTION_STEM not in left  # ступени взаимоисключающие
 
-    full = build_viewer_header(SOURCE_SESSION, entry, full=True, width=120,
-                               head_ref=ref, edit=0, edits=2)
+    full = build_viewer_header(
+        SOURCE_SESSION,
+        entry,
+        full=True,
+        width=120,
+        head_ref=ref,
+        edit=0,
+        edits=2,
+    )
     assert full == (
         f"изменения · сессия · calc.py · +27 −4 · {HEAD_CAPTION_STEM}"
         f" ({ref}) · {FULL_SUFFIX} · правка 1/2"
     )
 
     # Без `head_ref` (дефолт) — байт-в-байт прежний текст.
-    assert build_viewer_header(
-        SOURCE_SESSION, entry, full=False, width=100
-    ) == "изменения · сессия · calc.py · +27 −4"
+    assert (
+        build_viewer_header(SOURCE_SESSION, entry, full=False, width=100)
+        == "изменения · сессия · calc.py · +27 −4"
+    )
 
 
 def test_viewer_header_sacrifices_word_then_source_then_path():
-    entry = _entry("src/very/deep/nested/module/screens/engine.py", add=7, del_=2)
+    entry = _entry(
+        "src/very/deep/nested/module/screens/engine.py", add=7, del_=2
+    )
     full = "изменения · сессия · src/very/deep/nested/module/screens/engine.py · +7 −2"
-    assert build_viewer_header(SOURCE_SESSION, entry, full=False,
-                               width=len(full)) == full
+    assert (
+        build_viewer_header(SOURCE_SESSION, entry, full=False, width=len(full))
+        == full
+    )
 
-    without_word = build_viewer_header(SOURCE_SESSION, entry, full=False,
-                                       width=len(full) - 1)
+    without_word = build_viewer_header(
+        SOURCE_SESSION, entry, full=False, width=len(full) - 1
+    )
     assert without_word.startswith("сессия · ")
 
     narrow = build_viewer_header(SOURCE_SESSION, entry, full=False, width=30)
     assert "сессия" not in narrow
-    assert "engine.py · +7 −2" in narrow      # имя файла и числа целы
+    assert "engine.py · +7 −2" in narrow  # имя файла и числа целы
     assert "…" in narrow
     assert len(narrow) <= 30
 
@@ -502,8 +582,12 @@ async def test_enter_opens_viewer_with_cumulative_diff(tmp_path):
     ws = _Workspace(tmp_path)
     ws.base("a.py", "a\nb\nc\n")
     ws.write("a.py", "a\nB\nc\nd\n")
-    ws.journal.append(_rec("a.py", ts=1.0, hunks="@@ -1 +1 @@\n-старое\n+новое\n"))
-    ws.journal.append(_rec("a.py", ts=2.0, hunks="@@ -1 +1 @@\n-новое\n+третье\n"))
+    ws.journal.append(
+        _rec("a.py", ts=1.0, hunks="@@ -1 +1 @@\n-старое\n+новое\n")
+    )
+    ws.journal.append(
+        _rec("a.py", ts=2.0, hunks="@@ -1 +1 @@\n-новое\n+третье\n")
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -517,13 +601,15 @@ async def test_enter_opens_viewer_with_cumulative_diff(tmp_path):
         viewer = pilot.app.screen
         assert isinstance(viewer, DiffFileViewer)
         body = _body(viewer)
-        assert "+B" in body and "+d" in body        # кумулятив базы против диска
+        assert "+B" in body and "+d" in body  # кумулятив базы против диска
         assert "старое" not in body and "третье" not in body
         assert "a.py" in _plain(viewer.query_one("#header-left"))
 
 
 @pytest.mark.asyncio
-async def test_viewer_header_names_the_accepted_step_only_for_the_accepted_file(tmp_path):
+async def test_viewer_header_names_the_accepted_step_only_for_the_accepted_file(
+    tmp_path,
+):
     """Полная фраза глифа `↺` (§13 спеки) — в шапке ЖИВОГО вьюера, открытого
     через `DiffScreen._open_viewer`, и только у файла, чья ступень «Сессии»
     сейчас `.accepted` — не у соседнего активного файла без принятия.
@@ -538,7 +624,7 @@ async def test_viewer_header_names_the_accepted_step_only_for_the_accepted_file(
 
     ws.base("plain.py", "было\n")
     ws.write("plain.py", "стало\n")
-    ws.journal.append(_rec("plain.py", ts=2.0))     # свежее — активных первым
+    ws.journal.append(_rec("plain.py", ts=2.0))  # свежее — активных первым
 
     ts = ws.store.accepted_state("accepted.py").ts
 
@@ -548,13 +634,13 @@ async def test_viewer_header_names_the_accepted_step_only_for_the_accepted_file(
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("enter")             # первый активный — plain.py
+        await pilot.press("enter")  # первый активный — plain.py
         await pilot.pause()
         header = _plain(pilot.app.screen.query_one("#header-left"))
         assert "plain.py" in header
         assert ACCEPTED_CAPTION_STEM not in header
 
-        await pilot.press("right")             # соседний файл — accepted.py
+        await pilot.press("right")  # соседний файл — accepted.py
         await pilot.pause()
         header = _plain(pilot.app.screen.query_one("#header-left"))
         assert "accepted.py" in header
@@ -562,7 +648,9 @@ async def test_viewer_header_names_the_accepted_step_only_for_the_accepted_file(
 
 
 @pytest.mark.asyncio
-async def test_viewer_header_names_the_head_step_only_for_the_head_file(tmp_path):
+async def test_viewer_header_names_the_head_step_only_for_the_head_file(
+    tmp_path,
+):
     """Симметрично `..._only_for_the_accepted_file` (С8): полная подпись
     ступени HEAD — в шапке ЖИВОГО вьюера, и только у файла, чья действующая
     ступень «Сессии» сейчас `head` (тай-брейк Р28: коммит поверх принятого
@@ -582,29 +670,51 @@ async def test_viewer_header_names_the_head_step_only_for_the_head_file(tmp_path
         ("config", "user.email", "test@example.com"),
         ("config", "user.name", "test"),
     ):
-        subprocess.run(["git", *args], cwd=str(ws.root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", *args], cwd=str(ws.root), check=True, capture_output=True
+        )
     ws.write("head.py", "v1\n")
-    subprocess.run(["git", "add", "--", "head.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "head.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.base("head.py", "v1\n")
     ws.write("head.py", "v2\n")
     ws.journal.append(_rec("head.py", ts=1.0))
 
-    view = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config)
-    view.accept(["head.py"])                    # принято состояние "v2\n"
+    view = EditsView(
+        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+    )
+    view.accept(["head.py"])  # принято состояние "v2\n"
     ws.write("head.py", "v3\n")
     ws.journal.append(_rec("head.py", ts=2.0, call_id="c2"))
-    subprocess.run(["git", "add", "--", "head.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit after accept"], cwd=str(ws.root),
-                   check=True, capture_output=True)
-    ws.write("head.py", "v4\n")                 # правка поверх коммита — файл активен
+    subprocess.run(
+        ["git", "add", "--", "head.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit after accept"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.write("head.py", "v4\n")  # правка поверх коммита — файл активен
 
     ws.base("plain.py", "было\n")
     ws.write("plain.py", "стало\n")
-    ws.journal.append(_rec("plain.py", ts=3.0, call_id="c3"))  # свежее — активных первым
+    ws.journal.append(
+        _rec("plain.py", ts=3.0, call_id="c3")
+    )  # свежее — активных первым
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -616,13 +726,13 @@ async def test_viewer_header_names_the_head_step_only_for_the_head_file(tmp_path
         assert scr._view.active[1].step is not None
         assert scr._view.active[1].step.kind == STEP_HEAD
 
-        await pilot.press("enter")             # первый активный — plain.py
+        await pilot.press("enter")  # первый активный — plain.py
         await pilot.pause()
         header = _plain(pilot.app.screen.query_one("#header-left"))
         assert "plain.py" in header
         assert HEAD_CAPTION_STEM not in header
 
-        await pilot.press("right")             # соседний файл — head.py
+        await pilot.press("right")  # соседний файл — head.py
         await pilot.pause()
         header = _plain(pilot.app.screen.query_one("#header-left"))
         assert "head.py" in header
@@ -636,7 +746,7 @@ async def test_viewer_header_counters_are_painted(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.base("a.py", "a\nb\nc\n")
-    ws.write("a.py", "a\nB\nc\nd\n")           # +2 −1 от базы
+    ws.write("a.py", "a\nB\nc\nd\n")  # +2 −1 от базы
     ws.journal.append(_rec("a.py", ts=1.0))
 
     async with TuiApp(
@@ -675,9 +785,15 @@ async def test_body_frame_reserves_place_and_does_not_cut_the_body(tmp_path):
         bottom = [i for i, line in enumerate(lines) if line.startswith("╰")]
         assert top and bottom, lines
         # Тело — ВНУТРИ рамки, шапка и футер — снаружи.
-        body = [line for line in lines[top[0] + 1: bottom[0]] if line.strip("│ ")]
-        assert all(line.startswith("│") and line.endswith("│") for line in body), body
-        assert any("line01" in line for line in body), body   # первая строка цела
+        body = [
+            line for line in lines[top[0] + 1 : bottom[0]] if line.strip("│ ")
+        ]
+        assert all(
+            line.startswith("│") and line.endswith("│") for line in body
+        ), body
+        assert any("line01" in line for line in body), (
+            body
+        )  # первая строка цела
 
 
 @pytest.mark.asyncio
@@ -725,8 +841,11 @@ async def test_line_numbers_present(tmp_path):
 
 def _cursor_at(viewer) -> list[int]:
     """Номера правок, помеченных кромкой курсора прямо сейчас."""
-    return [index for index, widgets in enumerate(viewer._edits)
-            if all(w.has_class("cursor") for w in widgets)]
+    return [
+        index
+        for index, widgets in enumerate(viewer._edits)
+        if all(w.has_class("cursor") for w in widgets)
+    ]
 
 
 @pytest.mark.asyncio
@@ -748,16 +867,16 @@ async def test_n_p_move_the_cursor_in_a_circle(tmp_path):
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         assert viewer._edit_idx == 0
-        assert _cursor_at(viewer) == [0]        # курсор виден сразу, без нажатий
+        assert _cursor_at(viewer) == [0]  # курсор виден сразу, без нажатий
         await pilot.press("n")
         await pilot.pause()
         assert viewer._edit_idx == 1 and _cursor_at(viewer) == [1]
         await pilot.press("n")
         await pilot.pause()
-        assert viewer._edit_idx == 0            # по кругу, а не упор
+        assert viewer._edit_idx == 0  # по кругу, а не упор
         await pilot.press("p")
         await pilot.pause()
-        assert viewer._edit_idx == 1            # назад — тоже по кругу
+        assert viewer._edit_idx == 1  # назад — тоже по кругу
         assert _cursor_at(viewer) == [1]
 
 
@@ -776,15 +895,17 @@ async def test_cursor_marks_the_edit_even_when_everything_fits(tmp_path):
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         trace = viewer.query_one("#trace")
-        assert trace.max_scroll_y == 0          # тело влезло целиком
+        assert trace.max_scroll_y == 0  # тело влезло целиком
         await pilot.press("n")
         await pilot.pause()
-        assert _cursor_at(viewer) == [1]        # видимая реакция всё равно есть
+        assert _cursor_at(viewer) == [1]  # видимая реакция всё равно есть
         assert "правка 2/2" in _plain(viewer.query_one("#header-left"))
 
 
 @pytest.mark.asyncio
-async def test_cursor_is_an_accent_edge_and_diff_colours_are_untouched(tmp_path):
+async def test_cursor_is_an_accent_edge_and_diff_colours_are_untouched(
+    tmp_path,
+):
     """Р18: курсор — акцентная кромка слева; цвета диффа не трогаются.
 
     Колонку под кромку резервирует каждый участок: правка под курсором не
@@ -831,7 +952,7 @@ async def test_full_file_mode_still_walks_edits(tmp_path):
         await pilot.press("f")
         await pilot.pause()
         assert viewer.full is True
-        assert len(viewer._edits) == 2          # правки те же, что и без контекста
+        assert len(viewer._edits) == 2  # правки те же, что и без контекста
         header = _plain(viewer.query_one("#header-left"))
         assert f"{FULL_SUFFIX} · правка 1/2" in header
         assert "n след. правка" in _plain(viewer.query_one("#footer"))
@@ -875,9 +996,9 @@ async def test_switching_files_recounts_the_edits_in_the_header(tmp_path):
     from gc_tui.app import TuiApp
 
     ws = _Workspace(tmp_path)
-    _two_hunk_file(ws, "two.py")                 # две правки
+    _two_hunk_file(ws, "two.py")  # две правки
     ws.base("one.py", "a\nb\n")
-    ws.write("one.py", "a\nB\n")                 # одна правка
+    ws.write("one.py", "a\nB\n")  # одна правка
     ws.journal.append(_rec("one.py", ts=2.0))
 
     async with TuiApp(
@@ -902,17 +1023,24 @@ async def test_switching_files_recounts_the_edits_in_the_header(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cursor_walks_journal_edits_when_there_is_no_exact_baseline(tmp_path):
+async def test_cursor_walks_journal_edits_when_there_is_no_exact_baseline(
+    tmp_path,
+):
     """Без точной базы правка — запись журнала: курсор метит подпись и тело."""
     from gc_tui.app import TuiApp
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\nb\nc\n")
     for number in range(2):
-        ws.journal.append(_rec(
-            "a.py", call_id=None, op="shell", ts=float(number + 1),
-            hunks=f"@@ -{number + 1} +{number + 1} @@\n-old{number}\n+new{number}\n",
-        ))
+        ws.journal.append(
+            _rec(
+                "a.py",
+                call_id=None,
+                op="shell",
+                ts=float(number + 1),
+                hunks=f"@@ -{number + 1} +{number + 1} @@\n-old{number}\n+new{number}\n",
+            )
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -922,7 +1050,7 @@ async def test_cursor_walks_journal_edits_when_there_is_no_exact_baseline(tmp_pa
         await pilot.pause()
         assert viewer.entry.exact is False
         assert len(viewer._edits) == 2
-        assert len(viewer._edits[0]) == 2          # подпись и тело — одна правка
+        assert len(viewer._edits[0]) == 2  # подпись и тело — одна правка
         assert "— правка 1" in _plain(viewer._edits[0][0])
         assert "правка 1/2" in _plain(viewer.query_one("#header-left"))
 
@@ -956,7 +1084,9 @@ async def test_single_edit_file_says_one_of_one_and_drops_np(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_cursor_scrolls_the_frame_only_when_the_edit_is_out_of_it(tmp_path):
+async def test_cursor_scrolls_the_frame_only_when_the_edit_is_out_of_it(
+    tmp_path,
+):
     """Прокрутка — следствие: кадр едет к курсору, только если правка вне его."""
     from gc_tui.app import TuiApp
 
@@ -971,7 +1101,7 @@ async def test_cursor_scrolls_the_frame_only_when_the_edit_is_out_of_it(tmp_path
         await pilot.pause()
         trace = viewer.query_one("#trace")
         assert trace.scroll_offset.y == 0
-        await pilot.press("n")                  # вторая правка ниже сгиба
+        await pilot.press("n")  # вторая правка ниже сгиба
         await pilot.pause()
         await pilot.pause()
         moved = trace.scroll_offset.y
@@ -1001,7 +1131,9 @@ async def test_left_right_switch_files_without_pushing_screen(tmp_path):
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         depth = len(pilot.app.screen_stack)
-        assert "b.py" in _plain(viewer.query_one("#header-left"))   # свежая первой
+        assert "b.py" in _plain(
+            viewer.query_one("#header-left")
+        )  # свежая первой
 
         await pilot.press("right")
         await pilot.pause()
@@ -1054,8 +1186,9 @@ async def test_viewer_index_returns_to_list_cursor(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(3):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create",
-                               add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1089,7 +1222,7 @@ async def test_f_toggles_full_file_in_place(tmp_path):
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         depth = len(pilot.app.screen_stack)
-        assert "line10" not in _body(viewer)       # далёкая строка вне контекста
+        assert "line10" not in _body(viewer)  # далёкая строка вне контекста
         assert FULL_SUFFIX not in _plain(viewer.query_one("#header-left"))
 
         await pilot.press("f")
@@ -1119,14 +1252,28 @@ async def test_inexact_source_shows_note_and_journal_edits(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\nb\n")
-    ws.journal.append(_rec(
-        "a.py", call_id=None, op="shell", ts=1.0, add=1, del_=0,
-        hunks="diff --git a/a.py b/a.py\n@@ -1 +1,2 @@\n a\n+первая\n",
-    ))
-    ws.journal.append(_rec(
-        "a.py", call_id=None, op="shell", ts=2.0, add=1, del_=0,
-        hunks="@@ -2 +2,2 @@\n первая\n+вторая\n",
-    ))
+    ws.journal.append(
+        _rec(
+            "a.py",
+            call_id=None,
+            op="shell",
+            ts=1.0,
+            add=1,
+            del_=0,
+            hunks="diff --git a/a.py b/a.py\n@@ -1 +1,2 @@\n a\n+первая\n",
+        )
+    )
+    ws.journal.append(
+        _rec(
+            "a.py",
+            call_id=None,
+            op="shell",
+            ts=2.0,
+            add=1,
+            del_=0,
+            hunks="@@ -2 +2,2 @@\n первая\n+вторая\n",
+        )
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1136,7 +1283,7 @@ async def test_inexact_source_shows_note_and_journal_edits(tmp_path):
         await pilot.pause()
         assert viewer.entry.exact is False
         body = _body(viewer)
-        assert VIEWER_NOTE_INEXACT_SHELL in body      # обе правки — командами
+        assert VIEWER_NOTE_INEXACT_SHELL in body  # обе правки — командами
         assert "— правка 1 (" in body and "— правка 2 (" in body
         assert body.index("— правка 1 (") < body.index("— правка 2 (")
         assert "команда" in body
@@ -1150,14 +1297,28 @@ async def test_inexact_note_drops_commands_when_a_tool_edit_is_there(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\nb\n")
-    ws.journal.append(_rec(
-        "a.py", call_id=None, op="shell", ts=1.0, add=1, del_=0,
-        hunks="@@ -1 +1,2 @@\n a\n+командой\n",
-    ))
-    ws.journal.append(_rec(                       # правка тула, снимка нет
-        "a.py", call_id="c9", op="edit", ts=2.0, add=1, del_=0,
-        hunks="@@ -2 +2,2 @@\n командой\n+тулом\n",
-    ))
+    ws.journal.append(
+        _rec(
+            "a.py",
+            call_id=None,
+            op="shell",
+            ts=1.0,
+            add=1,
+            del_=0,
+            hunks="@@ -1 +1,2 @@\n a\n+командой\n",
+        )
+    )
+    ws.journal.append(
+        _rec(  # правка тула, снимка нет
+            "a.py",
+            call_id="c9",
+            op="edit",
+            ts=2.0,
+            add=1,
+            del_=0,
+            hunks="@@ -2 +2,2 @@\n командой\n+тулом\n",
+        )
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1207,10 +1368,17 @@ async def test_f_is_dead_without_exact_baseline(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\nb\n")
-    ws.journal.append(_rec(
-        "a.py", call_id=None, op="shell", ts=1.0, add=1, del_=0,
-        hunks="@@ -1 +1,2 @@\n a\n+b\n",
-    ))
+    ws.journal.append(
+        _rec(
+            "a.py",
+            call_id=None,
+            op="shell",
+            ts=1.0,
+            add=1,
+            del_=0,
+            hunks="@@ -1 +1,2 @@\n a\n+b\n",
+        )
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1239,7 +1407,7 @@ async def test_viewer_hides_r_for_a_file_without_a_reliable_base(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.write("norev.py", "a\n")
-    ws.journal.append(_rec("norev.py", ts=2.0))        # правка без снимка сессии
+    ws.journal.append(_rec("norev.py", ts=2.0))  # правка без снимка сессии
     ws.base("rev.py", "a\n")
     ws.write("rev.py", "a\nb\n")
     ws.journal.append(_rec("rev.py", ts=1.0))
@@ -1254,11 +1422,11 @@ async def test_viewer_hides_r_for_a_file_without_a_reliable_base(tmp_path):
         assert scr._entries[0].revertable is False
         assert scr._entries[1].revertable is True
 
-        await pilot.press("enter")                      # вьюер на norev.py
+        await pilot.press("enter")  # вьюер на norev.py
         await pilot.pause()
         assert "r откат" not in _plain(pilot.app.screen.query_one("#footer"))
 
-        await pilot.press("right")                       # соседний файл — с базой
+        await pilot.press("right")  # соседний файл — с базой
         await pilot.pause()
         assert pilot.app.screen.entry.path == "rev.py"
         assert "r откат" in _plain(pilot.app.screen.query_one("#footer"))
@@ -1271,9 +1439,10 @@ def test_can_revert_does_not_raise_when_the_flags_list_is_shorter_than_files():
     необработанный `IndexError` прямо в рендере футера (`_render_chrome` →
     `viewer_footer(..., can_revert=self._can_revert())`)."""
     viewer = DiffFileViewer(
-        view=None, source=SOURCE_SESSION,
+        view=None,
+        source=SOURCE_SESSION,
         files=[_entry("a.py"), _entry("b.py")],
-        index=1,                          # вне границ одноэлементного списка
+        index=1,  # вне границ одноэлементного списка
         on_revert=lambda path: None,
         can_revert=[True],
     )
@@ -1348,11 +1517,11 @@ async def test_resize_rebuilds_body_only_on_width_change(tmp_path):
 
         viewer._view.file_diff = _counted
 
-        await pilot.resize_terminal(80, 30)       # только высота
+        await pilot.resize_terminal(80, 30)  # только высота
         await pilot.pause()
         assert calls == []
 
-        await pilot.resize_terminal(60, 30)       # ширина
+        await pilot.resize_terminal(60, 30)  # ширина
         await pilot.pause()
         assert len(calls) == 1
 
@@ -1385,17 +1554,17 @@ async def test_body_is_cached_per_file_mode_and_width(tmp_path):
 
         viewer._view.file_diff = _counted
 
-        await pilot.press("f")            # «весь файл» считается впервые
+        await pilot.press("f")  # «весь файл» считается впервые
         await pilot.pause()
         assert calls == [True]
 
-        await pilot.press("f")            # обратно — тело уже посчитано
+        await pilot.press("f")  # обратно — тело уже посчитано
         await pilot.pause()
-        await pilot.press("f")            # и снова «весь файл»
+        await pilot.press("f")  # и снова «весь файл»
         await pilot.pause()
         assert calls == [True]
         assert viewer.full is True
-        assert "line10" in _body(viewer)   # из кэша пришло именно полное тело
+        assert "line10" in _body(viewer)  # из кэша пришло именно полное тело
 
 
 @pytest.mark.asyncio
@@ -1433,7 +1602,9 @@ async def test_filled_lines_reach_right_edge_minus_scrollbar(tmp_path):
         # примет `#trace`, и тело собиралось на предыдущую ширину.
         await pilot.resize_terminal(90, 20)
         await pilot.pause()
-        assert _filled(viewer) == {body.size.width - SCROLLBAR_COLUMN - EDIT_EDGE}
+        assert _filled(viewer) == {
+            body.size.width - SCROLLBAR_COLUMN - EDIT_EDGE
+        }
 
 
 @pytest.mark.asyncio
@@ -1482,6 +1653,7 @@ async def test_long_line_is_reachable_by_horizontal_scrolling(tmp_path):
         assert body.max_scroll_x > 0, "полотно не прокручивается вбок"
         # Клавиша названа, только пока жива — общее правило экрана.
         from textual.widgets import Static as _Static
+
         assert "Ctrl+←/→" in str(viewer.query_one("#footer", _Static).render())
 
         await pilot.press("ctrl+right")
@@ -1501,8 +1673,9 @@ async def test_double_click_row_opens_viewer(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(2):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create",
-                               add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1538,12 +1711,14 @@ def test_a_single_huge_edit_is_cut_into_parts_of_one_number():
     """
     from gc_tui.screens.diff import CONTEXT_CHUNK
 
-    body = ("".join(f"-old{n}\n" for n in range(250))
-            + "".join(f"+new{n}\n" for n in range(250)))
-    parts = split_body("@@ -1,250 +1,250 @@\n" + body, path="a.py",
-                       fill_width=None)
+    body = "".join(f"-old{n}\n" for n in range(250)) + "".join(
+        f"+new{n}\n" for n in range(250)
+    )
+    parts = split_body(
+        "@@ -1,250 +1,250 @@\n" + body, path="a.py", fill_width=None
+    )
 
-    assert len(parts) == 5                       # 500 строк / CONTEXT_CHUNK
+    assert len(parts) == 5  # 500 строк / CONTEXT_CHUNK
     assert {part.edit for part in parts} == {0}  # и все они — одна правка
     assert all(part.lines == CONTEXT_CHUNK for part in parts)
 
@@ -1570,16 +1745,19 @@ async def test_body_is_built_by_the_frame_not_all_at_once(tmp_path):
         trace = viewer.query_one("#trace")
         blocks = list(viewer.query("#trace > Static"))
 
-        assert len(blocks) == 6                          # 600 строк тела
-        assert trace.virtual_size.height == 600          # место — под всё тело
+        assert len(blocks) == 6  # 600 строк тела
+        assert trace.virtual_size.height == 600  # место — под всё тело
         built = [w for w in blocks if _plain(w)]
         assert 0 < len(built) < len(blocks)
         assert "-line0000" in _plain(blocks[0])
 
         # Хвост подъезжает прокруткой (она плавная — ждём наблюдаемое, не такт).
         await pilot.press("end")
-        await wait_until(pilot, lambda: "+LINE0299" in _body(viewer),
-                         "последняя строка файла собралась")
+        await wait_until(
+            pilot,
+            lambda: "+LINE0299" in _body(viewer),
+            "последняя строка файла собралась",
+        )
 
 
 @pytest.mark.asyncio
@@ -1591,8 +1769,10 @@ async def test_cursor_reaches_an_edit_that_was_not_built_yet(tmp_path):
     ws.base("big.py", "".join(f"line{n:04d}\n" for n in range(1200)))
     ws.write(
         "big.py",
-        "".join(f"{'LINE' if n in (1, 1198) else 'line'}{n:04d}\n"
-                for n in range(1200)),
+        "".join(
+            f"{'LINE' if n in (1, 1198) else 'line'}{n:04d}\n"
+            for n in range(1200)
+        ),
     )
     ws.journal.append(_rec("big.py", add=2, del_=2))
 
@@ -1602,16 +1782,16 @@ async def test_cursor_reaches_an_edit_that_was_not_built_yet(tmp_path):
         viewer = ws.viewer()
         await pilot.app.push_screen(viewer)
         await pilot.pause()
-        await pilot.press("f")             # весь файл: правки далеко друг от друга
+        await pilot.press("f")  # весь файл: правки далеко друг от друга
         await pilot.pause()
         far = viewer._edits[1][0]
-        assert not _plain(far)                   # вторая правка ещё не собрана
+        assert not _plain(far)  # вторая правка ещё не собрана
 
         await pilot.press("n")
         await pilot.pause()
 
-        assert "+LINE1198" in _plain(far)        # собрана
-        assert far.has_class("cursor")           # и помечена курсором
+        assert "+LINE1198" in _plain(far)  # собрана
+        assert far.has_class("cursor")  # и помечена курсором
         assert "правка 2/2" in _plain(viewer.query_one("#header-left"))
 
 
@@ -1631,9 +1811,19 @@ async def test_selection_crosses_the_border_between_parts(tmp_path):
     _rewritten(ws)
 
     def _mouse(screen, x, y, button=0):
-        return dict(widget=screen, x=x, y=y, delta_x=0, delta_y=0,
-                    button=button, shift=False, meta=False, ctrl=False,
-                    screen_x=x, screen_y=y)
+        return dict(
+            widget=screen,
+            x=x,
+            y=y,
+            delta_x=0,
+            delta_y=0,
+            button=button,
+            shift=False,
+            meta=False,
+            ctrl=False,
+            screen_x=x,
+            screen_y=y,
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1654,8 +1844,8 @@ async def test_selection_crosses_the_border_between_parts(tmp_path):
         screen._forward_event(MouseUp(**_mouse(screen, 40, 16)))
         await pilot.pause()
 
-        assert len(screen.selections) == 2               # оба участка
+        assert len(screen.selections) == 2  # оба участка
         selected = screen.get_selected_text().splitlines()
         assert len(selected) > 10
-        assert any("line0096" in line for line in selected)   # до границы
-        assert any("line0100" in line for line in selected)   # и после неё
+        assert any("line0096" in line for line in selected)  # до границы
+        assert any("line0100" in line for line in selected)  # и после неё

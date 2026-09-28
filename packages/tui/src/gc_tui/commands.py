@@ -90,14 +90,34 @@ def build_default_registry() -> CommandRegistry:
 
     cmds = [
         Command("help", (), "", "Справка по командам", hotkey="F1 · Ctrl+/"),
-        Command("sessions", (), "", "Список сессий — выбрать и продолжить",
-                hotkey="F2 · Ctrl+S"),
-        Command("diff", (), "", "Правки агента: обзор, принятие, откат",
-                hotkey="F3 · Ctrl+D"),
-        Command("view", (), "<path>", "Постраничный просмотр текстового файла",
-                arg_file=True),
-        Command("notices", (), "", "Уведомления (старт + runtime)",
-                hotkey="F4 · Ctrl+O"),
+        Command(
+            "sessions",
+            (),
+            "",
+            "Список сессий — выбрать и продолжить",
+            hotkey="F2 · Ctrl+S",
+        ),
+        Command(
+            "diff",
+            (),
+            "",
+            "Правки агента: обзор, принятие, откат",
+            hotkey="F3 · Ctrl+D",
+        ),
+        Command(
+            "view",
+            (),
+            "<path>",
+            "Постраничный просмотр текстового файла",
+            arg_file=True,
+        ),
+        Command(
+            "notices",
+            (),
+            "",
+            "Уведомления (старт + runtime)",
+            hotkey="F4 · Ctrl+O",
+        ),
         Command("new", (), "", "Новая сессия в этом окне", hotkey="Ctrl+N"),
         Command(
             "config",

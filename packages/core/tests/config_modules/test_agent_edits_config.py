@@ -3,6 +3,7 @@
 Пакет `agent_edits` умер, секция конфига — нет: её ключи держат лимиты записи
 правок и их показа в TUI.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -43,9 +44,7 @@ def test_flatten_exposes_agent_edits(tmp_path):
 
     conf = tmp_path / "config.yml"
     conf.write_text(
-        "agent_edits:\n"
-        "  snapshots_max_files: 42\n"
-        "  max_diff_chars: 100\n",
+        "agent_edits:\n  snapshots_max_files: 42\n  max_diff_chars: 100\n",
         encoding="utf-8",
     )
     cfg = cfgmod.load_config(str(conf))

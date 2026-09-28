@@ -19,6 +19,7 @@
 Слой данных: без UI. Причины отказов — машинные коды (``REASON_*``), формулировки
 для пользователя собирает экран.
 """
+
 from __future__ import annotations
 
 import os
@@ -33,21 +34,27 @@ from gc_core.agent_edits.paths import goes_through_link, is_external_key
 from gc_core.utils.atomic_io import atomic_replace
 
 # Причины, по которым путь не откачен. Машинные коды: слой данных не знает UI.
-REASON_NOT_REVERTABLE = "not_revertable"       # достоверной базы для отката нет
-REASON_NOTHING_TO_DELETE = "nothing_to_delete"  # созданный файл уже удалён — noop
-REASON_NO_BASELINE = "no_baseline"             # снимка «до» нет (или он пропал)
-REASON_WRITE_FAILED = "write_failed"           # запись/удаление не удались
-REASON_UNKNOWN_PATH = "unknown_path"           # пути нет в наборе представления
-REASON_THROUGH_LINK = "through_link"           # путь идёт через ссылку — писать по нему нельзя
+REASON_NOT_REVERTABLE = "not_revertable"  # достоверной базы для отката нет
+REASON_NOTHING_TO_DELETE = (
+    "nothing_to_delete"  # созданный файл уже удалён — noop
+)
+REASON_NO_BASELINE = "no_baseline"  # снимка «до» нет (или он пропал)
+REASON_WRITE_FAILED = "write_failed"  # запись/удаление не удались
+REASON_UNKNOWN_PATH = "unknown_path"  # пути нет в наборе представления
+REASON_THROUGH_LINK = (
+    "through_link"  # путь идёт через ссылку — писать по нему нельзя
+)
 
 _TMP_SUFFIX = ".revert.tmp"
 
 
 @dataclass(frozen=True)
 class RevertOutcome:
-    restored: list[str] = field(default_factory=list)          # содержимое возвращено
-    deleted: list[str] = field(default_factory=list)           # созданный файл удалён
-    skipped: list[tuple[str, str]] = field(default_factory=list)  # (путь, причина)
+    restored: list[str] = field(default_factory=list)  # содержимое возвращено
+    deleted: list[str] = field(default_factory=list)  # созданный файл удалён
+    skipped: list[tuple[str, str]] = field(
+        default_factory=list
+    )  # (путь, причина)
 
 
 def revert_paths(
@@ -125,7 +132,7 @@ def _restore(
     try:
         baseline = baseline_for(key)
     except OSError:
-        baseline = None      # снимок унесли из-под нас — это не повод падать
+        baseline = None  # снимок унесли из-под нас — это не повод падать
     if baseline is None:
         outcome.skipped.append((key, REASON_NO_BASELINE))
         return
@@ -134,10 +141,18 @@ def _restore(
     # `<файл>.revert.tmp` запись шла по заранее подложенной на этом месте
     # ссылке во внешний файл, а замена ставила саму ссылку на место файла.
     # `O_EXCL` не идёт по ссылке — занятое имя просто отказ.
-    tmp = abs_path.with_name(f"{abs_path.name}.{uuid.uuid4().hex[:8]}{_TMP_SUFFIX}")
+    tmp = abs_path.with_name(
+        f"{abs_path.name}.{uuid.uuid4().hex[:8]}{_TMP_SUFFIX}"
+    )
     try:
-        abs_path.parent.mkdir(parents=True, exist_ok=True)   # файл мог быть удалён
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o666)
+        abs_path.parent.mkdir(
+            parents=True, exist_ok=True
+        )  # файл мог быть удалён
+        fd = os.open(
+            tmp,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0),
+            0o666,
+        )
         with os.fdopen(fd, "wb") as fh:
             fh.write(baseline)
         _carry_mode(abs_path, tmp)

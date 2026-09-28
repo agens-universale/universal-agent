@@ -3,6 +3,7 @@ replay_expanded_turns, turn_summary_in_status. Потребители подкл
 в задачах этой волны (см. .superpowers/sdd/2026-08-10-diff-rework-wave2-plan) —
 здесь только схема.
 """
+
 from __future__ import annotations
 
 from gc_core.config_modules.agent_edits import AgentEditsConfig
@@ -23,7 +24,9 @@ def test_app_config_includes_agent_edits_wave2_keys():
     assert app.agent_edits.turn_summary_in_status is True
 
 
-def test_flatten_exposes_agent_edits_wave2_keys_from_yaml(tmp_path, monkeypatch):
+def test_flatten_exposes_agent_edits_wave2_keys_from_yaml(
+    tmp_path, monkeypatch
+):
     """Значения из config.yml доходят до config_dict['agent_edits']."""
     import gc_core.config as cfgmod
     import gc_core.config_modules.env_vars as env_vars
@@ -31,7 +34,9 @@ def test_flatten_exposes_agent_edits_wave2_keys_from_yaml(tmp_path, monkeypatch)
     # Адресуем МОДУЛЬ-владелец: `config.py` зовёт обе функции через него, и оба
     # имени переехали в `config_modules.env_vars` при разделении на пакеты.
     monkeypatch.setattr(env_vars, "project_local_config_path", lambda: None)
-    monkeypatch.setattr(env_vars, "managed_config_path", lambda: tmp_path / "none.yml")
+    monkeypatch.setattr(
+        env_vars, "managed_config_path", lambda: tmp_path / "none.yml"
+    )
 
     conf = tmp_path / "config.yml"
     conf.write_text(

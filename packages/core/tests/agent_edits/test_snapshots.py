@@ -1,4 +1,5 @@
 """SnapshotStore: per-thread снапшоты .orig/.turn с turn-индексом и LRU."""
+
 from __future__ import annotations
 
 import hashlib
@@ -37,7 +38,9 @@ def test_snapshots_root_gets_internal_gitignore(tmp_path):
     store.capture_session("a.py", b"x")
 
     ignore = snapshots_root(str(tmp_path)) / ".gitignore"
-    assert ignore.is_file() and ignore.read_text(encoding="utf-8").strip() == "*"
+    assert (
+        ignore.is_file() and ignore.read_text(encoding="utf-8").strip() == "*"
+    )
 
 
 def test_existing_gitignore_is_not_overwritten(tmp_path):
@@ -53,23 +56,29 @@ def test_existing_gitignore_is_not_overwritten(tmp_path):
 def test_capture_session_reports_whether_it_wrote(tmp_path):
     store = SnapshotStore(snapshots_root(str(tmp_path)), "sys_th")
     assert store.capture_session("a.py", b"first") is True
-    assert store.capture_session("a.py", b"second") is False      # baseline уже есть
+    assert (
+        store.capture_session("a.py", b"second") is False
+    )  # baseline уже есть
     assert store.session_baseline("a.py") == b"first"
 
 
 def test_capture_turn_of_same_turn_is_not_clobbered(tmp_path):
     store = SnapshotStore(snapshots_root(str(tmp_path)), "sys_th")
     store.capture_turn("a.py", b"base", "t1")
-    store.capture_turn("a.py", b"later", "t1")     # тот же ход — ранний выход
+    store.capture_turn("a.py", b"later", "t1")  # тот же ход — ранний выход
     assert store.turn_baseline("a.py", "t1") == b"base"
 
 
 def test_capture_turn_of_new_turn_replaces_previous(tmp_path):
     store = SnapshotStore(snapshots_root(str(tmp_path)), "sys_th")
     store.capture_turn("a.py", b"t1base", "t1")
-    store.capture_turn("a.py", b"t2base", "t2")    # ход сменился — снимок перевыставлен
+    store.capture_turn(
+        "a.py", b"t2base", "t2"
+    )  # ход сменился — снимок перевыставлен
     assert store.turn_baseline("a.py", "t2") == b"t2base"
-    assert store.turn_baseline("a.py", "t1") is None   # протухший снимок не отдаётся
+    assert (
+        store.turn_baseline("a.py", "t1") is None
+    )  # протухший снимок не отдаётся
 
 
 def test_capture_turn_overwrites_on_new_turn_keeps_on_same_turn(tmp_path):
@@ -236,7 +245,9 @@ def test_evict_lru_counts_and_removes_counting_bases(tmp_path):
     """Счётная база живёт в том же каталоге и обязана считаться в лимите."""
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
-    threads_dir.mkdir(parents=True)  # пусто — тред без журнала, снимки evictable
+    threads_dir.mkdir(
+        parents=True
+    )  # пусто — тред без журнала, снимки evictable
 
     store = SnapshotStore(diffs_root, "th-a", threads_dir)
     store.capture_shell_session("a.py", b"a")
@@ -254,9 +265,9 @@ def test_evict_lru_counts_and_removes_counting_bases(tmp_path):
     assert store.counting_turn_baseline("a.py", "turn-1") is None
     assert store.session_baseline("b.py") == b"b"
     # отметка вынесенной .gitturn убрана из индекса вместе с файлом
-    assert "shell_turn_id" not in (tmp_path / "diffs" / "index.json").read_text(
-        encoding="utf-8"
-    )
+    assert "shell_turn_id" not in (
+        tmp_path / "diffs" / "index.json"
+    ).read_text(encoding="utf-8")
 
 
 def test_evict_lru_spares_thread_with_real_journal_path(tmp_path):
@@ -266,7 +277,9 @@ def test_evict_lru_spares_thread_with_real_journal_path(tmp_path):
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir(parents=True)
-    edits_journal_path(str(threads_dir), "sys", "th").write_text("", encoding="utf-8")
+    edits_journal_path(str(threads_dir), "sys", "th").write_text(
+        "", encoding="utf-8"
+    )
 
     store_alive = SnapshotStore(diffs_root, "sys_th", threads_dir)
     store_dead = SnapshotStore(diffs_root, "sys_other", threads_dir)
@@ -286,7 +299,9 @@ def test_evict_lru_evicts_legacy_before_older_evictable_snapshots(tmp_path):
     сортировка «всё по mtime» снесла бы th-a, а не legacy)."""
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
-    threads_dir.mkdir(parents=True)  # пусто — оба треда без журнала (evictable)
+    threads_dir.mkdir(
+        parents=True
+    )  # пусто — оба треда без журнала (evictable)
 
     store_a = SnapshotStore(diffs_root, "th-a", threads_dir)
     store_b = SnapshotStore(diffs_root, "th-b", threads_dir)
@@ -343,7 +358,9 @@ def test_legacy_diffs_store_is_dropped_once(tmp_path):
     (legacy / ("a" * 64 + ".orig")).write_bytes(b"x")
     (legacy / "index.json").write_text("{}", encoding="utf-8")
 
-    SnapshotStore(snapshots_root(str(tmp_path)), "sys_th").capture_session("a.py", b"y")
+    SnapshotStore(snapshots_root(str(tmp_path)), "sys_th").capture_session(
+        "a.py", b"y"
+    )
 
     assert not legacy.exists()
 
@@ -354,7 +371,9 @@ def test_legacy_store_with_foreign_files_is_kept(tmp_path):
     legacy.mkdir(parents=True)
     (legacy / "notes.txt").write_text("важное", encoding="utf-8")
 
-    SnapshotStore(snapshots_root(str(tmp_path)), "sys_th").capture_session("a.py", b"y")
+    SnapshotStore(snapshots_root(str(tmp_path)), "sys_th").capture_session(
+        "a.py", b"y"
+    )
 
     assert (legacy / "notes.txt").is_file()
 
@@ -366,7 +385,7 @@ def _link_dir(link: Path, target: Path, kind: str) -> None:
         if kind == "symlink":
             link.symlink_to(target, target_is_directory=True)
             return
-        import _winapi                       # junction — только Windows
+        import _winapi  # junction — только Windows
 
         _winapi.CreateJunction(str(target), str(link))
     except (OSError, ImportError, NotImplementedError, AttributeError):
@@ -383,27 +402,33 @@ def test_legacy_store_link_is_not_followed(tmp_path, kind):
     """
     target = tmp_path / "real"
     target.mkdir()
-    victim = target / ("a" * 64 + ".orig")             # проходит фильтр насквозь
+    victim = target / ("a" * 64 + ".orig")  # проходит фильтр насквозь
     victim.write_bytes(b"x")
     link = tmp_path / ".gc" / "diffs"
     _link_dir(link, target, kind)
 
-    SnapshotStore(snapshots_root(str(tmp_path)), "sys_th").capture_session("a.py", b"y")
+    SnapshotStore(snapshots_root(str(tmp_path)), "sys_th").capture_session(
+        "a.py", b"y"
+    )
 
     assert victim.is_file()
     assert link.exists()
 
 
-def test_legacy_store_is_not_rescanned_after_root_exists(tmp_path, monkeypatch):
+def test_legacy_store_is_not_rescanned_after_root_exists(
+    tmp_path, monkeypatch
+):
     """Чистка одноразовая: обход чужого каталога не платится на каждой правке."""
     from gc_core.agent_edits import snapshots as snap_mod
 
     store = SnapshotStore(snapshots_root(str(tmp_path)), "sys_th")
-    store.capture_session("a.py", b"y")          # корень заведён здесь
+    store.capture_session("a.py", b"y")  # корень заведён здесь
 
     calls = []
     monkeypatch.setattr(
-        snap_mod, "_drop_legacy_store", lambda root: calls.append(root) or False
+        snap_mod,
+        "_drop_legacy_store",
+        lambda root: calls.append(root) or False,
     )
     store.capture_session("b.py", b"z")
     assert calls == []
@@ -418,7 +443,9 @@ def test_accepted_roundtrip_and_overwrite(tmp_path):
     st = store.accepted_state("a.py")
     assert (st.content, st.head_oid) == (b"one", "oid1") and st.ts > 0
 
-    store.capture_accepted("a.py", b"two", head_oid=None)   # повторное принятие перезаписывает
+    store.capture_accepted(
+        "a.py", b"two", head_oid=None
+    )  # повторное принятие перезаписывает
     assert store.accepted_state("a.py").content == b"two"
 
 
@@ -426,14 +453,14 @@ def test_accepted_absent_marker_is_explicit(tmp_path):
     store = _store(tmp_path)
     store.capture_accepted("gone.py", None, head_oid=None)
     st = store.accepted_state("gone.py")
-    assert st is not None and st.content is None            # принято «отсутствие»
+    assert st is not None and st.content is None  # принято «отсутствие»
 
 
 def test_accepted_ts_without_bytes_and_marker_is_not_accepted(tmp_path):
     # контракт §3.1: потерянный снимок не читается как маркер
     store = _store(tmp_path)
     store.capture_accepted("a.py", b"data", head_oid=None)
-    _accepted_file_of(store, "a.py").unlink()               # снимок потерян
+    _accepted_file_of(store, "a.py").unlink()  # снимок потерян
     assert store.accepted_state("a.py") is None
 
 
@@ -444,9 +471,11 @@ def test_live_accepted_bytes_win_over_a_stale_absent_marker(tmp_path):
     предложить пользователю удалить живой файл — читаем байты.
     """
     store = _store(tmp_path)
-    store.capture_accepted("a.py", None, head_oid=None)           # принято отсутствие
+    store.capture_accepted("a.py", None, head_oid=None)  # принято отсутствие
     # байты легли, индекс — нет
-    _accepted_file_of(store, "a.py").write_bytes("снова принят\n".encode("utf-8"))
+    _accepted_file_of(store, "a.py").write_bytes(
+        "снова принят\n".encode("utf-8")
+    )
 
     st = store.accepted_state("a.py")
 
@@ -461,17 +490,21 @@ def test_clear_accepted_removes_bytes_and_index_keys(tmp_path):
 
     assert store.accepted_state("a.py") is None
     assert not _accepted_file_of(store, "a.py").exists()
-    index_text = (tmp_path / "diffs" / "index.json").read_text(encoding="utf-8")
+    index_text = (tmp_path / "diffs" / "index.json").read_text(
+        encoding="utf-8"
+    )
     assert "accepted_ts" not in index_text
     assert "accepted_head_oid" not in index_text
-    assert store.clear_accepted("a.py") is False   # уже пусто — чистить нечего
+    assert store.clear_accepted("a.py") is False  # уже пусто — чистить нечего
 
 
 def test_evict_lru_takes_accepted_and_cleans_index(tmp_path):
     """Сиротский .accepted мёртвого треда вытесняется, accepted_* ключи не сиротеют."""
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
-    threads_dir.mkdir(parents=True)  # пусто — тред без журнала, снимки evictable
+    threads_dir.mkdir(
+        parents=True
+    )  # пусто — тред без журнала, снимки evictable
 
     store = SnapshotStore(diffs_root, "th-a", threads_dir)
     store.capture_accepted("a.py", b"accepted-content", head_oid="oid1")
@@ -497,7 +530,9 @@ def test_live_journal_thread_accepted_survives_eviction(tmp_path):
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir(parents=True)
-    edits_journal_path(str(threads_dir), "sys", "th").write_text("", encoding="utf-8")
+    edits_journal_path(str(threads_dir), "sys", "th").write_text(
+        "", encoding="utf-8"
+    )
 
     store_alive = SnapshotStore(diffs_root, "sys_th", threads_dir)
     store_dead = SnapshotStore(diffs_root, "sys_other", threads_dir)
@@ -569,7 +604,7 @@ def test_mark_created_records_the_rev_and_none_means_no_mark(tmp_path):
 
     assert store.created_head_rev("new.py") == "a" * 40
     assert store.created_head_rev("outside-git.py") is None
-    assert store.session_baseline("new.py") is None      # байтов у отметки нет
+    assert store.session_baseline("new.py") is None  # байтов у отметки нет
 
 
 def test_mark_created_survives_a_later_session_snapshot(tmp_path):
@@ -579,7 +614,9 @@ def test_mark_created_survives_a_later_session_snapshot(tmp_path):
     store = _store(tmp_path)
     store.mark_created("new.py", head_rev="a" * 40)
 
-    store.capture_session("new.py", b"content after create\n", head_rev="b" * 40)
+    store.capture_session(
+        "new.py", b"content after create\n", head_rev="b" * 40
+    )
 
     assert store.created_head_rev("new.py") == "a" * 40
     assert store.session_head_rev("new.py") == "b" * 40
@@ -610,7 +647,9 @@ def test_mark_created_is_evicted_with_thread(tmp_path):
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir(parents=True)
-    edits_journal_path(str(threads_dir), "sys", "th").write_text("", encoding="utf-8")
+    edits_journal_path(str(threads_dir), "sys", "th").write_text(
+        "", encoding="utf-8"
+    )
 
     store_alive = SnapshotStore(diffs_root, "sys_th", threads_dir)
     store_dead = SnapshotStore(diffs_root, "sys_other", threads_dir)
@@ -633,7 +672,7 @@ def test_evict_lru_keeps_index_entry_of_a_surviving_snapshot(tmp_path):
     store_dead = SnapshotStore(diffs_root, "sys_other", threads_dir)
     store_dead.capture_turn("a.py", b"turn base", "turn-1")
 
-    store_dead.evict_lru(max_files=10)   # переполнения нет — вытеснять нечего
+    store_dead.evict_lru(max_files=10)  # переполнения нет — вытеснять нечего
 
     assert store_dead.turn_baseline("a.py", "turn-1") == b"turn base"
 
@@ -642,7 +681,9 @@ def test_evict_lru_cleans_session_head_rev(tmp_path):
     """Вынесли `.orig` — ревизия не сиротеет в индексе."""
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
-    threads_dir.mkdir(parents=True)  # пусто — тред без журнала, снимки evictable
+    threads_dir.mkdir(
+        parents=True
+    )  # пусто — тред без журнала, снимки evictable
 
     store = SnapshotStore(diffs_root, "th-a", threads_dir)
     store.capture_session("a.py", b"a", head_rev="a" * 40)
@@ -661,7 +702,9 @@ def test_evict_lru_cleans_session_head_rev(tmp_path):
     )
 
 
-def test_second_writer_does_not_steal_the_first_writers_tmp(tmp_path, monkeypatch):
+def test_second_writer_does_not_steal_the_first_writers_tmp(
+    tmp_path, monkeypatch
+):
     """Два писателя одного пути в одном треде не делят временный файл.
 
     Открытый TUI и `gc-cli` по тому же треду дают одинаковый ключ треда, а
@@ -729,7 +772,9 @@ def test_tmp_name_stays_within_the_path_budget(tmp_path):
 # --- отложенная запись индекса (пакетная запись шелл-канала) -------------------
 
 
-def test_deferred_index_writes_the_index_once_for_a_whole_batch(tmp_path, monkeypatch):
+def test_deferred_index_writes_the_index_once_for_a_whole_batch(
+    tmp_path, monkeypatch
+):
     """Внутри `deferred_index` отметки копятся в памяти — индекс пишется ОДИН раз.
 
     Индекс переписывается целиком на каждой отметке, а растёт с числом путей:
@@ -738,7 +783,9 @@ def test_deferred_index_writes_the_index_once_for_a_whole_batch(tmp_path, monkey
     store = _store(tmp_path)
     saves = []
     real_save = store._save_index
-    monkeypatch.setattr(store, "_save_index", lambda index: (saves.append(1), real_save(index)))
+    monkeypatch.setattr(
+        store, "_save_index", lambda index: (saves.append(1), real_save(index))
+    )
 
     with store.deferred_index():
         for i in range(5):
@@ -760,8 +807,12 @@ def test_deferred_marks_are_visible_inside_the_block_and_after_it(tmp_path):
     with store.deferred_index():
         store.capture_session("src/a.py", b"base", head_rev="rev1")
         store.capture_turn("src/a.py", b"base", "turn-1")
-        store.capture_turn("src/a.py", b"later", "turn-1")      # тот же ход — no-op
-        store.mark_created("src/a.py", head_rev="rev1")          # точный снимок уже есть
+        store.capture_turn(
+            "src/a.py", b"later", "turn-1"
+        )  # тот же ход — no-op
+        store.mark_created(
+            "src/a.py", head_rev="rev1"
+        )  # точный снимок уже есть
         assert store.session_head_rev("src/a.py") == "rev1"
         assert store.has_turn_baseline("src/a.py", "turn-1")
         assert store.created_head_rev("src/a.py") is None
@@ -789,7 +840,9 @@ def test_deferred_flush_keeps_a_concurrent_writers_marks(tmp_path):
     assert fresh.accepted_state("src/b.py") is not None
 
 
-def test_zero_cap_disables_eviction_but_not_the_cleanup_of_dead_marks(tmp_path):
+def test_zero_cap_disables_eviction_but_not_the_cleanup_of_dead_marks(
+    tmp_path,
+):
     """`snapshots_max_files: 0` — «не вытеснять», но мёртвые отметки индекса всё равно убираются.
 
     Уборка отметок мёртвых тредов — не вытеснение: у отметки создания файла нет по
@@ -797,18 +850,22 @@ def test_zero_cap_disables_eviction_but_not_the_cleanup_of_dead_marks(tmp_path):
     diffs_root = tmp_path / "diffs"
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir(parents=True)
-    edits_journal_path(str(threads_dir), "sys", "th").write_text("", encoding="utf-8")
+    edits_journal_path(str(threads_dir), "sys", "th").write_text(
+        "", encoding="utf-8"
+    )
     store_alive = SnapshotStore(diffs_root, "sys_th", threads_dir)
     store_dead = SnapshotStore(diffs_root, "sys_other", threads_dir)
     store_alive.mark_created("a.py", head_rev="a" * 40)
     store_dead.mark_created("b.py", head_rev="b" * 40)
-    store_dead.capture_session("c.py", b"old")          # файл мёртвого треда
+    store_dead.capture_session("c.py", b"old")  # файл мёртвого треда
 
     store_alive.evict_lru(max_files=0)
 
     assert store_alive.created_head_rev("a.py") == "a" * 40
-    assert store_dead.created_head_rev("b.py") is None     # мёртвая отметка убрана
-    assert store_dead.session_baseline("c.py") == b"old"   # а вытеснения нет
+    assert (
+        store_dead.created_head_rev("b.py") is None
+    )  # мёртвая отметка убрана
+    assert store_dead.session_baseline("c.py") == b"old"  # а вытеснения нет
 
 
 def _busy_lock(monkeypatch) -> None:
@@ -863,10 +920,14 @@ def test_exact_base_is_not_taken_over_a_counting_one(tmp_path):
 
     assert store.session_baseline("a.py") is None
     assert store.turn_baseline("a.py", "t1") is None
-    assert store.turn_baseline("a.py", "t2") == b"turn two start"   # другой ход — своё «до»
+    assert (
+        store.turn_baseline("a.py", "t2") == b"turn two start"
+    )  # другой ход — своё «до»
 
 
-def test_a_failed_byte_replace_keeps_the_previous_acceptance(tmp_path, monkeypatch):
+def test_a_failed_byte_replace_keeps_the_previous_acceptance(
+    tmp_path, monkeypatch
+):
     """Не легли новые байты принятия — прежнее принятие остаётся целиком.
 
     Индекс пишется первым; если замена байтов следом падает, а прежнее
@@ -881,7 +942,7 @@ def test_a_failed_byte_replace_keeps_the_previous_acceptance(tmp_path, monkeypat
     real_replace = snapshots.atomic_replace
 
     def broken_bytes(src, dst):
-        if str(dst).endswith(".accepted"):         # индекс пишется, байты — нет
+        if str(dst).endswith(".accepted"):  # индекс пишется, байты — нет
             raise OSError("диск отказал")
         real_replace(src, dst)
 
@@ -891,8 +952,10 @@ def test_a_failed_byte_replace_keeps_the_previous_acceptance(tmp_path, monkeypat
     monkeypatch.undo()
 
     state = _store(tmp_path).accepted_state("a.py")
-    assert state is not None and state.content is None and state.head_oid == "old"
-    assert not list((tmp_path / "diffs").glob("*.tmp"))    # временный файл убран
+    assert (
+        state is not None and state.content is None and state.head_oid == "old"
+    )
+    assert not list((tmp_path / "diffs").glob("*.tmp"))  # временный файл убран
 
 
 def _race_on_first_capture(tmp_path, capture: str) -> tuple:
@@ -937,7 +1000,7 @@ def test_turn_snapshot_is_claimed_under_the_index_lock(tmp_path):
     писатель, чьё чтение отметки устарело (прочитано до того, как первый
     записал снимок), затирал базу хода своим — состоянием после чужой правки."""
     first, second = _store(tmp_path), _store(tmp_path)
-    second._index_entry = lambda path_key: {}      # чтение до записи первого
+    second._index_entry = lambda path_key: {}  # чтение до записи первого
 
     first.capture_turn("a.py", b"original\n", "t1")
     second.capture_turn("a.py", b"later-state\n", "t1")

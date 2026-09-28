@@ -11,6 +11,7 @@
 тот режим, которому он включён (`agent_edits.record`): TUI — по умолчанию, CLI и
 сервер — по конфигу. Где запись выключена, обёртки вокруг команд нет вовсе.
 """
+
 from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.backends.local import LocalFsBackend
 from gc_core.run_context import acreate_run_context

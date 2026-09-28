@@ -5,6 +5,7 @@
 * проводка спадающего фронта в TraceScreen (сводка + отсутствие CTA в ленте);
 * восстановление строки-итога на resume (цифры только из meta того же хода).
 """
+
 import json
 import re
 
@@ -24,17 +25,30 @@ from gc_tui.widgets.thinking_indicator import (
 
 def _write_task(tmp_path, tid):
     (tmp_path / f"meta_cli_{tid}.json").write_text(
-        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8")
+        json.dumps({"thread_id": tid, "system_id": "cli"}), encoding="utf-8"
+    )
     (tmp_path / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
 
 
-def _append_edit(tmp_path, tid, *, path, turn, add, del_, call_id="c1", op="edit"):
+def _append_edit(
+    tmp_path, tid, *, path, turn, add, del_, call_id="c1", op="edit"
+):
     journal = EditsJournal(edits_journal_path(str(tmp_path), "cli", tid))
-    journal.append(EditRecord(
-        path=path, turn_id=turn, ts=1.0, call_id=call_id, op=op,
-        hunks="@@ -1 +1 @@\n-a\n+b\n", add=add, del_=del_,
-        before_sha256="x", after_sha256="y", flags=[],
-    ))
+    journal.append(
+        EditRecord(
+            path=path,
+            turn_id=turn,
+            ts=1.0,
+            call_id=call_id,
+            op=op,
+            hunks="@@ -1 +1 @@\n-a\n+b\n",
+            add=add,
+            del_=del_,
+            before_sha256="x",
+            after_sha256="y",
+            flags=[],
+        )
+    )
 
 
 def _edit_on_disk(tmp_path, tid, *, path, turn, before, after, call_id="c1"):
@@ -50,12 +64,20 @@ def _edit_on_disk(tmp_path, tid, *, path, turn, before, after, call_id="c1"):
     root = tmp_path / "proj"
     root.mkdir(exist_ok=True)
     if before is not None:
-        SnapshotStore(snapshots_root(str(root)), f"cli_{tid}", tmp_path).capture_turn(
-            path, before.encode("utf-8"), turn
-        )
+        SnapshotStore(
+            snapshots_root(str(root)), f"cli_{tid}", tmp_path
+        ).capture_turn(path, before.encode("utf-8"), turn)
     (root / path).write_text(after, encoding="utf-8", newline="\n")
-    _append_edit(tmp_path, tid, path=path, turn=turn, add=0, del_=0, call_id=call_id,
-                 op="edit" if before is not None else "create")
+    _append_edit(
+        tmp_path,
+        tid,
+        path=path,
+        turn=turn,
+        add=0,
+        del_=0,
+        call_id=call_id,
+        op="edit" if before is not None else "create",
+    )
 
 
 class _Runner:
@@ -115,7 +137,7 @@ def test_compose_status_line_reports_summary_span():
     head = Text("✓ Выполнил за 12с")
     out, span = compose_status_line(head, summary, 60)
     assert span == (60 - len(summary), 60)
-    assert out.plain[span[0]:span[1]] == summary
+    assert out.plain[span[0] : span[1]] == summary
 
 
 def test_span_is_none_when_summary_hidden():
@@ -165,17 +187,28 @@ def test_hover_speaks_the_same_color_as_every_hover_rule_of_the_base():
 
     tcss_path = module_dir("tui") / "styles.tcss"
     tcss = tcss_path.read_text(encoding="utf-8")
-    tokens = set(re.findall(r"\.(?:block-copy|diff-more):hover\s*\{\s*color:\s*\$([\w-]+)", tcss))
+    tokens = set(
+        re.findall(
+            r"\.(?:block-copy|diff-more):hover\s*\{\s*color:\s*\$([\w-]+)",
+            tcss,
+        )
+    )
     assert tokens, "hover-правила базы не найдены — сверять не с чем"
 
-    hot, _span = compose_status_line(Text("✓"), "изменено 1 файл · +1 −0", 60, hover=True)
+    hot, _span = compose_status_line(
+        Text("✓"), "изменено 1 файл · +1 −0", 60, hover=True
+    )
     styles = {str(span.style) for span in hot.spans if span.style}
     assert styles == {css_variables()[token] for token in tokens}
 
 
 def test_indicator_remembers_the_span_it_rendered():
-    ind = ThinkingIndicator(state="done", frozen_elapsed=12, clock=lambda: 0.0,
-                            turn_summary=(2, 5, 6))
+    ind = ThinkingIndicator(
+        state="done",
+        frozen_elapsed=12,
+        clock=lambda: 0.0,
+        turn_summary=(2, 5, 6),
+    )
     plain = ind._render_text().plain
     start, end = ind._summary_span
     assert plain[start:end] == "изменено 2 файла · +5 −6"
@@ -193,8 +226,12 @@ def test_indicator_done_without_summary_unchanged():
 
 
 def test_indicator_done_with_summary_shows_segment():
-    ind = ThinkingIndicator(state="done", frozen_elapsed=12, clock=lambda: 0.0,
-                            turn_summary=(2, 5, 6))
+    ind = ThinkingIndicator(
+        state="done",
+        frozen_elapsed=12,
+        clock=lambda: 0.0,
+        turn_summary=(2, 5, 6),
+    )
     plain = ind._render_text().plain
     assert plain.startswith("✓ Выполнил за 12с")
     assert plain.endswith("изменено 2 файла · +5 −6")
@@ -208,7 +245,10 @@ def test_indicator_done_with_summary_shows_segment():
         ("stopped_steps", "⏹ Остановлено: превышен лимит шагов"),
         ("stopped_errors", "⏹ Остановлено: превышен лимит ошибок"),
         ("stopped_tokens", "⏹ Остановлено: превышен лимит токенов"),
-        ("stopped_tool_calls", "⏹ Остановлено: превышен лимит вызовов инструментов"),
+        (
+            "stopped_tool_calls",
+            "⏹ Остановлено: превышен лимит вызовов инструментов",
+        ),
     ],
 )
 def test_every_terminal_state_shows_the_edits_summary(state, head):
@@ -217,7 +257,9 @@ def test_every_terminal_state_shows_the_edits_summary(state, head):
     Сводку сохраняли для любого исхода, а рисовали только у «Выполнил»: после
     ошибки пользователь видел одно «Ошибка», хотя именно тогда ему важнее всего
     знать, что файлы тронуты (ревью PR, находка 7)."""
-    ind = ThinkingIndicator(state=state, clock=lambda: 0.0, turn_summary=(1, 1, 1))
+    ind = ThinkingIndicator(
+        state=state, clock=lambda: 0.0, turn_summary=(1, 1, 1)
+    )
     plain = ind._render_text().plain
     assert plain.startswith(head)
     assert plain.endswith("изменено 1 файл · +1 −1")
@@ -243,19 +285,39 @@ async def _falling_edge(pilot, scr, tid):
 async def test_turn_with_edits_shows_summary_from_journal(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000001a"
     _write_task(tmp_path, tid)
-    _edit_on_disk(tmp_path, tid, path="a.py", turn="T1",
-                  before="a\nb\nc\n", after="a\nB\nc\n", call_id="c1")   # +1 −1
-    _edit_on_disk(tmp_path, tid, path="b.py", turn="T1",
-                  before=None, after="one\ntwo\n", call_id="c2")          # +2 (создан)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "launch_root": str(tmp_path / "proj")})
+    _edit_on_disk(
+        tmp_path,
+        tid,
+        path="a.py",
+        turn="T1",
+        before="a\nb\nc\n",
+        after="a\nB\nc\n",
+        call_id="c1",
+    )  # +1 −1
+    _edit_on_disk(
+        tmp_path,
+        tid,
+        path="b.py",
+        turn="T1",
+        before=None,
+        after="one\ntwo\n",
+        call_id="c2",
+    )  # +2 (создан)
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
         assert scr._thinking is not None
-        assert scr._thinking._render_text().plain.endswith("изменено 2 файла · +3 −1")
+        assert scr._thinking._render_text().plain.endswith(
+            "изменено 2 файла · +3 −1"
+        )
 
 
 @pytest.mark.asyncio
@@ -268,20 +330,37 @@ async def test_turn_summary_shows_net_delta_not_sum_of_records(tmp_path):
     """
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000008a"
     _write_task(tmp_path, tid)
     before = "".join(f"old{i}\n" for i in range(22))
     after = "".join(f"new{i}\n" for i in range(133))
-    _edit_on_disk(tmp_path, tid, path="calc.py", turn="T1",
-                  before=before, after=after, call_id="c1")
-    _append_edit(tmp_path, tid, path="calc.py", turn="T1", add=133, del_=0, call_id="c2")
-    _append_edit(tmp_path, tid, path="calc.py", turn="T1", add=132, del_=0, call_id="c3")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "launch_root": str(tmp_path / "proj")})
+    _edit_on_disk(
+        tmp_path,
+        tid,
+        path="calc.py",
+        turn="T1",
+        before=before,
+        after=after,
+        call_id="c1",
+    )
+    _append_edit(
+        tmp_path, tid, path="calc.py", turn="T1", add=133, del_=0, call_id="c2"
+    )
+    _append_edit(
+        tmp_path, tid, path="calc.py", turn="T1", add=132, del_=0, call_id="c3"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert scr._thinking._render_text().plain.endswith("изменено 1 файл · +133 −22")
+        assert scr._thinking._render_text().plain.endswith(
+            "изменено 1 файл · +133 −22"
+        )
 
 
 @pytest.mark.asyncio
@@ -289,14 +368,17 @@ async def test_turn_without_edits_has_no_segment(tmp_path):
     """Журнал не дописан за ход — цифры прошлого хода в строку не попадают."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000002a"
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T0", add=9, del_=9)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._stamp_tui_running()          # старт нового хода → отметка журнала
+        scr._stamp_tui_running()  # старт нового хода → отметка журнала
         await _falling_edge(pilot, scr, tid)
         assert "изменено" not in scr._thinking._render_text().plain
 
@@ -316,15 +398,18 @@ async def test_second_stamp_does_not_move_the_turn_boundary(tmp_path):
     """
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000009a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._stamp_tui_running()                      # подготовка прогона
+        scr._stamp_tui_running()  # подготовка прогона
         _append_edit(tmp_path, tid, path="a.py", turn="T1", add=3, del_=1)
-        scr._stamp_tui_running()                      # страховочная сетка, уже после правки
+        scr._stamp_tui_running()  # страховочная сетка, уже после правки
         await _falling_edge(pilot, scr, tid)
 
         assert "изменено" in scr._thinking._render_text().plain
@@ -334,9 +419,12 @@ async def test_second_stamp_does_not_move_the_turn_boundary(tmp_path):
 async def test_empty_journal_has_no_segment(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000003a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
@@ -347,11 +435,18 @@ async def test_empty_journal_has_no_segment(tmp_path):
 async def test_config_switch_off_hides_segment(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000004a"
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T1", add=3, del_=1)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "agent_edits": {"turn_summary_in_status": False}})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={
+            "model": "M",
+            "agent_edits": {"turn_summary_in_status": False},
+        },
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
@@ -364,14 +459,19 @@ async def test_no_cta_block_in_trace_after_turn_with_edits(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import TraceRow
+
     tid = "turn0000000000000000000000000005a"
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T1", add=3, del_=1)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
-        assert not any("/diff" in str(row._content) for row in scr.query(TraceRow))
+        assert not any(
+            "/diff" in str(row._content) for row in scr.query(TraceRow)
+        )
         assert not hasattr(scr, "_maybe_mount_diff_pending_cta")
         assert not hasattr(scr, "_flush_diff_pending_cta")
         assert not hasattr(scr, "_diff_pending_cta_pending")
@@ -412,10 +512,21 @@ def _post_gesture(pilot, widget, down_dx, up_dx=None, *, button=1):
     y = widget.region.y
     for cls, dx in ((MouseDown, down_dx), (MouseUp, up_dx)):
         x = widget.region.x + dx
-        pilot.app.post_message(cls(
-            widget, x=x, y=y, delta_x=0, delta_y=0, button=button,
-            shift=False, meta=False, ctrl=False, screen_x=x, screen_y=y,
-        ))
+        pilot.app.post_message(
+            cls(
+                widget,
+                x=x,
+                y=y,
+                delta_x=0,
+                delta_y=0,
+                button=button,
+                shift=False,
+                meta=False,
+                ctrl=False,
+                screen_x=x,
+                screen_y=y,
+            )
+        )
 
 
 async def _gesture(pilot, widget, down_dx, up_dx=None, *, button=1):
@@ -435,10 +546,14 @@ async def _app_with_turn_edits(tmp_path, tid):
     from gc_tui.app import TuiApp
 
     _write_task(tmp_path, tid)
-    _edit_on_disk(tmp_path, tid, path="a.py", turn="T1",
-                  before="a\nb\n", after="a\nB\n")
-    return TuiApp(threads_dir=str(tmp_path), system="cli",
-                  config={"model": "M", "launch_root": str(tmp_path / "proj")})
+    _edit_on_disk(
+        tmp_path, tid, path="a.py", turn="T1", before="a\nb\n", after="a\nB\n"
+    )
+    return TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+    )
 
 
 @pytest.mark.asyncio
@@ -448,12 +563,17 @@ async def test_click_inside_summary_span_opens_screen_in_turn_source(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import DiffScreen
     from gc_tui.services.edits_view import SOURCE_TURN
+
     tid = "turn0000000000000000000000000009a"
     _write_task(tmp_path, tid)
-    _edit_on_disk(tmp_path, tid, path="a.py", turn="T1",
-                  before="a\nb\n", after="a\nB\n")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "launch_root": str(tmp_path / "proj")})
+    _edit_on_disk(
+        tmp_path, tid, path="a.py", turn="T1", before="a\nb\n", after="a\nB\n"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+    )
     async with app.run_test() as pilot:
         _scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
@@ -471,21 +591,26 @@ async def test_click_outside_span_does_nothing(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import DiffScreen
+
     tid = "turn0000000000000000000000000010a"
     _write_task(tmp_path, tid)
-    _edit_on_disk(tmp_path, tid, path="a.py", turn="T1",
-                  before="a\nb\n", after="a\nB\n")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "launch_root": str(tmp_path / "proj")})
+    _edit_on_disk(
+        tmp_path, tid, path="a.py", turn="T1", before="a\nb\n", after="a\nB\n"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+    )
     async with app.run_test() as pilot:
         scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
 
-        await pilot.click(ind, offset=(0, 0))              # по строке-итогу
+        await pilot.click(ind, offset=(0, 0))  # по строке-итогу
         await pilot.pause()
         assert pilot.app.screen is scr
 
-        await pilot.click(ind, offset=(start - 1, 0))      # вплотную к сегменту
+        await pilot.click(ind, offset=(start - 1, 0))  # вплотную к сегменту
         await pilot.pause()
         assert pilot.app.screen is scr
         assert not isinstance(pilot.app.screen, DiffScreen)
@@ -495,12 +620,17 @@ async def test_click_outside_span_does_nothing(tmp_path):
 async def test_hover_over_segment_lightens_it_and_leaving_dims_back(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000011a"
     _write_task(tmp_path, tid)
-    _edit_on_disk(tmp_path, tid, path="a.py", turn="T1",
-                  before="a\nb\n", after="a\nB\n")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "launch_root": str(tmp_path / "proj")})
+    _edit_on_disk(
+        tmp_path, tid, path="a.py", turn="T1", before="a\nb\n", after="a\nB\n"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+    )
     async with app.run_test() as pilot:
         _scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
@@ -527,6 +657,7 @@ async def test_double_click_on_summary_opens_exactly_one_screen(tmp_path):
     """
     pytest.importorskip("textual")
     from gc_tui.messages import OpenEditsScreenRequest
+
     tid = "turn0000000000000000000000000013a"
     app = await _app_with_turn_edits(tmp_path, tid)
     async with app.run_test() as pilot:
@@ -547,11 +678,11 @@ async def test_double_click_on_summary_opens_exactly_one_screen(tmp_path):
         ind.post_message = _spy
 
         _post_gesture(pilot, ind, start + 1)
-        _post_gesture(pilot, ind, start + 1)           # тот же пиксель → chain 2
+        _post_gesture(pilot, ind, start + 1)  # тот же пиксель → chain 2
         await pilot.pause()
         await pilot.pause()
 
-        assert len(requests) == 1                      # второй клик молчит
+        assert len(requests) == 1  # второй клик молчит
         assert len(_diff_screens(pilot)) == 1
         assert len(pilot.app.screen_stack) == depth + 1
 
@@ -566,7 +697,9 @@ async def test_selection_drag_released_on_summary_does_not_open(tmp_path):
         scr, ind = await _turn_with_edits(pilot, tmp_path, tid)
         start, _end = ind._summary_span
 
-        await _gesture(pilot, ind, 0, start + 1)       # нажали слева, отпустили на сводке
+        await _gesture(
+            pilot, ind, 0, start + 1
+        )  # нажали слева, отпустили на сводке
 
         assert _diff_screens(pilot) == []
         assert pilot.app.screen is scr
@@ -593,6 +726,7 @@ async def test_single_click_still_opens_the_screen_through_the_queue(tmp_path):
     """Страж от «починили запретами всё, включая сам жест»."""
     pytest.importorskip("textual")
     from gc_tui.services.edits_view import SOURCE_TURN
+
     tid = "turn0000000000000000000000000016a"
     app = await _app_with_turn_edits(tmp_path, tid)
     async with app.run_test() as pilot:
@@ -611,6 +745,7 @@ async def test_stale_request_does_not_stack_over_the_open_screen(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.messages import OpenEditsScreenRequest
     from gc_tui.services.edits_view import SOURCE_TURN
+
     tid = "turn0000000000000000000000000017a"
     app = await _app_with_turn_edits(tmp_path, tid)
     async with app.run_test() as pilot:
@@ -620,7 +755,7 @@ async def test_stale_request_does_not_stack_over_the_open_screen(tmp_path):
         assert len(_diff_screens(pilot)) == 1
         depth = len(pilot.app.screen_stack)
 
-        scr.post_message(OpenEditsScreenRequest(SOURCE_TURN))   # запоздавший
+        scr.post_message(OpenEditsScreenRequest(SOURCE_TURN))  # запоздавший
         await pilot.pause()
 
         assert len(_diff_screens(pilot)) == 1
@@ -633,10 +768,14 @@ async def test_click_on_indicator_without_summary_is_inert(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.screens.diff import DiffScreen
+
     tid = "turn0000000000000000000000000012a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "launch_root": str(tmp_path / "proj")})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "launch_root": str(tmp_path / "proj")},
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         await _falling_edge(pilot, scr, tid)
@@ -653,16 +792,26 @@ async def test_click_on_indicator_without_summary_is_inert(tmp_path):
 async def test_resume_shows_summary_saved_with_indicator(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000006a"
     _write_task(tmp_path, tid)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._store.update_tui_meta(tid, {
-            "status": "completed",
-            "last_indicator": {"kind": "done", "elapsed": 12, "edits": [2, 5, 6]},
-        })
+        scr._store.update_tui_meta(
+            tid,
+            {
+                "status": "completed",
+                "last_indicator": {
+                    "kind": "done",
+                    "elapsed": 12,
+                    "edits": [2, 5, 6],
+                },
+            },
+        )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()
         scr._restore_terminal_indicator()
@@ -678,17 +827,23 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
     рядом с итогом НЕ показываем — они принадлежат не тому ходу."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
+
     tid = "turn0000000000000000000000000007a"
     _write_task(tmp_path, tid)
     _append_edit(tmp_path, tid, path="a.py", turn="T0", add=9, del_=9)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task(tid)
-        scr._store.update_tui_meta(tid, {
-            "status": "completed",
-            "last_indicator": {"kind": "done", "elapsed": 12},
-        })
+        scr._store.update_tui_meta(
+            tid,
+            {
+                "status": "completed",
+                "last_indicator": {"kind": "done", "elapsed": 12},
+            },
+        )
         pilot.app.active_runner = None
         scr._destroy_thinking_indicator()
         scr._restore_terminal_indicator()

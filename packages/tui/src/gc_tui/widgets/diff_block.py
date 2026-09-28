@@ -35,18 +35,23 @@ ALLOW_SELECT=False + get_selection()->None) — иначе в буфер поп�
 * в буфер уходят сырые хэнки записи, а не `.plain` отрендеренного текста — в
   нём номера строк, маркеры и хвостовые пробелы фоновой заливки.
 """
+
 from __future__ import annotations
 
 from typing import Optional
 
+from gc_core.agent_edits.journal import EditRecord
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.message import Message
 from textual.widgets import Static
 
-from gc_core.agent_edits.journal import EditRecord
-from gc_tui.services.diff_render import DiffRender, copyable_hunks, render_hunks
+from gc_tui.services.diff_render import (
+    DiffRender,
+    copyable_hunks,
+    render_hunks,
+)
 from gc_tui.services.plural import lines_word
 from gc_tui.widgets.block_panel import (
     COPY_FEEDBACK_S,
@@ -67,7 +72,7 @@ BODY_INDENT = 2
 class DiffBlock(ClickModelMixin, Vertical):
     """Блок правки: ветка с кнопкой, свёрнутое тело диффа и хвост-тогл."""
 
-    ALLOW_SELECT = False   # выделяется тело, а не блок целиком
+    ALLOW_SELECT = False  # выделяется тело, а не блок целиком
     # Блок НЕ участвует в Tab-обходе и вообще не принимает фокус (живая правка
     # 2026-08-11). Событие трейса — это ВЫЗОВ ИНСТРУМЕНТА, а дифф лишь его часть:
     # Tab обязан идти по событиям, останавливаясь на строке тула, а следующий Tab
@@ -94,8 +99,14 @@ class DiffBlock(ClickModelMixin, Vertical):
     DiffBlock .diff-more { width: 1fr; height: 1; margin: 0 0 0 2; }
     """
 
-    def __init__(self, record: EditRecord, *, event_no: int,
-                 collapsed_max_lines: int, compact: bool = False) -> None:
+    def __init__(
+        self,
+        record: EditRecord,
+        *,
+        event_no: int,
+        collapsed_max_lines: int,
+        compact: bool = False,
+    ) -> None:
         super().__init__(classes="diff-block")
         self._record = record
         self._event_no = event_no
@@ -105,34 +116,52 @@ class DiffBlock(ClickModelMixin, Vertical):
         # так что и хвост «… ещё N строк», и разворот работают как обычно.
         self._collapsed_max_lines = 0 if compact else collapsed_max_lines
         self._expanded = False
-        self._cache: dict[tuple[str, str, Optional[int], Optional[int]],
-                          DiffRender] = {}
-        self._fill: Optional[int] = None   # ширина заливки текущего тела
+        self._cache: dict[
+            tuple[str, str, Optional[int], Optional[int]], DiffRender
+        ] = {}
+        self._fill: Optional[int] = None  # ширина заливки текущего тела
         self._restore_timer = None
-        self.can_focus = False  # см. FOCUS_ON_CLICK выше: дифф — не событие трейса
+        self.can_focus = (
+            False  # см. FOCUS_ON_CLICK выше: дифф — не событие трейса
+        )
 
     @classmethod
-    def for_record(cls, record: EditRecord, *, event_no: int,
-                   collapsed_max_lines: int, compact: bool = False) -> "DiffBlock":
+    def for_record(
+        cls,
+        record: EditRecord,
+        *,
+        event_no: int,
+        collapsed_max_lines: int,
+        compact: bool = False,
+    ) -> DiffBlock:
         """Блок по записи журнала правок."""
-        return cls(record, event_no=event_no,
-                   collapsed_max_lines=collapsed_max_lines, compact=compact)
+        return cls(
+            record,
+            event_no=event_no,
+            collapsed_max_lines=collapsed_max_lines,
+            compact=compact,
+        )
 
     # --- сборка ------------------------------------------------------------
 
     def compose(self) -> ComposeResult:
         record = self._record
         with Horizontal(classes="block-header"):
-            yield _NoSelect(f"{BRANCH_PREFIX} +{record.add} −{record.del_}",
-                            classes="block-label", markup=False)
+            yield _NoSelect(
+                f"{BRANCH_PREFIX} +{record.add} −{record.del_}",
+                classes="block-label",
+                markup=False,
+            )
             yield _NoSelect(copy_glyph(), classes="block-copy", markup=False)
         collapsed = self._diff_render(expanded=False)
         if collapsed.total_lines == 0:
-            return   # binary / delete / no_diff — только ветка, без пустой рамки
+            return  # binary / delete / no_diff — только ветка, без пустой рамки
         if collapsed.shown_lines:
             yield Static(collapsed.text, classes="block-body", markup=False)
         if collapsed.truncated:
-            yield _NoSelect(self._tail_label(), classes="diff-more", markup=False)
+            yield _NoSelect(
+                self._tail_label(), classes="diff-more", markup=False
+            )
 
     def on_mount(self) -> None:
         self._sync_body()
@@ -168,9 +197,16 @@ class DiffBlock(ClickModelMixin, Vertical):
             # Ширина — часть ключа: тот же дифф на другой ширине даёт другую
             # заливку. Записи прошлых ширин выбрасываем — иначе протяжка рамки
             # накопила бы по полному рендеру на каждый её шаг.
-            self._cache = {k: v for k, v in self._cache.items() if k[3] == fill}
-            cached = render_hunks(self._record.hunks, path=self._record.path,
-                                  max_lines=max_lines, fill_width=fill, wrap=True)
+            self._cache = {
+                k: v for k, v in self._cache.items() if k[3] == fill
+            }
+            cached = render_hunks(
+                self._record.hunks,
+                path=self._record.path,
+                max_lines=max_lines,
+                fill_width=fill,
+                wrap=True,
+            )
             self._cache[key] = cached
         return cached
 
@@ -188,8 +224,10 @@ class DiffBlock(ClickModelMixin, Vertical):
         elif body:
             body.first(Static).remove()
         elif render.shown_lines:
-            self.mount(Static(render.text, classes="block-body", markup=False),
-                       before=self.query_one(".diff-more"))
+            self.mount(
+                Static(render.text, classes="block-body", markup=False),
+                before=self.query_one(".diff-more"),
+            )
         self._sync_tail()
 
     def _sync_tail(self) -> None:
@@ -210,8 +248,11 @@ class DiffBlock(ClickModelMixin, Vertical):
             if tail:
                 tail.first(Static).update(self._tail_label())
             else:
-                self.mount(_NoSelect(self._tail_label(), classes="diff-more",
-                                     markup=False))
+                self.mount(
+                    _NoSelect(
+                        self._tail_label(), classes="diff-more", markup=False
+                    )
+                )
         elif tail:
             tail.first(Static).remove()
 
@@ -222,8 +263,11 @@ class DiffBlock(ClickModelMixin, Vertical):
         # Скрытое = целые строки, не влезшие в бюджет, ПЛЮС ряды, срезанные
         # внутри длинной строки: бюджет свёрнутого блока считается в экранных
         # рядах, и перенесённый остаток — такая же скрытая строка экрана.
-        remaining = (collapsed.total_lines - collapsed.shown_lines
-                     + collapsed.hidden_rows)
+        remaining = (
+            collapsed.total_lines
+            - collapsed.shown_lines
+            + collapsed.hidden_rows
+        )
         return f"… ещё {remaining} {lines_word(remaining)}"
 
     # --- взаимодействие ----------------------------------------------------
@@ -282,26 +326,31 @@ class DiffBlock(ClickModelMixin, Vertical):
     def _toggle(self) -> None:
         """Переключить свёртку; у компактного блока тело появляется/исчезает."""
         self._expanded = not self._expanded
-        self._sync_body()      # хвост обновляет `_sync_tail` внутри
+        self._sync_body()  # хвост обновляет `_sync_tail` внутри
 
     def _copy_block(self) -> None:
-        self.post_message(_copy_request(
-            copyable_hunks(self._record.hunks, path=self._record.path)
-        ))
+        self.post_message(
+            _copy_request(
+                copyable_hunks(self._record.hunks, path=self._record.path)
+            )
+        )
         self.query_one(".block-copy", Static).update(DONE_GLYPH)
         if self._restore_timer is not None:
             self._restore_timer.stop()
-        self._restore_timer = self.set_timer(COPY_FEEDBACK_S, self._restore_copy_glyph)
+        self._restore_timer = self.set_timer(
+            COPY_FEEDBACK_S, self._restore_copy_glyph
+        )
 
     def _restore_copy_glyph(self) -> None:
         self._restore_timer = None
         try:
             self.query_one(".block-copy", Static).update(copy_glyph())
         except Exception:
-            pass   # блок уже размонтирован — восстанавливать нечего
+            pass  # блок уже размонтирован — восстанавливать нечего
 
     def _open_request(self) -> Optional[Message]:
         if not self._event_no:
             return None
         from gc_tui.messages import OpenEventRequest
+
         return OpenEventRequest(self._event_no)

@@ -5,6 +5,7 @@
 что разные формы ``hunks`` и отсутствующий ``before_sha256`` у shell-записи —
 это контракт, а не разрыв цепочки целостности.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -26,7 +27,9 @@ from gc_testkit.helpers.tool_ctx import local_ctx
 
 
 def _git(root: Path, *args: str) -> None:
-    subprocess.run(["git", *args], cwd=str(root), check=True, capture_output=True)
+    subprocess.run(
+        ["git", *args], cwd=str(root), check=True, capture_output=True
+    )
 
 
 @pytest.fixture
@@ -50,7 +53,7 @@ def repo(tmp_path, monkeypatch):
 
 def _ctx(launch_root, threads_dir):
     ctx = local_ctx({"launch_root": str(launch_root)})
-    ctx.is_tui = True                # режим с записью правок по умолчанию
+    ctx.is_tui = True  # режим с записью правок по умолчанию
     ctx.threads_dir = str(threads_dir)
     ctx.system_id = "cli"
     ctx.thread_id = "th1"
@@ -68,7 +71,9 @@ async def test_tool_edit_and_shell_edit_land_in_one_journal_one_turn(repo):
     ctx = _ctx(launch_root, threads_dir)
 
     after_tool = b"line1\nline2x\n"
-    tool = WriteToFile(ctx=ctx, config_dict=ctx.config_dict, call_id="call-tool")
+    tool = WriteToFile(
+        ctx=ctx, config_dict=ctx.config_dict, call_id="call-tool"
+    )
     raw = await tool.acall(path=str(target), content="line1\nline2x\n")
     assert json.loads(raw)["ok"] is True
 

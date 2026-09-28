@@ -4,6 +4,7 @@
 диске сейчас, — поэтому тесты кладут рядом с журналом настоящие файлы и
 turn-снимки.
 """
+
 from pathlib import Path
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
@@ -12,11 +13,21 @@ from gc_core.thread_store import edits_journal_path
 from gc_tui.services.edits_lookup import EditsLookup
 
 
-def make_rec(path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1, **kw):
+def make_rec(
+    path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1, **kw
+):
     base = dict(
-        path=path, turn_id=turn, ts=1.0, call_id=call_id, op=op,
-        hunks="@@ -1 +1 @@\n-a\n+b\n", add=add, del_=del_,
-        before_sha256="x", after_sha256="y", flags=[],
+        path=path,
+        turn_id=turn,
+        ts=1.0,
+        call_id=call_id,
+        op=op,
+        hunks="@@ -1 +1 @@\n-a\n+b\n",
+        add=add,
+        del_=del_,
+        before_sha256="x",
+        after_sha256="y",
+        flags=[],
     )
     base.update(kw)
     return EditRecord(**base)
@@ -37,7 +48,11 @@ class _Workspace:
             snapshots_root(str(self.root)), "cli_th1", self.threads_dir
         )
         self.lookup = EditsLookup(
-            str(self.threads_dir), "cli", "th1", launch_root=str(self.root), **limits
+            str(self.threads_dir),
+            "cli",
+            "th1",
+            launch_root=str(self.root),
+            **limits,
         )
 
     def write(self, rel: str, text: str) -> Path:
@@ -141,7 +156,9 @@ def test_turn_summary_single_edit_matches_record_counters(tmp_path):
     ws = _Workspace(tmp_path)
     ws.snapshot("a.py", "a\nb\nc\n")
     ws.write("a.py", "a\nB\nc\n")
-    ws.journal.append(make_rec(path="a.py", turn="t1", call_id="c1", add=1, del_=1))
+    ws.journal.append(
+        make_rec(path="a.py", turn="t1", call_id="c1", add=1, del_=1)
+    )
 
     assert ws.lookup.turn_summary("t1") == (1, 1, 1)
 
@@ -157,12 +174,29 @@ def test_turn_summary_three_rewrites_of_one_file_report_net_delta(tmp_path):
     after = "".join(f"new{i}\n" for i in range(133))
     ws.snapshot("calc.py", before)
     ws.write("calc.py", after)
-    ws.journal.append(make_rec(path="calc.py", turn="t1", call_id="c1",
-                               add=28, del_=22))
-    ws.journal.append(make_rec(path="calc.py", turn="t1", call_id=None,
-                               op="shell", add=133, del_=0))
-    ws.journal.append(make_rec(path="calc.py", turn="t1", call_id=None,
-                               op="shell", add=132, del_=0))
+    ws.journal.append(
+        make_rec(path="calc.py", turn="t1", call_id="c1", add=28, del_=22)
+    )
+    ws.journal.append(
+        make_rec(
+            path="calc.py",
+            turn="t1",
+            call_id=None,
+            op="shell",
+            add=133,
+            del_=0,
+        )
+    )
+    ws.journal.append(
+        make_rec(
+            path="calc.py",
+            turn="t1",
+            call_id=None,
+            op="shell",
+            add=132,
+            del_=0,
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (1, 133, 22)
 
@@ -170,9 +204,9 @@ def test_turn_summary_three_rewrites_of_one_file_report_net_delta(tmp_path):
 def test_turn_summary_two_files_sums_per_file_deltas(tmp_path):
     ws = _Workspace(tmp_path)
     ws.snapshot("a.py", "a\nb\nc\n")
-    ws.write("a.py", "a\nB\nc\nd\n")            # +2 −1
+    ws.write("a.py", "a\nB\nc\nd\n")  # +2 −1
     ws.snapshot("b.py", "one\ntwo\nthree\n")
-    ws.write("b.py", "one\n")                    # −2
+    ws.write("b.py", "one\n")  # −2
     ws.journal.append(make_rec(path="a.py", turn="t1", call_id="c1"))
     ws.journal.append(make_rec(path="b.py", turn="t1", call_id="c2"))
 
@@ -186,8 +220,11 @@ def test_turn_summary_file_created_in_turn_counts_whole_file(tmp_path):
     единственный случай, когда отсутствие снимка значит «база пуста»."""
     ws = _Workspace(tmp_path)
     ws.write("new.py", "one\ntwo\nthree\n")
-    ws.journal.append(make_rec(path="new.py", turn="t1", call_id="c1",
-                               op="create", add=3, del_=0))
+    ws.journal.append(
+        make_rec(
+            path="new.py", turn="t1", call_id="c1", op="create", add=3, del_=0
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (1, 3, 0)
 
@@ -195,8 +232,11 @@ def test_turn_summary_file_created_in_turn_counts_whole_file(tmp_path):
 def test_turn_summary_deleted_file_counts_whole_snapshot(tmp_path):
     ws = _Workspace(tmp_path)
     ws.snapshot("gone.py", "one\ntwo\nthree\nfour\n")
-    ws.journal.append(make_rec(path="gone.py", turn="t1", call_id="c1",
-                               op="delete", add=0, del_=4))
+    ws.journal.append(
+        make_rec(
+            path="gone.py", turn="t1", call_id="c1", op="delete", add=0, del_=4
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (1, 0, 4)
 
@@ -207,8 +247,17 @@ def test_turn_summary_no_diff_counts_as_file_not_in_sums(tmp_path):
     ws.write("a.py", "a\nB\nc\n")
     ws.write("b.bin", "мусор\n")
     ws.journal.append(make_rec(path="a.py", turn="t1", call_id="c1"))
-    ws.journal.append(make_rec(path="b.bin", turn="t1", call_id="c2", add=0, del_=0,
-                               op="binary", flags=["no_diff"]))
+    ws.journal.append(
+        make_rec(
+            path="b.bin",
+            turn="t1",
+            call_id="c2",
+            add=0,
+            del_=0,
+            op="binary",
+            flags=["no_diff"],
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (2, 1, 1)
 
@@ -222,21 +271,29 @@ def test_turn_summary_includes_shell_records_alongside_fs_records(tmp_path):
     """
     ws = _Workspace(tmp_path)
     ws.snapshot("a.py", "a\n")
-    ws.write("a.py", "a\nb\n")                   # +1 по снимку
-    ws.write("b.sh", "echo 1\necho 2\n")         # правлен командой: +4 −2 из журнала
-    ws.snapshot("c.py", "gone\n")                # удалён: −1
+    ws.write("a.py", "a\nb\n")  # +1 по снимку
+    ws.write("b.sh", "echo 1\necho 2\n")  # правлен командой: +4 −2 из журнала
+    ws.snapshot("c.py", "gone\n")  # удалён: −1
     ws.journal.append(make_rec(path="a.py", turn="t1", call_id="c1"))
-    ws.journal.append(make_rec(path="b.sh", turn="t1", call_id=None, op="shell",
-                               add=4, del_=2))
-    ws.journal.append(make_rec(path="c.py", turn="t1", call_id=None, op="delete",
-                               add=0, del_=1))
+    ws.journal.append(
+        make_rec(
+            path="b.sh", turn="t1", call_id=None, op="shell", add=4, del_=2
+        )
+    )
+    ws.journal.append(
+        make_rec(
+            path="c.py", turn="t1", call_id=None, op="delete", add=0, del_=1
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (3, 5, 3)
     recs = ws.lookup.records_for_turn("t1")
     assert [r.path for r in recs] == ["a.py", "b.sh", "c.py"]
 
 
-def test_turn_summary_shell_edit_of_existing_file_uses_journal_counters(tmp_path):
+def test_turn_summary_shell_edit_of_existing_file_uses_journal_counters(
+    tmp_path,
+):
     """Живой случай: команда переформатировала файл на 500 строк, журнал +12 −12.
 
     Снимка у шелл-канала нет никогда, и пустая база выдала бы «+500 −0» —
@@ -244,8 +301,11 @@ def test_turn_summary_shell_edit_of_existing_file_uses_journal_counters(tmp_path
     """
     ws = _Workspace(tmp_path)
     ws.write("fmt.py", "".join(f"line{i}\n" for i in range(500)))
-    ws.journal.append(make_rec(path="fmt.py", turn="t1", call_id=None, op="shell",
-                               add=12, del_=12))
+    ws.journal.append(
+        make_rec(
+            path="fmt.py", turn="t1", call_id=None, op="shell", add=12, del_=12
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (1, 12, 12)
 
@@ -258,13 +318,24 @@ def test_turn_summary_partial_append_uses_journal_counters(tmp_path):
     """
     ws = _Workspace(tmp_path)
     ws.write("big.log", "".join(f"line{i}\n" for i in range(10_000)))
-    ws.journal.append(make_rec(path="big.log", turn="t1", call_id="c1", op="append",
-                               add=3, del_=0, flags=["partial"]))
+    ws.journal.append(
+        make_rec(
+            path="big.log",
+            turn="t1",
+            call_id="c1",
+            op="append",
+            add=3,
+            del_=0,
+            flags=["partial"],
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (1, 3, 0)
 
 
-def test_turn_summary_caches_until_journal_or_files_change(tmp_path, monkeypatch):
+def test_turn_summary_caches_until_journal_or_files_change(
+    tmp_path, monkeypatch
+):
     """Сводка зовётся на каждом завершении хода — лишний раз файлы не читаем."""
     from gc_core.agent_edits import deltas
 
@@ -290,8 +361,17 @@ def test_turn_summary_caches_until_journal_or_files_change(tmp_path, monkeypatch
     assert ws.lookup.turn_summary("t1") == (1, 4, 0)
     assert len(calls) == 2
 
-    ws.journal.append(make_rec(path="b.py", turn="t1", call_id="c2", ts=2.0,
-                               op="create", add=1, del_=0))
+    ws.journal.append(
+        make_rec(
+            path="b.py",
+            turn="t1",
+            call_id="c2",
+            ts=2.0,
+            op="create",
+            add=1,
+            del_=0,
+        )
+    )
     ws.write("b.py", "x\n")
     assert ws.lookup.turn_summary("t1") == (2, 5, 0)
     assert len(calls) == 4
@@ -307,8 +387,11 @@ def test_turn_summary_counts_shell_edits_via_counting_base(tmp_path):
     ws = _Workspace(tmp_path)
     ws.store.capture_shell_turn("fmt.py", "a\nb\nc\n".encode("utf-8"), "t1")
     ws.write("fmt.py", "a\nB\nc\n")
-    ws.journal.append(make_rec(path="fmt.py", turn="t1", call_id=None, op="shell",
-                               add=9, del_=9))
+    ws.journal.append(
+        make_rec(
+            path="fmt.py", turn="t1", call_id=None, op="shell", add=9, del_=9
+        )
+    )
 
     assert ws.lookup.turn_summary("t1") == (1, 1, 1)
 
@@ -318,8 +401,9 @@ def test_turn_summary_honours_config_limits(tmp_path):
     ws = _Workspace(tmp_path, max_diff_source_bytes=10)
     ws.snapshot("big.py", "a\n")
     ws.write("big.py", "".join(f"line{i}\n" for i in range(50)))
-    ws.journal.append(make_rec(path="big.py", turn="t1", call_id="c1",
-                               add=7, del_=0))
+    ws.journal.append(
+        make_rec(path="big.py", turn="t1", call_id="c1", add=7, del_=0)
+    )
 
     # Сравнить стороны нечем (кап) — счётчики берутся из журнала, а дефолтный
     # кап в 2 МБ дал бы полноценную дельту в 50 строк.
@@ -332,7 +416,9 @@ def test_turn_summary_without_launch_root_counts_files_only(tmp_path):
     threads_dir.mkdir()
     journal = EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1"))
     lookup = EditsLookup(str(threads_dir), "cli", "th1")
-    journal.append(make_rec(path="a.py", turn="t1", call_id="c1", add=3, del_=1))
+    journal.append(
+        make_rec(path="a.py", turn="t1", call_id="c1", add=3, del_=1)
+    )
 
     assert lookup.turn_summary("t1") == (1, 0, 0)
 

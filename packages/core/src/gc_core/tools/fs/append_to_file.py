@@ -289,7 +289,10 @@ Usage:
             )
         assert payload_bytes is not None
 
-        from gc_core.agent_edits.recorder import is_recording, record_edit  # nested: cycle with thread_store
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            is_recording,
+            record_edit,
+        )
 
         # Старый контент — ради baseline-снапшота и честного хэша файла в
         # журнале. Тул сам файл целиком не читает, поэтому поднимаем его
@@ -338,7 +341,9 @@ Usage:
             self._ctx,
             abs_path=path,
             old_bytes=old_bytes,
-            new_bytes=appended_bytes if old_bytes is None else old_bytes + appended_bytes,
+            new_bytes=appended_bytes
+            if old_bytes is None
+            else old_bytes + appended_bytes,
             op="create" if created_file else "append",
             call_id=self._call_id,
             # create: дописанное и есть весь файл; append без old: только кусок

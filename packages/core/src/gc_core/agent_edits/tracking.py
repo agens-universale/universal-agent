@@ -18,6 +18,7 @@ fs-тулов, поэтому обёртка про них ничего не з�
 ``test_tracking_backend_delegates_full_backend_surface``, сигнатуры —
 ``test_tracking_backend_overrides_keep_the_inner_signature``.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,7 +37,11 @@ def _capture_kw(capture_max_chars: Optional[int]) -> dict:
     Безусловный проброс роняет такой бэкенд ``TypeError`` — а вызывающий гасит
     исключение общим ``except`` и молча уходит на обходной путь.
     """
-    return {} if capture_max_chars is None else {"capture_max_chars": capture_max_chars}
+    return (
+        {}
+        if capture_max_chars is None
+        else {"capture_max_chars": capture_max_chars}
+    )
 
 
 def wrap_local_for_tracking(inner: Any, ctx: Any) -> Any:
@@ -180,7 +185,10 @@ class TrackingFsBackend:
     ) -> Any:
         return await self._atrack_shell_delta(
             lambda: self._inner.aexec(
-                command, cwd=cwd, timeout=timeout, env=env,
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
                 **_capture_kw(capture_max_chars),
             )
         )
@@ -198,7 +206,11 @@ class TrackingFsBackend:
         помощников), поэтому дельта журналируется так же, как у ``aexec``."""
         return await self._atrack_shell_delta(
             lambda: arun_backend_exec_raw(
-                self._inner, command, cwd=cwd, timeout=timeout, env=env,
+                self._inner,
+                command,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
                 **_capture_kw(capture_max_chars),
             )
         )
@@ -215,7 +227,11 @@ class TrackingFsBackend:
     ) -> Any:
         return await self._atrack_shell_delta(
             lambda: self._inner.aexec_argv(
-                argv, stdin=stdin, cwd=cwd, timeout=timeout, env=env,
+                argv,
+                stdin=stdin,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
                 **_capture_kw(capture_max_chars),
             )
         )
@@ -235,13 +251,17 @@ class TrackingFsBackend:
         # гасит общим except и тихо уходит на медленный обходной путь.
         return await self._atrack_shell_delta(
             lambda: self._inner.arun_python(
-                code, cwd=cwd, timeout=timeout, env=env,
+                code,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
                 **_capture_kw(capture_max_chars),
             )
         )
 
-    async def aspawn_background(self, command: str, *, cwd: Any = None,
-                                env: Any = None) -> dict:
+    async def aspawn_background(
+        self, command: str, *, cwd: Any = None, env: Any = None
+    ) -> dict:
         """Фоновый запуск проксируем как есть, без шелл-делты.
 
         Делта снимается ВОКРУГ вызова, а этот возвращается мгновенно: разница
@@ -261,13 +281,17 @@ class TrackingFsBackend:
 
     # --- запись ---
 
-    async def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def write(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         await self._inner.write(path, content, encoding=encoding)
 
     async def write_bytes(self, path: str, data: bytes) -> None:
         await self._inner.write_bytes(path, data)
 
-    async def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
         await self._inner.append(path, content, encoding=encoding)
 
     async def copy(self, src: str, dst: str) -> None:
@@ -302,8 +326,9 @@ class TrackingFsBackend:
     def isabs(self, path: str) -> bool:
         return self._inner.isabs(path)
 
-    async def walk_entries(self, path: str, *, prune_names=(),
-                           prune_dot_dirs: bool = False) -> list:
+    async def walk_entries(
+        self, path: str, *, prune_names=(), prune_dot_dirs: bool = False
+    ) -> list:
         return await self._inner.walk_entries(
             path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
         )
@@ -344,8 +369,12 @@ class TrackingFsBackend:
     async def getsize(self, path: str) -> int:
         return await self._inner.getsize(path)
 
-    async def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
-        return await self._inner.stat_info(path, follow_symlinks=follow_symlinks)
+    async def stat_info(
+        self, path: str, follow_symlinks: bool = False
+    ) -> dict:
+        return await self._inner.stat_info(
+            path, follow_symlinks=follow_symlinks
+        )
 
     async def readable(self, path: str) -> bool:
         return await self._inner.readable(path)
@@ -387,7 +416,9 @@ class TrackingFsBackend:
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> AsyncIterator[tuple[str, bool]]:
-        async for item in self._inner.iter_walk(path, should_descend=should_descend):
+        async for item in self._inner.iter_walk(
+            path, should_descend=should_descend
+        ):
             yield item
 
     async def iter_files(
@@ -396,7 +427,9 @@ class TrackingFsBackend:
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> AsyncIterator[str]:
-        async for item in self._inner.iter_files(path, should_descend=should_descend):
+        async for item in self._inner.iter_files(
+            path, should_descend=should_descend
+        ):
             yield item
 
     def normpath(self, path: str) -> str:

@@ -467,7 +467,9 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         },
         "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
         "pricing": app_cfg.pricing.model_dump(),
-        "agent_auth": app_cfg.agent_auth.model_dump() if app_cfg.agent_auth else {},
+        "agent_auth": app_cfg.agent_auth.model_dump()
+        if app_cfg.agent_auth
+        else {},
         "agent_edits": app_cfg.agent_edits.model_dump(),
         "fs_tools": app_cfg.fs_tools.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),

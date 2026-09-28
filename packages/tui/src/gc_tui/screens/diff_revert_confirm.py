@@ -64,10 +64,12 @@
 `EditsView.reset_targets`, тот же приём и та же граница сервис/UI, что и у
 цели отката). Каркас (шапка/футер/resize/`LazyBody`) общий.
 """
+
 from __future__ import annotations
 
 from typing import List, Optional, Sequence, Tuple
 
+from gc_core.agent_edits.deltas import FileDelta
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -76,7 +78,6 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_core.agent_edits.deltas import FileDelta
 from gc_tui.palette import ACCENT, WARN
 from gc_tui.screens.diff import (
     BODY_UNBUILT,
@@ -153,7 +154,9 @@ def confirm_action(count: int, *, reset: bool = False) -> str:
     return f"Enter {verb} {count} {files_word(count)}"
 
 
-def confirm_footer(*, count: int, can_scroll: bool = True, reset: bool = False) -> str:
+def confirm_footer(
+    *, count: int, can_scroll: bool = True, reset: bool = False
+) -> str:
     """Футер подтверждения; мёртвые клавиши не рекламируются — как везде.
 
     Курсора по файлам нет (Е3): `n`/`p` ушли, остались прокрутка (только когда
@@ -173,7 +176,9 @@ CONFIRM_FOOTER = confirm_footer(count=1)
 RESET_CONFIRM_FOOTER = confirm_footer(count=1, reset=True)
 
 
-def file_caption(path: str, add: int, del_: int, *, countable: bool = True) -> str:
+def file_caption(
+    path: str, add: int, del_: int, *, countable: bool = True
+) -> str:
     """Строка имени блока в дереве: имя и вклад файла в итог шапки (Р22).
 
     Обрамления тире нет (Е3): блок опознаётся отступом вложенных строк, а
@@ -193,9 +198,15 @@ def _compact_slots(lines: Sequence[Text]) -> List[BodySlot]:
     Список режется на куски по `_COMPACT_CHUNK_LINES`: виджет на строку вернул
     бы ту же стену, от которой компактный вид и уходит.
     """
-    slots = [BodySlot(meta_line(COMPACT_NOTE.format(limit=FULL_PREVIEW_MAX_FILES), "tree-line"))]
+    slots = [
+        BodySlot(
+            meta_line(
+                COMPACT_NOTE.format(limit=FULL_PREVIEW_MAX_FILES), "tree-line"
+            )
+        )
+    ]
     for start in range(0, len(lines), _COMPACT_CHUNK_LINES):
-        chunk = Text("\n").join(lines[start:start + _COMPACT_CHUNK_LINES])
+        chunk = Text("\n").join(lines[start : start + _COMPACT_CHUNK_LINES])
         slots.append(BodySlot(meta_line(chunk, "tree-line")))
     return slots
 
@@ -304,8 +315,12 @@ class RevertConfirmScreen(Screen[bool]):
 
     @classmethod
     def for_reset(
-        cls, *, paths: Sequence[str], targets: Sequence[ResetTarget], mass: bool,
-    ) -> "RevertConfirmScreen":
+        cls,
+        *,
+        paths: Sequence[str],
+        targets: Sequence[ResetTarget],
+        mass: bool,
+    ) -> RevertConfirmScreen:
         """Подтверждение сброса (`u`/`Ctrl+U`, задача 4 доп. — С7): без диффа
         — сброс не пишет на диск, отменять в строках нечего, — поэтому
         `add`/`del_`/`exact`/`preview` и пропущенные откатом здесь не
@@ -316,8 +331,13 @@ class RevertConfirmScreen(Screen[bool]):
         считает всех.
         """
         return cls(
-            paths=paths, add=0, del_=0, exact=True, reset_targets=targets,
-            reset=True, mass=mass,
+            paths=paths,
+            add=0,
+            del_=0,
+            exact=True,
+            reset_targets=targets,
+            reset=True,
+            mass=mass,
         )
 
     # ---- каркас --------------------------------------------------------
@@ -404,7 +424,10 @@ class RevertConfirmScreen(Screen[bool]):
             build_reset_title(self._paths, mass=self._mass, width=width)
             if self._reset
             else build_revert_title(
-                self._paths, add=self._add, del_=self._del, exact=self._exact,
+                self._paths,
+                add=self._add,
+                del_=self._del,
+                exact=self._exact,
                 width=width,
             )
         )
@@ -488,31 +511,53 @@ class RevertConfirmScreen(Screen[bool]):
         for path, delta in self._preview:
             gap()
             if named:
-                slots.append(BodySlot(meta_line(
-                    paint_counters(
-                        file_caption(path, delta.add, delta.del_,
-                                     countable=delta.countable)
-                    ),
-                    "tree-head",
-                )))
+                slots.append(
+                    BodySlot(
+                        meta_line(
+                            paint_counters(
+                                file_caption(
+                                    path,
+                                    delta.add,
+                                    delta.del_,
+                                    countable=delta.countable,
+                                )
+                            ),
+                            "tree-head",
+                        )
+                    )
+                )
             target = self._targets_by_path.get(path)
             if target is not None:
-                line = revert_target_arrow(target) if named else revert_target_line(target)
-                slots.append(BodySlot(meta_line(_accent_text(line), "tree-line")))
+                line = (
+                    revert_target_arrow(target)
+                    if named
+                    else revert_target_line(target)
+                )
+                slots.append(
+                    BodySlot(meta_line(_accent_text(line), "tree-line"))
+                )
                 slots.extend(
-                    BodySlot(_NoSelect(warn, classes="tree-warn", markup=False))
+                    BodySlot(
+                        _NoSelect(warn, classes="tree-warn", markup=False)
+                    )
                     for warn in revert_target_warnings(target)
                 )
             if path in self._external:
                 slots.append(
-                    BodySlot(_NoSelect(WARN_EXTERNAL, classes="tree-warn",
-                                       markup=False))
+                    BodySlot(
+                        _NoSelect(
+                            WARN_EXTERNAL, classes="tree-warn", markup=False
+                        )
+                    )
                 )
             if not delta.countable:
-                slots.append(BodySlot(meta_line(VIEWER_NO_PREVIEW, "tree-line")))
+                slots.append(
+                    BodySlot(meta_line(VIEWER_NO_PREVIEW, "tree-line"))
+                )
                 continue
-            parts = split_body(delta.hunks, path=path, fill_width=fill,
-                               by_edits=False)
+            parts = split_body(
+                delta.hunks, path=path, fill_width=fill, by_edits=False
+            )
             if not parts:
                 slots.append(BodySlot(meta_line(PREVIEW_NOTHING, "tree-line")))
                 continue
@@ -546,7 +591,9 @@ class RevertConfirmScreen(Screen[bool]):
         lines: List[Text] = []
         for path, delta in self._preview:
             line = paint_counters(
-                file_caption(path, delta.add, delta.del_, countable=delta.countable)
+                file_caption(
+                    path, delta.add, delta.del_, countable=delta.countable
+                )
             )
             target = self._targets_by_path.get(path)
             warns: List[str] = []
@@ -587,8 +634,12 @@ class RevertConfirmScreen(Screen[bool]):
             line.append("  ")
             line.append_text(_accent_text(reset_target_line(target.target)))
             lines.append(line)
-            lines.append(Text(f"  {reset_loss_line(target)}",
-                              style=WARN if target.loses_point else ""))
+            lines.append(
+                Text(
+                    f"  {reset_loss_line(target)}",
+                    style=WARN if target.loses_point else "",
+                )
+            )
         return lines
 
     def _reset_slots(self) -> List[BodySlot]:
@@ -620,13 +671,21 @@ class RevertConfirmScreen(Screen[bool]):
             if target is None:
                 continue
             loss = reset_loss_line(target)
-            slots.append(BodySlot(
-                _NoSelect(loss, classes="tree-warn", markup=False)
-                if target.loses_point else meta_line(loss, "tree-line")
-            ))
-            slots.append(BodySlot(
-                meta_line(_accent_text(reset_target_line(target.target)), "tree-sub")
-            ))
+            slots.append(
+                BodySlot(
+                    _NoSelect(loss, classes="tree-warn", markup=False)
+                    if target.loses_point
+                    else meta_line(loss, "tree-line")
+                )
+            )
+            slots.append(
+                BodySlot(
+                    meta_line(
+                        _accent_text(reset_target_line(target.target)),
+                        "tree-sub",
+                    )
+                )
+            )
         return slots
 
     # ---- решение -------------------------------------------------------

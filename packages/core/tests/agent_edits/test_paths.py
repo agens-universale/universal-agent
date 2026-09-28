@@ -1,4 +1,5 @@
 """canonical_path_key: три исхода ключа — относительный, внешний, защищённый."""
+
 from __future__ import annotations
 
 import os
@@ -18,7 +19,9 @@ def launch_root(tmp_path):
 
 
 def test_canonical_key_relative_under_launch_root(launch_root):
-    key = canonical_path_key(str(launch_root / "src" / "foo.py"), str(launch_root))
+    key = canonical_path_key(
+        str(launch_root / "src" / "foo.py"), str(launch_root)
+    )
     assert key == "src/foo.py"
 
 
@@ -36,9 +39,13 @@ def test_canonical_key_has_three_outcomes(launch_root, tmp_path, monkeypatch):
     """
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars.env, "gc_home", launch_root.parent / "gc_home")
+    monkeypatch.setattr(
+        env_vars.env, "gc_home", launch_root.parent / "gc_home"
+    )
 
-    inside = canonical_path_key(str(launch_root / "src" / "foo.py"), str(launch_root))
+    inside = canonical_path_key(
+        str(launch_root / "src" / "foo.py"), str(launch_root)
+    )
     assert inside == "src/foo.py"
 
     outside = tmp_path / "other" / "a.py"
@@ -57,7 +64,9 @@ def test_canonical_key_has_three_outcomes(launch_root, tmp_path, monkeypatch):
 def test_operational_gc_not_trackable(launch_root, monkeypatch):
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars.env, "gc_home", launch_root.parent / "gc_home")
+    monkeypatch.setattr(
+        env_vars.env, "gc_home", launch_root.parent / "gc_home"
+    )
     gc_file = launch_root / ".gc" / "threads.json"
     gc_file.parent.mkdir(parents=True)
     gc_file.write_text("{}", encoding="utf-8")
@@ -67,12 +76,16 @@ def test_operational_gc_not_trackable(launch_root, monkeypatch):
 def test_regular_file_gets_relative_key(launch_root, monkeypatch):
     from gc_core.config_modules import env_vars
 
-    monkeypatch.setattr(env_vars.env, "gc_home", launch_root.parent / "gc_home")
+    monkeypatch.setattr(
+        env_vars.env, "gc_home", launch_root.parent / "gc_home"
+    )
     path = str(launch_root / "src" / "foo.py")
     assert canonical_path_key(path, str(launch_root)) == "src/foo.py"
 
 
-def test_protection_outranks_being_outside_the_project(launch_root, monkeypatch):
+def test_protection_outranks_being_outside_the_project(
+    launch_root, monkeypatch
+):
     """Защищённый путь ВНЕ проекта — `None`, а не внешний ключ.
 
     Проверка защиты стоит раньше проверки «внутри проекта»: иначе рабочий файл
@@ -82,7 +95,9 @@ def test_protection_outranks_being_outside_the_project(launch_root, monkeypatch)
     from gc_core.config_modules import env_vars
     from gc_core.config_modules.env_vars import gc_paths
 
-    monkeypatch.setattr(env_vars.env, "gc_home", launch_root.parent / "gc_home")
+    monkeypatch.setattr(
+        env_vars.env, "gc_home", launch_root.parent / "gc_home"
+    )
     operational = gc_paths()["config"] / "config.yml"
     operational.parent.mkdir(parents=True, exist_ok=True)
     operational.write_text("x", encoding="utf-8")

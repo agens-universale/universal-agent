@@ -77,6 +77,7 @@ def test_build_agent_widgets_empty_fence_yields_no_block_panel():
     pytest.importorskip("textual")
     from gc_tui.services.trace_render import build_agent_widgets
     from gc_tui.widgets.block_panel import BlockPanel
+
     ws = build_agent_widgets("```\n\n```", event_no=1)
     assert not any(isinstance(w, BlockPanel) for w in ws)
 
@@ -167,9 +168,15 @@ async def test_render_thread_readonly_call_row_uses_wire_tool_name():
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     records = [
-        _env({"type": "function_call", "id": "fc1", "call_id": "c1",
-              "name": "fs_append_file",
-              "arguments": '{"path": "x.py", "content": "hi"}'}),
+        _env(
+            {
+                "type": "function_call",
+                "id": "fc1",
+                "call_id": "c1",
+                "name": "fs_append_file",
+                "arguments": '{"path": "x.py", "content": "hi"}',
+            }
+        ),
     ]
 
     class _A(App):
@@ -177,7 +184,9 @@ async def test_render_thread_readonly_call_row_uses_wire_tool_name():
             yield VerticalScroll(id="t")
 
         def on_mount(self):
-            render_thread_readonly(self.query_one("#t", VerticalScroll), records)
+            render_thread_readonly(
+                self.query_one("#t", VerticalScroll), records
+            )
 
     async with _A().run_test() as pilot:
         row = pilot.app.screen.query_one(ToolCallRow)

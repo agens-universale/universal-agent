@@ -15,8 +15,13 @@ from textual.containers import Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
+from gc_tui.form_frame import (
+    FOOTER_SCROLL,
+    body_scrollable,
+    cap_frame_height,
+    scroll_body,
+)
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
-from gc_tui.form_frame import (FOOTER_SCROLL, body_scrollable, cap_frame_height, scroll_body)
 
 _FOOTER = "Space — отметить · Enter — выполнить отмеченное · Esc — позже (доступно в /settings)"
 _FOOTER_EMPTY = "Enter или Esc — продолжить"  # отмечать нечего — футер не врёт
@@ -157,7 +162,11 @@ class PostUpdateScreen(Screen):
         base = _FOOTER if self._items else _FOOTER_EMPTY
         # Клавиша прокрутки называется, только пока есть что прокручивать — то
         # же правило, что в настройках и онбординге.
-        return base + FOOTER_SCROLL if body_scrollable(self, "#pu-scroll") else base
+        return (
+            base + FOOTER_SCROLL
+            if body_scrollable(self, "#pu-scroll")
+            else base
+        )
 
     def _sync_footer(self) -> None:
         try:
@@ -219,7 +228,9 @@ class PostUpdateScreen(Screen):
         if self._items:
             frame.mount(Static(_HINT, classes="post-update-hint pu-hint"))
         for i, key in enumerate(self._items):
-            frame.mount(Static(self._row_text(key, i), classes="post-update-item"))
+            frame.mount(
+                Static(self._row_text(key, i), classes="post-update-item")
+            )
         self._sync_footer()
         # Полный футер длиннее и на узком окне занимает больше строк — потолок
         # рамки считается от его фактической высоты, значит пересчитать.
@@ -307,7 +318,9 @@ class PostUpdateScreen(Screen):
         if event.key in ("ctrl+up", "ctrl+down"):
             # Постраничная прокрутка тела — как в двух других экранах форм.
             event.stop()
-            scroll_body(self, "#pu-scroll", -1 if event.key == "ctrl+up" else 1)
+            scroll_body(
+                self, "#pu-scroll", -1 if event.key == "ctrl+up" else 1
+            )
         elif event.key == "down":
             event.stop()
             self._move(1)

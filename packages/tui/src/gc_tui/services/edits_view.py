@@ -35,10 +35,10 @@
 
 Слой ``tui/services``: без Textual, чистые данные поверх ``agent_edits``.
 """
+
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, replace
 from datetime import datetime
 from pathlib import Path
@@ -55,7 +55,12 @@ from gc_core.agent_edits.deltas import (
     file_entries,
 )
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.agent_edits.ladder import STEP_ACCEPTED, STEP_HEAD, SessionStep, session_step
+from gc_core.agent_edits.ladder import (
+    STEP_ACCEPTED,
+    STEP_HEAD,
+    SessionStep,
+    session_step,
+)
 from gc_core.agent_edits.mode import resolve_mode
 from gc_core.agent_edits.paths import is_external_key
 from gc_core.agent_edits.revert import RevertOutcome, revert_paths
@@ -69,6 +74,7 @@ from gc_core.config_modules.agent_edits import (
     DEFAULT_MAX_DIFF_SOURCE_BYTES,
 )
 from gc_core.thread_store import edits_journal_path
+
 from gc_tui.services.edits_lookup import disk_signature, journal_signature
 
 _logger = logging.getLogger(__name__)
@@ -81,18 +87,32 @@ SOURCE_TURN = "turn"
 FULL_FILE_CONTEXT = 1_000_000
 
 # Причины отказа `accept`/`reset_accept` — тот же приём.
-ACCEPT_EXTERNAL = "external"          # ключ вне проекта — базы не бывает, capture_accepted не зовём
-ACCEPT_READ_FAILED = "read_failed"    # файл пропал/залочен между is_file() и read_bytes()
-ACCEPT_TOO_LARGE = "too_large"        # файл больше max_diff_source_bytes — принятие недоступно
-ACCEPT_WRITE_FAILED = "write_failed"  # стор не принял снимок: занятый лок индекса, полный диск
-RESET_NOT_ACCEPTED = "not_accepted"   # у пути нет принятой базы — сбрасывать нечего
-RESET_WRITE_FAILED = "write_failed"   # стор не отдал снимок: тот же класс отказов
+ACCEPT_EXTERNAL = (
+    "external"  # ключ вне проекта — базы не бывает, capture_accepted не зовём
+)
+ACCEPT_READ_FAILED = (
+    "read_failed"  # файл пропал/залочен между is_file() и read_bytes()
+)
+ACCEPT_TOO_LARGE = (
+    "too_large"  # файл больше max_diff_source_bytes — принятие недоступно
+)
+ACCEPT_WRITE_FAILED = (
+    "write_failed"  # стор не принял снимок: занятый лок индекса, полный диск
+)
+RESET_NOT_ACCEPTED = (
+    "not_accepted"  # у пути нет принятой базы — сбрасывать нечего
+)
+RESET_WRITE_FAILED = (
+    "write_failed"  # стор не отдал снимок: тот же класс отказов
+)
 
 # Причина попадания файла в группу «разобрано» (§4.1/§4.2 спеки волны 4) — уже
 # готовые слова для колонки группы, не машинный код: словарь задачи фиксирует
 # ровно эти два значения, третьего не заводим.
-SETTLED_MANUAL = "вручную"    # жив accepted_state (даже если settled сработал по коммиту)
-SETTLED_COMMIT = "коммитом"   # accepted_state нет, чисто относительно HEAD
+SETTLED_MANUAL = (
+    "вручную"  # жив accepted_state (даже если settled сработал по коммиту)
+)
+SETTLED_COMMIT = "коммитом"  # accepted_state нет, чисто относительно HEAD
 
 # Подписи целей отката (§4.4 спеки) — готовые слова превью, собираются ЗДЕСЬ
 # (граница сервиса и UI, задача 9): экран Textual их не формулирует.
@@ -112,11 +132,15 @@ SKIP_NOT_REVERTABLE = "достоверной базы для отката не�
 class AcceptOutcome:
     """Итог принятия: чья база сдвинута, что ушло в индекс, что пропущено (Р26/Р27/Р29)."""
 
-    accepted: List[str]              # ключи, у которых сдвинута база
-    staged: int                      # сколько ушло в индекс (включая удаления)
-    stage_error: Optional[str]       # None — git add прошёл, либо принятие не в git-режиме
-    skipped: List[Tuple[str, str]]   # (ключ, причина) — напр. «файл больше лимита»
-    with_external: List[str]         # принятые, у которых entry.external — для плашки
+    accepted: List[str]  # ключи, у которых сдвинута база
+    staged: int  # сколько ушло в индекс (включая удаления)
+    stage_error: Optional[
+        str
+    ]  # None — git add прошёл, либо принятие не в git-режиме
+    skipped: List[
+        Tuple[str, str]
+    ]  # (ключ, причина) — напр. «файл больше лимита»
+    with_external: List[str]  # принятые, у которых entry.external — для плашки
 
 
 @dataclass(frozen=True)
@@ -124,7 +148,7 @@ class ResetOutcome:
     """Итог отмены принятия: у кого снята база и для кого жива ступень HEAD."""
 
     reset: List[str]
-    to_head: List[str]               # после сброса живёт ступень HEAD (условная плашка §13)
+    to_head: List[str]  # после сброса живёт ступень HEAD (условная плашка §13)
     skipped: List[Tuple[str, str]]
 
 
@@ -141,9 +165,9 @@ class RowStep:
     ровно по одному «времени» на природу ступени.
     """
 
-    kind: str                 # STEP_ACCEPTED | STEP_HEAD
-    ts: Optional[float]       # момент принятия (kind=STEP_ACCEPTED), иначе None
-    ref: Optional[str]        # короткая подпись коммита (kind=STEP_HEAD), иначе None
+    kind: str  # STEP_ACCEPTED | STEP_HEAD
+    ts: Optional[float]  # момент принятия (kind=STEP_ACCEPTED), иначе None
+    ref: Optional[str]  # короткая подпись коммита (kind=STEP_HEAD), иначе None
 
 
 @dataclass(frozen=True)
@@ -157,8 +181,12 @@ class ActiveRow:
     """
 
     entry: FileEntry
-    step: Optional[RowStep]     # None — счёт от начала сессии; в «Ходе» — ВСЕГДА None (Р27)
-    has_accepted_base: bool     # есть ли `.accepted` у пути — НЕ то же самое, что `step`
+    step: Optional[
+        RowStep
+    ]  # None — счёт от начала сессии; в «Ходе» — ВСЕГДА None (Р27)
+    has_accepted_base: (
+        bool  # есть ли `.accepted` у пути — НЕ то же самое, что `step`
+    )
     # Содержимое файла СЕЙЧАС и есть принятое — состояние, а не факт из
     # прошлого. Тот же расчёт, которым правило (а) отправляет путь в группу
     # «принято»: в «Сессии» такой путь до активного списка не доходит, а в
@@ -171,11 +199,13 @@ class SettledRow:
     """Файл в свёрнутой группе «разобрано»: кумулятив сессии, а не текущая дельта."""
 
     path: str
-    add: int           # кумулятив СЕССИИ (от начала сессии до диска), не сумма записей
+    add: int  # кумулятив СЕССИИ (от начала сессии до диска), не сумма записей
     del_: int
-    kind: str           # created|modified|deleted
-    reason: str          # SETTLED_MANUAL | SETTLED_COMMIT
-    exact: bool = True   # False → счётчики из журнала: базы нет, сравнить было нечем
+    kind: str  # created|modified|deleted
+    reason: str  # SETTLED_MANUAL | SETTLED_COMMIT
+    exact: bool = (
+        True  # False → счётчики из журнала: базы нет, сравнить было нечем
+    )
 
 
 @dataclass(frozen=True)
@@ -188,7 +218,7 @@ class SessionView:
     экрана считает активные файлы, разобранные — нет, §4.2).
     """
 
-    source: str                  # SOURCE_SESSION | SOURCE_TURN
+    source: str  # SOURCE_SESSION | SOURCE_TURN
     turn_id: Optional[str]
     active: List[ActiveRow]
     settled: List[SettledRow]
@@ -216,7 +246,7 @@ class RevertTarget:
     """
 
     path: str
-    kind: str                 # accepted|head|session|turn|delete|skip
+    kind: str  # accepted|head|session|turn|delete|skip
     label: str
     skip_reason: Optional[str]
     warns: Tuple[str, ...]
@@ -241,9 +271,11 @@ class ResetTarget:
     """
 
     path: str
-    target: RevertTarget          # куда пойдёт счёт после сброса
-    loses_point: bool             # исчезнет ли точка отката к принятому состоянию
-    accepted_ts: Optional[float]  # момент принятия; None — базы нет либо не прочиталась
+    target: RevertTarget  # куда пойдёт счёт после сброса
+    loses_point: bool  # исчезнет ли точка отката к принятому состоянию
+    accepted_ts: Optional[
+        float
+    ]  # момент принятия; None — базы нет либо не прочиталась
 
 
 def diff_limits(config: Optional[Dict[str, Any]]) -> Tuple[int, int]:
@@ -257,14 +289,24 @@ def diff_limits(config: Optional[Dict[str, Any]]) -> Tuple[int, int]:
     """
     section = (config or {}).get("agent_edits") or {}
     return (
-        _limit(section, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES,
-               minimum=1),
-        _limit(section, "hunk_context_lines", DEFAULT_HUNK_CONTEXT_LINES,
-               minimum=0),
+        _limit(
+            section,
+            "max_diff_source_bytes",
+            DEFAULT_MAX_DIFF_SOURCE_BYTES,
+            minimum=1,
+        ),
+        _limit(
+            section,
+            "hunk_context_lines",
+            DEFAULT_HUNK_CONTEXT_LINES,
+            minimum=0,
+        ),
     )
 
 
-def _limit(section: Dict[str, Any], key: str, default: int, *, minimum: int) -> int:
+def _limit(
+    section: Dict[str, Any], key: str, default: int, *, minimum: int
+) -> int:
     raw = section.get(key, default)
     if isinstance(raw, bool):
         return default
@@ -284,7 +326,8 @@ def _records_for_path(
     в журнал.
     """
     return sorted(
-        (rec for rec in records if rec.path == path_key), key=lambda rec: rec.ts
+        (rec for rec in records if rec.path == path_key),
+        key=lambda rec: rec.ts,
     )
 
 
@@ -301,7 +344,11 @@ def _head_state_label(commit_ref: Optional[str]) -> str:
     `HEAD_CAPTION_STEM`/`RESET_FROM_HEAD` в `tui.screens.diff` (тот же класс
     находки, тем же приёмом чинится и здесь).
     """
-    return f"закоммиченное состояние ({commit_ref})" if commit_ref else "закоммиченное состояние"
+    return (
+        f"закоммиченное состояние ({commit_ref})"
+        if commit_ref
+        else "закоммиченное состояние"
+    )
 
 
 def _row_step(step: Optional[SessionStep]) -> Optional[RowStep]:
@@ -393,7 +440,9 @@ class _LadderGitFacts:
         if head_rev is None:
             return
         rels = [rel for paths in by_rev.values() for rel in paths]
-        unchecked = [rel for rel in rels if (rel, head_rev) not in self._filter_cache]
+        unchecked = [
+            rel for rel in rels if (rel, head_rev) not in self._filter_cache
+        ]
         filtered = git_ops.custom_filter_paths(self._launch_root, unchecked)
         for rel in unchecked:
             self._filter_cache[(rel, head_rev)] = rel in filtered
@@ -401,26 +450,36 @@ class _LadderGitFacts:
         # файл с диска не читает и берёт форму выкладки — в пачке он был бы
         # чистым балластом памяти.
         unread = [
-            rel for rel in rels
+            rel
+            for rel in rels
             if not self._filter_cache[(rel, head_rev)]
             and (rel, head_rev) not in self._blob_cache
             and self._within_source_cap(rel)
         ]
-        for rel, blob in git_ops.blobs_at(self._launch_root, unread, rev="HEAD").items():
+        for rel, blob in git_ops.blobs_at(
+            self._launch_root, unread, rev="HEAD"
+        ).items():
             self._blob_cache[(rel, head_rev)] = blob
         for since, paths in by_rev.items():
-            unsigned = [rel for rel in paths if (rel, head_rev) not in self._ref_cache]
+            unsigned = [
+                rel for rel in paths if (rel, head_rev) not in self._ref_cache
+            ]
             for rel, (short_hash, ts) in git_ops.last_commits(
                 self._launch_root, since, unsigned
             ).items():
-                self._ref_cache[(rel, head_rev)] = git_ops.commit_label(short_hash, ts)
+                self._ref_cache[(rel, head_rev)] = git_ops.commit_label(
+                    short_hash, ts
+                )
                 self._commit_ts_cache[(rel, head_rev)] = float(ts)
 
     def _within_source_cap(self, rel: str) -> bool:
         """Файл на диске есть и не больше капа источника — его байты лестница читает."""
         path = abs_path_for_key(self._launch_root, rel)
         try:
-            return path.is_file() and path.stat().st_size <= self._max_source_bytes
+            return (
+                path.is_file()
+                and path.stat().st_size <= self._max_source_bytes
+            )
         except OSError:
             return False
 
@@ -451,7 +510,9 @@ class _LadderGitFacts:
                 # что у `head_bytes_like_disk`, без запуска git.
                 blob = self._blob_cache[blob_key]
                 self._bytes_cache[key] = (
-                    None if blob is None else git_ops.blob_like_disk(blob, disk)
+                    None
+                    if blob is None
+                    else git_ops.blob_like_disk(blob, disk)
                 )
             else:
                 self._bytes_cache[key] = git_ops.head_bytes_like_disk(
@@ -485,7 +546,9 @@ class _LadderGitFacts:
         except OSError:
             return False
 
-    def note_head_tree(self, rels: Sequence[str], tree: Optional[Dict[str, str]]) -> None:
+    def note_head_tree(
+        self, rels: Sequence[str], tree: Optional[Dict[str, str]]
+    ) -> None:
         """Ответ ``ls-tree`` по ``rels``, уже полученный сборкой, — в кэш отсутствия.
 
         Тот же запуск, что дал oid'ы (``prime``): второй по тем же путям только
@@ -503,13 +566,17 @@ class _LadderGitFacts:
     def has_filter(self, rel: str) -> bool:
         key = (rel, self._head_rev)
         if key not in self._filter_cache:
-            self._filter_cache[key] = git_ops.has_custom_filter(self._launch_root, rel)
+            self._filter_cache[key] = git_ops.has_custom_filter(
+                self._launch_root, rel
+            )
         return self._filter_cache[key]
 
     def head_ref(self, rel: str) -> Optional[str]:
         key = (rel, self._head_rev)
         if key not in self._ref_cache:
-            self._ref_cache[key] = git_ops.head_commit_label(self._launch_root, rel)
+            self._ref_cache[key] = git_ops.head_commit_label(
+                self._launch_root, rel
+            )
         return self._ref_cache[key]
 
     def head_commit_ts(self, rel: str) -> Optional[float]:
@@ -520,7 +587,9 @@ class _LadderGitFacts:
         """
         key = (rel, self._head_rev)
         if key not in self._commit_ts_cache:
-            self._commit_ts_cache[key] = git_ops.head_commit_ts(self._launch_root, rel)
+            self._commit_ts_cache[key] = git_ops.head_commit_ts(
+                self._launch_root, rel
+            )
         return self._commit_ts_cache[key]
 
 
@@ -533,7 +602,9 @@ def _cut_commands(records: List[EditRecord]) -> Tuple[Tuple[str, int], ...]:
     имя команды несоразмерно.
     """
     seen = dict.fromkeys(
-        (rec.turn_id, rec.command_paths) for rec in records if rec.command_paths
+        (rec.turn_id, rec.command_paths)
+        for rec in records
+        if rec.command_paths
     )
     return tuple(seen)
 
@@ -569,7 +640,9 @@ class EditsView:
         # ревью, находка 9). Теперь превью собирает вид раз на набор
         # (`revert_deltas`), но ключ остаётся дешёвым.
         self._cache: Dict[str, Tuple[Any, SessionView]] = {}
-        self._ladder_facts = _LadderGitFacts(self._launch_root, self._max_source_bytes)
+        self._ladder_facts = _LadderGitFacts(
+            self._launch_root, self._max_source_bytes
+        )
         # Ступень лестницы «Сессии» на путь — свежа СРАЗУ ПОСЛЕ любого вызова
         # `session_view(SOURCE_SESSION)` (её ставит `_build_session_view` на
         # каждый промах кэша); `file_diff`/`revert_delta`/`revert`/
@@ -614,9 +687,13 @@ class EditsView:
         # Подпись индекса снимков — ради принятия: оно меняет только индекс, и
         # принятие из другого окна иначе не сбрасывало бы кэш — откат отсюда
         # вёл бы к началу сессии мимо принятого состояния.
-        key = (turn_id, journal_signature(records),
-               disk_signature(self._launch_root, records), head_rev,
-               self._store.index_signature())
+        key = (
+            turn_id,
+            journal_signature(records),
+            disk_signature(self._launch_root, records),
+            head_rev,
+            self._store.index_signature(),
+        )
         cached = self._cache.get(source)
         if cached is not None and cached[0] == key:
             return cached[1]
@@ -670,12 +747,19 @@ class EditsView:
 
         view = self.session_view(source)
         entry = next(
-            (row.entry for row in view.active if row.entry.path == path_key), None,
+            (row.entry for row in view.active if row.entry.path == path_key),
+            None,
         )
-        settled = entry is None and any(row.path == path_key for row in view.settled)
+        settled = entry is None and any(
+            row.path == path_key for row in view.settled
+        )
         created = created_here(path_records)
         if entry is not None and entry.exact:
-            if created and source == SOURCE_SESSION and self._stepped(path_key):
+            if (
+                created
+                and source == SOURCE_SESSION
+                and self._stepped(path_key)
+            ):
                 created = False
             baseline = (
                 None
@@ -691,16 +775,24 @@ class EditsView:
             # той же базы, что числа строки группы (§12: сумма записей журнала
             # воспроизвела бы «+293 при реальных +133»). Ступень лестницы тут
             # не при чём: дельта от неё пуста — на то файл и разобран.
-            baseline = None if created else self._store.counting_session_baseline(path_key)
+            baseline = (
+                None
+                if created
+                else self._store.counting_session_baseline(path_key)
+            )
             if baseline is None and not created:
                 # Базы НЕТ вовсе (снимки вычищены; путь, который рекордер не
                 # снимал) — это не «база пуста»: пустую базу легализует только
                 # `created_here` (контракт `delta_vs_disk`, то же правило, что
                 # в `deltas.file_entries`). Иначе тело объявило бы весь файл
                 # написанным агентом — вранья громче, чем сумма записей.
-                return "".join(rec.hunks for rec in path_records if rec.hunks), False
+                return "".join(
+                    rec.hunks for rec in path_records if rec.hunks
+                ), False
         else:
-            return "".join(rec.hunks for rec in path_records if rec.hunks), False
+            return "".join(
+                rec.hunks for rec in path_records if rec.hunks
+            ), False
 
         delta = delta_vs_disk(
             baseline,
@@ -714,7 +806,9 @@ class EditsView:
             # Сравнить стороны нечем (бинарь, кап): у активного пути это видно
             # заранее по `entry`, у разобранного выясняется только здесь —
             # `SettledRow` признака не несёт. Честная деградация к журналу.
-            return "".join(rec.hunks for rec in path_records if rec.hunks), False
+            return "".join(
+                rec.hunks for rec in path_records if rec.hunks
+            ), False
         return delta.hunks, True
 
     def revert_delta(self, source: str, path_key: str) -> FileDelta:
@@ -741,7 +835,9 @@ class EditsView:
         """
         return self.revert_deltas(source, [path_key])[0]
 
-    def revert_deltas(self, source: str, path_keys: Sequence[str]) -> List[FileDelta]:
+    def revert_deltas(
+        self, source: str, path_keys: Sequence[str]
+    ) -> List[FileDelta]:
         """``revert_delta`` для многих путей — вид и выборка записей ОДИН раз.
 
         Превью массового отката звало ``revert_delta`` на каждый путь, а тот
@@ -751,7 +847,9 @@ class EditsView:
         """
         records, turn_id = self._records(source)
         by_path: Dict[str, List[EditRecord]] = {}
-        for rec in sorted(records, key=lambda rec: rec.ts):   # стабильно, как `_records_for_path`
+        for rec in sorted(
+            records, key=lambda rec: rec.ts
+        ):  # стабильно, как `_records_for_path`
             by_path.setdefault(rec.path, []).append(rec)
         # Прогревает `self._session_ladder` (задача 9): без вызова база
         # «Сессии» ниже могла бы читать устаревшую (или ещё не построенную)
@@ -765,14 +863,20 @@ class EditsView:
                 deltas.append(EMPTY_DELTA)
                 continue
             created = created_here(path_records)
-            if created and source == SOURCE_SESSION and self._stepped(path_key):
+            if (
+                created
+                and source == SOURCE_SESSION
+                and self._stepped(path_key)
+            ):
                 created = False
-            deltas.append(delta_vs_disk(
-                None if created else precise(path_key),
-                abs_path_for_key(self._launch_root, path_key),
-                max_source_bytes=self._max_source_bytes,
-                hunk_context_lines=self._hunk_context_lines,
-            ))
+            deltas.append(
+                delta_vs_disk(
+                    None if created else precise(path_key),
+                    abs_path_for_key(self._launch_root, path_key),
+                    max_source_bytes=self._max_source_bytes,
+                    hunk_context_lines=self._hunk_context_lines,
+                )
+            )
         return deltas
 
     def file_records(self, source: str, path_key: str) -> List[EditRecord]:
@@ -806,14 +910,25 @@ class EditsView:
             except OSError:
                 files.append((key, None))
             else:
-                files.append((key, st.st_size, st.st_mtime_ns, st.st_ino, st.st_ctime_ns))
+                files.append(
+                    (
+                        key,
+                        st.st_size,
+                        st.st_mtime_ns,
+                        st.st_ino,
+                        st.st_ctime_ns,
+                    )
+                )
         head_rev = (
             git_ops.head_rev_from_files(self._launch_root)
-            if self.mode == "git-mode" else None
+            if self.mode == "git-mode"
+            else None
         )
         return (tuple(files), self._store.index_signature(), head_rev)
 
-    def revert_targets(self, source: str, path_keys: Sequence[str]) -> List[RevertTarget]:
+    def revert_targets(
+        self, source: str, path_keys: Sequence[str]
+    ) -> List[RevertTarget]:
         """Куда вернёт `r` каждый путь — превью словами, до самого отката (§4.4 спеки).
 
         Источник задаёт форму цели (Р8): «Сессия» идёт по лестнице отсчёта
@@ -828,7 +943,9 @@ class EditsView:
         """
         view = self.session_view(source)
         active_by_path = {row.entry.path: row.entry for row in view.active}
-        settled_paths = {row.path for row in view.settled}   # у «Хода» всегда пусто
+        settled_paths = {
+            row.path for row in view.settled
+        }  # у «Хода» всегда пусто
 
         head_rev: Optional[str] = None
         turn_start_ts: Optional[float] = None
@@ -839,7 +956,8 @@ class EditsView:
                 head_rev = git_ops.head_rev_from_files(self._launch_root)
         committed = (
             self._prepare_head_steps(path_keys, head_rev)
-            if turn_start_ts is not None else None
+            if turn_start_ts is not None
+            else None
         )
 
         targets: List[RevertTarget] = []
@@ -849,17 +967,23 @@ class EditsView:
                 continue
             entry = active_by_path.get(key)
             if entry is None or not entry.revertable:
-                targets.append(RevertTarget(key, "skip", "", SKIP_NOT_REVERTABLE, ()))
+                targets.append(
+                    RevertTarget(key, "skip", "", SKIP_NOT_REVERTABLE, ())
+                )
                 continue
             if source == SOURCE_SESSION:
                 targets.append(self._session_revert_target(key, entry))
             else:
                 targets.append(
-                    self._turn_revert_target(key, entry, head_rev, turn_start_ts, committed)
+                    self._turn_revert_target(
+                        key, entry, head_rev, turn_start_ts, committed
+                    )
                 )
         return targets
 
-    def _session_revert_target(self, key: str, entry: FileEntry) -> RevertTarget:
+    def _session_revert_target(
+        self, key: str, entry: FileEntry
+    ) -> RevertTarget:
         """Цель «Сессии» для одного пути — та же ступень, что база отката/счёта.
 
         Ступень проверяется ПЕРВОЙ: `kind == "created"` бывает и у пути, чья
@@ -871,7 +995,8 @@ class EditsView:
         step = self._session_ladder.get(key)
         if step is not None and step.content is None:
             label = (
-                TARGET_DELETE_ACCEPTED_ABSENT if step.kind == STEP_ACCEPTED
+                TARGET_DELETE_ACCEPTED_ABSENT
+                if step.kind == STEP_ACCEPTED
                 else TARGET_DELETE_HEAD_ABSENT
             )
             return RevertTarget(key, "delete", label, None, ())
@@ -885,7 +1010,9 @@ class EditsView:
         if step.kind == STEP_ACCEPTED:
             label = f"принятое состояние ({_format_hhmm(step.ts)})"
             return RevertTarget(key, STEP_ACCEPTED, label, None, ())
-        return RevertTarget(key, STEP_HEAD, _head_state_label(step.commit_ref), None, ())
+        return RevertTarget(
+            key, STEP_HEAD, _head_state_label(step.commit_ref), None, ()
+        )
 
     def _turn_revert_target(
         self,
@@ -905,7 +1032,9 @@ class EditsView:
         except (OSError, TimeoutError):
             # Замок индекса снимков занят (другое окно, CLI, субагенты): превью
             # без предупреждения о принятом — беднее правды, но экран на `r` жив.
-            _logger.warning("принятое состояние не прочитано: %s", key, exc_info=True)
+            _logger.warning(
+                "принятое состояние не прочитано: %s", key, exc_info=True
+            )
             accepted = None
         if (
             accepted is not None
@@ -922,16 +1051,21 @@ class EditsView:
             except (OSError, TimeoutError):
                 # Та же деградация, что у снятия принятия: превью без
                 # предупреждения о коммите беднее правды, но экран на `r` жив.
-                _logger.warning("ступень HEAD не определена: %s", key, exc_info=True)
+                _logger.warning(
+                    "ступень HEAD не определена: %s", key, exc_info=True
+                )
                 head_step = None
             if head_step is not None:
                 rel = None if Path(key).is_absolute() else key
-                commit_ts = self._ladder_facts.head_commit_ts(rel) if rel else None
+                commit_ts = (
+                    self._ladder_facts.head_commit_ts(rel) if rel else None
+                )
                 if commit_ts is not None and commit_ts >= turn_start_ts:
                     ref = head_step.commit_ref
                     warns.append(
                         f"заденет коммит {ref}, сделанный после начала хода"
-                        if ref else "заденет коммит, сделанный после начала хода"
+                        if ref
+                        else "заденет коммит, сделанный после начала хода"
                     )
 
         return RevertTarget(key, "turn", TARGET_TURN_START, None, tuple(warns))
@@ -964,7 +1098,8 @@ class EditsView:
         """
         head_rev = (
             git_ops.head_rev_from_files(self._launch_root)
-            if self.mode == "git-mode" else None
+            if self.mode == "git-mode"
+            else None
         )
         committed = self._prepare_head_steps(path_keys, head_rev)
         targets: List[ResetTarget] = []
@@ -972,14 +1107,22 @@ class EditsView:
             try:
                 step = self._head_step(key, head_rev, committed)
             except (OSError, TimeoutError):
-                _logger.warning("ступень HEAD не определена: %s", key, exc_info=True)
+                _logger.warning(
+                    "ступень HEAD не определена: %s", key, exc_info=True
+                )
                 step = None
             if step is not None:
                 target = RevertTarget(
-                    key, STEP_HEAD, _head_state_label(step.commit_ref), None, (),
+                    key,
+                    STEP_HEAD,
+                    _head_state_label(step.commit_ref),
+                    None,
+                    (),
                 )
             else:
-                target = RevertTarget(key, "session", TARGET_SESSION_START, None, ())
+                target = RevertTarget(
+                    key, "session", TARGET_SESSION_START, None, ()
+                )
             loses_point, accepted_ts = self._accepted_point(key)
             targets.append(ResetTarget(key, target, loses_point, accepted_ts))
         return targets
@@ -1001,7 +1144,9 @@ class EditsView:
         try:
             accepted = self._store.accepted_state(path_key)
         except (OSError, TimeoutError):
-            _logger.warning("принятая база не прочитана: %s", path_key, exc_info=True)
+            _logger.warning(
+                "принятая база не прочитана: %s", path_key, exc_info=True
+            )
             return True, None
         if accepted is None:
             return False, None
@@ -1011,7 +1156,9 @@ class EditsView:
             max_source_bytes=self._max_source_bytes,
             hunk_context_lines=self._hunk_context_lines,
         )
-        return (not delta.countable or (delta.add, delta.del_) != (0, 0)), accepted.ts
+        return (
+            not delta.countable or (delta.add, delta.del_) != (0, 0)
+        ), accepted.ts
 
     def revert(self, source: str, path_keys: Sequence[str]) -> RevertOutcome:
         """Вернуть пути к базе ЭТОГО представления (Р8) — ступени лестницы у «Сессии».
@@ -1081,7 +1228,7 @@ class EditsView:
                 continue
             abs_path = abs_path_for_key(self._launch_root, key)
             if not abs_path.is_file():
-                contents[key] = None      # маркер «принято отсутствие файла»
+                contents[key] = None  # маркер «принято отсутствие файла»
                 continue
             try:
                 if abs_path.stat().st_size > self._max_source_bytes:
@@ -1096,19 +1243,24 @@ class EditsView:
         oid_rels = [key for key in candidates if not Path(key).is_absolute()]
         oids = (
             git_ops.head_blob_oids(self._launch_root, oid_rels)
-            if oid_rels and is_git else {}
+            if oid_rels and is_git
+            else {}
         )
 
         accepted: List[str] = []
         for key in candidates:
             try:
-                self._store.capture_accepted(key, contents[key], head_oid=oids.get(key))
+                self._store.capture_accepted(
+                    key, contents[key], head_oid=oids.get(key)
+                )
             except (OSError, TimeoutError):
                 # Занятый `index.json.lock` (второй экземпляр приложения,
                 # параллельный прогон), антивирусный лок, полный диск: отказ —
                 # часть исхода, а не падение наружу (докстринг метода). Экран
                 # зовёт `accept` без try/except нарочно.
-                _logger.warning("принятая база не записана: %s", key, exc_info=True)
+                _logger.warning(
+                    "принятая база не записана: %s", key, exc_info=True
+                )
                 skipped.append((key, ACCEPT_WRITE_FAILED))
                 continue
             accepted.append(key)
@@ -1121,8 +1273,11 @@ class EditsView:
             if stageable:
                 code, err = git_ops.add_paths(self._launch_root, stageable)
                 if code != 0:
-                    _logger.warning("git add при принятии не выполнен (%s): %s",
-                                     code, err.strip())
+                    _logger.warning(
+                        "git add при принятии не выполнен (%s): %s",
+                        code,
+                        err.strip(),
+                    )
                     stage_error = err
                 else:
                     staged = len(stageable)
@@ -1137,19 +1292,25 @@ class EditsView:
             accepted_keys = set(accepted)
             scoped = [rec for rec in records if rec.path in accepted_keys]
             entries_by_path = {
-                e.path: e for e in file_entries(
-                    scoped, self._store.counting_session_baseline, self._launch_root,
+                e.path: e
+                for e in file_entries(
+                    scoped,
+                    self._store.counting_session_baseline,
+                    self._launch_root,
                     max_source_bytes=self._max_source_bytes,
                     hunk_context_lines=self._hunk_context_lines,
                 )
             }
             with_external = [
-                key for key in accepted
+                key
+                for key in accepted
                 if key in entries_by_path and entries_by_path[key].external
             ]
 
         self.invalidate()
-        return AcceptOutcome(accepted, staged, stage_error, skipped, with_external)
+        return AcceptOutcome(
+            accepted, staged, stage_error, skipped, with_external
+        )
 
     def _stageable(self, rels: List[str]) -> List[str]:
         """Пути, которые ``git add`` вообще способен принять: есть на диске
@@ -1163,8 +1324,10 @@ class EditsView:
         """
         tracked = git_ops.ls_files_set(self._launch_root, rels)
         return [
-            rel for rel in rels
-            if rel in tracked or abs_path_for_key(self._launch_root, rel).exists()
+            rel
+            for rel in rels
+            if rel in tracked
+            or abs_path_for_key(self._launch_root, rel).exists()
         ]
 
     def reset_accept(self, path_keys: Sequence[str]) -> ResetOutcome:
@@ -1182,7 +1345,8 @@ class EditsView:
         skipped: List[Tuple[str, str]] = []
         head_rev = (
             git_ops.head_rev_from_files(self._launch_root)
-            if self.mode == "git-mode" else None
+            if self.mode == "git-mode"
+            else None
         )
         # Признак коммита — батчем, как в превью (`reset_targets`): он не зависит
         # от принятой базы, которую цикл ниже снимает, и посчитать его до цикла
@@ -1194,7 +1358,9 @@ class EditsView:
             except (OSError, TimeoutError):
                 # Тот же класс отказов, что в `accept`: занятый лок индекса,
                 # антивирус, полный диск — исход, а не исключение наружу.
-                _logger.warning("принятая база не снята: %s", key, exc_info=True)
+                _logger.warning(
+                    "принятая база не снята: %s", key, exc_info=True
+                )
                 skipped.append((key, RESET_WRITE_FAILED))
                 continue
             if not cleared:
@@ -1223,7 +1389,11 @@ class EditsView:
         спрашивать это только для «Сессии».
         """
         step = self._session_ladder.get(path_key)
-        return step.ts if step is not None and step.kind == STEP_ACCEPTED else None
+        return (
+            step.ts
+            if step is not None and step.kind == STEP_ACCEPTED
+            else None
+        )
 
     # --- внутреннее ---------------------------------------------------------
 
@@ -1266,7 +1436,9 @@ class EditsView:
         """База для СЧЁТА: более ранняя из точной и счётной."""
         if source == SOURCE_TURN:
             return lambda key: (
-                self._store.counting_turn_baseline(key, turn_id) if turn_id else None
+                self._store.counting_turn_baseline(key, turn_id)
+                if turn_id
+                else None
             )
         return self._store.counting_session_baseline
 
@@ -1319,10 +1491,13 @@ class EditsView:
         for key in path_keys:
             accepted = accepted_by_path[key]
             if accepted is None and key not in committed:
-                continue    # ни принятой базы, ни коммита по пути — ступени не будет
+                continue  # ни принятой базы, ни коммита по пути — ступени не будет
             rel = None if Path(key).is_absolute() else key
             steps[key] = session_step(
-                key, rel, accepted, self._step_snapshot(key), git_facts,
+                rel,
+                accepted,
+                self._step_snapshot(key),
+                git_facts,
                 committed_since_snapshot=key in committed,
             )
         return steps
@@ -1403,7 +1578,9 @@ class EditsView:
         try:
             committed, by_rev = self._committed_by_rev(rels, head_rev)
         except (OSError, TimeoutError):
-            _logger.warning("ступени HEAD не собраны батчем — по одному", exc_info=True)
+            _logger.warning(
+                "ступени HEAD не собраны батчем — по одному", exc_info=True
+            )
             return None
         # Сбой прогрева стоит только прогрева: множество уже верно, а без него
         # цикл пересчитал бы признак коммита по пути, снова дёргая индекс снимков.
@@ -1411,7 +1588,9 @@ class EditsView:
             self._ladder_facts.prime(head_rev, {})
             self._ladder_facts.prefetch(by_rev)
         except (OSError, TimeoutError):
-            _logger.warning("факты лестницы не прогреты — по одному", exc_info=True)
+            _logger.warning(
+                "факты лестницы не прогреты — по одному", exc_info=True
+            )
         return committed
 
     def _stepped(self, path_key: str) -> bool:
@@ -1484,7 +1663,9 @@ class EditsView:
         for key, entry in entries.items():
             step = self._session_ladder.get(key)
             if step is not None and step.content is None:
-                overridden[key] = replace(entry, kind="created", revertable=True)
+                overridden[key] = replace(
+                    entry, kind="created", revertable=True
+                )
         return overridden
 
     def _build_session_view(
@@ -1492,7 +1673,9 @@ class EditsView:
     ) -> SessionView:
         """«Сессия»: активные — от лестницы отсчёта (§3.2), разобранные — §4.1."""
         path_keys = sorted({rec.path for rec in records})
-        accepted_by_path = {key: self._store.accepted_state(key) for key in path_keys}
+        accepted_by_path = {
+            key: self._store.accepted_state(key) for key in path_keys
+        }
 
         # Ступень `.accepted` работает и без git (`accept` не требует git-mode
         # — см. test_accept_plain_folder_no_git_tail): без HEAD строится только
@@ -1502,7 +1685,9 @@ class EditsView:
         # `file_diff`/`revert_delta`/`revert`/`revert_targets` (задача 9) —
         # одна ступень на счёт, превью и запись.
         self._session_ladder = self._compute_session_steps(
-            path_keys, accepted_by_path, head_rev,
+            path_keys,
+            accepted_by_path,
+            head_rev,
         )
 
         entries = file_entries(
@@ -1533,7 +1718,8 @@ class EditsView:
                     ActiveRow(
                         entry=entry,
                         step=_row_step(self._session_ladder.get(entry.path)),
-                        has_accepted_base=accepted_by_path[entry.path] is not None,
+                        has_accepted_base=accepted_by_path[entry.path]
+                        is not None,
                     )
                 )
 
@@ -1592,10 +1778,15 @@ class EditsView:
             # действия по невидимому пути не будет.
             if self._nothing_left(entry, precise):
                 continue
-            active.append(ActiveRow(
-                entry=entry, step=None, has_accepted_base=accepted,
-                accepted_now=accepted and self._matches_accepted(entry.path, accepted_state),
-            ))
+            active.append(
+                ActiveRow(
+                    entry=entry,
+                    step=None,
+                    has_accepted_base=accepted,
+                    accepted_now=accepted
+                    and self._matches_accepted(entry.path, accepted_state),
+                )
+            )
         return SessionView(
             source=SOURCE_TURN,
             turn_id=turn_id,
@@ -1686,7 +1877,9 @@ class EditsView:
         )
         return delta.countable and (delta.add, delta.del_) == (0, 0)
 
-    def _is_undone(self, entry: FileEntry, accepted_by_path: Dict[str, Any]) -> bool:
+    def _is_undone(
+        self, entry: FileEntry, accepted_by_path: Dict[str, Any]
+    ) -> bool:
         """То же для «Сессии», но только у пути БЕЗ ступени и без принятия.
 
         Ступень различает породы, а нулевая дельта — нет: нулевая она у всех
@@ -1695,7 +1888,10 @@ class EditsView:
         записанный факт.
         """
         key = entry.path
-        if accepted_by_path[key] is not None or self._session_ladder.get(key) is not None:
+        if (
+            accepted_by_path[key] is not None
+            or self._session_ladder.get(key) is not None
+        ):
             return False
         return self._nothing_left(entry, self._session_precise_baseline)
 
@@ -1775,7 +1971,9 @@ class EditsView:
                 # Только по путям журнала: полный `git status -u` обходил бы
                 # весь проект, и в потоке интерфейса — на миллионе файлов F3
                 # открывался бы секундами.
-                status_rows = git_ops.status_entries_for(self._launch_root, rels)
+                status_rows = git_ops.status_entries_for(
+                    self._launch_root, rels
+                )
                 if status_rows is not None:
                     status_paths = {path for path, _xy in status_rows}
                     for rel in rels:
@@ -1789,7 +1987,9 @@ class EditsView:
                             rel in self._session_committed
                             and rel not in status_paths
                             and self._head_deleted(rel)
-                            and not abs_path_for_key(self._launch_root, rel).exists()
+                            and not abs_path_for_key(
+                                self._launch_root, rel
+                            ).exists()
                         ):
                             # Коммит удалил путь, и на диске его нет: закоммиченное
                             # «файла нет» и есть текущее состояние. `ls_files` такого
@@ -1797,14 +1997,22 @@ class EditsView:
                             settled.add(rel)
 
         return {
-            key: (SETTLED_MANUAL if accepted_by_path[key] is not None else SETTLED_COMMIT)
+            key: (
+                SETTLED_MANUAL
+                if accepted_by_path[key] is not None
+                else SETTLED_COMMIT
+            )
             for key in settled
         }
 
     def _head_deleted(self, path_key: str) -> bool:
         """Ступень пути — удаление, закоммиченное в этой сессии (``STEP_HEAD`` без байтов)."""
         step = self._session_ladder.get(path_key)
-        return step is not None and step.kind == STEP_HEAD and step.content is None
+        return (
+            step is not None
+            and step.kind == STEP_HEAD
+            and step.content is None
+        )
 
     def _settled_rows(
         self, records: List[EditRecord], reasons: Dict[str, str]
@@ -1821,14 +2029,21 @@ class EditsView:
         )
         return [
             SettledRow(
-                path=e.path, add=e.add, del_=e.del_, kind=e.kind,
-                reason=reasons[e.path], exact=e.exact,
+                path=e.path,
+                add=e.add,
+                del_=e.del_,
+                kind=e.kind,
+                reason=reasons[e.path],
+                exact=e.exact,
             )
             for e in entries
         ]
 
     def _head_step(
-        self, path_key: str, head_rev: Optional[str], committed: Optional[set] = None
+        self,
+        path_key: str,
+        head_rev: Optional[str],
+        committed: Optional[set] = None,
     ) -> Optional[SessionStep]:
         """Ступень HEAD сама по себе (§3.2 волны 4, правило 1 ``agent_edits.ladder``)
         — НЕЗАВИСИМО от того, кто победил бы в арбитраже с ``.accepted``.
@@ -1851,7 +2066,9 @@ class EditsView:
             return None
         rel = None if Path(path_key).is_absolute() else path_key
         if rel is None:
-            return None     # ключ вне репозитория — ступени HEAD нет по построению
+            return (
+                None  # ключ вне репозитория — ступени HEAD нет по построению
+            )
         if committed is None:
             # Батч из одного пути: при неизменившемся HEAD (обычный случай)
             # git не зовётся вовсе.
@@ -1860,12 +2077,18 @@ class EditsView:
         # ветку) — батч пустой, лишнего `ls-tree` не заводим.
         self._ladder_facts.prime(head_rev, {})
         return session_step(
-            path_key, rel, None, self._step_snapshot(path_key),
-            self._ladder_facts, committed_since_snapshot=rel in committed,
+            rel,
+            None,
+            self._step_snapshot(path_key),
+            self._ladder_facts,
+            committed_since_snapshot=rel in committed,
         )
 
     def _head_step_lives(
-        self, path_key: str, head_rev: Optional[str], committed: Optional[set] = None
+        self,
+        path_key: str,
+        head_rev: Optional[str],
+        committed: Optional[set] = None,
     ) -> bool:
         """Ступень HEAD жива после сброса принятия — см. ``_head_step``.
 
@@ -1877,5 +2100,7 @@ class EditsView:
         try:
             return self._head_step(path_key, head_rev, committed) is not None
         except (OSError, TimeoutError):
-            _logger.warning("ступень HEAD не определена: %s", path_key, exc_info=True)
+            _logger.warning(
+                "ступень HEAD не определена: %s", path_key, exc_info=True
+            )
             return False

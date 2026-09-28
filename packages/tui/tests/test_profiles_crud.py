@@ -108,7 +108,10 @@ def _footer(scr) -> str:
     # Хвост подсказки прокрутки снимаем: он зависит от того, влезло ли
     # содержимое в окно теста, и к предмету этих сверок не относится.
     from gc_tui.form_frame import FOOTER_SCROLL
-    return str(scr.query_one("#set-footer", Static).render()).replace(FOOTER_SCROLL, "")
+
+    return str(scr.query_one("#set-footer", Static).render()).replace(
+        FOOTER_SCROLL, ""
+    )
 
 
 def _flash(scr) -> str:

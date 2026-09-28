@@ -202,7 +202,7 @@ def render_prose(text: str) -> Text:
     heading/bullet; fenced-блоки и таблицы — plain (рамки/сетка только на финале).
     Возвращает rich.Text в нормальном цвете (INK)."""
     out = Text()
-    in_fence = 0          # 0 — вне блока, иначе длина открывающей ограды
+    in_fence = 0  # 0 — вне блока, иначе длина открывающей ограды
     for i, line in enumerate(text.split("\n")):
         if i:
             out.append("\n")

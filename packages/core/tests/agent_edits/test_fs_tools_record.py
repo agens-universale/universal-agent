@@ -4,6 +4,7 @@
 меняет так же, и сквозь журнал проходить обязан. Место общее нарочно — тот,
 кто заведёт шестой такой тул, ищет стража здесь.
 """
+
 from __future__ import annotations
 
 import base64
@@ -38,10 +39,18 @@ def roots(tmp_path, monkeypatch):
     return launch_root, threads_dir
 
 
-def _tool(tool_cls, launch_root, threads_dir, *, call_id="call-1", identity=True, config=None):
+def _tool(
+    tool_cls,
+    launch_root,
+    threads_dir,
+    *,
+    call_id="call-1",
+    identity=True,
+    config=None,
+):
     """Тул с ctx как в тестах tools/fs (local_ctx) + thread-identity для журнала."""
     ctx = local_ctx({"launch_root": str(launch_root), **(config or {})})
-    ctx.is_tui = True                # режим с записью правок по умолчанию
+    ctx.is_tui = True  # режим с записью правок по умолчанию
     if identity:
         ctx.threads_dir = str(threads_dir)
         ctx.system_id = "cli"
@@ -51,11 +60,15 @@ def _tool(tool_cls, launch_root, threads_dir, *, call_id="call-1", identity=True
 
 
 def _records(threads_dir):
-    return EditsJournal(edits_journal_path(str(threads_dir), "cli", "th1")).read_all()
+    return EditsJournal(
+        edits_journal_path(str(threads_dir), "cli", "th1")
+    ).read_all()
 
 
 def _snapshot_store(launch_root, threads_dir):
-    return SnapshotStore(launch_root / ".gc" / "agent_edits", "cli_th1", threads_dir)
+    return SnapshotStore(
+        launch_root / ".gc" / "agent_edits", "cli_th1", threads_dir
+    )
 
 
 def _sha(data: bytes) -> str:
@@ -76,7 +89,8 @@ def _install_http(monkeypatch, body: bytes) -> None:
         return httpx.AsyncClient(
             transport=httpx.MockTransport(
                 lambda request: httpx.Response(
-                    200, content=body,
+                    200,
+                    content=body,
                     headers={"Content-Type": "application/octet-stream"},
                 )
             )
@@ -104,10 +118,18 @@ async def test_download_file_records_the_file_it_created(roots, monkeypatch):
     (launch_root / "downloads").mkdir()
     _install_http(monkeypatch, body)
 
-    tool = _tool(DownloadFile, launch_root, threads_dir,
-                 config={"download": {"download_dir": "downloads", "max_bytes": 1_000_000}})
+    tool = _tool(
+        DownloadFile,
+        launch_root,
+        threads_dir,
+        config={
+            "download": {"download_dir": "downloads", "max_bytes": 1_000_000}
+        },
+    )
     result = json.loads(
-        await tool.acall(url="https://example.com/report.pdf", filename="report.pdf")
+        await tool.acall(
+            url="https://example.com/report.pdf", filename="report.pdf"
+        )
     )
     assert result["ok"] is True, result.get("error")
 
@@ -128,9 +150,9 @@ async def test_write_to_file_existing_records_write(roots):
     new_bytes = b"line1\nline2x\n"
 
     res = json.loads(
-        await _tool(WriteToFile, launch_root, threads_dir, call_id="call-write").acall(
-            path=str(target), content="line1\nline2x\n"
-        )
+        await _tool(
+            WriteToFile, launch_root, threads_dir, call_id="call-write"
+        ).acall(path=str(target), content="line1\nline2x\n")
     )
     assert res["ok"] is True
 
@@ -156,9 +178,9 @@ async def test_write_to_file_new_file_records_create(roots):
     new_bytes = b"hello\nworld\n"
 
     res = json.loads(
-        await _tool(WriteToFile, launch_root, threads_dir, call_id="call-create").acall(
-            path=str(target), content="hello\nworld\n"
-        )
+        await _tool(
+            WriteToFile, launch_root, threads_dir, call_id="call-create"
+        ).acall(path=str(target), content="hello\nworld\n")
     )
     assert res["ok"] is True
 
@@ -180,9 +202,9 @@ async def test_append_to_file_records_append_with_baseline(roots):
     target.write_bytes(old_bytes)
 
     res = json.loads(
-        await _tool(AppendToFile, launch_root, threads_dir, call_id="call-append").acall(
-            path=str(target), content="added\n", separator=""
-        )
+        await _tool(
+            AppendToFile, launch_root, threads_dir, call_id="call-append"
+        ).acall(path=str(target), content="added\n", separator="")
     )
     assert res["ok"] is True
     assert target.read_bytes() == b"start\nadded\n"
@@ -200,7 +222,10 @@ async def test_append_to_file_records_append_with_baseline(roots):
     assert rec.after_sha256 == _sha(target.read_bytes())
 
     path_key = canonical_path_key(str(target), str(launch_root))
-    assert _snapshot_store(launch_root, threads_dir).session_baseline(path_key) == old_bytes
+    assert (
+        _snapshot_store(launch_root, threads_dir).session_baseline(path_key)
+        == old_bytes
+    )
 
 
 async def test_append_over_mutate_cap_records_partial_without_baseline(roots):
@@ -231,7 +256,10 @@ async def test_append_over_mutate_cap_records_partial_without_baseline(roots):
     assert rec.del_ == 0
 
     path_key = canonical_path_key(str(target), str(launch_root))
-    assert _snapshot_store(launch_root, threads_dir).session_baseline(path_key) is None
+    assert (
+        _snapshot_store(launch_root, threads_dir).session_baseline(path_key)
+        is None
+    )
 
 
 async def test_apply_file_edits_records_edit(roots):
@@ -242,9 +270,9 @@ async def test_apply_file_edits_records_edit(roots):
     new_bytes = b"a\nB\nc\n"
 
     res = json.loads(
-        await _tool(ApplyFileEdits, launch_root, threads_dir, call_id="call-apply").acall(
-            path=str(target), edits=[{"search": "b\n", "replace": "B\n"}]
-        )
+        await _tool(
+            ApplyFileEdits, launch_root, threads_dir, call_id="call-apply"
+        ).acall(path=str(target), edits=[{"search": "b\n", "replace": "B\n"}])
     )
     assert res["applied"] is True
 
@@ -267,9 +295,9 @@ async def test_search_and_replace_records_edit(roots):
     new_bytes = b"host=new\nport=1\n"
 
     res = json.loads(
-        await _tool(SearchAndReplace, launch_root, threads_dir, call_id="call-replace").acall(
-            path=str(target), search="host=old", replace="host=new"
-        )
+        await _tool(
+            SearchAndReplace, launch_root, threads_dir, call_id="call-replace"
+        ).acall(path=str(target), search="host=old", replace="host=new")
     )
     assert res["applied"] is True
 
@@ -298,7 +326,9 @@ async def test_created_binary_file_is_revertable_by_deletion(roots):
     target = launch_root / "logo.png"
 
     res = json.loads(
-        await _tool(SaveBase64File, launch_root, threads_dir, call_id="call-png").acall(
+        await _tool(
+            SaveBase64File, launch_root, threads_dir, call_id="call-png"
+        ).acall(
             path=str(target), data=base64.b64encode(PNG_BYTES).decode("ascii")
         )
     )
@@ -306,7 +336,9 @@ async def test_created_binary_file_is_revertable_by_deletion(roots):
 
     from gc_core.agent_edits.deltas import file_entries
 
-    [entry] = file_entries(_records(threads_dir), lambda key: None, str(launch_root))
+    [entry] = file_entries(
+        _records(threads_dir), lambda key: None, str(launch_root)
+    )
     assert entry.kind == "created"
     assert entry.revertable is True
 
@@ -316,7 +348,9 @@ async def test_save_base64_file_records_binary(roots):
     target = launch_root / "shot.png"
 
     res = json.loads(
-        await _tool(SaveBase64File, launch_root, threads_dir, call_id="call-b64").acall(
+        await _tool(
+            SaveBase64File, launch_root, threads_dir, call_id="call-b64"
+        ).acall(
             path=str(target), data=base64.b64encode(PNG_BYTES).decode("ascii")
         )
     )
@@ -348,7 +382,9 @@ async def test_save_base64_file_over_existing_text_keeps_baseline(roots):
     new_bytes = b"line1\nline2x\n"
 
     res = json.loads(
-        await _tool(SaveBase64File, launch_root, threads_dir, call_id="call-b64-over").acall(
+        await _tool(
+            SaveBase64File, launch_root, threads_dir, call_id="call-b64-over"
+        ).acall(
             path=str(target), data=base64.b64encode(new_bytes).decode("ascii")
         )
     )
@@ -364,7 +400,10 @@ async def test_save_base64_file_over_existing_text_keeps_baseline(roots):
     assert rec.del_ == 1
     assert rec.before_sha256 == _sha(old_bytes)
     assert rec.after_sha256 == _sha(new_bytes)
-    assert _snapshot_store(launch_root, threads_dir).session_baseline(path_key) == old_bytes
+    assert (
+        _snapshot_store(launch_root, threads_dir).session_baseline(path_key)
+        == old_bytes
+    )
 
 
 async def test_save_base64_file_binary_over_existing_keeps_before_hash(roots):
@@ -375,14 +414,16 @@ async def test_save_base64_file_binary_over_existing_keeps_before_hash(roots):
     target.write_bytes(old_bytes)
 
     res = json.loads(
-        await _tool(SaveBase64File, launch_root, threads_dir, call_id="call-b64-bin").acall(
+        await _tool(
+            SaveBase64File, launch_root, threads_dir, call_id="call-b64-bin"
+        ).acall(
             path=str(target), data=base64.b64encode(PNG_BYTES).decode("ascii")
         )
     )
     assert res["ok"] is True
 
     rec = _records(threads_dir)[0]
-    assert rec.op == "write"          # существующий файл: вид правки — запись
+    assert rec.op == "write"  # существующий файл: вид правки — запись
     assert "no_diff" in rec.flags
     assert rec.flags == ["no_diff"]
     assert rec.hunks == ""
@@ -412,7 +453,10 @@ async def test_agent_edits_config_keys_affect_fs_tool_record(roots):
 
     rec = _records(threads_dir)[0]
     # контекст 1: вокруг правки ровно по одной строке, line3/line8 в дифф не попали
-    assert rec.hunks == "--- \n+++ \n@@ -5,3 +5,3 @@\n line4\n-line5\n+line5x\n line6\n"
+    assert (
+        rec.hunks
+        == "--- \n+++ \n@@ -5,3 +5,3 @@\n line4\n-line5\n+line5x\n line6\n"
+    )
     assert rec.add == 1
     assert rec.del_ == 1
 
@@ -420,7 +464,9 @@ async def test_agent_edits_config_keys_affect_fs_tool_record(roots):
 async def test_max_diff_chars_from_config_truncates_fs_tool_record(roots):
     launch_root, threads_dir = roots
     target = launch_root / "many.py"
-    target.write_bytes(("".join(f"old-{i}\n" for i in range(50))).encode("utf-8"))
+    target.write_bytes(
+        ("".join(f"old-{i}\n" for i in range(50))).encode("utf-8")
+    )
 
     res = json.loads(
         await _tool(
@@ -429,7 +475,9 @@ async def test_max_diff_chars_from_config_truncates_fs_tool_record(roots):
             threads_dir,
             call_id="call-cfg-chars",
             config={"agent_edits": {"max_diff_chars": 30}},
-        ).acall(path=str(target), content="".join(f"new-{i}\n" for i in range(50)))
+        ).acall(
+            path=str(target), content="".join(f"new-{i}\n" for i in range(50))
+        )
     )
     assert res["ok"] is True
 
@@ -446,9 +494,9 @@ async def test_backup_copy_is_not_recorded(roots):
     target.write_bytes(b"old\n")
 
     res = json.loads(
-        await _tool(WriteToFile, launch_root, threads_dir, call_id="call-backup").acall(
-            path=str(target), content="new\n", backup=True
-        )
+        await _tool(
+            WriteToFile, launch_root, threads_dir, call_id="call-backup"
+        ).acall(path=str(target), content="new\n", backup=True)
     )
     assert res["ok"] is True
     assert (launch_root / "app.py.bak").read_bytes() == b"old\n"
@@ -463,9 +511,9 @@ async def test_no_thread_identity_writes_no_journal(roots):
     target = launch_root / "app.py"
 
     res = json.loads(
-        await _tool(WriteToFile, launch_root, threads_dir, identity=False).acall(
-            path=str(target), content="hello\n"
-        )
+        await _tool(
+            WriteToFile, launch_root, threads_dir, identity=False
+        ).acall(path=str(target), content="hello\n")
     )
     assert res["ok"] is True
     assert target.read_bytes() == b"hello\n"
@@ -489,7 +537,9 @@ async def test_write_to_file_reads_old_content_only_when_recording(roots):
         tool._ctx.os_backend.read_bytes = read_bytes
         return calls
 
-    without_identity = _tool(WriteToFile, launch_root, threads_dir, identity=False)
+    without_identity = _tool(
+        WriteToFile, launch_root, threads_dir, identity=False
+    )
     reads_off = _count_reads(without_identity)
     raw = await without_identity.acall(path=str(target), content="a\n")
     assert json.loads(raw)["ok"] is True
@@ -516,9 +566,9 @@ async def test_append_to_empty_existing_file_is_not_a_creation(roots):
     target.write_bytes(b"")
 
     res = json.loads(
-        await _tool(AppendToFile, launch_root, threads_dir, call_id="call-empty").acall(
-            path=str(target), content="first\n", separator=""
-        )
+        await _tool(
+            AppendToFile, launch_root, threads_dir, call_id="call-empty"
+        ).acall(path=str(target), content="first\n", separator="")
     )
     assert res["ok"] is True
 
@@ -527,4 +577,6 @@ async def test_append_to_empty_existing_file_is_not_a_creation(roots):
 
     path_key = canonical_path_key(str(target), str(launch_root))
     base = _snapshot_store(launch_root, threads_dir).session_baseline(path_key)
-    assert base == b"", "база «до» у пустого файла не снята — откату не к чему вернуться"
+    assert base == b"", (
+        "база «до» у пустого файла не снята — откату не к чему вернуться"
+    )

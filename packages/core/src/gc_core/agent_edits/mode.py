@@ -5,6 +5,7 @@
 ``launch_root/.git``, иначе вендоренный репозиторий переключал бы режим всему
 проекту. Шелл-канал журнала работает только в git-mode.
 """
+
 from __future__ import annotations
 
 import shutil

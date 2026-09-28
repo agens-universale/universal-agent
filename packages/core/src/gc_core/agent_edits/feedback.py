@@ -7,6 +7,7 @@
 
 Слой данных: без UI (сообщение адресовано модели, не пользователю).
 """
+
 from __future__ import annotations
 
 from typing import Sequence
@@ -15,7 +16,9 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_TECHNICAL,
     wrap_technical_user_content,
 )
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id_func
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id_func,
+)
 
 
 def build_undo_feedback_body(
@@ -37,10 +40,7 @@ def build_undo_feedback_body(
         )
     if deleted:
         lines = "\n".join(f"- {k}" for k in deleted)
-        parts.append(
-            "Deleted previously created files:\n"
-            f"{lines}"
-        )
+        parts.append(f"Deleted previously created files:\n{lines}")
     return "\n\n".join(parts) + "\n"
 
 

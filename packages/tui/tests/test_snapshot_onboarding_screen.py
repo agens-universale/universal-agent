@@ -11,6 +11,7 @@
 отдаёт `OnboardingScreen`. Шаг адреса ни в сеть, ни в subprocess не ходит
 (`fetch`/`mcp` нужны шагам модели и MCP) — подменять на этом шаге нечего.
 """
+
 import pytest
 
 pytest.importorskip("textual")
@@ -23,21 +24,27 @@ def _unconfigured() -> dict:
     """Конфиг из пакетного шаблона — все три поля ещё заглушки (…_SENTINEL):
     ровно то состояние, в котором прод сам поднимает мастер настройки."""
     from gc_core import onboarding
+
     return {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
     }
 
 
 def _app(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
+
     # Стартовый авто-чек обновления — сеть, а его находка ещё и всплывает тостом
     # поверх мастера: снимок ловил бы то с тостом, то без.
     monkeypatch.setattr(TuiApp, "_start_auto_update_check", lambda self: None)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=_unconfigured())
-    app._onboarding_mode = "auto"                       # ставит tui/__init__.py
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config=_unconfigured()
+    )
+    app._onboarding_mode = "auto"  # ставит tui/__init__.py
     app._onboarding_config_path = str(tmp_path / "config.yml")
     return app
 
@@ -47,13 +54,22 @@ async def _ready(pilot):
     прокрутке досчитывается уже после раскладки (call_after_refresh)."""
     from textual.widgets import Input
     from gc_tui.screens.onboarding import OnboardingScreen
-    await wait_until(pilot, lambda: isinstance(pilot.app.screen, OnboardingScreen)
-                     and bool(pilot.app.screen.query(Input)), "onboarding step mounted")
+
+    await wait_until(
+        pilot,
+        lambda: (
+            isinstance(pilot.app.screen, OnboardingScreen)
+            and bool(pilot.app.screen.query(Input))
+        ),
+        "onboarding step mounted",
+    )
     await pilot.pause()
     await pilot.pause()
 
 
-def test_onboarding_endpoint_step_snapshot(snap_compare, tmp_path, monkeypatch):
+def test_onboarding_endpoint_step_snapshot(
+    snap_compare, tmp_path, monkeypatch
+):
     """Обычное окно: карточка целиком, рамка по содержимому, футер под ней."""
     app = _app(tmp_path, monkeypatch)
 
@@ -63,7 +79,9 @@ def test_onboarding_endpoint_step_snapshot(snap_compare, tmp_path, monkeypatch):
     assert snap_compare(app, terminal_size=(100, 30), run_before=setup)
 
 
-def test_onboarding_endpoint_step_low_snapshot(snap_compare, tmp_path, monkeypatch):
+def test_onboarding_endpoint_step_low_snapshot(
+    snap_compare, tmp_path, monkeypatch
+):
     """Низкое окно — Р19: рамка завершена и упёрлась в потолок, скроллбар внутри
     неё, футер в кадре и с подсказкой о прокрутке."""
     app = _app(tmp_path, monkeypatch)

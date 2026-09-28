@@ -541,7 +541,9 @@ def test_a_broken_layer_leaves_prospective_registry_on_the_file_itself(
     assert sorted(models) == ["a"]
 
 
-def test_prospective_registry_puts_the_profile_through_compat_before_merging(stack, monkeypatch):
+def test_prospective_registry_puts_the_profile_through_compat_before_merging(
+    stack, monkeypatch
+):
     """Текст профиля проходит compat ДО склейки с базой — как все слои загрузчика.
 
     Склеенный стек compat видит уже без слоёв: старое имя в профиле столкнулось
@@ -551,11 +553,16 @@ def test_prospective_registry_puts_the_profile_through_compat_before_merging(sta
     from gc_core.config import prospective_registry
     from gc_core.config_modules import compat
 
-    monkeypatch.setattr(compat, "RENAMES", {**compat.RENAMES, "legacy_models": "models"})
+    monkeypatch.setattr(
+        compat, "RENAMES", {**compat.RENAMES, "legacy_models": "models"}
+    )
     base, _profiles = stack
     base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
 
     models, _slots = prospective_registry(
-        'legacy_models:\n  b:\n    model: "y"\n', base_path=base, is_profile=True)
+        'legacy_models:\n  b:\n    model: "y"\n',
+        base_path=base,
+        is_profile=True,
+    )
 
     assert sorted(models) == ["a", "b"]

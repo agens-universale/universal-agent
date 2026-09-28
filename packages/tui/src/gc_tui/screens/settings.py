@@ -449,9 +449,16 @@ def _empty_anchor(value) -> bool:
 
 
 class SettingsScreen(Screen):
-
-    def __init__(self, *, config, config_path, on_apply, probe_fn=None,
-                 auth_probe_fn=None, voice=None) -> None:
+    def __init__(
+        self,
+        *,
+        config,
+        config_path,
+        on_apply,
+        probe_fn=None,
+        auth_probe_fn=None,
+        voice=None,
+    ) -> None:
         super().__init__()
         self._config = config or {}
         self._config_path = config_path
@@ -594,8 +601,12 @@ class SettingsScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="set-header"):
-                yield Static(self._title_text(), id="header-left", markup=False)
-                yield Static(self._version_text(), id="header-right", markup=False)
+                yield Static(
+                    self._title_text(), id="header-left", markup=False
+                )
+                yield Static(
+                    self._version_text(), id="header-right", markup=False
+                )
             # Фокус у области прокрутки не отнимаем (Р17): на нём держится
             # клавиатурная прокрутка. Свои клавиши экран забирает раньше —
             # `on_key` предка отрабатывает ДО проверки биндингов, — поэтому
@@ -689,7 +700,11 @@ class SettingsScreen(Screen):
         # то же правило «мёртвые клавиши не рекламируются», что и на экране
         # изменений. На высоком окне подсказки о ней нет вовсе.
         base = self._footer_base()
-        return base + FOOTER_SCROLL if body_scrollable(self, "#set-scroll") else base
+        return (
+            base + FOOTER_SCROLL
+            if body_scrollable(self, "#set-scroll")
+            else base
+        )
 
     def _sync_footer(self) -> None:
         """Перерисовать полосу подсказок (подсказка прокрутки зависит от высоты)."""
@@ -1703,8 +1718,9 @@ class SettingsScreen(Screen):
             self._start_wave()  # пока идёт probe — крутим волну (стоп в _wave_tick)
 
     # --- draft-probe секции (Ctrl+Space / умный Enter, спека v2 §3.1) ---
-    def _start_draft_probe(self, section: int, on_done=None, *,
-                           manual: bool = False) -> None:
+    def _start_draft_probe(
+        self, section: int, on_done=None, *, manual: bool = False
+    ) -> None:
         """Differential-probe «Подключения»: контрольный запрос БЕЗ токена определяет,
         требует ли сервер авторизацию; только при 401 проверяем сам токен. Так
         честно отличаем «сервер не требует токен» от «токен принят/отклонён».
@@ -1727,8 +1743,12 @@ class SettingsScreen(Screen):
         )
         endpoint = url or endpoint_cfg  # поле пусто → действующий (для ссылок)
         if not endpoint:
-            show(Text("сначала настройте адрес — проверка стучится на него",
-                      style=DEEP_DIM))
+            show(
+                Text(
+                    "сначала настройте адрес — проверка стучится на него",
+                    style=DEEP_DIM,
+                )
+            )
             return
         if auth_idx == 1:
             token = None  # без авторизации
@@ -1766,10 +1786,21 @@ class SettingsScreen(Screen):
                     probe_fn=self._auth_probe_fn,
                 )
             except Exception as exc:
-                result = ProbeResult("unknown", None, None, 0, f"внутренняя ошибка проверки: {exc}")
-            self.app.call_from_thread(self._on_draft_probe, result, gen=gen,
-                                      section=_CONNECTION, on_done=on_done,
-                                      manual=manual)
+                result = ProbeResult(
+                    "unknown",
+                    None,
+                    None,
+                    0,
+                    f"внутренняя ошибка проверки: {exc}",
+                )
+            self.app.call_from_thread(
+                self._on_draft_probe,
+                result,
+                gen=gen,
+                section=_CONNECTION,
+                on_done=on_done,
+                manual=manual,
+            )
 
         self.run_worker(_work, thread=True, name="settings-draft-probe")
 
@@ -3488,8 +3519,12 @@ class SettingsScreen(Screen):
             # `ModelListController._load`) — находка финального ревью 2026-08-06 (F):
             # разные ответы на один и тот же вопрос «адреса нет» путали; хвост
             # «проверка стучится на него» — только здесь, это специфика пробы.
-            self._show_probe_line(Text(f"{_URL_REQUIRED} — проверка стучится на него",
-                                       style=DEEP_DIM))
+            self._show_probe_line(
+                Text(
+                    f"{_URL_REQUIRED} — проверка стучится на него",
+                    style=DEEP_DIM,
+                )
+            )
             return
         from gc_core import config_raw
         from gc_core.onboarding import _valid_endpoint_url
@@ -3505,8 +3540,12 @@ class SettingsScreen(Screen):
             # http(s)-схемы), но блокировать пробу здесь нельзя — это откроет наружу
             # ту же дыру, что чинили в «Подключении» (фикс-раунд 1 ревью): корп-конфиг
             # с ${ENV:GC_URL} потерял бы ручную перепроверку связи насовсем.
-            self._show_probe_line(Text("сначала выберите адрес endpoint — проверка стучится на него",
-                                       style=DEEP_DIM))
+            self._show_probe_line(
+                Text(
+                    "сначала выберите адрес endpoint — проверка стучится на него",
+                    style=DEEP_DIM,
+                )
+            )
             return
         self._voice_probe_values = values
         self._voice_probe_gen += 1
@@ -3540,6 +3579,7 @@ class SettingsScreen(Screen):
                 self._voice_probe_in_flight = False
                 self._voice_probe_result = r
                 self._show_probe_line(self._voice_probe_line())
+
             try:
                 self.app.call_from_thread(_apply)
             except Exception:
@@ -6956,11 +6996,15 @@ class SettingsScreen(Screen):
                 # ревью, фикс-раунд 1). Пропускаем гейт и отдаём решение
                 # `_start_draft_probe` как есть — она сегодня шлёт ссылку в probe_fn
                 # без резолва (тот же пробел жил тут и ДО этой задачи, не наш скоуп).
-                self._show_probe_line(Text("сначала выберите адрес — проверка стучится на него",
-                                           style=DEEP_DIM))
+                self._show_probe_line(
+                    Text(
+                        "сначала выберите адрес — проверка стучится на него",
+                        style=DEEP_DIM,
+                    )
+                )
                 return
             self._reset_draft_state()
-            self._cancel_autoprobe()                  # запускаем СВОЮ пробу — автопроба лишняя
+            self._cancel_autoprobe()  # запускаем СВОЮ пробу — автопроба лишняя
             self._start_draft_probe(self._view, manual=True)
             return
         if self._view == _MODELS:
@@ -6996,9 +7040,14 @@ class SettingsScreen(Screen):
             ):  # уже проверено: решаем по вердикту
                 self._smart_enter_decide(section, values, self._draft_checked)
                 return
-            self._cancel_autoprobe()                  # запускаем СВОЮ пробу — автопроба лишняя
-            self._start_draft_probe(section, on_done=lambda r: self._smart_enter_decide(
-                section, self._collect_values(section) or {}, r), manual=True)
+            self._cancel_autoprobe()  # запускаем СВОЮ пробу — автопроба лишняя
+            self._start_draft_probe(
+                section,
+                on_done=lambda r: self._smart_enter_decide(
+                    section, self._collect_values(section) or {}, r
+                ),
+                manual=True,
+            )
             return
         if event.key == "enter" and self._view == _UPDATE:
             event.stop()

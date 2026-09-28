@@ -36,10 +36,8 @@ MERGE_RENAMED_SECTIONS = frozenset({"diff_tui"})
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
-    "agent_edits.preview_context_lines":
-        "экран правок считает дифф по журналу; контекст хэнков — agent_edits.hunk_context_lines",
-    "agent_edits.full_file_max_lines":
-        "порога больше нет: клавиша f на экране правок показывает файл целиком",
+    "agent_edits.preview_context_lines": "экран правок считает дифф по журналу; контекст хэнков — agent_edits.hunk_context_lines",
+    "agent_edits.full_file_max_lines": "порога больше нет: клавиша f на экране правок показывает файл целиком",
 }
 
 _SYNC_HINT = "обновите config.yml: gc-cli --sync-config"
@@ -87,7 +85,9 @@ def _get_path(d: Dict[str, Any], dotted: str) -> Any:
     return cur
 
 
-def _deep_merge_missing(target: Dict[str, Any], extra: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge_missing(
+    target: Dict[str, Any], extra: Dict[str, Any]
+) -> Dict[str, Any]:
     """``target`` дополняется ключами ``extra``, которых в нём нет; свои не трогаются."""
     for key, value in extra.items():
         if key not in target:
@@ -108,7 +108,7 @@ def map_legacy_path(dotted: str) -> Optional[str]:
     path = dotted
     for old, new in RENAMES.items():
         if path == old or path.startswith(old + "."):
-            path = new + path[len(old):]
+            path = new + path[len(old) :]
     if any(path == gone or path.startswith(gone + ".") for gone in REMOVED):
         return None
     return path
@@ -143,7 +143,9 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
             # разных слоях конфига (старое в пользовательском, новое в проектном):
             # выбросить старую целиком значило бы молча потерять её ключи.
             # Сливаем под новую, заданное в новой побеждает.
-            _set_path(raw, new, _deep_merge_missing(_get_path(raw, new), value))
+            _set_path(
+                raw, new, _deep_merge_missing(_get_path(raw, new), value)
+            )
             facts.append(
                 f"{old} переименован в {new}: ключи слиты, заданные в {new} "
                 f"побеждают — {_SYNC_HINT}"

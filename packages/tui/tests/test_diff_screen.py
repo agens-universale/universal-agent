@@ -7,6 +7,7 @@
   расхождение можно только сравнив строки между собой;
 * поведение (курсор, источники, клики, пустые состояния) — живым pilot'ом.
 """
+
 from __future__ import annotations
 
 import inspect
@@ -74,28 +75,64 @@ from gc_testkit.tui_support import span_style
 
 
 def _entry(
-    path="a.py", add=1, del_=1, kind="modified", exact=True, countable=True,
-    by_shell=False, external=False, revertable=True, last_ts=1.0,
+    path="a.py",
+    add=1,
+    del_=1,
+    kind="modified",
+    exact=True,
+    countable=True,
+    by_shell=False,
+    external=False,
+    revertable=True,
+    last_ts=1.0,
 ) -> FileEntry:
     return FileEntry(
-        path=path, add=add, del_=del_, kind=kind, exact=exact,
-        countable=countable, by_shell=by_shell, external=external,
-        revertable=revertable, last_ts=last_ts,
+        path=path,
+        add=add,
+        del_=del_,
+        kind=kind,
+        exact=exact,
+        countable=countable,
+        by_shell=by_shell,
+        external=external,
+        revertable=revertable,
+        last_ts=last_ts,
     )
 
 
-def _rec(path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1, ts=1.0):
+def _rec(
+    path="a.py", turn="t1", call_id="c1", op="edit", add=1, del_=1, ts=1.0
+):
     return EditRecord(
-        path=path, turn_id=turn, ts=ts, call_id=call_id, op=op, hunks="",
-        add=add, del_=del_, before_sha256=None, after_sha256=None, flags=[],
+        path=path,
+        turn_id=turn,
+        ts=ts,
+        call_id=call_id,
+        op=op,
+        hunks="",
+        add=add,
+        del_=del_,
+        before_sha256=None,
+        after_sha256=None,
+        flags=[],
     )
 
 
 def _settled(
-    path="a.py", add=1, del_=1, kind="modified", reason=SETTLED_MANUAL, exact=True,
+    path="a.py",
+    add=1,
+    del_=1,
+    kind="modified",
+    reason=SETTLED_MANUAL,
+    exact=True,
 ) -> SettledRow:
     return SettledRow(
-        path=path, add=add, del_=del_, kind=kind, reason=reason, exact=exact,
+        path=path,
+        add=add,
+        del_=del_,
+        kind=kind,
+        reason=reason,
+        exact=exact,
     )
 
 
@@ -165,8 +202,10 @@ def _rows_text(screen: DiffScreen) -> list[str]:
 
 def _screen_lines(app) -> list[str]:
     """Текстовый слепок экрана строками композитора (приём тестов блоков диффа)."""
-    return ["".join(seg.text for seg in strip).rstrip()
-            for strip in app.screen._compositor.render_strips()]
+    return [
+        "".join(seg.text for seg in strip).rstrip()
+        for strip in app.screen._compositor.render_strips()
+    ]
 
 
 # --- сетка строки: жёсткое требование дизайн-гейта ---------------------------
@@ -174,10 +213,25 @@ def _screen_lines(app) -> list[str]:
 
 _GRID = [
     _entry("src/tui/screens/diff.py", add=84, del_=12, last_ts=6.0),
-    _entry("src/agent_edits/revert.py", add=96, del_=0, kind="created", last_ts=5.0),
-    _entry("src/agent_edits/deltas.py", add=9, del_=3, by_shell=True, last_ts=4.0),
+    _entry(
+        "src/agent_edits/revert.py",
+        add=96,
+        del_=0,
+        kind="created",
+        last_ts=5.0,
+    ),
+    _entry(
+        "src/agent_edits/deltas.py", add=9, del_=3, by_shell=True, last_ts=4.0
+    ),
     _entry("src/tui/app.py", add=7, del_=2, external=True, last_ts=3.0),
-    _entry("src/config.py", add=5, del_=1, by_shell=True, external=True, last_ts=2.0),
+    _entry(
+        "src/config.py",
+        add=5,
+        del_=1,
+        by_shell=True,
+        external=True,
+        last_ts=2.0,
+    ),
     _entry("uv.lock", add=3, del_=1, by_shell=True, exact=False, last_ts=1.0),
 ]
 
@@ -192,7 +246,7 @@ def test_counter_columns_are_identical_for_rows_with_and_without_marks():
     rows = [str(t) for t in build_rows(_GRID, selected=0, width=100)]
     marked = [row for row in rows if MARK_SHELL in row or MARK_EXTERNAL in row]
     plain = [row for row in rows if row not in marked]
-    assert marked and plain, rows          # обе породы строк в наборе есть
+    assert marked and plain, rows  # обе породы строк в наборе есть
 
     plus = [re.search(r"\+\d+", row) for row in rows]
     minus = [re.search(r"−\d+", row) for row in rows]
@@ -239,7 +293,9 @@ def test_approx_survives_narrow_width_while_marks_shrink():
     """
     entries = [
         _entry("src/config.py", add=5, del_=1, by_shell=True, external=True),
-        _entry("uv.lock", add=3, del_=1, by_shell=True, exact=False, last_ts=0.5),
+        _entry(
+            "uv.lock", add=3, del_=1, by_shell=True, exact=False, last_ts=0.5
+        ),
     ]
     rows = [str(t) for t in build_rows(entries, selected=0, width=48)]
 
@@ -262,15 +318,23 @@ def test_truncated_path_does_not_touch_neighbours():
     ширине, где колонка пометок пожертвована, — `…screens/engine.py≈+1284`.
     """
     entries = [
-        _entry("src/very/deep/nested/package/module/screens/engine.py",
-               add=1284, del_=96, by_shell=True, external=True, exact=False),
+        _entry(
+            "src/very/deep/nested/package/module/screens/engine.py",
+            add=1284,
+            del_=96,
+            by_shell=True,
+            external=True,
+            exact=False,
+        ),
         _entry("src/config.py", add=5, del_=1, by_shell=True, last_ts=0.5),
     ]
     for width in (80, 60, 45):
         rows = [str(t) for t in build_rows(entries, selected=0, width=width)]
-        assert "…" in rows[0], (width, rows)        # путь и правда обрезан
+        assert "…" in rows[0], (width, rows)  # путь и правда обрезан
         for row in rows:
-            right = [row.index(m) for m in (MARK_SHELL, MARK_EXTERNAL) if m in row]
+            right = [
+                row.index(m) for m in (MARK_SHELL, MARK_EXTERNAL) if m in row
+            ]
             right += [row.index(APPROX)] if APPROX in row else []
             if right:
                 assert row[min(right) - 1] == " ", (width, row)
@@ -297,7 +361,9 @@ def test_kind_words_and_cursor_glyph():
 def test_long_path_is_truncated_from_the_left():
     """Режем слева: имя файла различает строки, общий корень — нет."""
     long_path = "src/very/deep/nested/package/module/screens/diff.py"
-    row = str(build_rows([_entry(long_path, add=1, del_=1)], selected=0, width=40)[0])
+    row = str(
+        build_rows([_entry(long_path, add=1, del_=1)], selected=0, width=40)[0]
+    )
     assert "diff.py" in row
     assert long_path not in row
     assert "…" in row
@@ -308,7 +374,10 @@ def test_long_path_is_truncated_from_the_left():
 
 def test_active_row_has_glyph_when_accepted():
     """↺ — сразу после счётчиков, цветом ACCENT, только у ступени `accepted`."""
-    entries = [_entry("a.py", add=10, del_=0), _entry("b.py", add=5, del_=1, last_ts=0.5)]
+    entries = [
+        _entry("a.py", add=10, del_=0),
+        _entry("b.py", add=5, del_=1, last_ts=0.5),
+    ]
     steps = [RowStep(kind=STEP_ACCEPTED, ts=1.0, ref=None), None]
     rows = build_rows(entries, selected=0, width=100, steps=steps)
 
@@ -326,26 +395,37 @@ def test_glyph_is_absent_without_steps_argument():
 
 def test_glyph_reserves_room_for_every_row_so_none_overflows():
     """Место под глиф резервируется у ВСЕХ строк набора, если он есть хоть у одной."""
-    entries = [_entry("src/config.py", add=5, del_=1),
-               _entry("uv.lock", add=3, del_=1, last_ts=0.5)]
+    entries = [
+        _entry("src/config.py", add=5, del_=1),
+        _entry("uv.lock", add=3, del_=1, last_ts=0.5),
+    ]
     steps = [RowStep(kind=STEP_ACCEPTED, ts=1.0, ref=None), None]
     for width in (40, 48, 60, 80):
-        rows = [str(t) for t in build_rows(entries, selected=0, width=width,
-                                           steps=steps)]
+        rows = [
+            str(t)
+            for t in build_rows(entries, selected=0, width=width, steps=steps)
+        ]
         for row in rows:
             assert len(row) <= width, (width, row)
-    rows = [str(t) for t in build_rows(entries, selected=0, width=60, steps=steps)]
+    rows = [
+        str(t) for t in build_rows(entries, selected=0, width=60, steps=steps)
+    ]
     assert ACCEPTED_GLYPH in rows[0] and ACCEPTED_GLYPH not in rows[1]
 
 
 def test_active_row_shows_short_hash_for_head_step():
     """Хэш — приглушённо, в слоте глифа, только у ступени `head` (С9)."""
-    entries = [_entry("a.py", add=10, del_=0), _entry("b.py", add=5, del_=1, last_ts=0.5)]
+    entries = [
+        _entry("a.py", add=10, del_=0),
+        _entry("b.py", add=5, del_=1, last_ts=0.5),
+    ]
     steps = [RowStep(kind=STEP_HEAD, ts=None, ref="e5f2c1a · 14:20"), None]
     rows = build_rows(entries, selected=0, width=100, steps=steps)
 
     assert "e5f2c1a" in rows[0].plain
-    assert "14:20" not in rows[0].plain          # только хэш, время — дело шапки вьюера
+    assert (
+        "14:20" not in rows[0].plain
+    )  # только хэш, время — дело шапки вьюера
     assert ACCEPTED_GLYPH not in rows[0].plain
     assert rows[0].plain.index("−0") < rows[0].plain.index("e5f2c1a")
     assert span_style(rows[0], "e5f2c1a") == DEEP_DIM
@@ -372,27 +452,39 @@ def test_hash_is_sacrificed_before_marks_on_a_narrow_window():
     """
     entries = [
         _entry("src/config.py", add=5, del_=1, by_shell=True, external=True),
-        _entry("uv.lock", add=3, del_=1, by_shell=True, exact=False, last_ts=0.5),
+        _entry(
+            "uv.lock", add=3, del_=1, by_shell=True, exact=False, last_ts=0.5
+        ),
     ]
     steps = [RowStep(kind=STEP_HEAD, ts=None, ref="e5f2c1a · 14:20"), None]
 
-    full = [str(t) for t in build_rows(entries, selected=0, width=65, steps=steps)]
+    full = [
+        str(t) for t in build_rows(entries, selected=0, width=65, steps=steps)
+    ]
     config_full = next(r for r in full if "config.py" in r)
     assert "e5f2c1a" in config_full
     assert MARK_SHELL in config_full and MARK_EXTERNAL in config_full
 
-    at_60 = [str(t) for t in build_rows(entries, selected=0, width=60, steps=steps)]
+    at_60 = [
+        str(t) for t in build_rows(entries, selected=0, width=60, steps=steps)
+    ]
     config_60 = next(r for r in at_60 if "config.py" in r)
-    assert "e5f2c1a" not in config_60                          # хэш уступил первым
-    assert MARK_SHELL in config_60 and MARK_EXTERNAL in config_60   # пометки ещё целы
-    assert "+5" in config_60 and "−1" in config_60                  # счётчики целы
+    assert "e5f2c1a" not in config_60  # хэш уступил первым
+    assert (
+        MARK_SHELL in config_60 and MARK_EXTERNAL in config_60
+    )  # пометки ещё целы
+    assert "+5" in config_60 and "−1" in config_60  # счётчики целы
 
-    shrunk = [str(t) for t in build_rows(entries, selected=0, width=48, steps=steps)]
+    shrunk = [
+        str(t) for t in build_rows(entries, selected=0, width=48, steps=steps)
+    ]
     config_shrunk = next(r for r in shrunk if "config.py" in r)
     assert "e5f2c1a" not in config_shrunk
     assert MARK_EXTERNAL in config_shrunk and MARK_SHELL not in config_shrunk
 
-    bare = [str(t) for t in build_rows(entries, selected=0, width=40, steps=steps)]
+    bare = [
+        str(t) for t in build_rows(entries, selected=0, width=40, steps=steps)
+    ]
     for row in bare:
         assert "e5f2c1a" not in row
         assert MARK_EXTERNAL not in row and MARK_SHELL not in row
@@ -433,7 +525,7 @@ def test_group_row_collapsed_expanded_and_zero_segments():
     assert group_summary(mixed) == "принято 1 · закоммичено 2"
 
     commit_only = [_settled("b.py", reason=SETTLED_COMMIT)]
-    assert group_summary(commit_only) == "закоммичено 1"    # «принято 0» опущен
+    assert group_summary(commit_only) == "закоммичено 1"  # «принято 0» опущен
 
 
 def test_group_row_is_muted_as_a_whole():
@@ -452,9 +544,13 @@ def test_settled_rows_reason_in_kind_column():
     кодами сервиса `SETTLED_MANUAL`/`SETTLED_COMMIT` (`вручную`/`коммитом`)."""
     rows_data = [
         _settled("a.py", add=22, del_=3, reason=SETTLED_MANUAL),
-        _settled("verylongname/pkg/b.py", add=8, del_=1, reason=SETTLED_COMMIT),
+        _settled(
+            "verylongname/pkg/b.py", add=8, del_=1, reason=SETTLED_COMMIT
+        ),
     ]
-    rows = [str(t) for t in build_settled_rows(rows_data, selected=-1, width=100)]
+    rows = [
+        str(t) for t in build_settled_rows(rows_data, selected=-1, width=100)
+    ]
 
     assert rows[0].index("принят") < rows[0].index("a.py")
     assert "+22" in rows[0] and "−3" in rows[0]
@@ -465,8 +561,14 @@ def test_settled_rows_reason_in_kind_column():
 def test_settled_rows_have_no_marks_column():
     """`SettledRow` не несёт `by_shell`/`external` — колонок для них нет; у
     ТОЧНОЙ строки пуст и слот `≈` (сам слот при этом занят — соседний тест)."""
-    row = str(build_settled_rows([_settled("a.py")], selected=-1, width=100)[0])
-    assert MARK_SHELL not in row and MARK_EXTERNAL not in row and APPROX not in row
+    row = str(
+        build_settled_rows([_settled("a.py")], selected=-1, width=100)[0]
+    )
+    assert (
+        MARK_SHELL not in row
+        and MARK_EXTERNAL not in row
+        and APPROX not in row
+    )
 
 
 def test_settled_rows_carry_approx_from_the_row_itself():
@@ -474,18 +576,26 @@ def test_settled_rows_carry_approx_from_the_row_itself():
     и кумулятив, собранный из журнала, метится `≈` тем же знаком и в том же
     слоте, что у активных строк, — слот занят ВСЕГДА, иначе счётчики точной
     и неточной строк разъехались бы по вертикали."""
-    rows = [str(t) for t in build_settled_rows(
-        [_settled("a.py", add=22, del_=3),
-         _settled("b.py", add=8, del_=1, exact=False)],
-        selected=-1, width=100,
-    )]
+    rows = [
+        str(t)
+        for t in build_settled_rows(
+            [
+                _settled("a.py", add=22, del_=3),
+                _settled("b.py", add=8, del_=1, exact=False),
+            ],
+            selected=-1,
+            width=100,
+        )
+    ]
     exact, inexact = rows
     assert APPROX not in exact
     assert APPROX in inexact
     slot = inexact.index(APPROX)
-    assert slot < inexact.index("+8")             # знак стоит ПЕРЕД счётчиками
-    assert exact[slot] == " "                     # у точной строки слот занят пробелом
-    assert exact.index("−3") == inexact.index("−1")   # счётчики на одной вертикали
+    assert slot < inexact.index("+8")  # знак стоит ПЕРЕД счётчиками
+    assert exact[slot] == " "  # у точной строки слот занят пробелом
+    assert exact.index("−3") == inexact.index(
+        "−1"
+    )  # счётчики на одной вертикали
 
 
 def test_settled_rows_paint_approx_deep_dim_like_active_rows():
@@ -501,7 +611,9 @@ def test_settled_rows_path_and_kind_stay_muted():
     """Путь и причина (колонка вида) остаются приглушёнными — существующий
     muted-токен, не новый оттенок (задача 2 брифа: «путь и колонка вида
     остаются приглушёнными»)."""
-    [row] = build_settled_rows([_settled("a.py", add=1, del_=1)], selected=-1, width=100)
+    [row] = build_settled_rows(
+        [_settled("a.py", add=1, del_=1)], selected=-1, width=100
+    )
     assert span_style(row, "a.py") == MUTED
     assert span_style(row, "принят") == MUTED
 
@@ -511,7 +623,9 @@ def test_settled_rows_counters_are_dim_green_and_red_not_grey():
     вариантом смысловых цветов, не сливаются с приглушённым путём/причиной.
     Не новый оттенок — существующие `OK`/`ERR` с рендер-атрибутом Rich `dim`.
     """
-    [row] = build_settled_rows([_settled("a.py", add=1, del_=1)], selected=-1, width=100)
+    [row] = build_settled_rows(
+        [_settled("a.py", add=1, del_=1)], selected=-1, width=100
+    )
     assert span_style(row, "+1") == f"{OK} dim"
     assert span_style(row, "−1") == f"{ERR} dim"
     assert span_style(row, "+1") != MUTED
@@ -520,9 +634,14 @@ def test_settled_rows_counters_are_dim_green_and_red_not_grey():
 
 def test_settled_row_cursor_glyph():
     """Курсор внутри группы — тот же приём, что у активных: `▸`/два пробела."""
-    rows = [str(t) for t in build_settled_rows(
-        [_settled("a.py"), _settled("b.py")], selected=1, width=100,
-    )]
+    rows = [
+        str(t)
+        for t in build_settled_rows(
+            [_settled("a.py"), _settled("b.py")],
+            selected=1,
+            width=100,
+        )
+    ]
     assert rows[1].startswith("▸ ")
     assert rows[0].startswith("  ") and not rows[0].startswith("▸")
 
@@ -544,23 +663,29 @@ def test_counters_are_painted_by_meaning_not_grey():
 
 def test_zero_counter_keeps_the_colour_of_its_column():
     """`−0` у созданного файла — тот же красный: колонку читают цветом."""
-    row = next(row for row in build_rows(_GRID, selected=0, width=100)
-               if "revert.py" in row.plain)
+    row = next(
+        row
+        for row in build_rows(_GRID, selected=0, width=100)
+        if "revert.py" in row.plain
+    )
     assert span_style(row, "−0") == ERR
 
 
 def test_approx_sign_stays_dim():
     """`≈` — про достоверность чисел, а не про них самих; цвет счётчиков не его."""
-    row = next(row for row in build_rows(_GRID, selected=0, width=100)
-               if APPROX in row.plain)
+    row = next(
+        row
+        for row in build_rows(_GRID, selected=0, width=100)
+        if APPROX in row.plain
+    )
     assert span_style(row, APPROX) == DEEP_DIM
 
 
 def test_cursor_brightens_the_path_but_not_the_counters():
     """Курсор — про строку, а не про числа: путь ярче, счётчики остаются собой."""
     rows = build_rows(_GRID, selected=0, width=100)
-    assert span_style(rows[0], "diff.py") == BRIGHT      # строка под курсором
-    assert span_style(rows[1], "revert.py") == INK       # соседняя
+    assert span_style(rows[0], "diff.py") == BRIGHT  # строка под курсором
+    assert span_style(rows[1], "revert.py") == INK  # соседняя
     assert span_style(rows[0], "+84") == OK
     assert span_style(rows[0], "−12") == ERR
 
@@ -574,7 +699,7 @@ def test_header_counters_are_painted_like_the_rows():
         SOURCE_SESSION, files=3, add=120, del_=15, mode="git-mode", width=100
     )
     painted = paint_counters(left)
-    assert painted.plain == left           # текст тот же, добавлен только цвет
+    assert painted.plain == left  # текст тот же, добавлен только цвет
     assert span_style(painted, "+120") == OK
     assert span_style(painted, "−15") == ERR
 
@@ -594,7 +719,7 @@ def test_header_paints_the_counters_not_a_plus_inside_the_path():
     painted = paint_counters("изменения · сессия · src/c++/a+1 −2.py · +9 −4")
     assert span_style(painted, "+9") == OK
     assert span_style(painted, "−4") == ERR
-    assert span_style(painted, "+1") == ""      # пара внутри пути не тронута
+    assert span_style(painted, "+1") == ""  # пара внутри пути не тронута
 
 
 def test_header_says_izmeneniya_and_marks_git_mode_only():
@@ -607,7 +732,7 @@ def test_header_says_izmeneniya_and_marks_git_mode_only():
     _left, right_cache = build_header(
         SOURCE_SESSION, files=3, add=120, del_=15, mode="cache-mode", width=100
     )
-    assert right_cache == ""          # слова «cache» в интерфейсе нет
+    assert right_cache == ""  # слова «cache» в интерфейсе нет
 
 
 def test_header_sacrifices_git_then_word_then_files_count():
@@ -615,20 +740,23 @@ def test_header_sacrifices_git_then_word_then_files_count():
     full = "изменения · сессия · 3 файла · +120 −15"
 
     left, right = build_header(SOURCE_SESSION, width=len(full) + 2, **kwargs)
-    assert (left, right) == (full, "")                       # первым уходит `git`
+    assert (left, right) == (full, "")  # первым уходит `git`
 
     left, _ = build_header(SOURCE_SESSION, width=len(full) - 1, **kwargs)
-    assert left == "сессия · 3 файла · +120 −15"              # затем слово экрана
+    assert left == "сессия · 3 файла · +120 −15"  # затем слово экрана
 
     left, _ = build_header(SOURCE_SESSION, width=20, **kwargs)
-    assert left == "сессия · +120 −15"                        # затем «N файлов»
+    assert left == "сессия · +120 −15"  # затем «N файлов»
 
 
 def test_header_of_empty_source_says_no_changes():
     left, _right = build_header(
         SOURCE_TURN, files=0, add=0, del_=0, mode="cache-mode", width=100
     )
-    assert left == "изменения · последний ход с правками · от начала хода · изменений нет"
+    assert (
+        left
+        == "изменения · последний ход с правками · от начала хода · изменений нет"
+    )
 
 
 def test_header_says_no_new_changes_while_the_group_lives():
@@ -652,7 +780,10 @@ def test_header_names_the_turn_base_only_for_turn_source():
     kwargs = dict(files=3, add=120, del_=15, mode="cache-mode", width=100)
 
     turn_left, _ = build_header(SOURCE_TURN, **kwargs)
-    assert turn_left == "изменения · последний ход с правками · от начала хода · 3 файла · +120 −15"
+    assert (
+        turn_left
+        == "изменения · последний ход с правками · от начала хода · 3 файла · +120 −15"
+    )
 
     session_left, _ = build_header(SOURCE_SESSION, **kwargs)
     assert session_left == "изменения · сессия · 3 файла · +120 −15"
@@ -673,19 +804,36 @@ def test_header_turn_base_phrase_sacrificed_before_files_count_but_after_word():
     assert left == full
 
     left, _ = build_header(SOURCE_TURN, width=70, **kwargs)
-    assert left == "последний ход с правками · от начала хода · 3 файла · +120 −15"
+    assert (
+        left
+        == "последний ход с правками · от начала хода · 3 файла · +120 −15"
+    )
 
     left, _ = build_header(SOURCE_TURN, width=50, **kwargs)
-    assert left == "последний ход с правками · 3 файла · +120 −15"          # фраза ушла
+    assert (
+        left == "последний ход с правками · 3 файла · +120 −15"
+    )  # фраза ушла
 
     left, _ = build_header(SOURCE_TURN, width=35, **kwargs)
-    assert left == "последний ход с правками · +120 −15"                    # «N файлов» тоже ушёл
+    assert (
+        left == "последний ход с правками · +120 −15"
+    )  # «N файлов» тоже ушёл
 
 
 def test_files_word_declension():
-    for files, word in ((1, "файл"), (2, "файла"), (5, "файлов"), (11, "файлов")):
+    for files, word in (
+        (1, "файл"),
+        (2, "файла"),
+        (5, "файлов"),
+        (11, "файлов"),
+    ):
         left, _ = build_header(
-            SOURCE_SESSION, files=files, add=0, del_=0, mode="cache-mode", width=100
+            SOURCE_SESSION,
+            files=files,
+            add=0,
+            del_=0,
+            mode="cache-mode",
+            width=100,
         )
         assert f"{files} {word}" in left
 
@@ -719,7 +867,10 @@ def test_footer_nav_advertises_tab_only_when_group_exists():
     )
     for row in _FOOTER_ROWS:
         assert footer_text(row=row).splitlines()[0] == nav_without_group
-        assert footer_text(row=row, has_group=True).splitlines()[0] == nav_with_group
+        assert (
+            footer_text(row=row, has_group=True).splitlines()[0]
+            == nav_with_group
+        )
 
 
 def test_footer_actions_for_a_plain_active_file():
@@ -734,10 +885,12 @@ def test_footer_action_target_follows_the_source():
     """Цель `r` в строке действий — по источнику: «Ход» откатывает к началу
     ХОДА, и футер обязан повторять слова превью, а не сочинять своё."""
     assert "вернуть файл к началу сессии" in footer_text(
-        row=ROW_PLAIN, source=SOURCE_SESSION,
+        row=ROW_PLAIN,
+        source=SOURCE_SESSION,
     )
     assert "вернуть файл к началу хода" in footer_text(
-        row=ROW_PLAIN, source=SOURCE_TURN,
+        row=ROW_PLAIN,
+        source=SOURCE_TURN,
     )
 
 
@@ -817,10 +970,16 @@ def test_footer_of_empty_source_offers_only_working_keys():
     пустота решает раньше (как и массовые `mass_*`).
     """
     assert footer_text(empty=True) == "Shift+Tab сессия/ход · Esc"
-    assert footer_text(
-        row=ROW_ACCEPTED, empty=True, mass_accept=True, mass_revert=True,
-        mass_reset=True,
-    ) == "Shift+Tab сессия/ход · Esc"
+    assert (
+        footer_text(
+            row=ROW_ACCEPTED,
+            empty=True,
+            mass_accept=True,
+            mass_revert=True,
+            mass_reset=True,
+        )
+        == "Shift+Tab сессия/ход · Esc"
+    )
 
 
 # --- `Enter` по строке под курсором, `u` только живой (Ж3/Ж4 батча 4) ---------
@@ -857,7 +1016,7 @@ def test_group_header_does_not_advertise_a_dead_reset():
     """Ж4: на самом заголовке группы снимать нечего — `_reset_target` отдаёт
     по нему `None`, и футер обязан молчать."""
     text = footer_text(row=ROW_GROUP, group_expanded=True)
-    assert "u сброс" not in text          # `u` на заголовке группы мёртв
+    assert "u сброс" not in text  # `u` на заголовке группы мёртв
 
 
 def test_settled_file_advertises_reset_only_when_it_is_alive():
@@ -881,8 +1040,12 @@ def test_settled_file_advertises_reset_only_when_it_is_alive():
 
 def test_mass_tail_names_every_live_key_with_a_verb():
     assert mass_tail(accept=True, revert=True, reset=True) == (
-        "Ctrl+A принять все · Ctrl+R откатить все · Ctrl+U сбросить все принятия")
-    assert mass_tail(accept=True, revert=False, reset=False) == "Ctrl+A принять все"
+        "Ctrl+A принять все · Ctrl+R откатить все · Ctrl+U сбросить все принятия"
+    )
+    assert (
+        mass_tail(accept=True, revert=False, reset=False)
+        == "Ctrl+A принять все"
+    )
     assert mass_tail(accept=False, revert=False, reset=False) == ""
 
 
@@ -891,7 +1054,8 @@ def test_footer_mass_tail_is_the_same_on_every_row():
     for row in _FOOTER_ROWS:
         text = footer_text(row=row, **kw)
         assert text.endswith(
-            "Ctrl+A принять все · Ctrl+R откатить все · Ctrl+U сбросить все принятия")
+            "Ctrl+A принять все · Ctrl+R откатить все · Ctrl+U сбросить все принятия"
+        )
         assert "то же для всех" not in text and "остальные" not in text
 
 
@@ -899,14 +1063,19 @@ def test_footer_names_ctrl_u_on_a_plain_row_when_any_accepted_base_exists():
     """Смоук 3, шаг 7: файл под курсором сам без принятой базы, но она есть
     ГДЕ-ТО в представлении — `Ctrl+U` рекламируется и здесь (Е4)."""
     text = footer_text(
-        row=ROW_PLAIN, can_revert=False, mass_accept=True, mass_revert=True,
+        row=ROW_PLAIN,
+        can_revert=False,
+        mass_accept=True,
+        mass_revert=True,
         mass_reset=True,
     )
     assert "Ctrl+U сбросить все принятия" in text and " r откат" not in text
 
 
 @pytest.mark.asyncio
-async def test_live_screen_advertises_ctrl_u_from_an_active_accepted_row(tmp_path):
+async def test_live_screen_advertises_ctrl_u_from_an_active_accepted_row(
+    tmp_path,
+):
     """Сцена смоука 3, шаг 7: принятый файл с новой правкой стоит в активных
     (`ROW_ACCEPTED`), второй принятый файл — в группе. Раньше `Ctrl+U`
     рекламировался только со строки группы (Р35) — курсор на активном о
@@ -919,11 +1088,15 @@ async def test_live_screen_advertises_ctrl_u_from_an_active_accepted_row(tmp_pat
     ws.write("active.py", "a\nb\n")
     ws.journal.append(_rec("active.py", ts=1.0))
     ws.accept("active.py", "a\nb\n")
-    ws.write("active.py", "a\nb\nc\n")       # новая правка поверх принятого — снова активен
+    ws.write(
+        "active.py", "a\nb\nc\n"
+    )  # новая правка поверх принятого — снова активен
     ws.journal.append(_rec("active.py", ts=2.0, call_id="c2"))
     ws.write("settled.py", "v1\n")
     ws.journal.append(_rec("settled.py", ts=0.5))
-    ws.accept("settled.py", "v1\n")          # чисто относительно принятого — уходит в группу
+    ws.accept(
+        "settled.py", "v1\n"
+    )  # чисто относительно принятого — уходит в группу
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -932,7 +1105,7 @@ async def test_live_screen_advertises_ctrl_u_from_an_active_accepted_row(tmp_pat
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert [e.path for e in scr._entries] == ["active.py"]
-        assert scr._selected_idx == 0                    # курсор на активном
+        assert scr._selected_idx == 0  # курсор на активном
 
         footer = _plain(scr.query_one("#footer"))
         assert "Ctrl+U сбросить все принятия" in footer
@@ -972,23 +1145,27 @@ async def test_footer_wraps_not_clips_at_narrow_widths(tmp_path):
     ws.write("accepted.py", "a\nb\n")
     ws.journal.append(_rec("accepted.py", ts=1.0))
     ws.accept("accepted.py", "a\nb\n")
-    ws.write("accepted.py", "a\nb\nc\n")           # принят и снова изменён — строка с ↺
+    ws.write("accepted.py", "a\nb\nc\n")  # принят и снова изменён — строка с ↺
     ws.journal.append(_rec("accepted.py", ts=2.0, call_id="c2"))
     ws.write("group.py", "v1\n")
     ws.journal.append(_rec("group.py", ts=0.5))
-    ws.accept("group.py", "v1\n")                  # чисто относительно принятого — в группе
+    ws.accept("group.py", "v1\n")  # чисто относительно принятого — в группе
 
-    app = TuiApp(threads_dir=str(ws.threads_dir), system="cli", config=ws.config)
+    app = TuiApp(
+        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+    )
     async with app.run_test(size=(100, 24)) as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert len(scr._entries) == 2                  # plain.py + accepted.py активны
-        plain_idx = next(i for i, e in enumerate(scr._entries) if e.path == "plain.py")
+        assert len(scr._entries) == 2  # plain.py + accepted.py активны
+        plain_idx = next(
+            i for i, e in enumerate(scr._entries) if e.path == "plain.py"
+        )
         accepted_idx = next(
             i for i, e in enumerate(scr._entries) if e.path == "accepted.py"
         )
-        group_idx = len(scr._entries)                  # строка группы — сразу после активных
+        group_idx = len(scr._entries)  # строка группы — сразу после активных
 
         # Хвост массовых клавиш — свойство представления (Е4): в этом сценарии
         # он одинаков на ВСЕХ трёх строках (принят есть `accepted.py`, база
@@ -996,17 +1173,45 @@ async def test_footer_wraps_not_clips_at_narrow_widths(tmp_path):
         #
         # (индекс строки, {ширина: измеренная высота футера}, обязательные сегменты)
         cases = [
-            (plain_idx, {60: 6, 100: 3},
-             ("Shift+Tab сессия/ход", "Tab активные/группа", "Enter дифф",
-              "a принять", "r откат", "Ctrl+A принять все", "Ctrl+R откатить все",
-              "Ctrl+U сбросить все принятия")),
-            (accepted_idx, {60: 6, 100: 4},
-             ("Shift+Tab сессия/ход", "Tab активные/группа", "Enter дифф",
-              "a принять", "u сброс", "r откат", "Ctrl+A принять все",
-              "Ctrl+R откатить все", "Ctrl+U сбросить все принятия")),
-            (group_idx, {60: 4, 100: 2},
-             ("Shift+Tab сессия/ход", "Tab активные/группа", "Enter развернуть",
-              "Ctrl+U сбросить все принятия")),
+            (
+                plain_idx,
+                {60: 6, 100: 3},
+                (
+                    "Shift+Tab сессия/ход",
+                    "Tab активные/группа",
+                    "Enter дифф",
+                    "a принять",
+                    "r откат",
+                    "Ctrl+A принять все",
+                    "Ctrl+R откатить все",
+                    "Ctrl+U сбросить все принятия",
+                ),
+            ),
+            (
+                accepted_idx,
+                {60: 6, 100: 4},
+                (
+                    "Shift+Tab сессия/ход",
+                    "Tab активные/группа",
+                    "Enter дифф",
+                    "a принять",
+                    "u сброс",
+                    "r откат",
+                    "Ctrl+A принять все",
+                    "Ctrl+R откатить все",
+                    "Ctrl+U сбросить все принятия",
+                ),
+            ),
+            (
+                group_idx,
+                {60: 4, 100: 2},
+                (
+                    "Shift+Tab сессия/ход",
+                    "Tab активные/группа",
+                    "Enter развернуть",
+                    "Ctrl+U сбросить все принятия",
+                ),
+            ),
         ]
         for idx, widths, chunks in cases:
             scr._move(idx)
@@ -1017,14 +1222,26 @@ async def test_footer_wraps_not_clips_at_narrow_widths(tmp_path):
                 await pilot.pause()
                 footer = scr.query_one("#footer")
                 needed = footer.get_content_height(
-                    footer.container_size, footer.container_size, footer.size.width
+                    footer.container_size,
+                    footer.container_size,
+                    footer.size.width,
                 )
-                assert needed <= footer.size.height, (idx, width)     # без обрезки
+                assert needed <= footer.size.height, (
+                    idx,
+                    width,
+                )  # без обрезки
                 rendered = _plain(footer)
                 for chunk in chunks:
-                    assert chunk in rendered, (idx, width, rendered)  # сегмент цел
+                    assert chunk in rendered, (
+                        idx,
+                        width,
+                        rendered,
+                    )  # сегмент цел
                 assert footer.size.height == expected_lines, (
-                    idx, width, footer.size.height, rendered
+                    idx,
+                    width,
+                    footer.size.height,
+                    rendered,
                 )
 
 
@@ -1038,7 +1255,10 @@ async def test_footer_wraps_not_clips_at_narrow_widths(tmp_path):
 
 def test_accept_ack_plain_success_in_a_repo():
     outcome = AcceptOutcome(
-        accepted=["src/app.py"], staged=1, stage_error=None, skipped=[],
+        accepted=["src/app.py"],
+        staged=1,
+        stage_error=None,
+        skipped=[],
         with_external=[],
     )
     assert accept_ack(outcome, is_git=True) == (
@@ -1049,7 +1269,10 @@ def test_accept_ack_plain_success_in_a_repo():
 
 def test_accept_ack_mentions_manual_edits_only_when_marked_external():
     outcome = AcceptOutcome(
-        accepted=["src/app.py"], staged=1, stage_error=None, skipped=[],
+        accepted=["src/app.py"],
+        staged=1,
+        stage_error=None,
+        skipped=[],
         with_external=["src/app.py"],
     )
     assert accept_ack(outcome, is_git=True) == (
@@ -1060,7 +1283,10 @@ def test_accept_ack_mentions_manual_edits_only_when_marked_external():
 
 def test_accept_ack_has_no_git_tail_outside_a_repository():
     outcome = AcceptOutcome(
-        accepted=["src/app.py"], staged=0, stage_error=None, skipped=[],
+        accepted=["src/app.py"],
+        staged=0,
+        stage_error=None,
+        skipped=[],
         with_external=[],
     )
     ack = accept_ack(outcome, is_git=False)
@@ -1076,9 +1302,11 @@ def test_accept_ack_reports_git_add_failure_with_reason_and_action():
     бы ложью (§7, финальное ревью ветки, I3). Причина и действие остаются.
     """
     outcome = AcceptOutcome(
-        accepted=["src/app.py"], staged=0,
+        accepted=["src/app.py"],
+        staged=0,
         stage_error="fatal: Unable to create '.git/index.lock': File exists.",
-        skipped=[], with_external=[],
+        skipped=[],
+        with_external=[],
     )
     assert accept_ack(outcome, is_git=True) == (
         "принято: src/app.py, но git add отказал (fatal: Unable to "
@@ -1092,8 +1320,11 @@ def test_accept_ack_reports_git_add_failure_with_reason_and_action():
 def test_accept_ack_names_the_count_for_a_mass_accept():
     """`Ctrl+A` — плашка с числом (§4.3), как у отката и git add."""
     outcome = AcceptOutcome(
-        accepted=["a.py", "b.py", "c.py"], staged=3, stage_error=None,
-        skipped=[], with_external=[],
+        accepted=["a.py", "b.py", "c.py"],
+        staged=3,
+        stage_error=None,
+        skipped=[],
+        with_external=[],
     )
     assert accept_ack(outcome, is_git=True).startswith(
         "принято: 3 файла — новая точка отсчёта"
@@ -1102,8 +1333,11 @@ def test_accept_ack_names_the_count_for_a_mass_accept():
 
 def test_accept_ack_reports_the_cap_refusal_with_a_reason():
     outcome = AcceptOutcome(
-        accepted=[], staged=0, stage_error=None,
-        skipped=[("huge.bin", ACCEPT_TOO_LARGE)], with_external=[],
+        accepted=[],
+        staged=0,
+        stage_error=None,
+        skipped=[("huge.bin", ACCEPT_TOO_LARGE)],
+        with_external=[],
     )
     ack = accept_ack(outcome, is_git=True)
     assert "huge.bin" in ack and "файл больше лимита" in ack
@@ -1112,21 +1346,29 @@ def test_accept_ack_reports_the_cap_refusal_with_a_reason():
 
 def test_accept_ack_reports_the_read_failure_reason():
     outcome = AcceptOutcome(
-        accepted=[], staged=0, stage_error=None,
-        skipped=[("a.py", ACCEPT_READ_FAILED)], with_external=[],
+        accepted=[],
+        staged=0,
+        stage_error=None,
+        skipped=[("a.py", ACCEPT_READ_FAILED)],
+        with_external=[],
     )
     assert "прочитать не удалось" in accept_ack(outcome, is_git=True)
 
 
 def test_accept_ack_combines_success_and_skip_in_one_message():
     outcome = AcceptOutcome(
-        accepted=["a.py"], staged=1, stage_error=None,
-        skipped=[("huge.bin", ACCEPT_TOO_LARGE)], with_external=[],
+        accepted=["a.py"],
+        staged=1,
+        stage_error=None,
+        skipped=[("huge.bin", ACCEPT_TOO_LARGE)],
+        with_external=[],
     )
     ack = accept_ack(outcome, is_git=True)
     assert ack.startswith("принято: a.py — новая точка отсчёта")
     assert "huge.bin" in ack and "файл больше лимита" in ack
-    assert accept_tone(outcome, is_git=True) == "warn"     # неполный успех — не ok
+    assert (
+        accept_tone(outcome, is_git=True) == "warn"
+    )  # неполный успех — не ok
 
 
 def test_accept_ack_in_turn_source_notes_where_the_effect_is_visible():
@@ -1134,12 +1376,18 @@ def test_accept_ack_in_turn_source_notes_where_the_effect_is_visible():
     ход её не видит — файл в его списке остаётся на месте. Плашка обязана
     назвать источник, где сдвиг виден; в «Сессии» текст не меняется."""
     outcome = AcceptOutcome(
-        accepted=["a.py"], staged=0, stage_error=None, skipped=[], with_external=[],
+        accepted=["a.py"],
+        staged=0,
+        stage_error=None,
+        skipped=[],
+        with_external=[],
     )
     session_ack = accept_ack(outcome, is_git=False, source=SOURCE_SESSION)
     turn_ack = accept_ack(outcome, is_git=False, source=SOURCE_TURN)
 
-    assert session_ack == accept_ack(outcome, is_git=False)   # источник по умолчанию — прежний
+    assert session_ack == accept_ack(
+        outcome, is_git=False
+    )  # источник по умолчанию — прежний
     assert turn_ack != session_ack
     assert turn_ack.startswith(session_ack)
     assert "Сесси" in turn_ack
@@ -1155,7 +1403,9 @@ def test_reset_ack_from_session_start_when_no_head_step():
 
 def test_reset_ack_from_head_when_head_step_lives():
     """Условная формулировка (Р29, §13): ступень HEAD жива — не «с начала сессии»."""
-    outcome = ResetOutcome(reset=["src/app.py"], to_head=["src/app.py"], skipped=[])
+    outcome = ResetOutcome(
+        reset=["src/app.py"], to_head=["src/app.py"], skipped=[]
+    )
     assert reset_ack(outcome) == (
         "принятие отменено: src/app.py — счёт от закоммиченного состояния"
     )
@@ -1169,14 +1419,20 @@ def test_reset_ack_names_the_count_for_a_uniform_mass_reset():
 
 
 def test_reset_ack_splits_mixed_targets_by_head_step():
-    outcome = ResetOutcome(reset=["a.py", "b.py"], to_head=["b.py"], skipped=[])
+    outcome = ResetOutcome(
+        reset=["a.py", "b.py"], to_head=["b.py"], skipped=[]
+    )
     ack = reset_ack(outcome)
-    assert "принятие отменено: a.py — счёт для файла снова с начала сессии" in ack
+    assert (
+        "принятие отменено: a.py — счёт для файла снова с начала сессии" in ack
+    )
     assert "принятие отменено: b.py — счёт от закоммиченного состояния" in ack
 
 
 def test_reset_ack_when_nothing_had_an_accepted_base():
-    outcome = ResetOutcome(reset=[], to_head=[], skipped=[("a.py", RESET_NOT_ACCEPTED)])
+    outcome = ResetOutcome(
+        reset=[], to_head=[], skipped=[("a.py", RESET_NOT_ACCEPTED)]
+    )
     ack = reset_ack(outcome)
     assert "принятие не отменено" in ack and "a.py" in ack
     assert reset_tone(outcome) == "warn"
@@ -1192,7 +1448,7 @@ def test_reset_ack_in_turn_source_notes_where_the_effect_is_visible():
     session_ack = reset_ack(outcome, source=SOURCE_SESSION)
     turn_ack = reset_ack(outcome, source=SOURCE_TURN)
 
-    assert session_ack == reset_ack(outcome)          # источник по умолчанию — прежний
+    assert session_ack == reset_ack(outcome)  # источник по умолчанию — прежний
     assert turn_ack != session_ack
     assert turn_ack.startswith(session_ack)
     assert "Сесси" in turn_ack
@@ -1203,7 +1459,9 @@ def test_reset_ack_in_turn_source_notes_where_the_effect_is_visible():
 
 def test_viewer_footer_drops_accept_and_revert_when_opened_from_the_group():
     """§4.3: у вьюера из группы дельта от ступени пуста — обе клавиши мертвы."""
-    footer = viewer_footer(full=False, can_full=False, can_add=False, can_revert=False)
+    footer = viewer_footer(
+        full=False, can_full=False, can_add=False, can_revert=False
+    )
     assert "a принять" not in footer
     assert "r откат" not in footer
     assert "↑↓ PgUp PgDn · Esc" in footer
@@ -1301,11 +1559,13 @@ async def test_header_shows_source_and_cumulative_counters(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.base("a.py", "a\nb\nc\n")
-    ws.write("a.py", "a\nB\nc\nd\n")            # +2 −1 от базы
-    ws.write("new.py", "one\ntwo\n")            # создан в наборе: +2
+    ws.write("a.py", "a\nB\nc\nd\n")  # +2 −1 от базы
+    ws.write("new.py", "one\ntwo\n")  # создан в наборе: +2
     ws.journal.append(_rec("a.py", ts=1.0))
     ws.journal.append(_rec("a.py", ts=2.0, turn="t2"))
-    ws.journal.append(_rec("new.py", ts=3.0, turn="t2", op="create", add=2, del_=0))
+    ws.journal.append(
+        _rec("new.py", ts=3.0, turn="t2", op="create", add=2, del_=0)
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1323,7 +1583,9 @@ async def test_header_shows_source_and_cumulative_counters(tmp_path):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("size", [(40, 24), (50, 24), (80, 24), (120, 30)])
-async def test_body_frame_holds_full_height_and_keeps_rows_whole(tmp_path, size):
+async def test_body_frame_holds_full_height_and_keeps_rows_whole(
+    tmp_path, size
+):
     """Р16: тело списка в рамке на всю доступную высоту, строки целы.
 
     `outline` в Textual места не резервирует: движок затирает им первую и
@@ -1338,8 +1600,9 @@ async def test_body_frame_holds_full_height_and_keeps_rows_whole(tmp_path, size)
     ws = _Workspace(tmp_path)
     for idx in range(3):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create",
-                               add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1350,7 +1613,9 @@ async def test_body_frame_holds_full_height_and_keeps_rows_whole(tmp_path, size)
 
         lines = _screen_lines(pilot.app)
         top = next(i for i, line in enumerate(lines) if line.startswith("╭"))
-        bottom = next(i for i, line in enumerate(lines) if line.startswith("╰"))
+        bottom = next(
+            i for i, line in enumerate(lines) if line.startswith("╰")
+        )
         # Рамка стоит между шапкой (2 строки) и футером, занимая весь остаток.
         assert top == 2, lines
         footer_h = scr.query_one("#footer").outer_size.height
@@ -1360,13 +1625,17 @@ async def test_body_frame_holds_full_height_and_keeps_rows_whole(tmp_path, size)
         # Строки списка целы и лежат ВНУТРИ рамки.
         for row in (scr._rows[0], scr._rows[-1]):
             text = _plain(row).strip()
-            inside = [line for line in lines[top + 1: bottom] if text in line]
+            inside = [line for line in lines[top + 1 : bottom] if text in line]
             assert inside, (text, lines)
-            assert inside[0].startswith("│") and inside[0].endswith("│"), inside
+            assert inside[0].startswith("│") and inside[0].endswith("│"), (
+                inside
+            )
 
 
 @pytest.mark.asyncio
-async def test_shift_tab_switches_source_in_place_without_pushing_screen(tmp_path):
+async def test_shift_tab_switches_source_in_place_without_pushing_screen(
+    tmp_path,
+):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
@@ -1375,7 +1644,9 @@ async def test_shift_tab_switches_source_in_place_without_pushing_screen(tmp_pat
     ws.write("a.py", "a\nb\n")
     ws.write("b.py", "one\n")
     ws.journal.append(_rec("a.py", turn="t1", ts=1.0))
-    ws.journal.append(_rec("b.py", turn="t2", ts=2.0, op="create", add=1, del_=0))
+    ws.journal.append(
+        _rec("b.py", turn="t2", ts=2.0, op="create", add=1, del_=0)
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1388,11 +1659,13 @@ async def test_shift_tab_switches_source_in_place_without_pushing_screen(tmp_pat
 
         await pilot.press("shift+tab")
         await pilot.pause()
-        assert pilot.app.screen is scr                    # in-place, без push
+        assert pilot.app.screen is scr  # in-place, без push
         assert len(pilot.app.screen_stack) == depth
         assert scr.source == SOURCE_TURN
         assert [e.path for e in scr._entries] == ["b.py"]
-        assert "последний ход с правками" in _plain(scr.query_one("#header-left"))
+        assert "последний ход с правками" in _plain(
+            scr.query_one("#header-left")
+        )
 
         await pilot.press("shift+tab")
         await pilot.pause()
@@ -1400,7 +1673,9 @@ async def test_shift_tab_switches_source_in_place_without_pushing_screen(tmp_pat
 
 
 @pytest.mark.asyncio
-async def test_tab_switches_between_active_part_and_group_remembering_position(tmp_path):
+async def test_tab_switches_between_active_part_and_group_remembering_position(
+    tmp_path,
+):
     """`Tab` — переключатель областей (С4 смоука волны 4): активная часть ↔
     строка группы, с запоминанием позиции в активной части."""
     pytest.importorskip("textual")
@@ -1409,10 +1684,12 @@ async def test_tab_switches_between_active_part_and_group_remembering_position(t
     ws = _Workspace(tmp_path)
     for idx in range(3):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
     ws.write("done.py", "v1\n")
     ws.journal.append(_rec("done.py", ts=9.0))
-    ws.accept("done.py", "v1\n")                # чисто относительно принятого → группа
+    ws.accept("done.py", "v1\n")  # чисто относительно принятого → группа
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1421,18 +1698,18 @@ async def test_tab_switches_between_active_part_and_group_remembering_position(t
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert len(scr._entries) == 3
-        assert scr._settled                            # группа реально есть
+        assert scr._settled  # группа реально есть
         group_idx = len(scr._entries)
-        scr._move(1)                                    # курсор на вторую активную строку
+        scr._move(1)  # курсор на вторую активную строку
         await pilot.pause()
 
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._selected_idx == group_idx           # ушли на строку группы
+        assert scr._selected_idx == group_idx  # ушли на строку группы
 
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._selected_idx == 1                   # вернулись туда, откуда ушли
+        assert scr._selected_idx == 1  # вернулись туда, откуда ушли
 
         # Второй круг с другой позиции — запоминается заново, не залипает на 1.
         scr._move(2)
@@ -1454,7 +1731,9 @@ async def test_tab_is_silent_without_a_group(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(2):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1462,13 +1741,13 @@ async def test_tab_is_silent_without_a_group(tmp_path):
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert not scr._settled                        # группы нет
+        assert not scr._settled  # группы нет
         scr._move(1)
         await pilot.pause()
 
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._selected_idx == 1                  # курсор не сдвинулся
+        assert scr._selected_idx == 1  # курсор не сдвинулся
         assert "Tab активные/группа" not in _plain(scr.query_one("#footer"))
 
 
@@ -1480,7 +1759,7 @@ def _group_workspace(tmp_path) -> _Workspace:
     for idx, name in enumerate(("one.py", "two.py")):
         ws.write(name, "v1\n")
         ws.journal.append(_rec(name, ts=float(idx), call_id=f"c{idx}"))
-        ws.accept(name, "v1\n")           # чисто относительно принятого → в группу
+        ws.accept(name, "v1\n")  # чисто относительно принятого → в группу
     return ws
 
 
@@ -1503,23 +1782,25 @@ async def test_tab_returns_to_the_remembered_row_inside_the_group(tmp_path):
         group_idx = 1
 
         scr._move(group_idx)
-        await pilot.press("enter")                  # раскрыть группу
+        await pilot.press("enter")  # раскрыть группу
         await pilot.pause()
         assert scr._group_expanded is True
-        scr._move(group_idx + 2)                    # вторая строка внутри группы
+        scr._move(group_idx + 2)  # вторая строка внутри группы
         await pilot.pause()
 
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._selected_idx == 0                # ушли в активную часть
+        assert scr._selected_idx == 0  # ушли в активную часть
 
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._selected_idx == group_idx + 2    # вернулись на ту же строку
+        assert scr._selected_idx == group_idx + 2  # вернулись на ту же строку
 
 
 @pytest.mark.asyncio
-async def test_tab_returns_to_the_group_row_when_the_group_is_collapsed(tmp_path):
+async def test_tab_returns_to_the_group_row_when_the_group_is_collapsed(
+    tmp_path,
+):
     """Запомненной строки на экране больше нет — возвращаться некуда, кроме
     заголовка группы (Д3)."""
     pytest.importorskip("textual")
@@ -1539,11 +1820,11 @@ async def test_tab_returns_to_the_group_row_when_the_group_is_collapsed(tmp_path
         await pilot.pause()
         scr._move(group_idx + 1)
         await pilot.pause()
-        await pilot.press("tab")                    # запомнили строку в группе
+        await pilot.press("tab")  # запомнили строку в группе
         await pilot.pause()
         assert scr._selected_idx == 0
 
-        scr._toggle_group()                          # свернули, курсор не трогали
+        scr._toggle_group()  # свернули, курсор не трогали
         await pilot.pause()
         assert scr._group_expanded is False
 
@@ -1553,7 +1834,9 @@ async def test_tab_returns_to_the_group_row_when_the_group_is_collapsed(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_tab_returns_to_the_group_row_when_the_remembered_file_is_gone(tmp_path):
+async def test_tab_returns_to_the_group_row_when_the_remembered_file_is_gone(
+    tmp_path,
+):
     """Память держит ПУТЬ файла, а не индекс: между двумя `Tab` список
     перечитывается, и запомненная строка могла уйти из группы вовсе — тогда
     возврат идёт на заголовок (Д3)."""
@@ -1571,20 +1854,20 @@ async def test_tab_returns_to_the_group_row_when_the_remembered_file_is_gone(tmp
         scr._move(1)
         await pilot.press("enter")
         await pilot.pause()
-        scr._move(3)                                 # вторая строка группы — two.py
+        scr._move(3)  # вторая строка группы — two.py
         await pilot.pause()
         remembered = scr._settled[1].path
         await pilot.press("tab")
         await pilot.pause()
 
-        scr._edits.reset_accept([remembered])        # файл вернулся в активные
+        scr._edits.reset_accept([remembered])  # файл вернулся в активные
         scr._reload()
         await pilot.pause()
         assert remembered not in [row.path for row in scr._settled]
 
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._selected_idx == len(scr._entries)   # заголовок группы
+        assert scr._selected_idx == len(scr._entries)  # заголовок группы
 
 
 @pytest.mark.asyncio
@@ -1605,17 +1888,17 @@ async def test_tab_is_silent_when_the_active_part_is_empty(tmp_path):
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert scr._entries == [] and scr._settled     # только группа
+        assert scr._entries == [] and scr._settled  # только группа
         assert "Tab активные/группа" not in _plain(scr.query_one("#footer"))
 
-        await pilot.press("enter")                     # раскрыть
+        await pilot.press("enter")  # раскрыть
         await pilot.pause()
-        scr._move(1)                                    # строка внутри группы
+        scr._move(1)  # строка внутри группы
         await pilot.pause()
 
         await pilot.press("tab")
         await pilot.pause()
-        assert scr._selected_idx == 1                   # курсор не сдвинулся
+        assert scr._selected_idx == 1  # курсор не сдвинулся
 
 
 @pytest.mark.asyncio
@@ -1640,7 +1923,9 @@ async def test_tab_without_a_group_still_stops_and_prevents_default(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(2):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1648,10 +1933,12 @@ async def test_tab_without_a_group_still_stops_and_prevents_default(tmp_path):
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert not scr._settled                        # группы нет
+        assert not scr._settled  # группы нет
 
-        with patch.object(events.Key, "stop") as stop_spy, \
-                patch.object(events.Key, "prevent_default") as prevent_spy:
+        with (
+            patch.object(events.Key, "stop") as stop_spy,
+            patch.object(events.Key, "prevent_default") as prevent_spy,
+        ):
             await pilot.press("tab")
             await pilot.pause()
 
@@ -1667,7 +1954,9 @@ async def test_selected_row_has_caret_and_selected_class(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(3):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1691,7 +1980,9 @@ async def test_arrows_wrap_and_home_end(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(3):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1701,7 +1992,7 @@ async def test_arrows_wrap_and_home_end(tmp_path):
         await pilot.pause()
         await pilot.press("up")
         await pilot.pause()
-        assert scr._selected_idx == 2          # круговая навигация вверх
+        assert scr._selected_idx == 2  # круговая навигация вверх
         await pilot.press("down")
         await pilot.pause()
         assert scr._selected_idx == 0
@@ -1723,7 +2014,13 @@ async def test_pgdn_moves_by_page_and_clamps(tmp_path):
     for idx in range(40):
         ws.write(f"f{idx:02d}.py", "x\n")
         ws.journal.append(
-            _rec(f"f{idx:02d}.py", ts=float(40 - idx), op="create", add=1, del_=0)
+            _rec(
+                f"f{idx:02d}.py",
+                ts=float(40 - idx),
+                op="create",
+                add=1,
+                del_=0,
+            )
         )
 
     async with TuiApp(
@@ -1739,7 +2036,7 @@ async def test_pgdn_moves_by_page_and_clamps(tmp_path):
         for _ in range(10):
             await pilot.press("pagedown")
         await pilot.pause()
-        assert scr._selected_idx == 39         # уперлись, а не ушли по кругу
+        assert scr._selected_idx == 39  # уперлись, а не ушли по кругу
         for _ in range(10):
             await pilot.press("pageup")
         await pilot.pause()
@@ -1761,7 +2058,13 @@ async def test_long_list_keeps_rows_one_line_high(tmp_path):
     for idx in range(40):
         ws.write(f"f{idx:02d}.py", "x\n")
         ws.journal.append(
-            _rec(f"f{idx:02d}.py", ts=float(40 - idx), op="create", add=1, del_=0)
+            _rec(
+                f"f{idx:02d}.py",
+                ts=float(40 - idx),
+                op="create",
+                add=1,
+                del_=0,
+            )
         )
 
     async with TuiApp(
@@ -1770,7 +2073,9 @@ async def test_long_list_keeps_rows_one_line_high(tmp_path):
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert scr.query_one("#trace").scrollbar_size_vertical > 0   # список длинный
+        assert (
+            scr.query_one("#trace").scrollbar_size_vertical > 0
+        )  # список длинный
         assert {row.size.height for row in scr._rows} == {1}
 
 
@@ -1792,11 +2097,11 @@ async def test_row_wider_than_body_is_cropped_not_wrapped(tmp_path):
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
     ).run_test(size=(50, 24)) as pilot:
         scr = ws.screen()
-        scr._row_width = lambda: 70            # намеренно шире тела
+        scr._row_width = lambda: 70  # намеренно шире тела
         await pilot.app.push_screen(scr)
         await pilot.pause()
         row = scr._rows[0]
-        assert len(_plain(row)) > row.size.width       # строка правда не влезла
+        assert len(_plain(row)) > row.size.width  # строка правда не влезла
         assert row.size.height == 1
 
 
@@ -1818,7 +2123,14 @@ async def test_narrow_terminal_keeps_rows_one_line_high(tmp_path):
     for idx in range(6):
         ws.write(f"f{idx}.py", "x\n")
         ws.journal.append(
-            _rec(f"f{idx}.py", call_id=None, ts=float(idx), op="create", add=1, del_=0)
+            _rec(
+                f"f{idx}.py",
+                call_id=None,
+                ts=float(idx),
+                op="create",
+                add=1,
+                del_=0,
+            )
         )
 
     for width in (50, 40):
@@ -1831,10 +2143,13 @@ async def test_narrow_terminal_keeps_rows_one_line_high(tmp_path):
             body = scr._rows[0].size.width
             lengths = {len(_plain(row)) for row in scr._rows}
             assert {row.size.height for row in scr._rows} == {1}, width
-            assert len(lengths) == 1, (width, lengths)      # сетка общая
-            assert lengths.pop() <= body, (width, body)     # и влезает в тело
-            for row in scr._rows:                 # счётчики уцелели у всех
-                assert re.search(r"\+\d+ +−\d+", _plain(row)), (width, _plain(row))
+            assert len(lengths) == 1, (width, lengths)  # сетка общая
+            assert lengths.pop() <= body, (width, body)  # и влезает в тело
+            for row in scr._rows:  # счётчики уцелели у всех
+                assert re.search(r"\+\d+ +−\d+", _plain(row)), (
+                    width,
+                    _plain(row),
+                )
 
 
 @pytest.mark.asyncio
@@ -1850,7 +2165,9 @@ async def test_cursor_index_is_clamped_to_the_list(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(3):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1876,7 +2193,9 @@ async def test_click_selects_row(tmp_path):
     ws = _Workspace(tmp_path)
     for idx in range(3):
         ws.write(f"f{idx}.py", "x\n")
-        ws.journal.append(_rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0))
+        ws.journal.append(
+            _rec(f"f{idx}.py", ts=float(idx), op="create", add=1, del_=0)
+        )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -1957,10 +2276,10 @@ async def test_footer_offers_accept_regardless_of_git_mode(tmp_path):
             scr = ws.screen()
             await pilot.app.push_screen(scr)
             await pilot.pause()
-            assert scr._entries                    # список не пуст
+            assert scr._entries  # список не пуст
             footers[git] = _plain(scr.query_one("#footer"))
 
-    assert footers[False] == footers[True]          # режим не решает содержимое
+    assert footers[False] == footers[True]  # режим не решает содержимое
     assert "a принять" in footers[False]
     assert "r откат" in footers[False]
 
@@ -1972,11 +2291,13 @@ async def test_footer_shows_accepted_wording_on_a_marked_row(tmp_path):
     from gc_tui.app import TuiApp
 
     ws = _Workspace(tmp_path)
-    ws.base("a.py", "a\n")                 # снимок начала сессии — откат доступен
+    ws.base("a.py", "a\n")  # снимок начала сессии — откат доступен
     ws.write("a.py", "a\nb\n")
     ws.journal.append(_rec("a.py", ts=1.0))
     ws.accept("a.py", "a\nb\n")
-    ws.write("a.py", "a\nb\nc\n")          # новая правка поверх принятого — снова активен
+    ws.write(
+        "a.py", "a\nb\nc\n"
+    )  # новая правка поверх принятого — снова активен
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
 
     async with TuiApp(
@@ -1996,7 +2317,9 @@ async def test_footer_shows_accepted_wording_on_a_marked_row(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_footer_shows_group_wording_and_ctrl_u_on_the_group_row(tmp_path):
+async def test_footer_shows_group_wording_and_ctrl_u_on_the_group_row(
+    tmp_path,
+):
     """На заголовке группы `Enter` называется разворотом (Ж3 батча 4), а
     массовый `Ctrl+U` жив: принятый вручную файл в группе есть."""
     pytest.importorskip("textual")
@@ -2005,7 +2328,7 @@ async def test_footer_shows_group_wording_and_ctrl_u_on_the_group_row(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    ws.accept("a.py", "v1\n")               # принят вручную — снимать есть с кого
+    ws.accept("a.py", "v1\n")  # принят вручную — снимать есть с кого
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2014,7 +2337,7 @@ async def test_footer_shows_group_wording_and_ctrl_u_on_the_group_row(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert scr._entries == []
-        assert scr._selected_idx == 0             # курсор сразу на группе
+        assert scr._selected_idx == 0  # курсор сразу на группе
 
         footer = _plain(scr.query_one("#footer"))
         assert "Enter развернуть" in footer
@@ -2041,7 +2364,7 @@ async def test_footer_on_group_rows_advertises_u_only_where_it_lives(tmp_path):
     ws.journal.append(_rec("act.py", ts=2.0))
     ws.write("manual.py", "v1\n")
     ws.journal.append(_rec("manual.py", ts=1.0, call_id="c2"))
-    ws.accept("manual.py", "v1\n")          # чисто относительно принятого — в группе
+    ws.accept("manual.py", "v1\n")  # чисто относительно принятого — в группе
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2052,22 +2375,24 @@ async def test_footer_on_group_rows_advertises_u_only_where_it_lives(tmp_path):
         assert [entry.path for entry in scr._entries] == ["act.py"]
         assert [row.path for row in scr._settled] == ["manual.py"]
 
-        await pilot.press("down")                    # заголовок группы
+        await pilot.press("down")  # заголовок группы
         await pilot.pause()
         footer = _plain(scr.query_one("#footer"))
         assert "Enter развернуть" in footer
         assert "u сброс" not in footer
 
-        await pilot.press("enter")                   # развернули группу
+        await pilot.press("enter")  # развернули группу
         await pilot.pause()
         assert scr._group_expanded is True
         assert "Enter свернуть" in _plain(scr.query_one("#footer"))
 
-        await pilot.press("down")                    # файл внутри группы
+        await pilot.press("down")  # файл внутри группы
         await pilot.pause()
         footer = _plain(scr.query_one("#footer"))
         assert "Enter — что агент сделал с файлом за сессию" in footer
-        assert "u сброс — отменить принятие, файл вернётся в активные" in footer
+        assert (
+            "u сброс — отменить принятие, файл вернётся в активные" in footer
+        )
 
         scr._settled = [_settled(path="commit.py", reason=SETTLED_COMMIT)]
         scr._render_screen()
@@ -2088,7 +2413,7 @@ async def test_footer_hides_revert_when_the_row_has_no_reliable_base(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\nb\n")
-    ws.journal.append(_rec("a.py", ts=1.0))       # правка есть, снимка сессии нет
+    ws.journal.append(_rec("a.py", ts=1.0))  # правка есть, снимка сессии нет
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2119,20 +2444,24 @@ async def test_a_reserved_row_separates_the_flash_from_the_footer(tmp_path):
     ws.write("a.py", "a\nb\n")
     ws.journal.append(_rec("a.py", ts=1.0))
 
-    app = TuiApp(threads_dir=str(ws.threads_dir), system="cli", config=ws.config)
+    app = TuiApp(
+        threads_dir=str(ws.threads_dir), system="cli", config=ws.config
+    )
     async with app.run_test(size=(160, 24)) as pilot:
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
         footer = scr.query_one("#footer")
         quiet_y = footer.region.y
-        assert _screen_lines(pilot.app)[quiet_y - 1] == ""     # резерв есть и без плашки
+        assert (
+            _screen_lines(pilot.app)[quiet_y - 1] == ""
+        )  # резерв есть и без плашки
 
         scr._flash("принято: 1 файл — новая точка отсчёта")
         await pilot.pause()
         flash = scr.query_one("#diff-flash")
 
-        assert footer.region.y == quiet_y                       # футер не сдвинулся
+        assert footer.region.y == quiet_y  # футер не сдвинулся
         assert _screen_lines(pilot.app)[quiet_y - 1] == ""
         # ровно одна пустая строка между плашкой и полосой подсказок
         assert flash.region.y + flash.region.height == quiet_y - 1
@@ -2152,7 +2481,9 @@ async def test_footer_actions_follow_the_cursor_between_rows(tmp_path):
     ws.write("a.py", "a\nb\nc\n")
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
     ws.write("b.py", "b\n")
-    ws.journal.append(_rec("b.py", ts=3.0, call_id="c3", op="create", add=1, del_=0))
+    ws.journal.append(
+        _rec("b.py", ts=3.0, call_id="c3", op="create", add=1, del_=0)
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2162,7 +2493,8 @@ async def test_footer_actions_follow_the_cursor_between_rows(tmp_path):
         await pilot.pause()
         assert len(scr._entries) == 2
         accepted_idx = next(
-            i for i, row in enumerate(scr._view.active)
+            i
+            for i, row in enumerate(scr._view.active)
             if row.step is not None and row.step.kind == STEP_ACCEPTED
         )
         plain_idx = 1 - accepted_idx
@@ -2179,7 +2511,9 @@ async def test_footer_actions_follow_the_cursor_between_rows(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_group_viewer_body_is_the_session_cumulative_not_journal_records(tmp_path):
+async def test_group_viewer_body_is_the_session_cumulative_not_journal_records(
+    tmp_path,
+):
     """Enter на разобранном файле показывает кумулятив сессии (§12/Р31, I1).
 
     Тело собирается от базы начала сессии — тем же расчётом, что числа строки
@@ -2191,8 +2525,8 @@ async def test_group_viewer_body_is_the_session_cumulative_not_journal_records(t
     ws = _Workspace(tmp_path)
     ws.base("a.py", "было\n")
     ws.write("a.py", "было\nстало\n")
-    ws.journal.append(_rec("a.py", ts=1.0))     # хэнков в записи нет вовсе
-    ws.accept("a.py", "было\nстало\n")          # принят и чист → уходит в группу
+    ws.journal.append(_rec("a.py", ts=1.0))  # хэнков в записи нет вовсе
+    ws.accept("a.py", "было\nстало\n")  # принят и чист → уходит в группу
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2201,19 +2535,23 @@ async def test_group_viewer_body_is_the_session_cumulative_not_journal_records(t
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert scr._entries == []
-        await pilot.press("enter")             # раскрыть группу
+        await pilot.press("enter")  # раскрыть группу
         await pilot.pause()
-        await pilot.press("down")              # settled-строка
-        await pilot.press("enter")             # вьюер группы
+        await pilot.press("down")  # settled-строка
+        await pilot.press("enter")  # вьюер группы
         await pilot.pause()
 
         body = "\n".join(_screen_lines(pilot.app))
-        assert "+стало" in body                       # реальная разница «до → сейчас»
-        assert VIEWER_NOTE_INEXACT not in body        # `.orig` жив — нота была бы ложью
+        assert "+стало" in body  # реальная разница «до → сейчас»
+        assert (
+            VIEWER_NOTE_INEXACT not in body
+        )  # `.orig` жив — нота была бы ложью
 
 
 @pytest.mark.asyncio
-async def test_group_viewer_keeps_approx_when_group_numbers_came_from_the_journal(tmp_path):
+async def test_group_viewer_keeps_approx_when_group_numbers_came_from_the_journal(
+    tmp_path,
+):
     """Регресс I1: у разобранного пути без базы в сторе числа приходят из
     журнала — шапка вьюера обязана сохранить `≈`, а тело остаться историей
     правок. Заглушка строки берёт `exact` У СТРОКИ, а не назначает его."""
@@ -2222,8 +2560,10 @@ async def test_group_viewer_keeps_approx_when_group_numbers_came_from_the_journa
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "line1\nline2\nline3\n")
-    ws.journal.append(_rec("a.py", ts=1.0))     # снимка у пути нет вовсе
-    ws.accept("a.py", "line1\nline2\nline3\n")  # принят и чист → уходит в группу
+    ws.journal.append(_rec("a.py", ts=1.0))  # снимка у пути нет вовсе
+    ws.accept(
+        "a.py", "line1\nline2\nline3\n"
+    )  # принят и чист → уходит в группу
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2232,10 +2572,10 @@ async def test_group_viewer_keeps_approx_when_group_numbers_came_from_the_journa
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert scr._settled[0].exact is False
-        await pilot.press("enter")             # раскрыть группу
+        await pilot.press("enter")  # раскрыть группу
         await pilot.pause()
-        await pilot.press("down")              # settled-строка
-        await pilot.press("enter")             # вьюер группы
+        await pilot.press("down")  # settled-строка
+        await pilot.press("enter")  # вьюер группы
         await pilot.pause()
 
         header = _plain(pilot.app.screen.query_one("#header-left"))
@@ -2243,7 +2583,9 @@ async def test_group_viewer_keeps_approx_when_group_numbers_came_from_the_journa
 
 
 @pytest.mark.asyncio
-async def test_group_viewer_footer_advertises_neither_accept_nor_revert(tmp_path):
+async def test_group_viewer_footer_advertises_neither_accept_nor_revert(
+    tmp_path,
+):
     """Вьюер, открытый из группы, не рекламирует ни `a`, ни `r` (ревью задачи 10)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
@@ -2259,10 +2601,10 @@ async def test_group_viewer_footer_advertises_neither_accept_nor_revert(tmp_path
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("enter")             # раскрыть группу
+        await pilot.press("enter")  # раскрыть группу
         await pilot.pause()
-        await pilot.press("down")              # settled-строка
-        await pilot.press("enter")             # вьюер группы
+        await pilot.press("down")  # settled-строка
+        await pilot.press("enter")  # вьюер группы
         await pilot.pause()
 
         footer = _plain(pilot.app.screen.query_one("#footer"))
@@ -2305,7 +2647,7 @@ async def test_header_counts_active_only_and_empty_state_rule(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    ws.accept("a.py", "v1\n")             # a.py уходит в settled — активных нет
+    ws.accept("a.py", "v1\n")  # a.py уходит в settled — активных нет
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2314,11 +2656,11 @@ async def test_header_counts_active_only_and_empty_state_rule(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
 
-        assert scr._entries == []                        # активных нет
+        assert scr._entries == []  # активных нет
         # Группа жива — шапка говорит про НОВЫЕ изменения (Д7 второго смоука).
         assert "новых изменений нет" in _plain(scr.query_one("#header-left"))
         body = "\n".join(_plain(w) for w in scr.query("#trace > Static"))
-        assert EMPTY_SESSION not in body                  # но группа даёт видимое содержимое
+        assert EMPTY_SESSION not in body  # но группа даёт видимое содержимое
         assert "принято 1" in body
 
 
@@ -2336,7 +2678,9 @@ async def test_cursor_walks_into_expanded_group(tmp_path):
     ws.journal.append(_rec("c.py", ts=2.0, call_id="c2"))
     ws.accept("c.py", "v1\n")
     ws.write("b.py", "x\n")
-    ws.journal.append(_rec("b.py", ts=3.0, call_id="c3", op="create", add=1, del_=0))
+    ws.journal.append(
+        _rec("b.py", ts=3.0, call_id="c3", op="create", add=1, del_=0)
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2345,29 +2689,29 @@ async def test_cursor_walks_into_expanded_group(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
 
-        assert len(scr._entries) == 1                     # только b.py активен
+        assert len(scr._entries) == 1  # только b.py активен
         assert scr._selected_idx == 0
 
-        await pilot.press("down")                          # b.py → строка группы
+        await pilot.press("down")  # b.py → строка группы
         await pilot.pause()
         assert scr._selected_idx == 1
         assert scr._rows[1].has_class("selected")
 
-        await pilot.press("enter")                         # разворот, курсор остаётся тут
+        await pilot.press("enter")  # разворот, курсор остаётся тут
         await pilot.pause()
         assert scr._group_expanded is True
         assert scr._selected_idx == 1
-        assert len(scr._rows) == 4                         # 1 активный + группа + 2 settled
+        assert len(scr._rows) == 4  # 1 активный + группа + 2 settled
 
         await pilot.press("down")
         await pilot.pause()
-        assert scr._selected_idx == 2                       # первый settled
+        assert scr._selected_idx == 2  # первый settled
 
         await pilot.press("down")
         await pilot.pause()
-        assert scr._selected_idx == 3                       # второй settled
+        assert scr._selected_idx == 3  # второй settled
 
-        await pilot.press("down")                            # по кругу — назад к активному
+        await pilot.press("down")  # по кругу — назад к активному
         await pilot.pause()
         assert scr._selected_idx == 0
 
@@ -2391,14 +2735,14 @@ async def test_enter_toggles_group_and_opens_settled_viewer(tmp_path):
         await pilot.app.push_screen(scr)
         await pilot.pause()
         assert scr._entries == []
-        assert scr._selected_idx == 0                       # курсор сразу на группе
+        assert scr._selected_idx == 0  # курсор сразу на группе
 
         await pilot.press("enter")
         await pilot.pause()
         assert scr._group_expanded is True
-        assert pilot.app.screen is scr                       # не открылся вьюер
+        assert pilot.app.screen is scr  # не открылся вьюер
 
-        await pilot.press("down")                            # на settled-строку
+        await pilot.press("down")  # на settled-строку
         await pilot.pause()
         await pilot.press("enter")
         await pilot.pause()
@@ -2451,14 +2795,14 @@ async def test_revert_and_git_add_keys_are_noop_on_group_row(tmp_path):
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert scr._selected_idx == 0                        # единственная строка — группа
+        assert scr._selected_idx == 0  # единственная строка — группа
 
         await pilot.press("r")
         await pilot.press("a")
         await pilot.pause()
 
-        assert pilot.app.screen is scr                        # ни подтверждения, ни вьюера
-        assert not scr.query("#diff-flash")                   # и действие не отчиталось
+        assert pilot.app.screen is scr  # ни подтверждения, ни вьюера
+        assert not scr.query("#diff-flash")  # и действие не отчиталось
 
 
 # --- принятие/сброс из вьюера группы (§4.3) -----------------------------------
@@ -2483,10 +2827,10 @@ async def test_group_viewer_hides_dead_keys(tmp_path):
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        await pilot.press("enter")            # раскрыть группу
+        await pilot.press("enter")  # раскрыть группу
         await pilot.pause()
-        await pilot.press("down")             # settled-строка manual.py
-        await pilot.press("enter")            # вьюер группы
+        await pilot.press("down")  # settled-строка manual.py
+        await pilot.press("enter")  # вьюер группы
         await pilot.pause()
 
         viewer = pilot.app.screen
@@ -2497,14 +2841,14 @@ async def test_group_viewer_hides_dead_keys(tmp_path):
         await pilot.press("r")
         await pilot.pause()
 
-        assert pilot.app.screen is viewer            # ни подтверждения, ни принятия
+        assert pilot.app.screen is viewer  # ни подтверждения, ни принятия
         assert not viewer.query("#diff-flash")
-        assert ws.store.accepted_state("manual.py") is not None    # база цела
+        assert ws.store.accepted_state("manual.py") is not None  # база цела
 
         await pilot.press("u")
         await pilot.pause()
 
-        assert pilot.app.screen is scr                # успешный сброс закрыл вьюер
+        assert pilot.app.screen is scr  # успешный сброс закрыл вьюер
         assert ws.store.accepted_state("manual.py") is None
 
 
@@ -2593,7 +2937,7 @@ async def test_u_resets_from_the_turn_source_when_the_file_has_an_accepted_base(
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
     ws.accept("a.py", "v1\n")
-    ws.write("a.py", "v2\n")                 # дельта от принятого непуста
+    ws.write("a.py", "v2\n")  # дельта от принятого непуста
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
 
     async with TuiApp(
@@ -2604,9 +2948,9 @@ async def test_u_resets_from_the_turn_source_when_the_file_has_an_accepted_base(
         await pilot.pause()
         assert scr.source == SOURCE_TURN
         row = scr._view.active[0]
-        assert row.step is None                              # «Ход» ступеней не видит (Р27)
+        assert row.step is None  # «Ход» ступеней не видит (Р27)
         assert row.has_accepted_base is True
-        assert ACCEPTED_GLYPH not in _rows_text(scr)[0]       # глиф не про «Ход»
+        assert ACCEPTED_GLYPH not in _rows_text(scr)[0]  # глиф не про «Ход»
         # Пометки «принят» тут НЕТ: диск ушёл дальше принятого (`v2` против
         # `v1`), а пометка говорит про СОСТОЯНИЕ — «файл и есть то, что вы
         # приняли», — а не про факт из прошлого. Иначе она висела бы вечно и
@@ -2614,12 +2958,12 @@ async def test_u_resets_from_the_turn_source_when_the_file_has_an_accepted_base(
         assert MARK_ACCEPTED not in _rows_text(scr)[0]
 
         footer = _plain(scr.query_one("#footer"))
-        assert "u сброс" in footer                            # клавиша названа
+        assert "u сброс" in footer  # клавиша названа
 
         await pilot.press("u")
         await pilot.pause()
         confirm = pilot.app.screen
-        assert isinstance(confirm, RevertConfirmScreen)       # дошла, не смолчала
+        assert isinstance(confirm, RevertConfirmScreen)  # дошла, не смолчала
         await pilot.press("enter")
         await pilot.pause()
 
@@ -2684,10 +3028,10 @@ async def test_ctrl_u_confirm_counts_the_file_that_risks_nothing_too(tmp_path):
     ws.write("lost.py", "v1\n")
     ws.journal.append(_rec("lost.py", ts=2.0))
     ws.accept("lost.py", "v1\n")
-    ws.write("lost.py", "v2\n")           # дельта непуста — точка отката теряется
+    ws.write("lost.py", "v2\n")  # дельта непуста — точка отката теряется
     ws.write("kept.py", "v1\n")
     ws.journal.append(_rec("kept.py", ts=1.0, call_id="c2"))
-    ws.accept("kept.py", "v1\n")          # диск равен принятому — терять нечего
+    ws.accept("kept.py", "v1\n")  # диск равен принятому — терять нечего
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2701,7 +3045,10 @@ async def test_ctrl_u_confirm_counts_the_file_that_risks_nothing_too(tmp_path):
 
         confirm = pilot.app.screen
         assert isinstance(confirm, RevertConfirmScreen)
-        assert _plain(confirm.query_one("#header-left")) == "Сброс принятия у 2 файлов"
+        assert (
+            _plain(confirm.query_one("#header-left"))
+            == "Сброс принятия у 2 файлов"
+        )
 
         await pilot.press("enter")
         await pilot.pause()
@@ -2721,7 +3068,7 @@ async def test_ctrl_u_without_a_single_loss_resets_at_once(tmp_path):
     for name, ts in (("a.py", 2.0), ("b.py", 1.0)):
         ws.write(name, "v1\n")
         ws.journal.append(_rec(name, ts=ts, call_id=f"c_{name}"))
-        ws.accept(name, "v1\n")           # диск равен принятому у обоих
+        ws.accept(name, "v1\n")  # диск равен принятому у обоих
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -2733,7 +3080,7 @@ async def test_ctrl_u_without_a_single_loss_resets_at_once(tmp_path):
         await pilot.press("ctrl+u")
         await pilot.pause()
 
-        assert pilot.app.screen is scr                   # экрана подтверждения нет
+        assert pilot.app.screen is scr  # экрана подтверждения нет
         assert "принятие отменено" in _plain(scr.query_one("#diff-flash"))
         assert ws.store.accepted_state("a.py") is None
         assert ws.store.accepted_state("b.py") is None
@@ -2763,7 +3110,9 @@ async def test_ctrl_u_cyrillic_lower_resets_all(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_footer_does_not_promise_accepted_target_outside_the_session_ladder(tmp_path):
+async def test_footer_does_not_promise_accepted_target_outside_the_session_ladder(
+    tmp_path,
+):
     """Ревью ветки, Minor 1: у файла есть `.accepted`, но `r` вернёт НЕ к нему.
 
     Два случая в одном сценарии — оба про одно: состояние футера обязано
@@ -2792,12 +3141,22 @@ async def test_footer_does_not_promise_accepted_target_outside_the_session_ladde
         ("config", "user.email", "test@example.com"),
         ("config", "user.name", "test"),
     ):
-        subprocess.run(["git", *args], cwd=str(ws.root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", *args], cwd=str(ws.root), check=True, capture_output=True
+        )
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.base("a.py", "v1\n")
     # Снимок начала ХОДА — как у живого рекордера: без него у «Хода» нет
     # достоверной базы, и `r` из его футера ушёл бы вовсе (Д10).
@@ -2805,15 +3164,25 @@ async def test_footer_does_not_promise_accepted_target_outside_the_session_ladde
     ws.write("a.py", "v2\n")
     ws.journal.append(_rec("a.py", ts=1.0))
 
-    view = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config)
-    view.accept(["a.py"])                      # принято состояние "v2\n"
+    view = EditsView(
+        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+    )
+    view.accept(["a.py"])  # принято состояние "v2\n"
     ws.write("a.py", "v3\n")
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit after accept"], cwd=str(ws.root),
-                   check=True, capture_output=True)
-    ws.write("a.py", "v4\n")                   # правка поверх коммита — файл активен
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit after accept"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.write("a.py", "v4\n")  # правка поверх коммита — файл активен
     ws.journal.append(_rec("a.py", ts=3.0, call_id="c3"))
 
     async with TuiApp(
@@ -2822,11 +3191,13 @@ async def test_footer_does_not_promise_accepted_target_outside_the_session_ladde
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
-        assert ws.store.accepted_state("a.py") is not None    # `.accepted` жив
+        assert ws.store.accepted_state("a.py") is not None  # `.accepted` жив
         row = scr._view.active[0]
-        assert row.step is not None and row.step.kind == STEP_HEAD  # но действует ступень HEAD
+        assert (
+            row.step is not None and row.step.kind == STEP_HEAD
+        )  # но действует ступень HEAD
         [target] = scr._edits.revert_targets(SOURCE_SESSION, ["a.py"])
-        assert target.kind == "head"                          # а `r` вернёт к коммиту
+        assert target.kind == "head"  # а `r` вернёт к коммиту
 
         footer = _plain(scr.query_one("#footer"))
         assert "вернуть к принятому" not in footer
@@ -2836,8 +3207,12 @@ async def test_footer_does_not_promise_accepted_target_outside_the_session_ladde
         scr._toggle_source()
         await pilot.pause()
         assert scr.source == SOURCE_TURN
-        assert ws.store.accepted_state("a.py") is not None    # `.accepted` по-прежнему жив
-        assert scr._view.active[0].step is None                # но в «Ходе» ступени нет вовсе (С1)
+        assert (
+            ws.store.accepted_state("a.py") is not None
+        )  # `.accepted` по-прежнему жив
+        assert (
+            scr._view.active[0].step is None
+        )  # но в «Ходе» ступени нет вовсе (С1)
 
         turn_footer = _plain(scr.query_one("#footer"))
         assert "вернуть к принятому" not in turn_footer
@@ -2871,25 +3246,45 @@ async def test_u_resets_in_session_source_when_a_later_commit_wins_the_tiebreak(
         ("config", "user.email", "test@example.com"),
         ("config", "user.name", "test"),
     ):
-        subprocess.run(["git", *args], cwd=str(ws.root), check=True, capture_output=True)
+        subprocess.run(
+            ["git", *args], cwd=str(ws.root), check=True, capture_output=True
+        )
     ws.write("a.py", "v1\n")
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(ws.root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
     ws.base("a.py", "v1\n")
     ws.write("a.py", "v2\n")
     ws.journal.append(_rec("a.py", ts=1.0))
 
-    view = EditsView(str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config)
-    view.accept(["a.py"])                      # принято состояние "v2\n"
+    view = EditsView(
+        str(ws.threads_dir), "cli", "th1", str(ws.root), ws.config
+    )
+    view.accept(["a.py"])  # принято состояние "v2\n"
     ws.write("a.py", "v3\n")
     ws.journal.append(_rec("a.py", ts=2.0, call_id="c2"))
-    subprocess.run(["git", "add", "--", "a.py"], cwd=str(ws.root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "commit after accept"], cwd=str(ws.root),
-                   check=True, capture_output=True)
-    ws.write("a.py", "v4\n")                   # правка поверх коммита — файл активен
+    subprocess.run(
+        ["git", "add", "--", "a.py"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "commit after accept"],
+        cwd=str(ws.root),
+        check=True,
+        capture_output=True,
+    )
+    ws.write("a.py", "v4\n")  # правка поверх коммита — файл активен
     ws.journal.append(_rec("a.py", ts=3.0, call_id="c3"))
 
     async with TuiApp(
@@ -2900,18 +3295,26 @@ async def test_u_resets_in_session_source_when_a_later_commit_wins_the_tiebreak(
         await pilot.pause()
 
         row = scr._view.active[0]
-        assert row.step is not None and row.step.kind == STEP_HEAD   # тай-брейк отдал HEAD
-        assert row.has_accepted_base is True                          # принятая база жива
-        assert ACCEPTED_GLYPH not in _rows_text(scr)[0]                # глиф не про эту строку
+        assert (
+            row.step is not None and row.step.kind == STEP_HEAD
+        )  # тай-брейк отдал HEAD
+        assert row.has_accepted_base is True  # принятая база жива
+        assert (
+            ACCEPTED_GLYPH not in _rows_text(scr)[0]
+        )  # глиф не про эту строку
 
         footer = _plain(scr.query_one("#footer"))
-        assert "u сброс" in footer            # клавиша названа, хоть строка и не ROW_ACCEPTED
+        assert (
+            "u сброс" in footer
+        )  # клавиша названа, хоть строка и не ROW_ACCEPTED
 
         await pilot.press("u")
         await pilot.pause()
 
         confirm = pilot.app.screen
-        assert isinstance(confirm, RevertConfirmScreen)     # клавиша сработала, не смолчала
+        assert isinstance(
+            confirm, RevertConfirmScreen
+        )  # клавиша сработала, не смолчала
         await pilot.press("enter")
         await pilot.pause()
 
@@ -2933,7 +3336,7 @@ async def test_turn_with_all_edits_undone_says_so(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "было\n")
-    ws.store.capture_turn("a.py", "было\n".encode(), "t1")   # база начала хода
+    ws.store.capture_turn("a.py", "было\n".encode(), "t1")  # база начала хода
     ws.journal.append(_rec("a.py", turn="t1", ts=1.0))
     # диск совпал с началом хода: правки этого хода не осталось
 
@@ -2956,12 +3359,22 @@ def test_header_legend_explains_only_the_marks_that_are_on_screen():
     ЗНАК, а не одна база на всех. Без легенды знак приходилось знать: полная
     фраза жила только во вьюере и в превью отката, а вопрос возникает в списке.
     """
-    from gc_tui.screens.diff import (LEGEND_ACCEPTED, LEGEND_COMMIT,
-                                     LEGEND_EXTERNAL)
+    from gc_tui.screens.diff import (
+        LEGEND_ACCEPTED,
+        LEGEND_COMMIT,
+        LEGEND_EXTERNAL,
+    )
 
     def head(width=160, **kw):
-        return build_header(SOURCE_SESSION, files=2, add=2, del_=2,
-                            mode="git-mode", width=width, **kw)[0]
+        return build_header(
+            SOURCE_SESSION,
+            files=2,
+            add=2,
+            del_=2,
+            mode="git-mode",
+            width=width,
+            **kw,
+        )[0]
 
     plain = head()
     assert LEGEND_ACCEPTED not in plain and LEGEND_COMMIT not in plain
@@ -2969,10 +3382,15 @@ def test_header_legend_explains_only_the_marks_that_are_on_screen():
 
     only_external = head(legend_external=True)
     assert LEGEND_EXTERNAL in only_external
-    assert LEGEND_ACCEPTED not in only_external and LEGEND_COMMIT not in only_external
+    assert (
+        LEGEND_ACCEPTED not in only_external
+        and LEGEND_COMMIT not in only_external
+    )
 
     only_accepted = head(legend_accepted=True)
-    assert LEGEND_ACCEPTED in only_accepted and LEGEND_COMMIT not in only_accepted
+    assert (
+        LEGEND_ACCEPTED in only_accepted and LEGEND_COMMIT not in only_accepted
+    )
 
     only_commit = head(legend_commit=True)
     assert LEGEND_COMMIT in only_commit and LEGEND_ACCEPTED not in only_commit
@@ -2982,8 +3400,12 @@ def test_header_legend_explains_only_the_marks_that_are_on_screen():
 
     # Узкая ширина: легенда жертвуется ПЕРВОЙ — знак без расшифровки хуже, чем
     # числа без знака, но числа и источник обязаны выжить.
-    narrow = head(width=len(plain), legend_accepted=True, legend_commit=True,
-                  legend_external=True)
+    narrow = head(
+        width=len(plain),
+        legend_accepted=True,
+        legend_commit=True,
+        legend_external=True,
+    )
     assert narrow == plain
 
 
@@ -3018,7 +3440,7 @@ async def test_turn_marks_a_file_whose_content_is_the_accepted_one(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "v1\n")
     ws.journal.append(_rec("a.py", ts=1.0))
-    ws.accept("a.py", "v1\n")          # принято ровно то, что на диске
+    ws.accept("a.py", "v1\n")  # принято ровно то, что на диске
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -3031,7 +3453,9 @@ async def test_turn_marks_a_file_whose_content_is_the_accepted_one(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_screen_admits_the_list_is_incomplete_after_a_command_cut_by_the_cap(tmp_path):
+async def test_screen_admits_the_list_is_incomplete_after_a_command_cut_by_the_cap(
+    tmp_path,
+):
     """Команда тронула больше путей, чем пишет журнал, — экран говорит об этом прямо.
 
     Без строки список выглядел бы полным: «откатить всё» откатило бы видимое, а
@@ -3044,8 +3468,12 @@ async def test_screen_admits_the_list_is_incomplete_after_a_command_cut_by_the_c
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\n")
-    ws.journal.append(replace(_rec("a.py", turn="t1", call_id=None, op="shell"),
-                              command_paths=10001))
+    ws.journal.append(
+        replace(
+            _rec("a.py", turn="t1", call_id=None, op="shell"),
+            command_paths=10001,
+        )
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -3055,7 +3483,10 @@ async def test_screen_admits_the_list_is_incomplete_after_a_command_cut_by_the_c
         await pilot.pause()
 
         body = [_plain(w) for w in scr.query("#trace > Static")]
-        assert "одна из команд этой сессии изменила 10001 файл " in body[0].lower()
+        assert (
+            "одна из команд этой сессии изменила 10001 файл "
+            in body[0].lower()
+        )
         assert len(scr._rows) == 1 and "a.py" in _plain(scr._rows[0])
 
 
@@ -3075,12 +3506,19 @@ async def test_x_hides_the_cut_command_note_until_the_app_exits(tmp_path):
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\n")
     ws.write("b.py", "b\n")
-    ws.journal.append(replace(_rec("a.py", turn="t1", call_id=None, op="shell"),
-                              command_paths=10001))
+    ws.journal.append(
+        replace(
+            _rec("a.py", turn="t1", call_id=None, op="shell"),
+            command_paths=10001,
+        )
+    )
 
     def notes(scr):
-        return [t for t in (_plain(w) for w in scr.query("#trace > Static"))
-                if "одна из команд" in t.lower()]
+        return [
+            t
+            for t in (_plain(w) for w in scr.query("#trace > Static"))
+            if "одна из команд" in t.lower()
+        ]
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -3102,8 +3540,12 @@ async def test_x_hides_the_cut_command_note_until_the_app_exits(tmp_path):
         assert notes(scr) == []
 
         await pilot.press("escape")
-        ws.journal.append(replace(_rec("b.py", turn="t2", call_id=None, op="shell", ts=2.0),
-                                  command_paths=20002))
+        ws.journal.append(
+            replace(
+                _rec("b.py", turn="t2", call_id=None, op="shell", ts=2.0),
+                command_paths=20002,
+            )
+        )
         scr = ws.screen()
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3124,8 +3566,12 @@ async def test_x_removes_only_the_note_without_rebuilding_the_list(tmp_path):
 
     ws = _Workspace(tmp_path)
     ws.write("a.py", "a\n")
-    ws.journal.append(replace(_rec("a.py", turn="t1", call_id=None, op="shell"),
-                              command_paths=10001))
+    ws.journal.append(
+        replace(
+            _rec("a.py", turn="t1", call_id=None, op="shell"),
+            command_paths=10001,
+        )
+    )
 
     async with TuiApp(
         threads_dir=str(ws.threads_dir), system="cli", config=ws.config
@@ -3141,9 +3587,13 @@ async def test_x_removes_only_the_note_without_rebuilding_the_list(tmp_path):
         await pilot.pause()
 
         assert rebuilds == []
-        assert not any("одна из команд" in _plain(w).lower()
-                       for w in scr.query("#trace > Static"))
-        assert scr._rows == rows_before and all(row.is_attached for row in scr._rows)
+        assert not any(
+            "одна из команд" in _plain(w).lower()
+            for w in scr.query("#trace > Static")
+        )
+        assert scr._rows == rows_before and all(
+            row.is_attached for row in scr._rows
+        )
 
 
 @pytest.mark.asyncio
@@ -3172,7 +3622,11 @@ async def test_list_rows_are_mounted_in_one_call(tmp_path, monkeypatch):
         trace = scr.query_one("#trace", VerticalScroll)
         calls = []
         real_mount = trace.mount
-        monkeypatch.setattr(trace, "mount", lambda *w, **k: (calls.append(len(w)), real_mount(*w, **k))[1])
+        monkeypatch.setattr(
+            trace,
+            "mount",
+            lambda *w, **k: (calls.append(len(w)), real_mount(*w, **k))[1],
+        )
         scr._render_screen()
         await pilot.pause()
 
@@ -3181,7 +3635,9 @@ async def test_list_rows_are_mounted_in_one_call(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_cursor_step_repaints_only_the_rows_that_changed(tmp_path, monkeypatch):
+async def test_cursor_step_repaints_only_the_rows_that_changed(
+    tmp_path, monkeypatch
+):
     """Шаг курсора перерисовывает две строки — ушедшую и пришедшую, а не весь список.
 
     Каждое обновление строки просит Textual переложить список: перерисовка всех
@@ -3203,16 +3659,29 @@ async def test_cursor_step_repaints_only_the_rows_that_changed(tmp_path, monkeyp
         updated = []
         for idx, row in enumerate(scr._rows):
             real = row.update
-            monkeypatch.setattr(row, "update", lambda *a, _i=idx, _r=real, **k: (updated.append(_i), _r(*a, **k))[1])
+            monkeypatch.setattr(
+                row,
+                "update",
+                lambda *a, _i=idx, _r=real, **k: (
+                    updated.append(_i),
+                    _r(*a, **k),
+                )[1],
+            )
         await pilot.press("down")
         await pilot.pause()
 
         assert sorted(updated) == [0, 1]
-        assert [r.has_class("selected") for r in scr._rows[:3]] == [False, True, False]
+        assert [r.has_class("selected") for r in scr._rows[:3]] == [
+            False,
+            True,
+            False,
+        ]
 
 
 @pytest.mark.asyncio
-async def test_actions_on_a_busy_snapshot_index_warn_instead_of_crashing(tmp_path, monkeypatch):
+async def test_actions_on_a_busy_snapshot_index_warn_instead_of_crashing(
+    tmp_path, monkeypatch
+):
     """Занятый индекс снимков не роняет экран ни на одном действии — только предупреждает.
 
     Индекс читает почти каждое действие (превью и применение отката, принятие,
@@ -3238,21 +3707,23 @@ async def test_actions_on_a_busy_snapshot_index_warn_instead_of_crashing(tmp_pat
         await pilot.app.push_screen(scr)
         await pilot.pause()
         notes = []
-        monkeypatch.setattr(pilot.app, "notify", lambda msg, **kw: notes.append(msg))
+        monkeypatch.setattr(
+            pilot.app, "notify", lambda msg, **kw: notes.append(msg)
+        )
 
         def busy(self):
             raise TimeoutError("индекс снимков занят")
 
         monkeypatch.setattr(SnapshotStore, "_index_snapshot", busy)
         for key in ("r", "a", "u", "ctrl+r", "ctrl+a", "enter"):
-            scr._edits.invalidate()                   # конкурент сбил кэш вида
+            scr._edits.invalidate()  # конкурент сбил кэш вида
             await pilot.press(key)
             await pilot.pause()
             if pilot.app.screen is not scr:
-                await pilot.press("escape")           # вьюер или подтверждение — назад
+                await pilot.press("escape")  # вьюер или подтверждение — назад
                 await pilot.pause()
 
-        assert pilot.app.screen is scr               # экран жив
+        assert pilot.app.screen is scr  # экран жив
         assert EDITS_UNREADABLE in notes
 
 
@@ -3298,7 +3769,9 @@ async def test_viewer_body_on_a_busy_snapshot_index_says_so_instead_of_crashing(
         await pilot.pause()
 
         assert pilot.app.screen is viewer
-        assert EDITS_UNREADABLE in "\n".join(_plain(w) for w in viewer.query(Static))
+        assert EDITS_UNREADABLE in "\n".join(
+            _plain(w) for w in viewer.query(Static)
+        )
 
 
 @pytest.mark.asyncio
@@ -3330,7 +3803,9 @@ async def test_revert_that_cannot_be_reported_still_reloads_and_says_so(
         await pilot.app.push_screen(scr)
         await pilot.pause()
         notes = []
-        monkeypatch.setattr(pilot.app, "notify", lambda msg, **kw: notes.append(msg))
+        monkeypatch.setattr(
+            pilot.app, "notify", lambda msg, **kw: notes.append(msg)
+        )
         reloads = []
         real_reload = scr._reload
         monkeypatch.setattr(

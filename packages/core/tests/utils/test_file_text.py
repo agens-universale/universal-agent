@@ -328,9 +328,21 @@ def test_split_lines_lf_ignores_everything_python_calls_a_line_break():
     """
     from gc_core.utils.file_text import split_lines_lf
 
-    for odd in ("\r", "\v", "\f", "\x1c", "\x1d", "\x1e", "\x85", "\u2028", "\u2029"):
+    for odd in (
+        "\r",
+        "\v",
+        "\f",
+        "\x1c",
+        "\x1d",
+        "\x1e",
+        "\x85",
+        "\u2028",
+        "\u2029",
+    ):
         text = f"a{odd}b"
-        assert text.splitlines() == ["a", "b"], "питон считает это концом строки"
+        assert text.splitlines() == ["a", "b"], (
+            "питон считает это концом строки"
+        )
         assert split_lines_lf(text) == [text], "а git — нет"
 
     assert split_lines_lf("") == []

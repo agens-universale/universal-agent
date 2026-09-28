@@ -1,4 +1,5 @@
 """record_edit: единая точка записи о правке файла в журнал треда."""
+
 from __future__ import annotations
 
 import hashlib
@@ -24,9 +25,16 @@ def roots(tmp_path, monkeypatch):
     return launch_root, threads_dir
 
 
-def _ctx(launch_root, threads_dir, *, system_id="cli", thread_id="th1", turn_id="turn-1"):
+def _ctx(
+    launch_root,
+    threads_dir,
+    *,
+    system_id="cli",
+    thread_id="th1",
+    turn_id="turn-1",
+):
     return SimpleNamespace(
-        is_tui=True,             # режим с записью правок по умолчанию
+        is_tui=True,  # режим с записью правок по умолчанию
         config_dict={"launch_root": str(launch_root)},
         threads_dir=str(threads_dir),
         system_id=system_id,
@@ -36,12 +44,18 @@ def _ctx(launch_root, threads_dir, *, system_id="cli", thread_id="th1", turn_id=
 
 
 def _journal(threads_dir, *, system_id="cli", thread_id="th1"):
-    return EditsJournal(edits_journal_path(str(threads_dir), system_id, thread_id))
+    return EditsJournal(
+        edits_journal_path(str(threads_dir), system_id, thread_id)
+    )
 
 
-def _snapshot_store(launch_root, threads_dir, *, system_id="cli", thread_id="th1"):
+def _snapshot_store(
+    launch_root, threads_dir, *, system_id="cli", thread_id="th1"
+):
     return SnapshotStore(
-        launch_root / ".gc" / "agent_edits", f"{system_id}_{thread_id}", threads_dir
+        launch_root / ".gc" / "agent_edits",
+        f"{system_id}_{thread_id}",
+        threads_dir,
     )
 
 
@@ -62,15 +76,35 @@ def _git_repo_with_seed_commit(launch_root) -> str:
         ("config", "user.email", "test@example.com"),
         ("config", "user.name", "test"),
     ):
-        subprocess.run(["git", *args], cwd=str(launch_root), check=True,
-                       capture_output=True)
+        subprocess.run(
+            ["git", *args],
+            cwd=str(launch_root),
+            check=True,
+            capture_output=True,
+        )
     (launch_root / "seed.txt").write_bytes(b"seed\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(launch_root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(launch_root), check=True,
-                   capture_output=True)
-    return subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(launch_root),
-                          check=True, capture_output=True).stdout.decode().strip()
+    subprocess.run(
+        ["git", "add", "-A"],
+        cwd=str(launch_root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(launch_root),
+        check=True,
+        capture_output=True,
+    )
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(launch_root),
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
 
 
 async def test_normal_edit_records_hunks_hashes_and_both_snapshots(roots):
@@ -99,7 +133,9 @@ async def test_normal_edit_records_hunks_hashes_and_both_snapshots(roots):
     assert rec.op == "edit"
     assert rec.call_id == "call-1"
     assert rec.turn_id == "turn-1"
-    assert rec.hunks == "--- \n+++ \n@@ -1,2 +1,2 @@\n line1\n-line2\n+line2x\n"
+    assert (
+        rec.hunks == "--- \n+++ \n@@ -1,2 +1,2 @@\n line1\n-line2\n+line2x\n"
+    )
     assert rec.add == 1
     assert rec.del_ == 1
     assert rec.before_sha256 == hashlib.sha256(old_bytes).hexdigest()
@@ -129,7 +165,9 @@ async def test_create_has_no_before_hash_and_no_session_snapshot(roots):
 
     rec = _journal(threads_dir).read_all()[0]
     path_key = canonical_path_key(str(target), str(launch_root))
-    assert rec.op == "write"  # op передан вызывающим, рекордер его не переопределяет
+    assert (
+        rec.op == "write"
+    )  # op передан вызывающим, рекордер его не переопределяет
     assert rec.before_sha256 is None
     assert rec.after_sha256 == hashlib.sha256(new_bytes).hexdigest()
     assert rec.hunks == "--- \n+++ \n@@ -0,0 +1,2 @@\n+hello\n+world\n"
@@ -179,7 +217,12 @@ async def test_both_bytes_none_is_noop(roots):
     ctx = _ctx(launch_root, threads_dir)
 
     await record_edit(
-        ctx, abs_path=str(target), old_bytes=None, new_bytes=None, op="edit", call_id="call-x"
+        ctx,
+        abs_path=str(target),
+        old_bytes=None,
+        new_bytes=None,
+        op="edit",
+        call_id="call-x",
     )
 
     assert _journal(threads_dir).read_all() == []
@@ -253,12 +296,18 @@ async def test_oversized_content_skips_diff_and_snapshot(roots):
     assert store.session_baseline(path_key) is None
 
 
-async def test_large_diff_is_truncated_with_flag_but_counts_stay_accurate(roots):
+async def test_large_diff_is_truncated_with_flag_but_counts_stay_accurate(
+    roots,
+):
     launch_root, threads_dir = roots
     target = launch_root / "src" / "many.py"
     target.parent.mkdir()
-    old_bytes = ("\n".join(f"old-{i}" for i in range(50)) + "\n").encode("utf-8")
-    new_bytes = ("\n".join(f"new-{i}" for i in range(50)) + "\n").encode("utf-8")
+    old_bytes = ("\n".join(f"old-{i}" for i in range(50)) + "\n").encode(
+        "utf-8"
+    )
+    new_bytes = ("\n".join(f"new-{i}" for i in range(50)) + "\n").encode(
+        "utf-8"
+    )
     target.write_bytes(old_bytes)
     ctx = _ctx(launch_root, threads_dir)
 
@@ -279,7 +328,9 @@ async def test_large_diff_is_truncated_with_flag_but_counts_stay_accurate(roots)
     assert rec.del_ == 50
 
 
-async def test_add_count_not_fooled_by_content_line_starting_with_plus_plus(roots):
+async def test_add_count_not_fooled_by_content_line_starting_with_plus_plus(
+    roots,
+):
     """Регрессия: контент '++i;' после '+'-маркера diff даёт '+++i;' — не
     должен приниматься за заголовок '+++' и теряться из счётчика add."""
     launch_root, threads_dir = roots
@@ -305,7 +356,9 @@ async def test_add_count_not_fooled_by_content_line_starting_with_plus_plus(root
     assert "+++i;\n" in rec.hunks
 
 
-async def test_del_count_not_fooled_by_content_line_starting_with_dash_dash(roots):
+async def test_del_count_not_fooled_by_content_line_starting_with_dash_dash(
+    roots,
+):
     """Регрессия: удалённая строка '--x;' даёт '---x;' после '-'-маркера — не
     должна приниматься за заголовок '---' и теряться из счётчика del."""
     launch_root, threads_dir = roots
@@ -331,7 +384,9 @@ async def test_del_count_not_fooled_by_content_line_starting_with_dash_dash(root
     assert "---x;\n" in rec.hunks
 
 
-async def test_del_count_not_fooled_by_content_line_that_is_a_dash_separator(roots):
+async def test_del_count_not_fooled_by_content_line_that_is_a_dash_separator(
+    roots,
+):
     """Регрессия: удалённая строка-разделитель '---' (markdown/YAML) даёт
     '----' после '-'-маркера — не должна приниматься за заголовок diff'а."""
     launch_root, threads_dir = roots
@@ -383,7 +438,12 @@ async def test_ctx_without_thread_identity_is_noop(roots):
     ctx = SimpleNamespace(config_dict={"launch_root": str(launch_root)})
 
     await record_edit(
-        ctx, abs_path=str(target), old_bytes=b"a", new_bytes=b"b", op="edit", call_id="call-8"
+        ctx,
+        abs_path=str(target),
+        old_bytes=b"a",
+        new_bytes=b"b",
+        op="edit",
+        call_id="call-8",
     )
 
     assert list(threads_dir.glob("edits_*.jsonl")) == []
@@ -414,7 +474,7 @@ async def test_external_file_is_recorded_without_any_baseline(roots):
     key = outside.resolve().as_posix()
     assert [r.path for r in records] == [key]
     assert records[0].call_id == "c1"
-    assert records[0].hunks != ""          # блоку в ленте есть что показать
+    assert records[0].hunks != ""  # блоку в ленте есть что показать
 
     store = _snapshot_store(launch_root, threads_dir)
     assert store.counting_session_baseline(key) is None
@@ -446,7 +506,7 @@ async def test_external_file_deleted_here_gets_no_baseline(roots):
     key = outside.resolve().as_posix()
     records = _journal(threads_dir).read_all()
     assert [(r.path, r.op) for r in records] == [(key, "delete")]
-    assert records[0].hunks != ""          # блоку в ленте есть что показать
+    assert records[0].hunks != ""  # блоку в ленте есть что показать
     store = _snapshot_store(launch_root, threads_dir)
     assert store.session_baseline(key) is None
     assert store.counting_session_baseline(key) is None
@@ -506,13 +566,22 @@ async def test_extra_paths_no_longer_buy_a_baseline(roots):
     ctx.config_dict["write_guard"] = {"extra_paths": [str(extra)]}
 
     await record_edit(
-        ctx, abs_path=str(target), old_bytes=b"x = 1\n", new_bytes=b"x = 2\n",
-        op="write", call_id="c1",
+        ctx,
+        abs_path=str(target),
+        old_bytes=b"x = 1\n",
+        new_bytes=b"x = 2\n",
+        op="write",
+        call_id="c1",
     )
 
     key = target.resolve().as_posix()
     assert [r.path for r in _journal(threads_dir).read_all()] == [key]
-    assert _snapshot_store(launch_root, threads_dir).counting_session_baseline(key) is None
+    assert (
+        _snapshot_store(launch_root, threads_dir).counting_session_baseline(
+            key
+        )
+        is None
+    )
 
 
 async def test_global_instruction_file_is_not_recorded_at_all(roots):
@@ -534,9 +603,12 @@ async def test_global_instruction_file_is_not_recorded_at_all(roots):
     l1.write_bytes("старое\n".encode("utf-8"))
 
     await record_edit(
-        _ctx(launch_root, threads_dir), abs_path=str(l1),
-        old_bytes="старое\n".encode("utf-8"), new_bytes="новое\n".encode("utf-8"),
-        op="write", call_id="c1",
+        _ctx(launch_root, threads_dir),
+        abs_path=str(l1),
+        old_bytes="старое\n".encode("utf-8"),
+        new_bytes="новое\n".encode("utf-8"),
+        op="write",
+        call_id="c1",
     )
 
     assert _journal(threads_dir).read_all() == []
@@ -557,14 +629,22 @@ async def test_instruction_file_of_a_neighbour_project_is_recorded(roots):
     target.write_bytes("правила\n".encode("utf-8"))
 
     await record_edit(
-        _ctx(launch_root, threads_dir), abs_path=str(target),
-        old_bytes="правила\n".encode("utf-8"), new_bytes="другие правила\n".encode("utf-8"),
-        op="write", call_id="c1",
+        _ctx(launch_root, threads_dir),
+        abs_path=str(target),
+        old_bytes="правила\n".encode("utf-8"),
+        new_bytes="другие правила\n".encode("utf-8"),
+        op="write",
+        call_id="c1",
     )
 
     key = target.resolve().as_posix()
     assert [r.path for r in _journal(threads_dir).read_all()] == [key]
-    assert _snapshot_store(launch_root, threads_dir).counting_session_baseline(key) is None
+    assert (
+        _snapshot_store(launch_root, threads_dir).counting_session_baseline(
+            key
+        )
+        is None
+    )
 
 
 async def test_user_skill_outside_the_project_is_recorded(roots):
@@ -583,9 +663,12 @@ async def test_user_skill_outside_the_project_is_recorded(roots):
     skill.write_bytes("шаг\n".encode("utf-8"))
 
     await record_edit(
-        _ctx(launch_root, threads_dir), abs_path=str(skill),
-        old_bytes="шаг\n".encode("utf-8"), new_bytes="другой шаг\n".encode("utf-8"),
-        op="write", call_id="c1",
+        _ctx(launch_root, threads_dir),
+        abs_path=str(skill),
+        old_bytes="шаг\n".encode("utf-8"),
+        new_bytes="другой шаг\n".encode("utf-8"),
+        op="write",
+        call_id="c1",
     )
 
     assert [r.path for r in _journal(threads_dir).read_all()] == [
@@ -593,7 +676,9 @@ async def test_user_skill_outside_the_project_is_recorded(roots):
     ]
 
 
-async def test_cyrillic_path_and_cp1251_content_records_and_snapshots_bytes_exactly(roots):
+async def test_cyrillic_path_and_cp1251_content_records_and_snapshots_bytes_exactly(
+    roots,
+):
     launch_root, threads_dir = roots
     target = launch_root / "тест.txt"
     old_text = (
@@ -719,7 +804,9 @@ async def test_first_edit_evicts_orphans_but_never_live_threads(roots):
         p.write_bytes(b"orphan")
 
     # чужой, но ЖИВОЙ тред: журнал на месте — его снимок неприкосновенен
-    edits_journal_path(str(threads_dir), "cli", "other").write_text("", encoding="utf-8")
+    edits_journal_path(str(threads_dir), "cli", "other").write_text(
+        "", encoding="utf-8"
+    )
     alive = SnapshotStore(snapshots_dir, "cli_other", threads_dir)
     alive.capture_session("other.py", b"alive\n")
 
@@ -744,7 +831,9 @@ async def test_first_edit_evicts_orphans_but_never_live_threads(roots):
     assert store.turn_baseline(path_key, "turn-1") == b"line1\n"
 
 
-async def test_zero_max_files_switches_eviction_off_instead_of_wiping(roots, monkeypatch):
+async def test_zero_max_files_switches_eviction_off_instead_of_wiping(
+    roots, monkeypatch
+):
     """`snapshots_max_files: 0` — «не вытеснять», и ноль обязан доехать нулём.
 
     В `evict_lru` ноль отсекается первой же строкой (`max_files <= 0 → return`),
@@ -783,7 +872,9 @@ async def test_zero_max_files_switches_eviction_off_instead_of_wiping(roots, mon
     assert all(p.exists() for p in orphans)
 
 
-async def test_eviction_runs_once_per_file_not_on_every_edit(roots, monkeypatch):
+async def test_eviction_runs_once_per_file_not_on_every_edit(
+    roots, monkeypatch
+):
     """evict_lru обходит каталог целиком — платить обходом за каждую правку нельзя."""
     launch_root, threads_dir = roots
     target = launch_root / "foo.py"
@@ -792,7 +883,9 @@ async def test_eviction_runs_once_per_file_not_on_every_edit(roots, monkeypatch)
 
     calls: list[int] = []
     monkeypatch.setattr(
-        SnapshotStore, "evict_lru", lambda self, max_files: calls.append(max_files)
+        SnapshotStore,
+        "evict_lru",
+        lambda self, max_files: calls.append(max_files),
     )
 
     for new in (b"line2\n", b"line3\n"):
@@ -805,10 +898,12 @@ async def test_eviction_runs_once_per_file_not_on_every_edit(roots, monkeypatch)
             call_id="call-1",
         )
 
-    assert calls == [500]   # только первая правка записала session-снапшот
+    assert calls == [500]  # только первая правка записала session-снапшот
 
 
-async def test_session_snapshot_carries_head_rev_in_git_project(roots, monkeypatch):
+async def test_session_snapshot_carries_head_rev_in_git_project(
+    roots, monkeypatch
+):
     """Признак ступени HEAD пишется вместе со снимком (§3.2) и БЕЗ подпроцесса
     git: `rev-parse` на каждом первом контакте с файлом — налог на горячий путь
     fs-тулов (ограничение фикса C1)."""
@@ -823,19 +918,35 @@ async def test_session_snapshot_carries_head_rev_in_git_project(roots, monkeypat
         ("config", "user.email", "test@example.com"),
         ("config", "user.name", "test"),
     ):
-        subprocess.run(["git", *args], cwd=str(launch_root), check=True,
-                       capture_output=True)
+        subprocess.run(
+            ["git", *args],
+            cwd=str(launch_root),
+            check=True,
+            capture_output=True,
+        )
     target = launch_root / "foo.py"
     target.write_bytes(b"line1\n")
-    subprocess.run(["git", "add", "-A"], cwd=str(launch_root), check=True,
-                   capture_output=True)
-    subprocess.run(["git", "commit", "-m", "seed"], cwd=str(launch_root), check=True,
-                   capture_output=True)
+    subprocess.run(
+        ["git", "add", "-A"],
+        cwd=str(launch_root),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "seed"],
+        cwd=str(launch_root),
+        check=True,
+        capture_output=True,
+    )
 
     from gc_core.agent_edits import git_ops
+
     monkeypatch.setattr(
-        git_ops, "run_git",
-        lambda *a, **kw: pytest.fail("рекордер не должен звать git подпроцессом"),
+        git_ops,
+        "run_git",
+        lambda *a, **kw: pytest.fail(
+            "рекордер не должен звать git подпроцессом"
+        ),
     )
 
     await record_edit(
@@ -849,8 +960,16 @@ async def test_session_snapshot_carries_head_rev_in_git_project(roots, monkeypat
 
     store = _snapshot_store(launch_root, threads_dir)
     path_key = canonical_path_key(str(target), str(launch_root))
-    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(launch_root),
-                          check=True, capture_output=True).stdout.decode().strip()
+    head = (
+        subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=str(launch_root),
+            check=True,
+            capture_output=True,
+        )
+        .stdout.decode()
+        .strip()
+    )
     assert store.session_head_rev(path_key) == head
 
 
@@ -870,9 +989,12 @@ async def test_session_snapshot_has_no_head_rev_outside_git(roots):
     )
 
     store = _snapshot_store(launch_root, threads_dir)
-    assert store.session_head_rev(
-        canonical_path_key(str(target), str(launch_root))
-    ) is None
+    assert (
+        store.session_head_rev(
+            canonical_path_key(str(target), str(launch_root))
+        )
+        is None
+    )
 
 
 async def test_created_file_gets_the_creation_mark_with_head_rev(roots):
@@ -893,7 +1015,9 @@ async def test_created_file_gets_the_creation_mark_with_head_rev(roots):
     store = _snapshot_store(launch_root, threads_dir)
     path_key = canonical_path_key(str(target), str(launch_root))
     assert store.created_head_rev(path_key) == head
-    assert store.session_baseline(path_key) is None   # «пустая база не хранится»
+    assert (
+        store.session_baseline(path_key) is None
+    )  # «пустая база не хранится»
 
 
 async def test_create_over_a_path_with_a_snapshot_keeps_the_honest_base(roots):
@@ -912,12 +1036,12 @@ async def test_create_over_a_path_with_a_snapshot_keeps_the_honest_base(roots):
     store = _snapshot_store(launch_root, threads_dir)
     path_key = canonical_path_key(str(target), str(launch_root))
     store.capture_session(path_key, b"user work\n", head_rev="a" * 40)
-    target.write_bytes(b"")                  # шелл-команда усекла файл
+    target.write_bytes(b"")  # шелл-команда усекла файл
 
     await record_edit(
         _ctx(launch_root, threads_dir),
         abs_path=str(target),
-        old_bytes=None,                      # `size == 0` — тул «до» не поднимает
+        old_bytes=None,  # `size == 0` — тул «до» не поднимает
         new_bytes=b"appended\n",
         op="create",
         call_id="call-1",
@@ -928,7 +1052,9 @@ async def test_create_over_a_path_with_a_snapshot_keeps_the_honest_base(roots):
     assert store.session_head_rev(path_key) == "a" * 40
 
 
-async def test_write_over_existing_file_without_old_bytes_is_not_a_creation(roots):
+async def test_write_over_existing_file_without_old_bytes_is_not_a_creation(
+    roots,
+):
     """`old_bytes is None` — ещё не «файл создан»: перезапись существующего
     файла сверх капа мутирующих тулов приходит ровно такой же (см.
     `write_to_file_tool`/`save_base64_file`), но с `op="write"`.
@@ -945,16 +1071,19 @@ async def test_write_over_existing_file_without_old_bytes_is_not_a_creation(root
     await record_edit(
         _ctx(launch_root, threads_dir),
         abs_path=str(target),
-        old_bytes=None,          # сверх капа: старый контент в память не поднимали
+        old_bytes=None,  # сверх капа: старый контент в память не поднимали
         new_bytes=b"overwritten\n",
-        op="write",              # файл СУЩЕСТВОВАЛ — вызывающий это знает
+        op="write",  # файл СУЩЕСТВОВАЛ — вызывающий это знает
         call_id="call-1",
     )
 
     store = _snapshot_store(launch_root, threads_dir)
-    assert store.created_head_rev(
-        canonical_path_key(str(target), str(launch_root))
-    ) is None
+    assert (
+        store.created_head_rev(
+            canonical_path_key(str(target), str(launch_root))
+        )
+        is None
+    )
 
 
 async def test_partial_append_beyond_cap_is_not_a_creation(roots):
@@ -976,12 +1105,17 @@ async def test_partial_append_beyond_cap_is_not_a_creation(roots):
     )
 
     store = _snapshot_store(launch_root, threads_dir)
-    assert store.created_head_rev(
-        canonical_path_key(str(target), str(launch_root))
-    ) is None
+    assert (
+        store.created_head_rev(
+            canonical_path_key(str(target), str(launch_root))
+        )
+        is None
+    )
 
 
-async def test_snapshot_failure_does_not_swallow_the_journal_record(roots, monkeypatch):
+async def test_snapshot_failure_does_not_swallow_the_journal_record(
+    roots, monkeypatch
+):
     """Отказ снимка базы стоит ОТКАТА, а не видимости правки.
 
     Снимок снимается ДО записи в журнал, и исключение там обрывало всю
@@ -990,6 +1124,7 @@ async def test_snapshot_failure_does_not_swallow_the_journal_record(roots, monke
     случай, пойманный смоком: путь снапшота длиннее предела ОС (на Windows
     MAX_PATH 260, а одно имя файла снимка — 110 знаков).
     """
+
     def _boom(self, *a, **kw):
         raise OSError(2, "No such file or directory")
 
@@ -1012,11 +1147,15 @@ async def test_snapshot_failure_does_not_swallow_the_journal_record(roots, monke
     )
 
     recs = _journal(threads_dir).read_all()
-    assert [(r.path, r.op, r.call_id) for r in recs] == [("src/foo.py", "edit", "call-1")]
+    assert [(r.path, r.op, r.call_id) for r in recs] == [
+        ("src/foo.py", "edit", "call-1")
+    ]
     assert (recs[0].add, recs[0].del_) == (1, 1)
 
 
-async def test_snapshot_of_the_turn_failing_does_not_cancel_eviction(roots, monkeypatch):
+async def test_snapshot_of_the_turn_failing_does_not_cancel_eviction(
+    roots, monkeypatch
+):
     """Снимок сессии лёг, а следующий за ним снимок хода упал.
 
     Обработчик не вправе обнулять признак записи: эвикция цепляется именно к
@@ -1029,7 +1168,9 @@ async def test_snapshot_of_the_turn_failing_does_not_cancel_eviction(roots, monk
         raise OSError(2, "No such file or directory")
 
     monkeypatch.setattr(SnapshotStore, "capture_turn", _boom)
-    monkeypatch.setattr(SnapshotStore, "evict_lru", lambda self, limit: calls.append(limit))
+    monkeypatch.setattr(
+        SnapshotStore, "evict_lru", lambda self, limit: calls.append(limit)
+    )
 
     launch_root, threads_dir = roots
     target = launch_root / "src" / "foo.py"
@@ -1077,7 +1218,10 @@ async def test_garbage_source_cap_in_config_does_not_kill_the_snapshot(roots):
     path_key = canonical_path_key(str(target), str(launch_root))
     assert rec.flags == []
     assert rec.hunks.endswith("@@ -1 +1 @@\n-old\n+new\n")
-    assert _snapshot_store(launch_root, threads_dir).session_baseline(path_key) == b"old\n"
+    assert (
+        _snapshot_store(launch_root, threads_dir).session_baseline(path_key)
+        == b"old\n"
+    )
 
 
 async def test_non_numeric_limit_in_config_does_not_lose_the_record(roots):
@@ -1102,7 +1246,9 @@ async def test_non_numeric_limit_in_config_does_not_lose_the_record(roots):
     assert [r.path for r in _journal(threads_dir).read_all()] == ["src/foo.py"]
 
 
-async def test_tool_edit_after_a_shell_edit_does_not_pass_for_the_session_start(roots):
+async def test_tool_edit_after_a_shell_edit_does_not_pass_for_the_session_start(
+    roots,
+):
     """Правка тулом после шелл-команды не выдаёт состояние после команды за начало сессии.
 
     Команда оставила пути счётную базу (путь был грязен — точного «до» нет).
@@ -1116,10 +1262,21 @@ async def test_tool_edit_after_a_shell_edit_does_not_pass_for_the_session_start(
     store = _snapshot_store(launch_root, threads_dir)
     store.capture_shell_session("src/foo.py", b"index-before\n")
 
-    await record_edit(ctx, abs_path=str(target), old_bytes=b"after-command\n",
-                      new_bytes=b"after-tool\n", op="edit", call_id="c1")
+    await record_edit(
+        ctx,
+        abs_path=str(target),
+        old_bytes=b"after-command\n",
+        new_bytes=b"after-tool\n",
+        op="edit",
+        call_id="c1",
+    )
 
-    assert _snapshot_store(launch_root, threads_dir).session_baseline("src/foo.py") is None
+    assert (
+        _snapshot_store(launch_root, threads_dir).session_baseline(
+            "src/foo.py"
+        )
+        is None
+    )
 
 
 async def test_nothing_is_recorded_where_recording_is_off(tmp_path):
@@ -1141,8 +1298,12 @@ async def test_nothing_is_recorded_where_recording_is_off(tmp_path):
 
     assert is_recording(ctx) is False
     await record_edit(
-        ctx, abs_path=str(target), old_bytes=b"old\n", new_bytes=b"new\n",
-        op="edit", call_id="call-1",
+        ctx,
+        abs_path=str(target),
+        old_bytes=b"old\n",
+        new_bytes=b"new\n",
+        op="edit",
+        call_id="call-1",
     )
 
     assert list(threads_dir.glob("edits_*.jsonl")) == []

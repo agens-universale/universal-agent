@@ -35,6 +35,7 @@
 Слой данных: без UI, git, конфиг-чтения; лимиты (``max_files``) приходят
 параметром.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -92,7 +93,9 @@ class AcceptedState:
 
     content: bytes | None  # None — принято «отсутствие файла» (явный маркер)
     ts: float  # момент принятия
-    head_oid: str | None  # blob-oid HEAD:<rel> на момент принятия; None — не git/нет в HEAD
+    head_oid: (
+        str | None
+    )  # blob-oid HEAD:<rel> на момент принятия; None — не git/нет в HEAD
 
 
 def _path_hash(path_key: str) -> str:
@@ -196,12 +199,16 @@ def _drop_legacy_store(root: Path) -> bool:
     legacy = _legacy_store_dir(root)
     if legacy is None or not legacy.is_dir():
         return False
-    if legacy.is_symlink() or getattr(os.path, "isjunction", lambda _p: False)(legacy):
+    if legacy.is_symlink() or getattr(os.path, "isjunction", lambda _p: False)(
+        legacy
+    ):
         return False
     try:
         entries = list(legacy.iterdir())
         for p in entries:
-            if not p.is_file() or (p.suffix != ".orig" and p.name != "index.json"):
+            if not p.is_file() or (
+                p.suffix != ".orig" and p.name != "index.json"
+            ):
                 return False
         for p in entries:
             p.unlink()
@@ -213,7 +220,7 @@ def _drop_legacy_store(root: Path) -> bool:
 
 def thread_key_from_journal_path(journal_path: Path) -> str:
     """``edits_<thread_key>.jsonl`` → ``thread_key`` (см. докстринг класса)."""
-    return Path(journal_path).stem[len(_JOURNAL_STEM_PREFIX):]
+    return Path(journal_path).stem[len(_JOURNAL_STEM_PREFIX) :]
 
 
 class SnapshotStore:
@@ -250,9 +257,13 @@ class SnapshotStore:
     ) -> None:
         self.root = Path(root)
         self.thread_key = thread_key
-        self.threads_dir = Path(threads_dir) if threads_dir is not None else None
+        self.threads_dir = (
+            Path(threads_dir) if threads_dir is not None else None
+        )
         # Кэш индекса по подписи файла — см. `_index_snapshot`.
-        self._index_cache: Optional[tuple[tuple[int, int], Dict[str, Any]]] = None
+        self._index_cache: Optional[tuple[tuple[int, int], Dict[str, Any]]] = (
+            None
+        )
         # Отложенные отметки `deferred_index`: stem → {поле: значение, None — снять}.
         self._pending: Optional[Dict[str, Dict[str, Optional[str]]]] = None
         self.index_path = self.root / "index.json"
@@ -387,11 +398,14 @@ class SnapshotStore:
         return raw if isinstance(raw, dict) else {}
 
     def _save_index(self, index: Dict[str, Any]) -> None:
-        self._index_cache = None      # своя запись — подпись изменится, но не ждём её
+        self._index_cache = (
+            None  # своя запись — подпись изменится, но не ждём её
+        )
         self._ensure_dir()
         tmp = self.index_path.with_suffix(".json.tmp")
         tmp.write_text(
-            json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+            json.dumps(index, ensure_ascii=False, indent=2, sort_keys=True)
+            + "\n",
             encoding="utf-8",
             newline="\n",
         )
@@ -434,7 +448,7 @@ class SnapshotStore:
         HEAD или `.turn` перепишется тем же ходом ещё раз.
         """
         if self._pending is not None:
-            yield                        # вложенный блок — копит в тот же пакет
+            yield  # вложенный блок — копит в тот же пакет
             return
         self._pending = {}
         try:
@@ -489,7 +503,9 @@ class SnapshotStore:
         self._write_session_head_rev(path_key, head_rev)
         return True
 
-    def _write_session_head_rev(self, path_key: str, head_rev: str | None) -> None:
+    def _write_session_head_rev(
+        self, path_key: str, head_rev: str | None
+    ) -> None:
         self._mark(path_key, {_SESSION_HEAD_REV_KEY: head_rev})
 
     def mark_created(self, path_key: str, *, head_rev: str | None) -> None:
@@ -533,9 +549,13 @@ class SnapshotStore:
         value = self._index_entry(path_key).get(_CREATED_HEAD_REV_KEY)
         return value if isinstance(value, str) and value else None
 
-    def capture_turn(self, path_key: str, content: bytes, turn_id: str) -> None:
+    def capture_turn(
+        self, path_key: str, content: bytes, turn_id: str
+    ) -> None:
         """Записать точный turn-baseline, если для ``turn_id`` он ещё не записан."""
-        self._capture_turn_snapshot(self._turn_path(path_key), path_key, content, turn_id)
+        self._capture_turn_snapshot(
+            self._turn_path(path_key), path_key, content, turn_id
+        )
 
     def capture_shell_session(self, path_key: str, content: bytes) -> bool:
         """Записать СЧЁТНУЮ session-базу, только если её ещё нет. ``True`` — записали.
@@ -545,7 +565,9 @@ class SnapshotStore:
         """
         return self._publish_once(self._shell_session_path(path_key), content)
 
-    def capture_shell_turn(self, path_key: str, content: bytes, turn_id: str) -> None:
+    def capture_shell_turn(
+        self, path_key: str, content: bytes, turn_id: str
+    ) -> None:
         """Записать СЧЁТНУЮ turn-базу, если для ``turn_id`` она ещё не записана."""
         self._capture_turn_snapshot(
             self._shell_turn_path(path_key), path_key, content, turn_id
@@ -570,7 +592,11 @@ class SnapshotStore:
             with file_lock(self.index_path, timeout=5.0):
                 index = self._load_index()
                 entry = index.get(stem)
-                if _turn_taken(entry if isinstance(entry, dict) else {}, index_key, turn_id):
+                if _turn_taken(
+                    entry if isinstance(entry, dict) else {},
+                    index_key,
+                    turn_id,
+                ):
                     return
                 self._write_bytes(dest, content)
                 if _apply_marks(index, stem, {index_key: turn_id}):
@@ -643,7 +669,7 @@ class SnapshotStore:
                 st = self.index_path.stat()
                 signature = (st.st_size, st.st_mtime_ns)
             except OSError:
-                return index          # файл унесли — кэшировать нечего
+                return index  # файл унесли — кэшировать нечего
         self._index_cache = (signature, index)
         return index
 
@@ -676,7 +702,9 @@ class SnapshotStore:
             self._session_path(path_key), self._shell_session_path(path_key)
         )
 
-    def counting_turn_baseline(self, path_key: str, turn_id: str) -> Optional[bytes]:
+    def counting_turn_baseline(
+        self, path_key: str, turn_id: str
+    ) -> Optional[bytes]:
         """То же для хода: более ранняя из двух баз ЭТОГО хода.
 
         Каждая порода отдаётся, только если её отметка в индексе принадлежит
@@ -792,7 +820,9 @@ class SnapshotStore:
         head_oid = entry.get("accepted_head_oid")
         p = self._accepted_path(path_key)
         if p.is_file():
-            return AcceptedState(content=p.read_bytes(), ts=float(ts), head_oid=head_oid)
+            return AcceptedState(
+                content=p.read_bytes(), ts=float(ts), head_oid=head_oid
+            )
         if entry.get("accepted_absent"):
             return AcceptedState(content=None, ts=float(ts), head_oid=head_oid)
         return None
@@ -849,7 +879,8 @@ class SnapshotStore:
         if not self.root.is_dir():
             return
         files = [
-            p for p in self.root.iterdir()
+            p
+            for p in self.root.iterdir()
             if p.is_file() and p.suffix in _SNAPSHOT_SUFFIXES
         ]
         self._prune_dead_marks(files)
@@ -906,7 +937,8 @@ class SnapshotStore:
         with file_lock(self.index_path, timeout=5.0):
             index = self._load_index()
             dead = [
-                key for key in index
+                key
+                for key in index
                 if (match := _STEM_RE.match(key)) is not None
                 and match.group(1) == self.thread_key
             ]
@@ -932,7 +964,8 @@ class SnapshotStore:
         with file_lock(self.index_path, timeout=5.0):
             index = self._load_index()
             dead = [
-                key for key in index
+                key
+                for key in index
                 if key not in stems
                 and (match := _STEM_RE.match(key)) is not None
                 and not self._has_live_journal(match.group(1))

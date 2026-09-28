@@ -48,6 +48,7 @@ def test_focus_on_click_disabled_for_blocks():
     on_click, только за клик по телу."""
     from gc_tui.widgets.block_panel import BlockPanel
     from gc_tui.widgets.diff_block import DiffBlock
+
     for cls in (BlockPanel, DiffBlock):
         assert cls.FOCUS_ON_CLICK is False, cls.__name__
 

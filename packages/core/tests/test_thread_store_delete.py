@@ -63,7 +63,9 @@ def test_delete_thread_missing_is_noop(tmp_path):
     assert delete_thread(str(tmp_path), "cli", "nope") == []
 
 
-def test_delete_thread_keeps_going_when_one_file_refuses_to_die(tmp_path, monkeypatch):
+def test_delete_thread_keeps_going_when_one_file_refuses_to_die(
+    tmp_path, monkeypatch
+):
     """Та же причина, что у сброса: лок журнала чужой процесс держит открытым,
     и на Windows `os.remove` по нему даёт `PermissionError`. Голый цикл ронял
     удаление треда посреди работы, оставляя половину файлов."""

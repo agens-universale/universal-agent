@@ -1,4 +1,5 @@
 """DiffBlock — инлайн-дифф правки в ленте: шапка, свёртка, копирование."""
+
 from __future__ import annotations
 
 import pytest
@@ -15,12 +16,7 @@ from gc_tui.services.diff_render import copyable_hunks
 from gc_tui.widgets.diff_block import DiffBlock
 
 SHORT_HUNKS = (
-    "--- \n"
-    "+++ \n"
-    "@@ -1,3 +1,3 @@\n"
-    " def f():\n"
-    "-    return 1\n"
-    "+    return 2\n"
+    "--- \n+++ \n@@ -1,3 +1,3 @@\n def f():\n-    return 1\n+    return 2\n"
 )
 LIMIT = 5
 
@@ -37,11 +33,28 @@ def _long_hunks(count: int = 30) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _record(hunks: str, *, path: str = "src/app.py", add: int = 1, del_: int = 1,
-            op: str = "edit", flags: tuple[str, ...] = ()) -> EditRecord:
-    return EditRecord(path=path, turn_id="t1", ts=0.0, call_id="c1", op=op,
-                      hunks=hunks, add=add, del_=del_, before_sha256=None,
-                      after_sha256=None, flags=list(flags))
+def _record(
+    hunks: str,
+    *,
+    path: str = "src/app.py",
+    add: int = 1,
+    del_: int = 1,
+    op: str = "edit",
+    flags: tuple[str, ...] = (),
+) -> EditRecord:
+    return EditRecord(
+        path=path,
+        turn_id="t1",
+        ts=0.0,
+        call_id="c1",
+        op=op,
+        hunks=hunks,
+        add=add,
+        del_=del_,
+        before_sha256=None,
+        after_sha256=None,
+        flags=list(flags),
+    )
 
 
 class _Host(App):
@@ -67,10 +80,12 @@ class _Host(App):
         self.opened.append(event.event_no)
 
 
-def _block(record: EditRecord, *, limit: int = LIMIT,
-           compact: bool = False) -> DiffBlock:
-    return DiffBlock.for_record(record, event_no=7, collapsed_max_lines=limit,
-                                compact=compact)
+def _block(
+    record: EditRecord, *, limit: int = LIMIT, compact: bool = False
+) -> DiffBlock:
+    return DiffBlock.for_record(
+        record, event_no=7, collapsed_max_lines=limit, compact=compact
+    )
 
 
 def _body_lines(app: App) -> int:
@@ -123,16 +138,21 @@ async def test_long_diff_collapsed_then_toggled_by_tail_click():
         await pilot.click(".diff-more")
         await pilot.pause()
         assert _body_lines(app) == LIMIT
-        assert app.query_one(".diff-more", Static).visual.plain.startswith("… ещё")
+        assert app.query_one(".diff-more", Static).visual.plain.startswith(
+            "… ещё"
+        )
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("remaining,label", [
-    (1, "1 строка"),
-    (2, "2 строки"),
-    (5, "5 строк"),
-    (21, "21 строка"),
-])
+@pytest.mark.parametrize(
+    "remaining,label",
+    [
+        (1, "1 строка"),
+        (2, "2 строки"),
+        (5, "5 строк"),
+        (21, "21 строка"),
+    ],
+)
 async def test_tail_label_plural_forms(remaining, label):
     app = _Host(_block(_record(_long_hunks(LIMIT + remaining))))
     async with app.run_test(size=(70, 40)):
@@ -159,7 +179,9 @@ async def test_copy_button_posts_raw_hunks():
         # Заливка фона добивает строки пробелами до общей ширины, а гаттер
         # печатает номер строки — в буфер уходят сырые хэнки, а не .plain тела.
         body = app.query_one(".block-body", Static).visual.plain
-        assert any(line.endswith(" ") for line in body.splitlines())   # не вакуум
+        assert any(
+            line.endswith(" ") for line in body.splitlines()
+        )  # не вакуум
         assert not any(line.endswith(" ") for line in payload.splitlines())
         assert "line 0" in payload and "1 +line" not in payload
 
@@ -203,11 +225,20 @@ async def test_double_click_on_compact_tail_copies_nothing():
 @pytest.mark.asyncio
 async def test_record_without_hunks_shows_branch_only():
     """Бинарь/удаление (`no_diff`): только ветка со счётчиками — ни тела, ни хвоста."""
-    record = _record("", path="assets/logo.png", op="binary", add=0, del_=0,
-                     flags=("no_diff",))
+    record = _record(
+        "",
+        path="assets/logo.png",
+        op="binary",
+        add=0,
+        del_=0,
+        flags=("no_diff",),
+    )
     app = _Host(_block(record))
     async with app.run_test(size=(70, 20)):
-        assert app.query_one(".block-label", Static).visual.plain == "└ изменено: +0 −0"
+        assert (
+            app.query_one(".block-label", Static).visual.plain
+            == "└ изменено: +0 −0"
+        )
         assert not app.query(".block-body")
         assert not app.query(".diff-more")
 
@@ -217,9 +248,15 @@ async def test_compact_block_shows_branch_and_tail_without_body():
     """Компактный блок старого хода: ветка со счётчиками + хвост, тела нет."""
     app = _Host(_block(_record(_long_hunks(30), add=30, del_=0), compact=True))
     async with app.run_test(size=(70, 40)):
-        assert app.query_one(".block-label", Static).visual.plain == "└ изменено: +30 −0"
+        assert (
+            app.query_one(".block-label", Static).visual.plain
+            == "└ изменено: +30 −0"
+        )
         assert not app.query(".block-body")
-        assert app.query_one(".diff-more", Static).visual.plain == "… ещё 30 строк"
+        assert (
+            app.query_one(".diff-more", Static).visual.plain
+            == "… ещё 30 строк"
+        )
 
 
 @pytest.mark.asyncio
@@ -281,10 +318,20 @@ async def test_ctrl_click_opens_event():
     app = _Host(block)
     async with app.run_test(size=(70, 20)) as pilot:
         body = app.query_one(".block-body", Static)
-        block.on_click(events.Click(
-            widget=body, x=0, y=0, delta_x=0, delta_y=0,
-            button=1, shift=False, meta=False, ctrl=True, chain=1,
-        ))
+        block.on_click(
+            events.Click(
+                widget=body,
+                x=0,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=1,
+                shift=False,
+                meta=False,
+                ctrl=True,
+                chain=1,
+            )
+        )
         await pilot.pause()
         assert app.opened == [7]
         assert app.copied == []
@@ -299,7 +346,7 @@ async def test_copy_button_click_does_not_focus_block():
     block = _block(_record(_long_hunks(30)))
     app = _Host(block)
     async with app.run_test(size=(70, 40)) as pilot:
-        block.blur()   # AUTO_FOCUS сам фокусирует единственный focusable-виджет
+        block.blur()  # AUTO_FOCUS сам фокусирует единственный focusable-виджет
         await pilot.pause()
         await pilot.click(".block-copy")
         await pilot.pause()
@@ -318,12 +365,12 @@ async def test_tail_click_does_not_focus_block():
     async with app.run_test(size=(70, 40)) as pilot:
         block.blur()
         await pilot.pause()
-        await pilot.click(".diff-more")          # «… ещё N строк» → развернуть
+        await pilot.click(".diff-more")  # «… ещё N строк» → развернуть
         await pilot.pause()
         assert _body_lines(app) == 30
         assert not block.has_focus
 
-        await pilot.click(".diff-more")          # «свернуть» → свернуть
+        await pilot.click(".diff-more")  # «свернуть» → свернуть
         await pilot.pause()
         assert _body_lines(app) == LIMIT
         assert not block.has_focus
@@ -370,13 +417,20 @@ def _counting_render(monkeypatch) -> list:
     calls: list[tuple] = []
     original = module.render_hunks
 
-    def counting(hunks, *, path, max_lines=None, syntax=True, fill_width=None,
-                 **kwargs):
+    def counting(
+        hunks, *, path, max_lines=None, syntax=True, fill_width=None, **kwargs
+    ):
         # `**kwargs` — чтобы заглушка не отставала от сигнатуры (перенос,
         # и что появится дальше): считаем мы вызовы, а не аргументы.
         calls.append((max_lines, fill_width))
-        return original(hunks, path=path, max_lines=max_lines, syntax=syntax,
-                        fill_width=fill_width, **kwargs)
+        return original(
+            hunks,
+            path=path,
+            max_lines=max_lines,
+            syntax=syntax,
+            fill_width=fill_width,
+            **kwargs,
+        )
 
     monkeypatch.setattr(module, "render_hunks", counting)
     return calls
@@ -392,13 +446,13 @@ async def test_render_cached_per_state(monkeypatch):
         # compose (ширины ещё нет) + первый layout — и ни одного лишнего
         assert [s for s, _ in calls] == [LIMIT] * len(calls)
         assert len(calls) <= 2
-        await pilot.click(".diff-more")      # развернуть — первый полный рендер
+        await pilot.click(".diff-more")  # развернуть — первый полный рендер
         await pilot.pause()
         assert [s for s, _ in calls][-1] is None
         before = len(calls)
-        await pilot.click(".diff-more")      # свернуть — из кэша
+        await pilot.click(".diff-more")  # свернуть — из кэша
         await pilot.pause()
-        await pilot.click(".diff-more")      # развернуть — из кэша
+        await pilot.click(".diff-more")  # развернуть — из кэша
         await pilot.pause()
         assert len(calls) == before
 
@@ -426,7 +480,7 @@ async def test_body_fill_reaches_block_edge_minus_one_column():
     async with app.run_test(size=(70, 20)) as pilot:
         rows = app.query_one(".block-body", Static).visual.plain.split("\n")
         assert len(rows[1]) == len(rows[2]) == block.size.width - 2
-        assert len(rows[0]) < len(rows[1])   # контекст не добивается
+        assert len(rows[0]) < len(rows[1])  # контекст не добивается
 
         await pilot.resize_terminal(50, 20)
         await pilot.pause()
@@ -458,12 +512,14 @@ async def test_branch_is_outside_block_background(tui_app_factory):
     block = _block(_record(_long_hunks(30)))
     app = tui_app_factory(block)
     async with app.run_test(size=(70, 40)) as pilot:
-        block.blur()   # AUTO_FOCUS сам фокусирует единственный focusable-виджет
+        block.blur()  # AUTO_FOCUS сам фокусирует единственный focusable-виджет
         await pilot.pause()
-        assert block.styles.background.a == 0     # сам блок подложки не несёт
+        assert block.styles.background.a == 0  # сам блок подложки не несёт
         for selector in (".block-body", ".diff-more"):
             slab = app.query_one(selector, Static)
-            assert slab.styles.background.hex == palette.BLOCK_BG.upper(), selector
+            assert slab.styles.background.hex == palette.BLOCK_BG.upper(), (
+                selector
+            )
 
 
 @pytest.mark.asyncio
@@ -495,8 +551,10 @@ async def test_copy_and_tail_keep_hover_highlight(tui_app_factory):
         for selector in (".block-copy", ".diff-more"):
             await pilot.hover(selector)
             await pilot.pause()
-            assert app.query_one(selector, Static).styles.color.hex == \
-                palette.ACCENT.upper(), selector
+            assert (
+                app.query_one(selector, Static).styles.color.hex
+                == palette.ACCENT.upper()
+            ), selector
 
 
 @pytest.mark.asyncio
@@ -505,7 +563,7 @@ async def test_block_has_blank_line_after_it(tui_app_factory):
     block = _block(_record(SHORT_HUNKS))
     app = tui_app_factory(block)
     async with app.run_test(size=(70, 20)):
-        assert block.styles.margin.top == 0      # к своей строке — вплотную
+        assert block.styles.margin.top == 0  # к своей строке — вплотную
         assert block.styles.margin.bottom == 1
 
 
@@ -517,5 +575,6 @@ async def test_body_indented_two_columns_from_branch(tui_app_factory):
     async with app.run_test(size=(70, 40)):
         branch = app.query_one(".block-label", Static)
         for selector in (".block-body", ".diff-more"):
-            assert app.query_one(selector, Static).region.x - branch.region.x == 2, \
-                selector
+            assert (
+                app.query_one(selector, Static).region.x - branch.region.x == 2
+            ), selector

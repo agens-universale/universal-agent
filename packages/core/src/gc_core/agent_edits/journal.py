@@ -39,6 +39,7 @@ fs-тулы, читают трейс и экран /diff (в других мод
 намеренное — индекс по ``call_id`` для ленты: внешние записи он видеть ДОЛЖЕН,
 блок диффа базы не требует.
 """
+
 from __future__ import annotations
 
 import json
@@ -130,7 +131,9 @@ class EditsJournal:
     def append(self, rec: EditRecord) -> None:
         with file_lock(self._path, timeout=5.0):
             with open(self._path, "a", encoding="utf-8", newline="\n") as fh:
-                fh.write(json.dumps(rec.to_json_obj(), ensure_ascii=False) + "\n")
+                fh.write(
+                    json.dumps(rec.to_json_obj(), ensure_ascii=False) + "\n"
+                )
 
     def read_all(self) -> List[EditRecord]:
         try:
@@ -169,7 +172,7 @@ class EditsJournal:
         """
         records: List[EditRecord] = []
         try:
-            with open(self._path, "r", encoding="utf-8") as fh:
+            with open(self._path, encoding="utf-8") as fh:
                 for line in fh:
                     row = line.strip()
                     if not row:
@@ -182,10 +185,12 @@ class EditsJournal:
                         continue
                     records.append(EditRecord.from_json_obj(obj))
         except FileNotFoundError:
-            return []        # журнал снесли — законная пустота
+            return []  # журнал снесли — законная пустота
         except OSError:
-            _logger.warning("журнал правок не прочитан: %s", self._path, exc_info=True)
-            return None      # прочесть не смогли — пустотой это не считается
+            _logger.warning(
+                "журнал правок не прочитан: %s", self._path, exc_info=True
+            )
+            return None  # прочесть не смогли — пустотой это не считается
         return records
 
     def last_turn_id(self) -> Optional[str]:

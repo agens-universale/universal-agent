@@ -34,11 +34,11 @@ def test_summarize_output_error_cuts_at_word_boundary_not_mid_word():
     (`path='<roo`). Теперь — по последнему пробелу в пределах лимита + «…»."""
     from gc_tui.services.trace_mapper import _summarize_output
 
-    err = "A" * 155 + " " + "B" * 20   # пробел ровно на границе среза [:160]
+    err = "A" * 155 + " " + "B" * 20  # пробел ровно на границе среза [:160]
     out = json.dumps({"ok": False, "error": err})
     summary = _summarize_output(out, error=True)
     assert summary == "A" * 155 + "…"
-    assert "B" not in summary   # старое поведение отдало бы обрубок "BBBB"
+    assert "B" not in summary  # старое поведение отдало бы обрубок "BBBB"
 
 
 def test_summarize_output_error_without_word_boundary_still_gets_ellipsis():
@@ -69,8 +69,8 @@ def test_technical_error_text_is_cut_on_a_word_boundary():
         "Wrong arguments for `fs_append_file`: Arguments for tool 'fs_append_file' "
         "do not match its schema. Details: path='<root>': Additional properties are "
         "not allowed ('line_ending' was unexpected)"
-    ) + " и дальше пошли бы подробности схемы," * 4   # заведомо длиннее бюджета
-    ev = _tech("error_message", long_msg)          # хелпер файла
+    ) + " и дальше пошли бы подробности схемы," * 4  # заведомо длиннее бюджета
+    ev = _tech("error_message", long_msg)  # хелпер файла
     assert ev.summary.endswith("…")
     assert len(ev.summary) <= _TECH_TEXT_LIMIT + 1  # бюджет + многоточие
     assert not ev.summary.endswith("path='<roo…")  # не обрыв посреди слова
@@ -100,4 +100,4 @@ def test_technical_error_text_shows_the_cause_not_just_the_preamble():
     )
     ev = _tech("error_message", live)
     assert "'newline' was unexpected" in ev.summary
-    assert "\n" not in ev.summary          # врезка занимает одну строку ленты
+    assert "\n" not in ev.summary  # врезка занимает одну строку ленты

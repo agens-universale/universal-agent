@@ -112,16 +112,20 @@ async def test_workspace_is_assembled_once_even_when_wrapped(monkeypatch):
     probes = []
     real = ew.resolve_root_writable
     monkeypatch.setattr(
-        ew, "resolve_root_writable",
+        ew,
+        "resolve_root_writable",
         lambda backend, root: (probes.append(root), real(backend, root))[1],
     )
 
     ctx = await acreate_run_context(
-        {"backend_api_mode": "chat_completions", "save_logs": False}, is_tui=True,
+        {"backend_api_mode": "chat_completions", "save_logs": False},
+        is_tui=True,
     )
 
     assert isinstance(ctx.os_backend, TrackingFsBackend)
-    assert len(probes) == 1, f"проба записи должна быть одна, а их {len(probes)}"
+    assert len(probes) == 1, (
+        f"проба записи должна быть одна, а их {len(probes)}"
+    )
     assert ctx.workspace.backend is ctx.os_backend, (
         "рабочая область обязана смотреть на ту же обёртку, что и контекст"
     )

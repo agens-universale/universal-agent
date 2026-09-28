@@ -219,10 +219,19 @@ async def test_clipboard_payload_appends_diff_cite(tmp_path, monkeypatch):
         threads_dir=str(tmp_path), system="cli", config={"model": "M"}
     )
     async with app.run_test() as pilot:
-        view = EditsView(str(tmp_path / "threads"), "cli", "th1", str(tmp_path), {})
+        view = EditsView(
+            str(tmp_path / "threads"), "cli", "th1", str(tmp_path), {}
+        )
         entry = FileEntry(
-            path="src/x.py", add=1, del_=0, kind="modified", exact=False,
-            countable=True, by_shell=True, external=False, revertable=False,
+            path="src/x.py",
+            add=1,
+            del_=0,
+            kind="modified",
+            exact=False,
+            countable=True,
+            by_shell=True,
+            external=False,
+            revertable=False,
             last_ts=1.0,
         )
         viewer = DiffFileViewer(

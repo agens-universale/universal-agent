@@ -617,10 +617,14 @@ def prospective_registry(
                 )
                 # profile_override="" — пустой указатель: слой профиля из файлов НЕ
                 # берётся, его место занимает наш текст, чьим бы файлом он ни был.
-                layers = _merge_layers(base_raw, str(base_path), profile_override="")
+                layers = _merge_layers(
+                    base_raw, str(base_path), profile_override=""
+                )
                 # Текст профиля — такой же слой, как в `_merge_layers`: compat до
                 # склейки, иначе старое имя в нём проиграло бы новому в базе.
-                profile_raw = _compat_layer(_raw_from_text(text, subject), subject, [])
+                profile_raw = _compat_layer(
+                    _raw_from_text(text, subject), subject, []
+                )
                 merged = deep_merge(layers.config, profile_raw)
             cfg = _app_config_from_raw(merged)
             return cfg.models, cfg.slots

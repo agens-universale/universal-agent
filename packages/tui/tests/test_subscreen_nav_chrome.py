@@ -116,12 +116,18 @@ async def test_focused_trace_draws_no_frame_over_content(tmp_path):
 
     payload = {"lines": [f"строка {i}" for i in range(30)]}
 
-    async with TuiApp(threads_dir=str(tmp_path), system="cli").run_test() as pilot:
-        await pilot.app.push_screen(ViewerScreen(title="просмотр", content=payload))
+    async with TuiApp(
+        threads_dir=str(tmp_path), system="cli"
+    ).run_test() as pilot:
+        await pilot.app.push_screen(
+            ViewerScreen(title="просмотр", content=payload)
+        )
         await pilot.pause()
         trace = pilot.app.screen.query_one("#trace")
-        assert trace.has_focus                      # рамке было бы откуда взяться
-        lines = ["".join(seg.text for seg in strip)
-                 for strip in pilot.app.screen._compositor.render_strips()]
+        assert trace.has_focus  # рамке было бы откуда взяться
+        lines = [
+            "".join(seg.text for seg in strip)
+            for strip in pilot.app.screen._compositor.render_strips()
+        ]
         assert not [line for line in lines if set(line) & set("┌┐└┘│")], lines
         assert any("строка 0" in line for line in lines), lines

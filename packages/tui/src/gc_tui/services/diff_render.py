@@ -24,13 +24,12 @@ services/code_render).
 from __future__ import annotations
 
 import re
-
-from gc_core.utils.file_text import split_lines_lf
 from bisect import bisect_right
 from collections import Counter
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
+from gc_core.utils.file_text import split_lines_lf
 from rich.style import Style
 from rich.text import Text
 
@@ -42,7 +41,6 @@ from gc_tui.palette import (
     DIFF_DEL_GUTTER,
     DIFF_DEL_HL,
     DIFF_GUTTER,
-    MUTED,
 )
 from gc_tui.services.code_render import highlight_code, normalize_code
 
@@ -98,15 +96,21 @@ class DiffRender:
 
 @dataclass
 class _Row:
-    kind: str          # "add" | "del" | "ctx" | "sep"
+    kind: str  # "add" | "del" | "ctx" | "sep"
     old_no: int | None
     new_no: int | None
     content: str
 
 
-def render_hunks(hunks: str, *, path: str, max_lines: int | None = None,
-                 syntax: bool = True, fill_width: int | None = None,
-                 wrap: bool = False) -> DiffRender:
+def render_hunks(
+    hunks: str,
+    *,
+    path: str,
+    max_lines: int | None = None,
+    syntax: bool = True,
+    fill_width: int | None = None,
+    wrap: bool = False,
+) -> DiffRender:
     """Хэнки журнала правок → `rich.Text` с номерами строк и подсветкой.
 
     Понимает обе формы поля `hunks`: difflib (`--- ` / `+++ ` / `@@`) и git
@@ -127,10 +131,21 @@ def render_hunks(hunks: str, *, path: str, max_lines: int | None = None,
     Рисует тело ЦЕЛИКОМ — этого и хочет блок ленты. Тому, кто рисует его
     участками, нужен `HunkBody`: там та же картинка, но по заказанным строкам.
     """
-    body = HunkBody(hunks, path=path, max_lines=max_lines, syntax=syntax,
-                    fill_width=fill_width, wrap=wrap)
-    return DiffRender(body.render(), body.shown_lines, body.total_lines,
-                      body.truncated, body.hidden_rows)
+    body = HunkBody(
+        hunks,
+        path=path,
+        max_lines=max_lines,
+        syntax=syntax,
+        fill_width=fill_width,
+        wrap=wrap,
+    )
+    return DiffRender(
+        body.render(),
+        body.shown_lines,
+        body.total_lines,
+        body.truncated,
+        body.hidden_rows,
+    )
 
 
 def copyable_hunks(hunks: str, *, path: str) -> str:
@@ -153,7 +168,11 @@ def copyable_hunks(hunks: str, *, path: str) -> str:
     отвергнет.
     """
     lines = hunks.split("\n")
-    if len(lines) < 2 or lines[0].rstrip() != "---" or lines[1].rstrip() != "+++":
+    if (
+        len(lines) < 2
+        or lines[0].rstrip() != "---"
+        or lines[1].rstrip() != "+++"
+    ):
         return hunks
     rel = path.replace("\\", "/")
     if rel.startswith("/") or re.match(r"^[A-Za-z]:/", rel):
@@ -183,24 +202,37 @@ class HunkBody:
     разбора всего тела разом, а работа только по нужным группам.
     """
 
-    def __init__(self, hunks: str, *, path: str, max_lines: int | None = None,
-                 syntax: bool = True, fill_width: int | None = None,
-                 wrap: bool = False) -> None:
+    def __init__(
+        self,
+        hunks: str,
+        *,
+        path: str,
+        max_lines: int | None = None,
+        syntax: bool = True,
+        fill_width: int | None = None,
+        wrap: bool = False,
+    ) -> None:
         rows = _parse(hunks or "")
         total = sum(1 for row in rows if row.kind != "sep")
         # Ширина колонки номеров — по ВСЕМУ телу, а не по отобранной части:
         # от неё зависит ширина реза, а рез решает, что отбирать. Заодно
         # колонка перестаёт прыгать при разворачивании блока.
         self._gutter_w = max(
-            (len(str(row.old_no if row.kind == "del" else row.new_no))
-             for row in rows if row.kind != "sep"),
+            (
+                len(str(row.old_no if row.kind == "del" else row.new_no))
+                for row in rows
+                if row.kind != "sep"
+            ),
             default=1,
         )
         # Перенос — ЯВНЫЙ, а не следствие известной ширины: ширину передают и
         # экраны правок, но там строка не переносится (по дизайну у них
         # прокрутка вбок, а на нерасползающейся высоте держится ленивое тело).
-        self._wrap_w = (fill_width - (self._gutter_w + 1) - 1
-                        if wrap and fill_width is not None else None)
+        self._wrap_w = (
+            fill_width - (self._gutter_w + 1) - 1
+            if wrap and fill_width is not None
+            else None
+        )
         # Лимита нет — не ограничиваем ВОВСЕ. Подставлять сюда число
         # логических строк нельзя: бюджет считается в рядах, и перенесённая
         # строка «не влезала» бы, исчезая целиком.
@@ -254,9 +286,13 @@ class HunkBody:
             # текст на 103 млн знаков и около 200 МБ на один блок ленты.
             self._fill_w = self._wrap_w + 1
         else:
-            self._fill_w = max((1 + len(row.content) for row in body), default=1)
+            self._fill_w = max(
+                (1 + len(row.content) for row in body), default=1
+            )
             if fill_width is not None:
-                self._fill_w = max(self._fill_w, fill_width - (self._gutter_w + 1))
+                self._fill_w = max(
+                    self._fill_w, fill_width - (self._gutter_w + 1)
+                )
         self._lang = (
             _lang_for_path(path)
             if syntax and 0 < len(body) <= _SYNTAX_MAX_LINES
@@ -281,13 +317,21 @@ class HunkBody:
             if position > begin:
                 text.append("\n")
             if row.kind == "sep":
-                text.append(_HUNK_SEPARATOR.rjust(self._gutter_w),
-                            style=DIFF_GUTTER)
+                text.append(
+                    _HUNK_SEPARATOR.rjust(self._gutter_w), style=DIFF_GUTTER
+                )
                 continue
             body_index = self._body_at[position]
-            _append_row(text, row, self._gutter_w, self._fill_w,
-                        code_spans[body_index], accents.get(body_index, ()),
-                        wrap_w=self._wrap_w, max_rows=self._row_cap)
+            _append_row(
+                text,
+                row,
+                self._gutter_w,
+                self._fill_w,
+                code_spans[body_index],
+                accents.get(body_index, ()),
+                wrap_w=self._wrap_w,
+                max_rows=self._row_cap,
+            )
         return text
 
     def _spans(self) -> list:
@@ -327,13 +371,23 @@ def row_kinds(hunks: str) -> list[str]:
     без `max_lines`) — весь её смысл.
     """
     rows = _parse(hunks or "")
-    return [row.kind
-            for row in _take(rows, sum(1 for r in rows if r.kind != "sep"))]
+    return [
+        row.kind
+        for row in _take(rows, sum(1 for r in rows if r.kind != "sep"))
+    ]
 
 
-def _append_row(text: Text, row: _Row, gutter_w: int, fill_w: int,
-                code_spans, accents, *, wrap_w: int | None = None,
-                max_rows: int | None = None) -> None:
+def _append_row(
+    text: Text,
+    row: _Row,
+    gutter_w: int,
+    fill_w: int,
+    code_spans,
+    accents,
+    *,
+    wrap_w: int | None = None,
+    max_rows: int | None = None,
+) -> None:
     """Одна строка тела: гаттер, маркер, содержимое, фон, акценты.
 
     Номер и маркер красятся ОДНИМ цветом по типу строки — колонка слева
@@ -350,8 +404,9 @@ def _append_row(text: Text, row: _Row, gutter_w: int, fill_w: int,
     marker = {"add": "+", "del": "-"}.get(row.kind, " ")
     gutter = f"{number:>{gutter_w}} "
     filled = row.kind in ("add", "del")
-    gutter_style = {"add": DIFF_ADD_GUTTER,
-                    "del": DIFF_DEL_GUTTER}.get(row.kind, DIFF_GUTTER)
+    gutter_style = {"add": DIFF_ADD_GUTTER, "del": DIFF_DEL_GUTTER}.get(
+        row.kind, DIFF_GUTTER
+    )
 
     chunks = _chunks(row.content, wrap_w)
     if max_rows is not None and len(chunks) > max_rows:
@@ -372,7 +427,9 @@ def _append_row(text: Text, row: _Row, gutter_w: int, fill_w: int,
 
         if chunk_no == 0:
             text.stylize(gutter_style, start, start + gutter_w)
-        text.stylize(gutter_style, start + len(gutter), start + len(gutter) + 1)
+        text.stylize(
+            gutter_style, start + len(gutter), start + len(gutter) + 1
+        )
         content_at = start + len(gutter) + 1
         for span_start, span_end, style in _clip(code_spans, at, len(chunk)):
             text.stylize(style, content_at + span_start, content_at + span_end)
@@ -386,9 +443,13 @@ def _append_row(text: Text, row: _Row, gutter_w: int, fill_w: int,
             # (`test_markers_readable_on_their_row_backgrounds`).
             text.stylize(Style(bgcolor=background), start, len(text))
             for span_start, span_end, _ in _clip(
-                    [(a, b, None) for a, b in accents], at, len(chunk)):
-                text.stylize(Style(bgcolor=accent),
-                             content_at + span_start, content_at + span_end)
+                [(a, b, None) for a, b in accents], at, len(chunk)
+            ):
+                text.stylize(
+                    Style(bgcolor=accent),
+                    content_at + span_start,
+                    content_at + span_end,
+                )
 
 
 def _chunks(content: str, width: int | None) -> list:
@@ -405,7 +466,9 @@ def _chunks(content: str, width: int | None) -> list:
     """
     if not width or width <= 0 or len(content) <= width:
         return [(0, content)]
-    return [(at, content[at:at + width]) for at in range(0, len(content), width)]
+    return [
+        (at, content[at : at + width]) for at in range(0, len(content), width)
+    ]
 
 
 def _clip(spans, at: int, size: int):
@@ -438,7 +501,9 @@ def _parse(hunks: str) -> list[_Row]:
         if raw.startswith("diff --git"):  # следующий файл в потоке
             in_hunk = False
             continue
-        marker, content = (raw[:1], normalize_code(raw[1:])) if raw else (" ", "")
+        marker, content = (
+            (raw[:1], normalize_code(raw[1:])) if raw else (" ", "")
+        )
         if marker == "+":
             rows.append(_Row("add", None, new_no, content))
             new_no += 1
@@ -454,7 +519,9 @@ def _parse(hunks: str) -> list[_Row]:
     return rows
 
 
-def _take(rows: list[_Row], limit: int | None, wrap_w: int | None = None) -> list[_Row]:
+def _take(
+    rows: list[_Row], limit: int | None, wrap_w: int | None = None
+) -> list[_Row]:
     """Строки тела, укладывающиеся в `limit` ЭКРАННЫХ рядов, с разделителями.
 
     Бюджет считается в рядах, а не в строках файла: смысл лимита — сколько
@@ -542,22 +609,32 @@ def _intraline(shown_rows: list[_Row]) -> dict[int, list[tuple[int, int]]]:
         add_end = del_end
         while add_end < size and sequence[add_end][1].kind == "add":
             add_end += 1
-        for (del_i, deleted), (add_i, added) in zip(sequence[index:del_end],
-                                                    sequence[del_end:add_end]):
-            _pair_accents(deleted.content, added.content, del_i, add_i, accents)
+        for (del_i, deleted), (add_i, added) in zip(
+            sequence[index:del_end], sequence[del_end:add_end]
+        ):
+            _pair_accents(
+                deleted.content, added.content, del_i, add_i, accents
+            )
         index = add_end
     return accents
 
 
-def _pair_accents(old: str, new: str, old_index: int, new_index: int,
-                  accents: dict[int, list[tuple[int, int]]]) -> None:
+def _pair_accents(
+    old: str,
+    new: str,
+    old_index: int,
+    new_index: int,
+    accents: dict[int, list[tuple[int, int]]],
+) -> None:
     if not old or not new:
         return
     # Гварды строго ДО SequenceMatcher: `ratio()` уже оплачивает весь матчинг,
     # так что проверять порог похожести постфактум поздно. Пара, не прошедшая
     # гвард, просто остаётся без акцентов — обычный фон added/removed.
-    if (len(old) > _INTRALINE_MAX_LINE_CHARS
-            or len(new) > _INTRALINE_MAX_LINE_CHARS):
+    if (
+        len(old) > _INTRALINE_MAX_LINE_CHARS
+        or len(new) > _INTRALINE_MAX_LINE_CHARS
+    ):
         return
     if _match_work(old, new) > _INTRALINE_MAX_MATCH_WORK:
         return
@@ -591,8 +668,11 @@ def _match_work(old: str, new: str) -> int:
     экономит.
     """
     new_counts = Counter(new)
-    return sum(count * new_counts[char]
-               for char, count in Counter(old).items() if char in new_counts)
+    return sum(
+        count * new_counts[char]
+        for char, count in Counter(old).items()
+        if char in new_counts
+    )
 
 
 def _syntax_spans(contents: list[str], lang: str | None):
@@ -607,7 +687,9 @@ def _syntax_spans(contents: list[str], lang: str | None):
     # обязаны остаться цветными. Список той же длины, поэтому спаны
     # по-прежнему раскладываются по индексу строки — у погашенных их
     # просто не будет.
-    contents = [c if len(c) <= _SYNTAX_MAX_LINE_CHARS else "" for c in contents]
+    contents = [
+        c if len(c) <= _SYNTAX_MAX_LINE_CHARS else "" for c in contents
+    ]
     joined = "\n".join(contents)
     highlighted = highlight_code(joined, lang)
     per_line: list[list[tuple[int, int, object]]] = [[] for _ in contents]
@@ -633,9 +715,14 @@ def _syntax_spans(contents: list[str], lang: str | None):
         while line < len(contents) and starts[line] < span_end:
             line_start = starts[line]
             line_end = line_start + len(contents[line])
-            begin, finish = max(span_start, line_start), min(span_end, line_end)
+            begin, finish = (
+                max(span_start, line_start),
+                min(span_end, line_end),
+            )
             if finish > begin:
-                per_line[line].append((begin - line_start, finish - line_start, style))
+                per_line[line].append(
+                    (begin - line_start, finish - line_start, style)
+                )
             line += 1
     return per_line
 

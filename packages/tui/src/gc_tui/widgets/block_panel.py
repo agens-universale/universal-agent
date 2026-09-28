@@ -61,8 +61,10 @@ class BlockPanel(ClickModelMixin, Vertical):
     шапки и payload кнопки. Прямой конструктор не используется.
     """
 
-    ALLOW_SELECT = False   # выделяется тело, а не панель целиком
-    FOCUS_ON_CLICK = False  # выделение ставит on_click, и только за клик по телу
+    ALLOW_SELECT = False  # выделяется тело, а не панель целиком
+    FOCUS_ON_CLICK = (
+        False  # выделение ставит on_click, и только за клик по телу
+    )
 
     # Отступы задаются ОДНИМ shorthand-правилом на селектор: Textual не мёржит
     # margin-*/padding-* из разных правил — второе затирает весь box.
@@ -129,9 +131,16 @@ class BlockPanel(ClickModelMixin, Vertical):
         if indent:
             classes += " code-indent"
         if not lang:
-            classes += " no-lang"   # Д9: без метки языка — без воздуха под шапкой
-        panel = cls(label=lang or "", copy_payload=normalize_code(content),
-                    event_no=event_no, focusable=focusable, classes=classes)
+            classes += (
+                " no-lang"  # Д9: без метки языка — без воздуха под шапкой
+            )
+        panel = cls(
+            label=lang or "",
+            copy_payload=normalize_code(content),
+            event_no=event_no,
+            focusable=focusable,
+            classes=classes,
+        )
         panel._body_text = highlight_code(content, lang)
         panel._table_source = None
         return panel

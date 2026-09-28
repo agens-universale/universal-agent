@@ -15,6 +15,7 @@ Textual, только данные. Индекс `call_id -> запись` ст�
 fs-тула и счётной базы шелл-канала. Точный снимок в одиночку оставлял бы ход,
 где файл правила одна команда, со счётчиками журнала.
 """
+
 from __future__ import annotations
 
 import logging
@@ -37,7 +38,9 @@ from gc_core.thread_store import edits_journal_path
 _logger = logging.getLogger(__name__)
 
 
-def journal_signature(records: Iterable[EditRecord]) -> Tuple[int, Optional[float]]:
+def journal_signature(
+    records: Iterable[EditRecord],
+) -> Tuple[int, Optional[float]]:
     """Подпись набора записей — часть ключа любого кэша над журналом.
 
     Записи append-only, но сам файл может быть пересоздан целиком
@@ -99,7 +102,9 @@ class EditsLookup:
         self._indexed_signature: Optional[Tuple[int, Optional[float]]] = None
         self._index: Dict[str, EditRecord] = {}
         self._turn_ids: List[str] = []
-        self._summary_cache: Optional[Tuple[str, Any, Tuple[int, int, int]]] = None
+        self._summary_cache: Optional[
+            Tuple[str, Any, Tuple[int, int, int]]
+        ] = None
 
     def by_call_id(self, call_id: str) -> Optional[EditRecord]:
         self._ensure_index()
@@ -129,16 +134,23 @@ class EditsLookup:
             # пошаговых счётчиков вместо итога — это те самые раздутые цифры,
             # ради которых всё и затевалось: честнее показать, что дельта
             # неизвестна. В TUI ветка недостижима (launch_root ставит рантайм).
-            _logger.warning("сводка правок без launch_root: дельта не считается")
+            _logger.warning(
+                "сводка правок без launch_root: дельта не считается"
+            )
             return (len({r.path for r in records}), 0, 0)
 
-        key = (self._indexed_signature, disk_signature(self._launch_root, records))
+        key = (
+            self._indexed_signature,
+            disk_signature(self._launch_root, records),
+        )
         cached = self._summary_cache
         if cached is not None and cached[0] == turn_id and cached[1] == key:
             return cached[2]
 
         store = SnapshotStore(
-            snapshots_root(self._launch_root), self._thread_key, self._threads_dir
+            snapshots_root(self._launch_root),
+            self._thread_key,
+            self._threads_dir,
         )
         summary = net_summary(
             records,
@@ -163,10 +175,13 @@ class EditsLookup:
         # (`thread_store.reset_thread_files`, `-n`/новая сессия с тем же
         # thread_id), и индекс со старыми call_id пережил бы подмену молча.
         signature = journal_signature(records)
-        if self._indexed_signature is not None and signature == self._indexed_signature:
+        if (
+            self._indexed_signature is not None
+            and signature == self._indexed_signature
+        ):
             return
         index: Dict[str, EditRecord] = {}
-        turns: Dict[str, None] = {}   # dict — упорядоченное множество ходов
+        turns: Dict[str, None] = {}  # dict — упорядоченное множество ходов
         turn_of: Dict[str, str] = {}
         ambiguous: set = set()
         for rec in records:

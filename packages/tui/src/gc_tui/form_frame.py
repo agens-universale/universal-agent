@@ -238,8 +238,14 @@ def _reveal_focus_now(host, frame: int) -> None:
 
 def _tail_of(target):
     """Последняя видимая строка блока `REVEAL_WITH_TAIL` вокруг цели, если он есть."""
-    block = next((node for node in target.ancestors_with_self
-                  if node.has_class(REVEAL_WITH_TAIL)), None)
+    block = next(
+        (
+            node
+            for node in target.ancestors_with_self
+            if node.has_class(REVEAL_WITH_TAIL)
+        ),
+        None,
+    )
     if block is None:
         return None
     shown = [child for child in block.children if child.display]
@@ -248,7 +254,9 @@ def _tail_of(target):
 
 def _focus_inside_scroll(scope):
     """Виджет в фокусе, если он лежит внутри прокручиваемой области экрана."""
-    node = getattr(scope, "focused", None) or getattr(scope.app, "focused", None)
+    node = getattr(scope, "focused", None) or getattr(
+        scope.app, "focused", None
+    )
     if node is None:
         return None
     walker = node
