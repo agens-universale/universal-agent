@@ -2143,12 +2143,6 @@ class OnboardingScreen(Screen):
             self._refresh_footer()
 
     def on_key(self, event: events.Key) -> None:
-        if event.key in ("ctrl+up", "ctrl+down"):
-            event.stop()
-            scroll_body(
-                self, _SEL_ONB_SCROLL, -1 if event.key == "ctrl+up" else 1
-            )
-            return
         if event.key in ("up", "down"):
             # Кадр едет за курсором шага; PgUp тут занят возвратом назад, а
             # Home/End внутри поля принадлежат тексту — без этого вернуть кадр
@@ -2228,7 +2222,10 @@ class OnboardingScreen(Screen):
                 if _ed is not None and _ed.reload_presets():
                     event.stop()
                     self._refresh_footer()  # клавиши теперь про список
-                return
+                    return
+            if event.key == "ctrl+down":
+                # Списку клавиша не понадобилась — она прокручивает тело.
+                self._scroll_body_key(event)
             return
         if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
             # Развод §2 спеки 2026-08-06: клавиша больше не спрашивает список поля
@@ -2396,3 +2393,14 @@ class OnboardingScreen(Screen):
                 self._commit()
             else:
                 self._advance()
+            return
+        # Запасной вариант, ПОСЛЕ всех претендентов, — как в /settings: Ctrl+↓
+        # раскрывает список поля под курсором, и перехват сверху отнял бы у него
+        # клавишу; Ctrl+↓ без списка прокручивает тело там же, в ветке Alt+↓.
+        if event.key == "ctrl+up":
+            self._scroll_body_key(event)
+
+    def _scroll_body_key(self, event: events.Key) -> None:
+        """`Ctrl+↑`/`Ctrl+↓` — прокрутка тела шага страницами (обещана футером)."""
+        event.stop()
+        scroll_body(self, _SEL_ONB_SCROLL, -1 if event.key == "ctrl+up" else 1)

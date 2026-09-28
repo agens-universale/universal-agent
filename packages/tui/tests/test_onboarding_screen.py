@@ -722,6 +722,38 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_wizard_ctrl_down_opens_the_field_list_before_scrolling(
+    tmp_path,
+):
+    """Ctrl+↓ в мастере — как в /settings: сначала список поля под курсором
+    (тихий синоним Alt+↓), прокрутка тела — только если клавишу никто не
+    разобрал. Перехват прокруткой в начале on_key отнимал её у списка."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.editors.connection import ConnectionEditor
+
+    own_url = "https://my-own-host.internal/v1"
+    cfg_path = _write_conn_cfg(tmp_path, url=own_url)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(
+            config_path=str(cfg_path),
+            config={
+                "completions_url": own_url,
+                "chat_completion_headers": {},
+                "model": "",
+            },
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        ed = scr.query_one(ConnectionEditor)
+        assert ed.presets_open is False
+        await pilot.press("ctrl+down")
+        await pilot.pause()
+        assert ed.presets_open is True
+
+
+@pytest.mark.asyncio
 async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(
     tmp_path,
 ):
