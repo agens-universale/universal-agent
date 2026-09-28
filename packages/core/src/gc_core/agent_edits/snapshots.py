@@ -186,6 +186,7 @@ def _apply_marks(
 
 _logger = logging.getLogger(__name__)
 
+
 def snapshots_root(launch_root: str) -> Path:
     """Каталог снапшотов правок агента в проекте пользователя."""
     return Path(launch_root) / ".gc" / "agent_edits"

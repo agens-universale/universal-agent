@@ -320,9 +320,7 @@ def test_sync_keeps_the_new_name_when_both_sections_are_in_one_file(
     template = (ASSETS / "config.default.yml").read_text(encoding="utf-8")
     new = "agent_edits:\n  trace_inline_max_lines: 99\n"
     old = (
-        "diff_tui:\n"
-        "  trace_inline_max_lines: 11\n"
-        "  replay_expanded_turns: 4\n"
+        "diff_tui:\n  trace_inline_max_lines: 11\n  replay_expanded_turns: 4\n"
     )
     user = new + old if new_first else old + new
     cfg, _ = _run_sync(tmp_path, user=user, template=template)
