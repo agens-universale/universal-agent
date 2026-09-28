@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from gc_tui.widgets.user_reply import UserReplyContainer
 
+from gc_core.agent_edits.ctx import section_limit
 from gc_core.config_modules.agent_edits import (
     DEFAULT_REPLAY_EXPANDED_TURNS,
     DEFAULT_TRACE_INLINE_MAX_LINES,
@@ -3072,16 +3073,12 @@ class TraceScreen(Screen):
         return self._edits_lookup
 
     def _agent_edits_limit(self, key: str, default: int) -> int:
-        """Числовой порог секции `agent_edits`, всегда >= 1.
+        """Числовой порог секции `agent_edits` — общим правилом ядра.
 
-        Кламп обязателен: 0 / отрицательное / `true` в конфиге иначе дают блок
-        с пустым телом и хвостом «… ещё N строк» — сломанный вид вместо диффа."""
+        Мусор (0, отрицательное, `true`) даёт дефолт, а не пустое тело с
+        хвостом «… ещё N строк» — сломанный вид вместо диффа."""
         cfg = getattr(self.app, "_config", None) or {}
-        section = cfg.get("agent_edits") or {}
-        try:
-            return max(1, int(section.get(key, default)))
-        except (TypeError, ValueError):
-            return default
+        return section_limit(cfg.get("agent_edits") or {}, key, default)
 
     def _trace_inline_max_lines(self) -> int:
         """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
@@ -3094,7 +3091,7 @@ class TraceScreen(Screen):
 
         Ровно `0` — «без ограничения»: разворачиваются все ходы (вернём -1 как
         признак «окно не режем», см. `_is_stale_edit_turn`). Прочий мусор
-        (отрицательное, `true`, строка) клампится общим правилом."""
+        (отрицательное, `true`, строка) даёт дефолт — общим правилом."""
         cfg = getattr(self.app, "_config", None) or {}
         section = cfg.get("agent_edits") or {}
         raw = section.get(

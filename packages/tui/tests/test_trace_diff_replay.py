@@ -483,11 +483,11 @@ async def test_broken_inline_threshold_keeps_body(tmp_path, value):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("value", [-5, True])
-async def test_broken_replay_limit_behaves_like_one(tmp_path, value):
-    """Отрицательное / `true` в replay_expanded_turns схлопывают окно до одного хода.
+async def test_broken_replay_limit_falls_back_to_default(tmp_path, value):
+    """Отрицательное / `true` в replay_expanded_turns — мусор, действует дефолт.
 
-    Ровно `0` — не мусор, а «без ограничения» (см. соседний тест);
-    нечисловой мусор уходит в дефолт (см. `_agent_edits_limit`)."""
+    Ровно `0` — не мусор, а «без ограничения» (см. соседний тест). Правило то
+    же, что у остальных ключей секции (`agent_edits.ctx.section_limit`)."""
     tid = f"broken_replay_{abs(hash(value)) % 1000}"
     _turns_thread(tmp_path, tid, 2)
 
@@ -495,7 +495,7 @@ async def test_broken_replay_limit_behaves_like_one(tmp_path, value):
         tmp_path, tid, config={"agent_edits": {"replay_expanded_turns": value}}
     ) as pilot:
         blocks = _blocks(pilot.app.screen)
-        assert [_has_body(b) for b in blocks] == [False, True]
+        assert [_has_body(b) for b in blocks] == [True, True]
 
 
 @pytest.mark.asyncio

@@ -45,6 +45,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from gc_core.agent_edits import git_ops
+from gc_core.agent_edits.ctx import section_limit
 from gc_core.agent_edits.deltas import (
     EMPTY_DELTA,
     FileDelta,
@@ -292,32 +293,13 @@ def diff_limits(config: Optional[Dict[str, Any]]) -> Tuple[int, int]:
     """
     section = (config or {}).get("agent_edits") or {}
     return (
-        _limit(
-            section,
-            "max_diff_source_bytes",
-            DEFAULT_MAX_DIFF_SOURCE_BYTES,
-            minimum=1,
+        section_limit(
+            section, "max_diff_source_bytes", DEFAULT_MAX_DIFF_SOURCE_BYTES
         ),
-        _limit(
-            section,
-            "hunk_context_lines",
-            DEFAULT_HUNK_CONTEXT_LINES,
-            minimum=0,
+        section_limit(
+            section, "hunk_context_lines", DEFAULT_HUNK_CONTEXT_LINES
         ),
     )
-
-
-def _limit(
-    section: Dict[str, Any], key: str, default: int, *, minimum: int
-) -> int:
-    raw = section.get(key, default)
-    if isinstance(raw, bool):
-        return default
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        return default
-    return value if value >= minimum else default
 
 
 def _records_for_path(

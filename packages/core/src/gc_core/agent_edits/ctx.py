@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Mapping
 
 
 def config_from_ctx(ctx: Any) -> dict:
@@ -99,24 +99,26 @@ _DEFAULT_MINIMUM = 1
 def limit(explicit: int | None, ctx: Any, key: str, default: int) -> int:
     """Явно переданный лимит побеждает конфиг, конфиг — дефолт схемы.
 
-    Значение из конфига санитизируется здесь: схема (`AgentEditsConfig`) объявляет
-    эти ключи простым `int` без ограничений, то есть пропускает и
-    отрицательное, а через слой оверрайдов доходит и нечисловое — прежде оно
-    роняло `int()` внутри записи, и правка исчезала вместе с исключением.
-    Ключи делит ровно один читатель — `edits_view.diff_limits`
-    (`hunk_context_lines`, `max_diff_source_bytes`), и семантика у нас с ним
-    одна: ниже минимума — дефолт, `bool` отсеивается. `main._agent_edits_limit`
-    санитизирует ДРУГИЕ ключи (`trace_inline_max_lines`,
-    `replay_expanded_turns`) и делает это иначе — клампом, без отсева `bool`;
-    сравнивать себя с ним нельзя, общих ключей нет.
-
-    Запись правок оставалась единственной, кто верил конфигу на слово, — и
-    показывала «всё в порядке» там, где откат уже был недоступен.
+    Значение из конфига санитизирует ``section_limit`` — см. там.
     """
     if explicit is not None:
         return explicit
-    raw = agent_edits_config(ctx).get(key, default)
-    if isinstance(raw, bool):  # `true` в yaml — не «единица», а мусор
+    return section_limit(agent_edits_config(ctx), key, default)
+
+
+def section_limit(section: Mapping[str, Any], key: str, default: int) -> int:
+    """Числовой ключ секции ``agent_edits`` — ОДНО правило на всех читателей.
+
+    Схема (`AgentEditsConfig`) объявляет эти ключи простым `int` без
+    ограничений, то есть пропускает и отрицательное, а через слой оверрайдов
+    доходит и нечисловое. Правило: ниже минимума ключа, нечисло и `bool`
+    (`true` в yaml — не «единица», а мусор) — дефолт. Читатели — запись правок,
+    экран изменений, лента TUI: одинаковый мусор в одной секции обязан вести
+    себя одинаково. Особые значения (``replay_expanded_turns: 0`` — «все
+    ходы») разбирает вызывающий ДО этой функции.
+    """
+    raw = (section or {}).get(key, default)
+    if isinstance(raw, bool):
         return default
     try:
         value = int(raw)
