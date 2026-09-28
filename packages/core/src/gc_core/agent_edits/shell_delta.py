@@ -1207,41 +1207,22 @@ class ShellDelta:
         пачка не собралась, и всё спрашивается по одному.
         """
         try:
-            if self._exact_step(clean_before) and not (
-                rel in facts.filtered
-                if facts is not None
-                else git_ops.has_custom_filter(self._launch_root, rel)
-            ):
-                disk = _read_bytes(self._abs(rel))
-                if disk is None or facts is None or rel not in facts.head:
-                    # Пачки нет, её кусок не прочитался, либо файл пропал уже
-                    # после команды («родной» формы не узнать — форма выкладки)
-                    # — по одному.
-                    content = git_ops.head_bytes_like_disk(
-                        self._launch_root,
-                        rel,
-                        disk,
-                        rev="HEAD",
-                    )
-                else:
-                    blob = facts.head[rel]
-                    content = (
-                        None
-                        if blob is None
-                        else git_ops.blob_like_disk(blob, disk)
-                    )
-                if content is not None:
-                    wrote = store.capture_session(
-                        key,
-                        content,
-                        head_rev=self._head_before,
-                    )
-                    if turn_id:
-                        # Та же проверка, что и в счётной ветке ниже: без неё
-                        # точная ветка писала снимок хода под ПУСТЫМ turn_id.
-                        store.capture_turn(key, content, turn_id)
-                    return wrote
-                # HEAD не читает путь (например, свежий rename) — счётный путь ниже.
+            content = self._exact_head_content(
+                rel, clean_before=clean_before, facts=facts
+            )
+            if content is not None:
+                wrote = store.capture_session(
+                    key,
+                    content,
+                    head_rev=self._head_before,
+                )
+                if turn_id:
+                    # Та же проверка, что и в счётной ветке ниже: без неё
+                    # точная ветка писала снимок хода под ПУСТЫМ turn_id.
+                    store.capture_turn(key, content, turn_id)
+                return wrote
+            # Точная ступень неприменима или HEAD не читает путь (например,
+            # свежий rename) — счётный путь ниже.
             before = (
                 facts.index[rel]
                 if facts is not None and rel in facts.index
@@ -1258,6 +1239,34 @@ class ShellDelta:
                 "shell delta: база не снята rel=%r", rel, exc_info=True
             )
             return False
+
+    def _exact_head_content(
+        self, rel: str, *, clean_before: bool, facts: _BaseFacts | None
+    ) -> bytes | None:
+        """«До» из ``HEAD`` в форме файла на диске — если точная ступень применима.
+
+        ``None`` — ступень неприменима (путь был грязен, ``HEAD`` сдвинулся,
+        у пути кастомный фильтр) или ``HEAD`` пути не читает. Гвард фильтра
+        идёт ПЕРЕД чтением содержимого (см. ``_capture_base``).
+        """
+        if not self._exact_step(clean_before):
+            return None
+        filtered = (
+            rel in facts.filtered
+            if facts is not None
+            else git_ops.has_custom_filter(self._launch_root, rel)
+        )
+        if filtered:
+            return None
+        disk = _read_bytes(self._abs(rel))
+        if disk is None or facts is None or rel not in facts.head:
+            # Пачки нет, её кусок не прочитался, либо файл пропал уже после
+            # команды («родной» формы не узнать — форма выкладки) — по одному.
+            return git_ops.head_bytes_like_disk(
+                self._launch_root, rel, disk, rev="HEAD"
+            )
+        blob = facts.head[rel]
+        return None if blob is None else git_ops.blob_like_disk(blob, disk)
 
     def _remember(self, record: EditRecord) -> None:
         """Запомнить записанное состояние пути (только после удачной записи).

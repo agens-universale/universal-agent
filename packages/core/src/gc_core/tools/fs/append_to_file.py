@@ -42,6 +42,23 @@ def _validate_append_args(
     return encoding_used, None
 
 
+def _written_bytes(
+    written: str, chunk: str, encoding_used: str, payload_bytes: bytes
+) -> bytes:
+    """Байты, реально легшие на диск: при нормализации CRLF кусок другой.
+
+    В журнал и в ``bytes_appended`` должно уйти именно это, а не исходный payload.
+    """
+    if written == chunk:
+        return payload_bytes
+    crlf_bytes, crlf_err = try_encode_text_bytes_for_append(
+        written, encoding_used
+    )
+    if crlf_err is None and crlf_bytes is not None:
+        return crlf_bytes
+    return payload_bytes
+
+
 def _encode_chunk(chunk: str, encoding_used: str, is_create: bool):
     # Create-path (incl. size==0 existing file): leading BOM needed for utf-16/sig.
     # Append-path: pure payload without BOM (mid-file BOM corrupts utf-16/sig).
@@ -218,6 +235,53 @@ Usage:
         await self._backend.append(path, chunk, encoding=encoding_used)
         return None, chunk
 
+    async def _journal_old_bytes(
+        self, path: str, size: int, created_file: bool
+    ) -> bytes | None:
+        """Старый контент — ради baseline-снапшота и честного хэша в журнале.
+
+        Тул сам файл целиком не читает, поэтому поднимаем его только когда
+        запись правок ведётся и файл в пределах капа мутирующих тулов; иначе
+        правка уйдёт в журнал как partial (кусок без baseline). У нового
+        файла старого контента нет.
+        """
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            is_recording,
+        )
+
+        if created_file or not is_recording(self._ctx):
+            return None
+        try:
+            if size <= fs_mutate_max_bytes(self._config_dict):
+                return await self._backend.read_bytes(path)
+        except Exception:
+            return None
+        return None
+
+    async def _record(
+        self,
+        path: str,
+        old_bytes: bytes | None,
+        appended_bytes: bytes,
+        created_file: bool,
+    ) -> None:
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            record_edit,
+        )
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=old_bytes,
+            new_bytes=appended_bytes
+            if old_bytes is None
+            else old_bytes + appended_bytes,
+            op="create" if created_file else "append",
+            call_id=self._call_id,
+            # create: дописанное и есть весь файл; append без old: только кусок
+            partial=old_bytes is None and not created_file,
+        )
+
     @enforce_write_guard(path_arg="path", operation="append")
     async def acall(
         self,
@@ -289,22 +353,7 @@ Usage:
             )
         assert payload_bytes is not None
 
-        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
-            is_recording,
-            record_edit,
-        )
-
-        # Старый контент — ради baseline-снапшота и честного хэша файла в
-        # журнале. Тул сам файл целиком не читает, поэтому поднимаем его
-        # только когда запись правок ведётся и файл в пределах капа мутирующих
-        # тулов; иначе правка уйдёт в журнал как partial (кусок без baseline).
-        old_bytes = None
-        if not created_file and is_recording(self._ctx):
-            try:
-                if size <= fs_mutate_max_bytes(self._config_dict):
-                    old_bytes = await self._backend.read_bytes(path)
-            except Exception:
-                old_bytes = None
+        old_bytes = await self._journal_old_bytes(path, size, created_file)
         appended_bytes = payload_bytes
 
         try:
@@ -321,13 +370,9 @@ Usage:
                         separator=separator,
                         error=head_err,
                     )
-                if written != chunk:
-                    # В журнал должно уйти то, что реально легло на диск.
-                    crlf_bytes, crlf_err = try_encode_text_bytes_for_append(
-                        written, encoding_used
-                    )
-                    if crlf_err is None and crlf_bytes is not None:
-                        appended_bytes = crlf_bytes
+                appended_bytes = _written_bytes(
+                    written, chunk, encoding_used, payload_bytes
+                )
             content_sha256 = await self._backend.sha256_bytes(path)
         except Exception as e:
             return self._result(
@@ -337,18 +382,7 @@ Usage:
                 error={"type": "append_failed", "message": str(e)},
             )
 
-        await record_edit(
-            self._ctx,
-            abs_path=path,
-            old_bytes=old_bytes,
-            new_bytes=appended_bytes
-            if old_bytes is None
-            else old_bytes + appended_bytes,
-            op="create" if created_file else "append",
-            call_id=self._call_id,
-            # create: дописанное и есть весь файл; append без old: только кусок
-            partial=old_bytes is None and not created_file,
-        )
+        await self._record(path, old_bytes, appended_bytes, created_file)
 
         return self._result(
             ok=True,

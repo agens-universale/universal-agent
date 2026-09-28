@@ -131,29 +131,7 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
                     f"{old}: значение не удалось перенести в {new} — задайте заново ({_SYNC_HINT})"
                 )
                 continue
-        if not explicit_new:
-            _set_path(raw, new, value)
-            facts.append(f"{old} переименован в {new} — {_SYNC_HINT}")
-        elif (
-            old in MERGE_RENAMED_SECTIONS
-            and isinstance(value, dict)
-            and isinstance(_get_path(raw, new), dict)
-        ):
-            # Переименованная СЕКЦИЯ, заданная под обоими именами — обычно в
-            # разных слоях конфига (старое в пользовательском, новое в проектном):
-            # выбросить старую целиком значило бы молча потерять её ключи.
-            # Сливаем под новую, заданное в новой побеждает.
-            _set_path(
-                raw, new, _deep_merge_missing(_get_path(raw, new), value)
-            )
-            facts.append(
-                f"{old} переименован в {new}: ключи слиты, заданные в {new} "
-                f"побеждают — {_SYNC_HINT}"
-            )
-        else:
-            facts.append(
-                f"{old} устарел: действует явно заданный {new}, старое значение отброшено — {_SYNC_HINT}"
-            )
+        facts.append(_place_renamed(raw, old, new, value, explicit_new))
     for old, why in REMOVED.items():
         present, _ = _pop_path(raw, old)
         if present:
@@ -161,3 +139,27 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
                 f"{old} устарел и игнорируется ({why}) — {_SYNC_HINT}"
             )
     return facts
+
+
+def _place_renamed(
+    raw: Dict[str, Any], old: str, new: str, value: Any, explicit_new: bool
+) -> str:
+    """Положить значение старого имени под новое; факт для уведомления."""
+    if not explicit_new:
+        _set_path(raw, new, value)
+        return f"{old} переименован в {new} — {_SYNC_HINT}"
+    if (
+        old in MERGE_RENAMED_SECTIONS
+        and isinstance(value, dict)
+        and isinstance(_get_path(raw, new), dict)
+    ):
+        # Переименованная СЕКЦИЯ, заданная под обоими именами — обычно в
+        # разных слоях конфига (старое в пользовательском, новое в проектном):
+        # выбросить старую целиком значило бы молча потерять её ключи.
+        # Сливаем под новую, заданное в новой побеждает.
+        _set_path(raw, new, _deep_merge_missing(_get_path(raw, new), value))
+        return (
+            f"{old} переименован в {new}: ключи слиты, заданные в {new} "
+            f"побеждают — {_SYNC_HINT}"
+        )
+    return f"{old} устарел: действует явно заданный {new}, старое значение отброшено — {_SYNC_HINT}"

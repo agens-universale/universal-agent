@@ -297,62 +297,24 @@ def file_entries(
     файла: дельта от пустоты, ``kind`` ``created``, право отката по
     существованию на диске (откат такого пути — удаление, §3.1).
     """
-    by_path: dict[str, list[EditRecord]] = {}
-    for rec in records:
-        # Внешние пути отсекаются ЗДЕСЬ, в единственном пофайловом расчёте
-        # (Р11), а не на экране: сводка хода — тонкий агрегат над ним, и
-        # второй фильтр во втором слое дал бы два разных числа об одном
-        # наборе. Считать внешний путь нечем — базы у него нет.
-        if is_external_key(rec.path):
-            continue
-        by_path.setdefault(rec.path, []).append(rec)
-
     entries: list[FileEntry] = []
-    for path_key, unordered in by_path.items():
+    for path_key, unordered in _group_by_path(records).items():
         # Сортировка стабильная: при равных ts порядок дописывания сохраняется.
         path_records = sorted(unordered, key=lambda rec: rec.ts)
         abs_path = abs_path_for_key(launch_root, path_key)
         on_disk = abs_path.is_file()
-        created = created_here(path_records)
-        # Ступень выше есть — база больше не пуста, created-обход снят.
-        stepped_over_created = (
-            created and stepped is not None and stepped(path_key)
+        created, stepped_over_created = _created_state(
+            path_key, path_records, stepped, absent_step
         )
-        if stepped_over_created:
-            created = False
-        # ...кроме ступени «принято отсутствие»: её база — ПУСТОТА, и путь
-        # считается от неё ровно как созданный (§3.1), чем бы он ни был в
-        # журнале до принятия.
-        if absent_step is not None and absent_step(path_key):
-            created = True
-            stepped_over_created = False
-
-        exact = countable = False
-        add = del_ = 0
-        disk_sha256: Optional[str] = None
-        baseline_sha256: Optional[str] = None
-        if not all(_is_no_diff(rec) for rec in path_records):
-            baseline = None if created else baseline_for(path_key)
-            if baseline is not None:
-                baseline_sha256 = sha256_hex_of_bytes(baseline)
-            if baseline is not None or created:
-                delta = delta_vs_disk(
-                    baseline,
-                    abs_path,
-                    max_source_bytes=max_source_bytes,
-                    hunk_context_lines=hunk_context_lines,
-                )
-                countable = delta.countable
-                exact = delta.countable
-                add, del_ = delta.add, delta.del_
-                disk_sha256 = delta.disk_sha256
-            else:
-                countable = (
-                    True  # пошаговые хэнки в журнале всё-таки посчитаны
-                )
-            if not exact:
-                add = sum(rec.add for rec in path_records)
-                del_ = sum(rec.del_ for rec in path_records)
+        counts = _path_counts(
+            path_key,
+            path_records,
+            abs_path,
+            created=created,
+            baseline_for=baseline_for,
+            max_source_bytes=max_source_bytes,
+            hunk_context_lines=hunk_context_lines,
+        )
 
         if stepped_over_created:
             revertable = True  # ступень — точная порода, база под неё есть
@@ -367,16 +329,16 @@ def file_entries(
         entries.append(
             FileEntry(
                 path=path_key,
-                add=add,
-                del_=del_,
+                add=counts.add,
+                del_=counts.del_,
                 kind=_kind(path_records, created=created, on_disk=on_disk),
-                exact=exact,
-                countable=countable,
+                exact=counts.exact,
+                countable=counts.countable,
                 by_shell=any(rec.call_id is None for rec in path_records),
                 external=_edited_outside(
                     path_records,
-                    disk_sha256=disk_sha256,
-                    baseline_sha256=baseline_sha256,
+                    disk_sha256=counts.disk_sha256,
+                    baseline_sha256=counts.baseline_sha256,
                 ),
                 revertable=revertable,
                 last_ts=path_records[-1].ts,
@@ -386,6 +348,101 @@ def file_entries(
 
     entries.sort(key=lambda entry: entry.last_ts, reverse=True)
     return entries
+
+
+def _group_by_path(
+    records: Iterable[EditRecord],
+) -> dict[str, list[EditRecord]]:
+    by_path: dict[str, list[EditRecord]] = {}
+    for rec in records:
+        # Внешние пути отсекаются ЗДЕСЬ, в единственном пофайловом расчёте
+        # (Р11), а не на экране: сводка хода — тонкий агрегат над ним, и
+        # второй фильтр во втором слое дал бы два разных числа об одном
+        # наборе. Считать внешний путь нечем — базы у него нет.
+        if is_external_key(rec.path):
+            continue
+        by_path.setdefault(rec.path, []).append(rec)
+    return by_path
+
+
+def _created_state(
+    path_key: str,
+    path_records: list[EditRecord],
+    stepped: Optional[Callable[[str], bool]],
+    absent_step: Optional[Callable[[str], bool]],
+) -> tuple[bool, bool]:
+    """``(created, stepped_over_created)`` пути — см. докстринг ``file_entries``."""
+    created = created_here(path_records)
+    # Ступень выше есть — база больше не пуста, created-обход снят.
+    stepped_over_created = (
+        created and stepped is not None and stepped(path_key)
+    )
+    if stepped_over_created:
+        created = False
+    # ...кроме ступени «принято отсутствие»: её база — ПУСТОТА, и путь
+    # считается от неё ровно как созданный (§3.1), чем бы он ни был в
+    # журнале до принятия.
+    if absent_step is not None and absent_step(path_key):
+        created = True
+        stepped_over_created = False
+    return created, stepped_over_created
+
+
+@dataclass(frozen=True)
+class _PathCounts:
+    add: int = 0
+    del_: int = 0
+    exact: bool = False
+    countable: bool = False
+    disk_sha256: Optional[str] = None
+    baseline_sha256: Optional[str] = None
+
+
+def _path_counts(
+    path_key: str,
+    path_records: list[EditRecord],
+    abs_path: Path,
+    *,
+    created: bool,
+    baseline_for: Callable[[str], Optional[bytes]],
+    max_source_bytes: int,
+    hunk_context_lines: int,
+) -> _PathCounts:
+    """Счётчики пути: по диску от базы (точно) или суммой записей журнала."""
+    if all(_is_no_diff(rec) for rec in path_records):
+        return _PathCounts()
+    baseline = None if created else baseline_for(path_key)
+    baseline_sha256 = (
+        sha256_hex_of_bytes(baseline) if baseline is not None else None
+    )
+    if baseline is not None or created:
+        delta = delta_vs_disk(
+            baseline,
+            abs_path,
+            max_source_bytes=max_source_bytes,
+            hunk_context_lines=hunk_context_lines,
+        )
+        if delta.countable:
+            return _PathCounts(
+                delta.add,
+                delta.del_,
+                True,
+                True,
+                delta.disk_sha256,
+                baseline_sha256,
+            )
+        countable, disk_sha256 = False, delta.disk_sha256
+    else:
+        # пошаговые хэнки в журнале всё-таки посчитаны
+        countable, disk_sha256 = True, None
+    return _PathCounts(
+        sum(rec.add for rec in path_records),
+        sum(rec.del_ for rec in path_records),
+        False,
+        countable,
+        disk_sha256,
+        baseline_sha256,
+    )
 
 
 def net_summary(
@@ -509,7 +566,6 @@ def _edited_outside(
     начала сессии, не видна вовсе — журнал о ней ничего не знает.
     """
     records, anchored = _since_baseline(path_records, baseline_sha256)
-    outside = False
     # База, от которой идёт отсчёт, — известное состояние: откат к ней пишет
     # диск без записи в журнал, и следующая запись честно говорит «видел
     # базу». Без неё в известных возврат к базе считался разрывом, когда её
@@ -519,7 +575,25 @@ def _edited_outside(
     known: set[str] = (
         {baseline_sha256} if baseline_sha256 is not None else set()
     )
-    previous_after: Optional[str] = baseline_sha256 if anchored else None
+    outside, previous_after = _chain_breaks(
+        records, known, baseline_sha256 if anchored else None
+    )
+    if (
+        disk_sha256 is not None
+        and previous_after is not None
+        and disk_sha256 not in known
+    ):
+        outside = True
+    return outside
+
+
+def _chain_breaks(
+    records: list[EditRecord],
+    known: set[str],
+    previous_after: Optional[str],
+) -> tuple[bool, Optional[str]]:
+    """Разрыв цепочки записей и ``after`` последней; ``known`` пополняется."""
+    outside = False
     for rec in records:
         if (
             rec.before_sha256 is not None
@@ -532,13 +606,7 @@ def _edited_outside(
             if digest is not None:
                 known.add(digest)
         previous_after = rec.after_sha256
-    if (
-        disk_sha256 is not None
-        and previous_after is not None
-        and disk_sha256 not in known
-    ):
-        outside = True
-    return outside
+    return outside, previous_after
 
 
 def created_here(path_records: list[EditRecord]) -> bool:

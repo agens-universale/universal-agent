@@ -200,6 +200,32 @@ Usage:
             return {"type": "mkdir_failed", "message": str(e)}
         return None
 
+    async def _journal_old_bytes(
+        self, path: str, exists: bool
+    ) -> bytes | None:
+        """Контент до перезаписи — для журнала правок.
+
+        Тул нигде больше его не читает, а без него запись о перезаписи
+        выглядит как создание файла (нет baseline-снапшота, весь файл в дифф
+        как добавленный). Читаем только когда запись правок реально ведётся и
+        файл в пределах капа мутирующих тулов — собственного гейта по размеру
+        у этого тула нет.
+        """
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            is_recording,
+        )
+
+        if not exists or not is_recording(self._ctx):
+            return None
+        try:
+            if await self._backend.getsize(path) <= fs_mutate_max_bytes(
+                self._config_dict
+            ):
+                return await self._backend.read_bytes(path)
+        except Exception:
+            return None
+        return None
+
     @enforce_write_guard(path_arg="path", operation="write")
     async def acall(
         self,
@@ -262,24 +288,10 @@ Usage:
                 )
 
         from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
-            is_recording,
             record_edit,
         )
 
-        # Контент до перезаписи — для журнала правок: тул нигде больше его не
-        # читает, а без него запись о перезаписи выглядит как создание файла
-        # (нет baseline-снапшота, весь файл в дифф как добавленный). Читаем
-        # только когда запись правок реально ведётся и файл в пределах капа
-        # мутирующих тулов — собственного гейта по размеру у этого тула нет.
-        old_bytes = None
-        if exists and is_recording(self._ctx):
-            try:
-                if await self._backend.getsize(path) <= fs_mutate_max_bytes(
-                    self._config_dict
-                ):
-                    old_bytes = await self._backend.read_bytes(path)
-            except Exception:
-                old_bytes = None
+        old_bytes = await self._journal_old_bytes(path, exists)
 
         try:
             out_bytes, encode_err = try_encode_text_bytes(

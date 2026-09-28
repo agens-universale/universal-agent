@@ -54,7 +54,34 @@ class _NoSelect(Static):
         return None
 
 
-class BlockPanel(ClickModelMixin, Vertical):
+class CopyFeedbackMixin:
+    """Отклик кнопки ❐ и открытие события по Ctrl+клику — общие у панели и
+    блока правки. Хозяин держит ``_restore_timer`` и ``_event_no``."""
+
+    def _flash_copied(self) -> None:
+        self.query_one(".block-copy", Static).update(DONE_GLYPH)
+        if self._restore_timer is not None:
+            self._restore_timer.stop()
+        self._restore_timer = self.set_timer(
+            COPY_FEEDBACK_S, self._restore_copy_glyph
+        )
+
+    def _restore_copy_glyph(self) -> None:
+        self._restore_timer = None
+        try:
+            self.query_one(".block-copy", Static).update(copy_glyph())
+        except Exception:
+            pass  # блок уже размонтирован — восстанавливать нечего
+
+    def _open_request(self) -> Optional[Message]:
+        if not self._event_no:
+            return None
+        from gc_tui.messages import OpenEventRequest
+
+        return OpenEventRequest(self._event_no)
+
+
+class BlockPanel(CopyFeedbackMixin, ClickModelMixin, Vertical):
     """Код-панель или таблица трейса.
 
     Конструируется фабриками `for_code` / `for_table` — они задают тело, метку
@@ -258,26 +285,7 @@ class BlockPanel(ClickModelMixin, Vertical):
 
     def _copy_block(self) -> None:
         self.post_message(_copy_request(self._copy_payload))
-        self.query_one(".block-copy", Static).update(DONE_GLYPH)
-        if self._restore_timer is not None:
-            self._restore_timer.stop()
-        self._restore_timer = self.set_timer(
-            COPY_FEEDBACK_S, self._restore_copy_glyph
-        )
-
-    def _restore_copy_glyph(self) -> None:
-        self._restore_timer = None
-        try:
-            self.query_one(".block-copy", Static).update(copy_glyph())
-        except Exception:
-            pass  # панель уже размонтирована — восстанавливать нечего
-
-    def _open_request(self) -> Optional[Message]:
-        if not self._event_no:
-            return None
-        from gc_tui.messages import OpenEventRequest
-
-        return OpenEventRequest(self._event_no)
+        self._flash_copied()
 
 
 def _copy_request(payload: str) -> Message:

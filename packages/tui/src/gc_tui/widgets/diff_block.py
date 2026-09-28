@@ -44,7 +44,6 @@ from gc_core.agent_edits.journal import EditRecord
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.message import Message
 from textual.widgets import Static
 
 from gc_tui.services.diff_render import (
@@ -54,8 +53,7 @@ from gc_tui.services.diff_render import (
 )
 from gc_tui.services.plural import lines_word
 from gc_tui.widgets.block_panel import (
-    COPY_FEEDBACK_S,
-    DONE_GLYPH,
+    CopyFeedbackMixin,
     _copy_request,
     _NoSelect,
     copy_glyph,
@@ -69,7 +67,7 @@ BRANCH_PREFIX = "└ изменено:"
 BODY_INDENT = 2
 
 
-class DiffBlock(ClickModelMixin, Vertical):
+class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
     """Блок правки: ветка с кнопкой, свёрнутое тело диффа и хвост-тогл."""
 
     ALLOW_SELECT = False  # выделяется тело, а не блок целиком
@@ -334,23 +332,4 @@ class DiffBlock(ClickModelMixin, Vertical):
                 copyable_hunks(self._record.hunks, path=self._record.path)
             )
         )
-        self.query_one(".block-copy", Static).update(DONE_GLYPH)
-        if self._restore_timer is not None:
-            self._restore_timer.stop()
-        self._restore_timer = self.set_timer(
-            COPY_FEEDBACK_S, self._restore_copy_glyph
-        )
-
-    def _restore_copy_glyph(self) -> None:
-        self._restore_timer = None
-        try:
-            self.query_one(".block-copy", Static).update(copy_glyph())
-        except Exception:
-            pass  # блок уже размонтирован — восстанавливать нечего
-
-    def _open_request(self) -> Optional[Message]:
-        if not self._event_no:
-            return None
-        from gc_tui.messages import OpenEventRequest
-
-        return OpenEventRequest(self._event_no)
+        self._flash_copied()

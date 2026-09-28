@@ -176,21 +176,89 @@ def _record_edit(
     thread_key = thread_key_from_journal_path(journal_path)
 
     launch_root = launch_root_from_ctx(ctx)
-    path_key = (
-        canonical_path_key(
-            abs_path,
-            launch_root,
-            protected_extra=protected_extra_from_ctx(ctx),
-        )
-        if launch_root
-        else None
-    )
+    path_key = _path_key_for(ctx, abs_path, launch_root)
     if path_key is None:
         return
 
     if old_bytes is None and new_bytes is None:
         return
 
+    hunks, add, del_, flags, take_snapshot, take_created_mark = _diff_and_base(
+        abs_path,
+        path_key,
+        old_bytes,
+        new_bytes,
+        op=op,
+        partial=partial,
+        max_diff_source_bytes=max_diff_source_bytes,
+        hunk_context_lines=hunk_context_lines,
+        max_diff_chars=max_diff_chars,
+    )
+
+    store = None
+    wrote_session = False
+    if take_snapshot or take_created_mark:
+        store, wrote_session = _capture_base(
+            ctx,
+            launch_root,
+            thread_key,
+            threads_dir,
+            path_key,
+            old_bytes,
+            created_mark=take_created_mark,
+        )
+
+    rec = EditRecord(
+        path=path_key,
+        turn_id=current_turn_id(ctx) or "",
+        ts=time.time(),
+        call_id=call_id,
+        op=op,
+        hunks=hunks,
+        add=add,
+        del_=del_,
+        before_sha256=None if partial else _sha256_or_none(old_bytes),
+        after_sha256=None if partial else _sha256_or_none(new_bytes),
+        flags=flags,
+    )
+    EditsJournal(journal_path).append(rec)
+
+    # Эвикция — только когда session-снапшот реально записан (один раз на файл на
+    # тред): capture_session зовётся на каждой правке, а evict_lru обходит каталог
+    # целиком. Строго ПОСЛЕ записи журнала: живость треда evict_lru проверяет по
+    # наличию edits_<thread_key>.jsonl, и до первого append свои же свежие снимки
+    # оказались бы кандидатами на вытеснение.
+    if wrote_session and store is not None:
+        store.evict_lru(
+            limit(
+                None, ctx, "snapshots_max_files", DEFAULT_SNAPSHOTS_MAX_FILES
+            )
+        )
+
+
+def _path_key_for(ctx: Any, abs_path: str, launch_root: str) -> str | None:
+    if not launch_root:
+        return None
+    return canonical_path_key(
+        abs_path,
+        launch_root,
+        protected_extra=protected_extra_from_ctx(ctx),
+    )
+
+
+def _diff_and_base(
+    abs_path: str,
+    path_key: str,
+    old_bytes: bytes | None,
+    new_bytes: bytes | None,
+    *,
+    op: str,
+    partial: bool,
+    max_diff_source_bytes: int,
+    hunk_context_lines: int,
+    max_diff_chars: int,
+) -> tuple[str, int, int, list[str], bool, bool]:
+    """Дифф правки и решение о базе: ``(hunks, add, del_, flags, снимок, отметка создания)``."""
     flags: list[str] = []
     hunks = ""
     add = 0
@@ -256,72 +324,58 @@ def _record_edit(
         # создания — ступень отсчёта у пути, который на экране не появится.
         take_snapshot = False
         take_created_mark = False
+    return hunks, add, del_, flags, take_snapshot, take_created_mark
 
+
+def _capture_base(
+    ctx: Any,
+    launch_root: str,
+    thread_key: str,
+    threads_dir: str,
+    path_key: str,
+    old_bytes: bytes | None,
+    *,
+    created_mark: bool,
+) -> tuple[Any, bool]:
+    """Снимок базы или отметка создания; ``(store, записан ли снимок сессии)``."""
     store = None
     wrote_session = False
-    if take_snapshot or take_created_mark:
-        # Свой try — как у соседа по каналу (`shell_delta._record`): снимок
-        # базы это ВОЗМОЖНОСТЬ ОТКАТА, а запись ниже — основной контракт
-        # («видно, что агент изменил»). Необязательное не вправе ронять
-        # обязательное: отказ файловой системы здесь (путь длиннее предела ОС,
-        # нет места, файл занят чужим процессом) обрывал всю функцию, внешний
-        # `except` глотал исключение, и правка исчезала отовсюду разом — из
-        # ленты, с экрана правок и из счётчиков хода, молча. Цена отказа
-        # теперь ровно та, что он стоит: у пути не будет базы для отката.
-        try:
-            store = SnapshotStore(
-                snapshots_root(launch_root), thread_key, Path(threads_dir)
-            )
-            # Признак ступени HEAD фиксируется вместе с первой записью о пути
-            # (§3.2): ревизия читается ФАЙЛАМИ `.git`, без подпроцесса —
-            # горячий путь тула не должен платить `rev-parse` за каждый первый
-            # контакт с файлом.
-            head_rev = head_rev_from_files(launch_root)
-            if take_created_mark:
-                store.mark_created(path_key, head_rev=head_rev)
-            else:
-                wrote_session = store.capture_session(
-                    path_key, old_bytes, head_rev=head_rev
-                )
-                turn_id = current_turn_id(ctx)
-                if turn_id is not None:
-                    store.capture_turn(path_key, old_bytes, turn_id)
-        except Exception:
-            # `store`/`wrote_session` здесь НЕ сбрасываются: снимок сессии мог
-            # уже лечь, а упасть — следующий за ним снимок хода. Обнулив флаг,
-            # мы пропустили бы эвикцию, и хранилище переросло бы свой лимит.
-            _logger.warning(
-                "снимок базы не снят, запись всё равно идёт path=%r",
-                path_key,
-                exc_info=True,
-            )
-
-    rec = EditRecord(
-        path=path_key,
-        turn_id=current_turn_id(ctx) or "",
-        ts=time.time(),
-        call_id=call_id,
-        op=op,
-        hunks=hunks,
-        add=add,
-        del_=del_,
-        before_sha256=None if partial else _sha256_or_none(old_bytes),
-        after_sha256=None if partial else _sha256_or_none(new_bytes),
-        flags=flags,
-    )
-    EditsJournal(journal_path).append(rec)
-
-    # Эвикция — только когда session-снапшот реально записан (один раз на файл на
-    # тред): capture_session зовётся на каждой правке, а evict_lru обходит каталог
-    # целиком. Строго ПОСЛЕ записи журнала: живость треда evict_lru проверяет по
-    # наличию edits_<thread_key>.jsonl, и до первого append свои же свежие снимки
-    # оказались бы кандидатами на вытеснение.
-    if wrote_session and store is not None:
-        store.evict_lru(
-            limit(
-                None, ctx, "snapshots_max_files", DEFAULT_SNAPSHOTS_MAX_FILES
-            )
+    # Свой try — как у соседа по каналу (`shell_delta._record`): снимок
+    # базы это ВОЗМОЖНОСТЬ ОТКАТА, а запись в журнал — основной контракт
+    # («видно, что агент изменил»). Необязательное не вправе ронять
+    # обязательное: отказ файловой системы здесь (путь длиннее предела ОС,
+    # нет места, файл занят чужим процессом) обрывал всю функцию, внешний
+    # `except` глотал исключение, и правка исчезала отовсюду разом — из
+    # ленты, с экрана правок и из счётчиков хода, молча. Цена отказа
+    # теперь ровно та, что он стоит: у пути не будет базы для отката.
+    try:
+        store = SnapshotStore(
+            snapshots_root(launch_root), thread_key, Path(threads_dir)
         )
+        # Признак ступени HEAD фиксируется вместе с первой записью о пути
+        # (§3.2): ревизия читается ФАЙЛАМИ `.git`, без подпроцесса —
+        # горячий путь тула не должен платить `rev-parse` за каждый первый
+        # контакт с файлом.
+        head_rev = head_rev_from_files(launch_root)
+        if created_mark:
+            store.mark_created(path_key, head_rev=head_rev)
+        else:
+            wrote_session = store.capture_session(
+                path_key, old_bytes, head_rev=head_rev
+            )
+            turn_id = current_turn_id(ctx)
+            if turn_id is not None:
+                store.capture_turn(path_key, old_bytes, turn_id)
+    except Exception:
+        # `store`/`wrote_session` здесь НЕ сбрасываются: снимок сессии мог
+        # уже лечь, а упасть — следующий за ним снимок хода. Обнулив флаг,
+        # мы пропустили бы эвикцию, и хранилище переросло бы свой лимит.
+        _logger.warning(
+            "снимок базы не снят, запись всё равно идёт path=%r",
+            path_key,
+            exc_info=True,
+        )
+    return store, wrote_session
 
 
 def _is_binary_side(path: str, data: bytes | None) -> bool:

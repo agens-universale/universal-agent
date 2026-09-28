@@ -622,21 +622,26 @@ def _patch_header_path(header: str) -> Optional[str]:
             return _unquote_c_path(rest) if rest.startswith('"') else rest
     rest = header[len("diff --git ") :]
     if rest.startswith('"'):
-        end = _closing_quote(rest)
-        if end < 0:
-            return None
-        src = _unquote_c_path(rest[: end + 1])
-        dst = _unquote_c_path(rest[end + 2 :])
-        if (
-            not (src.startswith("a/") and dst.startswith("b/"))
-            or src[2:] != dst[2:]
-        ):
-            return None
-        return src[2:]
+        return _quoted_git_header_path(rest)
     if len(rest) < 5 or (len(rest) - 5) % 2:
         return None
     path = rest[2 : 2 + (len(rest) - 5) // 2]
     return path if rest == f"a/{path} b/{path}" else None
+
+
+def _quoted_git_header_path(rest: str) -> Optional[str]:
+    """``"a/<путь>" "b/<путь>"`` в C-кавычках → путь; половины обязаны совпасть."""
+    end = _closing_quote(rest)
+    if end < 0:
+        return None
+    src = _unquote_c_path(rest[: end + 1])
+    dst = _unquote_c_path(rest[end + 2 :])
+    if (
+        not (src.startswith("a/") and dst.startswith("b/"))
+        or src[2:] != dst[2:]
+    ):
+        return None
+    return src[2:]
 
 
 def argv_chunks(items: Sequence[str], *, size=len) -> list[list[str]]:
@@ -984,15 +989,7 @@ def last_commits(
     if code != 0:
         return {}
     if merges.strip():
-        answers = run_git_many(
-            launch_root, [_last_commit_args(rel) for rel in rels]
-        )
-        return {
-            rel: commit
-            for rel, (answer_code, out) in zip(rels, answers)
-            if answer_code == 0
-            and (commit := _parse_last_commit(out)) is not None
-        }
+        return _last_commits_one_by_one(launch_root, rels)
     wanted = set(rels)
     specs = [f":(literal){rel}" for rel in rels]
     outputs = _chunked_outputs(
@@ -1010,26 +1007,41 @@ def last_commits(
     )
     found: dict[str, tuple[str, int]] = {}
     for out in outputs or ():
-        commit: tuple[str, int] | None = None
-        first_name = False
-        for token in out.decode("utf-8", errors="surrogateescape").split(
-            "\x00"
-        ):
-            if token.startswith("\x01"):
-                short_hash, _sep, ts_text = token[1:].partition("\t")
-                commit = (
-                    (short_hash, int(ts_text)) if ts_text.isdigit() else None
-                )
-                first_name = True
-                continue
-            # Первое имя после заголовка git отделяет переводом строки.
-            name = (
-                token[1:] if first_name and token.startswith("\n") else token
-            )
-            first_name = False
-            if commit is not None and name in wanted and name not in found:
-                found[name] = commit
+        _collect_last_commits(out, wanted, found)
     return found
+
+
+def _last_commits_one_by_one(
+    launch_root: str, rels: list[str]
+) -> dict[str, tuple[str, int]]:
+    """Диапазон со слиянием: каждый путь — своей одиночной командой, параллельно."""
+    answers = run_git_many(
+        launch_root, [_last_commit_args(rel) for rel in rels]
+    )
+    return {
+        rel: commit
+        for rel, (answer_code, out) in zip(rels, answers)
+        if answer_code == 0 and (commit := _parse_last_commit(out)) is not None
+    }
+
+
+def _collect_last_commits(
+    out: bytes, wanted: set[str], found: dict[str, tuple[str, int]]
+) -> None:
+    """Вывод ``git log --name-only -z`` → первый (последний) коммит пути в ``found``."""
+    commit: tuple[str, int] | None = None
+    first_name = False
+    for token in out.decode("utf-8", errors="surrogateescape").split("\x00"):
+        if token.startswith("\x01"):
+            short_hash, _sep, ts_text = token[1:].partition("\t")
+            commit = (short_hash, int(ts_text)) if ts_text.isdigit() else None
+            first_name = True
+            continue
+        # Первое имя после заголовка git отделяет переводом строки.
+        name = token[1:] if first_name and token.startswith("\n") else token
+        first_name = False
+        if commit is not None and name in wanted and name not in found:
+            found[name] = commit
 
 
 def run_git_many(

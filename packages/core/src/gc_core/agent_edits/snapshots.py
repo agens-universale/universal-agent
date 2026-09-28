@@ -935,16 +935,8 @@ class SnapshotStore:
             return 0
         removed = 0
         for p in sorted(self.root.iterdir()):
-            if not p.is_file() or p.suffix not in _SNAPSHOT_SUFFIXES:
-                continue
-            match = _STEM_RE.match(p.stem)
-            if match is None or match.group(1) != self.thread_key:
-                continue
-            try:
-                p.unlink()
-            except OSError:
-                continue
-            removed += 1
+            if self._is_own_snapshot(p) and _unlink_quietly(p):
+                removed += 1
         with file_lock(self.index_path, timeout=5.0):
             index = self._load_index()
             dead = [
@@ -958,6 +950,13 @@ class SnapshotStore:
                     del index[key]
                 self._save_index(index)
         return removed
+
+    def _is_own_snapshot(self, p: Path) -> bool:
+        """Файл снимка ЭТОГО треда (legacy-стемы без треда — не свои)."""
+        if not p.is_file() or p.suffix not in _SNAPSHOT_SUFFIXES:
+            return False
+        match = _STEM_RE.match(p.stem)
+        return match is not None and match.group(1) == self.thread_key
 
     def _prune_dead_marks(self, files: list[Path]) -> None:
         """Записи индекса мёртвых тредов, за которыми не осталось ни файла.
@@ -1025,3 +1024,11 @@ class SnapshotStore:
             else:
                 del index[key]
             self._save_index(index)
+
+
+def _unlink_quietly(p: Path) -> bool:
+    try:
+        p.unlink()
+    except OSError:
+        return False
+    return True

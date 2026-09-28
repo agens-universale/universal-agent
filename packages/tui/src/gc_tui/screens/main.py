@@ -3225,7 +3225,7 @@ class TraceScreen(Screen):
             block = self._inline_diff_block(ev.call_id, event_no=ev.no)
             if block is None:
                 return
-            self.query_one("#trace", VerticalScroll).mount(block, after=row)
+            self.query_one(_SEL_TRACE, VerticalScroll).mount(block, after=row)
             if self._stick_bottom:
                 self._scroll_trace_end()
         except Exception as exc:
