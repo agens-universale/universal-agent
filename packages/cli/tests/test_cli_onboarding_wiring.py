@@ -154,3 +154,62 @@ def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     )
     assert cli.main() == 0
     assert "config.yml" in capsys.readouterr().err
+
+
+def test_unconfigured_with_structured_format_exits_1(
+    monkeypatch, tmp_path, capsys
+):
+    """Флаг формы на ненастроенном конфиге — отказ, не пустой успех."""
+    fmt = tmp_path / "format.md"
+    fmt.write_text("верни JSON\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "_interactive", lambda: True)
+    monkeypatch.setattr(
+        cli.arg_parser,
+        "run_args",
+        type(
+            "A",
+            (),
+            {
+                "init_config": False,
+                "init": False,
+                "config": None,
+                "write_guard": None,
+                "no_write_guard": False,
+                "command_moderation": None,
+                "read_guard": None,
+                "no_read_guard": False,
+                "read_guard_mode": None,
+                "agentsmd_override": False,
+                "skill": None,
+                "profile": None,
+                "structured_output_format": str(fmt),
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        cli,
+        "load_config_ex",
+        lambda *a, **k: (
+            {
+                "completions_url": "http://your-backend:PORT/v1/chat/completions"
+            },
+            None,
+        ),
+    )
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+    monkeypatch.setattr(
+        cli, "user_config_path", lambda: tmp_path / "config.yml"
+    )
+    from gc_cli import onboarding_wizard
+
+    monkeypatch.setattr(
+        onboarding_wizard,
+        "run",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("run вызван")),
+    )
+    assert cli.main() == 1
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "config.yml" in err

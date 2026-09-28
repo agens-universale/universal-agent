@@ -500,6 +500,33 @@ async def _emit_structured_if_requested(
     )
 
 
+def _unconfigured_setup_exit(
+    config_arg: str | None,
+    config_dict: dict,
+    *,
+    just_created: bool,
+    format_text: str | None,
+) -> int | None:
+    """Код выхода, если дефолтный конфиг ещё не настроен.
+
+    ``None`` — конфиг указан явно или уже заполнен, агент стартует.
+    С ``--structured-output-format`` код 1: пустой stdout и 0 скрипт
+    принял бы за ответ. Без флага код 0, подсказка остаётся в stderr.
+    Вынесено из ``arun_cli``: вложенная ветка поднимала S3776 выше 15.
+    """
+    if config_arg is not None or not onboarding.is_unconfigured(config_dict):
+        return None
+    print(
+        onboarding.setup_guide(
+            str(user_config_path()), config_dict, just_created=just_created
+        ),
+        file=sys.stderr,
+    )
+    if format_text is not None:
+        return 1
+    return 0
+
+
 async def arun_cli() -> int:
     """
     Входная точка CLI: парсинг аргументов, загрузка конфига,
@@ -572,14 +599,14 @@ async def arun_cli() -> int:
 
     # gc-cli больше НЕ запускает визард автоматически — только по --init-config.
     # При неполном конфиге на дефолтном пути — пассивный текстовый хинт и выход.
-    if config_arg is None and onboarding.is_unconfigured(config_dict):
-        print(
-            onboarding.setup_guide(
-                str(user_config_path()), config_dict, just_created=just_created
-            ),
-            file=sys.stderr,
-        )
-        return 0
+    setup_exit = _unconfigured_setup_exit(
+        config_arg,
+        config_dict,
+        just_created=just_created,
+        format_text=format_text,
+    )
+    if setup_exit is not None:
+        return setup_exit
 
     # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
     # notice «агент обновлён» (ревью Task 4).
