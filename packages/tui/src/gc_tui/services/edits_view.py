@@ -77,6 +77,9 @@ from gc_core.thread_store import edits_journal_path
 
 from gc_tui.services.edits_lookup import disk_signature, journal_signature
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_MSG_HEAD_STEP_UNKNOWN = "ступень HEAD не определена: %s"
+
 _logger = logging.getLogger(__name__)
 
 SOURCE_SESSION = "session"
@@ -761,15 +764,12 @@ class EditsView:
                 and self._stepped(path_key)
             ):
                 created = False
-            baseline = (
-                None
-                if created
-                else (
-                    self._session_ladder_baseline(path_key)
-                    if source == SOURCE_SESSION
-                    else self._counting_baseline(source, turn_id)(path_key)
-                )
-            )
+            if created:
+                baseline = None
+            elif source == SOURCE_SESSION:
+                baseline = self._session_ladder_baseline(path_key)
+            else:
+                baseline = self._counting_baseline(source, turn_id)(path_key)
         elif settled:
             # Разобранный файл: тело — КУМУЛЯТИВ СЕССИИ, тем же расчётом и от
             # той же базы, что числа строки группы (§12: сумма записей журнала
@@ -1029,7 +1029,7 @@ class EditsView:
         warns: List[str] = []
         try:
             accepted = self._store.accepted_state(key)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError замка — подкласс OSError
             # Замок индекса снимков занят (другое окно, CLI, субагенты): превью
             # без предупреждения о принятом — беднее правды, но экран на `r` жив.
             _logger.warning(
@@ -1048,12 +1048,10 @@ class EditsView:
         if head_rev is not None and turn_start_ts is not None:
             try:
                 head_step = self._head_step(key, head_rev, committed)
-            except (OSError, TimeoutError):
+            except OSError:  # TimeoutError замка — подкласс OSError
                 # Та же деградация, что у снятия принятия: превью без
                 # предупреждения о коммите беднее правды, но экран на `r` жив.
-                _logger.warning(
-                    "ступень HEAD не определена: %s", key, exc_info=True
-                )
+                _logger.warning(_MSG_HEAD_STEP_UNKNOWN, key, exc_info=True)
                 head_step = None
             if head_step is not None:
                 rel = None if Path(key).is_absolute() else key
@@ -1106,10 +1104,8 @@ class EditsView:
         for key in path_keys:
             try:
                 step = self._head_step(key, head_rev, committed)
-            except (OSError, TimeoutError):
-                _logger.warning(
-                    "ступень HEAD не определена: %s", key, exc_info=True
-                )
+            except OSError:  # TimeoutError замка — подкласс OSError
+                _logger.warning(_MSG_HEAD_STEP_UNKNOWN, key, exc_info=True)
                 step = None
             if step is not None:
                 target = RevertTarget(
@@ -1143,7 +1139,7 @@ class EditsView:
         """
         try:
             accepted = self._store.accepted_state(path_key)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError замка — подкласс OSError
             _logger.warning(
                 "принятая база не прочитана: %s", path_key, exc_info=True
             )
@@ -1253,7 +1249,7 @@ class EditsView:
                 self._store.capture_accepted(
                     key, contents[key], head_oid=oids.get(key)
                 )
-            except (OSError, TimeoutError):
+            except OSError:  # TimeoutError замка — подкласс OSError
                 # Занятый `index.json.lock` (второй экземпляр приложения,
                 # параллельный прогон), антивирусный лок, полный диск: отказ —
                 # часть исхода, а не падение наружу (докстринг метода). Экран
@@ -1355,7 +1351,7 @@ class EditsView:
         for key in path_keys:
             try:
                 cleared = self._store.clear_accepted(key)
-            except (OSError, TimeoutError):
+            except OSError:  # TimeoutError замка — подкласс OSError
                 # Тот же класс отказов, что в `accept`: занятый лок индекса,
                 # антивирус, полный диск — исход, а не исключение наружу.
                 _logger.warning(
@@ -1577,7 +1573,7 @@ class EditsView:
         rels = [key for key in path_keys if not Path(key).is_absolute()]
         try:
             committed, by_rev = self._committed_by_rev(rels, head_rev)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError замка — подкласс OSError
             _logger.warning(
                 "ступени HEAD не собраны батчем — по одному", exc_info=True
             )
@@ -1587,7 +1583,7 @@ class EditsView:
         try:
             self._ladder_facts.prime(head_rev, {})
             self._ladder_facts.prefetch(by_rev)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError замка — подкласс OSError
             _logger.warning(
                 "факты лестницы не прогреты — по одному", exc_info=True
             )
@@ -2099,8 +2095,6 @@ class EditsView:
         """
         try:
             return self._head_step(path_key, head_rev, committed) is not None
-        except (OSError, TimeoutError):
-            _logger.warning(
-                "ступень HEAD не определена: %s", path_key, exc_info=True
-            )
+        except OSError:  # TimeoutError замка — подкласс OSError
+            _logger.warning(_MSG_HEAD_STEP_UNKNOWN, path_key, exc_info=True)
             return False

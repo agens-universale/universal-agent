@@ -36,6 +36,8 @@ from gc_tui.services.probe_presentation import connection_line_text
 from gc_tui.widgets.loading_wave import WAVE_INTERVAL, WAVE_SEQ, wave_glyph
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_SET_SCROLL = "#set-scroll"
+_SEL_SET_FOOTER = "#set-footer"
 _CLS_SELECTED = " selected"
 _CLS_SET_HINT_SET_DYN = "set-hint set-dyn"
 _CLS_SET_HINT_SET_DYN_SET_PROBE = "set-hint set-dyn set-probe"
@@ -702,21 +704,21 @@ class SettingsScreen(Screen):
         base = self._footer_base()
         return (
             base + FOOTER_SCROLL
-            if body_scrollable(self, "#set-scroll")
+            if body_scrollable(self, _SEL_SET_SCROLL)
             else base
         )
 
     def _sync_footer(self) -> None:
         """Перерисовать полосу подсказок (подсказка прокрутки зависит от высоты)."""
         try:
-            self.query_one("#set-footer", Static).update(self._footer_text())
+            self.query_one(_SEL_SET_FOOTER, Static).update(self._footer_text())
         except NoMatches:
             pass
 
     def on_resize(self, event: events.Resize) -> None:
         # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
         # ресайз, а не на каждый кадр секции (см. form_frame).
-        cap_frame_height(self, "#set-scroll")
+        cap_frame_height(self, _SEL_SET_SCROLL)
         # Влезет ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
         # называть ли клавишу прокрутки.
         self.call_after_refresh(self._sync_footer)
@@ -865,7 +867,7 @@ class SettingsScreen(Screen):
         """Футер меняется вместе с курсором — обновляем на месте (ре-рендер секции для
         этого не нужен и стёр бы черновик полей)."""
         try:
-            self.query_one("#set-footer", Static).update(self._footer_text())
+            self.query_one(_SEL_SET_FOOTER, Static).update(self._footer_text())
         except NoMatches:
             pass
 
@@ -886,7 +888,7 @@ class SettingsScreen(Screen):
         # обязан оставаться живым без единого сокета на UI-потоке.
         self._kick_voice_alive()
         self.set_interval(3.0, self._voice_alive_tick)
-        self.call_after_refresh(cap_frame_height, self, "#set-scroll")
+        self.call_after_refresh(cap_frame_height, self, _SEL_SET_SCROLL)
 
     # --- сырые значения полей (файл — источник для редакторов и сверки «не изменено») ---
     def _read_raw(self) -> dict:
@@ -1435,7 +1437,7 @@ class SettingsScreen(Screen):
             self._report_text = None
             self._report_section = None
         self.query_one("#header-left", Static).update(self._title_text())
-        self.query_one("#set-footer", Static).update(self._footer_text())
+        self.query_one(_SEL_SET_FOOTER, Static).update(self._footer_text())
         # Влезет ли содержимое, видно только ПОСЛЕ раскладки — а от этого
         # зависит, называть ли клавишу прокрутки.
         self.call_after_refresh(self._sync_footer)
@@ -1864,7 +1866,7 @@ class SettingsScreen(Screen):
         self._last_probed_snapshot = None
         if self._view in _PROBE_SECTIONS:
             try:
-                self.query_one("#set-footer", Static).update(
+                self.query_one(_SEL_SET_FOOTER, Static).update(
                     self._footer_text()
                 )
             except NoMatches:
@@ -7354,7 +7356,7 @@ class SettingsScreen(Screen):
     def _scroll_body_key(self, event: events.Key) -> None:
         """`Ctrl+↑`/`Ctrl+↓` — прокрутка тела секции страницами (обещана футером)."""
         event.stop()
-        scroll_body(self, "#set-scroll", -1 if event.key == "ctrl+up" else 1)
+        scroll_body(self, _SEL_SET_SCROLL, -1 if event.key == "ctrl+up" else 1)
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if self._view in _PROBE_SECTIONS:

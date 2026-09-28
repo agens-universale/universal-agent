@@ -23,6 +23,9 @@ from gc_tui.form_frame import (
 )
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_PU_SCROLL = "#pu-scroll"
+
 _FOOTER = "Space — отметить · Enter — выполнить отмеченное · Esc — позже (доступно в /settings)"
 _FOOTER_EMPTY = "Enter или Esc — продолжить"  # отмечать нечего — футер не врёт
 _HINT = "Осталось обновить:"
@@ -69,7 +72,7 @@ class PostUpdateScreen(Screen):
         self._stamped = False
 
     def on_mount(self) -> None:
-        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
+        self.call_after_refresh(cap_frame_height, self, _SEL_PU_SCROLL)
         if self._wired:
             self.run_worker(
                 self._scan_mcp_updates,
@@ -81,8 +84,8 @@ class PostUpdateScreen(Screen):
         # Дважды: сразу — под новую высоту экрана, после раскладки — под новую
         # высоту полосы подсказок (на узком окне она переносится и растёт: своего
         # `Resize` при этом нет, и одиночный замер остался бы протухшим).
-        cap_frame_height(self, "#pu-scroll")
-        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
+        cap_frame_height(self, _SEL_PU_SCROLL)
+        self.call_after_refresh(cap_frame_height, self, _SEL_PU_SCROLL)
         # Влезло ли содержимое, видно только ПОСЛЕ раскладки — от этого зависит,
         # называть ли клавишу прокрутки.
         self.call_after_refresh(self._sync_footer)
@@ -164,7 +167,7 @@ class PostUpdateScreen(Screen):
         # же правило, что в настройках и онбординге.
         return (
             base + FOOTER_SCROLL
-            if body_scrollable(self, "#pu-scroll")
+            if body_scrollable(self, _SEL_PU_SCROLL)
             else base
         )
 
@@ -234,7 +237,7 @@ class PostUpdateScreen(Screen):
         self._sync_footer()
         # Полный футер длиннее и на узком окне занимает больше строк — потолок
         # рамки считается от его фактической высоты, значит пересчитать.
-        self.call_after_refresh(cap_frame_height, self, "#pu-scroll")
+        self.call_after_refresh(cap_frame_height, self, _SEL_PU_SCROLL)
 
     # --- навигация/действия ---
 
@@ -319,7 +322,7 @@ class PostUpdateScreen(Screen):
             # Постраничная прокрутка тела — как в двух других экранах форм.
             event.stop()
             scroll_body(
-                self, "#pu-scroll", -1 if event.key == "ctrl+up" else 1
+                self, _SEL_PU_SCROLL, -1 if event.key == "ctrl+up" else 1
             )
         elif event.key == "down":
             event.stop()

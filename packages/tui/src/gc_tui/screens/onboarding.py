@@ -29,6 +29,7 @@ from gc_tui.form_frame import (
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_ONB_SCROLL = "#onb-scroll"
 _CLS_SELECTED = " selected"
 _SEL_ONB_BODY = "#onb-body"
 
@@ -566,7 +567,7 @@ class OnboardingScreen(Screen):
         base = self._footer_base()
         return (
             base + FOOTER_SCROLL
-            if body_scrollable(self, "#onb-scroll")
+            if body_scrollable(self, _SEL_ONB_SCROLL)
             else base
         )
 
@@ -661,12 +662,12 @@ class OnboardingScreen(Screen):
 
     def on_mount(self) -> None:
         self._mount_step_body()
-        self.call_after_refresh(cap_frame_height, self, "#onb-scroll")
+        self.call_after_refresh(cap_frame_height, self, _SEL_ONB_SCROLL)
 
     def on_resize(self, event: events.Resize) -> None:
         # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
         # ресайз, а не на каждый кадр шага (см. form_frame).
-        cap_frame_height(self, "#onb-scroll")
+        cap_frame_height(self, _SEL_ONB_SCROLL)
         # Влезет ли карточка, видно только ПОСЛЕ раскладки — от этого зависит,
         # называть ли клавишу прокрутки.
         self.call_after_refresh(self._sync_footer)
@@ -2145,7 +2146,7 @@ class OnboardingScreen(Screen):
         if event.key in ("ctrl+up", "ctrl+down"):
             event.stop()
             scroll_body(
-                self, "#onb-scroll", -1 if event.key == "ctrl+up" else 1
+                self, _SEL_ONB_SCROLL, -1 if event.key == "ctrl+up" else 1
             )
             return
         if event.key in ("up", "down"):

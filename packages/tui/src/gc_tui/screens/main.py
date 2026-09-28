@@ -3159,7 +3159,7 @@ class TraceScreen(Screen):
             return None
         try:
             files, add, del_ = lookup.turn_summary(turn_id)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError замка — подкласс OSError
             _log.warning("сводка правок хода не прочитана", exc_info=True)
             return None
         return (files, add, del_) if files > 0 else None
@@ -6930,24 +6930,6 @@ class TraceScreen(Screen):
         if suggestion:
             line.append(f" (вы имели в виду /{suggestion}?)", style=_DEEP_DIM)
         self._trace_mount(Static(line, classes="line-error", markup=False))
-
-    def _last_trace_row_content(self) -> str | None:
-        """Содержимое последней строки трейса или None (трейс пуст / не смонтирован)."""
-        from gc_tui.widgets.trace_row import TraceRow
-
-        try:
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        except Exception:
-            return None
-        # Смотрим ровно ПОСЛЕДНЕГО ребёнка (дедуп CTA сравнивает с ним): цикл «иду с
-        # конца» обещал бы поиск, которого нет — оба его пути выходили на первом шаге.
-        kids = trace.children
-        last = kids[-1] if kids else None
-        return (
-            getattr(last, "_content", None)
-            if isinstance(last, TraceRow)
-            else None
-        )
 
     def _mount_trace_row(
         self,

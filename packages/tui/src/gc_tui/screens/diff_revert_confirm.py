@@ -103,6 +103,9 @@ from gc_tui.services.plural import files_word
 from gc_tui.widgets.block_panel import _NoSelect
 from gc_tui.widgets.lazy_body import BodySlot, LazyBody
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_TRACE = "#trace"
+
 # Отступ тела слева (`RevertConfirmScreen #trace > Static` в `styles.tcss`) —
 # ровно тот же воздух, что кромка курсора даёт участкам вьюера. Строки имён и
 # вложенные строки дерева набирают его паддингом своих классов, участки диффа —
@@ -390,7 +393,7 @@ class RevertConfirmScreen(Screen[bool]):
         """
         if screen_width is None:
             try:
-                width = self.query_one("#trace", VerticalScroll).size.width
+                width = self.query_one(_SEL_TRACE, VerticalScroll).size.width
             except Exception:
                 width = 0
         else:
@@ -445,13 +448,14 @@ class RevertConfirmScreen(Screen[bool]):
         self.query_one("#footer", Static).update(
             confirm_footer(
                 count=self._count,
-                can_scroll=self.query_one("#trace", LazyBody).max_scroll_y > 0,
+                can_scroll=self.query_one(_SEL_TRACE, LazyBody).max_scroll_y
+                > 0,
                 reset=self._reset,
             )
         )
 
     def _render_body(self, fill: Optional[int]) -> None:
-        trace = self.query_one("#trace", LazyBody)
+        trace = self.query_one(_SEL_TRACE, LazyBody)
         self._fill = fill
         trace.set_slots(self._body_slots(fill))
 

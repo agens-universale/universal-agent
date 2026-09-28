@@ -152,6 +152,14 @@ from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.widgets.block_panel import _NoSelect
 from gc_tui.widgets.lazy_body import BodySlot, LazyBody
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_KEY_CTRL_A = "ctrl+a"
+_KEY_CTRL_R = "ctrl+r"
+_KEY_CTRL_U = "ctrl+u"
+_SEL_TRACE = "#trace"
+_SEL_HEADER_LEFT = "#header-left"
+_SEL_FOOTER = "#footer"
+
 _logger = logging.getLogger(__name__)
 
 UndoFeedbackFn = Callable[
@@ -427,7 +435,7 @@ def _survives_unreadable_edits(action):
     def guarded(self, *args, **kwargs):
         try:
             return action(self, *args, **kwargs)
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError замка — подкласс OSError
             _logger.warning(
                 "действие над правками не выполнено", exc_info=True
             )
@@ -678,18 +686,18 @@ _KEY_ALIASES = {
     "X": "x",
     "ч": "x",
     "Ч": "x",
-    "ctrl+a": "ctrl+a",
-    "ctrl+A": "ctrl+a",
-    "ctrl+ф": "ctrl+a",
-    "ctrl+Ф": "ctrl+a",
-    "ctrl+r": "ctrl+r",
-    "ctrl+R": "ctrl+r",
-    "ctrl+к": "ctrl+r",
-    "ctrl+К": "ctrl+r",
-    "ctrl+u": "ctrl+u",
-    "ctrl+U": "ctrl+u",
-    "ctrl+г": "ctrl+u",
-    "ctrl+Г": "ctrl+u",
+    _KEY_CTRL_A: _KEY_CTRL_A,
+    "ctrl+A": _KEY_CTRL_A,
+    "ctrl+ф": _KEY_CTRL_A,
+    "ctrl+Ф": _KEY_CTRL_A,
+    _KEY_CTRL_R: _KEY_CTRL_R,
+    "ctrl+R": _KEY_CTRL_R,
+    "ctrl+к": _KEY_CTRL_R,
+    "ctrl+К": _KEY_CTRL_R,
+    _KEY_CTRL_U: _KEY_CTRL_U,
+    "ctrl+U": _KEY_CTRL_U,
+    "ctrl+г": _KEY_CTRL_U,
+    "ctrl+Г": _KEY_CTRL_U,
 }
 
 
@@ -1705,7 +1713,7 @@ class _ActionFlash:
                 Static(
                     glyph + text, id="diff-flash", classes=cls, markup=False
                 ),
-                before=self.query_one("#footer", Static),
+                before=self.query_one(_SEL_FOOTER, Static),
             )
             return
         flash.update(glyph + text)
@@ -1874,10 +1882,10 @@ class DiffScreen(_ActionFlash, Screen):
     # свой метод с таким именем гасит отрисовку самого экрана.
 
     def _render_no_thread(self) -> None:
-        self.query_one("#header-left", Static).update("")
+        self.query_one(_SEL_HEADER_LEFT, Static).update("")
         self.query_one("#header-right", Static).update("")
-        self.query_one("#footer", Static).update("Esc")
-        trace = self.query_one("#trace", VerticalScroll)
+        self.query_one(_SEL_FOOTER, Static).update("Esc")
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
         trace.remove_children()
         self._rows = []
         trace.mount(Static(NO_THREAD, classes="line-meta", markup=False))
@@ -1902,11 +1910,11 @@ class DiffScreen(_ActionFlash, Screen):
                 row.entry.external for row in self._view.active
             ),
         )
-        self.query_one("#header-left", Static).update(paint_counters(left))
+        self.query_one(_SEL_HEADER_LEFT, Static).update(paint_counters(left))
         self.query_one("#header-right", Static).update(right)
         self._update_footer()
 
-        trace = self.query_one("#trace", VerticalScroll)
+        trace = self.query_one(_SEL_TRACE, VerticalScroll)
         trace.remove_children()
         self._rows = []
         # Всё тело — ОДНИМ монтированием: Textual на каждом перебирает уже
@@ -1986,7 +1994,7 @@ class DiffScreen(_ActionFlash, Screen):
         """
         active = self._selected_active()
         step = active.step if active is not None else None
-        self.query_one("#footer", Static).update(
+        self.query_one(_SEL_FOOTER, Static).update(
             footer_text(
                 row=self._footer_row(),
                 empty=not self._entries and not self._settled,
@@ -2138,7 +2146,7 @@ class DiffScreen(_ActionFlash, Screen):
         """
         try:
             width = (
-                self.query_one("#trace", VerticalScroll).size.width
+                self.query_one(_SEL_TRACE, VerticalScroll).size.width
                 - ROW_PADDING
                 - SCROLLBAR_COLUMN
             )
@@ -2186,7 +2194,7 @@ class DiffScreen(_ActionFlash, Screen):
     def _page(self) -> int:
         try:
             height = self.query_one(
-                "#trace", VerticalScroll
+                _SEL_TRACE, VerticalScroll
             ).content_size.height
         except Exception:
             height = 0
@@ -2287,19 +2295,19 @@ class DiffScreen(_ActionFlash, Screen):
         elif key == "a":
             event.stop()
             self._accept_selected()
-        elif key == "ctrl+a":
+        elif key == _KEY_CTRL_A:
             event.stop()
             self._accept_all()
         elif key == "u":
             event.stop()
             self._reset_selected()
-        elif key == "ctrl+u":
+        elif key == _KEY_CTRL_U:
             event.stop()
             self._reset_all()
         elif key == "r":
             event.stop()
             self._revert_selected()
-        elif key == "ctrl+r":
+        elif key == _KEY_CTRL_R:
             event.stop()
             self._revert_all()
         elif key == "x":
@@ -2452,7 +2460,7 @@ class DiffScreen(_ActionFlash, Screen):
         """
         try:
             yield
-        except (OSError, TimeoutError):
+        except OSError:  # TimeoutError замка — подкласс OSError
             _logger.warning("о правках рассказано не до конца", exc_info=True)
             self.app.notify(EDITS_CHANGED_UNREPORTED, severity="warning")
         finally:
@@ -3024,7 +3032,7 @@ class DiffFileViewer(_ActionFlash, Screen):
 
     def _body_scroll(self) -> LazyBody | None:
         try:
-            return self.query_one("#trace", LazyBody)
+            return self.query_one(_SEL_TRACE, LazyBody)
         except NoMatches:
             return None
 
@@ -3175,7 +3183,7 @@ class DiffFileViewer(_ActionFlash, Screen):
         заново: «правка 2/4» обязана говорить ровно о тех участках, по которым
         ходит курсор.
         """
-        self.query_one("#header-left", Static).update(
+        self.query_one(_SEL_HEADER_LEFT, Static).update(
             paint_counters(
                 build_viewer_header(
                     self._source,
@@ -3189,7 +3197,7 @@ class DiffFileViewer(_ActionFlash, Screen):
                 )
             )
         )
-        self.query_one("#footer", Static).update(
+        self.query_one(_SEL_FOOTER, Static).update(
             viewer_footer(
                 full=self._full,
                 can_full=self._can_full(),
@@ -3221,7 +3229,7 @@ class DiffFileViewer(_ActionFlash, Screen):
         работают ровно так же, как на собранном теле.
         """
         entry = self.entry
-        body = self.query_one("#trace", LazyBody)
+        body = self.query_one(_SEL_TRACE, LazyBody)
         self._edits = []
         self._fill = fill
         slots: List[BodySlot] = []
@@ -3256,7 +3264,7 @@ class DiffFileViewer(_ActionFlash, Screen):
             }
             try:
                 cached = self._build_body(entry, width)
-            except (OSError, TimeoutError):
+            except OSError:  # TimeoutError замка — подкласс OSError
                 # Тело строится лениво, при отрисовке, — до границы действий
                 # (`_survives_unreadable_edits`) отказ отсюда не доходит. Строка
                 # вместо тела и без кэша: следующая отрисовка попробует снова.
@@ -3407,7 +3415,7 @@ class DiffFileViewer(_ActionFlash, Screen):
         """
         if screen_width is None:
             try:
-                width = self.query_one("#trace", VerticalScroll).size.width
+                width = self.query_one(_SEL_TRACE, VerticalScroll).size.width
             except Exception:
                 width = 0
         else:
@@ -3456,7 +3464,7 @@ class DiffFileViewer(_ActionFlash, Screen):
             and self._edits[self._edit_idx]
         ):
             target = self._edits[self._edit_idx][0]
-            self.query_one("#trace", LazyBody).ensure(target)
+            self.query_one(_SEL_TRACE, LazyBody).ensure(target)
             self.call_after_refresh(target.scroll_visible, animate=False)
 
     def _go_file(self, step: int) -> None:
@@ -3477,7 +3485,7 @@ class DiffFileViewer(_ActionFlash, Screen):
         # Новый файл читают с начала. Textual сам ужимает прокрутку только под
         # размер нового тела: с длинного файла на длинный она осталась бы
         # посреди чужого диффа.
-        self.query_one("#trace", VerticalScroll).scroll_home(animate=False)
+        self.query_one(_SEL_TRACE, VerticalScroll).scroll_home(animate=False)
 
     def action_prev_file(self) -> None:
         self._go_file(-1)

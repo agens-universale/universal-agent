@@ -52,6 +52,11 @@ from typing import Any, Dict, Iterator, Optional, Tuple
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.file_lock import file_lock
 
+# Константы вместо повторяющихся литералов (Sonar S1192).
+_SUFFIX_ORIG = ".orig"
+_SUFFIX_TURN = ".turn"
+_SUFFIX_GITTURN = ".gitturn"
+
 # stem нового формата: <64 hex sha256>_<thread_key>; legacy — голый sha без хвоста.
 _STEM_RE = re.compile(r"^[0-9a-f]{64}_(.+)$")
 
@@ -60,7 +65,7 @@ _JOURNAL_STEM_PREFIX = "edits_"
 # Суффикс снимка → ключ его turn-отметки в index.json. У ``.gitorig`` отметки
 # нет: существование файла самодостаточно; у ``.orig`` своя — см.
 # ``_SESSION_HEAD_REV_KEY``.
-_TURN_INDEX_KEYS = {".turn": "turn_id", ".gitturn": "shell_turn_id"}
+_TURN_INDEX_KEYS = {_SUFFIX_TURN: "turn_id", _SUFFIX_GITTURN: "shell_turn_id"}
 
 # Ключи принятой базы в записи index.json — все три чистятся вместе (эвикция,
 # clear_accepted): в отличие от turn-отметок, они не делят запись с другой породой.
@@ -78,7 +83,13 @@ _SESSION_HEAD_REV_KEY = "session_head_rev"
 # ревизию — общий ключ затёр бы момент создания и ступень HEAD исчезла бы.
 _CREATED_HEAD_REV_KEY = "created_head_rev"
 
-_SNAPSHOT_SUFFIXES = (".orig", ".turn", ".gitorig", ".gitturn", ".accepted")
+_SNAPSHOT_SUFFIXES = (
+    _SUFFIX_ORIG,
+    _SUFFIX_TURN,
+    ".gitorig",
+    _SUFFIX_GITTURN,
+    ".accepted",
+)
 
 # служебный каталог не должен светиться в git status пользовательского проекта
 _GITIGNORE_BODY = "*\n"
@@ -129,8 +140,8 @@ def _turn_taken(entry: Dict[str, Any], index_key: str, turn_id: str) -> bool:
     """
     if entry.get(index_key) == turn_id:
         return True
-    return index_key == _TURN_INDEX_KEYS[".turn"] and (
-        entry.get(_TURN_INDEX_KEYS[".gitturn"]) == turn_id
+    return index_key == _TURN_INDEX_KEYS[_SUFFIX_TURN] and (
+        entry.get(_TURN_INDEX_KEYS[_SUFFIX_GITTURN]) == turn_id
     )
 
 
@@ -207,7 +218,7 @@ def _drop_legacy_store(root: Path) -> bool:
         entries = list(legacy.iterdir())
         for p in entries:
             if not p.is_file() or (
-                p.suffix != ".orig" and p.name != "index.json"
+                p.suffix != _SUFFIX_ORIG and p.name != "index.json"
             ):
                 return False
         for p in entries:
@@ -988,7 +999,7 @@ class SnapshotStore:
             return
         if p.suffix == ".accepted":
             keys: tuple = _ACCEPTED_INDEX_KEYS
-        elif p.suffix == ".orig":
+        elif p.suffix == _SUFFIX_ORIG:
             keys = (_SESSION_HEAD_REV_KEY,)
         else:
             turn_key = _TURN_INDEX_KEYS.get(p.suffix)

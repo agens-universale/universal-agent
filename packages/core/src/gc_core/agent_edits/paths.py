@@ -68,7 +68,7 @@ def canonical_path_key(
     try:
         resolved = normalize_path_for_policy(path, launch_root)
         root = normalize_path_for_policy(launch_root, launch_root)
-    except (ValueError, FileNotFoundError, OSError):
+    except (ValueError, OSError):
         return None
 
     if is_protected_from_tracking(
