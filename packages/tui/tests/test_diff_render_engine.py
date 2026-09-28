@@ -860,3 +860,26 @@ def test_syntax_skips_only_the_over_long_lines_not_the_whole_body():
 
     assert per_line[0], "обычная строка обязана остаться цветной"
     assert per_line[1] == [], "строка сверх предела не красится"
+
+
+def test_crlf_line_endings_are_not_line_content():
+    """CRLF-файл: `\r` — часть перевода строки, а не текст строки.
+
+    Разбор режет дифф по `\n`, и `\r` оставался в содержимом: заливка считалась
+    с ним, а при выводе управляющий символ выбрасывался — залитая строка
+    выходила на клетку короче соседних («лесенка»), а внутристрочная подсветка
+    метила `\r` изменённым символом."""
+    from gc_tui.services.diff_render import HunkBody, _parse
+
+    hunks = (
+        "--- \n+++ \n@@ -1,3 +1,4 @@\n one\r\n two\r\n"
+        "-three\r\n+three!\r\n+four\n"
+    )
+    assert all("\r" not in row.content for row in _parse(hunks))
+
+    rows = (
+        HunkBody(hunks, path="a.txt", fill_width=40).render().plain.split("\n")
+    )
+    filled = [r for r in rows if r[2:3] in ("+", "-")]
+    assert len(filled) == 3
+    assert len({len(r) for r in filled}) == 1, filled

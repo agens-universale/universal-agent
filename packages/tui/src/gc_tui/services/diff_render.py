@@ -501,9 +501,11 @@ def _parse(hunks: str) -> list[_Row]:
         if raw.startswith("diff --git"):  # следующий файл в потоке
             in_hunk = False
             continue
-        marker, content = (
-            (raw[:1], normalize_code(raw[1:])) if raw else (" ", "")
-        )
+        # `\r` в хвосте — половина перевода строки CRLF, а не текст строки: с
+        # ним заливка считалась на клетку длиннее выведенного («лесенка»), а
+        # внутристрочная подсветка метила его изменённым символом.
+        body = raw[1:].removesuffix("\r")
+        marker, content = (raw[:1], normalize_code(body)) if raw else (" ", "")
         if marker == "+":
             rows.append(_Row("add", None, new_no, content))
             new_no += 1
