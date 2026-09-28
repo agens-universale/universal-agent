@@ -8,6 +8,7 @@
 Как это настраивается пользователем — docs/configuration.md, раздел
 «Профили и уровни моделей».
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -45,12 +46,19 @@ def validate_level_value(value: str) -> str:
             "level: значение 'auto' появится с функцией авто-выбора — пока недоступно"
         )
     if value not in LEVELS:
-        raise ValueError(f"level должен быть одним из {LEVELS}, получено '{value}'")
+        raise ValueError(
+            f"level должен быть одним из {LEVELS}, получено '{value}'"
+        )
     return value
 
 
 def connection_parts(
-    *, url: Any, token: Any, completions_url: Any, proxy: Any, authorization: Any
+    *,
+    url: Any,
+    token: Any,
+    completions_url: Any,
+    proxy: Any,
+    authorization: Any,
 ) -> tuple[bool, bool]:
     """§2, ЕДИНОЕ определение «адрес задан» / «токен задан» для всех точек проверки.
 
@@ -73,7 +81,9 @@ def connection_parts(
     )
 
 
-def resolve_entry_address(*, url: Any, completions_url: Any, inherited: Any = "") -> str:
+def resolve_entry_address(
+    *, url: Any, completions_url: Any, inherited: Any = ""
+) -> str:
     """ДЕЙСТВУЮЩИЙ адрес записи реестра — одна or-цепочка на всех, кто её произносит:
     свой `url` → своё второе написание `backend.completions_url` → унаследованный из
     эффективной секции `backend`. Тем же порядком резолвит рантайм
@@ -90,12 +100,14 @@ def resolve_entry_address(*, url: Any, completions_url: Any, inherited: Any = ""
     return url or completions_url or inherited or ""
 
 
-def _pair_violation(label: str, has_address: bool, has_token: bool) -> str | None:
+def _pair_violation(
+    label: str, has_address: bool, has_token: bool
+) -> str | None:
     """Текст отказа правила пары (§3) или None, если пара целая. Один на обе точки —
     иначе формулировки разъезжаются так же, как разъехались бы определения."""
     if has_address and not has_token:
         return (
-            f'{label}: задан свой адрес, но не задан токен — укажите token '
+            f"{label}: задан свой адрес, но не задан токен — укажите token "
             '(или token: "" — «сервер не требует авторизации»), либо уберите адрес, '
             "чтобы запись работала через общее подключение"
         )
@@ -113,21 +125,34 @@ def _unresolved_pair_refs(entry) -> list[str]:
     Смотрит ДОРЕЗОЛВНОЕ значение: после подстановки от `${ENV:X}` не остаётся ничего,
     кроме пустой строки, и назвать причину уже нечем."""
     from gc_core.config_raw import missing_env_refs
+
     if not isinstance(entry, dict):
         return []
-    backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-    headers = (backend.get("chat_completion_headers")
-               if isinstance(backend.get("chat_completion_headers"), dict) else {})
+    backend = (
+        entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
+    )
+    headers = (
+        backend.get("chat_completion_headers")
+        if isinstance(backend.get("chat_completion_headers"), dict)
+        else {}
+    )
     names: list[str] = []
-    for value in (entry.get("url"), entry.get("token"), backend.get("completions_url"),
-                  backend.get("proxy"), headers.get("Authorization")):
+    for value in (
+        entry.get("url"),
+        entry.get("token"),
+        backend.get("completions_url"),
+        backend.get("proxy"),
+        headers.get("Authorization"),
+    ):
         for name in missing_env_refs(value):
             if name not in names:
                 names.append(name)
     return names
 
 
-def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> None:
+def validate_registry_pairs(
+    raw: dict, source: str = "", *, raw_source=None
+) -> None:
     """§3, точка B: проверка правила пары на СЫРОМ документе одного слоя, до слияния.
 
     Нужна отдельно от валидатора `ModelEntry`: слои сливаются `deep_merge` рекурсивно по
@@ -154,9 +179,16 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
     for alias, entry in models.items():
         if not isinstance(entry, dict):
             continue
-        backend = entry.get("backend") if isinstance(entry.get("backend"), dict) else {}
-        headers = (backend.get("chat_completion_headers")
-                   if isinstance(backend.get("chat_completion_headers"), dict) else {})
+        backend = (
+            entry.get("backend")
+            if isinstance(entry.get("backend"), dict)
+            else {}
+        )
+        headers = (
+            backend.get("chat_completion_headers")
+            if isinstance(backend.get("chat_completion_headers"), dict)
+            else {}
+        )
         problem = _pair_violation(
             f"{prefix}models.{alias}",
             *connection_parts(
@@ -169,7 +201,8 @@ def validate_registry_pairs(raw: dict, source: str = "", *, raw_source=None) -> 
         )
         if problem:
             names = _unresolved_pair_refs(
-                ((raw_source or {}).get("models") or {}).get(alias))
+                ((raw_source or {}).get("models") or {}).get(alias)
+            )
             if names:
                 raise ValueError(
                     f"{prefix}models.{alias}: не задана переменная окружения "
@@ -193,20 +226,24 @@ class ModelEntry(BaseModel):
     backend: BackendConfig | None = None
 
     @model_validator(mode="after")
-    def _validate_no_duplicate_settings(self) -> "ModelEntry":
+    def _validate_no_duplicate_settings(self) -> ModelEntry:
         if (
             self.token is not None
             and self.backend is not None
-            and self.backend.chat_completion_headers.get("Authorization") is not None
+            and self.backend.chat_completion_headers.get("Authorization")
+            is not None
         ):
             raise ValueError(
                 "models.<alias>: token и backend.chat_completion_headers.Authorization "
                 "заданы одновременно — оставьте что-то одно"
             )
-        if self.url is not None and self.backend is not None and self.backend.completions_url:
+        if (
+            self.url is not None
+            and self.backend is not None
+            and self.backend.completions_url
+        ):
             raise ValueError(
-                "models.<alias>: url и backend.completions_url — два написания одного "
-                "и того же — оставьте что-то одно"
+                "models.<alias>: url и backend.completions_url — два написания одного и того же — оставьте что-то одно"
             )
         return self
 
@@ -220,16 +257,19 @@ class ModelEntry(BaseModel):
         return connection_parts(
             url=self.url,
             token=self.token,
-            completions_url=backend.completions_url if backend is not None else None,
+            completions_url=backend.completions_url
+            if backend is not None
+            else None,
             proxy=backend.proxy if backend is not None else None,
             authorization=(
                 backend.chat_completion_headers.get("Authorization")
-                if backend is not None else None
+                if backend is not None
+                else None
             ),
         )
 
     @model_validator(mode="after")
-    def _validate_connection_pair(self) -> "ModelEntry":
+    def _validate_connection_pair(self) -> ModelEntry:
         """§2: своё подключение задаётся ЦЕЛИКОМ. Адрес и токен принадлежат одному
         провайдеру: половина пары либо уносит общий ключ на чужой хост (свой адрес без
         токена), либо уезжает вслед за сменой общего адреса (свой токен без адреса).
@@ -257,13 +297,21 @@ class ModelEntry(BaseModel):
         backend = self.backend
         if backend is None or any(self._connection_parts()):
             return False
-        return not backend.use_ssl or bool(backend.cert_path) or bool(backend.key_path)
+        return (
+            not backend.use_ssl
+            or bool(backend.cert_path)
+            or bool(backend.key_path)
+        )
 
     @property
     def authorization_header(self) -> str | None:
         """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
         иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        if self.token is None or not self.token or self.token.startswith("Bearer "):
+        if (
+            self.token is None
+            or not self.token
+            or self.token.startswith("Bearer ")
+        ):
             return self.token
         return f"Bearer {self.token}"
 

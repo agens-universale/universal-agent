@@ -3,19 +3,31 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from gc_core.config_modules.intent_scope import IntentScopeConfig, intent_scope_from_config_dict
-from gc_core.config_modules.chat_completions import ChatCompletionsLlmConfig, auxiliary_llm_from_config_dict
-from gc_core.utils.prod_auth import AuthConnector
-from gc_core.utils.logging_module import create_run_logger
-from gc_core.utils.logging_module import generate_run_id
-from gc_core.tools import build_tools_data
-from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
-from gc_core.execution_workspace import ExecutionWorkspace, build_execution_workspace
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
-from gc_core.config_modules.env_vars import project_gc_dir as _resolve_project_gc_dir
-from gc_core.trace_id import trace_id_from_config, trace_header_name
+from gc_core.config_modules.chat_completions import (
+    ChatCompletionsLlmConfig,
+    auxiliary_llm_from_config_dict,
+)
+from gc_core.config_modules.env_vars import (
+    project_gc_dir as _resolve_project_gc_dir,
+)
+from gc_core.config_modules.intent_scope import (
+    IntentScopeConfig,
+    intent_scope_from_config_dict,
+)
+from gc_core.execution_workspace import (
+    ExecutionWorkspace,
+    aprime_backend_cwd,
+    build_execution_workspace,
+)
+from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.tools import abuild_tools_data
+from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.trace_id import trace_header_name, trace_id_from_config
+from gc_core.utils.logging_module import create_run_logger, generate_run_id
+from gc_core.utils.prod_auth import AuthConnector
 
 
 @dataclass
@@ -64,11 +76,36 @@ class RunContext:
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
+    # Порт «спросить человека»: обычная функция или корутинная. Не задан —
+    # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
+    # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
+    ask_human: Optional[Callable[[str], Any]] = None
     # Optional: messages dropped by context compaction (not retained in State).
-    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = (
+        None
+    )
+    # Активный скоуп ввода субагента ЭТОГО прогона: сюда уходит сообщение
+    # пользователя, пришедшее посреди работы ребёнка. Живёт здесь, а не в
+    # глобали модуля, потому что процесс ведёт МНОГО прогонов сразу (сервер) —
+    # и глобаль отдавала сообщение тому, кто зарегистрировался последним, чужой
+    # сессии в том числе. Подробности — в `tools/subagents/active_scope`.
+    child_input_scope: Optional[Any] = None
+    # Хранилище тредов. None — файловое по умолчанию (прежнее поведение).
+    # Передав своё (например поверх базы), встраивающий уводит туда всю историю:
+    # ни ThreadSession, ни ядро больше диска не касаются.
+    thread_store: Any = None
+    # ToolsCache этого контекста, если владелец его передал. Лежит здесь, чтобы
+    # субагенты (они пересобирают tools_data на каждый спавн) брали готовое, а не
+    # ходили в дискавери заново.
+    tools_cache: Any = None
+    # Владелец живых MCP-сессий этого контекста (см. gc_core.mcp_session_owner).
+    # По нему ``arun`` понимает, ЧТО ему закрывать на выходе, и не сносит
+    # сессии параллельных агентов. Пустая строка — контекст собран в обход
+    # create_run_context (тесты, ручная сборка); тогда владельца нет.
+    mcp_session_owner: str = ""
 
 
-def create_run_context(
+async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     config_dict: Dict[str, Any],
     *,
     auth_connector: Optional[AuthConnector] = None,
@@ -78,18 +115,49 @@ def create_run_context(
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
-    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+    on_messages_evicted: Optional[
+        Callable[[List[Dict[str, Any]]], None]
+    ] = None,
     is_tui: bool = False,
+    tools_cache: Any = None,
+    log_handlers: Any = None,
+    thread_store: Any = None,
     level_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
 ) -> RunContext:
-    """
+    """Собрать RunContext, не блокируя event loop.
+
+    Настоящая корутина, а не ``to_thread`` над синхронной сборкой. Прежняя
+    форма работала (loop был свободен), но стоила дорого: замер давал 8 event
+    loop'ов и пик в 10 потоков на ОДНУ сборку — воркер пула, внутри него
+    ``asyncio.run``, а под ним по демон-потоку на сервер и ещё по ``asyncio.run``
+    в каждом. Нативный путь даёт ту же латентность при 1 loop и 5 потоках.
+
+    И уходит ловушка: отмена ожидания возвращала управление не сразу, а через
+    сотни миллисекунд — ``asyncio.run`` дожидался брошенного воркера
+    дефолтного пула (``shutdown_default_executor``). Это ровно то, что уровнем
+    ниже запрещает ``abandonable``, а на уровне контекста возвращалось обратно.
+
+    Дорогая часть здесь одна — MCP-дискавери; остальное занимает 2.4–6.9 мс и
+    остаётся синхронным, потому что это словари в памяти и короткий локальный
+    I/O (лог-файл, проба прав на запись в корне проекта).
+
+    Синхронного двойника у сборки БОЛЬШЕ НЕТ. Он держался ради TUI, и docs
+    объясняли его привязкой MCP-сессий к loop'у — обоснование было неверным:
+    синхронная форма уводила дискавери в `run_coro_blocking`, то есть на
+    такой же одноразовый loop. Настоящая причина была в том, что фабрика
+    исполнителя в TUI — обычная функция без своего loop; теперь она заводит
+    его сама (`asyncio.run`), как уже делает на каждый ход.
+
+
     Создать RunContext для одного запуска агента.
 
-    - Тулы (tools_data, tools_spec, tools_description) кэшируются по ключу
-      от config_dict, чтобы не пересобирать реестры при каждом запуске
-      с одним и тем же конфигом.
+    - Тулы (tools_data, tools_spec, tools_description) собираются заново на
+      каждый вызов. Кэш MCP-дискавери есть, но им ВЛАДЕЕТ ВЫЗЫВАЮЩИЙ: передайте
+      ``tools_cache=ToolsCache(...)``, и повторные сборки с тем же набором
+      ``mcp-servers`` перестанут ходить в сеть (866–1405 мс на реальном
+      конфиге). Не передали — поведение прежнее, каждая сборка платит полностью.
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
@@ -104,6 +172,164 @@ def create_run_context(
       поверх непустого реестра моделей отключает резолв уровней/алиасов на этот
       запуск (детект — ``config.cli_forces_legacy_model``).
     """
+    # Хранилище встраивающего проверяем ДО всего остального. Проверка стояла в
+    # `_finish_run_context`, то есть после MCP-дискавери и создания логгера: на
+    # негодном сторе исключение прилетало, когда stdio-сессии уже подняты под
+    # токеном владельца, а `AsyncAgent.create` на ошибке закрывает только пул
+    # httpx — persistent stdio (браузер) и логгер с открытым файлом доживали до
+    # конца процесса.
+    if thread_store is not None:
+        from gc_core.thread_store_async import athread_store
+
+        athread_store(thread_store)
+
+    prep = _prepare_run_context(
+        config_dict,
+        run_id=run_id,
+        environment=environment,
+        loop=loop,
+        os_backend=os_backend,
+        log_handlers=log_handlers,
+    )
+    # Пробы возможностей бэкенда (`has_grep`/`has_find`/…) здесь СОЗНАТЕЛЬНО не
+    # прогреваются, хотя `awarm_capabilities` для этого есть.
+    #
+    # Во-первых, прогрев уводит пробы в поток, а сборка контекста обязана
+    # обходиться без потоков — это отдельное свойство со своей историей
+    # (прежняя форма давала 8 event loop'ов и пик в 10 потоков на ОДНУ сборку),
+    # и стережёт его `test_context_build_native_async`.
+    #
+    # Во-вторых, прогрев плату не убирает, а переносит: пробы кэшируются и
+    # стоят однократно на процесс. Прогрев при сборке заставил бы платить за
+    # них КАЖДЫЙ прогон, включая те, что ни разу не ищут по файлам.
+    #
+    # Кому перенос нужен (фронтенд, знающий, что поиск будет) — зовёт
+    # `backend.awarm_capabilities()` сам, вне горячего пути.
+    # Рабочий каталог окружения спрашиваем ЗДЕСЬ, до дискавери MCP: сборка
+    # рабочей области ниже синхронная, а синхронного `exec` у песочницы нет.
+    # До дискавери — чтобы его отказ не застал открытых MCP-сессий.
+    #
+    # Страховка — на ВСЁ после подготовки, а не на один прогрев. Логгер
+    # прогона уже создан и держит открытый файл, а дискавери поднимает
+    # stdio-серверы под токеном владельца этого контекста. Обычный отказ
+    # дискавери исключения не бросает (сервер помечается недоступным), но
+    # отмена посреди неё и исключение сборки после неё раньше шли мимо:
+    # логгер доживал до конца процесса, сервер (браузер) — до `atexit`.
+    # Закрыть его раньше некому: снос фильтрует по владельцу, а контекста,
+    # которому он принадлежит, так и не появилось.
+    try:
+        await aprime_backend_cwd(prep.backend, config_dict)
+        # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
+        # успешно снятый тул снова считается опечаткой. Способность пришла с
+        # develop, у нас её не было; тело, которое список заполняет, слилось
+        # автоматически — без самого списка оно осталось бы мёртвым кодом.
+        registered: list[str] = []
+        with use_owner(prep.mcp_session_owner):
+            tools = await abuild_tools_data(
+                config_dict,
+                on_progress=on_progress,
+                os_backend=prep.backend,
+                skills_registry=prep.skills_registry,
+                logger=prep.run_logger,
+                tools_cache=tools_cache,
+                registered_names=registered,
+            )
+        return _finish_run_context(
+            config_dict,
+            prep,
+            tools,
+            registered_names=registered,
+            auth_connector=auth_connector,
+            environment=environment,
+            on_stream_delta=on_stream_delta,
+            on_messages_evicted=on_messages_evicted,
+            is_tui=is_tui,
+            tools_cache=tools_cache,
+            thread_store=thread_store,
+            level_provider=level_provider,
+            circuit_breaker=circuit_breaker,
+            force_legacy=force_legacy,
+        )
+    except BaseException as exc:
+        from gc_core.utils.logging_module import release_run_logger
+
+        try:
+            # Закрытую корутину (`GeneratorExit`) ждать уже нельзя: `await`
+            # здесь кончился бы «coroutine ignored GeneratorExit». Тогда
+            # серверы доберёт хук на выход, а логгер отдаём в любом случае.
+            if not isinstance(exc, GeneratorExit):
+                await _aclose_owned_mcp_sessions(prep.mcp_session_owner)
+        finally:
+            release_run_logger(prep.run_logger)
+        raise
+
+
+async def _aclose_owned_mcp_sessions(owner: str) -> None:
+    """Закрыть MCP-сессии, поднятые под владельцем несостоявшегося контекста.
+
+    Закрывается долгоживущий stdio, и этого достаточно: других живых сессий
+    дискавери не оставляет. Stream-транспорты спрашивают список тулов
+    одноразовой сессией, а долгоживущую заводит только вызов тула — до него
+    сборка не доходит.
+
+    Не ``_aclose_mcp_and_release`` из исполнителя, хотя по сути то же самое.
+    Тот держит реестр, связанный при импорте ``agent_executor``, а дискавери
+    берёт клиента лениво, в момент вызова. Реестр здесь берётся так же — и
+    потому гарантированно тот, куда дискавери положила сессии. Это не
+    теория: вторая копия ``gc_core.tools.*`` в процессе бывает — тесты
+    ``tests/tools`` и ``tests/security`` импортируются под заглушкой пакета, а
+    тест-кит до недавнего времени перезагружал его после каждого теста, — и с
+    помощником исполнителя проверка этого места краснела уже на втором тесте
+    файла: закрывался реестр другой копии модуля. К тому же сборка контекста
+    лежит ниже исполнителя, и тянуть его наверх ради отказа незачем.
+    """
+    from gc_core.tools.connect_mcp.persistent_stdio import (
+        PersistentStdioRegistry,
+    )
+
+    with use_owner(owner):
+        await PersistentStdioRegistry.instance().aclose_all()
+
+
+@dataclass
+class _RunContextPrep:
+    """Всё, что готово ДО сборки тулов. Одинаково для обеих форм вызова."""
+
+    run_id: str
+    backend: FsBackend
+    skills_registry: Any
+    run_logger: Any
+    logging_path: str
+    summary_trace_path: str
+    mcp_session_owner: str
+    #: Вызывающий передал СВОЙ бэкенд (а не положился на фабрику).
+    #:
+    #: Нужен на шаге досборки: TUI оборачивает локальный бэкенд в
+    #: ``TrackingFsBackend`` (diff-журнал) только тогда, когда бэкенд собрали
+    #: мы сами. Чужой не трогаем — вызывающий знает, что подсунул.
+    #:
+    #: Флагом, а не самим бэкендом: после ``resolve_os_backend`` отличить
+    #: «передали свой» от «собрали дефолтный» уже нечем, и в первой редакции
+    #: разделения это привело к тому, что ``os_backend is None`` в досборке
+    #: сравнивалось с локальной переменной, всегда не-None. Условие стало
+    #: вечно ложным, а обёртка — мёртвым кодом.
+    backend_was_overridden: bool
+
+
+def _prepare_run_context(
+    config_dict: Dict[str, Any],
+    *,
+    run_id: Optional[str],
+    environment: Optional[Any],
+    loop: Optional[Any],
+    os_backend: Optional[FsBackend],
+    log_handlers: Any = None,
+) -> _RunContextPrep:
+    """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
+
+    Вынесено, чтобы синхронная и асинхронная сборка делили одно тело: между
+    ними отличается ровно один шаг — как дождаться дискавери.
+    """
     effective_run_id = run_id or generate_run_id()
     backend = resolve_os_backend(
         config_dict,
@@ -117,17 +343,63 @@ def create_run_context(
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
     # зависит лишь от config_dict и run_id, поэтому порядок безопасен.
     run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict, run_id=effective_run_id, agent_kind="main"
-    )
-    registered: list[str] = []
-    tools_data, tools_spec, tools_description, mcp_status = build_tools_data(
         config_dict,
-        on_progress=on_progress,
-        os_backend=backend,
-        skills_registry=skills_registry,
-        logger=run_logger,
-        registered_names=registered,
+        run_id=effective_run_id,
+        agent_kind="main",
+        log_handlers=log_handlers,
     )
+    # Токен владельца MCP-сессий рождается здесь и живёт столько же, сколько
+    # контекст. Дискавери поднимает сессии прямо сейчас, поэтому она обязана
+    # идти уже под ним — иначе поднятое ею оказалось бы ничьим, и ни один
+    # прогон не смог бы это закрыть.
+    return _RunContextPrep(
+        run_id=effective_run_id,
+        backend=backend,
+        skills_registry=skills_registry,
+        run_logger=run_logger,
+        logging_path=logging_path,
+        summary_trace_path=summary_trace_path,
+        mcp_session_owner=new_owner_token(),
+        backend_was_overridden=os_backend is not None,
+    )
+
+
+def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
+    config_dict: Dict[str, Any],
+    prep: "_RunContextPrep",
+    tools: tuple,
+    *,
+    registered_names: Optional[list] = None,
+    auth_connector: Optional[AuthConnector],
+    environment: Optional[Any],
+    on_stream_delta,
+    on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]],
+    is_tui: bool,
+    tools_cache: Any,
+    thread_store: Any = None,
+    level_provider: Optional[Callable[[], str]] = None,
+    circuit_breaker: Optional[CircuitBreaker] = None,
+    force_legacy: bool = False,
+) -> RunContext:
+    """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
+    # Хранилище встраивающего проверяем ЗДЕСЬ — это и есть точка проводки.
+    # Раньше негодный объект принимался молча, а падал на 630-й строке
+    # thread_store.py с «TypeError: cannot unpack non-iterable coroutine
+    # object»: сообщение верное, но указывает не туда, и половина обращений
+    # при этом вообще не падала, а теряла запись без ошибки и без лога.
+    if thread_store is not None:
+        from gc_core.thread_store_async import athread_store
+
+        athread_store(thread_store)
+
+    tools_data, tools_spec, tools_description, mcp_status = tools
+    effective_run_id = prep.run_id
+    backend = prep.backend
+    skills_registry = prep.skills_registry
+    run_logger = prep.run_logger
+    logging_path = prep.logging_path
+    summary_trace_path = prep.summary_trace_path
+    mcp_session_owner = prep.mcp_session_owner
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
@@ -193,7 +465,7 @@ def create_run_context(
         tools_spec=tools_spec,
         tools_description=tools_description,
         mcp_status=mcp_status,
-        registered_tool_names=set(registered),
+        registered_tool_names=set(registered_names or []),
         project_gc_dir=_resolve_project_gc_dir(),
         environment=environment,
         os_backend=backend,
@@ -202,7 +474,17 @@ def create_run_context(
         model_router=model_router,
         on_stream_delta=on_stream_delta,
         on_messages_evicted=on_messages_evicted,
+        mcp_session_owner=mcp_session_owner,
+        tools_cache=tools_cache,
+        thread_store=thread_store,
     )
+    # ``is_tui`` контекст только ПОМЕЧАЕТ. Обёртку в ``TrackingFsBackend``
+    # (diff-журнал) ставит сам TUI — ``gc_tui.diff_tui.tracking.attach_to_context``,
+    # его зовёт ``TuiApp``. Здесь стоял лениво-импортируемый вызов
+    # ``wrap_local_for_tui``: это была ЕДИНСТВЕННАЯ зависимость ``gc_core`` от
+    # фронтенда, и 27.08.2026 её сняли разделением на пакеты. Вливание веток
+    # вернуло её — а вместе с ней и вторую обёртку поверх первой, потому что
+    # TUI к этому моменту уже оборачивает сам.
     ctx.is_tui = bool(is_tui)
 
     run_logger.debug(
@@ -218,5 +500,5 @@ def create_run_context(
 
 __all__ = [
     "RunContext",
-    "create_run_context",
+    "acreate_run_context",
 ]

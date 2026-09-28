@@ -124,8 +124,12 @@ CODE PLANNER HANDOFF ADDENDUM
 - If no repository inspection was possible, set status to blocked/partial/clarification_needed as appropriate and record assumptions/questions.
 - Ensure the spec explicitly separates: what coder should implement vs what reviewer should validate.
 """
-        assignment = self.build_assignment_message({"task": self.task, "reason": self.reason})
-        return self.with_handoff_contract(self.agent_role, code_planner_notes), assignment
+        assignment = self.build_assignment_message(
+            {"task": self.task, "reason": self.reason}
+        )
+        return self.with_handoff_contract(
+            self.agent_role, code_planner_notes
+        ), assignment
 
     def get_agent_name(self):
         return self.agent_name

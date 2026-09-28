@@ -32,13 +32,15 @@ class StateRepository:
         return restored
 
     @staticmethod
-    def save_snapshot(states: Dict[str, State], filepath: str, **json_kwargs: Any) -> None:
+    def save_snapshot(
+        states: Dict[str, State], filepath: str, **json_kwargs: Any
+    ) -> None:
         payload = StateRepository.serialize_storage(states)
         with open(filepath, "w", encoding="utf-8") as fd:
             json.dump(payload, fd, ensure_ascii=False, **json_kwargs)
 
     @staticmethod
     def load_snapshot(filepath: str) -> Dict[str, State]:
-        with open(filepath, "r", encoding="utf-8") as fd:
+        with open(filepath, encoding="utf-8") as fd:
             data = json.load(fd)
         return StateRepository.deserialize_storage(data)

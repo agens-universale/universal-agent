@@ -302,6 +302,11 @@ logging:
   # Уровень per-run логгера (актуален для jsonl): debug | info | warning | error.
   # На debug добавляются объёмные события backend_request/backend_response/agent_tools.
   log_level: info
+  # Всплывать ли записям рана в корневой логгер приложения.
+  # false (дефолт) — ран пишет в свой файл и не засоряет чужие хендлеры.
+  # true нужен встраивающему, который настроил logging по-своему: без него он
+  # не увидит ничего, потому что per-run логгер обрывает цепочку.
+  propagate: false
   # Маскировка секретов (Bearer/JWT/sk-/PEM/AWS/...) перед записью в лог и stdout →
   # ***REDACTED***. По умолчанию ВЫКЛ (поведение как раньше).
   redact_secrets:
@@ -411,8 +416,12 @@ intent_scope:
 
 summary:
   chat_completions_summary_trigger_chars: 200000
+  # 0 — токенный порог выключен. Иначе input последнего главного запроса плюс хвост // 2.
+  chat_completions_summary_trigger_tokens: 0
   # Turn-end compaction после accept submit_solution (по умолчанию = 60% trigger)
   chat_completions_summary_turn_end_trigger_chars: 120000
+  # 0 — токенный turn-end выключен. Нет ключа — 60% от токенного mid-turn.
+  chat_completions_summary_turn_end_trigger_tokens: 0
   incremental_batch_chars: 280000
   max_message_chars: 30000
   max_dialogue_chars: 1000000

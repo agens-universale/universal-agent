@@ -1,4 +1,5 @@
 """child_run_id в output meta (без path к логу)."""
+
 from __future__ import annotations
 
 import json
@@ -6,6 +7,7 @@ from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.usage.account import UsageAccount
+from gc_testkit import as_coro
 
 
 class _FakeChildState:
@@ -25,34 +27,47 @@ class _FakeChildState:
 
 def _wire(monkeypatch, runner, child, *, run_id="run-abc"):
     class _Inst:
-        def finalize_role(self, ctx, state):
+        # Runner зовёт асинхронный хук порта: синхронный ушёл бы в поток и
+        # оттуда в портал, а тот из-под работающего loop отказывает.
+        async def afinalize_role(self, ctx, state):
             return None
 
         def get_initial_data(self):
             return "role", "assignment"
 
-    monkeypatch.setattr(runner, "_build_child_state", lambda role: child)
+    monkeypatch.setattr(
+        runner, "_build_child_state", as_coro(lambda role: child)
+    )
     monkeypatch.setattr(
         runner,
         "_build_child_ctx",
-        lambda tool_name: SimpleNamespace(
-            logger=None,
-            run_id=run_id,
-            logging_path="/tmp/should-not-leak/agent_subagent_worker_run-abc.log",
+        as_coro(
+            lambda tool_name: SimpleNamespace(
+                logger=None,
+                run_id=run_id,
+                logging_path="/tmp/should-not-leak/agent_subagent_worker_run-abc.log",
+            )
         ),
     )
     monkeypatch.setattr(runner, "_build_initial_messages", lambda *a, **k: [])
     monkeypatch.setattr(runner, "_log_lifecycle", lambda **k: None)
 
     from gc_core.tools.subagents import runner as runner_mod
-    monkeypatch.setattr(runner_mod, "init_subagent_open_turn", lambda *a, **k: None)
+
     monkeypatch.setattr(
-        runner_mod, "get_thread_memory_registers_from_shared", lambda shared: {}
+        runner_mod, "init_subagent_open_turn", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        runner_mod,
+        "get_thread_memory_registers_from_shared",
+        lambda shared: {},
     )
     monkeypatch.setattr(
         runner_mod, "subagent_thread_memory_bootstrap_text", lambda cfg, mf: ""
     )
-    monkeypatch.setattr(runner_mod, "parse_summary_trigger_chars", lambda cfg: 0)
+    monkeypatch.setattr(
+        runner_mod, "parse_summary_trigger_chars", lambda cfg: 0
+    )
 
     async def _create(*a, **k):
         return _Inst()
@@ -68,20 +83,25 @@ def _runner():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None, is_tui=False)
+    ctx = SimpleNamespace(
+        logger=None, run_id="r", auth_connector=None, is_tui=False
+    )
     return SubagentRunner(ctx, orch, {"use_local_subagents": True})
 
 
-def test_success_meta_includes_child_run_id_not_path(monkeypatch):
+async def test_success_meta_includes_child_run_id_not_path(monkeypatch):
     runner = _runner()
     child = _FakeChildState()
     cls = _wire(monkeypatch, runner, child, run_id="child-guid-1")
 
-    out = runner._run_internal(
+    async def _fake_run_agent(*a, **k):
+        return "done"
+
+    out = await runner._arun_internal(
         "subagent_worker",
         cls,
         {"task": "t"},
-        lambda *a, **k: "done",
+        _fake_run_agent,
     )
     payload = json.loads(out)
     assert payload["ok"] is True
@@ -93,22 +113,24 @@ def test_success_meta_includes_child_run_id_not_path(monkeypatch):
     assert ".log" not in blob
 
 
-def test_run_failed_error_includes_child_run_id(monkeypatch):
+async def test_run_failed_error_includes_child_run_id(monkeypatch):
     runner = _runner()
     child = _FakeChildState()
     cls = _wire(monkeypatch, runner, child, run_id="child-guid-err")
 
-    def boom(*a, **k):
+    async def boom(*a, **k):
         raise RuntimeError("boom")
 
-    out = runner._run_internal("subagent_worker", cls, {"task": "t"}, boom)
+    out = await runner._arun_internal(
+        "subagent_worker", cls, {"task": "t"}, boom
+    )
     payload = json.loads(out)
     assert payload["ok"] is False
     assert payload["meta"]["child_run_id"] == "child-guid-err"
     assert "child_log_path" not in payload["meta"]
 
 
-def test_early_error_without_ctx_has_no_child_run_id():
+async def test_early_error_without_ctx_has_no_child_run_id():
     """До build child_ctx run_id ещё нет — meta без child_run_id."""
     orch = SimpleNamespace(
         usage=UsageAccount(),
@@ -117,9 +139,15 @@ def test_early_error_without_ctx_has_no_child_run_id():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(logger=None, run_id="r", auth_connector=None, is_tui=False)
+    ctx = SimpleNamespace(
+        logger=None, run_id="r", auth_connector=None, is_tui=False
+    )
     runner = SubagentRunner(ctx, orch, {"use_local_subagents": True})
-    out = runner.run("subagent_no_such", {"task": "t"}, lambda *a, **k: None)
+
+    async def _fake_run_agent(*a, **k):
+        return None
+
+    out = await runner.arun("subagent_no_such", {"task": "t"}, _fake_run_agent)
     payload = json.loads(out)
     assert payload["ok"] is False
     assert "child_run_id" not in payload["meta"]

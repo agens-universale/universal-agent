@@ -3,6 +3,7 @@
 Runtime кладёт события в QueueSubagentProgressSink (worker-поток).
 Этот модуль — только UI: plan/apply действий, без оркестрации execute.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -45,8 +46,10 @@ def reconcile_batch_phases(rows: Sequence[Any]) -> None:
     появления в batch (insertion order _active_calls).
     """
     pending = [
-        r for r in rows
-        if getattr(r, "_result", None) is None and not getattr(r, "_interrupted", False)
+        r
+        for r in rows
+        if getattr(r, "_result", None) is None
+        and not getattr(r, "_interrupted", False)
     ]
     if not pending:
         return
@@ -160,7 +163,14 @@ def plan_progress_actions(
         elif ev.kind in ("confirm", "confirm_done"):
             # Баннер confirm уже открывает tui_confirm(via=…); здесь только heartbeat.
             actions.append(_heartbeat(ev))
-        elif ev.kind in ("finished", "error", "cancelled", "started", "heartbeat", "usage"):
+        elif ev.kind in (
+            "finished",
+            "error",
+            "cancelled",
+            "started",
+            "heartbeat",
+            "usage",
+        ):
             # Nested в живой сессии оставляем под parent (✓/✗); collapse — только
             # при clear/смене треда.
             actions.append(_heartbeat(ev))

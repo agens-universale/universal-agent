@@ -1,5 +1,6 @@
 # tests/test_harbor_step_timings.py
 # Pure-stdlib adapter module: a fake `processing_responses` stands in for the core.
+import asyncio
 import json
 import sys
 import types
@@ -10,31 +11,42 @@ import pytest
 from gc_testkit.paths import HARBOR
 
 
-
 @pytest.fixture
 def timings_mod(monkeypatch):
     core = types.ModuleType("gc_core.processing_responses")
-    core._request_backend_canonical = lambda messages, state, ctx, **kw: "llm-result"
 
-    def _apply_tool(*, tool_name, arguments, ctx, state, run_agent_func=None, call_id=None):
+    # Заглушка повторяет ФОРМУ швов ядра: обе корутинные. Синхронные имена
+    # адаптер больше не оборачивает — агентский цикл ходит в `a`-формы, и
+    # обёртка над шимом портала не увидела бы ни одного вызова.
+    async def _arequest_backend_canonical(messages, state, ctx, **kw):
+        return "llm-result"
+
+    core._arequest_backend_canonical = _arequest_backend_canonical
+
+    async def _aapply_tool(
+        *, tool_name, arguments, ctx, state, run_agent_func=None, call_id=None
+    ):
         # A subagent tool calls the backend from inside the tool span.
         if tool_name == "subagent":
-            core._request_backend_canonical([], state, ctx)
+            await core._arequest_backend_canonical([], state, ctx)
         if tool_name == "boom":
             raise RuntimeError("tool exploded")
         return "tool-result"
 
-    core.apply_tool = _apply_tool
+    core.aapply_tool = _aapply_tool
     # Подменять надо И запись в sys.modules, И атрибут на пакете. После переезда
     # адаптер берёт ядро как `from gc_core import processing_responses`, а эта форма
     # читает АТРИБУТ пакета: стоит соседнему тесту импортировать настоящий модуль
     # раньше — атрибут уже проставлен, и одна лишь подмена sys.modules не видна.
     # В одиночку файл при этом проходит, поэтому класс ловится только полным прогоном.
     import gc_core
+
     monkeypatch.setitem(sys.modules, "gc_core.processing_responses", core)
     monkeypatch.setattr(gc_core, "processing_responses", core, raising=False)
     monkeypatch.syspath_prepend(str(HARBOR))
-    for key in [k for k in sys.modules if k.startswith("adapters.step_timings")]:
+    for key in [
+        k for k in sys.modules if k.startswith("adapters.step_timings")
+    ]:
         del sys.modules[key]
     import adapters.step_timings as mod
 
@@ -44,7 +56,10 @@ def timings_mod(monkeypatch):
 
 
 def _read(path: Path) -> list[dict]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+    ]
 
 
 def test_llm_and_tool_spans_are_recorded_per_step(timings_mod, tmp_path):
@@ -52,8 +67,12 @@ def test_llm_and_tool_spans_are_recorded_per_step(timings_mod, tmp_path):
     sink = mod.StepTimings(tmp_path / "timings.jsonl")
     sink.attach()
     state = SimpleNamespace(steps=3, default_model="test-model")
-    core._request_backend_canonical([], state, None)
-    core.apply_tool(tool_name="execute_command", arguments="", ctx=None, state=state)
+    asyncio.run(core._arequest_backend_canonical([], state, None))
+    asyncio.run(
+        core.aapply_tool(
+            tool_name="execute_command", arguments="", ctx=None, state=state
+        )
+    )
     sink.close()
 
     records = _read(tmp_path / "timings.jsonl")
@@ -73,7 +92,11 @@ def test_subagent_llm_is_nested_and_not_double_counted(timings_mod, tmp_path):
     sink = mod.StepTimings(tmp_path / "timings.jsonl")
     sink.attach()
     state = SimpleNamespace(steps=1, default_model="m")
-    core.apply_tool(tool_name="subagent", arguments="", ctx=None, state=state)
+    asyncio.run(
+        core.aapply_tool(
+            tool_name="subagent", arguments="", ctx=None, state=state
+        )
+    )
     sink.close()
 
     ends = [r for r in _read(tmp_path / "timings.jsonl") if r["ev"] == "end"]
@@ -89,7 +112,11 @@ def test_failing_tool_is_recorded_and_reraised(timings_mod, tmp_path):
     sink.attach()
     state = SimpleNamespace(steps=0, default_model="m")
     with pytest.raises(RuntimeError):
-        core.apply_tool(tool_name="boom", arguments="", ctx=None, state=state)
+        asyncio.run(
+            core.aapply_tool(
+                tool_name="boom", arguments="", ctx=None, state=state
+            )
+        )
     sink.close()
 
     end = _read(tmp_path / "timings.jsonl")[-1]
@@ -103,5 +130,12 @@ def test_detached_sink_leaves_the_core_untouched(timings_mod, tmp_path):
     sink.attach()
     sink.close()
     state = SimpleNamespace(steps=0, default_model="m")
-    assert core.apply_tool(tool_name="x", arguments="", ctx=None, state=state) == "tool-result"
+    assert (
+        asyncio.run(
+            core.aapply_tool(
+                tool_name="x", arguments="", ctx=None, state=state
+            )
+        )
+        == "tool-result"
+    )
     assert not (tmp_path / "timings.jsonl").read_text(encoding="utf-8")

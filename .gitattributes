@@ -1,0 +1,3 @@
+# Скрипты оболочки — всегда с LF: с CRLF (autocrlf клона на Windows, WSL-гейт
+# из той же копии) bash не исполнит обёртку песочницы swarm.
+*.sh text eol=lf

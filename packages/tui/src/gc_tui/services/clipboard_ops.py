@@ -5,6 +5,7 @@
 их развели — см. `_send_osc52`. Внутренний app.clipboard наполняется всегда.
 Возврат bool = успех native при blocking; при async — True если задача поставлена.
 """
+
 from __future__ import annotations
 
 import os
@@ -49,7 +50,7 @@ def _remember_internally(app: Any, text: str) -> None:
     try:
         app._clipboard = text
     except Exception:
-        pass   # чужая реализация app — внутренний буфер не наша забота
+        pass  # чужая реализация app — внутренний буфер не наша забота
 
 
 def _send_osc52(app: Any, text: str) -> None:

@@ -1,4 +1,5 @@
 """ViewerScreen — read-only просмотр (payload / файл / markdown)."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -35,5 +36,6 @@ class ViewerScreen(Screen):
                 yield body
             yield Static(
                 "[Esc] back  [↑↓ / PgUp PgDn] прокрутка",
-                id="footer", markup=False,
+                id="footer",
+                markup=False,
             )

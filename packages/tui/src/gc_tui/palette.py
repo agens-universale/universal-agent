@@ -8,6 +8,7 @@
 Имена констант соответствуют TCSS-переменным (`$deep-dim` → `DEEP_DIM`,
 `$run-color` → `RUN_COLOR`, ...).
 """
+
 from __future__ import annotations
 
 # Базовые
@@ -20,24 +21,24 @@ DEEP_DIM = "#7a8290"
 
 # Семантические
 ACCENT = "#54B3A6"
-CODE = "#afbdff"           # инлайн-код / путь / тех. имя (тулы, сервера, ключи)
+CODE = "#afbdff"  # инлайн-код / путь / тех. имя (тулы, сервера, ключи)
 TOOL_NAME = "#BCC3CC"
 CODE_BLOCK = "#9aa4b2"
 OK = "#5FAE7F"
 RUN_COLOR = "#D4A574"
-OLIVE = "#8FA05A"          # средний стоп градиента логотипа (амбер→олива→teal)
+OLIVE = "#8FA05A"  # средний стоп градиента логотипа (амбер→олива→teal)
 ERR = "#C75C54"
-WARN = "#f0883e"           # предупреждение (не ошибка): контекст-метр, ⚠-уведомления
-INFO = "#58a6ff"           # ℹ-уведомления (info-уровень)
+WARN = "#f0883e"  # предупреждение (не ошибка): контекст-метр, ⚠-уведомления
+INFO = "#58a6ff"  # ℹ-уведомления (info-уровень)
 BRAND = "#9A6DD7"
 
 # Плашки футера (контекст-метр, голосовая пилюля)
-TRACK = "#3f4654"        # «трек» незаполненной части метра: серый над тёмным футером
-TEXT_ON_FILL = "#ffffff" # текст поверх цветной заливки плашек (метр, пилюля)
+TRACK = "#3f4654"  # «трек» незаполненной части метра: серый над тёмным футером
+TEXT_ON_FILL = "#ffffff"  # текст поверх цветной заливки плашек (метр, пилюля)
 
 # Поверхности
 BAND_BG = "#1f2128"
-FOCUS_BG = "#363b47"     # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
+FOCUS_BG = "#363b47"  # подсветка строки трассы в фокусе (только CSS :focus) — светлее user-band
 
 # Выделение текста мышью. Тот же синий, которым Textual выделяет текст в
 # TextArea (экран /buffer): #368AE9 с прозрачностью 40% поверх фона даёт
@@ -56,12 +57,27 @@ def css_variables() -> dict[str, str]:
     """Токены → CSS-переменные (kebab-имена как в TCSS). Инжектится в
     `TuiApp.get_css_variables()`; TCSS ссылается на них через `$name`."""
     variables = {
-        "bg": BG, "ink": INK, "bright": BRIGHT, "dim": DIM, "muted": MUTED,
-        "deep-dim": DEEP_DIM, "accent": ACCENT, "code": CODE, "tool-name": TOOL_NAME,
-        "code-block": CODE_BLOCK, "ok": OK, "run-color": RUN_COLOR, "olive": OLIVE,
-        "err": ERR, "warn": WARN, "info": INFO, "brand": BRAND,
-        "band-bg": BAND_BG, "focus-bg": FOCUS_BG,
+        "bg": BG,
+        "ink": INK,
+        "bright": BRIGHT,
+        "dim": DIM,
+        "muted": MUTED,
+        "deep-dim": DEEP_DIM,
+        "accent": ACCENT,
+        "code": CODE,
+        "tool-name": TOOL_NAME,
+        "code-block": CODE_BLOCK,
+        "ok": OK,
+        "run-color": RUN_COLOR,
+        "olive": OLIVE,
+        "err": ERR,
+        "warn": WARN,
+        "info": INFO,
+        "brand": BRAND,
+        "band-bg": BAND_BG,
+        "focus-bg": FOCUS_BG,
         "screen-selection-background": SCREEN_SELECTION_BACKGROUND,
-        "card-select-bg": CARD_SELECT_BG, "frame-archive": FRAME_ARCHIVE,
+        "card-select-bg": CARD_SELECT_BG,
+        "frame-archive": FRAME_ARCHIVE,
     }
     return variables

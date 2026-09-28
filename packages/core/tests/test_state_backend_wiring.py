@@ -3,7 +3,7 @@ from gc_core.states import State
 from test_project_data_backend import FakeSandboxBackend
 
 
-def _state(**kwargs) -> State:
+async def _state(**kwargs) -> State:
     base = dict(
         verbose=False,
         model="m",
@@ -15,18 +15,30 @@ def _state(**kwargs) -> State:
         use_server_subagents=False,
     )
     base.update(kwargs)
-    return State(**base)
+    # Данные о проекте собирает фабрика: конструктор в файловую систему больше
+    # не ходит — у порта одна форма, корутинная, а `__init__` ждать не умеет.
+    return await State.acreate(**base)
 
 
-def test_state_without_backend_uses_local_cwd(tmp_path, monkeypatch):
+async def test_state_without_backend_uses_local_cwd(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    state = _state()
+    state = await _state()
     assert state.initial_project_data["projectDir"] == str(tmp_path.resolve())
 
 
-def test_state_with_workspace_uses_container_root():
-    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True)
-    state = _state(workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True))
+async def test_state_with_workspace_uses_container_root():
+    backend = FakeSandboxBackend(
+        cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True
+    )
+    state = await _state(
+        workspace=ExecutionWorkspace(
+            root="/testbed",
+            backend=backend,
+            shell="sh",
+            os_name="Linux",
+            root_writable=True,
+        )
+    )
     assert state.initial_project_data["projectDir"] == "/testbed"
     assert state.initial_project_data["isGitProject"] == "true"
     assert state.workspace.root == "/testbed"
@@ -36,26 +48,38 @@ def test_state_with_workspace_uses_container_root():
     assert state.workspace.backend is backend
 
 
-def test_state_os_backend_compat_builds_workspace():
-    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True)
-    state = _state(os_backend=backend)
+async def test_state_os_backend_compat_builds_workspace():
+    backend = FakeSandboxBackend(
+        cwd="/testbed", tree={"/testbed": [("pkg", True)]}, git=True
+    )
+    state = await _state(os_backend=backend)
     assert state.workspace is not None
     assert state.workspace.root == "/testbed"
     assert state.workspace.backend is backend
     assert state.initial_project_data["projectDir"] == "/testbed"
 
 
-def test_state_with_workspace_is_json_serializable():
+async def test_state_with_workspace_is_json_serializable():
     """Live I/O handle must not leak into the persisted snapshot."""
     import json
 
     from gc_core.persistence.state_repository import StateRepository
 
-    backend = FakeSandboxBackend(cwd="/testbed", tree={"/testbed": []}, git=False)
-    state = _state(workspace=ExecutionWorkspace(root="/testbed", backend=backend, shell="sh", os_name="Linux", root_writable=True))
+    backend = FakeSandboxBackend(
+        cwd="/testbed", tree={"/testbed": []}, git=False
+    )
+    state = await _state(
+        workspace=ExecutionWorkspace(
+            root="/testbed",
+            backend=backend,
+            shell="sh",
+            os_name="Linux",
+            root_writable=True,
+        )
+    )
 
     payload = StateRepository.serialize_storage({state.state_id: state})
 
-    json.dumps(payload)                                   # must not raise
+    json.dumps(payload)  # must not raise
     assert "workspace" not in payload[state.state_id]
     assert "os_backend" not in payload[state.state_id]

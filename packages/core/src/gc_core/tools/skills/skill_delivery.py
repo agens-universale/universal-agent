@@ -4,12 +4,13 @@
 Доменный слой скиллов (знает структуру скилла, грузит detail). Презентацию/
 проводку добавляют контроллеры (TUI). См. spec 2026-06-25-skill-instruction-injection.
 """
+
 from __future__ import annotations
 
 from typing import Any
 
 
-def build_skill_delivery(skill_id: str, registry: Any) -> str:
+async def build_skill_delivery(skill_id: str, registry: Any) -> str:
     """Собрать текст доставки скилла для wire-сообщения агенту.
 
     Директива + инлайн-инструкция SKILL.md + имена references/assets + «замок».
@@ -18,7 +19,7 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
     """
     directive = f"Use skill `{skill_id}`."
     try:
-        detail = registry.load_skill_detail(skill_id)
+        detail = await registry.load_skill_detail(skill_id)
     except Exception:
         return directive
 
@@ -43,25 +44,23 @@ def build_skill_delivery(skill_id: str, registry: Any) -> str:
         )
 
     lock = [
-        f"Skill `{skill_id}` is already loaded — the instruction is shown above; "
-        "do not call skills_load again."
+        f"Skill `{skill_id}` is already loaded — the instruction is shown above; do not call skills_load again."
     ]
     if refs or assets:
         lock.append(
-            "Load auxiliary files by the exact names above "
-            "(skills_read_reference / skills_read_asset)."
+            "Load auxiliary files by the exact names above (skills_read_reference / skills_read_asset)."
         )
     parts.append("")
     parts.append(" ".join(lock))
     return "\n".join(parts)
 
 
-def skill_is_available(skill_id: str, registry: Any) -> bool:
+async def skill_is_available(skill_id: str, registry: Any) -> bool:
     """True, если скилл реально загрузим — для честного маркера «загружен»/«не
     найден». Критерий тот же, что у build_skill_delivery: detail грузится ⟺
     инструкция инжектнута (fallback ⟺ не найден)."""
     try:
-        registry.load_skill_detail(skill_id)
+        await registry.load_skill_detail(skill_id)
         return True
     except Exception:
         return False

@@ -7,12 +7,12 @@ and asserts it forwards the RAW code/cwd/timeout/validated-env dict to
 `run_python()`, plus the sandbox cwd branch and shared envelope parity
 (validation errors, non_zero_exit, timeout, execution_failed, truncation).
 """
-import json
-from types import SimpleNamespace
 
-from gc_testkit.harbor_fakes import bind_os_backend
+import json
+
 from gc_core.backends.protocol import ExecResult, bound_exec_result
 from gc_core.tools.exec.run_python_code import RunPythonCode
+from gc_testkit.harbor_fakes import bind_os_backend
 
 
 class _RecordingFakeBackend:
@@ -20,17 +20,35 @@ class _RecordingFakeBackend:
 
     is_sandbox = True
 
-    def __init__(self, stdout="", stderr="", rc=0, dirs=None, timed_out=False, capture_max_chars=None):
-        res = ExecResult(stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out)
-        self.res = res if capture_max_chars is None else bound_exec_result(res, capture_max_chars)
+    def __init__(
+        self,
+        stdout="",
+        stderr="",
+        rc=0,
+        dirs=None,
+        timed_out=False,
+        capture_max_chars=None,
+    ):
+        res = ExecResult(
+            stdout=stdout, stderr=stderr, return_code=rc, timed_out=timed_out
+        )
+        self.res = (
+            res
+            if capture_max_chars is None
+            else bound_exec_result(res, capture_max_chars)
+        )
         self.calls = []
         self._dirs = set(dirs or [])
 
-    def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
-        self.calls.append({"code": code, "cwd": cwd, "timeout": timeout, "env": env})
+    def run_python(
+        self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None
+    ):
+        self.calls.append(
+            {"code": code, "cwd": cwd, "timeout": timeout, "env": env}
+        )
         return self.res
 
-    def is_dir(self, path):
+    async def is_dir(self, path):
         return path in self._dirs
 
 
@@ -44,7 +62,15 @@ def _tool(backend, config_dict=None):
 def test_envelope_shape_matches_base_contract():
     b = _RecordingFakeBackend(stdout="42", rc=0)
     env = json.loads(_tool(b)(code="print(42)"))
-    for k in ("tool", "ok", "return_code", "timed_out", "error", "stdout", "stderr"):
+    for k in (
+        "tool",
+        "ok",
+        "return_code",
+        "timed_out",
+        "error",
+        "stdout",
+        "stderr",
+    ):
         assert k in env, k
     assert "truncated" not in env
     assert env["return_code"] == 0 and env["ok"] is True
@@ -104,7 +130,9 @@ def test_invalid_timeout_rejected():
 
 
 def test_max_output_chars_argument_no_longer_exists():
-    env = json.loads(_tool(_RecordingFakeBackend(stdout="hi"))(code="x", max_output_chars=0))
+    env = json.loads(
+        _tool(_RecordingFakeBackend(stdout="hi"))(code="x", max_output_chars=0)
+    )
     assert env["ok"] is True and env["stdout"]["content"] == "hi"
 
 
@@ -147,7 +175,9 @@ def test_no_env_vars_passes_none_env():
 
 
 def test_env_vars_malformed_rejected():
-    env = json.loads(_tool(_RecordingFakeBackend())(code="x", env_vars=[{"value": "bar"}]))
+    env = json.loads(
+        _tool(_RecordingFakeBackend())(code="x", env_vars=[{"value": "bar"}])
+    )
     assert env["ok"] is False and env["error"]["field"] == "env_vars[0].name"
 
 
@@ -170,7 +200,15 @@ def test_backend_timed_out_sets_timeout_envelope():
 
 def test_backend_exception_returns_execution_failed():
     class _RaisingBackend(_RecordingFakeBackend):
-        def run_python(self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None):
+        def run_python(
+            self,
+            code,
+            *,
+            cwd=None,
+            timeout=None,
+            env=None,
+            capture_max_chars=None,
+        ):
             raise RuntimeError("boom")
 
     env = json.loads(_tool(_RaisingBackend())(code="x"))

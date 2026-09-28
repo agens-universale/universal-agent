@@ -39,9 +39,12 @@ def ok_probe():
 
     Сигнатура — как у `tui.services.settings_probe.probe`; годится и в `probe_fn`
     SettingsScreen, и в `probe=` OnboardingScreen."""
+
     def probe(endpoint, auth, verify, model, **kw):
         from gc_tui.services.settings_probe import ProbeResult
+
         return ProbeResult("ok", 200, None, 5, "доступен")
+
     return probe
 
 
@@ -51,10 +54,13 @@ def recording_probe(calls, result=None):
 
     Журнал — единственный способ проверить, что до запроса доехали действующие
     значения (прокси/verify), а не то, что показано в полях."""
+
     def probe(endpoint, auth, verify, model, *, config_proxy=None, **kw):
         from gc_tui.services.settings_probe import ProbeResult
+
         calls.append((endpoint, auth, verify, model, config_proxy))
         return result or ProbeResult("ok", 200, None, 5, "доступен")
+
     return probe
 
 
@@ -78,12 +84,15 @@ def blocking_probe(release, calls=None, result=None):
     интерфейс не морозит. `timeout` у ожидания — страховка от повисшего потока,
     когда тест упал, не дойдя до `set()`. `calls` — тот же журнал, что у
     `recording_probe` (пишется ДО ожидания: тесту нужен факт вылета запроса)."""
+
     def probe(endpoint, auth, verify, model, *, config_proxy=None, **kw):
         from gc_tui.services.settings_probe import ProbeResult
+
         if calls is not None:
             calls.append((endpoint, auth, verify, model, config_proxy))
         release.wait(timeout=10)
         return result or ProbeResult("ok", 200, None, 5, "доступен")
+
     return probe
 
 
@@ -93,9 +102,11 @@ def recording_loader(loads, models=()):
 
     `models=None` — «не достучались» (это НЕ то же самое, что пустой список:
     пустой значит «сервер ответил, но моделей не отдал», см. voice_setup)."""
+
     def list_models(url, token, verify=True, config_proxy=None):
         loads.append((url, token, verify, config_proxy))
         return models
+
     return list_models
 
 
@@ -108,7 +119,9 @@ def recording_loader(loads, models=()):
 
 
 @asynccontextmanager
-async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None):
+async def settings_connection(
+    tmp_path, *, probe=None, wait_probe=True, url=None
+):
     """/settings → секция «Подключение» на настоящем config.yml во временном каталоге.
 
     **Отдаёт экран, когда автопроба входа в секцию уже осела.** Вход ставит
@@ -131,8 +144,12 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
     тесту про раскрытый список нужен пустой адрес либо форсированное раскрытие."""
     from gc_tui import app as app_mod
     from test_settings_screen import _cfg, _mk_screen, _write_cfg
-    cfg_file = (_write_cfg(tmp_path) if url is None
-                else _write_cfg(tmp_path, url=f'"{url}"'))
+
+    cfg_file = (
+        _write_cfg(tmp_path)
+        if url is None
+        else _write_cfg(tmp_path, url=f'"{url}"')
+    )
     # Конфиг приложения — тот же, что у экрана: вход в секцию забирает его у
     # приложения (SettingsScreen._sync_config_from_app), и с пустым конфигом
     # секция осталась бы без адреса.
@@ -140,7 +157,7 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
     async with app.run_test() as pilot:
         scr = _mk_screen(config_path=str(cfg_file))
         if probe is not None:
-            scr._probe_fn = probe      # иначе остаётся ok-проба из _mk_screen
+            scr._probe_fn = probe  # иначе остаётся ok-проба из _mk_screen
             # Вердикт «Подключения» идёт через отдельный слот: не подменив его,
             # тест с фейком полез бы в сеть настоящей probe_auth.
             scr._auth_probe_fn = probe
@@ -149,14 +166,18 @@ async def settings_connection(tmp_path, *, probe=None, wait_probe=True, url=None
         open_settings_section(scr, "Подключение")
         await pilot.pause()
         if wait_probe:
-            await wait_until(pilot, lambda: scr._draft_checked is not None,
-                             "автопроба секции «Подключение» осела")
+            await wait_until(
+                pilot,
+                lambda: scr._draft_checked is not None,
+                "автопроба секции «Подключение» осела",
+            )
         yield pilot, scr
 
 
 @asynccontextmanager
-async def settings_voice_section(tmp_path, *, mode="cloud", probe=None,
-                                 list_models=None, installed=False):
+async def settings_voice_section(
+    tmp_path, *, mode="cloud", probe=None, list_models=None, installed=False
+):
     """/settings → секция «Голосовой ввод».
 
     `mode` — действующий режим ("local" | "cloud" | "off"), `installed` — стоит ли
@@ -167,14 +188,16 @@ async def settings_voice_section(tmp_path, *, mode="cloud", probe=None,
     Реальные слои конфига и каталог данных батарейки подменены на tmp: без этого
     вердикт секции зависел бы от машины (~/.gc/config.local.yml пишет наш же UI)."""
     from gc_tui import app as app_mod
-    from test_settings_voice import CLOUD_CONFIG, _mk_screen
     from gc_tui.services.voice_setup import VoiceStatus
+    from test_settings_voice import CLOUD_CONFIG, _mk_screen
+
     status = VoiceStatus(
         installed=installed,
         service_alive=installed and mode == "local",
         port=8735 if installed else None,
         model="Systran/faster-whisper-small" if installed else None,
-        mode=mode)
+        mode=mode,
+    )
     config_text = CLOUD_CONFIG if mode == "cloud" else "model: m\n"
     with _isolated_voice_data(tmp_path):
         app = app_mod.TuiApp(config={"voice": {}})
@@ -198,26 +221,39 @@ async def settings_mcp_section(tmp_path, *, servers=()):
     ходит в манифест и в конфиг машины."""
     from gc_tui import app as app_mod
     from gc_tui.services import mcp_manager as mcp_manager_mod
-    from test_settings_screen import _cfg, _mk_screen, _write_cfg
     from gc_tui.services.mcp_manager import McpRow, McpState
-    rows = [s if isinstance(s, McpRow) else McpRow(s, wired=False, manual=False)
-            for s in servers]
+    from test_settings_screen import _cfg, _mk_screen, _write_cfg
+
+    rows = [
+        s if isinstance(s, McpRow) else McpRow(s, wired=False, manual=False)
+        for s in servers
+    ]
 
     class _FakeManager:
         def __init__(self, **kw):
             self.calls = []
+
         def rows(self):
             return list(rows)
+
         def state(self, name):
             return McpState(False, None, None)
+
         def wire(self, name):
-            self.calls.append(("wire", name)); return True
+            self.calls.append(("wire", name))
+            return True
+
         def unwire(self, name):
-            self.calls.append(("unwire", name)); return True
+            self.calls.append(("unwire", name))
+            return True
+
         def install(self, name):
-            self.calls.append(("install", name)); return 0
+            self.calls.append(("install", name))
+            return 0
+
         def remove(self, name):
-            self.calls.append(("remove", name)); return 0
+            self.calls.append(("remove", name))
+            return 0
 
     cfg_file = _write_cfg(tmp_path)
     app = app_mod.TuiApp(config=_cfg())
@@ -238,10 +274,16 @@ async def mounted_model_editor(tmp_path, *, models):
 
     `tmp_path` — ради единой формы вызова с соседними хелперами; сам харнес
     (`_harness` из test_editors_model) файлов не трогает."""
-    from test_editors_model import _harness
     from gc_tui.editors.model import ModelEditor
-    ed = ModelEditor(current="", endpoint="http://x", auth=None, verify=True,
-                     fetch=lambda *a, **k: list(models))
+    from test_editors_model import _harness
+
+    ed = ModelEditor(
+        current="",
+        endpoint="http://x",
+        auth=None,
+        verify=True,
+        fetch=lambda *a, **k: list(models),
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await wait_until(pilot, lambda: ed.models_loaded, "models loaded")
@@ -249,15 +291,18 @@ async def mounted_model_editor(tmp_path, *, models):
 
 
 @asynccontextmanager
-async def wizard_voice_step(tmp_path, *, mode="cloud", installed=False, models=None):
+async def wizard_voice_step(
+    tmp_path, *, mode="cloud", installed=False, models=None
+):
     """Мастер первого запуска на шаге «Голосовой ввод», курсор — на строке `mode`
     ("local" | "cloud" | "skip"). Пометку (Space) хелпер НЕ ставит: показ полей
     зависит от курсора, а выбор — отдельное действие, и тесты про него разные.
 
     `models` — что отдаст endpoint на запрос списка (None = не достучались)."""
-    from test_onboarding_voice_step import FakeVoice, _screen, _to_voice_step
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import _VOICE_OPTIONS, STEP_VOICE
+    from test_onboarding_voice_step import FakeVoice, _screen, _to_voice_step
+
     keys = [k for k, _t, _d in _VOICE_OPTIONS]
     with _isolated_voice_data(tmp_path):
         app = TuiApp(config={"model": "M"})
@@ -270,7 +315,9 @@ async def wizard_voice_step(tmp_path, *, mode="cloud", installed=False, models=N
             # По кольцу: курсор может стоять не на нулевой строке (шаг открывается
             # на ДЕЙСТВУЮЩЕМ режиме, _prefill_voice_from_config), и простая разность
             # шагов молча дала бы ноль нажатий вместо доводки до нужной строки.
-            steps = (keys.index(mode) - screen._idx.get(STEP_VOICE, 0)) % len(keys)
+            steps = (keys.index(mode) - screen._idx.get(STEP_VOICE, 0)) % len(
+                keys
+            )
             for _ in range(steps):
                 await pilot.press("down")
             await pilot.pause()
@@ -285,9 +332,11 @@ async def wizard_connection_step(tmp_path):
     Работа идёт из `tmp_path`: снимок/сценарий не должен зависеть от того, из
     какого каталога запущен pytest."""
     import os
+
+    from gc_tui.app import TuiApp
     from test_onboarding_screen import _screen
     from test_onboarding_voice_step import FakeVoice
-    from gc_tui.app import TuiApp
+
     cwd = os.getcwd()
     os.chdir(tmp_path)
     try:
@@ -299,7 +348,9 @@ async def wizard_connection_step(tmp_path):
             async with app.run_test() as pilot:
                 screen = _screen(voice=FakeVoice())
                 await app.push_screen(screen)
-                await pilot.pause()  # ConnectionEditor.focus_input идёт call_after_refresh
+                await (
+                    pilot.pause()
+                )  # ConnectionEditor.focus_input идёт call_after_refresh
                 await pilot.pause()
                 yield pilot, screen
     finally:
@@ -310,10 +361,16 @@ async def wizard_connection_step(tmp_path):
 def _isolated_voice_data(tmp_path):
     """Каталог данных голосовой батарейки — на tmp: `_voice_installed`,
     `current_model_short` и статус секции читают реальный ~/.gc иначе."""
-    with mock.patch("gc_tui.voice_runtime.paths.voice_data_dir",
-                    lambda: tmp_path / "voice_data"), \
-         mock.patch("gc_tui.voice_runtime.state.voice_state_path",
-                    lambda: tmp_path / "voice_data" / "state.json"):
+    with (
+        mock.patch(
+            "gc_tui.voice_runtime.paths.voice_data_dir",
+            lambda: tmp_path / "voice_data",
+        ),
+        mock.patch(
+            "gc_tui.voice_runtime.state.voice_state_path",
+            lambda: tmp_path / "voice_data" / "state.json",
+        ),
+    ):
         yield
 
 
@@ -333,6 +390,7 @@ def _value_color(text, value: str):
     уже прошедший через консоль («rgb(122,130,144)»), а константа палитры — «#hex»;
     сравнение строк развело бы одинаковые цвета."""
     from rich.style import Style
+
     i = text.plain.index(value)
     span = next(s for s in text.spans if s.start == i)
     return Style.parse(str(span.style)).color.get_truecolor()
@@ -340,6 +398,7 @@ def _value_color(text, value: str):
 
 def _rgb(token: str):
     from rich.style import Style
+
     return Style.parse(token).color.get_truecolor()
 
 
@@ -350,14 +409,16 @@ def _row_style_set(text) -> set:
     Пробельные куски в счёт не идут: курсор-маркер («▸ »/«  ») и выравнивание
     колонок цвета не несут, а в множество добавили бы посторонний ACCENT."""
     from rich.style import Style
+
     colors = set()
     for span in text.spans:
-        if not text.plain[span.start:span.end].strip():
+        if not text.plain[span.start : span.end].strip():
             continue
         style = Style.parse(str(span.style))
         if style.color is not None:
             colors.add(style.color.get_truecolor())
     return colors
+
 
 # Фикстуры `tui_app_factory` и `_copy_raw_snapshots_to_svg` НЕ здесь: их дом —
 # `packages/tui/tests/conftest.py`. На develop и они, и монтажники лежали в

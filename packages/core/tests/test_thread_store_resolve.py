@@ -1,7 +1,4 @@
-from pathlib import Path
-
 import pytest
-
 from gc_core.thread_store import resolve_threads_dir
 
 

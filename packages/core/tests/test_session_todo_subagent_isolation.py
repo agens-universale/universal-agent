@@ -5,13 +5,17 @@ replace-семантика — субагент затирал план орке
 маршрутизируется по ``parent_state_id``: у оркестратора — общий ``shared``
 (персистится), у субагента — собственное поле (живёт только его прогон).
 """
+
 import json
 
 from gc_core.message_policy.todo_reminder import apply_todo_reminder
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.states import SharedStateData, State
-from gc_core.summarize.working_memory_gateway import read_session_todo_from_state
+from gc_core.summarize.working_memory_gateway import (
+    read_session_todo_from_state,
+)
 from gc_core.tools.session.todo import SessionTodo
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 PARENT_ITEMS = [
     {"content": "Спроектировать", "status": "completed"},
@@ -47,6 +51,7 @@ def _child_of(parent: State) -> State:
 
 # --- маршрутизация хранилища -------------------------------------------------
 
+
 def test_orchestrator_checklist_lives_in_shared():
     state = _state()
     state.session_todo = list(PARENT_ITEMS)
@@ -74,12 +79,15 @@ def test_subagent_starts_with_empty_checklist():
 
 # --- тул ---------------------------------------------------------------------
 
+
 def test_tool_call_from_subagent_preserves_parent_checklist():
     parent = _state()
-    SessionTodo(state=parent)(todos=list(PARENT_ITEMS))
+    CallableTool(SessionTodo(state=parent))(todos=list(PARENT_ITEMS))
     child = _child_of(parent)
 
-    out = json.loads(SessionTodo(state=child)(todos=list(CHILD_ITEMS)))
+    out = json.loads(
+        CallableTool(SessionTodo(state=child))(todos=list(CHILD_ITEMS))
+    )
 
     assert out["ok"] is True
     assert out["count"] == 2
@@ -89,17 +97,20 @@ def test_tool_call_from_subagent_preserves_parent_checklist():
 
 def test_tool_error_from_subagent_reports_own_counts():
     parent = _state()
-    SessionTodo(state=parent)(todos=list(PARENT_ITEMS))
+    CallableTool(SessionTodo(state=parent))(todos=list(PARENT_ITEMS))
     child = _child_of(parent)
-    SessionTodo(state=child)(todos=list(CHILD_ITEMS))
+    CallableTool(SessionTodo(state=child))(todos=list(CHILD_ITEMS))
 
-    out = json.loads(SessionTodo(state=child)(todos="не список"))
+    out = json.loads(CallableTool(SessionTodo(state=child))(todos="не список"))
 
     assert out["ok"] is False
-    assert out["count"] == 2, "в ошибке отдаём текущий чек-лист субагента, не родителя"
+    assert out["count"] == 2, (
+        "в ошибке отдаём текущий чек-лист субагента, не родителя"
+    )
 
 
 # --- читатели чек-листа ------------------------------------------------------
+
 
 def test_persistent_state_reads_own_checklist():
     parent = _state()

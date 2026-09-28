@@ -1,4 +1,5 @@
 """Парсер recommended_mcp/config.yml."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -131,22 +132,19 @@ def load_repo_url(path: Path) -> tuple[str | None, str | None]:
     return url, ref
 
 
-def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
-    name = raw.get("name")
-    if not name:
-        raise ManifestError(f"mcp entry missing 'name' in {source}")
-    path_str = raw.get("path")
-    if not path_str:
-        raise ManifestError(f"mcp '{name}' missing 'path' in {source}")
-    install_raw = raw.get("install")
+def _parse_install(install_raw: Any, name: str, source: Path) -> InstallSpec:
     if not isinstance(install_raw, dict):
-        raise ManifestError(f"mcp '{name}' missing 'install' block in {source}")
+        raise ManifestError(
+            f"mcp '{name}' missing 'install' block in {source}"
+        )
     source_raw = install_raw.get("source")
     install_source = Path(source_raw) if source_raw else None
     package_raw = install_raw.get("package")
     install_package = str(package_raw).strip() if package_raw else None
     npm_package_raw = install_raw.get("npm_package")
-    install_npm_package = str(npm_package_raw).strip() if npm_package_raw else None
+    install_npm_package = (
+        str(npm_package_raw).strip() if npm_package_raw else None
+    )
     dist_raw = install_raw.get("dist")
     install_dist = str(dist_raw).strip() if dist_raw else None
     version_raw = install_raw.get("version")
@@ -174,42 +172,60 @@ def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
         raise ManifestError(
             f"mcp '{name}' install.type=pypi requires install.package in {source}"
         )
+    return install
 
-    run_raw = raw.get("run")
-    run: RunSpec | None = None
-    if run_raw is not None:
-        if not isinstance(run_raw, dict):
-            raise ManifestError(f"mcp '{name}' 'run' must be a dict in {source}")
-        run_type = run_raw.get("type")
-        if not run_type:
-            raise ManifestError(f"mcp '{name}' missing 'run.type' in {source}")
-        run_cwd_raw = run_raw.get("cwd")
-        run_cwd = Path(run_cwd_raw) if run_cwd_raw else None
-        raw_args = run_raw.get("args", ()) or ()
-        run_args = tuple(str(arg) for arg in raw_args)
-        raw_env = run_raw.get("env", {}) or {}
-        if not isinstance(raw_env, dict):
-            raise ManifestError(f"mcp '{name}' run.env must be a dict in {source}")
-        run_env = tuple((str(k), str(v)) for k, v in raw_env.items())
-        run_command = run_raw.get("command")
-        run_command_str = str(run_command).strip() if run_command else None
-        run = RunSpec(
-            type=run_type,
-            detach=bool(run_raw.get("detach", False)),
-            command=run_command_str,
-            args=run_args,
-            env=run_env,
-            cwd=run_cwd,
+
+def _parse_run(run_raw: Any, name: str, source: Path) -> RunSpec | None:
+    if run_raw is None:
+        return None
+    if not isinstance(run_raw, dict):
+        raise ManifestError(f"mcp '{name}' 'run' must be a dict in {source}")
+    run_type = run_raw.get("type")
+    if not run_type:
+        raise ManifestError(f"mcp '{name}' missing 'run.type' in {source}")
+    run_cwd_raw = run_raw.get("cwd")
+    run_cwd = Path(run_cwd_raw) if run_cwd_raw else None
+    raw_args = run_raw.get("args", ()) or ()
+    run_args = tuple(str(arg) for arg in raw_args)
+    raw_env = run_raw.get("env", {}) or {}
+    if not isinstance(raw_env, dict):
+        raise ManifestError(f"mcp '{name}' run.env must be a dict in {source}")
+    run_env = tuple((str(k), str(v)) for k, v in raw_env.items())
+    run_command = run_raw.get("command")
+    run_command_str = str(run_command).strip() if run_command else None
+    run = RunSpec(
+        type=run_type,
+        detach=bool(run_raw.get("detach", False)),
+        command=run_command_str,
+        args=run_args,
+        env=run_env,
+        cwd=run_cwd,
+    )
+    if run.type == "command" and not run.command:
+        raise ManifestError(
+            f"mcp '{name}' run.type=command requires run.command in {source}"
         )
-        if run.type == "command" and not run.command:
-            raise ManifestError(
-                f"mcp '{name}' run.type=command requires run.command in {source}"
-            )
+    return run
+
+
+def _parse_entry(raw: dict[str, Any], source: Path) -> MCPEntry:
+    name = raw.get("name")
+    if not name:
+        raise ManifestError(f"mcp entry missing 'name' in {source}")
+    path_str = raw.get("path")
+    if not path_str:
+        raise ManifestError(f"mcp '{name}' missing 'path' in {source}")
+    install = _parse_install(raw.get("install"), name, source)
+
+    run = _parse_run(raw.get("run"), name, source)
 
     description = str(raw.get("description", "")).strip()
 
     return MCPEntry(
-        name=name, path=Path(path_str), install=install, run=run,
+        name=name,
+        path=Path(path_str),
+        install=install,
+        run=run,
         optional=bool(raw.get("optional", False)),
         description=description,
     )

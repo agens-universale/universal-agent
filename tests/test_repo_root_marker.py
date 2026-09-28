@@ -22,7 +22,6 @@ external/vendor в чужом дереве. Маркер стал строгим
 from __future__ import annotations
 
 import pytest
-
 from gc_core import bundled_assets
 from gc_testkit import paths as testkit_paths
 from gc_testkit.paths import REPO
@@ -44,9 +43,11 @@ def _fake_monorepo(root, core_name: str):
     """
     (root / "packages" / "core" / "src" / "foo").mkdir(parents=True)
     (root / "packages" / "core" / "pyproject.toml").write_text(
-        f'[project]\nname = "{core_name}"\nversion = "1.0"\n', encoding="utf-8")
+        f'[project]\nname = "{core_name}"\nversion = "1.0"\n', encoding="utf-8"
+    )
     (root / "pyproject.toml").write_text(
-        '[project]\nname = "someone-else-meta"\n', encoding="utf-8")
+        '[project]\nname = "someone-else-meta"\n', encoding="utf-8"
+    )
     return root / "packages" / "core" / "src" / "foo" / "mod.py"
 
 

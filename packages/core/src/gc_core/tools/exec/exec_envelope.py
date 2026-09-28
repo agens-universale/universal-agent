@@ -45,7 +45,9 @@ def stream_to_json(stream: CapturedStream) -> dict:
     }
 
 
-def stream_preview_json(stream: CapturedStream, preview_edge_chars: int) -> Optional[dict]:
+def stream_preview_json(
+    stream: CapturedStream, preview_edge_chars: int
+) -> Optional[dict]:
     """Front-loaded preview потока или ``None``, если он не нужен.
 
     Не нужен при ``P = 0`` и при ``total_chars <= 2P``: такой канал целиком

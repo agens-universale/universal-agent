@@ -9,16 +9,17 @@ IDENTICAL envelope for the same input.
 comparisons are restricted to valid-UTF-8 payloads; binary payloads are verified
 via a CapturingFakeBackend that records the raw bytes.
 """
+
 import base64
 import json
-from types import SimpleNamespace
 
-import pytest
-
-from gc_core.tools.fs.save_base64_file import SaveBase64File
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend, strip_path_fields
 from gc_core.backends.local import LocalFsBackend
-
+from gc_core.tools.fs.save_base64_file import SaveBase64File
+from gc_testkit.harbor_fakes import (
+    FakeBackend,
+    bind_os_backend,
+    strip_path_fields,
+)
 
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
@@ -39,7 +40,7 @@ class _CapturingFakeBackend(FakeBackend):
         super().__init__()
         self.written_bytes: dict[str, bytes] = {}
 
-    def write_bytes(self, path: str, data: bytes) -> None:  # type: ignore[override]
+    async def write_bytes(self, path: str, data: bytes) -> None:  # type: ignore[override]
         self.written_bytes[path] = data
 
 
@@ -87,6 +88,7 @@ def _run_both_utf8(tmp_path, b64_data, filename="out.txt"):
 # Differential tests: UTF-8-safe payloads
 # ---------------------------------------------------------------------------
 
+
 def test_valid_base64_utf8_envelope_matches_base(tmp_path):
     """Envelope from harbor shim is identical to base for a valid UTF-8 payload."""
     base_stripped, harbor_stripped = _run_both_utf8(tmp_path, TEXT_B64)
@@ -115,13 +117,16 @@ def test_invalid_argument_path_empty_envelope_matches_base(tmp_path):
     fake = FakeBackend()
     harbor_env = json.loads(_harbor_with(fake)(path="", data=TEXT_B64))
 
-    assert strip_path_fields(harbor_env, "path") == strip_path_fields(base_env, "path")
+    assert strip_path_fields(harbor_env, "path") == strip_path_fields(
+        base_env, "path"
+    )
     assert harbor_env["ok"] is False
 
 
 # ---------------------------------------------------------------------------
 # Direct: binary payload (non-UTF-8) — verify bytes fidelity
 # ---------------------------------------------------------------------------
+
 
 def test_binary_bytes_written_equals_decoded_length():
     """bytes_written == len(decoded bytes) for a 256-byte binary payload."""
@@ -147,6 +152,7 @@ def test_binary_backend_receives_exact_decoded_bytes():
 # Direct: decode_failed
 # ---------------------------------------------------------------------------
 
+
 def test_decode_failed_for_truly_invalid_base64():
     """base64.b64decode with validate=False almost never raises; verify shim mirrors base.
 
@@ -156,8 +162,6 @@ def test_decode_failed_for_truly_invalid_base64():
     """
     # Patch validate flag by temporarily overriding b64decode — instead, rely on the
     # fact that our shim uses validate=False just like the base. Verify same behavior.
-    import base64 as _b64
-    import binascii
 
     # b"!!!" contains characters outside the base64 alphabet; with validate=False they
     # are silently ignored, so we confirm shim matches base (both succeed or both fail).
@@ -168,7 +172,9 @@ def test_decode_failed_for_truly_invalid_base64():
     harbor_env = json.loads(t(path="/work/out.bin", data=data))
 
     # Base behavior for same input
-    import tempfile, pathlib
+    import pathlib
+    import tempfile
+
     with tempfile.TemporaryDirectory() as d:
         p = pathlib.Path(d) / "out.bin"
         base_env = json.loads(_base()(path=str(p), data=data))
@@ -182,6 +188,7 @@ def test_decode_failed_for_truly_invalid_base64():
 # ---------------------------------------------------------------------------
 # Direct: parent_not_found
 # ---------------------------------------------------------------------------
+
 
 def test_parent_not_found_returns_ok_false():
     """Returns ok=False / parent_not_found when parent dir absent from backend."""
@@ -202,6 +209,7 @@ def test_parent_found_write_succeeds():
 # ---------------------------------------------------------------------------
 # Direct: full _result envelope structure
 # ---------------------------------------------------------------------------
+
 
 def test_envelope_keys_on_success():
     """Successful call envelope contains all required keys."""

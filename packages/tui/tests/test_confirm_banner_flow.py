@@ -1,4 +1,5 @@
 """confirm banner: показ/скрытие + перехват y/s/N/Esc/↑↓/Enter → submit_confirm_reply."""
+
 import pytest
 
 
@@ -27,20 +28,35 @@ class _StubRunner:
 def _tool_call_events():
     """Пара call+result для call_id="c1" — из неё Screen строит ToolCallDetailScreen."""
     from gc_tui.models import TraceEvent
+
     call_ev = TraceEvent(
-        no=1, event_ts_utc_iso="t", kind="call", title="exec_command",
+        no=1,
+        event_ts_utc_iso="t",
+        kind="call",
+        title="exec_command",
         summary="curl",
         full_payload={
-            "type": "function_call", "name": "exec_command",
-            "arguments": '{"command":"curl"}', "call_id": "c1",
+            "type": "function_call",
+            "name": "exec_command",
+            "arguments": '{"command":"curl"}',
+            "call_id": "c1",
         },
-        call_id="c1", tool_name="exec_command",
+        call_id="c1",
+        tool_name="exec_command",
     )
     result_ev = TraceEvent(
-        no=2, event_ts_utc_iso="t", kind="result", title="exec_command",
+        no=2,
+        event_ts_utc_iso="t",
+        kind="result",
+        title="exec_command",
         summary="ok",
-        full_payload={"type": "function_call_output", "call_id": "c1", "output": "ok"},
-        call_id="c1", tool_name="exec_command",
+        full_payload={
+            "type": "function_call_output",
+            "call_id": "c1",
+            "output": "ok",
+        },
+        call_id="c1",
+        tool_name="exec_command",
     )
     return [call_ev, result_ev]
 
@@ -78,13 +94,16 @@ async def _mouse_click(pilot, row, *, ctrl: bool = False) -> None:
 async def test_confirm_banner_y_answers_allow_remember(tmp_path):
     """«y» при активном баннере: submit_confirm_reply("allow_remember"), баннер снят."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -95,7 +114,9 @@ async def test_confirm_banner_y_answers_allow_remember(tmp_path):
         # Баннер смонтирован, input-row скрыт.
         assert scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 1
-        assert pilot.app.query_one("#input-row", Horizontal).has_class("hidden")
+        assert pilot.app.query_one("#input-row", Horizontal).has_class(
+            "hidden"
+        )
 
         await pilot.press("y")
         await pilot.pause(0.1)
@@ -105,7 +126,9 @@ async def test_confirm_banner_y_answers_allow_remember(tmp_path):
         assert scr._confirm_banner is None
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # input-row восстановлен
-        assert not pilot.app.query_one("#input-row", Horizontal).has_class("hidden")
+        assert not pilot.app.query_one("#input-row", Horizontal).has_class(
+            "hidden"
+        )
 
 
 @pytest.mark.asyncio
@@ -116,8 +139,11 @@ async def test_confirm_banner_o_answers_allow_once(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -141,8 +167,11 @@ async def test_confirm_banner_n_answers_deny_remember(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -167,8 +196,11 @@ async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -194,8 +226,11 @@ async def test_confirm_banner_enter_default_answers_allow_remember(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -219,8 +254,11 @@ async def test_confirm_banner_down_then_enter_answers_allow_once(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -254,8 +292,11 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -277,7 +318,9 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
         )
         scr._task_events = [call_ev]
         row = ToolCallRow(
-            call_id="c1", tool_name="exec_command", args_summary="curl",
+            call_id="c1",
+            tool_name="exec_command",
+            args_summary="curl",
         )
         await scr.query_one("#trace").mount(row)
         await pilot.pause(0.05)
@@ -294,7 +337,9 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
 
         stack = [type(s).__name__ for s in pilot.app.screen_stack]
         assert "ToolCallDetailScreen" not in stack, stack
-        assert not any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
+        assert not any(
+            isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack
+        )
         assert runner.replies == ["allow_remember"]
         assert not scr._confirm_active
         assert len(pilot.app.query(ConfirmBanner)) == 0
@@ -317,14 +362,19 @@ async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._task_events = _tool_call_events()
-        row = ToolCallRow(call_id="c1", tool_name="exec_command", args_summary="curl")
+        row = ToolCallRow(
+            call_id="c1", tool_name="exec_command", args_summary="curl"
+        )
         await scr.query_one("#trace").mount(row)
         row.set_result(summary="ok", error=False)
         await pilot.pause(0.05)
@@ -336,7 +386,9 @@ async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
         await _mouse_click(pilot, row, ctrl=True)
 
         assert len(pilot.app.screen_stack) == stack_before
-        assert not any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
+        assert not any(
+            isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack
+        )
         assert scr._confirm_active
 
         # Баннер по-прежнему отвечает на «y».
@@ -357,13 +409,18 @@ async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
     from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._task_events = _tool_call_events()
-        row = ToolCallRow(call_id="c1", tool_name="exec_command", args_summary="curl")
+        row = ToolCallRow(
+            call_id="c1", tool_name="exec_command", args_summary="curl"
+        )
         await scr.query_one("#trace").mount(row)
         row.set_result(summary="ok", error=False)
         await pilot.pause(0.05)
@@ -371,7 +428,9 @@ async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
         assert not scr._confirm_active
         await _mouse_click(pilot, row, ctrl=True)
 
-        assert any(isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack)
+        assert any(
+            isinstance(s, ToolCallDetailScreen) for s in pilot.app.screen_stack
+        )
 
 
 @pytest.mark.asyncio
@@ -385,18 +444,28 @@ async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
     from gc_tui.widgets.trace_row import TraceRow
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr._task_events = [TraceEvent(
-            no=5, event_ts_utc_iso="t", kind="agent", title="agent",
-            summary="ответ", full_payload={"text": "ответ"},
-        )]
-        row = TraceRow(prefix="● ", content="ответ",
-                       kind_class="line-agent", event_no=5)
+        scr._task_events = [
+            TraceEvent(
+                no=5,
+                event_ts_utc_iso="t",
+                kind="agent",
+                title="agent",
+                summary="ответ",
+                full_payload={"text": "ответ"},
+            )
+        ]
+        row = TraceRow(
+            prefix="● ", content="ответ", kind_class="line-agent", event_no=5
+        )
         await scr.query_one("#trace").mount(row)
         await pilot.pause(0.05)
 
@@ -407,7 +476,9 @@ async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
         await _mouse_click(pilot, row, ctrl=True)
 
         assert len(pilot.app.screen_stack) == stack_before
-        assert not any(isinstance(s, ViewerScreen) for s in pilot.app.screen_stack)
+        assert not any(
+            isinstance(s, ViewerScreen) for s in pilot.app.screen_stack
+        )
         assert scr._confirm_active
 
         await pilot.press("y")
@@ -426,17 +497,28 @@ async def test_confirm_click_does_not_toggle_summary_body(tmp_path):
     from gc_tui.widgets.trace_row import SummaryMarker
 
     runner = _StubRunner()
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        marker = SummaryMarker(prefix="▸ ", content="──── контекст сжат ────",
-                               kind_class="summary-marker", event_no=9)
-        body = SummaryMarker(prefix="   ", content="Контекст сохранён:\nтекст",
-                             kind_class="summary-body hidden", event_no=9,
-                             focusable=False)
+        marker = SummaryMarker(
+            prefix="▸ ",
+            content="──── контекст сжат ────",
+            kind_class="summary-marker",
+            event_no=9,
+        )
+        body = SummaryMarker(
+            prefix="   ",
+            content="Контекст сохранён:\nтекст",
+            kind_class="summary-body hidden",
+            event_no=9,
+            focusable=False,
+        )
         trace = scr.query_one("#trace")
         await trace.mount(marker)
         await trace.mount(body)
@@ -467,16 +549,27 @@ async def test_click_toggles_summary_body_without_confirm(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.trace_row import SummaryMarker
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        marker = SummaryMarker(prefix="▸ ", content="──── контекст сжат ────",
-                               kind_class="summary-marker", event_no=9)
-        body = SummaryMarker(prefix="   ", content="Контекст сохранён:\nтекст",
-                             kind_class="summary-body hidden", event_no=9,
-                             focusable=False)
+        marker = SummaryMarker(
+            prefix="▸ ",
+            content="──── контекст сжат ────",
+            kind_class="summary-marker",
+            event_no=9,
+        )
+        body = SummaryMarker(
+            prefix="   ",
+            content="Контекст сохранён:\nтекст",
+            kind_class="summary-body hidden",
+            event_no=9,
+            focusable=False,
+        )
         trace = scr.query_one("#trace")
         await trace.mount(marker)
         await trace.mount(body)
@@ -498,12 +591,17 @@ async def test_confirm_banner_receives_focus_on_show(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
     from gc_tui.widgets.tool_call_row import ToolCallRow
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        row = ToolCallRow(call_id="c1", tool_name="exec_command", args_summary="x")
+        row = ToolCallRow(
+            call_id="c1", tool_name="exec_command", args_summary="x"
+        )
         await scr.query_one("#trace").mount(row)
         row.focus()
         await pilot.pause(0.05)
@@ -516,18 +614,24 @@ async def test_confirm_banner_receives_focus_on_show(tmp_path):
 
 # ── Tests for Ctrl+C / _reset_render_state confirm handling ──────────────────
 
+
 @pytest.mark.asyncio
-async def test_ctrl_c_during_init_style_confirm_cancels_and_hides_banner(tmp_path):
+async def test_ctrl_c_during_init_style_confirm_cancels_and_hides_banner(
+    tmp_path,
+):
     """/init-стиль: _confirm_active=True, runner.is_running()==False.
     Ctrl+C → cancel_confirm вызван, баннер снят, run НЕ остановлен (не было живого)."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner(running=False)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -547,23 +651,30 @@ async def test_ctrl_c_during_init_style_confirm_cancels_and_hides_banner(tmp_pat
         assert scr._confirm_banner is None
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # input-row restored
-        assert not pilot.app.query_one("#input-row", Horizontal).has_class("hidden")
+        assert not pilot.app.query_one("#input-row", Horizontal).has_class(
+            "hidden"
+        )
         # run was NOT stopped (no live runner)
         assert not runner.stopped
 
 
 @pytest.mark.asyncio
-async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(tmp_path):
+async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(
+    tmp_path,
+):
     """live-agent: _confirm_active=True, runner.is_running()==True.
     Ctrl+C → cancel_confirm вызван, баннер снят, раннер остановлен."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner(running=True)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -583,7 +694,9 @@ async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(tmp_path):
         assert scr._confirm_banner is None
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # input-row restored
-        assert not pilot.app.query_one("#input-row", Horizontal).has_class("hidden")
+        assert not pilot.app.query_one("#input-row", Horizontal).has_class(
+            "hidden"
+        )
         # active_runner nulled by _stop_and_replace_runner
         assert pilot.app.active_runner is None
 
@@ -592,13 +705,16 @@ async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(tmp_path):
 async def test_reset_render_state_clears_confirm_banner(tmp_path):
     """Backstop: _reset_render_state при _confirm_active=True → баннер снят, cancel вызван."""
     pytest.importorskip("textual")
-    from textual.containers import Horizontal
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.containers import Horizontal
 
     runner = _StubRunner(running=False)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli",
-                 config={"model": "M", "backend_api_mode": "chat_completions"})
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        config={"model": "M", "backend_api_mode": "chat_completions"},
+    )
     app.active_runner = runner
 
     async with app.run_test() as pilot:
@@ -616,4 +732,6 @@ async def test_reset_render_state_clears_confirm_banner(tmp_path):
         assert scr._confirm_banner is None
         assert len(pilot.app.query(ConfirmBanner)) == 0
         # input-row restored
-        assert not pilot.app.query_one("#input-row", Horizontal).has_class("hidden")
+        assert not pilot.app.query_one("#input-row", Horizontal).has_class(
+            "hidden"
+        )

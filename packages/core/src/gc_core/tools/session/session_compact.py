@@ -6,8 +6,15 @@ import json
 from typing import Any, Dict, Optional
 
 from gc_core.constants.tool_names import SESSION_COMPACT_TOOL_NAME
-from gc_core.summarize.compaction import run_summary_compaction, without_system_messages
-from gc_core.summarize.summary_logging import SummaryCompactionLog, log_compaction_failed, logger_from_ctx
+from gc_core.summarize.compaction import (
+    arun_summary_compaction,
+    without_system_messages,
+)
+from gc_core.summarize.summary_logging import (
+    SummaryCompactionLog,
+    log_compaction_failed,
+    logger_from_ctx,
+)
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 TRIGGER_REASON = "session_compact"
@@ -16,7 +23,9 @@ TRIGGER_REASON = "session_compact"
 class SessionCompact(AbstractSimpleTool):
     tool_name = SESSION_COMPACT_TOOL_NAME
 
-    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+    def __init__(
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
@@ -40,7 +49,9 @@ class SessionCompact(AbstractSimpleTool):
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> dict[str, Any]:
         return {
             "type": "function",
             "name": SESSION_COMPACT_TOOL_NAME,
@@ -73,7 +84,9 @@ class SessionCompact(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
         return """Tool name: session_compact
 Tool description: Replace the active step-by-step trace with a baseline summary for the same user turn—not durable memory and not a full log. When to use: after a major phase or before a new sub-goal (also when the trace is noisy or long). After success, the pre-compaction detailed trace is no longer sent to the model; the new trace is a structured dialog summary with updated thread memory registers, <last_dialog_steps> (recent pre-compaction messages), and current_user_intent for the open turn. Before calling, persist important verified facts or artifact paths in session_memory or a file.
 Input schema: {"type":"object","properties":{"reason":{"type":"string","description":"why compact now"}},"required":["reason"],"additionalProperties":false}
@@ -82,7 +95,14 @@ Return format (JSON string):
 {"tool":"session_compact","ok":true,"error":null|{"type":"...","message":"..."},"message":"...","compacted":true}
 """
 
-    def __call__(self, reason: str, **kwargs: Any) -> str:
+    async def acall(self, reason: str, **kwargs: Any) -> str:
+        """Основная реализация: сжать трассу текущего хода по просьбе агента.
+
+        Диспетчер тулов видит ``acall`` и зовёт его напрямую, без
+        ``asyncio.to_thread``: цепочка суммаризации асинхронна до самого
+        сетевого листа, поэтому поток пула на десятки секунд больше не
+        занимается.
+        """
         if not isinstance(reason, str):
             return self._result(
                 ok=False,
@@ -106,10 +126,15 @@ Return format (JSON string):
             return self._result(
                 ok=False,
                 message=None,
-                error={"type": "no_state", "message": "Agent state is not available."},
+                error={
+                    "type": "no_state",
+                    "message": "Agent state is not available.",
+                },
             )
 
-        backend_mode = str(getattr(state, "backend_api_mode", "") or "").strip().lower()
+        backend_mode = (
+            str(getattr(state, "backend_api_mode", "") or "").strip().lower()
+        )
         if backend_mode != "chat_completions":
             return self._result(
                 ok=False,
@@ -120,7 +145,9 @@ Return format (JSON string):
                 },
             )
 
-        dialog_messages = without_system_messages(getattr(state, "messages", []) or [])
+        dialog_messages = without_system_messages(
+            getattr(state, "messages", []) or []
+        )
         if not dialog_messages:
             return self._result(
                 ok=False,
@@ -132,12 +159,16 @@ Return format (JSON string):
             )
 
         ctx = self._ctx
-        on_summary_applied = getattr(ctx, "on_summary_applied", None) if ctx else None
-        is_cli_mode = bool(getattr(ctx, "is_cli_mode", False)) if ctx else False
+        on_summary_applied = (
+            getattr(ctx, "on_summary_applied", None) if ctx else None
+        )
+        is_cli_mode = (
+            bool(getattr(ctx, "is_cli_mode", False)) if ctx else False
+        )
         logger = logger_from_ctx(ctx)
 
         try:
-            run_summary_compaction(
+            await arun_summary_compaction(
                 ctx=ctx,
                 state=state,
                 trigger_reason=TRIGGER_REASON,
@@ -174,4 +205,4 @@ Return format (JSON string):
         )
 
 
-__all__ = ["SessionCompact", "TRIGGER_REASON"]
+__all__ = ["TRIGGER_REASON", "SessionCompact"]

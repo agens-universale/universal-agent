@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Mapping
 
 from gc_core.intent_log.record import (
@@ -18,9 +18,7 @@ from gc_core.intent_log.serialize import serialize
 
 def utc_now_ts() -> str:
     return (
-        datetime.now(timezone.utc)
-        .replace(microsecond=0)
-        .strftime("%Y-%m-%dT%H:%M:%SZ")
+        datetime.now(UTC).replace(microsecond=0).strftime("%Y-%m-%dT%H:%M:%SZ")
     )
 
 
@@ -88,7 +86,9 @@ def append_tool_raw(
     if not name:
         raise ValueError("tool_name is required for raw tool result")
     if arguments is None and output is None:
-        raise ValueError("append_tool_raw requires at least one of arguments/output")
+        raise ValueError(
+            "append_tool_raw requires at least one of arguments/output"
+        )
     content: dict[str, Any] = {}
     if arguments is not None:
         if not isinstance(arguments, Mapping):
@@ -239,7 +239,9 @@ def tail_preview(
     **record** index and count (same meaning as :func:`read_page`), not char positions.
     """
     total_records, total_chars = _log_totals(records)
-    tail_records, record_offset = _suffix_records_within_char_budget(records, max_chars)
+    tail_records, record_offset = _suffix_records_within_char_budget(
+        records, max_chars
+    )
     content = serialize(tail_records)
     page_records = len(tail_records)
     truncated = record_offset > 0

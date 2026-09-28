@@ -24,7 +24,6 @@ import subprocess
 import sys
 
 import pytest
-
 from gc_testkit.paths import REPO
 
 _SMOKE = """\
@@ -90,9 +89,19 @@ def test_plugin_is_inert_outside_working_copy(tmp_path, hide_our_packages):
     res = subprocess.run(
         # Плагин НЕ подключается флагом: он приезжает сам, через pytest11 —
         # ровно так, как это происходит у чужого проекта.
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-         "test_smoke.py"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "test_smoke.py",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     combined = res.stdout + res.stderr
@@ -113,9 +122,15 @@ def test_offsite_copy_really_sees_no_working_copy(tmp_path):
     env = dict(os.environ)
     env["PYTHONPATH"] = str(tmp_path)
     res = subprocess.run(
-        [sys.executable, "-c",
-         "import gc_testkit.paths as p; print(p.__file__); print(p.repo_root())"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        [
+            sys.executable,
+            "-c",
+            "import gc_testkit.paths as p; print(p.__file__); print(p.repo_root())",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert res.returncode == 0, res.stderr
     used_file, root = res.stdout.split()
@@ -138,13 +153,24 @@ def test_broken_module_map_does_not_break_a_foreign_run(tmp_path):
     """
     env = _offsite(tmp_path, hide_our_packages=False)
     (tmp_path / "gc_testkit" / "module_map.json").write_text(
-        '{"tools": ', encoding="utf-8"     # оборванный JSON
+        '{"tools": ',
+        encoding="utf-8",  # оборванный JSON
     )
 
     res = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider",
-         "test_smoke.py"],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-q",
+            "-p",
+            "no:cacheprovider",
+            "test_smoke.py",
+        ],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
 
     combined = res.stdout + res.stderr

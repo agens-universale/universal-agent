@@ -7,12 +7,11 @@ import socket
 import wave
 from pathlib import Path
 
-
 from recommended_mcp.manifest import RunSpec
 
 from gc_tui.voice_runtime.state import VoiceState
 
-_PREHEAT_TIMEOUT_SEC = 120   # первый запрос грузит модель с диска — это долго
+_PREHEAT_TIMEOUT_SEC = 120  # первый запрос грузит модель с диска — это долго
 
 
 def service_url(state: VoiceState) -> str:
@@ -30,9 +29,19 @@ def build_run_spec(state: VoiceState) -> RunSpec:
         detach=True,
         command="uv",
         # --no-sync: uv run иначе молча пересинхронизирует env по lock — вернёт вычищенный onnxruntime-gpu и dev-группу
-        args=("run", "--no-sync", "--project", state.root,
-              "uvicorn", "--factory", "speaches.main:create_app",
-              "--host", "127.0.0.1", "--port", str(state.port)),
+        args=(
+            "run",
+            "--no-sync",
+            "--project",
+            state.root,
+            "uvicorn",
+            "--factory",
+            "speaches.main:create_app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(state.port),
+        ),
         # ENABLE_UI=false: create_app иначе импортирует gradio (ui-extra не ставим).
         # WHISPER__TTL: в пине v0.8.3 ttl живёт в WhisperConfig (не STT_MODEL_TTL) —
         # подтверждено дампом конфига сервиса на живой приёмке.
@@ -41,17 +50,21 @@ def build_run_spec(state: VoiceState) -> RunSpec:
         # на Windows с NVIDIA-драйвером. CUDA-режим — future (install --cuda).
         # HF_HUB_OFFLINE: модель скачивает install; сервис работает из кэша.
         # Без него холодная загрузка ходит на HF (в корп-сети — TLS-зависание).
-        env=(("ENABLE_UI", "false"),
-             ("WHISPER__TTL", "-1"),
-             ("WHISPER__INFERENCE_DEVICE", "cpu"),
-             ("HF_HUB_OFFLINE", "1")),
+        env=(
+            ("ENABLE_UI", "false"),
+            ("WHISPER__TTL", "-1"),
+            ("WHISPER__INFERENCE_DEVICE", "cpu"),
+            ("HF_HUB_OFFLINE", "1"),
+        ),
         cwd=Path(state.root),
     )
 
 
 def port_alive(state: VoiceState, timeout: float = 0.5) -> bool:
     try:
-        with socket.create_connection(("127.0.0.1", state.port), timeout=timeout):
+        with socket.create_connection(
+            ("127.0.0.1", state.port), timeout=timeout
+        ):
             return True
     except OSError:
         return False
@@ -75,6 +88,7 @@ def preheat(state: VoiceState, *, post=None) -> bool:
     корп-прокси дефолтная сессия увела бы прогрев в прокси — тот в 127.0.0.1 не пустит."""
     if post is None:
         from gc_tui.voice_runtime.net import post as net_post
+
         post = net_post
     try:
         resp = post(

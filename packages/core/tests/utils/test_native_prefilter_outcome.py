@@ -1,6 +1,9 @@
 """Префильтр по needle: исход не молчит — (paths, None) при успехе, (None, причина) при отказе."""
 
-from gc_core.utils.native_fs_search import PREFILTER_TIMEOUT_SEC, native_prefilter_candidates
+from gc_core.utils.native_fs_search import (
+    PREFILTER_TIMEOUT_SEC,
+    anative_prefilter_candidates,
+)
 
 
 class _Res:
@@ -31,8 +34,8 @@ class _Backend:
         return p.startswith("/")
 
 
-def _run(backend):
-    return native_prefilter_candidates(
+async def _run(backend):
+    return await anative_prefilter_candidates(
         backend,
         "/work",
         terms=["KEY"],
@@ -44,34 +47,40 @@ def _run(backend):
     )
 
 
-def test_success_returns_paths_and_no_failure():
+async def test_success_returns_paths_and_no_failure():
     backend = _Backend(_Res("/work/a.py\nb.py\n"))
-    assert _run(backend) == (["/work/a.py", "/work/b.py"], None)
+    assert await _run(backend) == (["/work/a.py", "/work/b.py"], None)
 
 
-def test_timeout_is_named():
-    assert _run(_Backend(_Res(timed_out=True))) == (None, "timeout")
+async def test_timeout_is_named():
+    assert await _run(_Backend(_Res(timed_out=True))) == (None, "timeout")
 
 
-def test_capped_listing_is_named():
-    assert _run(_Backend(_Res("/work/a.py\n", capped=True))) == (None, "capped")
+async def test_capped_listing_is_named():
+    assert await _run(_Backend(_Res("/work/a.py\n", capped=True))) == (
+        None,
+        "capped",
+    )
 
 
-def test_exec_error_and_bad_exit_are_named():
-    assert _run(_Backend(raise_exc=RuntimeError("boom"))) == (None, "failed")
-    assert _run(_Backend(_Res(rc=2))) == (None, "failed")
+async def test_exec_error_and_bad_exit_are_named():
+    assert await _run(_Backend(raise_exc=RuntimeError("boom"))) == (
+        None,
+        "failed",
+    )
+    assert await _run(_Backend(_Res(rc=2))) == (None, "failed")
 
 
-def test_prefilter_budget_is_one_minute():
+async def test_prefilter_budget_is_one_minute():
     backend = _Backend(_Res())
-    _run(backend)
+    await _run(backend)
     assert PREFILTER_TIMEOUT_SEC == 60
     assert backend.calls[0]["timeout"] == PREFILTER_TIMEOUT_SEC
 
 
-def test_prefilter_captures_at_walk_ceiling_not_tool_60k():
+async def test_prefilter_captures_at_walk_ceiling_not_tool_60k():
     from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
 
     backend = _Backend(_Res())
-    _run(backend)
+    await _run(backend)
     assert backend.calls[0]["capture_max_chars"] == WALK_OUTPUT_MAX_CHARS

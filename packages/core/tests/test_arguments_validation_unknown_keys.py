@@ -4,13 +4,13 @@
 import json
 
 import pytest
-
-from gc_core.tools import apply_tool
+from gc_core.tools import aapply_tool
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
     parse_and_validate_tool_arguments,
 )
+from gc_testkit import run_coro
 
 SPEC = {
     "type": "function",
@@ -50,7 +50,9 @@ def test_unknown_top_level_key_is_dropped_and_call_proceeds():
 
 
 def test_several_unknown_keys_are_dropped():
-    args = _validate({"command": "ls", "description": "why", "reason": "because"})
+    args = _validate(
+        {"command": "ls", "description": "why", "reason": "because"}
+    )
     assert args == {"command": "ls"}
 
 
@@ -110,7 +112,10 @@ def test_annotate_json_object_puts_note_first():
 
 def test_annotate_plain_text_prefixes_note():
     raw = annotate_output_with_dropped_arguments("done", ["description"])
-    assert raw == "Field description was dropped because it is not in the tool schema.\ndone"
+    assert (
+        raw
+        == "Field description was dropped because it is not in the tool schema.\ndone"
+    )
 
 
 def test_apply_tool_output_mentions_dropped_fields():
@@ -118,8 +123,12 @@ def test_apply_tool_output_mentions_dropped_fields():
         def __init__(self, **_kwargs):
             pass
 
-        def __call__(self, command: str, timeout: int | None = None) -> str:
-            return json.dumps({"ok": True, "command": command, "timeout": timeout})
+        # Контракт тула в ветке — `acall`; синхронного входа нет ни у одного
+        # настоящего тула, и двойник обязан повторять форму, а не прошлую.
+        async def acall(self, command: str, timeout: int | None = None) -> str:
+            return json.dumps(
+                {"ok": True, "command": command, "timeout": timeout}
+            )
 
     tools = {
         "exec_command": {
@@ -128,10 +137,12 @@ def test_apply_tool_output_mentions_dropped_fields():
             "injected_fields": [],
         }
     }
-    raw = apply_tool(
-        "exec_command",
-        {"command": "ls", "description": "List dir", "timeout": "3"},
-        tools_data_=tools,
+    raw = run_coro(
+        aapply_tool(
+            "exec_command",
+            {"command": "ls", "description": "List dir", "timeout": "3"},
+            tools_data_=tools,
+        )
     )
     payload = json.loads(raw)
     assert payload["ok"] is True

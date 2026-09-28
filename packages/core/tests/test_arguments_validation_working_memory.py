@@ -1,8 +1,10 @@
 import json
 
 import pytest
-
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.session.working_memory import WorkingMemory
 
 

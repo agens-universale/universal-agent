@@ -1,12 +1,13 @@
 """OS terminal window title (OSC) for the TUI — so the window is identifiable
 in the taskbar / OBS window-capture by its title. Textual sets only its in-app
 Header, not the OS title; we emit the OSC escape ourselves."""
+
 from __future__ import annotations
 
 import sys
 from typing import Optional
 
-_EMBLEM = "✦"   # U+2726
+_EMBLEM = "✦"  # U+2726
 _APP_NAME = "GigaCode"
 
 # Статус-слово (из _session_status_word) → глиф. Глиф служит разделителем

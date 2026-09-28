@@ -1,0 +1,543 @@
+# =============================================================================
+# Дефолт-конфиг GigaCode Universal Agent (gc-ua).
+# Авто-копируется в пользовательский config.yml при первом запуске
+# (Windows: ~/.gc/, macOS/Linux: ~/.config/gc/).
+# Полный документированный пример со всеми опциями — demo_config.yml.
+#
+# ПЕРЕД ПЕРВЫМ ЗАПРОСОМ впишите:
+#   1) backend.completions_url — endpoint OpenAI-совместимого провайдера;
+#   2) backend.chat_completion_headers.Authorization — токен доступа.
+# =============================================================================
+
+backend:
+  # responses | chat_completions
+  api_mode: chat_completions
+  #completions_url: "https://routerai.ru/api/v1/chat/completions"
+  # openrouter.ai — прежний эндпоинт, ключ тот же (sk-or-...), работает на обоих.
+  completions_url: "https://openrouter.ai/api/v1/chat/completions"
+  # Зеркало or.crbrcloud.ru НЕ ГОДИТСЯ для агента: nginx там режет тело запроса
+  # на ~11 КБ (проверено бинарным поиском: 10970 байт → 200, 11005 → nginx 500).
+  # Один системный промпт агента — 18 КБ, с тулами payload ~76 КБ. Короткие
+  # ручные запросы проходят, поэтому провайдер выглядит рабочим.
+  #completions_url: "https://or.crbrcloud.ru/api/v1/chat/completions"
+  #completions_url: "https://gigacode.ru/api/v2/chat/completions"
+  # completions_url: "http://localhost:8011/v1/chat/completions"
+  # completions_url: "https://routerai.ru/api/v1/chat/completions"
+  chat_completions_max_tokens: 32768
+  # OpenAI gpt-5.x требует max_completion_tokens, а не max_tokens.
+  # Qwen/cloud.ru (vLLM-style) — стандартный max_tokens → true.
+  use_max_tokens_param: true
+  # Для OpenAI включаем strict-нормализацию tools schema.
+  openai_strict_tools_schema: true
+  # Vendor-specific параметры. Настраивайте под свой провайдер.
+  chat_completion_kwargs:
+    # gpt-5.x reasoning-модели принимают только дефолтную temperature (1.0);
+    # deepseek-style sampling (top_k/min_p/repetition_penalty/enable_thinking) убран.
+    temperature: 0.5
+    top_p: 0.95
+    presence_penalty: 0
+    tool_choice: auto
+  # Заголовки для chat/completions (всё, что должно уйти в HTTP headers).
+  chat_completion_headers:
+    # routerai.ru — ключ из https://routerai.ru/settings/keys (действует для
+    # completions_url на routerai.ru; OpenRouter его НЕ принимает и наоборот).
+    #Authorization: "Bearer sk-REDACTED"
+    # OpenRouter-ключ (для completions_url на openrouter.ai):
+    Authorization: "REDACTED-FOR-TESTS"
+    # GigaCode: авторизация по X-Api-Key (не Bearer). Нужен ТОЛЬКО для gigacode.ru;
+    # при возврате туда — раскомментировать и закомментировать Authorization выше.
+    #X-Api-Key: "REDACTED32"
+    # Рекомендованный вариант — через окружение (не хранить ключ в файле):
+    #   export GC_API_KEY=sk-REDACTED
+    # Authorization: "Bearer ${ENV:GC_API_KEY}"
+    # Обязательно для gc-cli на этом прокси: он отдаёт gzip-тело, но НЕ ставит
+    # заголовок Content-Encoding, поэтому requests не разжимает его и r.json()
+    # падает JSONDecodeError. gc-ua это не задевает — стриминговый ответ (SSE)
+    # прокси не сжимает. identity запрещает сжатие и чинит не-стриминговый путь.
+    Accept-Encoding: "identity"
+  #   HTTP-Referer: "https://your-app.example"
+  #   X-OpenRouter-Title: "mini-cli-pub"
+  #   X-Custom-Header: "value"
+    # Можно не хранить токен в файле:
+    #   Authorization: "Bearer ${ENV:GC_API_KEY}"                # затем: export GC_API_KEY=sk-...
+    # Или из файла (chmod 600): Authorization: "Bearer ${FILE:~/.secrets/gc_api_key}"
+
+  use_ssl: true            # bool (как раньше) ИЛИ строка-путь к CA-bundle: use_ssl: "/path/ca.pem"
+  # --- ported feature: backend mTLS (клиентский сертификат; опционально) ---
+  # cert_path: "/path/client.crt"   # оба заданы → mTLS; ни одного → как сейчас
+  # key_path:  "/path/client.key"
+  use_retry: true
+
+# Вспомогательные LLM (summary, finish gate, intent scope).
+  # HTTP-таймаут одного запроса к LLM (секунды). Дефолт 600 (10 минут).
+  request_timeout_sec: 600
+  # HTTP/SOCKS-прокси для backend-вызовов. null/пусто → из env
+  # (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY). Пример: "socks5h://proxy.example:1080"
+  proxy: null
+  # Слать ли провайдеру поле function.strict в схемах тулов.
+  # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  send_tool_strict: true
+agent:
+  # routerai.ru / OpenRouter требуют полное имя с вендором, в нижнем регистре.
+  model: "anthropic/claude-opus-5"
+  # model: "qwen/qwen3-coder-next"
+  # Для gigacode.ru: только "GigaCode" или "vllm/CodeChat". Голый алиас "CodeChat"
+  # роутится на ноду, которая отдаёт 500 на любом сообщении с role: system,
+  # т.е. на системном промпте агента.
+  # model: "vllm/CodeChat"
+  # model: "GigaCode"
+  #model: "Qwen/Qwen3-Coder-Next"
+  # model: "MiniMaxAI/MiniMax-M2.7"
+  # model: deepseek/deepseek-v4-pro
+  system_prompt_id: v1
+  use_server_subagents: false
+  # true — встроенные + все кастомные из subagents_dir.
+  # Список имён выбирает КАСТОМНЫХ; встроенные семь доступны всегда, пока
+  # значение не false (префикс subagent_ можно не писать).
+  #
+  # СЕЙЧАС ВКЛЮЧЁН СТЕНД ВАРНИНГОВ (папка agents-warn): битый файл, коллизия со
+  # встроенным worker, четыре валидных при лимите 2 и несуществующее имя в
+  # списке — сработают все четыре варнинга сразу.
+  # Вернуть рабочую папку: раскомментировать две строки ниже, закомментировать
+  # три строки стенда и убрать subagents_max_count.
+  #   use_local_subagents: [explorer, reviewer, doc_writer]
+  #   subagents_dir: "/Users/nikita/.gc/agents"
+  use_local_subagents: [gamma, alpha, beta, delta, typo_agent]
+  subagents_max_count: 2
+  subagents_dir: "/Users/nikita/.gc/agents-warn"
+  subagent_max_steps: 50
+  client_name: mini_cli_pub_agent_1
+  x_cl_id: "12345"
+  verbose: true
+  stop_tools: [turn_ask_human]
+  server_tool_prefix: system
+  max_steps: 200
+  # Слать ли trace_id в заголовке к модели. Дефолт false — opt-in.
+  trace_header_enabled: true
+  no_tool_call_max_count: 3
+  strict_turn_finish_validation: true
+  # Finish gate (quality gate): макс. reject turn_finish за user turn / subagent run
+  finish_gate_max_iterations: 10
+  subagent_finish_gate_max_iterations: 3
+  # finish_gate_use_rule_hints: false  # rule-layer без LLM — вне v1
+  inject_tool_fields:
+    reason: "Brief rationale (1–2 sentences): goal, why now, expected outcome."
+
+  # Per-run лимиты надёжности (закомментировано = выключено):
+  # session_token_limit: 200000   # бюджет input+output токенов на один ран
+  # max_tool_calls: 100           # макс. вызовов инструментов на один ран
+  # Аварийная LLM-суммаризация трейса при лимите (step/tool/token limit).
+  # Возвращает envelope с raw_trace_summary; false — пустой summary.
+  limit_trace_summary: true
+tui:
+  # Мастер-свитч live-стриминга в TUI (chat_completions). На CLI/server/swarm НЕ
+  # влияет — там всегда non-stream (гейтится on_stream_delta, ставит только TUI).
+  # Не задан → legacy backend.stream.
+  stream: true
+  # minimal (default) — только индикатор + счётчик; answer — прогрессивный ответ;
+  # answer_reasoning — + строка-мысль «⠇ …».
+  stream_display: minimal
+  # adaptive bounce (только TUI): как поступать с текст-ответом без тула.
+  #   deny  — всегда требовать tool-call (как CLI/server/swarm);
+  #   judge — судья решает, полный ли это ответ (привет/объяснение → принять);
+  #   allow — всегда принимать текст (ни bounce, ни судьи).
+  text_answer_mode: "deny"
+  # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
+  # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
+  finish_gate_mode: "on"
+  # Только TUI: оставить лишь корневой AGENTS.md (L3), отбросив global (~/.config/gc)
+  # и .gc/AGENTS.md. Игнорируется, если задан paths.agent_md_path (путь главнее).
+  agentsmd_override: false
+  # Bang-shell: префикс `!` в поле ввода → локальная shell-команда (не агент).
+  bang_shell:
+    enabled: true
+    # null / omit / 0 = без лимита. Положительное N = авто-kill через N секунд.
+    # timeout_sec: null
+    max_output_bytes: 32768
+    max_output_lines: 200
+  file_view:
+    enabled: true
+    max_file_bytes: 67108864   # 64 MiB
+    # null / omit = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn.
+    # page_lines: null
+
+# Diff-TUI: visual review/approve/undo правок агента (не параметры fs return_diff).
+diff_tui:
+  cache_max_orig: 500          # LRU лимит .orig в cache-mode
+  preview_context_lines: 6     # контекст в TUI visual diff / trace-preview
+  full_file_max_lines: 300     # порог «весь файл» vs preview (adaptive)
+  max_diff_chars: 8000         # усечение больших visual diff (0 = без лимита)
+
+# Обновление агента (спека D)
+update:
+  check: auto            # auto | off — фоновая проверка новой версии при старте TUI
+  extra_args: []         # доп. аргументы к uv tool install (корп-сеть: ["--system-certs"])
+
+logging:
+  full_log_backend: false
+  console_trace: true
+  save_logs: true
+  # --- ported feature: config-selectable log format + secret redaction ---
+  format: jsonl            # text (истор. дефолт) | jsonl (структурный event-поток: agent_start, backend_request/response, dialog_message, final_answer, run_usage, summary_* ...)
+  log_level: info          # debug|info|warning|error  (debug добавляет backend_request/response, agent_tools)
+  redact_secrets:
+    enabled: true          # маскировать секреты (Bearer/JWT/sk-/PEM/AWS/...) в логах и stdout → ***REDACTED***
+    extra_keys: []         # доп. имена-подстроки чувствительных ключей
+    extra_patterns: []     # доп. value-regex
+
+paths:
+  # Промпт роли запуска (agent_md). Пусто = ролевого промпта нет.
+  # В CLI/server/swarm это единственный источник инструкций; задан → замещает всё.
+  agent_md_path: "/Users/nikita/.config/gc/prompts/cli_agent_test.md"
+  # agent_md_path: "prompts/demo_cli_agent.md"
+  # chat_completions_system_prompt_path: "prompts/chat_completions_system_prompt.md"
+
+  # threads_data_path / logs_dump_dir / skills_data_path по умолчанию НЕ заданы —
+  # тогда runtime-данные пишутся в кросс-платформенные дефолтные каталоги:
+  #   Linux/macOS:  ~/.local/state/gc/projects/<project-slug>/{threads,logs}/
+  #   Windows:      %USERPROFILE%\.gc\projects\<project-slug>\{threads,logs}\
+  # Если хочется явный путь — раскомментируй и задай абсолютный.
+  # threads_data_path: ""
+  # logs_dump_dir: ""
+
+  # Обычно не задавать — gc-cli автоматически смотрит project/user/system слои.
+  # Задавайте только если нужно жёстко зафиксировать единственный источник
+  # (production sandbox, curated team set, CI с фикстурами).
+  # skills_data_path: /opt/gc/curated-skills
+
+  # Для пром-стенда (с одним доступным для записи каталогом, например /tmp):
+  #   запускать с GC_HOME=/tmp/gc — все runtime-данные пойдут под этот корень.
+  # Доступные env-переменные:
+  #   GC_HOME, GC_STATE_DIR, GC_CONFIG_DIR, GC_CACHE_DIR, GC_DATA_DIR,
+  #   XDG_*_HOME (стандарт freedesktop.org, только Linux/macOS).
+
+# Лимиты trace digest для finish gate (отдельно от summary; см. docs_md/quality_gate/SPEC.md)
+summary:
+  chat_completions_summary_trigger_chars: 200000
+  # Turn-end compaction после accept submit_solution (по умолчанию = 60% trigger)
+  chat_completions_summary_turn_end_trigger_chars: 120000
+  incremental_batch_chars: 280000
+  max_message_chars: 30000
+  max_dialogue_chars: 1000000
+  max_accumulated_summary_chars: 60000
+  last_dialog_steps_count: 4
+  last_dialog_step_message_max_chars: 5000
+  intent_log_preview_chars: 10000
+  
+strip_tags_projection:
+  tags: []
+
+intent_scope:
+  # tools.<name>.record:
+  # - aggregated: хранить только текстовую сводку (без arguments/output полей)
+  # - raw: хранить структурированный payload по флагам ниже
+  #
+  # tools.<name>.store_arguments / store_output:
+  # - применяются только для record=raw
+  # - если оба false -> невалидный конфиг (старт с ошибкой)
+  tools:
+    turn_ask_human:
+      record: aggregated
+    turn_finish:
+      record: raw
+      # turn_finish output уже содержит итоговый report/handoff/status,
+      # поэтому arguments обычно дублируют данные.
+      store_arguments: false
+      store_output: true
+  max_summary_chars: 500
+  max_tool_output_chars: 8000
+  max_raw_record_chars: 5000
+  read_page_record_limit: 10
+  fallback_raw_on_llm_error: true
+
+  # Финальная проза, закрывающая ход, пишется в intent log:
+  # <= порога — как есть (raw); > порога — LLM-саммари (кап max_summary_chars).
+  max_final_answer_raw_chars: 2000
+
+fs_tools:
+  max_read_bytes: 8388608       # 8 MiB
+  max_mutate_bytes: 16777216    # 16 MiB (peak RAM ≈ ×2–3; raise via config if needed)
+
+todo:
+  reminder_steps: 10
+
+security:
+  command_moderation:
+    enabled: false
+    mode: allow # allow | ask | deny — judge для execute_command/run_python_code
+                # ВАЖНО: denied_command_examples работает только при mode: ask|deny
+                # (при allow judge не запускается). Для теста deny-листа поставь mode: ask
+    allowed_command_examples: []
+    # --- ported feature: operator deny-list (judge → risk flag "operator_denied") ---
+    denied_command_examples:
+      - "rm -rf /"
+      - "curl * | sh"
+    # allowed_command_examples:
+    #   - "ls -la"
+    #   - "git status"
+    #   - "pytest tests/"
+
+  write_guard:
+    enabled: false
+    mode: deny
+    # When enabled, write/edit tools can modify only launch_root + extra_paths.
+    extra_paths: []
+    # extra_paths:
+    #   - "./build"                    # относительно config.yml
+    #   - "/tmp/agent-scratch"         # абсолютный
+    #   - "~/Downloads/agent-out"      # ~ резолвится
+
+  url_policy:
+    enabled: false
+    mode: allow
+    allowed_schemes: ["http", "https"]
+    url_blacklist:
+      - "*.google.com"
+      - google.com
+    # Дополнительные patterns если нужно — раскомментируй:
+    #   - "169.254.*"
+    #   - "127.*"
+    #   - "10.*"
+    #   - "192.168.*"
+    #   - "172.1[6-9].*"
+    #   - "172.2[0-9].*"
+    #   - "172.3[0-1].*"
+    #   - "0.0.0.0"
+    #   - "localhost"
+
+  read_guard:
+    enabled: false
+    mode: ask                          # allow | ask | deny
+    # Пусто = [launch_root] (= только проект); ["*"] = allow-by-default по ФС.
+    allowed_read_roots: []
+    allowed_read_paths: []
+    # allowed_read_paths:
+    #   - "~/.local/state/gc/skills"
+    #   - "<launch_root>/.gc/skills"
+    denied_read_paths: []
+    # denied_read_paths:
+    #   - "~/.ssh"
+    #   - "~/.aws"
+    #   - "~/.config/gcloud"
+    #   - "~/.gnupg"
+    #   - "/etc/ssl/private"
+    #   - "/proc"
+    #   - "/sys"
+    #   - "~/.local/state/gc"
+    #   - "<launch_root>/.gc"
+    denied_file_patterns: []
+    # denied_file_patterns:
+    #   - ".env"
+    #   - ".env.*"
+    #   - "*id_rsa*"
+    #   - "*id_ed25519*"
+    #   - "*.pem"
+    #   - "*credentials*.json"
+    #   - "*.sqlite"
+    denied_extensions: []
+    # denied_extensions:
+    #   - ".key"
+    #   - ".pfx"
+    #   - ".jks"
+
+  protected_paths:
+    enabled: false
+    extra: []
+
+pricing:
+  enabled: true                # рубильник ПОКАЗА денег; токены считаются всегда
+  currency: "₽"                # валюта ТАРИФА (факт провайдера всегда в $)
+  per_tokens: 1000000          # ставки указаны за столько токенов
+
+  # Ставки нужны только провайдерам, которые цену НЕ сообщают (GigaCode, локальный
+  # vLLM). На OpenRouter их заполнять не нужно — цена придёт фактом.
+  # Оба нуля = «не задано» (не «бесплатно»). Поставь реальные значения вместо
+  # нулей, чтобы увидеть тарифный расчёт и смешанный режим (маркер ~), напр. 59/118.
+  # НЕ добавляй второй ключ input/output выше по блоку — YAML молча возьмёт последний.
+  #
+  # Ставки СОЗНАТЕЛЬНО закомментированы, а не выставлены в 0: «ключа нет» одинаково
+  # понимают и develop, и ветка PR #63, а `0` они трактуют по-разному — на develop
+  # это валидный нулевой тариф, и вся стоимость печатается как «0.0 ₽».
+  # (--sync-config может вернуть сюда `input: 0 / output: 0` — тогда закомментируй снова.)
+  # input: 59
+  # output: 118
+  # cache_read: 0              # опц.; нет → кэш биллится как input
+
+  # Переопределение под конкретные модели (мультимодельные сетапы):
+  # models:
+  #   "GigaCode":
+  #     input: 59
+  #     output: 118
+
+# -----------------------------------------------------------------------------
+# Сборка мусора (gc.collect) — точки C1/C2/C3.
+# C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
+# C3 (один collect после батча тулов, перед LLM-шагом) — управляется этим флагом.
+# Default: on для CLI/TUI, off для server (gc.collect глобален для процесса).
+# Явное значение перекрывает режимный default.
+# gc:
+#   force_collect: false
+
+  input: 0                     # впишите реальные ставки, когда будут известны
+  output: 0
+  # cache_read: 0              # опц.; нет → кэш биллится как input
+
+# -----------------------------------------------------------------------------
+# Сборка мусора (gc.collect) — точки C1/C2/C3.
+# C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
+# C3 (один collect после батча тулов, перед LLM-шагом) — управляется этим флагом.
+# Default: on для CLI/TUI, off для server (gc.collect глобален для процесса).
+# Явное значение перекрывает режимный default.
+# gc:
+#   force_collect: false
+
+
+
+
+
+
+# -----------------------------------------------------------------------------
+# Сборка мусора (gc.collect) — точки C1/C2/C3.
+# C1 (после компакции истории) и C2 (после close_all в finally) — всегда вкл.
+# C3 (один collect после батча тулов, перед LLM-шагом) — управляется этим флагом.
+# Default: on для CLI/TUI, off для server (gc.collect глобален для процесса).
+# Явное значение перекрывает режимный default.
+# gc:
+#   force_collect: false
+
+
+
+
+
+
+
+
+
+
+
+
+
+chat_completions:
+  llm:
+    # gpt-5.4-mini — reasoning-модель; даём запас токенов, чтобы reasoning не
+    # съедал весь бюджет и summary/compact не возвращал пустой content (issue #6).
+    max_tokens: 16384
+    completion_kwargs: {}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+quality_gate:
+  max_dialogue_chars: 200000
+  max_message_chars: 5000
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+working_memory:
+  max_chars_goal: 2000
+  max_chars_constraints: 4000
+  max_chars_state: 6000
+  max_chars_knowledge: 8000
+  total_budget_chars: 20000
+
+# Technical hints о памяти (tool_usage_notice, long memory)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+tool_usage_notice:
+  - tool_name: session_memory
+    step_messages_count: 10
+    notice_message: "You have not used session memory for some steps. Review/update thread memory if needed."
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+project_memory:
+  enable_project_memory_notice: true
+  check_interval_messages: 5
+
+# Intent scope: LLM post-hook после human-facing tools (только chat_completions).
+# tools: [] — выключить. Параметры LLM — chat_completions.llm.
+
+mcp:
+  # Реальные серверы приезжают из ~/.gc/config.local.yml (gc-mcp install).
+  servers: {}
+  meta:
+    tools-cache-ttl: 3600
+    request_timeout_sec: 600

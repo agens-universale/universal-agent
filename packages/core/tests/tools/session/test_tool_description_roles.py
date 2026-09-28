@@ -1,13 +1,15 @@
 """Stage 2: session tools declare interaction roles in API descriptions."""
 
-from gc_core.tools.turn.intermediate_reply import IntermediateReply
-from gc_core.tools.turn.ask_human import AskHuman
-from gc_core.tools.turn.submit_solution import SubmitSolution
-from gc_core.tools.session.working_memory import WorkingMemory
-from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.fs.read_file import ReadFile
-from gc_core.tools.session.stored_outputs.read_stored_tool_output import ReadStoredToolOutput
+from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
+from gc_core.tools.session.stored_outputs.read_stored_tool_output import (
+    ReadStoredToolOutput,
+)
+from gc_core.tools.session.working_memory import WorkingMemory
+from gc_core.tools.turn.ask_human import AskHuman
+from gc_core.tools.turn.intermediate_reply import IntermediateReply
+from gc_core.tools.turn.submit_solution import SubmitSolution
 
 
 def test_intermediate_reply_non_final():
@@ -52,14 +54,28 @@ def test_working_memory_register_hygiene_in_description():
     for text in (desc, prompt):
         assert "approach" in text and "exceed" in text
         assert "write" in text
-        assert "full replace" in text or "full overwrite" in text or "fully replace" in text
+        assert (
+            "full replace" in text
+            or "full overwrite" in text
+            or "fully replace" in text
+        )
         assert "do not wait" in text
         assert "hygiene" in text
         assert "deduplicate" in text or "deduplication" in text
     assert "do not append on every trivial step" in prompt
     assert "definitions above" in desc or "per the definitions above" in desc
-    assert "rewrite" not in WorkingMemory.tool_description()["parameters"]["properties"]["action"]["enum"]
-    assert "write" in WorkingMemory.tool_description()["parameters"]["properties"]["action"]["enum"]
+    assert (
+        "rewrite"
+        not in WorkingMemory.tool_description()["parameters"]["properties"][
+            "action"
+        ]["enum"]
+    )
+    assert (
+        "write"
+        in WorkingMemory.tool_description()["parameters"]["properties"][
+            "action"
+        ]["enum"]
+    )
 
 
 def test_project_memory_project_future():
@@ -93,5 +109,7 @@ def test_read_user_intent_log_pagination_records():
     spec = ReadUserIntentLog.tool_description()
     flat = " ".join(spec["description"].lower().split())
     assert "record" in flat
-    offset_desc = spec["parameters"]["properties"]["offset"]["description"].lower()
+    offset_desc = spec["parameters"]["properties"]["offset"][
+        "description"
+    ].lower()
     assert "record" in offset_desc

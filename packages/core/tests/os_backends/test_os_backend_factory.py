@@ -1,11 +1,10 @@
 import asyncio
 
 import pytest
-
-from gc_core.run_context import create_run_context
 from gc_core.backends.factory import parse_os_backend_kind, resolve_os_backend
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
+from gc_core.run_context import acreate_run_context
 
 
 def test_parse_os_backend_defaults_to_local():
@@ -66,15 +65,17 @@ def test_resolve_harbor_rejects_non_string_exec_init():
         loop.close()
 
 
-def test_create_run_context_sets_local_os_backend():
-    ctx = create_run_context({"backend_api_mode": "chat_completions", "save_logs": False})
+async def test_create_run_context_sets_local_os_backend():
+    ctx = await acreate_run_context(
+        {"backend_api_mode": "chat_completions", "save_logs": False}
+    )
     assert isinstance(ctx.os_backend, LocalFsBackend)
     assert getattr(ctx, "is_tui", False) is False
 
 
-def test_create_run_context_explicit_override():
+async def test_create_run_context_explicit_override():
     sentinel = object()
-    ctx = create_run_context(
+    ctx = await acreate_run_context(
         {"save_logs": False},
         os_backend=sentinel,  # type: ignore[arg-type]
         is_tui=True,

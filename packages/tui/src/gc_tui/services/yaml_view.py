@@ -1,4 +1,5 @@
 """Общий YAML-виджет с подсветкой (Rich Syntax) — для /config и /mcp."""
+
 import yaml
 from rich.syntax import Syntax
 from textual.widgets import Static
@@ -27,6 +28,7 @@ def safe_yaml_dump(data) -> str:
         sort_keys=False,
         default_flow_style=False,
     )
+
 
 # Тема подсветки YAML — один источник, меняется в одну строку при ревью.
 # Кандидаты: solarized-dark | nord | gruvbox-dark | native | github-dark |

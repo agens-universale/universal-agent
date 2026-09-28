@@ -11,5 +11,6 @@ def test_discovery_timeout_from_value():
 
 def test_discovery_timeout_must_be_positive():
     import pytest
+
     with pytest.raises(Exception):
         McpMetaConfig(discovery_timeout_sec=0)

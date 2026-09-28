@@ -1,14 +1,18 @@
 """I3/B: finish_gate в jsonl один раз, уже финальный; skipped → runtime_outcome."""
+
 from __future__ import annotations
 
 import json
 
 from gc_core.intent_guard.guard import FinishGateDecision
-from gc_core.intent_guard.turn_finish_emit import apply_finish_gate_to_turn_finish_output_in_state
+from gc_core.intent_guard.turn_finish_emit import (
+    apply_finish_gate_to_turn_finish_output_in_state,
+)
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.states import State
 from gc_core.thread_store import make_message_key
 from gc_core.tools.turn.submit_solution import SubmitSolution
+from gc_testkit import run_coro
 
 
 def _make_state() -> State:
@@ -25,11 +29,17 @@ def _make_state() -> State:
 
 
 def _finish_output() -> str:
-    """Живой output тула turn_finish (валидные аргументы, статус submitted)."""
-    return SubmitSolution()(
-        solution_type="direct_answer",
-        task_report="готово",
-        handoff="{}",
+    """Живой output тула turn_finish (валидные аргументы, статус submitted).
+
+    Через ``run_coro(...acall(...))``: у тулов форма ОДНА — корутинная,
+    синхронного ``__call__`` у них нет.
+    """
+    return run_coro(
+        SubmitSolution().acall(
+            solution_type="direct_answer",
+            task_report="готово",
+            handoff="{}",
+        )
     )
 
 
@@ -84,7 +94,9 @@ def test_finish_gate_persisted_once_after_apply_not_before():
             "output": _finish_output(),
         },
     ]
-    assert persisted == [], "finish output не должен попасть в jsonl до apply gate"
+    assert persisted == [], (
+        "finish output не должен попасть в jsonl до apply gate"
+    )
 
     validation = ValidationResult(
         ok=True,
@@ -98,12 +110,16 @@ def test_finish_gate_persisted_once_after_apply_not_before():
         coverage_score=1.0,
         feedback_for_agent="",
     )
-    ok = apply_finish_gate_to_turn_finish_output_in_state(
-        state=state,
-        finish_call_id=call_id,
-        decision=FinishGateDecision(outcome="accept", validation=validation),
-        logger=None,
-        persist_messages_callback=persist,
+    ok = run_coro(
+        apply_finish_gate_to_turn_finish_output_in_state(
+            state=state,
+            finish_call_id=call_id,
+            decision=FinishGateDecision(
+                outcome="accept", validation=validation
+            ),
+            logger=None,
+            persist_messages_callback=persist,
+        )
     )
     assert ok is True
     assert len(persisted) == 1

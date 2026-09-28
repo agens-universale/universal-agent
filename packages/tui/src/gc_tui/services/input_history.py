@@ -11,10 +11,11 @@
 
 Навигация через prev/next (Task 2).
 """
+
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from gc_core.utils.atomic_io import atomic_replace
@@ -73,7 +74,7 @@ class InputHistory:
                 continue
             text = entry.get("text")
             if isinstance(text, str) and not _is_command(text):
-                self._entries.append(text)   # старые command-записи отсеиваем
+                self._entries.append(text)  # старые command-записи отсеиваем
 
     def append(self, text: str) -> None:
         if not text or _is_command(text):
@@ -84,8 +85,11 @@ class InputHistory:
         try:
             self._project_dir.mkdir(parents=True, exist_ok=True)
             with self._file.open("a", encoding="utf-8") as f:
-                ts = datetime.now(timezone.utc).isoformat()
-                f.write(json.dumps({"ts": ts, "text": text}, ensure_ascii=False) + "\n")
+                ts = datetime.now(UTC).isoformat()
+                f.write(
+                    json.dumps({"ts": ts, "text": text}, ensure_ascii=False)
+                    + "\n"
+                )
         except OSError:
             pass
 
@@ -97,14 +101,19 @@ class InputHistory:
             self._rewrite_tail()
 
     def _rewrite_tail(self) -> None:
-        self._entries = self._entries[-self.MAX_ENTRIES:]
+        self._entries = self._entries[-self.MAX_ENTRIES :]
         try:
             self._project_dir.mkdir(parents=True, exist_ok=True)
             tmp = self._file.with_suffix(self._file.suffix + ".tmp")
             with tmp.open("w", encoding="utf-8") as f:
-                ts = datetime.now(timezone.utc).isoformat()
+                ts = datetime.now(UTC).isoformat()
                 for text in self._entries:
-                    f.write(json.dumps({"ts": ts, "text": text}, ensure_ascii=False) + "\n")
+                    f.write(
+                        json.dumps(
+                            {"ts": ts, "text": text}, ensure_ascii=False
+                        )
+                        + "\n"
+                    )
             atomic_replace(tmp, self._file)
             self._appends_since_rewrite = 0
         except OSError:

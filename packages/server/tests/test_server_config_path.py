@@ -1,8 +1,6 @@
 import logging
 import os
 
-import pytest
-
 from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
@@ -24,25 +22,32 @@ def test_server_config_path_from_env_vars(monkeypatch, tmp_path):
 
 def test_server_config_path_none_falls_back_to_default(monkeypatch, tmp_path):
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
-    monkeypatch.setattr("gc_server.rest_api.server_config.PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "gc_server.rest_api.server_config.PROJECT_ROOT", str(tmp_path)
+    )
     cfg = load_server_config()
     assert cfg["server"]["host"] == "0.0.0.0"
     assert cfg["server"]["port"] == 8000
 
 
-def test_load_server_config_logs_which_candidate_won(monkeypatch, tmp_path, caplog):
+def test_load_server_config_logs_which_candidate_won(
+    monkeypatch, tmp_path, caplog
+):
     """Какой именно config_server.yml прочитан — обязано быть в логе.
 
     Список кандидатов начинается с CWD, и до этой строки узнать победителя было
     неоткуда: молчаливый промах резолва однажды поднял сервер с auth_token=None.
     """
     (tmp_path / "config_server.yml").write_text(
-        "server:\n  port: 7777\n", encoding="utf-8",
+        "server:\n  port: 7777\n",
+        encoding="utf-8",
     )
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
     monkeypatch.chdir(tmp_path)
 
-    with caplog.at_level(logging.INFO, logger="gc_server.rest_api.server_config"):
+    with caplog.at_level(
+        logging.INFO, logger="gc_server.rest_api.server_config"
+    ):
         cfg = load_server_config()
 
     assert cfg["server"]["port"] == 7777
@@ -63,7 +68,9 @@ def test_load_server_config_reports_the_file_it_read(monkeypatch, tmp_path):
     assert load_server_config()["config_path"] == str(custom)
 
 
-def test_load_server_config_reports_empty_path_when_nothing_found(monkeypatch, tmp_path):
+def test_load_server_config_reports_empty_path_when_nothing_found(
+    monkeypatch, tmp_path
+):
     """Файла нет — ключ есть, но пустой: «якорь неизвестен», а не «якорь = ассеты»."""
     monkeypatch.setattr(env_vars, "env", EnvVars(server_config_path=None))
     monkeypatch.setattr(server_config, "PROJECT_ROOT", str(tmp_path))
@@ -97,7 +104,9 @@ def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
     )
 
     assert cli_forces_legacy_model(cfg) is True
-    router = ModelRouter(cfg, level_provider=lambda: "default", force_legacy=True)
+    router = ModelRouter(
+        cfg, level_provider=lambda: "default", force_legacy=True
+    )
     resolved = router.resolve("main")
     assert resolved.alias is None
     assert resolved.model == "forced-model"
@@ -152,12 +161,16 @@ def test_relative_agent_md_is_found_next_to_the_config(tmp_path):
     """
     own = tmp_path / "server_agent.md"
     own.write_text("# инструкции\n", encoding="utf-8")
-    assert _agent_md("./server_agent.md", tmp_path / "config_server.yml") == str(own)
+    assert _agent_md(
+        "./server_agent.md", tmp_path / "config_server.yml"
+    ) == str(own)
 
 
 def test_relative_agent_md_falls_back_to_bundled_assets(tmp_path):
     """Рядом с конфигом нет — берём bundled-промпт дистрибутива."""
-    resolved = _agent_md("prompts/server_agent.md", tmp_path / "config_server.yml")
+    resolved = _agent_md(
+        "prompts/server_agent.md", tmp_path / "config_server.yml"
+    )
     assert os.path.isfile(resolved), resolved
     assert resolved.startswith(server_config.PROJECT_ROOT)
 
@@ -174,4 +187,6 @@ def test_absolute_agent_md_is_taken_as_is(tmp_path):
     explicit = tmp_path / "elsewhere" / "a.md"
     explicit.parent.mkdir(parents=True, exist_ok=True)
     explicit.write_text("x", encoding="utf-8")
-    assert _agent_md(str(explicit), tmp_path / "config_server.yml") == str(explicit)
+    assert _agent_md(str(explicit), tmp_path / "config_server.yml") == str(
+        explicit
+    )

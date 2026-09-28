@@ -10,24 +10,25 @@
 сменила сторону: раньше стерегла, что ядро оборачивает, теперь — что ядро НЕ
 оборачивает, а TUI оборачивает.
 """
+
 from gc_core.backends.local import LocalFsBackend
-from gc_core.run_context import create_run_context
+from gc_core.run_context import acreate_run_context
 
 _CFG = {"backend_api_mode": "chat_completions", "save_logs": False}
 
 
-def test_core_leaves_the_backend_alone():
+async def test_core_leaves_the_backend_alone():
     """Ядро контекст только строит. Не декорация, а инвариант: ядро не знает про diff."""
     from gc_tui.diff_tui.tracking import TrackingFsBackend
 
-    ctx = create_run_context(_CFG, is_tui=True)
+    ctx = await acreate_run_context(_CFG, is_tui=True)
 
     assert isinstance(ctx.os_backend, LocalFsBackend)
     assert not isinstance(ctx.os_backend, TrackingFsBackend)
     assert ctx.is_tui is True
 
 
-def test_attach_wraps_backend_and_rebuilds_workspace():
+async def test_attach_wraps_backend_and_rebuilds_workspace():
     """`attach_to_context` делает ОБА действия.
 
     Пересборка workspace — половина, которую легко забыть: без неё инструменты
@@ -36,7 +37,7 @@ def test_attach_wraps_backend_and_rebuilds_workspace():
     """
     from gc_tui.diff_tui.tracking import TrackingFsBackend, attach_to_context
 
-    ctx = create_run_context(_CFG, is_tui=True)
+    ctx = await acreate_run_context(_CFG, is_tui=True)
     inner = ctx.os_backend
     attach_to_context(ctx, _CFG)
 
@@ -45,11 +46,11 @@ def test_attach_wraps_backend_and_rebuilds_workspace():
     assert ctx.workspace.backend is ctx.os_backend
 
 
-def test_attach_is_idempotent():
+async def test_attach_is_idempotent():
     """Повторный вызов ничего не меняет: обёртка поверх обёртки — потерянный журнал."""
     from gc_tui.diff_tui.tracking import attach_to_context
 
-    ctx = create_run_context(_CFG, is_tui=True)
+    ctx = await acreate_run_context(_CFG, is_tui=True)
     attach_to_context(ctx, _CFG)
     first = ctx.os_backend
     attach_to_context(ctx, _CFG)

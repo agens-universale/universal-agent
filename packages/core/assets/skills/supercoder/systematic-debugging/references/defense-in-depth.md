@@ -36,6 +36,7 @@ def handle_request(raw):
     # internal — data is now guaranteed shape
     return deep_function(data.important_field)
 
+
 def deep_function(value: str):
     # value is str — no defensive checks needed
     return value.upper()

@@ -2,11 +2,14 @@
 
 См. docs_md/tui/meta-ownership/SPEC.md.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, MutableMapping
 
-RUNTIME_FLAG_NAMES = frozenset({"summarizing", "finalizing", "finish_gate_checking"})
+RUNTIME_FLAG_NAMES = frozenset(
+    {"summarizing", "finalizing", "finish_gate_checking"}
+)
 
 
 def resolve_runtime_flag_name(flag: str) -> str:
@@ -24,7 +27,9 @@ def runtime_section(meta: Mapping[str, Any] | None) -> Dict[str, Any]:
     return dict(rt) if isinstance(rt, dict) else {}
 
 
-def merge_runtime_into_meta(meta: MutableMapping[str, Any], patch: Mapping[str, Any]) -> None:
+def merge_runtime_into_meta(
+    meta: MutableMapping[str, Any], patch: Mapping[str, Any]
+) -> None:
     """Слить patch в ``meta['runtime']`` in-place."""
     runtime = dict(meta.get("runtime") or {})
     runtime.update(dict(patch))

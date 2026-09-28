@@ -1,4 +1,5 @@
 """Core fixes D-2 and D-3 from the 1C bench trace analysis."""
+
 import hashlib
 import json
 
@@ -20,12 +21,16 @@ def _fresh_state():
     state.shared = None
     state.user_intent_log = []
     state.current_user_intent = []
-    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputsStore
+    from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+        ToolCallOutputsStore,
+    )
+
     state.tool_call_outputs_store = ToolCallOutputsStore(max_entries=10)
     return state
 
 
 # ---------- D-2 ----------
+
 
 def test_compaction_emits_dropped_messages_via_callback():
     from gc_core.summarize.compaction import apply_summary_state_patch
@@ -124,6 +129,7 @@ def test_compaction_callback_errors_do_not_fail_patch():
 
 
 # ---------- D-3 ----------
+
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()

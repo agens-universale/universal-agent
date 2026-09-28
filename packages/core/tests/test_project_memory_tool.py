@@ -3,29 +3,34 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
-
 from gc_core.config_modules import env_vars
 from gc_core.project_memory.compaction import CompactionResult
 from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.registry import get_builtin_tools_data
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 @pytest.fixture(autouse=True)
 def _isolate_project_memory_gc_home(tmp_path, monkeypatch):
     """Не писать backup в реальный gc_state — иначе re-run с тем же basetemp
     восстанавливает leftover backup и ломает append/read assertions (length=22)."""
-    monkeypatch.setattr(env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc_home"))
+    monkeypatch.setattr(
+        env_vars, "env", env_vars.EnvVars(gc_home=tmp_path / "gc_home")
+    )
 
 
 def _make_tool(tmp_path) -> ProjectMemory:
     ctx = SimpleNamespace(
         project_gc_dir=tmp_path / ".gc",
-        config_dict={"backend_api_mode": "chat_completions", "model": "test-model"},
+        config_dict={
+            "backend_api_mode": "chat_completions",
+            "model": "test-model",
+        },
         auth_connector=None,
         logger=None,
     )
     state = SimpleNamespace()
-    return ProjectMemory(ctx=ctx, state=state)
+    return CallableTool(ProjectMemory(ctx=ctx, state=state))
 
 
 def test_tool_description_has_three_actions_only():
@@ -38,15 +43,18 @@ def test_tool_description_has_three_actions_only():
 def test_tool_description_requires_action_and_content():
     required = ProjectMemory.tool_description()["parameters"]["required"]
     assert required == ["action", "content"]
-    content_desc = ProjectMemory.tool_description()["parameters"]["properties"]["content"][
-        "description"
-    ].lower()
+    content_desc = ProjectMemory.tool_description()["parameters"][
+        "properties"
+    ]["content"]["description"].lower()
     assert "required for every action" in content_desc
     assert "ignored for read" in content_desc
 
 
 def test_parse_and_validate_rejects_append_without_content():
-    from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+    from gc_core.tools.arguments_validation import (
+        WrongFunctionArgumentsException,
+        parse_and_validate_tool_arguments,
+    )
 
     spec = ProjectMemory.tool_description()
     with pytest.raises(WrongFunctionArgumentsException):
@@ -91,7 +99,9 @@ def test_tool_read_missing_file_returns_ok_with_empty_content(tmp_path):
 def test_tool_read_with_empty_content_arg_ok(tmp_path):
     """Schema requires content; read ignores it — empty string is fine."""
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("kept", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "kept", encoding="utf-8"
+    )
     tool = _make_tool(tmp_path)
     res = json.loads(tool(action="read", content=""))
     assert res["ok"] is True
@@ -100,7 +110,9 @@ def test_tool_read_with_empty_content_arg_ok(tmp_path):
 
 def test_tool_read_existing_file_returns_full_content(tmp_path):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("hello world", encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "hello world", encoding="utf-8"
+    )
     tool = _make_tool(tmp_path)
     res = json.loads(tool(action="read"))
     assert res["ok"] is True
@@ -137,7 +149,9 @@ def test_tool_append_fast_path_no_compaction(tmp_path):
     assert res["ok"] is True
     assert res["compaction"] == {"performed": False}
     assert res["length"] == len("first fact")
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "first fact"
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(
+        encoding="utf-8"
+    ) == "first fact"
 
 
 def test_tool_append_persists_across_instances(tmp_path):
@@ -150,7 +164,9 @@ def test_tool_append_persists_across_instances(tmp_path):
 
 def _seed_memory(tmp_path, content: str) -> None:
     (tmp_path / ".gc").mkdir(exist_ok=True)
-    (tmp_path / ".gc" / "project_memory.md").write_text(content, encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        content, encoding="utf-8"
+    )
 
 
 def test_tool_append_overflow_triggers_compaction(tmp_path):
@@ -163,9 +179,14 @@ def test_tool_append_overflow_triggers_compaction(tmp_path):
 
     def fake_compact(text, ctx, state=None):
         captured["input"] = text
-        return CompactionResult(ok=True, text="COMPACTED", error_type=None, error_message=None)
+        return CompactionResult(
+            ok=True, text="COMPACTED", error_type=None, error_message=None
+        )
 
-    with patch("gc_core.project_memory.compaction.compact_text", side_effect=fake_compact):
+    with patch(
+        "gc_core.project_memory.compaction.acompact_text",
+        side_effect=fake_compact,
+    ):
         res = json.loads(tool(action="append", content=delta))
 
     # Combined text fed to compaction was existing + \n\n + delta, both stripped.
@@ -178,7 +199,9 @@ def test_tool_append_overflow_triggers_compaction(tmp_path):
     assert res["compaction"]["after_chars"] == len("COMPACTED")
     assert "Memory was compacted" in res["hint"]
     assert "action=read" in res["hint"]
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "COMPACTED"
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(
+        encoding="utf-8"
+    ) == "COMPACTED"
 
 
 def test_tool_append_overflow_compaction_failed(tmp_path):
@@ -188,14 +211,18 @@ def test_tool_append_overflow_compaction_failed(tmp_path):
     failed = CompactionResult(
         ok=False, text="", error_type="backend_error", error_message="boom"
     )
-    with patch("gc_core.project_memory.compaction.compact_text", return_value=failed):
+    with patch(
+        "gc_core.project_memory.compaction.acompact_text", return_value=failed
+    ):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
     assert res["error"]["type"] == "compaction_failed"
     assert "boom" in res["error"]["message"]
     # File untouched.
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "x" * 9_900
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(
+        encoding="utf-8"
+    ) == "x" * 9_900
 
 
 def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
@@ -205,17 +232,21 @@ def test_tool_append_overflow_compaction_result_still_too_large(tmp_path):
     over = CompactionResult(
         ok=True, text="z" * 10_001, error_type=None, error_message=None
     )
-    with patch("gc_core.project_memory.compaction.compact_text", return_value=over):
+    with patch(
+        "gc_core.project_memory.compaction.acompact_text", return_value=over
+    ):
         res = json.loads(tool(action="append", content="y" * 200))
 
     assert res["ok"] is False
     assert res["error"]["type"] == "limit_exceeded"
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "x" * 9_900
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(
+        encoding="utf-8"
+    ) == "x" * 9_900
 
 
 def test_tool_append_fast_path_does_not_call_compaction(tmp_path):
     tool = _make_tool(tmp_path)
-    with patch("gc_core.project_memory.compaction.compact_text") as mocked:
+    with patch("gc_core.project_memory.compaction.acompact_text") as mocked:
         json.loads(tool(action="append", content="small"))
     assert not mocked.called
 
@@ -232,14 +263,16 @@ def test_tool_write_under_max_chars_succeeds(tmp_path):
     res = json.loads(tool(action="write", content="full memory body"))
     assert res["ok"] is True
     assert res["compaction"] == {"performed": False}
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "full memory body"
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(
+        encoding="utf-8"
+    ) == "full memory body"
 
 
 def test_tool_write_over_max_chars_refuses_no_compaction(tmp_path):
     tool = _make_tool(tmp_path)
     huge = "x" * (10_001)
 
-    with patch("gc_core.project_memory.compaction.compact_text") as mocked:
+    with patch("gc_core.project_memory.compaction.acompact_text") as mocked:
         res = json.loads(tool(action="write", content=huge))
 
     assert res["ok"] is False
@@ -254,7 +287,9 @@ def test_tool_write_overwrites_existing(tmp_path):
     _seed_memory(tmp_path, "old body")
     tool = _make_tool(tmp_path)
     json.loads(tool(action="write", content="new body"))
-    assert (tmp_path / ".gc" / "project_memory.md").read_text(encoding="utf-8") == "new body"
+    assert (tmp_path / ".gc" / "project_memory.md").read_text(
+        encoding="utf-8"
+    ) == "new body"
 
 
 def test_tool_invalid_action_compact(tmp_path):
@@ -295,12 +330,14 @@ def _make_tool_with_limits(tmp_path, *, max_chars: int) -> ProjectMemory:
         auth_connector=None,
         logger=None,
     )
-    return ProjectMemory(ctx=ctx, state=SimpleNamespace())
+    return CallableTool(ProjectMemory(ctx=ctx, state=SimpleNamespace()))
 
 
 def test_tool_read_high_fill_includes_reorganize_hint(tmp_path):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("x" * 71, encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "x" * 71, encoding="utf-8"
+    )
     tool = _make_tool_with_limits(tmp_path, max_chars=100)
     res = json.loads(tool(action="read"))
     assert res["fill_percent"] == 71
@@ -311,7 +348,9 @@ def test_tool_read_high_fill_includes_reorganize_hint(tmp_path):
 
 def test_tool_read_at_70_percent_no_reorganize_hint(tmp_path):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("x" * 70, encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "x" * 70, encoding="utf-8"
+    )
     tool = _make_tool_with_limits(tmp_path, max_chars=100)
     res = json.loads(tool(action="read"))
     assert res["fill_percent"] == 70
@@ -320,7 +359,9 @@ def test_tool_read_at_70_percent_no_reorganize_hint(tmp_path):
 
 def test_tool_append_high_fill_includes_reorganize_hint(tmp_path):
     (tmp_path / ".gc").mkdir()
-    (tmp_path / ".gc" / "project_memory.md").write_text("x" * 70, encoding="utf-8")
+    (tmp_path / ".gc" / "project_memory.md").write_text(
+        "x" * 70, encoding="utf-8"
+    )
     tool = _make_tool_with_limits(tmp_path, max_chars=100)
     res = json.loads(tool(action="append", content="y"))
     assert res["fill_percent"] > 70
@@ -340,7 +381,7 @@ def test_tool_uses_custom_limits_from_config(tmp_path):
         auth_connector=None,
         logger=None,
     )
-    tool = ProjectMemory(ctx=ctx, state=SimpleNamespace())
+    tool = CallableTool(ProjectMemory(ctx=ctx, state=SimpleNamespace()))
 
     res = json.loads(tool(action="append", content="x" * 41))
     assert res["ok"] is False

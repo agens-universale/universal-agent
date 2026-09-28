@@ -8,7 +8,17 @@ from unittest.mock import patch
 
 from gc_core.states import SharedStateData, State
 from gc_core.thread_store import read_subagent_trace
-from gc_core.tools.subagents.sidecar import persist_subagent_trace
+from gc_core.tools.subagents.sidecar import apersist_subagent_trace
+from gc_testkit import run_coro
+
+
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return _wrapped
 
 
 def _state():
@@ -48,9 +58,18 @@ def _fc(name: str, call_id: str, arguments: str = "{}"):
 def _patch_process(monkeypatch, *, apply_return):
     from gc_core import processing_responses as pr
 
-    monkeypatch.setattr(pr, "apply_tool", lambda **kw: apply_return)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **kw: None)
+    async def _fake_aapply_tool(**kw):
+        return apply_return
+
+    monkeypatch.setattr(pr, "aapply_tool", _fake_aapply_tool)
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
     return pr
 
@@ -94,25 +113,33 @@ def _runner_cfg(tmp_path, *, trigger=0):
 
 
 class TestSidecarIntermediateReply:
-    def test_persists_intermediate_reply_without_sink(self, tmp_path, monkeypatch):
+    def test_persists_intermediate_reply_without_sink(
+        self, tmp_path, monkeypatch
+    ):
         answer = "Сейчас проверю структуру"
         pr = _patch_process(
             monkeypatch,
             apply_return=json.dumps(
-                {"tool": "turn_intermediate_reply", "ok": True, "answer": answer}
+                {
+                    "tool": "turn_intermediate_reply",
+                    "ok": True,
+                    "answer": answer,
+                }
             ),
         )
-        pr.process_tool_calls(
-            messages=[
-                _fc(
-                    "turn_intermediate_reply",
-                    "ir1",
-                    json.dumps({"answer": answer}),
-                )
-            ],
-            state=_state(),
-            ctx=_child_ctx(tmp_path),
-            run_agent_func=None,
+        run_coro(
+            pr.aprocess_tool_calls(
+                messages=[
+                    _fc(
+                        "turn_intermediate_reply",
+                        "ir1",
+                        json.dumps({"answer": answer}),
+                    )
+                ],
+                state=_state(),
+                ctx=_child_ctx(tmp_path),
+                run_agent_func=None,
+            )
         )
         rows = read_subagent_trace(str(tmp_path), "cli", "task-1")
         assert [r["kind"] for r in rows] == ["intermediate_reply"]
@@ -121,10 +148,10 @@ class TestSidecarIntermediateReply:
 
 
 class TestSidecarFinished:
-    def test_finished_on_success(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
+    async def test_finished_on_success(self, tmp_path):
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -144,11 +171,11 @@ class TestSidecarFinished:
         )
         runner = SubagentRunner(parent, _orch_state(), cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.steps = 3
             return "done"
 
-        result = runner.run(
+        result = await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,
@@ -165,10 +192,10 @@ class TestSidecarFinished:
         }
         assert finished[0]["parent_call_id"] == "call_sub_1"
 
-    def test_finished_on_user_stop(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
+    async def test_finished_on_user_stop(self, tmp_path):
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path)
         parent = local_ctx(cfg)
@@ -188,11 +215,11 @@ class TestSidecarFinished:
         )
         runner = SubagentRunner(parent, _orch_state(), cfg)
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.steps = 1
             return None
 
-        runner.run(
+        await runner.arun(
             "subagent_worker",
             {"task": "x", "reason": "y"},
             fake_run_agent,
@@ -206,11 +233,11 @@ class TestSidecarFinished:
 
 
 class TestSidecarChildSummary:
-    def test_child_summary_on_compaction_applied(self, tmp_path):
-        from gc_testkit.helpers.tool_ctx import local_ctx
+    async def test_child_summary_on_compaction_applied(self, tmp_path):
+        from gc_core import run_summary_coordinator as rsc
         from gc_core.tools.subagents.runner import SubagentRunner
         from gc_core.tools.subagents.sidecar import bind_thread_identity
-        from gc_core import run_summary_coordinator as rsc
+        from gc_testkit.helpers.tool_ctx import local_ctx
 
         cfg = _runner_cfg(tmp_path, trigger=10)
         parent = local_ctx(cfg)
@@ -230,29 +257,37 @@ class TestSidecarChildSummary:
         )
         runner = SubagentRunner(parent, _orch_state(), cfg)
 
-        def fake_run_summary_compaction(**kwargs):
+        async def fake_run_summary_compaction(**kwargs):
+            # Двойник обязан вести себя как настоящий шов: колбэк по контракту
+            # возвращает None ЛИБО awaitable, и ждать его — часть контракта.
+            from gc_core.utils.aio_compat import await_callback
+
             on_applied = kwargs.get("on_summary_applied")
             assert on_applied is not None
-            on_applied(
-                {
-                    "trigger_reason": "subagent_pre_backend",
-                    "summary_payload": {
-                        "summary_message_content": "wrapped",
-                    },
-                    "summary_trace": {
-                        "final_output": {"agent_summary_text": "сжатый контекст"},
-                    },
-                    "newly_summarized_message_id": "m1",
-                }
+            await await_callback(
+                on_applied(
+                    {
+                        "trigger_reason": "subagent_pre_backend",
+                        "summary_payload": {
+                            "summary_message_content": "wrapped",
+                        },
+                        "summary_trace": {
+                            "final_output": {
+                                "agent_summary_text": "сжатый контекст"
+                            },
+                        },
+                        "newly_summarized_message_id": "m1",
+                    }
+                )
             )
 
-        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+        async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
             child_state.messages = [
                 {"role": "user", "content": "old"},
                 {"role": "user", "content": "new"},
             ]
             # строки до маркера остаются в sidecar
-            persist_subagent_trace(
+            await apersist_subagent_trace(
                 child_ctx,
                 kind="call",
                 payload={
@@ -262,19 +297,22 @@ class TestSidecarChildSummary:
                     "arguments": "{}",
                 },
             )
-            kwargs["pre_backend_compaction_hook"](
+            # Хук корутинный (см. runner.py) — ждём его.
+            await kwargs["pre_backend_compaction_hook"](
                 [{"role": "user", "content": "new"}],
                 "user_ask",
             )
             return "ok"
 
         with (
-            patch.object(rsc, "history_exceeds_summary_trigger", return_value=True),
+            patch.object(rsc, "exceeded_summary_triggers", return_value=True),
             patch.object(
-                rsc, "run_summary_compaction", side_effect=fake_run_summary_compaction
+                rsc,
+                "arun_summary_compaction",
+                side_effect=fake_run_summary_compaction,
             ),
         ):
-            runner.run(
+            await runner.arun(
                 "subagent_worker",
                 {"task": "long", "reason": "y"},
                 fake_run_agent,

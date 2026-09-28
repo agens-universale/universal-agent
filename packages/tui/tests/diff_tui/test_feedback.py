@@ -1,15 +1,24 @@
 """T15: technical user message после undo + UX ack/CTA helpers."""
+
 from __future__ import annotations
 
 import pytest
-
 from gc_core.config_modules import env_vars
-from gc_tui.diff_tui.feedback import build_undo_feedback_body, build_undo_feedback_message, files_word, format_approve_ack, format_pending_cta, format_undo_ack
-from gc_tui.diff_tui.service import DiffService
-from gc_tui.diff_tui.store import DiffStore
-from gc_core.message_policy.user_message_policy import is_technical_user_message_text
+from gc_core.message_policy.user_message_policy import (
+    is_technical_user_message_text,
+)
 from gc_core.runtime_notices import clear_runtime_notices
 from gc_core.thread_store import load_thread_messages
+from gc_tui.diff_tui.feedback import (
+    build_undo_feedback_body,
+    build_undo_feedback_message,
+    files_word,
+    format_approve_ack,
+    format_pending_cta,
+    format_undo_ack,
+)
+from gc_tui.diff_tui.service import DiffService
+from gc_tui.diff_tui.store import DiffStore
 
 
 @pytest.fixture
@@ -24,7 +33,14 @@ def cache_proj(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize(
     "n,word",
-    [(1, "файл"), (2, "файла"), (5, "файлов"), (11, "файлов"), (21, "файл"), (22, "файла")],
+    [
+        (1, "файл"),
+        (2, "файла"),
+        (5, "файлов"),
+        (11, "файлов"),
+        (21, "файл"),
+        (22, "файла"),
+    ],
 )
 def test_files_word(n, word):
     assert files_word(n) == word
@@ -56,7 +72,10 @@ def test_format_approve_ack_and_cta():
 
 
 def test_format_bulk_dual_layer_acks():
-    from gc_tui.diff_tui.feedback import format_bulk_approve_ack, format_bulk_undo_ack
+    from gc_tui.diff_tui.feedback import (
+        format_bulk_approve_ack,
+        format_bulk_undo_ack,
+    )
 
     assert format_bulk_approve_ack(2, 1) == "Принято: git: 2; cache: 1"
     assert format_bulk_approve_ack(3, 0) == "Принято: git: 3"
@@ -117,7 +136,9 @@ def test_build_undo_feedback_deleted_only():
 def test_build_undo_feedback_empty_keys():
     assert build_undo_feedback_message() is None
     assert build_undo_feedback_body() is None
-    assert "src/a.py" in (build_undo_feedback_body(restored_keys=["src/a.py"]) or "")
+    assert "src/a.py" in (
+        build_undo_feedback_body(restored_keys=["src/a.py"]) or ""
+    )
 
 
 def test_service_undo_returns_undone_keys(cache_proj):
@@ -150,10 +171,10 @@ def test_service_undo_created_returns_deleted_keys(cache_proj):
 @pytest.mark.asyncio
 async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
     pytest.importorskip("textual")
-    from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffScreen
     from gc_core.thread_store import append_new_thread_messages
+    from gc_tui.app import TuiApp
     from gc_tui.diff_tui.touched import TouchedJournal
+    from gc_tui.screens.diff import DiffScreen
 
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
@@ -212,7 +233,9 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
         assert scr._status == "Отменено: src/foo.py"
         msgs, _keys, _seq = load_thread_messages(str(threads_dir), "cli", tid)
         technical = [
-            m for m in msgs if is_technical_user_message_text(m.get("content", ""))
+            m
+            for m in msgs
+            if is_technical_user_message_text(m.get("content", ""))
         ]
         assert len(technical) == 1
         assert "src/foo.py" in technical[0]["content"]

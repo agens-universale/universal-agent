@@ -110,7 +110,9 @@ class BoundedStreamAccumulator:
         )
 
 
-def captured_stream_from_text(text: str, capture_max_chars: int) -> CapturedStream:
+def captured_stream_from_text(
+    text: str, capture_max_chars: int
+) -> CapturedStream:
     """Нормализовать уже готовый полный поток тем же head+tail алгоритмом.
 
     Для путей, где вывод пришёл целиком (Harbor без streaming callback): внешний

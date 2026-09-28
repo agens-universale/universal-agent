@@ -3,19 +3,18 @@
 import asyncio
 import json
 from types import SimpleNamespace
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from gc_core.config_modules.chat_completions import (
     DEFAULT_SUBAGENT_ROLE_MAX_TOKENS,
     ChatCompletionsLlmConfig,
 )
-from gc_core.states import State, SharedStateData
+from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents import special_agent as special_agent_module
-from gc_core.tools.subagents.special_agent import SpecialAgent
-from gc_core.tools.subagents import runner as runner_module
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.tools.subagents.special_agent import SpecialAgent
+from gc_testkit import run_coro
 
 
 def _make_orchestrator_state():
@@ -70,7 +69,9 @@ def _make_ctx(cfg=None):
 
 
 def _make_state(model="test-model"):
-    return SimpleNamespace(default_model=model, usage=None, state_id="s1", x_target=None)
+    return SimpleNamespace(
+        default_model=model, usage=None, state_id="s1", x_target=None
+    )
 
 
 class TestSpecialAgentCreateInstance:
@@ -102,10 +103,11 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="Custom role",
         ):
-            instance.finalize_role(_make_ctx(), _make_state())
+            run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
         agent_role, task = instance.get_initial_data()
         assert agent_role.startswith("Custom role")
@@ -123,10 +125,11 @@ class TestFinalizeRole:
             )
         )
         with patch.object(
-            special_agent_module, "request_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
-            instance.finalize_role(_make_ctx(), _make_state())
+            run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
         user_msg = mock_call.call_args.kwargs["messages"][1]["content"]
         assert "Security Expert" in user_msg
@@ -138,17 +141,21 @@ class TestFinalizeRole:
         общий для всех вспомогательных LLM-вызовов."""
         instance = asyncio.run(
             SpecialAgent.create_instance(
-                role="Dev", role_description="desc", task="task",
-                model="test-model", config_dict=_make_config(),
+                role="Dev",
+                role_description="desc",
+                task="task",
+                model="test-model",
+                config_dict=_make_config(),
             )
         )
         ctx = _make_ctx()
         state = _make_state()
         with patch.object(
-            special_agent_module, "request_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
-            instance.finalize_role(ctx, state)
+            run_coro(instance.afinalize_role(ctx, state))
 
         kwargs = mock_call.call_args.kwargs
         assert kwargs["consumer"] == "subagent:subagent_special_agent"
@@ -159,62 +166,82 @@ class TestFinalizeRole:
     def test_uses_configured_max_tokens_default(self):
         instance = asyncio.run(
             SpecialAgent.create_instance(
-                role="Dev", role_description="desc", task="task",
-                model="test-model", config_dict=_make_config(),
+                role="Dev",
+                role_description="desc",
+                task="task",
+                model="test-model",
+                config_dict=_make_config(),
             )
         )
         with patch.object(
-            special_agent_module, "request_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             return_value="ok",
         ) as mock_call:
-            instance.finalize_role(_make_ctx(), _make_state())
+            run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
-        assert mock_call.call_args.kwargs["max_tokens"] == DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
+        assert (
+            mock_call.call_args.kwargs["max_tokens"]
+            == DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
+        )
 
     def test_generate_role_failure_propagates(self):
         """If LLM call fails, finalize_role should raise."""
         instance = asyncio.run(
             SpecialAgent.create_instance(
-                role="Dev", role_description="desc", task="task",
-                model="m", config_dict=_make_config(),
+                role="Dev",
+                role_description="desc",
+                task="task",
+                model="m",
+                config_dict=_make_config(),
             )
         )
         with patch.object(
-            special_agent_module, "request_auxiliary_completion_text",
+            special_agent_module,
+            "arequest_auxiliary_completion_text",
             side_effect=ConnectionError("Network error"),
         ):
             with pytest.raises(ConnectionError):
-                instance.finalize_role(_make_ctx(), _make_state())
+                run_coro(instance.afinalize_role(_make_ctx(), _make_state()))
 
 
 class TestSpecialAgentWithRunner:
-    def test_runner_calls_special_agent_end_to_end(self):
+    async def test_runner_calls_special_agent_end_to_end(self):
         """SubagentRunner.run integrates with SpecialAgent correctly: role generation
         now happens after child ctx is built, via finalize_role."""
         orch = _make_orchestrator_state()
         cfg = _make_config()
         ctx = _make_ctx(cfg)
-        run_agent_func = MagicMock(return_value="Special agent done")
+        run_agent_func = AsyncMock(return_value="Special agent done")
 
         runner = SubagentRunner(ctx, orch, cfg)
 
+        # Оба шва корутинные: генерация роли идёт нативной `a`-формой, сборка
+        # дочернего контекста — тоже. Синхронные двойники здесь не подойдут:
+        # runner их awaits.
         with (
             patch.object(
-                special_agent_module, "request_auxiliary_completion_text",
-                return_value="You are a security auditor.",
+                special_agent_module,
+                "arequest_auxiliary_completion_text",
+                new=AsyncMock(return_value="You are a security auditor."),
             ),
             patch.object(
-                runner, "_build_child_ctx",
-                return_value=SimpleNamespace(
-                    logger=None,
-                    run_id="cr",
-                    is_tui=False,
-                    auxiliary_llm=ChatCompletionsLlmConfig(),
-                    config_dict=cfg,
+                runner,
+                "_build_child_ctx",
+                new=AsyncMock(
+                    return_value=SimpleNamespace(
+                        logger=None,
+                        run_id="cr",
+                        is_tui=False,
+                        # Профиль aux нужен: роль теперь зовёт
+                        # `auxiliary_llm_completion_kwargs(ctx)`.
+                        auxiliary_llm=ChatCompletionsLlmConfig(),
+                        config_dict=cfg,
+                    )
                 ),
             ),
         ):
-            result = runner.run(
+            result = await runner.arun(
                 "subagent_special_agent",
                 {
                     "reason": "Need security audit",
@@ -235,6 +262,11 @@ class TestSpecialAgentWithRunner:
         child_state = call_args[0][1]
 
         user_msgs = [m for m in messages if m["role"] == "user"]
-        assert any("Audit the authentication module" in m["content"] for m in user_msgs)
+        assert any(
+            "Audit the authentication module" in m["content"]
+            for m in user_msgs
+        )
         assert child_state.parent_state_id == orch.state_id
-        assert child_state.specific_role.startswith("You are a security auditor.")
+        assert child_state.specific_role.startswith(
+            "You are a security auditor."
+        )

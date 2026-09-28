@@ -1,9 +1,8 @@
 """Онбординг первого запуска: детект ненастроенного конфига + текст-гайд + запись."""
+
 import pytest
 import yaml
-
-from gc_core import config
-from gc_core import onboarding
+from gc_core import config, onboarding
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
 from gc_core.model_router import ModelRouter
@@ -17,14 +16,21 @@ def _default_yaml() -> dict:
 
 def _isolated_default(tmp_path, monkeypatch) -> dict:
     """config.default.yml реальным загрузчиком, изолировав машинный и project-local overlay."""
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     return config.load_config(str(bundled_root() / "config.default.yml"))
 
 
 # --- базовый детект -------------------------------------------------------
+
 
 def test_default_config_is_unconfigured(tmp_path, monkeypatch):
     cfg = _isolated_default(tmp_path, monkeypatch)
@@ -43,13 +49,16 @@ def test_configured_when_url_token_model_set():
 def test_unconfigured_if_token_still_placeholder():
     cfg = {
         "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "gigacode_agent_v1.6_rc",
     }
     assert onboarding.is_unconfigured(cfg) is True
 
 
 # --- auth: токен ИЛИ agent_auth ------------------------------------------
+
 
 def test_agent_auth_satisfies_auth_without_token():
     cfg = {
@@ -65,7 +74,9 @@ def test_agent_auth_set_drops_token_from_guide():
         "completions_url": "https://real/v1/chat/completions",
         "model": "gigacode_agent_v1.6_rc",
         "agent_auth": {"auth_endpoint": "https://auth.local/token"},
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
     }
     text = onboarding.setup_guide("/home/u/.gc/config.yml", cfg)
     assert "Authorization" not in text
@@ -86,6 +97,7 @@ def test_no_token_and_no_complete_agent_auth_is_configured():
 
 
 # --- реестр закрывает ТОЛЬКО требование модели ---------------------------
+
 
 def test_registry_closes_model_requirement():
     """Спека §11: непустой merged-реестр — рабочая модель, легаси-плейсхолдер
@@ -116,7 +128,9 @@ def test_registry_does_not_close_endpoint_requirement():
 def test_registry_does_not_close_auth_requirement():
     cfg = {
         "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
     }
@@ -141,10 +155,17 @@ def test_self_sufficient_registry_closes_endpoint_and_auth_in_chat_completions()
     cfg = {
         "backend_api_mode": "chat_completions",
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"model": "g", "url": "https://x/v1",
-                             "authorization_header": "Bearer sk"}},
+        "models": {
+            "flash": {
+                "model": "g",
+                "url": "https://x/v1",
+                "authorization_header": "Bearer sk",
+            }
+        },
     }
     assert onboarding.is_unconfigured(cfg) is False
 
@@ -155,10 +176,17 @@ def test_self_sufficient_registry_does_not_close_endpoint_in_responses():
     cfg = {
         "backend_api_mode": "responses",
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"model": "g", "url": "https://x/v1",
-                             "authorization_header": "Bearer sk"}},
+        "models": {
+            "flash": {
+                "model": "g",
+                "url": "https://x/v1",
+                "authorization_header": "Bearer sk",
+            }
+        },
     }
     assert onboarding.is_unconfigured(cfg) is True
 
@@ -170,11 +198,17 @@ def test_registry_with_one_entry_without_url_does_not_close_endpoint():
     cfg = {
         "backend_api_mode": "chat_completions",
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
         "models": {
-            "flash": {"model": "g", "url": "https://x/v1", "authorization_header": "Bearer sk"},
-            "naked": {"model": "n"},          # наследует всё от плоского backend
+            "flash": {
+                "model": "g",
+                "url": "https://x/v1",
+                "authorization_header": "Bearer sk",
+            },
+            "naked": {"model": "n"},  # наследует всё от плоского backend
         },
     }
     assert onboarding.is_unconfigured(cfg) is True
@@ -186,7 +220,9 @@ def test_registry_with_own_url_but_no_token_does_not_close_auth():
     cfg = {
         "backend_api_mode": "chat_completions",
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "g", "url": "https://x/v1"}},
     }
@@ -202,15 +238,24 @@ def test_registry_of_local_servers_without_auth_closes_auth():
     cfg = {
         "backend_api_mode": "chat_completions",
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
-        "models": {"glm-local": {"model": "g", "url": "http://127.0.0.1:8014/v1",
-                                 "authorization_header": ""}},
+        "models": {
+            "glm-local": {
+                "model": "g",
+                "url": "http://127.0.0.1:8014/v1",
+                "authorization_header": "",
+            }
+        },
     }
     assert onboarding.is_unconfigured(cfg) is False
 
 
-def _loaded_with_registry(tmp_path, monkeypatch, extra: str, replace=()) -> dict:
+def _loaded_with_registry(
+    tmp_path, monkeypatch, extra: str, replace=()
+) -> dict:
     """config.yml из пакетного шаблона + `extra` в хвосте, прочитанный НАСТОЯЩИМ
     загрузчиком (слои изолированы).
 
@@ -218,10 +263,16 @@ def _loaded_with_registry(tmp_path, monkeypatch, extra: str, replace=()) -> dict
     формы «своего подключения» разложены там по разным ключам (`url` /
     `backend_overrides.completions_url`), и синтетический словарь того, что реально
     приезжает в детект, не доказывает."""
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     monkeypatch.chdir(tmp_path)
     text = (bundled_root() / "config.default.yml").read_text(encoding="utf-8")
     for old, new in replace:
@@ -231,14 +282,19 @@ def _loaded_with_registry(tmp_path, monkeypatch, extra: str, replace=()) -> dict
     return config.load_config(str(path))
 
 
-def test_registry_entry_in_backend_form_closes_endpoint_and_auth(tmp_path, monkeypatch):
+def test_registry_entry_in_backend_form_closes_endpoint_and_auth(
+    tmp_path, monkeypatch
+):
     """Вторая документированная форма своего подключения (docs/configuration.md,
     «Профили и уровни моделей»): `backend.completions_url` +
     `backend.chat_completion_headers.Authorization` — равноправная с `url`/`token`.
     Router её маршрутизирует, значит конфиг рабочий; судить о «своём подключении»
     по одним плоским ключам записи значит гнать в мастер на КАЖДОМ старте человека,
     заполнившего реестр по документации."""
-    cfg = _loaded_with_registry(tmp_path, monkeypatch, """
+    cfg = _loaded_with_registry(
+        tmp_path,
+        monkeypatch,
+        """
 models:
   flash:
     model: g
@@ -248,28 +304,44 @@ models:
         Authorization: Bearer sk-real
 slots:
   default: flash
-""")
+""",
+    )
     assert onboarding.is_unconfigured(cfg) is False
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+        "main"
+    )
     assert resolved.url == "https://x/v1/chat/completions"
 
 
-def test_registry_entry_with_empty_url_does_not_close_endpoint(tmp_path, monkeypatch):
+def test_registry_entry_with_empty_url_does_not_close_endpoint(
+    tmp_path, monkeypatch
+):
     """`url: ""` — «своего адреса нет, пара наследуется» (`connection_parts`), а не
     «адрес задан пустой строкой»: так его резолвит рантайм. При плейсхолдерном
     плоском адресе запрос уйдёт на `your-backend:PORT` — детект обязан прочитать
     запись так же, иначе объявляет готовым конфиг, которому работать нечем."""
-    cfg = _loaded_with_registry(tmp_path, monkeypatch, """
+    cfg = _loaded_with_registry(
+        tmp_path,
+        monkeypatch,
+        """
 models:
   flash:
     model: g
     url: ""
 slots:
   default: flash
-""", replace=((f'Authorization: "{onboarding.TOKEN_SENTINEL}"',
-               'Authorization: "Bearer sk-real"'),))
+""",
+        replace=(
+            (
+                f'Authorization: "{onboarding.TOKEN_SENTINEL}"',
+                'Authorization: "Bearer sk-real"',
+            ),
+        ),
+    )
     assert onboarding.is_unconfigured(cfg) is True
-    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+    resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+        "main"
+    )
     assert resolved.url == onboarding.URL_SENTINEL
 
 
@@ -292,7 +364,9 @@ def test_setup_guide_preset_note_is_about_flat_key_only():
     плейсхолдером она печатала бы «agent.model = <ВПИШИТЕ_МОДЕЛЬ>»."""
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
     }
@@ -302,6 +376,7 @@ def test_setup_guide_preset_note_is_about_flat_key_only():
 
 
 # --- adaptive model ------------------------------------------------------
+
 
 def test_model_sentinel_is_pending():
     cfg = {
@@ -316,19 +391,24 @@ def test_model_sentinel_is_pending():
 def test_filled_model_not_in_guide():
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "gigacode_agent_v1.6_rc",
     }
     text = onboarding.setup_guide("/p", cfg)
-    assert "имя модели" not in text   # модель не в списке полей к заполнению
+    assert "имя модели" not in text  # модель не в списке полей к заполнению
 
 
 # --- ремарка про preset-модель -------------------------------------------
 
+
 def test_setup_guide_notes_preset_model_when_pending():
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "gigacode_agent_v1.6_rc",
     }
     text = onboarding.setup_guide("/p", cfg)
@@ -339,15 +419,18 @@ def test_setup_guide_notes_preset_model_when_pending():
 def test_setup_guide_no_preset_model_note_when_model_pending():
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
     }
     text = onboarding.setup_guide("/p", cfg)
     assert "Модель по умолчанию уже задана" not in text
-    assert "имя модели" in text   # модель в списке pending
+    assert "имя модели" in text  # модель в списке pending
 
 
 # --- позитивное сообщение, когда всё покрыто -----------------------------
+
 
 def test_setup_guide_positive_when_all_covered():
     cfg = {
@@ -365,8 +448,14 @@ def _degraded(config, stage, profile=""):
     """Итог лестницы для гайда: значения полей, не мок шва — сам гайд и есть
     поверяемый шов; ступени лестницы на настоящих файлах проверяет
     tests/test_config_repair_ladder.py."""
-    return onboarding.RepairLoad(config, None, stage, "config.yml не читается …",
-                                 profile, stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE)
+    return onboarding.RepairLoad(
+        config,
+        None,
+        stage,
+        "config.yml не читается …",
+        profile,
+        stage == onboarding.REPAIR_STAGE_WITHOUT_PROFILE,
+    )
 
 
 def test_setup_guide_on_the_without_profile_stage_does_not_say_ready():
@@ -381,8 +470,11 @@ def test_setup_guide_on_the_without_profile_stage_does_not_say_ready():
         "profile": "",
     }
     text = onboarding.setup_guide(
-        "/p", cfg, program="gc-ua",
-        repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, "work"))
+        "/p",
+        cfg,
+        program="gc-ua",
+        repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, "work"),
+    )
 
     assert "можно запускать" not in text
     assert "настроен" not in text
@@ -390,7 +482,11 @@ def test_setup_guide_on_the_without_profile_stage_does_not_say_ready():
     assert 'gc-ua --profile ""' in text
 
     healthy = onboarding.setup_guide(
-        "/p", cfg, program="gc-ua", repair=_degraded(cfg, onboarding.REPAIR_STAGE_FULL))
+        "/p",
+        cfg,
+        program="gc-ua",
+        repair=_degraded(cfg, onboarding.REPAIR_STAGE_FULL),
+    )
     assert "можно запускать" in healthy
 
 
@@ -400,18 +496,24 @@ def test_setup_guide_notes_the_degradation_next_to_the_pending_fields():
     что профиль сломан и запуск с ним не поднимется."""
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
     }
     on_template = onboarding.setup_guide(
-        "/p", cfg, repair=_degraded(cfg, onboarding.REPAIR_STAGE_TEMPLATE))
+        "/p", cfg, repair=_degraded(cfg, onboarding.REPAIR_STAGE_TEMPLATE)
+    )
     assert "Не заполнены обязательные поля" in on_template
     assert "по пакетному шаблону" in on_template
     assert "gc-cli --reset-config" in on_template
 
     without_profile = onboarding.setup_guide(
-        "/p", cfg, program="gc-ua",
-        repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, "work"))
+        "/p",
+        cfg,
+        program="gc-ua",
+        repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, "work"),
+    )
     assert "Не заполнены обязательные поля" in without_profile
     assert 'Профиль "work" сломан' in without_profile
     assert 'gc-ua --profile ""' in without_profile
@@ -433,19 +535,25 @@ def test_setup_guide_names_a_nameless_dropped_profile_without_empty_quotes():
     }
     pending = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": onboarding.MODEL_SENTINEL,
     }
     for cfg in (ready, pending):
         text = onboarding.setup_guide(
-            "/p", cfg, program="gc-ua",
-            repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, ""))
-        assert "сломан" in text                       # сказать о поломке всё равно надо
+            "/p",
+            cfg,
+            program="gc-ua",
+            repair=_degraded(cfg, onboarding.REPAIR_STAGE_WITHOUT_PROFILE, ""),
+        )
+        assert "сломан" in text  # сказать о поломке всё равно надо
         assert 'профиль "" ' not in text
         assert 'Профиль "" ' not in text
 
 
 # --- страж сентинелов vs config.default.yml ------------------------------
+
 
 def test_sentinels_match_default_yaml():
     raw = _default_yaml()
@@ -463,8 +571,10 @@ def test_configured_endpoint_drops_the_template_placeholder():
     assert onboarding.configured_endpoint(onboarding.URL_SENTINEL) == ""
     assert onboarding.configured_endpoint(None) == ""
     assert onboarding.configured_endpoint("") == ""
-    assert (onboarding.configured_endpoint("https://real/v1/chat/completions")
-            == "https://real/v1/chat/completions")
+    assert (
+        onboarding.configured_endpoint("https://real/v1/chat/completions")
+        == "https://real/v1/chat/completions"
+    )
 
 
 def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
@@ -476,7 +586,9 @@ def test_setup_guide_lists_pending_fields_and_path(tmp_path, monkeypatch):
     assert config_path in text
     assert "backend.completions_url" in text
     assert "Authorization" in text
-    assert "имя модели" in text   # модель тоже не задана в дефолте → выбирается в мастере
+    assert (
+        "имя модели" in text
+    )  # модель тоже не задана в дефолте → выбирается в мастере
 
 
 def test_setup_guide_shows_a_relative_path_as_absolute(tmp_path, monkeypatch):
@@ -484,6 +596,7 @@ def test_setup_guide_shows_a_relative_path_as_absolute(tmp_path, monkeypatch):
     способ печати пути) — `--config .\\config.yml` не должен всплывать
     относительным: он бессмыслен вне момента запуска этой команды."""
     import os
+
     cfg = _isolated_default(tmp_path, monkeypatch)
     cwd = tmp_path / "cwd"
     cwd.mkdir()
@@ -501,18 +614,26 @@ def test_setup_guide_offers_init_config_helper_with_program():
     """pending-подсказка называет команду помощника с именем бинаря (program)."""
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "gigacode_agent_v1.6_rc",
     }
-    assert "gc-cli --init-config" in onboarding.setup_guide("/p", cfg, program="gc-cli")
-    assert "gc-ua --init-config" in onboarding.setup_guide("/p", cfg, program="gc-ua")
+    assert "gc-cli --init-config" in onboarding.setup_guide(
+        "/p", cfg, program="gc-cli"
+    )
+    assert "gc-ua --init-config" in onboarding.setup_guide(
+        "/p", cfg, program="gc-ua"
+    )
 
 
 def test_setup_guide_marks_config_created_when_just_created():
     """just_created=True → явно сообщает о создании файла; False → «Конфигурация:»."""
     cfg = {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "gigacode_agent_v1.6_rc",
     }
     created = onboarding.setup_guide("/p", cfg, just_created=True)
@@ -522,20 +643,51 @@ def test_setup_guide_marks_config_created_when_just_created():
     assert "Конфигурация:" in existing
 
 
-def test_setup_guide_mentions_gc_mcp():
-    """pending-подсказка упоминает gc-mcp для установки MCP-серверов."""
-    cfg = {
+def _pending_cfg():
+    return {
         "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": onboarding.TOKEN_SENTINEL},
+        "chat_completion_headers": {
+            "Authorization": onboarding.TOKEN_SENTINEL
+        },
         "model": "gigacode_agent_v1.6_rc",
     }
-    assert "gc-mcp install" in onboarding.setup_guide("/p", cfg)
+
+
+def test_setup_guide_mentions_gc_mcp(monkeypatch):
+    """pending-подсказка упоминает gc-mcp для установки MCP-серверов.
+
+    ``gc-mcp`` в PATH пинуется: подсказка выбирает ветку по
+    ``shutil.which``, и без пина проверка читала бы PATH машины —
+    на хосте без установленного gc-mcp она краснела на своём же окружении,
+    а не на регрессе.
+    """
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/gc-mcp")
+    assert "gc-mcp install" in onboarding.setup_guide("/p", _pending_cfg())
+
+
+def test_setup_guide_tells_how_to_get_gc_mcp_when_absent(monkeypatch):
+    """Узкий профиль: gc-mcp нет в PATH — советуем доставку, а не команду.
+
+    Советовать `gc-mcp install` там, где его нет, значит советовать
+    command not found.
+    """
+    import shutil
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    guide = onboarding.setup_guide("/p", _pending_cfg())
+    assert "gc-mcp install" not in guide
+    assert "uv tool install" in guide
 
 
 # --- алиас записи реестра из провайдерского id ----------------------------
 
+
 def test_default_alias_for_last_path_segment():
-    assert onboarding.default_alias_for("qwen/qwen-2.5-flash") == "qwen-2.5-flash"
+    assert (
+        onboarding.default_alias_for("qwen/qwen-2.5-flash") == "qwen-2.5-flash"
+    )
 
 
 def test_default_alias_for_short_name_as_is():
@@ -543,7 +695,10 @@ def test_default_alias_for_short_name_as_is():
 
 
 def test_default_alias_for_strips_options_suffix():
-    assert onboarding.default_alias_for("qwen/qwen-2.5-flash:free") == "qwen-2.5-flash"
+    assert (
+        onboarding.default_alias_for("qwen/qwen-2.5-flash:free")
+        == "qwen-2.5-flash"
+    )
 
 
 def test_default_alias_for_reserved_word_gets_suffix():
@@ -560,34 +715,53 @@ def test_default_alias_for_empty_id():
 
 # --- запись собранного мастером (волна B, спека §11) ----------------------
 
+
 def _wizard_config(tmp_path, monkeypatch):
     """Настоящий config.yml из пакетного шаблона + изоляция слоёв загрузки.
     Мастер пишет в НАСТОЯЩИЙ файл (запись реестра валидирует результат целиком) —
     синтетический огрызок YAML этот путь не прошёл бы."""
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {
-        "config": tmp_path / "gc", "state": tmp_path / "s",
-        "data": tmp_path / "d", "cache": tmp_path / "c",
-    })
-    monkeypatch.chdir(tmp_path)   # проектный корень профилей — не реальный репозиторий
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": tmp_path / "gc",
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
+    monkeypatch.chdir(
+        tmp_path
+    )  # проектный корень профилей — не реальный репозиторий
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
-        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"), encoding="utf-8")
+        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     return cfg_path
 
 
-def test_write_wizard_values_writes_connection_flat_and_model_to_registry(tmp_path, monkeypatch):
+def test_write_wizard_values_writes_connection_flat_and_model_to_registry(
+    tmp_path, monkeypatch
+):
     """Решение 10: подключение — плоскими ключами (база наследования + источник
     пробы), модель — записью реестра со слотом default. Запись сравнивается
     ЦЕЛИКОМ: per-model url/token мастер не пишет (§4 — в responses они мертвы)."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "Authorization": "Bearer sk-1",
-        "model": "qwen/qwen3-coder",
-    })
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "Authorization": "Bearer sk-1",
+            "model": "qwen/qwen3-coder",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["backend"]["completions_url"] == "https://x/v1/chat/completions"
-    assert raw["backend"]["chat_completion_headers"]["Authorization"] == "Bearer sk-1"
+    assert (
+        raw["backend"]["chat_completion_headers"]["Authorization"]
+        == "Bearer sk-1"
+    )
     assert raw["models"] == {"qwen3-coder": {"model": "qwen/qwen3-coder"}}
     assert raw["slots"]["default"] == "qwen3-coder"
 
@@ -595,32 +769,43 @@ def test_write_wizard_values_writes_connection_flat_and_model_to_registry(tmp_pa
 def test_write_wizard_values_does_not_touch_agent_model(tmp_path, monkeypatch):
     """Легаси-ключ мастер больше не пишет — остаётся плейсхолдером шаблона."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "model": "qwen3-coder",
-    })
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "qwen3-coder",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["agent"]["model"] == onboarding.MODEL_SENTINEL
 
 
 def test_write_wizard_values_writes_proxy_as_before(tmp_path, monkeypatch):
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {"proxy": "socks5h://proxy.example:1080"})
+    onboarding.write_wizard_values(
+        cfg_path, {"proxy": "socks5h://proxy.example:1080"}
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["backend"]["proxy"] == "socks5h://proxy.example:1080"
 
 
-def test_write_wizard_values_without_model_leaves_registry_absent(tmp_path, monkeypatch):
+def test_write_wizard_values_without_model_leaves_registry_absent(
+    tmp_path, monkeypatch
+):
     """Модель мастер не собрал — секции реестра не заводятся вовсе (пустой якорь
     `models: {}` был бы записью «реестр включён», которой пользователь не просил)."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {"completions_url": "https://x/v1"})
+    onboarding.write_wizard_values(
+        cfg_path, {"completions_url": "https://x/v1"}
+    )
     text = cfg_path.read_text(encoding="utf-8")
     assert yaml.safe_load(text).get("models") is None
     assert "\nmodels:" not in text
 
 
-def test_write_wizard_values_rerun_keeps_pricing_of_same_entry(tmp_path, monkeypatch):
+def test_write_wizard_values_rerun_keeps_pricing_of_same_entry(
+    tmp_path, monkeypatch
+):
     """Повторный прогон мастера — upsert той же записи по merge-контракту: тариф,
     дописанный редактором секции «Модели», переживает второй проход."""
     from pathlib import Path
@@ -629,21 +814,36 @@ def test_write_wizard_values_rerun_keeps_pricing_of_same_entry(tmp_path, monkeyp
     from gc_core.config_modules.registry_write import upsert_model
 
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions", "model": "qwen3-coder"})
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "qwen3-coder",
+        },
+    )
     template = Path(_default_config_path()).read_text(encoding="utf-8")
-    upsert_model(cfg_path, "qwen3-coder", {"pricing": {"input": 12, "output": 48}}, template)
+    upsert_model(
+        cfg_path,
+        "qwen3-coder",
+        {"pricing": {"input": 12, "output": 48}},
+        template,
+    )
 
-    onboarding.write_wizard_values(cfg_path, {
-        "Authorization": "Bearer sk-2", "model": "qwen3-coder"})
+    onboarding.write_wizard_values(
+        cfg_path, {"Authorization": "Bearer sk-2", "model": "qwen3-coder"}
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"]["qwen3-coder"]["model"] == "qwen3-coder"
-    assert raw["models"]["qwen3-coder"]["pricing"] == {"input": 12, "output": 48}
+    assert raw["models"]["qwen3-coder"]["pricing"] == {
+        "input": 12,
+        "output": 48,
+    }
     assert raw["slots"]["default"] == "qwen3-coder"
 
 
 def test_write_wizard_values_does_not_hijack_a_taken_alias_with_its_own_pair(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Имя алиаса, уже занятое ДРУГОЙ моделью, брать нельзя: `upsert_model` мержит
     в существующую запись («ключа нет — сохранить как был»), поэтому её собственная
     пара пережила бы прогон и увела бы слот на СТАРЫЙ хост со СТАРЫМ токеном — при
@@ -656,22 +856,37 @@ def test_write_wizard_values_does_not_hijack_a_taken_alias_with_its_own_pair(
 
     cfg_path = _wizard_config(tmp_path, monkeypatch)
     template = Path(_default_config_path()).read_text(encoding="utf-8")
-    apply_registry_ops(cfg_path, [
-        ("upsert_model", "qwen-plus", {"model": "vendor-a/qwen-plus",
-                                       "url": "https://a/v1/chat/completions",
-                                       "token": "A"}),
-        ("write_slot", "default", "qwen-plus"),
-    ], template)
+    apply_registry_ops(
+        cfg_path,
+        [
+            (
+                "upsert_model",
+                "qwen-plus",
+                {
+                    "model": "vendor-a/qwen-plus",
+                    "url": "https://a/v1/chat/completions",
+                    "token": "A",
+                },
+            ),
+            ("write_slot", "default", "qwen-plus"),
+        ],
+        template,
+    )
 
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://b/v1/chat/completions",
-        "Authorization": "Bearer B",
-        "model": "vendor-b/qwen-plus",
-    })
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://b/v1/chat/completions",
+            "Authorization": "Bearer B",
+            "model": "vendor-b/qwen-plus",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
-    assert raw["models"]["qwen-plus"] == {"model": "vendor-a/qwen-plus",
-                                          "url": "https://a/v1/chat/completions",
-                                          "token": "A"}
+    assert raw["models"]["qwen-plus"] == {
+        "model": "vendor-a/qwen-plus",
+        "url": "https://a/v1/chat/completions",
+        "token": "A",
+    }
     # Новая запись — без своей пары: работает через только что записанное общее
     # подключение, ради которого мастер и запускали.
     assert raw["models"]["qwen-plus-2"] == {"model": "vendor-b/qwen-plus"}
@@ -679,7 +894,8 @@ def test_write_wizard_values_does_not_hijack_a_taken_alias_with_its_own_pair(
 
 
 def test_write_wizard_values_leaves_no_token_when_the_registry_write_fails(
-        tmp_path, monkeypatch):
+    tmp_path, monkeypatch
+):
     """Отказ записи — «конфиг не записан» и для СЕКРЕТА тоже: реестр пишется первым,
     поэтому его провал не оставляет на диске плоский токен от несостоявшегося
     прогона (мастер при этом честно говорит, что ничего не записал)."""
@@ -692,11 +908,14 @@ def test_write_wizard_values_leaves_no_token_when_the_registry_write_fails(
 
     monkeypatch.setattr(rw, "apply_registry_ops", _refuse)
     with pytest.raises(ValueError) as info:
-        onboarding.write_wizard_values(cfg_path, {
-            "completions_url": "https://x/v1/chat/completions",
-            "Authorization": "Bearer sk-secret",
-            "model": "qwen/qwen3-coder",
-        })
+        onboarding.write_wizard_values(
+            cfg_path,
+            {
+                "completions_url": "https://x/v1/chat/completions",
+                "Authorization": "Bearer sk-secret",
+                "model": "qwen/qwen3-coder",
+            },
+        )
     # Голый `ValueError` — форма ответа «не легло НИЧЕГО»: `PartialWriteError`
     # здесь отправил бы человека искать в файле запись, которой там нет.
     assert not isinstance(info.value, onboarding.PartialWriteError)
@@ -705,7 +924,9 @@ def test_write_wizard_values_leaves_no_token_when_the_registry_write_fails(
     assert onboarding.TOKEN_SENTINEL in text
 
 
-def test_a_refused_flat_write_names_the_registry_as_landed(tmp_path, monkeypatch):
+def test_a_refused_flat_write_names_the_registry_as_landed(
+    tmp_path, monkeypatch
+):
     """Контракт `PartialWriteError.written`: состоявшиеся записи называет ПИСАТЕЛЬ —
     только он знает, что успело лечь. Поверхности мастера выводили это из его порядка
     записи, и такая догадка разъезжается с ним на первой же правке: человек прочитал
@@ -721,10 +942,13 @@ def test_a_refused_flat_write_names_the_registry_as_landed(tmp_path, monkeypatch
 
     monkeypatch.setattr(ocw, "write_values", _refuse_flat)
     with pytest.raises(onboarding.PartialWriteError) as info:
-        onboarding.write_wizard_values(cfg_path, {
-            "completions_url": "https://x/v1/chat/completions",
-            "model": "qwen/qwen3-coder",
-        })
+        onboarding.write_wizard_values(
+            cfg_path,
+            {
+                "completions_url": "https://x/v1/chat/completions",
+                "model": "qwen/qwen3-coder",
+            },
+        )
     assert info.value.written == ("registry",)
     assert str(info.value) == "схема не валидна"
     # Реестр ушёл настоящей транзакцией — «уже легло» проверяется по диску.
@@ -732,25 +956,35 @@ def test_a_refused_flat_write_names_the_registry_as_landed(tmp_path, monkeypatch
     assert raw["slots"]["default"] == "qwen3-coder"
 
 
-def test_write_wizard_values_survives_a_missing_template(tmp_path, monkeypatch):
+def test_write_wizard_values_survives_a_missing_template(
+    tmp_path, monkeypatch
+):
     """Пакетный шаблон недоступен — мастер не падает трейсбеком: вызывающие ловят
     только `ValueError`, а якорь секции писатель синтезирует сам, и пустой шаблон
     ему не мешает."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    monkeypatch.setattr(config, "_default_config_path",
-                        lambda: str(tmp_path / "no-such-template.yml"))
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "Authorization": "Bearer sk-1",
-        "model": "qwen/qwen3-coder",
-    })
+    monkeypatch.setattr(
+        config,
+        "_default_config_path",
+        lambda: str(tmp_path / "no-such-template.yml"),
+    )
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "Authorization": "Bearer sk-1",
+            "model": "qwen/qwen3-coder",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"] == {"qwen3-coder": {"model": "qwen/qwen3-coder"}}
     assert raw["slots"]["default"] == "qwen3-coder"
     assert raw["backend"]["completions_url"] == "https://x/v1/chat/completions"
 
 
-def test_write_wizard_values_result_resolves_in_both_api_modes(tmp_path, monkeypatch):
+def test_write_wizard_values_result_resolves_in_both_api_modes(
+    tmp_path, monkeypatch
+):
     """Страж решения 10: конфиг после мастера рабочий в ОБОИХ режимах. В `responses`
     от записи действует только провайдерский id (§4) — он и приходит из реестра, а
     адрес/токен берутся из плоского подключения; в `chat_completions` тот же резолв
@@ -759,46 +993,69 @@ def test_write_wizard_values_result_resolves_in_both_api_modes(tmp_path, monkeyp
     from gc_core import onboarding_config_writer as ocw
 
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "Authorization": "Bearer sk-1",
-        "model": "qwen/qwen3-coder",
-    })
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "Authorization": "Bearer sk-1",
+            "model": "qwen/qwen3-coder",
+        },
+    )
     for api_mode in ("chat_completions", "responses"):
         text = ocw.set_scalar_at_path(
-            cfg_path.read_text(encoding="utf-8"), "backend.api_mode", api_mode)
+            cfg_path.read_text(encoding="utf-8"), "backend.api_mode", api_mode
+        )
         cfg_path.write_text(text, encoding="utf-8")
         cfg = config.load_config(str(cfg_path))
         assert onboarding.is_unconfigured(cfg) is False
-        resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve("main")
+        resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
+            "main"
+        )
         assert resolved.model == "qwen/qwen3-coder"
-        assert resolved.url == "https://x/v1/chat/completions"   # унаследован от backend
-        assert resolved.authorization is None                    # наследуется заголовок
+        assert (
+            resolved.url == "https://x/v1/chat/completions"
+        )  # унаследован от backend
+        assert resolved.authorization is None  # наследуется заголовок
 
 
 # --- шаг «light/max»: его доля в записи (волна B, Task 8) ---
+
 
 def test_write_wizard_values_never_touches_the_profile_pointer(tmp_path):
     """Мастер профилями не управляет (спека §2): указатель в файле остаётся
     таким, каким был, при любом проходе."""
     from pathlib import Path
+
     from gc_core import onboarding
     from gc_core.config import _default_config_path
+
     cfg = tmp_path / "config.yml"
-    cfg.write_text(Path(_default_config_path()).read_text(encoding="utf-8"),
-                   encoding="utf-8")
+    cfg.write_text(
+        Path(_default_config_path()).read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     import yaml
-    text = cfg.read_text(encoding="utf-8").replace('profile: ""', 'profile: work')
+
+    text = cfg.read_text(encoding="utf-8").replace(
+        'profile: ""', "profile: work"
+    )
     cfg.write_text(text, encoding="utf-8")
-    onboarding.write_wizard_values(str(cfg), {
-        "completions_url": "http://h/v1/chat/completions",
-        "Authorization": "Bearer t",
-        onboarding.MODEL_SLOT_KEYS["default"]: "m",
-    })
-    assert (yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}).get("profile") == "work"
+    onboarding.write_wizard_values(
+        str(cfg),
+        {
+            "completions_url": "http://h/v1/chat/completions",
+            "Authorization": "Bearer t",
+            onboarding.MODEL_SLOT_KEYS["default"]: "m",
+        },
+    )
+    assert (yaml.safe_load(cfg.read_text(encoding="utf-8")) or {}).get(
+        "profile"
+    ) == "work"
 
 
-def test_deactivation_puts_the_pointer_where_the_next_start_will_read_it(tmp_path, monkeypatch):
+def test_deactivation_puts_the_pointer_where_the_next_start_will_read_it(
+    tmp_path, monkeypatch
+):
     """Живой тупик стенда: указатель на профиль лежит в ПРОЕКТНОМ `.gc/config.yml`,
     а финал мастера снимает его в базе — следующий старт поднимает тот же профиль,
     и починка не доезжает (гейт отвергает запись по стеку следующего старта).
@@ -818,77 +1075,113 @@ def test_deactivation_puts_the_pointer_where_the_next_start_will_read_it(tmp_pat
     monkeypatch.chdir(project)
 
     base = home / "config.yml"
-    base.write_text((bundled_root() / "config.default.yml").read_text(encoding="utf-8"),
-                    encoding="utf-8")
+    base.write_text(
+        (bundled_root() / "config.default.yml").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
     project_config = project / ".gc" / "config.yml"
     project_config.write_text('profile: "work"\n', encoding="utf-8")
     (project / ".gc" / "profiles" / "work.yml").write_text(
-        "agent:\n  max_steps: 7\n", encoding="utf-8")
-    assert resolve_profile_pointer(base) == "work"          # предусловие раскладки
+        "agent:\n  max_steps: 7\n", encoding="utf-8"
+    )
+    assert resolve_profile_pointer(base) == "work"  # предусловие раскладки
 
-    onboarding.write_wizard_values(str(base), {
-        "completions_url": "https://x/v1/chat/completions",
-        "Authorization": "Bearer sk-1",
-    }, deactivate_profile=True)
+    onboarding.write_wizard_values(
+        str(base),
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "Authorization": "Bearer sk-1",
+        },
+        deactivate_profile=True,
+    )
 
     # Вопрос не «в какой файл легло», а «что поднимет следующий старт»: снятие,
     # записанное не в тот слой, — молчаливый no-op.
     assert resolve_profile_pointer(base) == ""
-    assert yaml.safe_load(project_config.read_text(encoding="utf-8"))["profile"] == ""
+    assert (
+        yaml.safe_load(project_config.read_text(encoding="utf-8"))["profile"]
+        == ""
+    )
 
 
-def test_write_wizard_values_writes_level_models_with_slots(tmp_path, monkeypatch):
+def test_write_wizard_values_writes_level_models_with_slots(
+    tmp_path, monkeypatch
+):
     """Шаг (в): заполненные уровни — записи реестра + свои слоты, ОДНОЙ транзакцией
     с моделью по умолчанию (по отдельности вторая запись без слота нерезолвима, §4).
     Per-model url/token не пишутся и здесь — наследуются от плоского подключения."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "model": "qwen/qwen3-coder",
-        "model_light": "qwen/qwen3-flash",
-        "model_max": "qwen/qwen3-max",
-    })
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "qwen/qwen3-coder",
+            "model_light": "qwen/qwen3-flash",
+            "model_max": "qwen/qwen3-max",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"] == {
         "qwen3-coder": {"model": "qwen/qwen3-coder"},
         "qwen3-flash": {"model": "qwen/qwen3-flash"},
         "qwen3-max": {"model": "qwen/qwen3-max"},
     }
-    assert raw["slots"] == {"default": "qwen3-coder", "light": "qwen3-flash",
-                            "max": "qwen3-max"}
+    assert raw["slots"] == {
+        "default": "qwen3-coder",
+        "light": "qwen3-flash",
+        "max": "qwen3-max",
+    }
 
 
-def test_write_wizard_values_skipped_levels_write_nothing(tmp_path, monkeypatch):
+def test_write_wizard_values_skipped_levels_write_nothing(
+    tmp_path, monkeypatch
+):
     """Шаг (в) пропущен — ни записи, ни слота: пустой слот увёл бы уровень на
     несуществующий алиас, а лишняя запись появилась бы в реестре без спроса."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions", "model": "m"})
+    onboarding.write_wizard_values(
+        cfg_path,
+        {"completions_url": "https://x/v1/chat/completions", "model": "m"},
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"] == {"m": {"model": "m"}}
     assert raw["slots"] == {"default": "m"}
 
 
-def test_write_wizard_values_same_model_on_two_levels_writes_one_entry(tmp_path, monkeypatch):
+def test_write_wizard_values_same_model_on_two_levels_writes_one_entry(
+    tmp_path, monkeypatch
+):
     """Один и тот же id на двух уровнях — одна запись и два слота на неё: близнецы
     в реестре только запутывали бы."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "model": "glm-4-plus", "model_light": "glm-4-plus"})
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "glm-4-plus",
+            "model_light": "glm-4-plus",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"] == {"glm-4-plus": {"model": "glm-4-plus"}}
     assert raw["slots"] == {"default": "glm-4-plus", "light": "glm-4-plus"}
 
 
-def test_write_wizard_values_alias_collision_keeps_both_models(tmp_path, monkeypatch):
+def test_write_wizard_values_alias_collision_keeps_both_models(
+    tmp_path, monkeypatch
+):
     """Два РАЗНЫХ id с одинаковым хвостом дают одно имя алиаса: без разведения
     вторая запись затёрла бы первую, и оба слота увели бы уровни на одну модель —
     выбор человека потерялся бы молча."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "model": "vendor-a/qwen-plus", "model_max": "vendor-b/qwen-plus"})
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "vendor-a/qwen-plus",
+            "model_max": "vendor-b/qwen-plus",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"] == {
         "qwen-plus": {"model": "vendor-a/qwen-plus"},
@@ -897,26 +1190,37 @@ def test_write_wizard_values_alias_collision_keeps_both_models(tmp_path, monkeyp
     assert raw["slots"] == {"default": "qwen-plus", "max": "qwen-plus-2"}
 
 
-def test_write_wizard_values_reuses_the_alias_of_an_already_planned_model(tmp_path, monkeypatch):
+def test_write_wizard_values_reuses_the_alias_of_an_already_planned_model(
+    tmp_path, monkeypatch
+):
     """Разведённое имя — тоже имя ЭТОЙ модели: тот же id на третьем уровне обязан
     получить уже выданный алиас, а не третью запись-близнеца (находка ревью Task 8:
     поиск шёл только по первому расчёту `default_alias_for`)."""
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "model": "vendor-a/qwen-plus",
-        "model_light": "vendor-b/qwen-plus",
-        "model_max": "vendor-b/qwen-plus"})
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "vendor-a/qwen-plus",
+            "model_light": "vendor-b/qwen-plus",
+            "model_max": "vendor-b/qwen-plus",
+        },
+    )
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"] == {
         "qwen-plus": {"model": "vendor-a/qwen-plus"},
         "qwen-plus-2": {"model": "vendor-b/qwen-plus"},
     }
-    assert raw["slots"] == {"default": "qwen-plus", "light": "qwen-plus-2",
-                            "max": "qwen-plus-2"}
+    assert raw["slots"] == {
+        "default": "qwen-plus",
+        "light": "qwen-plus-2",
+        "max": "qwen-plus-2",
+    }
 
 
-def test_write_wizard_values_reuses_an_existing_alias_named_by_a_human(tmp_path, monkeypatch):
+def test_write_wizard_values_reuses_an_existing_alias_named_by_a_human(
+    tmp_path, monkeypatch
+):
     """Повторный прогон мастера поверх готового реестра НЕ плодит близнецов.
 
     Имя за той же моделью переиспользуется — так обещает докстринг, — но поиск шёл
@@ -933,15 +1237,24 @@ def test_write_wizard_values_reuses_an_existing_alias_named_by_a_human(tmp_path,
     from gc_core.config_modules.registry_write import apply_registry_ops
 
     cfg_path = _wizard_config(tmp_path, monkeypatch)
-    apply_registry_ops(cfg_path, [
-        ("upsert_model", "fast", {"model": "qwen/qwen3-8b"}),
-        ("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
-        ("write_slot", "default", "brain"),
-    ], "")
+    apply_registry_ops(
+        cfg_path,
+        [
+            ("upsert_model", "fast", {"model": "qwen/qwen3-8b"}),
+            ("upsert_model", "brain", {"model": "qwen/qwen3-235b"}),
+            ("write_slot", "default", "brain"),
+        ],
+        "",
+    )
 
-    onboarding.write_wizard_values(cfg_path, {
-        "completions_url": "https://x/v1/chat/completions",
-        "model": "qwen/qwen3-235b", "model_light": "qwen/qwen3-8b"})
+    onboarding.write_wizard_values(
+        cfg_path,
+        {
+            "completions_url": "https://x/v1/chat/completions",
+            "model": "qwen/qwen3-235b",
+            "model_light": "qwen/qwen3-8b",
+        },
+    )
 
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     assert raw["models"] == {
@@ -954,15 +1267,21 @@ def test_write_wizard_values_reuses_an_existing_alias_named_by_a_human(tmp_path,
 def test_effective_model_reads_registry_not_the_flat_key():
     """Волна B пишет реестр, а плоский ключ остаётся значением ШАБЛОНА: на
     настроенном конфиге по нему мастер видел бы чужую модель."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
-           "slots": {"default": "fast"}, "model": "MiniMax-M2.7"}
+    cfg = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}},
+        "slots": {"default": "fast"},
+        "model": "MiniMax-M2.7",
+    }
     assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
 
 
 def test_effective_model_resolves_single_entry_without_a_slot():
     """Реестр из одной записи резолвится без явного слота — так же, как в рантайме."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {},
-           "model": "MiniMax-M2.7"}
+    cfg = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}},
+        "slots": {},
+        "model": "MiniMax-M2.7",
+    }
     assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
 
 
@@ -974,8 +1293,11 @@ def test_effective_model_falls_back_to_the_legacy_key():
 def test_effective_model_survives_a_slot_pointing_nowhere():
     """Резолв бросает ValueError на битом слоте — мастер обязан открываться на
     любом конфиге, поэтому падение переходит в фоллбэк, а не наружу."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
-           "slots": {"default": "нет-такой"}, "model": "vllm/Qwen3-Coder"}
+    cfg = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}},
+        "slots": {"default": "нет-такой"},
+        "model": "vllm/Qwen3-Coder",
+    }
     assert onboarding.effective_model(cfg) == "vllm/Qwen3-Coder"
 
 
@@ -987,9 +1309,13 @@ def test_effective_model_is_empty_on_the_template_sentinel():
 def test_assigned_level_model_reports_only_explicit_slots():
     """Незаданный `max` работает моделью `default`, но «назначен» он не был:
     написать против него её имя значило бы закрепить выдуманное."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"},
-                      "brain": {"model": "qwen/qwen3-235b"}},
-           "slots": {"default": "brain", "light": "fast"}}
+    cfg = {
+        "models": {
+            "fast": {"model": "qwen/qwen3-8b"},
+            "brain": {"model": "qwen/qwen3-235b"},
+        },
+        "slots": {"default": "brain", "light": "fast"},
+    }
     assert onboarding.assigned_level_model(cfg, "light") == "qwen/qwen3-8b"
     assert onboarding.assigned_level_model(cfg, "max") == ""
 
@@ -1007,13 +1333,19 @@ def test_assigned_level_model_survives_a_broken_slot():
 
 # --- «сейчас» шага «Модель»: одно правило на обе поверхности ----------------
 
+
 def test_model_step_current_speaks_about_the_default_slot_not_the_active_level():
     """Шаг задаёт слот `default` — и «сейчас» говорит про него. `effective_model`
     резолвит АКТИВНЫЙ уровень: при `level: max` строка показывала модель max с
     именем записи слота default, а галочка в списке вставала не на ту строку."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"},
-                      "brain": {"model": "qwen/qwen3-235b"}},
-           "slots": {"default": "fast", "max": "brain"}, "level": "max"}
+    cfg = {
+        "models": {
+            "fast": {"model": "qwen/qwen3-8b"},
+            "brain": {"model": "qwen/qwen3-235b"},
+        },
+        "slots": {"default": "fast", "max": "brain"},
+        "level": "max",
+    }
     assert onboarding.model_step_current(cfg) == "qwen/qwen3-8b"
 
 
@@ -1024,7 +1356,11 @@ def test_model_step_current_keeps_the_model_of_a_config_without_slots():
     конфигов до волны B."""
     flat = {"model": "gigacode_agent_v1.6_rc", "level": "max"}
     assert onboarding.model_step_current(flat) == "gigacode_agent_v1.6_rc"
-    registry = {"models": {"fast": {"model": "qwen/qwen3-8b"}}, "slots": {}, "level": "max"}
+    registry = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}},
+        "slots": {},
+        "level": "max",
+    }
     assert onboarding.model_step_current(registry) == "qwen/qwen3-8b"
 
 
@@ -1032,8 +1368,11 @@ def test_model_step_current_is_empty_when_only_another_level_is_assigned():
     """Слоты есть, но `default` среди них нет: агент работает моделью `max` по
     матрице фоллбэков, однако назвать её «сейчас» на шаге про `default` значило бы
     сказать «слот задан» там, где он не задан, — и ответ зависел бы от `level`."""
-    cfg = {"models": {"brain": {"model": "qwen/qwen3-235b"}},
-           "slots": {"max": "brain"}, "level": "max"}
+    cfg = {
+        "models": {"brain": {"model": "qwen/qwen3-235b"}},
+        "slots": {"max": "brain"},
+        "level": "max",
+    }
     assert onboarding.model_step_current(cfg) == ""
 
 
@@ -1044,17 +1383,24 @@ def test_model_step_display_names_the_fallback_when_default_is_unset():
     которой default работает СЕЙЧАС по фоллбэку, с подписью об источнике, — и
     предвыбор ведётся к ней: проход насквозь означает «оставить как есть».
     Обход матрицы фиксирован от default и от активного `level` не зависит."""
-    cfg = {"models": {"slim": {"model": "vendor/slim"}},
-           "slots": {"light": "slim"}, "level": "light"}
+    cfg = {
+        "models": {"slim": {"model": "vendor/slim"}},
+        "slots": {"light": "slim"},
+        "level": "light",
+    }
     assert onboarding.model_step_display(cfg) == (
-        "vendor/slim", "(default не задан — работает light)")
+        "vendor/slim",
+        "(default не задан — работает light)",
+    )
 
 
 def test_model_step_display_is_plain_when_the_default_slot_is_assigned():
     """Слот задан — подписи нет: строка «сейчас» как раньше (тесты «default
     задан» не меняются)."""
-    cfg = {"models": {"fast": {"model": "qwen/qwen3-8b"}},
-           "slots": {"default": "fast"}}
+    cfg = {
+        "models": {"fast": {"model": "qwen/qwen3-8b"}},
+        "slots": {"default": "fast"},
+    }
     assert onboarding.model_step_display(cfg) == ("qwen/qwen3-8b", "")
 
 
@@ -1062,4 +1408,7 @@ def test_model_step_display_keeps_the_slotless_config_behaviour():
     """Ни одного слота — прежнее правило `model_step_current` (легаси/одна запись
     реестра), без подписи: там резолв от уровня не зависит."""
     flat = {"model": "gigacode_agent_v1.6_rc", "level": "max"}
-    assert onboarding.model_step_display(flat) == ("gigacode_agent_v1.6_rc", "")
+    assert onboarding.model_step_display(flat) == (
+        "gigacode_agent_v1.6_rc",
+        "",
+    )

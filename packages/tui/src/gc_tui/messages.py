@@ -1,4 +1,5 @@
 """Сообщения между виджетами трейса и экраном."""
+
 from __future__ import annotations
 
 from textual.message import Message
@@ -14,6 +15,7 @@ class OpenEventRequest(Message):
 
 class OpenToolCallDetailRequest(Message):
     """Двойной клик / Enter на ToolCallRow → детальный экран с call + output."""
+
     def __init__(self, call_id: str) -> None:
         super().__init__()
         self.call_id = call_id
@@ -21,6 +23,7 @@ class OpenToolCallDetailRequest(Message):
 
 class SummaryToggleRequest(Message):
     """Клик/Enter по маркеру или телу сводки → TraceScreen раскрывает/сворачивает блок."""
+
     def __init__(self, event_no: int) -> None:
         super().__init__()
         self.event_no = event_no
@@ -31,6 +34,7 @@ class CopyBlockRequest(Message):
 
     Виджет не обращается к буферу сам: главный экран дополнительно пишет копию
     в буфер сессии, экран превью — нет (там нет своей активной сессии)."""
+
     def __init__(self, payload: str) -> None:
         super().__init__()
         self.payload = payload

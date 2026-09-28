@@ -4,6 +4,7 @@
   (он уже смонтирован delivery-флоу через _mount_user_reply → _flush_skill_marker);
 - mid-run доставка (display_content="", live=False) — только маркер, без реплики юзера.
 """
+
 import pytest
 
 
@@ -37,14 +38,12 @@ def _midrun_delivery_rec(skill_id: str = "qa-x") -> dict:
 
 def _count_skill_markers(scr) -> int:
     """Считает [skill]-маркеры в #trace (line-meta-строки с 'загружен')."""
-    from textual.widgets import Static
     texts = [str(w.render()) for w in scr.query("#trace Static")]
     return sum(1 for t in texts if "загружен" in t)
 
 
 def _count_user_replies(scr) -> int:
     """Считает UserReplyContainer в #trace."""
-    from gc_tui.widgets.user_reply import UserReplyContainer
     return len(list(scr.query("#trace UserReplyContainer")))
 
 
@@ -54,7 +53,9 @@ async def test_resume_path_mounts_exactly_one_marker(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._render_records([_user_rec_with_skill("qa-x")], live=False)
@@ -71,7 +72,9 @@ async def test_live_path_mounts_no_marker(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._render_records([_user_rec_with_skill("qa-x")], live=True)
@@ -88,7 +91,9 @@ async def test_midrun_delivery_resume_marker_only(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._render_records([_midrun_delivery_rec("qa-x")], live=False)
@@ -108,7 +113,9 @@ async def test_midrun_delivery_live_no_marker(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._render_records([_midrun_delivery_rec("qa-x")], live=True)

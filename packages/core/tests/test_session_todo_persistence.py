@@ -1,6 +1,10 @@
-from gc_core.persistence.schema import normalize_session_todo, serialize_shared_block
+from gc_core.persistence.schema import (
+    normalize_session_todo,
+    serialize_shared_block,
+)
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.states import SharedStateData
+from gc_testkit import run_coro
 
 ITEMS = [
     {"content": "Изучить код", "status": "completed"},
@@ -16,12 +20,14 @@ def test_normalize_keeps_valid_items():
 def test_normalize_drops_invalid_items():
     raw = [
         {"content": "ok", "status": "pending"},
-        {"content": "", "status": "pending"},          # пустой content
-        {"content": "bad status", "status": "done"},   # статус вне enum
+        {"content": "", "status": "pending"},  # пустой content
+        {"content": "bad status", "status": "done"},  # статус вне enum
         "not a dict",
-        {"status": "pending"},                          # нет content
+        {"status": "pending"},  # нет content
     ]
-    assert normalize_session_todo(raw) == [{"content": "ok", "status": "pending"}]
+    assert normalize_session_todo(raw) == [
+        {"content": "ok", "status": "pending"}
+    ]
 
 
 def test_normalize_non_list_is_empty():
@@ -59,18 +65,26 @@ def test_session_todo_survives_compaction_via_post_run_heal():
 
     Известный pre-existing разрыв (обрыв рана до heal) — см. память
     compaction-drops-shared-fields; тут пиннится именно нормальный путь."""
-    from gc_core.states import SharedStateData, State
     from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+    from gc_core.states import SharedStateData, State
 
     state = State(
-        verbose=False, model="m", tools_spec=[], tools_descr=[], skills_list=[],
-        max_steps=100, system_prompt_id="v1", use_server_subagents=False,
+        verbose=False,
+        model="m",
+        tools_spec=[],
+        tools_descr=[],
+        skills_list=[],
+        max_steps=100,
+        system_prompt_id="v1",
+        use_server_subagents=False,
         shared=SharedStateData(
             session_todo=list(ITEMS), working_memory={"state": "прогресс"}
         ),
     )
     # Как compaction оставляет meta на диске: shared урезан до 2 полей.
-    truncated_meta = {"shared": {"working_memory": {"state": "прогресс"}, "notes_md": ""}}
+    truncated_meta = {
+        "shared": {"working_memory": {"state": "прогресс"}, "notes_md": ""}
+    }
 
     healed = ThreadMetaMapper.merge_state_into_meta(truncated_meta, state)
 
@@ -86,37 +100,65 @@ def test_session_todo_survives_compaction_payload():
     (поле есть только в этой ветке, поэтому тест живёт отдельно от фикса)."""
     import types
     from unittest.mock import patch
-    from gc_core.summarize.compaction import run_summary_compaction
+
+    from gc_core.summarize.compaction import arun_summary_compaction
     from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 
     state = types.SimpleNamespace(
         thread_id="t-todo",
         messages=[{"role": "user", "content": "x" * 500}],
-        user_intent_log=[], current_user_intent=[], user_turn_seq=0,
-        dialog_steps_offset=0, previous_response_id=None,
+        user_intent_log=[],
+        current_user_intent=[],
+        user_turn_seq=0,
+        dialog_steps_offset=0,
+        previous_response_id=None,
         shared=types.SimpleNamespace(
-            working_memory={}, notes_md="", fetch_url_cache={}, confirm_rules={},
+            working_memory={},
+            notes_md="",
+            fetch_url_cache={},
+            confirm_rules={},
             session_todo=list(ITEMS),
         ),
     )
-    ctx = types.SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
+    ctx = types.SimpleNamespace(
+        config_dict={"summary_params": {}}, logger=None
+    )
     captured: dict = {}
 
-    def _fake_summarize(**_kw):
-        return {"raw_summary": "<summary>ok</summary>", "num_batches": 1,
-                "last_dialog_steps": "", "memory_append_deltas": WorkingMemoryDeltas(),
-                "memory_replace_deltas": WorkingMemoryDeltas(), "memory_append_touched": [],
-                "memory_replace_touched": [],
-                "trace": {"memory_patch": {"executed": False}, "final_output": {}}}
+    async def _fake_summarize(**_kw):
+        return {
+            "raw_summary": "<summary>ok</summary>",
+            "num_batches": 1,
+            "last_dialog_steps": "",
+            "memory_append_deltas": WorkingMemoryDeltas(),
+            "memory_replace_deltas": WorkingMemoryDeltas(),
+            "memory_append_touched": [],
+            "memory_replace_touched": [],
+            "trace": {"memory_patch": {"executed": False}, "final_output": {}},
+        }
 
-    with patch("gc_core.summarize.compaction.log_compaction_started"), \
-         patch("gc_core.summarize.compaction.log_summary_raw_text"), \
-         patch("gc_core.summarize.compaction.log_summary_message_body"), \
-         patch("gc_core.summarize.compaction.log_compaction_completed"), \
-         patch("gc_core.summarize.compaction.summarize_dialog_via_chat_completions", _fake_summarize), \
-         patch("gc_core.summarize.compaction.apply_summary_state_patch", lambda **_kw: "body"):
-        run_summary_compaction(ctx=ctx, state=state, trigger_reason="test",
-                               is_cli_mode=False,
-                               on_summary_applied=lambda e: captured.update(e))
+    with (
+        patch("gc_core.summarize.compaction.log_compaction_started"),
+        patch("gc_core.summarize.compaction.log_summary_raw_text"),
+        patch("gc_core.summarize.compaction.log_summary_message_body"),
+        patch("gc_core.summarize.compaction.log_compaction_completed"),
+        patch(
+            "gc_core.summarize.compaction.asummarize_dialog_via_chat_completions",
+            _fake_summarize,
+        ),
+        patch(
+            "gc_core.summarize.compaction.apply_summary_state_patch",
+            lambda **_kw: "body",
+        ),
+    ):
+        run_coro(
+            arun_summary_compaction(
+                ctx=ctx,
+                state=state,
+                trigger_reason="test",
+                is_cli_mode=False,
+                on_summary_applied=lambda e: captured.update(e),
+            )
+        )
 
     assert captured["summary_payload"]["shared"]["session_todo"] == ITEMS

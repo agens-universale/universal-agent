@@ -8,11 +8,9 @@
 
 import json
 
-import pytest
-
 from gc_core.backends.protocol import WalkOutputTooLargeError
-from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 from gc_core.tools.fs.find_in_files import FindInFiles
+from gc_testkit.harbor_fakes import FakeBackend, bind_os_backend
 
 _FILES = {"/work/app.py": "needle here\n"}
 
@@ -22,11 +20,18 @@ class _RaisingWalkBackend(FakeBackend):
         super().__init__(files)
         self._exc = exc
 
-    def iter_walk(self, path, *, should_descend=None):
+    async def iter_walk(self, path, *, should_descend=None):
         raise self._exc
         yield  # pragma: no cover - генератор
 
-    def iter_walk_entries(self, path, *, should_descend=None, prune_names=(), prune_dot_dirs=False):
+    async def iter_walk_entries(
+        self,
+        path,
+        *,
+        should_descend=None,
+        prune_names=(),
+        prune_dot_dirs=False,
+    ):
         # find_in_files обходит дерево через iter_walk_entries (размеры + prune).
         raise self._exc
         yield  # pragma: no cover - генератор
@@ -34,7 +39,7 @@ class _RaisingWalkBackend(FakeBackend):
 
 def _run(exc):
     tool = FindInFiles.__new__(FindInFiles)
-    bind_os_backend(tool, _RaisingWalkBackend(_FILES, exc))
+    tool = bind_os_backend(tool, _RaisingWalkBackend(_FILES, exc))
     return json.loads(tool(path="/work", pattern="needle", query_mode="text"))
 
 
@@ -69,7 +74,7 @@ def test_missing_root_maps_to_a_domain_envelope():
 def test_worker_failure_maps_to_a_domain_envelope(monkeypatch):
     """Исключение из воркера пробрасывается наружу через `raise exc` в фан-ине."""
     tool = FindInFiles.__new__(FindInFiles)
-    bind_os_backend(tool, FakeBackend(_FILES))
+    tool = bind_os_backend(tool, FakeBackend(_FILES))
 
     def boom(*args, **kwargs):
         raise RuntimeError("worker exploded")

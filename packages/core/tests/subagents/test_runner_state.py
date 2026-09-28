@@ -2,13 +2,16 @@
 
 from types import SimpleNamespace
 
-from gc_core.states import State, SharedStateData
-from gc_core.tools.subagents.registry import SUBAGENT_CLASSES, is_subagent_tool
+import pytest
+from gc_core.states import SharedStateData, State
+from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
 def _make_orchestrator_state(**overrides):
-    shared = overrides.pop("shared", SharedStateData(working_memory={"state": "test"}))
+    shared = overrides.pop(
+        "shared", SharedStateData(working_memory={"state": "test"})
+    )
     state = State(
         verbose=False,
         model="test-model",
@@ -57,73 +60,84 @@ def _make_ctx(config_dict=None):
 
 
 class TestBuildChildState:
-    def test_parent_state_id_equals_orchestrator(self):
+    @pytest.mark.asyncio
+    async def test_parent_state_id_equals_orchestrator(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
+        child = await runner._build_child_state("test role")
         assert child.parent_state_id == orch.state_id
 
-    def test_shared_is_same_reference(self):
+    @pytest.mark.asyncio
+    async def test_shared_is_same_reference(self):
         shared = SharedStateData(working_memory={"state": "shared data"})
         orch = _make_orchestrator_state(shared=shared)
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
+        child = await runner._build_child_state("test role")
         assert child.shared is orch.shared
         assert child.shared is shared
 
-    def test_specific_role_set(self):
+    @pytest.mark.asyncio
+    async def test_specific_role_set(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         role = "You are an expert planner."
-        child = runner._build_child_state(role)
+        child = await runner._build_child_state(role)
         assert child.specific_role == role
 
-    def test_no_subagent_tools_in_child(self):
+    @pytest.mark.asyncio
+    async def test_no_subagent_tools_in_child(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
-        child_tool_names = {t.get("name") for t in child.tools if isinstance(t, dict)}
+        child = await runner._build_child_state("test role")
+        child_tool_names = {
+            t.get("name") for t in child.tools if isinstance(t, dict)
+        }
         for name in child_tool_names:
             assert not is_subagent_tool(name), (
                 f"Subagent tool {name} should NOT be in child state tools"
             )
 
-    def test_backend_api_mode_is_chat_completions(self):
+    @pytest.mark.asyncio
+    async def test_backend_api_mode_is_chat_completions(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
+        child = await runner._build_child_state("test role")
         assert child.backend_api_mode == "chat_completions"
 
-    def test_max_steps_from_config(self):
+    @pytest.mark.asyncio
+    async def test_max_steps_from_config(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(subagent_max_steps=25)
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
+        child = await runner._build_child_state("test role")
         assert child.max_steps == 25
 
-    def test_max_steps_default_when_not_in_config(self):
+    @pytest.mark.asyncio
+    async def test_max_steps_default_when_not_in_config(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         del cfg["subagent_max_steps"]
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
+        child = await runner._build_child_state("test role")
         assert child.max_steps == 50
 
-    def test_model_inherited_from_orchestrator(self):
+    @pytest.mark.asyncio
+    async def test_model_inherited_from_orchestrator(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
+        child = await runner._build_child_state("test role")
         assert child.default_model == orch.default_model
 
-    def test_use_server_subagents_is_false(self):
+    @pytest.mark.asyncio
+    async def test_use_server_subagents_is_false(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
-        child = runner._build_child_state("test role")
+        child = await runner._build_child_state("test role")
         assert child.use_server_subagents is False

@@ -11,7 +11,9 @@ from gc_core.message_policy.no_tool_call_bounce import (
     extract_last_assistant_text,
     format_no_tool_call_bounce,
 )
-from gc_core.utils.format_messages import format_message_chat_completions_to_send_backend
+from gc_core.utils.format_messages import (
+    format_message_chat_completions_to_send_backend,
+)
 
 
 def test_format_canonical_assistant_keeps_think_prose_as_in_messages():
@@ -163,7 +165,11 @@ def test_extract_strips_think_from_last_assistant():
 
 def test_extract_only_think_returns_empty():
     messages = [
-        {"type": "message", "role": "assistant", "content": "<think>only</think>"},
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": "<think>only</think>",
+        },
     ]
     assert extract_last_assistant_text(messages) == ""
 

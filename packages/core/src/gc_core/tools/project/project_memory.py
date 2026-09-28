@@ -4,6 +4,7 @@ The agent sees only three actions: read / append / write. Path, lock, atomicity,
 and compaction are entirely under the hood. Errors carry concrete actionable
 messages without leaking implementation details.
 """
+
 from __future__ import annotations
 
 import json
@@ -11,13 +12,20 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from gc_core.config_modules.env_vars import gc_paths, project_slug
-from gc_core.config_modules.project_memory import project_memory_limits_from_config_dict
+from gc_core.config_modules.project_memory import (
+    project_memory_limits_from_config_dict,
+)
+from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
+from gc_core.loop_detector.constants import (
+    GENERIC_PROFILE,
+    loop_warn_on_repeat,
+)
+from gc_core.message_policy.project_memory_notice.policy import (
+    touch_project_memory_baseline,
+)
 from gc_core.project_memory import compaction, storage
 from gc_core.project_memory.status import fill_percent
 from gc_core.project_memory.storage import ProjectMemoryError
-from gc_core.message_policy.project_memory_notice.policy import touch_project_memory_baseline
-from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
-from gc_core.loop_detector.constants import GENERIC_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _BACKUP_FILE_NAME = "GIGACODE_memory_backup.md"
@@ -31,16 +39,11 @@ def backup_path(*, cwd: str | None = None) -> Path:
     slug = project_slug(cwd)
     return gc_paths()["state"] / "projects" / slug / _BACKUP_FILE_NAME
 
+
 _FILE_NAME = "project_memory.md"
 
-_READ_EMPTY_HINT = (
-    "long memory is empty. Use action=write to seed it with important facts "
-    "you want to remember across sessions."
-)
-_AUTO_COMPACTION_HINT = (
-    "Memory was compacted to fit the limit. "
-    "Call action=read if you want to see what was kept."
-)
+_READ_EMPTY_HINT = "long memory is empty. Use action=write to seed it with important facts you want to remember across sessions."
+_AUTO_COMPACTION_HINT = "Memory was compacted to fit the limit. Call action=read if you want to see what was kept."
 _HIGH_FILL_THRESHOLD_PERCENT = 70
 _HIGH_FILL_HINT = (
     f"Project memory is over {_HIGH_FILL_THRESHOLD_PERCENT}% full. Consider action=write to reorganize it: "
@@ -54,12 +57,16 @@ _HIGH_FILL_HINT = (
 class ProjectMemory(AbstractSimpleTool):
     tool_name = PROJECT_MEMORY_TOOL_NAME
 
-    def __init__(self, ctx: Any = None, state: Any = None, **kwargs: Any) -> None:
+    def __init__(
+        self, ctx: Any = None, state: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self._ctx = ctx
         self._state = state
         gc_dir: Optional[Path] = getattr(ctx, "project_gc_dir", None)
-        self._path: Optional[Path] = (Path(gc_dir) / _FILE_NAME) if gc_dir else None
+        self._path: Optional[Path] = (
+            (Path(gc_dir) / _FILE_NAME) if gc_dir else None
+        )
         # Backup path: mirrors primary outside the project tree so it survives rm -rf .gc.
         # cwd is the parent of .gc (project root).
         if gc_dir is not None:
@@ -74,7 +81,9 @@ class ProjectMemory(AbstractSimpleTool):
         self._max_append_chars = limits["max_append_chars"]
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def tool_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "project_memory",
@@ -104,7 +113,7 @@ class ProjectMemory(AbstractSimpleTool):
                             "Required for every action; ignored for read. "
                             "For append: ONLY the new delta. "
                             "For write: the FULL updated markdown (full overwrite). "
-                            "For read: pass empty string \"\"."
+                            'For read: pass empty string "".'
                         ),
                     },
                 },
@@ -115,8 +124,10 @@ class ProjectMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None) -> str:
-        return '''Tool name: project_memory
+    def prompt_description(
+        cls, config_dict: Optional[Dict[str, Any]] = None
+    ) -> str:
+        return """Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.
 Append short factual deltas; write (full overwrite) only for rare full replacements.
@@ -147,7 +158,7 @@ Return format (JSON string):
   "compaction": {"performed": bool, "before_chars"?: number, "after_chars"?: number},
   "hint": "..." (when relevant; includes reorganize nudge above 70% fill)
 }
-'''
+"""
 
     def _usage_fields(self, length: int) -> Dict[str, int]:
         return {
@@ -163,11 +174,16 @@ Return format (JSON string):
         return info.chars if info.exists else 0
 
     def _high_fill_hint(self, length: int) -> Optional[str]:
-        if fill_percent(length, self._max_chars) > _HIGH_FILL_THRESHOLD_PERCENT:
+        if (
+            fill_percent(length, self._max_chars)
+            > _HIGH_FILL_THRESHOLD_PERCENT
+        ):
             return _HIGH_FILL_HINT
         return None
 
-    def _resolve_hint(self, length: int, hint: Optional[str] = None) -> Optional[str]:
+    def _resolve_hint(
+        self, length: int, hint: Optional[str] = None
+    ) -> Optional[str]:
         hints = [part for part in (hint, self._high_fill_hint(length)) if part]
         return "\n\n".join(hints) if hints else None
 
@@ -213,17 +229,37 @@ Return format (JSON string):
             payload["hint"] = resolved_hint
         return json.dumps(payload, ensure_ascii=False)
 
-    def __call__(self, action: str, content: str = "", **kwargs: Any) -> str:
+    async def acall(
+        self, action: str, content: str = "", **kwargs: Any
+    ) -> str:
+        """Инлайн на loop: нативного async у файлов нет (docs/async.md).
+
+        Файловые ветки исполняются прямо здесь — оборачивать нечего. Отличается
+        только ``append``: у него есть редкая ветка переполнения с LLM-компакцией,
+        и её надо ждать нативно — это единственный сетевой шаг в append'е.
+        См. ``_ahandle_append``.
+        """
+        early = self._reject_unusable(action)
+        if early is not None:
+            return early
+        if action == "append":
+            return await self._ahandle_append(content)
+        return self._dispatch_sync(action, content)
+
+    def _reject_unusable(self, action: str) -> Optional[str]:
+        """Отказ, если тулу негде работать. Общий для обоих входов."""
         if self._path is None:
             return self._err(
                 action=action,
                 error_type="not_configured",
                 message="project_memory path is not available in this context.",
             )
+        return None
+
+    def _dispatch_sync(self, action: str, content: str) -> str:
+        """Ветки без компакции: они одинаковы для синхронного и async входа."""
         if action == "read":
             return self._handle_read()
-        if action == "append":
-            return self._handle_append(content)
         if action == "write":
             return self._handle_write(content)
         return self._err(
@@ -249,7 +285,27 @@ Return format (JSON string):
             hint=_READ_EMPTY_HINT if is_empty else None,
         )
 
-    def _handle_append(self, content: str) -> str:
+    async def _ahandle_append(self, content: str) -> str:
+        """Дописать в long memory; компакцию ждём НАТИВНО.
+
+        Сжатие — LLM-вызов, и он единственное место в append'е, которое ходит
+        по сети: остальное — чтение и запись файла, они инлайновые.
+        """
+        early, combined = self._append_prepare(content)
+        if early is not None:
+            return early
+        return self._append_finish(
+            combined,
+            await compaction.acompact_text(combined, self._ctx, self._state),
+        )
+
+    def _append_prepare(self, content: str) -> tuple[Optional[str], str]:
+        """``(готовый ответ, текст для компакции)`` — ровно одно из двух значимо.
+
+        Всё, что не зависит от способа дождаться компакции: валидация, чтение
+        текущего содержимого и простая дозапись, если всё влезает. Вынесено,
+        чтобы у двух входов не разошлись правила — расходились бы молча.
+        """
         delta = content if isinstance(content, str) else ""
         delta_stripped = delta.strip()
         if not delta_stripped:
@@ -257,7 +313,7 @@ Return format (JSON string):
                 action="append",
                 error_type="empty_content",
                 message="content must be non-empty for append.",
-            )
+            ), ""
         if len(delta_stripped) > self._max_append_chars:
             return self._err(
                 action="append",
@@ -267,7 +323,7 @@ Return format (JSON string):
                     f"(> {self._max_append_chars}). "
                     "Rewrite more concisely (store facts, not raw text) and retry."
                 ),
-            )
+            ), ""
         existing = storage.read(self._path, backup=self._backup)
         existing_stripped = existing.strip()
         combined = (
@@ -278,14 +334,24 @@ Return format (JSON string):
         if len(combined) <= self._max_chars:
             try:
                 info = storage.append(
-                    self._path, delta_stripped, max_chars=self._max_chars, backup=self._backup
+                    self._path,
+                    delta_stripped,
+                    max_chars=self._max_chars,
+                    backup=self._backup,
                 )
             except ProjectMemoryError as e:
-                return self._err(action="append", error_type=e.code, message=e.message)
+                return self._err(
+                    action="append", error_type=e.code, message=e.message
+                ), ""
             self._sync_baseline_after_mutation()
-            return self._ok(action="append", length=info.chars, lines=info.lines)
+            return self._ok(
+                action="append", length=info.chars, lines=info.lines
+            ), ""
         # Overflow path: compact existing + delta together; LLM decides what to keep.
-        result = compaction.compact_text(combined, self._ctx, self._state)
+        return None, combined
+
+    def _append_finish(self, combined: str, result: Any) -> str:
+        """Разобрать итог компакции и записать результат."""
         if not result.ok:
             return self._err(
                 action="append",
@@ -299,9 +365,16 @@ Return format (JSON string):
                 message="content too large even after compaction.",
             )
         try:
-            info = storage.write(self._path, result.text, max_chars=self._max_chars, backup=self._backup)
+            info = storage.write(
+                self._path,
+                result.text,
+                max_chars=self._max_chars,
+                backup=self._backup,
+            )
         except ProjectMemoryError as e:
-            return self._err(action="append", error_type=e.code, message=e.message)
+            return self._err(
+                action="append", error_type=e.code, message=e.message
+            )
         self._sync_baseline_after_mutation()
         return self._ok(
             action="append",
@@ -329,14 +402,20 @@ Return format (JSON string):
                 action="write",
                 error_type="input_too_long",
                 message=(
-                    f"content is {len(text_stripped)} chars (> {self._max_chars}). "
-                    "Rewrite more concisely and retry."
+                    f"content is {len(text_stripped)} chars (> {self._max_chars}). Rewrite more concisely and retry."
                 ),
             )
         try:
-            info = storage.write(self._path, text_stripped, max_chars=self._max_chars, backup=self._backup)
+            info = storage.write(
+                self._path,
+                text_stripped,
+                max_chars=self._max_chars,
+                backup=self._backup,
+            )
         except ProjectMemoryError as e:
-            return self._err(action="write", error_type=e.code, message=e.message)
+            return self._err(
+                action="write", error_type=e.code, message=e.message
+            )
         self._sync_baseline_after_mutation()
         return self._ok(action="write", length=info.chars, lines=info.lines)
 

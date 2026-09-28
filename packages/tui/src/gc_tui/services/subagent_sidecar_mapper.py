@@ -7,9 +7,22 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Literal,
+    Optional,
+    Sequence,
+    Tuple,
+)
 
-from gc_core.tools.subagents.progress import brief_args_summary, parse_tool_result_status
+from gc_core.tools.subagents.progress import (
+    brief_args_summary,
+    parse_tool_result_status,
+)
+
 from gc_tui.models import TraceEvent
 
 CHILD_SUMMARY_LABEL = "контекст субагента сжат"
@@ -289,7 +302,9 @@ def trace_events_from_nested_detail(
         event_ts_utc_iso="",
         kind="call",
         title=name,
-        summary=brief_args_summary(call_payload.get("arguments"), tool_name=name or None),
+        summary=brief_args_summary(
+            call_payload.get("arguments"), tool_name=name or None
+        ),
         full_payload=call_payload,
         call_id=call_id,
         tool_name=name,

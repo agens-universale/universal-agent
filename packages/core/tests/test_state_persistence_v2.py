@@ -3,14 +3,25 @@ import tempfile
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.intent_log import ACTION_USER_ASK, deserialize_list, serialize_for_meta
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION, StateSchemaError, meta_has_persisted_agent_state, validate_thread_meta_for_load
+from gc_core.intent_log import (
+    ACTION_USER_ASK,
+    deserialize_list,
+    serialize_for_meta,
+)
+from gc_core.persistence.schema import (
+    STATE_SCHEMA_VERSION,
+    StateSchemaError,
+    meta_has_persisted_agent_state,
+    validate_thread_meta_for_load,
+)
 from gc_core.persistence.state_repository import StateRepository
 from gc_core.persistence.state_serializer import StateSerializer
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
-from gc_core.states import SharedStateData, State
-from gc_core.tools.session.stored_outputs.tool_call_outputs_store import ToolCallOutputRecord, ToolCallOutputsStore
+from gc_core.states import State
+from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
+    ToolCallOutputRecord,
+    ToolCallOutputsStore,
+)
 
 
 def _make_state() -> State:
@@ -49,7 +60,9 @@ def test_state_from_snapshot_roundtrip_preserves_runtime_fields():
     state.shared.notes_md = "notes"
     state.shared.fetch_url_cache = {"https://x": "body"}
     state.user_intent_log = deserialize_list([_user_ask_record("closed turn")])
-    state.current_user_intent = deserialize_list([_user_ask_record("open turn", turn=2)])
+    state.current_user_intent = deserialize_list(
+        [_user_ask_record("open turn", turn=2)]
+    )
     state.user_turn_seq = 2
     state.project_memory_content_hash = "lm_hash"
     state.tool_usage_notice_cnt = {"session_memory": 3}
@@ -178,12 +191,20 @@ def test_thread_meta_mapper_allows_empty_meta():
 
 
 def test_meta_has_persisted_agent_state_v2_signals_only():
-    assert meta_has_persisted_agent_state({"shared": {"working_memory": {"goal": "x"}}})
     assert meta_has_persisted_agent_state(
-        {"user_intent_log": serialize_for_meta(deserialize_list([_user_ask_record("ship")]))}
+        {"shared": {"working_memory": {"goal": "x"}}}
+    )
+    assert meta_has_persisted_agent_state(
+        {
+            "user_intent_log": serialize_for_meta(
+                deserialize_list([_user_ask_record("ship")])
+            )
+        }
     )
     assert not meta_has_persisted_agent_state({"dialog_steps_offset": 3})
-    assert not meta_has_persisted_agent_state({"memory_files": {"journal": "legacy"}})
+    assert not meta_has_persisted_agent_state(
+        {"memory_files": {"journal": "legacy"}}
+    )
 
 
 def test_validate_thread_meta_rejects_legacy_before_agent_state_check():
@@ -206,14 +227,19 @@ def test_state_repository_file_roundtrip():
     state = _make_state()
     state.shared.working_memory = {"knowledge": "persisted"}
 
-    with tempfile.NamedTemporaryFile(mode="w+", suffix=".json", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(
+        mode="w+", suffix=".json", delete=False
+    ) as tmp:
         path = tmp.name
 
     try:
         StateRepository.save_snapshot({state.state_id: state}, path)
         loaded = StateRepository.load_snapshot(path)
         assert state.state_id in loaded
-        assert loaded[state.state_id].shared.working_memory["knowledge"] == "persisted"
+        assert (
+            loaded[state.state_id].shared.working_memory["knowledge"]
+            == "persisted"
+        )
     finally:
         import os
 
@@ -227,7 +253,9 @@ def test_state_serializer_roundtrip_from_state_factory():
 
 
 def test_get_thread_memory_registers_only_working_memory():
-    from gc_core.message_policy.tool_usage_notice.policy import get_thread_memory_registers_from_shared
+    from gc_core.message_policy.tool_usage_notice.policy import (
+        get_thread_memory_registers_from_shared,
+    )
 
     shared = SimpleNamespace(
         working_memory={"state": "ok"},

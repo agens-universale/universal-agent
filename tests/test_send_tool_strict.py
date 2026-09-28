@@ -4,15 +4,16 @@ Some OpenAI-compatible builds (vllm/sglang) answer 500 on `function.strict`
 instead of ignoring the unknown key, so the field has to be switchable — for
 both API dialects, since `responses` sends tool specs verbatim.
 """
+
+import asyncio
 import os
 import tempfile
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.config import load_config
 from gc_core.config_modules.backend import BackendConfig
-from gc_core.tools import build_tools_data
+from gc_core.tools import abuild_tools_data
 from gc_core.utils.connect_backend import (
     create_call_data_responses,
     normalize_chat_completions_tools,
@@ -22,7 +23,16 @@ _CONFIG = {"stop_tools": [], "openai_strict_tools_schema": False}
 
 
 def _specs(send_tool_strict: bool) -> list:
-    _, specs, *_ = build_tools_data({**_CONFIG, "send_tool_strict": send_tool_strict})
+    # Сборка набора тулов корутинная: синхронный `build_tools_data` снят вместе
+    # с синхронными входами в дискавери — он уводил обход серверов в
+    # `run_coro_blocking`. Фикстура синхронная и своего loop не имеет, поэтому
+    # поднимаем его здесь одним `asyncio.run`.
+    async def _build():
+        return await abuild_tools_data(
+            {**_CONFIG, "send_tool_strict": send_tool_strict}
+        )
+
+    _, specs, *_ = asyncio.run(_build())
     return specs
 
 
@@ -62,7 +72,9 @@ def test_disabled_keeps_strict_out_of_chat_completions_payload(specs_off):
     wire = normalize_chat_completions_tools(specs_off)
 
     assert wire
-    assert [t["function"]["name"] for t in wire if "strict" in t["function"]] == []
+    assert [
+        t["function"]["name"] for t in wire if "strict" in t["function"]
+    ] == []
 
 
 def test_disabled_keeps_strict_out_of_responses_payload(specs_off):
@@ -73,6 +85,8 @@ def test_disabled_keeps_strict_out_of_responses_payload(specs_off):
         previous_response_id=None,
     )
 
-    call_data = create_call_data_responses([{"role": "user", "content": "hi"}], state)
+    call_data = create_call_data_responses(
+        [{"role": "user", "content": "hi"}], state
+    )
 
     assert [t["name"] for t in call_data["tools"] if "strict" in t] == []

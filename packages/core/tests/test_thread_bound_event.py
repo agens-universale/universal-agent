@@ -5,12 +5,13 @@
 только ``run_id``. Без этого события тред виден в логе лишь косвенно — через
 сообщения суммаризации, и только если она вообще срабатывала.
 """
+
 import json
 from pathlib import Path
 from unittest.mock import patch
 
 from gc_core import agent_executor as agent_executor_module
-from gc_core.run_context import create_run_context
+from gc_core.run_context import acreate_run_context
 
 
 def _config(tmp_path, log_format):
@@ -39,19 +40,19 @@ def _prompt_file(tmp_path):
     return path
 
 
-def _run(tmp_path, log_format, **run_kwargs):
+async def _run(tmp_path, log_format, **run_kwargs):
     """Прогнать run() с заглушкой вместо цикла агента; вернуть текст лога."""
-    ctx = create_run_context(_config(tmp_path, log_format))
+    ctx = await acreate_run_context(_config(tmp_path, log_format))
 
-    def _fake_run_agent(messages, state, _ctx, **_kwargs):
+    async def _fake_run_agent(messages, state, _ctx, **_kwargs):
         state.messages += list(messages)
         return "ok"
 
     with patch.object(
-        agent_executor_module, "run_agent", side_effect=_fake_run_agent
+        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
     ):
         executor = agent_executor_module.AgentExecutor(ctx)
-        result = executor.run(["привет"], verbose=False, **run_kwargs)
+        result = await executor.arun(["привет"], verbose=False, **run_kwargs)
 
     assert result == "ok"
     for handler in ctx.logger.handlers:
@@ -70,24 +71,28 @@ def _events(text):
 
 
 class TestJsonl:
-    def test_event_carries_thread_and_system_id(self, tmp_path):
-        text = _run(tmp_path, "jsonl", thread_id="thr-1", system="cli")
+    async def test_event_carries_thread_and_system_id(self, tmp_path):
+        text = await _run(tmp_path, "jsonl", thread_id="thr-1", system="cli")
         bound = [e for e in _events(text) if e.get("event") == "thread_bound"]
         assert len(bound) == 1
         assert bound[0]["thread_id"] == "thr-1"
         assert bound[0]["system_id"] == "cli"
 
-    def test_event_carries_run_id_for_free(self, tmp_path):
+    async def test_event_carries_run_id_for_free(self, tmp_path):
         # run_id ставит RunContextFilter на каждую запись — дублировать его в
         # extra= не нужно, и именно он связывает событие с именем файла.
-        text = _run(tmp_path, "jsonl", thread_id="thr-1", system="cli")
-        bound = [e for e in _events(text) if e.get("event") == "thread_bound"][0]
+        text = await _run(tmp_path, "jsonl", thread_id="thr-1", system="cli")
+        bound = [e for e in _events(text) if e.get("event") == "thread_bound"][
+            0
+        ]
         assert bound["run_id"]
 
-    def test_no_event_without_thread(self, tmp_path):
+    async def test_no_event_without_thread(self, tmp_path):
         # gc-cli без -t: треда нет вовсе, связывать не с чем — и это не падение.
-        text = _run(tmp_path, "jsonl")
-        assert not [e for e in _events(text) if e.get("event") == "thread_bound"]
+        text = await _run(tmp_path, "jsonl")
+        assert not [
+            e for e in _events(text) if e.get("event") == "thread_bound"
+        ]
 
 
 class TestText:
@@ -95,37 +100,40 @@ class TestText:
     обязаны быть в самом сообщении, иначе в стоковой конфигурации в строке
     осталось бы голое имя события."""
 
-    def test_values_are_in_the_line_itself(self, tmp_path):
-        text = _run(tmp_path, "text", thread_id="thr-1", system="cli")
+    async def test_values_are_in_the_line_itself(self, tmp_path):
+        text = await _run(tmp_path, "text", thread_id="thr-1", system="cli")
         line = [ln for ln in text.splitlines() if "thread_bound" in ln]
         assert len(line) == 1
         assert "thread_id=thr-1" in line[0]
         assert "system_id=cli" in line[0]
 
-    def test_no_event_without_thread(self, tmp_path):
-        text = _run(tmp_path, "text")
+    async def test_no_event_without_thread(self, tmp_path):
+        text = await _run(tmp_path, "text")
         assert "thread_bound" not in text
 
 
-def test_system_defaults_to_cli(tmp_path):
+async def test_system_defaults_to_cli(tmp_path):
     # run(system=None) → system_id 'cli'; в лог уходит значение из ThreadSession,
     # а не сырой аргумент.
-    text = _run(tmp_path, "jsonl", thread_id="thr-1")
+    text = await _run(tmp_path, "jsonl", thread_id="thr-1")
     bound = [e for e in _events(text) if e.get("event") == "thread_bound"][0]
     assert bound["system_id"] == "cli"
 
 
-def test_no_crash_when_logger_is_absent(tmp_path):
+async def test_no_crash_when_logger_is_absent(tmp_path):
     """ctx без logger: run() не обязан падать из-за диагностической записи."""
-    ctx = create_run_context(_config(tmp_path, "jsonl"))
+    ctx = await acreate_run_context(_config(tmp_path, "jsonl"))
     ctx.logger = None
 
-    def _fake_run_agent(messages, state, _ctx, **_kwargs):
+    async def _fake_run_agent(messages, state, _ctx, **_kwargs):
         state.messages += list(messages)
         return "ok"
 
     with patch.object(
-        agent_executor_module, "run_agent", side_effect=_fake_run_agent
+        agent_executor_module, "arun_agent", side_effect=_fake_run_agent
     ):
         executor = agent_executor_module.AgentExecutor(ctx)
-        assert executor.run(["привет"], thread_id="thr-1", system="cli") == "ok"
+        assert (
+            await executor.arun(["привет"], thread_id="thr-1", system="cli")
+            == "ok"
+        )

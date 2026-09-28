@@ -1,6 +1,7 @@
 """После падения рана /new (empty-state) не должен оставлять/репейнтить
 статус-индикатор. Основной фикс — сброс app.last_runner_error в empty-state;
 гейт-инвариант — poll без активной задачи вообще не рисует индикатор."""
+
 import pytest
 
 
@@ -9,7 +10,9 @@ async def test_new_session_clears_error_indicator(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("t-err")
         await pilot.pause()
@@ -36,7 +39,9 @@ async def test_poll_paints_no_indicator_without_active_task(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("t-1")
         await pilot.pause()

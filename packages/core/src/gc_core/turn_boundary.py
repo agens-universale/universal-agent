@@ -11,6 +11,7 @@
 В легаси-режиме (пустой реестр ``models``) ``ModelRouter.resolve("main")`` резолвит
 плоский ``model`` из снимка конфига — поведение не отличается от до-Router кода.
 """
+
 from __future__ import annotations
 
 from typing import Any

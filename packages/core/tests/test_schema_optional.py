@@ -2,16 +2,26 @@ import copy
 import json
 
 import pytest
-
-from gc_testkit.helpers.tool_ctx import with_local_ctx
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, parse_and_validate_tool_arguments
+from gc_core.tools.arguments_validation import (
+    parse_and_validate_tool_arguments,
+)
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
 from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec
-from gc_core.tools.schema_optional import OPTIONAL_EMPTY_AS_OMIT_HINT, OPTIONAL_OMIT_HINT, apply_openai_strict_object, apply_openai_strict_parameters, augment_optional_property_descriptions, normalize_optional_empty_as_omit, parameters_schema_for_local_validation, resolve_optional_property_keys
+from gc_core.tools.schema_optional import (
+    OPTIONAL_EMPTY_AS_OMIT_HINT,
+    OPTIONAL_OMIT_HINT,
+    apply_openai_strict_object,
+    apply_openai_strict_parameters,
+    augment_optional_property_descriptions,
+    normalize_optional_empty_as_omit,
+    parameters_schema_for_local_validation,
+    resolve_optional_property_keys,
+)
 from gc_core.tools.skills.skills_tools import SkillsListTool
+from gc_testkit.helpers.tool_ctx import CallableTool, with_local_ctx
 
 # Optional string fields that must receive augment hints in tool_description specs.
 _OPTIONAL_STRING_FIELDS = (
@@ -146,7 +156,9 @@ def test_strict_read_file_omits_optional_ok():
     spec = copy.deepcopy(ReadFile.tool_description())
     apply_injected_fields_to_spec(spec, _REASON_FIELDS)
     apply_openai_strict_parameters(spec["parameters"])
-    assert set(spec["parameters"]["required"]) == set(spec["parameters"]["properties"].keys())
+    assert set(spec["parameters"]["required"]) == set(
+        spec["parameters"]["properties"].keys()
+    )
 
     args = parse_and_validate_tool_arguments(
         tool_name="fs_read_file",
@@ -212,7 +224,9 @@ def test_strict_api_schema_keeps_full_required():
 def test_augment_optional_description_non_strict():
     spec = copy.deepcopy(SearchAndReplace.tool_description())
     augment_optional_property_descriptions(spec, openai_strict=False)
-    desc = spec["parameters"]["properties"]["expected_file_sha256"]["description"]
+    desc = spec["parameters"]["properties"]["expected_file_sha256"][
+        "description"
+    ]
     assert OPTIONAL_OMIT_HINT in desc
     assert OPTIONAL_EMPTY_AS_OMIT_HINT not in desc
     assert "If omitted" not in desc
@@ -222,7 +236,9 @@ def test_augment_optional_description_strict():
     spec = copy.deepcopy(SearchAndReplace.tool_description())
     apply_openai_strict_parameters(spec["parameters"])
     augment_optional_property_descriptions(spec, openai_strict=True)
-    desc = spec["parameters"]["properties"]["expected_file_sha256"]["description"]
+    desc = spec["parameters"]["properties"]["expected_file_sha256"][
+        "description"
+    ]
     assert OPTIONAL_EMPTY_AS_OMIT_HINT in desc
     assert OPTIONAL_OMIT_HINT not in desc
 
@@ -283,7 +299,7 @@ def test_skills_list_empty_pack_same_as_default(tmp_path):
         user_root=str(tmp_path / "u"),
         project_root=str(tmp_path / "p"),
     )
-    tool = SkillsListTool(reg)
+    tool = CallableTool(SkillsListTool(reg))
     default_payload = json.loads(tool())
     empty_pack_payload = json.loads(tool(pack=""))
     assert empty_pack_payload["ok"] is True

@@ -1,9 +1,9 @@
 """code_render — подсветка кода в rich.Text, пригодный для выделения мышью."""
+
 from __future__ import annotations
 
-from rich.text import Text
-
 from gc_tui.services.code_render import highlight_code, normalize_code
+from rich.text import Text
 
 
 def test_normalize_strips_trailing_newlines():
@@ -37,7 +37,10 @@ def test_highlight_has_no_trailing_newline():
 
 
 def test_highlight_colors_tokens():
-    colors = {str(span.style.color) for span in highlight_code("def f(): pass", "python").spans}
+    colors = {
+        str(span.style.color)
+        for span in highlight_code("def f(): pass", "python").spans
+    }
     assert len(colors) > 1
 
 
@@ -79,7 +82,7 @@ def test_highlight_preserves_inner_trailing_spaces():
     # Убедиться, что вторая строка целая
     lines = highlight_code(code, "python").plain.split("\n")
     assert lines[0] == "a = 1   "  # первая строка с пробелами
-    assert lines[1] == "b = 2"     # вторая строка
+    assert lines[1] == "b = 2"  # вторая строка
 
 
 def test_highlight_spans_not_shifted_after_trim():
@@ -103,7 +106,9 @@ def test_comments_use_dim_not_monokai_grey():
 
     text = highlight_code("def f():\n    # проверка\n    return 1", "python")
     comment = next(
-        span for span in text.spans if "проверка" in text.plain[span.start:span.end]
+        span
+        for span in text.spans
+        if "проверка" in text.plain[span.start : span.end]
     )
     assert comment.style.color.triplet.hex == DIM.lower()
 
@@ -112,8 +117,8 @@ def test_other_tokens_keep_monokai():
     """Меняем только комментарии — остальная подсветка остаётся монокаевской."""
     text = highlight_code("def f():\n    return 1", "python")
     colors = {span.style.color.triplet.hex for span in text.spans}
-    assert "#66d9ef" in colors        # def
-    assert "#ae81ff" in colors        # число
+    assert "#66d9ef" in colors  # def
+    assert "#ae81ff" in colors  # число
 
 
 def test_unknown_language_stays_plain_code_block():
@@ -122,6 +127,7 @@ def test_unknown_language_stays_plain_code_block():
     ничего не бросает, а отдаёт `lexer=None`, и fence с mermaid красился белым
     из темы monokai."""
     from gc_tui.palette import CODE_BLOCK
+
     for lang in ("mermaid", "plaintext", "jsonc"):
         t = highlight_code("graph TD;\n  A-->B;", lang)
         assert t.style == CODE_BLOCK, lang

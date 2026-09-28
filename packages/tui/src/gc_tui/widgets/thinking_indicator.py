@@ -16,6 +16,7 @@
 compressing; иначе по `_last_event_kind`: "_finalized" sentinel → validating,
 иначе → thinking.
 """
+
 from __future__ import annotations
 
 import random
@@ -24,9 +25,9 @@ import time
 from rich.text import Text
 from textual.widgets import Static
 
-from gc_tui.palette import DEEP_DIM as _DIM, RUN_COLOR as _ACCENT
+from gc_tui.palette import DEEP_DIM as _DIM
+from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.services.duration_format import format_compact_int, format_duration
-
 
 THINKING_PHRASES = [
     "думаю",
@@ -91,8 +92,16 @@ FRAME_HOLD = 2
 
 # Рампа «дыхания» цветом (ping-pong уже зашит в список): gold тускло→ярко→тускло.
 GLOW_SHADES = [
-    "#9c7a4a", "#b8915c", "#d4a574", "#e0b585", "#ecc596",
-    "#f0c896", "#ecc596", "#e0b585", "#d4a574", "#b8915c",
+    "#9c7a4a",
+    "#b8915c",
+    "#d4a574",
+    "#e0b585",
+    "#ecc596",
+    "#f0c896",
+    "#ecc596",
+    "#e0b585",
+    "#d4a574",
+    "#b8915c",
 ]
 
 # Период счётчика кадров: общий кратный темпа глифа и рампы цвета — счётчик
@@ -104,16 +113,32 @@ _ANIM_PERIOD = FRAME_HOLD * len(MORPH_FRAMES) * len(GLOW_SHADES)
 # рампе — та же техника дыхания яркостью, что у ✦/▸, но в самых глубоких серых
 # (тише всего: лесенка громкости ▸ > ✦ > •). Плавно на 0.1с-тике, без морфа формы.
 _PROCESSING_SHADES = [
-    "#4c525b", "#545b65", "#5d646e", "#666e78", "#6f7782",
-    "#7a8290", "#6f7782", "#666e78", "#5d646e", "#545b65",
+    "#4c525b",
+    "#545b65",
+    "#5d646e",
+    "#666e78",
+    "#6f7782",
+    "#7a8290",
+    "#6f7782",
+    "#666e78",
+    "#5d646e",
+    "#545b65",
 ]
 
 # «Дыхание» искры «завершаю…»: ✦ статична по форме, цвет плавно тускнеет↔
 # светлеет (серая рампа, ping-pong, ~1.0с) — спокойная финализация. Та же
 # техника, что пульс running-глифа ▸, но в приглушённых серых.
 _VALIDATING_SHADES = [
-    "#5e6675", "#69727f", "#747e8b", "#808c99", "#8c98a6",
-    "#9aa4b2", "#8c98a6", "#808c99", "#747e8b", "#69727f",
+    "#5e6675",
+    "#69727f",
+    "#747e8b",
+    "#808c99",
+    "#8c98a6",
+    "#9aa4b2",
+    "#8c98a6",
+    "#808c99",
+    "#747e8b",
+    "#69727f",
 ]
 
 _STATE_THINKING = "thinking"
@@ -130,15 +155,17 @@ _STATE_STOPPED_TOOL_CALLS = "stopped_tool_calls"
 
 # Исходы, которые персистентны как строка-итог (done / cancelled / …) до
 # следующего user-send. Единый список для poll, resume и meta.last_indicator.
-TERMINAL_INDICATOR_STATES = frozenset({
-    _STATE_DONE,
-    _STATE_CANCELLED,
-    _STATE_FAILED,
-    _STATE_STOPPED_STEPS,
-    _STATE_STOPPED_ERRORS,
-    _STATE_STOPPED_TOKENS,
-    _STATE_STOPPED_TOOL_CALLS,
-})
+TERMINAL_INDICATOR_STATES = frozenset(
+    {
+        _STATE_DONE,
+        _STATE_CANCELLED,
+        _STATE_FAILED,
+        _STATE_STOPPED_STEPS,
+        _STATE_STOPPED_ERRORS,
+        _STATE_STOPPED_TOKENS,
+        _STATE_STOPPED_TOOL_CALLS,
+    }
+)
 
 
 def is_terminal_indicator_state(state: str) -> bool:
@@ -178,14 +205,25 @@ class ThinkingIndicator(Static):
         self._state: str = state
         self._frozen_elapsed: int | None = frozen_elapsed
         self._rotator = PhraseRotator(THINKING_PHRASES)
-        super().__init__(self._render_text(), classes="thinking-indicator", markup=False)
+        super().__init__(
+            self._render_text(), classes="thinking-indicator", markup=False
+        )
 
     def set_state(self, state: str) -> None:
         """Переключить визуал без размонтирования. Идемпотентен."""
-        if state not in (_STATE_THINKING, _STATE_VALIDATING, _STATE_COMPRESSING,
-                         _STATE_PROCESSING, _STATE_DONE, _STATE_CANCELLED, _STATE_FAILED,
-                         _STATE_STOPPED_STEPS, _STATE_STOPPED_ERRORS,
-                         _STATE_STOPPED_TOKENS, _STATE_STOPPED_TOOL_CALLS):
+        if state not in (
+            _STATE_THINKING,
+            _STATE_VALIDATING,
+            _STATE_COMPRESSING,
+            _STATE_PROCESSING,
+            _STATE_DONE,
+            _STATE_CANCELLED,
+            _STATE_FAILED,
+            _STATE_STOPPED_STEPS,
+            _STATE_STOPPED_ERRORS,
+            _STATE_STOPPED_TOKENS,
+            _STATE_STOPPED_TOOL_CALLS,
+        ):
             return
         if self._state == state:
             return
@@ -240,7 +278,10 @@ class ThinkingIndicator(Static):
             # frozen_elapsed=None — восстановление старой сессии без сохранённого
             # времени → «Выполнил» без «за N» (не выдумываем 0с).
             if self._frozen_elapsed is not None:
-                text.append(f"Выполнил за {format_duration(self._frozen_elapsed)}", style=_DIM)
+                text.append(
+                    f"Выполнил за {format_duration(self._frozen_elapsed)}",
+                    style=_DIM,
+                )
             else:
                 text.append("Выполнил", style=_DIM)
             return text
@@ -272,7 +313,9 @@ class ThinkingIndicator(Static):
         if self._state == _STATE_STOPPED_TOOL_CALLS:
             text.append("⏹", style=_DIM)
             text.append(" ")
-            text.append("Остановлено: превышен лимит вызовов инструментов", style=_DIM)
+            text.append(
+                "Остановлено: превышен лимит вызовов инструментов", style=_DIM
+            )
             return text
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())
@@ -295,7 +338,9 @@ class ThinkingIndicator(Static):
         elapsed = int(self._clock() - self._started_at)
         parens = f" ({format_duration(elapsed)}"
         if self._state == _STATE_THINKING:
-            units = self._sink.progress_units() if self._sink is not None else 0
+            units = (
+                self._sink.progress_units() if self._sink is not None else 0
+            )
             if units > 0:
                 parens += f" · ↓ {format_compact_int(units)} токенов"
             clk = self._reasoning_clock
@@ -306,9 +351,11 @@ class ThinkingIndicator(Static):
                     secs = clk.episode()
                     if secs > 0:
                         if round(secs) == 0:
-                            parens += " · обдумал"            # <0.5с → без «за 0с»
+                            parens += " · обдумал"  # <0.5с → без «за 0с»
                         else:
-                            parens += f" · обдумал за {format_duration(round(secs))}"
+                            parens += (
+                                f" · обдумал за {format_duration(round(secs))}"
+                            )
         parens += ")"
         text.append(parens)
         return text

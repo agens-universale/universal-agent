@@ -14,7 +14,6 @@ from typing import Optional, Set
 
 import gc_server.swarm.lifecycle as lifecycle
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -89,7 +88,9 @@ class SwarmMonitor:
                 swarm_logs_dir=self._swarm_logs_dir,
             )
         except Exception:
-            logger.exception("swarm monitor: check_and_finalize failed for %s", swarm_id)
+            logger.exception(
+                "swarm monitor: check_and_finalize failed for %s", swarm_id
+            )
             return
 
         if not meta:

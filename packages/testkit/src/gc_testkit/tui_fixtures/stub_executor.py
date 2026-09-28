@@ -1,4 +1,5 @@
 """Детерминированный fake AgentExecutor для snapshot-тестов TUI."""
+
 from __future__ import annotations
 
 import json
@@ -65,5 +66,7 @@ class StubExecutor:
     def add_message(self, message: dict) -> None:
         pass  # для snapshot-тестов не используется
 
-    def _build_records(self, user_messages: list, *, scenario: str) -> list[dict]:
+    def _build_records(
+        self, user_messages: list, *, scenario: str
+    ) -> list[dict]:
         return SCENARIOS[scenario](user_messages)

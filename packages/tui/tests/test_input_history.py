@@ -1,6 +1,6 @@
 """InputHistory — per-project история input-реплик (JSONL)."""
+
 import json
-import pytest
 
 
 def test_load_missing_file_size_zero(tmp_path):
@@ -65,9 +65,7 @@ def test_load_skips_corrupted_lines(tmp_path):
 
     history_file = tmp_path / "input_history.jsonl"
     history_file.write_text(
-        '{"ts": "x", "text": "ok1"}\n'
-        'not valid json\n'
-        '{"ts": "y", "text": "ok2"}\n',
+        '{"ts": "x", "text": "ok1"}\nnot valid json\n{"ts": "y", "text": "ok2"}\n',
         encoding="utf-8",
     )
     h = InputHistory(tmp_path)

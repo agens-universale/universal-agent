@@ -11,13 +11,21 @@ def test_managed_local_config_merges_mcp_servers(tmp_path, monkeypatch):
         "      url: http://127.0.0.1:8765/mcp\n      server-name: science\n",
         encoding="utf-8",
     )
-    monkeypatch.setattr(env_vars, "gc_paths", lambda: {"config": cfg_dir,
-                                                       "state": tmp_path / "s",
-                                                       "data": tmp_path / "d",
-                                                       "cache": tmp_path / "c"})
+    monkeypatch.setattr(
+        env_vars,
+        "gc_paths",
+        lambda: {
+            "config": cfg_dir,
+            "state": tmp_path / "s",
+            "data": tmp_path / "d",
+            "cache": tmp_path / "c",
+        },
+    )
     monkeypatch.setattr(env_vars, "project_slug", lambda: "p")
     base = tmp_path / "base.yml"
-    base.write_text("backend:\n  api_mode: chat_completions\n", encoding="utf-8")
+    base.write_text(
+        "backend:\n  api_mode: chat_completions\n", encoding="utf-8"
+    )
 
     cfg = config.load_config(str(base))
     assert "science" in cfg["mcp-servers"]

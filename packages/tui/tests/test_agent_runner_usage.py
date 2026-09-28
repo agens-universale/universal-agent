@@ -2,6 +2,7 @@
 
 Если executor ещё не построен (factory не отработала) — None, без сборки.
 """
+
 from gc_tui.services.agent_runner import AgentRunner
 
 

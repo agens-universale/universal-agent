@@ -3,12 +3,15 @@
 Симметрия с токенами: usage ребёнка уже вливается в родителя инкрементально
 (`_push_usage_delta`), счётчик вызовов тулов теперь тоже (`_push_tool_calls_delta`).
 """
+
 from types import SimpleNamespace
 
 from gc_core.tools.subagents.runner import SubagentRunner
 
 
-def _runner(parent_tool_calls: int = 0) -> tuple[SubagentRunner, SimpleNamespace]:
+def _runner(
+    parent_tool_calls: int = 0,
+) -> tuple[SubagentRunner, SimpleNamespace]:
     parent = SimpleNamespace(tool_calls=parent_tool_calls)
     runner = SubagentRunner(SimpleNamespace(), parent, {})
     return runner, parent
@@ -25,9 +28,9 @@ def test_repeated_push_does_not_double_count():
     runner, parent = _runner()
     child = SimpleNamespace(tool_calls=3)
     runner._push_tool_calls_delta(child)
-    runner._push_tool_calls_delta(child)          # тот же снимок — прироста нет
+    runner._push_tool_calls_delta(child)  # тот же снимок — прироста нет
     assert parent.tool_calls == 3
-    child.tool_calls = 5                          # ребёнок сделал ещё два вызова
+    child.tool_calls = 5  # ребёнок сделал ещё два вызова
     runner._push_tool_calls_delta(child)
     assert parent.tool_calls == 5
 
@@ -40,7 +43,7 @@ def test_no_child_progress_leaves_parent_untouched():
 
 def test_non_int_child_counter_is_ignored():
     runner, parent = _runner(parent_tool_calls=2)
-    runner._push_tool_calls_delta(SimpleNamespace())              # поля нет вовсе
+    runner._push_tool_calls_delta(SimpleNamespace())  # поля нет вовсе
     runner._push_tool_calls_delta(SimpleNamespace(tool_calls=None))
     assert parent.tool_calls == 2
 
@@ -51,6 +54,6 @@ def test_second_invocation_counts_from_zero_after_reset():
     runner, parent = _runner()
     runner._push_tool_calls_delta(SimpleNamespace(tool_calls=3))
     assert parent.tool_calls == 3
-    runner._tool_calls_pushed = 0                 # то, что делает run() перед новым ребёнком
+    runner._tool_calls_pushed = 0  # то, что делает run() перед новым ребёнком
     runner._push_tool_calls_delta(SimpleNamespace(tool_calls=2))
     assert parent.tool_calls == 5

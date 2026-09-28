@@ -35,20 +35,23 @@ def normalize_quality_gate_config(cfg: QualityGateConfig) -> None:
         cfg.max_message_chars = DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
 
 
-
 def digest_limits_from_params(params: dict | None) -> dict[str, int]:
     """
     Лимиты digest из уже нормализованного ``quality_gate_params`` (``config_dict``).
 
     Ожидается, что значения прошли ``normalize_quality_gate_config`` в ``resolve_paths``.
-  """
+    """
     if not isinstance(params, dict):
         params = {}
     return {
         "max_dialogue_chars": int(
-            params.get("max_dialogue_chars", DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS)
+            params.get(
+                "max_dialogue_chars", DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS
+            )
         ),
         "max_message_chars": int(
-            params.get("max_message_chars", DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS)
+            params.get(
+                "max_message_chars", DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
+            )
         ),
     }

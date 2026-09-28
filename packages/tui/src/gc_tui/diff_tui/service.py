@@ -2,6 +2,7 @@
 
 В git-mode (v2) — гибрид: git-visible через index, ignored — через ``.gc/diffs/``.
 """
+
 from __future__ import annotations
 
 import threading
@@ -9,14 +10,25 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, Sequence, Union
 
-from gc_core.config_modules.diff_tui import DEFAULT_CACHE_MAX_ORIG, DEFAULT_FULL_FILE_MAX_LINES, DEFAULT_MAX_DIFF_CHARS, DEFAULT_PREVIEW_CONTEXT_LINES
+from gc_core.config_modules.diff_tui import (
+    DEFAULT_CACHE_MAX_ORIG,
+    DEFAULT_FULL_FILE_MAX_LINES,
+    DEFAULT_MAX_DIFF_CHARS,
+    DEFAULT_PREVIEW_CONTEXT_LINES,
+)
+from gc_core.utils.file_text import decode_text_best_effort
+
 from gc_tui.diff_tui import git_ops
 from gc_tui.diff_tui.mode import evict_stale_cache, resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key, orig_key
-from gc_tui.diff_tui.store import STATUS_CREATED, STATUS_DELETED, DiffStore, UndoResult
+from gc_tui.diff_tui.store import (
+    STATUS_CREATED,
+    STATUS_DELETED,
+    DiffStore,
+    UndoResult,
+)
 from gc_tui.diff_tui.touched import TouchedJournal
 from gc_tui.diff_tui.visual import build_created_file_diff, build_visual_diff
-from gc_core.utils.file_text import decode_text_best_effort
 
 PathLike = Union[str, Path]
 
@@ -107,7 +119,9 @@ class DiffService:
             and thread_id.strip()
         ):
             try:
-                self._journal = TouchedJournal(threads_dir, system_id, thread_id)
+                self._journal = TouchedJournal(
+                    threads_dir, system_id, thread_id
+                )
             except ValueError:
                 self._journal = None
 
@@ -151,9 +165,12 @@ class DiffService:
         if key is not None and not Path(key).is_absolute():
             return key
         try:
-            return Path(path).resolve().relative_to(
-                Path(self.launch_root).resolve()
-            ).as_posix()
+            return (
+                Path(path)
+                .resolve()
+                .relative_to(Path(self.launch_root).resolve())
+                .as_posix()
+            )
         except ValueError:
             return None
 
@@ -189,7 +206,9 @@ class DiffService:
 
     # --- list ---
 
-    def list_entries(self, *, pending_only: bool = False) -> list[DiffFileEntry]:
+    def list_entries(
+        self, *, pending_only: bool = False
+    ) -> list[DiffFileEntry]:
         self.ensure_mode_ready()
         touched = self._touched_paths()
         if not touched:
@@ -232,7 +251,9 @@ class DiffService:
                 )
             )
 
-        for entry in self._list_cache(pending_only=pending_only, touched=touched):
+        for entry in self._list_cache(
+            pending_only=pending_only, touched=touched
+        ):
             if entry.key in git_keys:
                 continue
             out.append(
@@ -264,7 +285,9 @@ class DiffService:
                 kind = "deleted"
             else:
                 kind = "modified"
-            state = self._cache_review_state(e.key, e.status, e.baseline_exists)
+            state = self._cache_review_state(
+                e.key, e.status, e.baseline_exists
+            )
             if pending_only and state != "pending":
                 continue
             out.append(
@@ -593,9 +616,7 @@ class DiffService:
         # удаление от последнего staged не можем (нет baseline в index).
         return ""
 
-    def _visual_diff_as_created(
-        self, key: str, disk: Path
-    ) -> str:
+    def _visual_diff_as_created(self, key: str, disk: Path) -> str:
         """Unified diff ``/dev/null`` → содержимое нового файла на диске.
 
         ``mode`` не нужен: созданный файл всегда показывается целиком как
@@ -613,7 +634,9 @@ class DiffService:
             max_diff_chars=self.max_diff_chars,
         )
 
-    def _build_deleted(self, *, key: str, orig_text: str, mode: str = "adaptive") -> str:
+    def _build_deleted(
+        self, *, key: str, orig_text: str, mode: str = "adaptive"
+    ) -> str:
         """disk↔``/dev/null`` удаление через ``build_visual_diff``."""
         return build_visual_diff(
             orig_text,
@@ -646,7 +669,9 @@ class DiffService:
         disk = self._store._disk_path(key)
         index = self._store.load_index()
         meta = index.get(key) or {}
-        if meta.get("status") == STATUS_CREATED and not meta.get("baseline_exists"):
+        if meta.get("status") == STATUS_CREATED and not meta.get(
+            "baseline_exists"
+        ):
             return self._visual_diff_as_created(key, disk)
         if orig.is_file() and not disk.is_file():
             old = self._read_disk(orig)

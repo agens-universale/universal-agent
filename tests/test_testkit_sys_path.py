@@ -50,7 +50,10 @@ def _probe(tmp_path):
     # мимо нашего бутстрапа, и проверка потеряла бы смысл.
     res = subprocess.run(
         [sys.executable, "-S", "-c", _PROBE],
-        cwd=tmp_path, env=env, capture_output=True, text=True,
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
     )
     assert res.returncode == 0, res.stderr
     return json.loads(res.stdout.strip().splitlines()[-1])
@@ -80,5 +83,7 @@ def test_bootstrap_puts_exactly_the_package_sources(tmp_path):
     # Сам testkit приезжает в подпроцесс через PYTHONPATH, поэтому в «добавленных»
     # его нет — он уже был. Всё остальное обязан положить бутстрап.
     expected_added = expected - {str(REPO / "packages" / "testkit" / "src")}
-    assert set(out["added"]) == expected_added, sorted(set(out["added"]) ^ expected_added)
+    assert set(out["added"]) == expected_added, sorted(
+        set(out["added"]) ^ expected_added
+    )
     assert expected <= set(out["path"])

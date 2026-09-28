@@ -10,6 +10,7 @@ Textual wrap'ит его внутри этой колонки. Wrapped-стро�
 - fenced code-block panel (BlockPanel)
 - tool-вызовов (ToolCallRow — собственный compose, тоже Horizontal-based)
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -119,6 +120,7 @@ class TraceRow(ClickModelMixin, Widget):
         if not self._event_no:
             return None
         from gc_tui.messages import OpenEventRequest
+
         return OpenEventRequest(self._event_no)
 
 
@@ -134,6 +136,7 @@ class SummaryMarker(TraceRow):
             return
         event.stop()
         from gc_tui.messages import SummaryToggleRequest
+
         self.post_message(SummaryToggleRequest(self._event_no))
 
     def on_key(self, event: events.Key) -> None:
@@ -144,4 +147,5 @@ class SummaryMarker(TraceRow):
                 return
             event.stop()
             from gc_tui.messages import SummaryToggleRequest
+
             self.post_message(SummaryToggleRequest(self._event_no))

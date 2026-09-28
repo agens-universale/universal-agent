@@ -3,18 +3,25 @@
 Тулы не импортируют diff_tui: обёртка перехватывает write/append/exec/run_python.
 Harbor / non-TUI — без этой обёртки.
 """
+
 from __future__ import annotations
 
 import logging
 from typing import Any, Callable, Iterable, Optional
+
+from gc_core.backends.protocol import (
+    DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
+)
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    classify_content_from_sample,
+)
 
 from gc_tui.diff_tui import git_ops
 from gc_tui.diff_tui.mode import resolve_mode
 from gc_tui.diff_tui.paths import canonical_path_key
 from gc_tui.diff_tui.store import DiffStore
 from gc_tui.diff_tui.touched import TouchedJournal
-from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, classify_content_from_sample
 
 _logger = logging.getLogger(__name__)
 
@@ -49,10 +56,14 @@ def _perimeter(ctx: Any) -> tuple[str, list, list[str], int]:
         root = getattr(workspace, "root", None)
         launch_root = str(root) if root else ""
     wg = config_dict.get("write_guard") or {}
-    extra_paths = list(wg.get("extra_paths") or []) if isinstance(wg, dict) else []
+    extra_paths = (
+        list(wg.get("extra_paths") or []) if isinstance(wg, dict) else []
+    )
     protected = config_dict.get("protected_paths") or {}
     protected_extra = (
-        list(protected.get("extra") or []) if isinstance(protected, dict) else []
+        list(protected.get("extra") or [])
+        if isinstance(protected, dict)
+        else []
     )
     diff_cfg = config_dict.get("diff_tui") or {}
     if not isinstance(diff_cfg, dict):
@@ -61,15 +72,20 @@ def _perimeter(ctx: Any) -> tuple[str, list, list[str], int]:
     return launch_root, extra_paths, protected_extra, cache_max_orig
 
 
-def _rel_for_check_ignore(path: str, launch_root: str, key: Optional[str]) -> str:
+def _rel_for_check_ignore(
+    path: str, launch_root: str, key: Optional[str]
+) -> str:
     from pathlib import Path
 
     if key is not None and not Path(key).is_absolute():
         return key
     try:
-        return Path(path).resolve().relative_to(
-            Path(launch_root).resolve()
-        ).as_posix()
+        return (
+            Path(path)
+            .resolve()
+            .relative_to(Path(launch_root).resolve())
+            .as_posix()
+        )
     except ValueError:
         return path
 
@@ -106,13 +122,39 @@ def attach_to_context(ctx: Any, config_dict: dict) -> None:
 
 
 class TrackingFsBackend:
-    """Декоратор LocalFsBackend: DiffStore snapshot + TouchedJournal."""
+    """Декоратор LocalFsBackend: DiffStore snapshot + TouchedJournal.
+
+    Порт не наследуется (обёртка повторяет его поверхность, а не является
+    им), но форма методов обязана совпадать: файловые операции корутинные,
+    обходчики — асинхронные генераторы. Примеси ``AsyncFileOps`` с
+    двойниками больше нет: у порта одна форма, дублировать нечего.
+    """
 
     def __init__(self, inner: Any, ctx: Any) -> None:
         self._inner = inner
         self._ctx = ctx
         self.is_sandbox = bool(getattr(inner, "is_sandbox", False))
-        self.default_exec_timeout = getattr(inner, "default_exec_timeout", None)
+        self.default_exec_timeout = getattr(
+            inner, "default_exec_timeout", None
+        )
+        # Возможность фонового запуска — свойство ВНУТРЕННЕГО бэкенда, обёртка
+        # её только повторяет. Без этой строки тул считал бы обёртку бэкендом
+        # без фона и отказывал бы в TUI, хотя под ней обычный LocalFsBackend.
+        self.supports_background = bool(
+            getattr(inner, "supports_background", False)
+        )
+
+    async def aspawn_background(
+        self, command: str, *, cwd: Any = None, env: Any = None
+    ) -> dict:
+        """Фоновый запуск проксируем как есть, без дельты diff-журнала.
+
+        Журнал снимает изменения ВОКРУГ вызова, а этот возвращается мгновенно:
+        дельта вокруг него пуста по построению. Файлы, которые фоновый процесс
+        напишет позже, журнал не увидит — показать их можно было бы только
+        опросом, которого у журнала нет. Это осознанная граница, а не пропуск.
+        """
+        return await self._inner.aspawn_background(command, cwd=cwd, env=env)
 
     @property
     def exec_output_capture_max_chars(self) -> int:
@@ -151,9 +193,10 @@ class TrackingFsBackend:
         return self._inner
 
     def _active(self) -> bool:
-        return bool(getattr(self._ctx, "is_tui", False)) and _identity_from_ctx(
-            self._ctx
-        ) is not None
+        return (
+            bool(getattr(self._ctx, "is_tui", False))
+            and _identity_from_ctx(self._ctx) is not None
+        )
 
     def _journal(self) -> TouchedJournal | None:
         ident = _identity_from_ctx(self._ctx)
@@ -164,13 +207,30 @@ class TrackingFsBackend:
         except ValueError:
             return None
 
+    async def _journal_mutation_off_loop(self, path: str) -> None:
+        """Снимок и journal перед записью — в потоке, не на loop.
+
+        Внутри ``_track_text_mutation`` живёт ``git_ops.check_ignore``, то есть
+        ЗАПУСК git, и копирование файла в ``DiffStore``. Пока запись тула была
+        синхронной, агента вёл демон-поток TUI, и loop это не касалось. После
+        перехода на async-only агент работает НА loop, и та же проба стала
+        морозить его на каждой записи файла — код не менялся, изменилось, где
+        он исполняется.
+
+        Сосед ``_atrack_shell_delta`` уводит свои ``git status`` в поток с тем
+        же обоснованием; здесь ровно оно.
+        """
+        import asyncio
+
+        await asyncio.to_thread(self._track_text_mutation, path)
+
     def _track_text_mutation(self, path: str) -> None:
         """Перед write/append: cache snapshot при необходимости + journal.add."""
         if not self._active() or not isinstance(path, str) or not path:
             return
         try:
-            launch_root, extra_paths, protected_extra, cache_max_orig = _perimeter(
-                self._ctx
+            launch_root, extra_paths, protected_extra, cache_max_orig = (
+                _perimeter(self._ctx)
             )
             if not launch_root:
                 return
@@ -208,24 +268,44 @@ class TrackingFsBackend:
         except Exception:
             _logger.exception("diff_tui tracking write failed path=%s", path)
 
-    def _track_shell_delta(self, run: Callable[[], Any]) -> Any:
-        """git-mode: status before/after → journal newly dirty paths. Soft-fail."""
+    async def _atrack_shell_delta(self, run: Callable[[], Any]) -> Any:
+        """Команда ждётся, а два `git status` уходят в поток.
+
+        ЕДИНСТВЕННАЯ форма. Синхронный близнец снят вместе с синхронными
+        `exec` / `exec_argv` / `run_python` этой обёртки: цепочка
+        `SyncExecAdapter` → `to_thread(TrackingFsBackend.exec)` →
+        `LocalFsBackend.exec` → `run_coro_blocking(self.aexec)` заводила ЕЩЁ
+        ОДИН loop в потоке пула. Кооперативный стоп до подпроцесса не доходил,
+        а `asyncio.run` хода на выходе ждал `shutdown_default_executor`: после
+        Esc поток жил до таймаута команды.
+
+        `git_status` — это запуск git, то есть блокирующий вызов; на loop его
+        звать нельзя, поэтому обе пробы идут через `to_thread`.
+        """
+        import asyncio
+
         before: set[str] | None = None
         launch_root = ""
         if self._active():
             try:
                 launch_root, _, _, _ = _perimeter(self._ctx)
                 if launch_root and resolve_mode(launch_root) == "git-mode":
-                    before = {e.path for e in git_ops.git_status(launch_root)}
+                    entries = await asyncio.to_thread(
+                        git_ops.git_status, launch_root
+                    )
+                    before = {e.path for e in entries}
             except Exception:
                 _logger.warning(
                     "shell mutation scope: pre-status failed", exc_info=True
                 )
                 before = None
-        result = run()
+        result = await run()
         if before is not None:
             try:
-                after = {e.path for e in git_ops.git_status(launch_root)}
+                entries = await asyncio.to_thread(
+                    git_ops.git_status, launch_root
+                )
+                after = {e.path for e in entries}
                 journal = self._journal()
                 if journal is not None:
                     for rel in sorted(after - before):
@@ -236,26 +316,7 @@ class TrackingFsBackend:
                 )
         return result
 
-    def write(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        self._track_text_mutation(path)
-        self._inner.write(path, content, encoding=encoding)
-
-    def write_bytes(self, path: str, data: bytes) -> None:
-        if not classify_content_from_sample(path, data[:BINARY_SAMPLE_BYTES]).is_binary:
-            self._track_text_mutation(path)
-        self._inner.write_bytes(path, data)
-
-    def append(self, path: str, content: str, encoding: str = "utf-8") -> None:
-        self._track_text_mutation(path)
-        self._inner.append(path, content, encoding=encoding)
-
-    def copy(self, src: str, dst: str) -> None:
-        self._inner.copy(src, dst)
-
-    def makedirs(self, path: str) -> None:
-        self._inner.makedirs(path)
-
-    def exec(
+    async def aexec(
         self,
         command: str,
         *,
@@ -264,8 +325,8 @@ class TrackingFsBackend:
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> Any:
-        return self._track_shell_delta(
-            lambda: self._inner.exec(
+        return await self._atrack_shell_delta(
+            lambda: self._inner.aexec(
                 command,
                 cwd=cwd,
                 timeout=timeout,
@@ -274,7 +335,7 @@ class TrackingFsBackend:
             )
         )
 
-    def exec_raw(
+    async def aexec_raw(
         self,
         command: str,
         *,
@@ -283,10 +344,13 @@ class TrackingFsBackend:
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> Any:
-        """Raw-канал тоже мутирует дерево (mkdir/mktemp/rm внутренних хелперов),
-        поэтому дельта журналируется так же, как у `exec`."""
-        return self._track_shell_delta(
-            lambda: self._inner.exec_raw(
+        """Сырой канал тоже меняет дерево (mkdir/mktemp/rm внутренних
+        помощников), поэтому дельта журналируется так же, как у ``aexec``."""
+        from gc_core.backends.async_protocol import arun_backend_exec_raw
+
+        return await self._atrack_shell_delta(
+            lambda: arun_backend_exec_raw(
+                self._inner,
                 command,
                 cwd=cwd,
                 timeout=timeout,
@@ -295,7 +359,7 @@ class TrackingFsBackend:
             )
         )
 
-    def exec_argv(
+    async def aexec_argv(
         self,
         argv: list,
         *,
@@ -305,8 +369,8 @@ class TrackingFsBackend:
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> Any:
-        return self._track_shell_delta(
-            lambda: self._inner.exec_argv(
+        return await self._atrack_shell_delta(
+            lambda: self._inner.aexec_argv(
                 argv,
                 stdin=stdin,
                 cwd=cwd,
@@ -316,7 +380,7 @@ class TrackingFsBackend:
             )
         )
 
-    def run_python(
+    async def arun_python(
         self,
         code: str,
         *,
@@ -325,86 +389,137 @@ class TrackingFsBackend:
         env: Optional[dict] = None,
         capture_max_chars: Optional[int] = None,
     ) -> Any:
-        # Прокидываем потолок захвата: без него внутренние каналы (MCP-carrier)
-        # молча падают на дефолт exec-тулы вместо своего 50M.
-        return self._track_shell_delta(
-            lambda: self._inner.run_python(
-                code, cwd=cwd, timeout=timeout, env=env,
+        # `capture_max_chars` доезжает до внутреннего бэкенда, как у `aexec` и
+        # `aexec_argv` этой же обёртки. Без него потолок захвата молча
+        # подменялся дефолтом бэкенда: вызывающий просил один, получал другой.
+        return await self._atrack_shell_delta(
+            lambda: self._inner.arun_python(
+                code,
+                cwd=cwd,
+                timeout=timeout,
+                env=env,
                 capture_max_chars=capture_max_chars,
             )
         )
 
+    async def write(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
+        await self._journal_mutation_off_loop(path)
+        await self._inner.write(path, content, encoding=encoding)
+
+    async def write_bytes(self, path: str, data: bytes) -> None:
+        if not classify_content_from_sample(
+            path, data[:BINARY_SAMPLE_BYTES]
+        ).is_binary:
+            await self._journal_mutation_off_loop(path)
+        await self._inner.write_bytes(path, data)
+
+    async def append(
+        self, path: str, content: str, encoding: str = "utf-8"
+    ) -> None:
+        await self._journal_mutation_off_loop(path)
+        await self._inner.append(path, content, encoding=encoding)
+
+    async def copy(self, src: str, dst: str) -> None:
+        await self._inner.copy(src, dst)
+
+    async def makedirs(self, path: str) -> None:
+        await self._inner.makedirs(path)
+
+    async def awarm_capabilities(self) -> None:
+        # Пробы — свойство ВНУТРЕННЕГО бэкенда: журналу diff тут отслеживать
+        # нечего, а кэш обязан лечь именно на него, иначе обёртка прогреет
+        # свой и первый поиск снова заплатит за пробы.
+        #
+        # Синхронного близнеца больше нет — как и у самих проб.
+        await self._inner.awarm_capabilities()
+
     def default_cwd(self) -> Optional[str]:
         return self._inner.default_cwd()
 
-    def exists(self, path: str) -> bool:
-        return self._inner.exists(path)
+    async def aprime_default_cwd(self) -> Optional[str]:
+        prime = getattr(self._inner, "aprime_default_cwd", None)
+        return await prime() if callable(prime) else None
 
-    def lexists(self, path: str) -> bool:
-        return self._inner.lexists(path)
+    async def exists(self, path: str) -> bool:
+        return await self._inner.exists(path)
 
-    def is_file(self, path: str) -> bool:
-        return self._inner.is_file(path)
+    async def lexists(self, path: str) -> bool:
+        return await self._inner.lexists(path)
 
-    def is_dir(self, path: str) -> bool:
-        return self._inner.is_dir(path)
+    async def is_file(self, path: str) -> bool:
+        return await self._inner.is_file(path)
 
-    def is_symlink(self, path: str) -> bool:
-        return self._inner.is_symlink(path)
+    async def is_dir(self, path: str) -> bool:
+        return await self._inner.is_dir(path)
 
-    def getsize(self, path: str) -> int:
-        return self._inner.getsize(path)
+    async def is_symlink(self, path: str) -> bool:
+        return await self._inner.is_symlink(path)
 
-    def stat_info(self, path: str, follow_symlinks: bool = False) -> dict:
-        return self._inner.stat_info(path, follow_symlinks=follow_symlinks)
+    async def getsize(self, path: str) -> int:
+        return await self._inner.getsize(path)
 
-    def readable(self, path: str) -> bool:
-        return self._inner.readable(path)
+    async def stat_info(
+        self, path: str, follow_symlinks: bool = False
+    ) -> dict:
+        return await self._inner.stat_info(
+            path, follow_symlinks=follow_symlinks
+        )
 
-    def writable(self, path: str) -> bool:
-        return self._inner.writable(path)
+    async def readable(self, path: str) -> bool:
+        return await self._inner.readable(path)
 
-    def realpath(self, path: str) -> str:
-        return self._inner.realpath(path)
+    async def writable(self, path: str) -> bool:
+        return await self._inner.writable(path)
 
-    def is_hidden(self, path: str) -> bool:
-        return self._inner.is_hidden(path)
+    async def realpath(self, path: str) -> str:
+        return await self._inner.realpath(path)
 
-    def read(self, path: str) -> str:
-        return self._inner.read(path)
+    async def is_hidden(self, path: str) -> bool:
+        return await self._inner.is_hidden(path)
 
-    def read_bytes(self, path: str) -> bytes:
-        return self._inner.read_bytes(path)
+    async def read(self, path: str) -> str:
+        return await self._inner.read(path)
 
-    def iter_lines(self, path: str) -> Iterable[str]:
-        return self._inner.iter_lines(path)
+    async def read_bytes(self, path: str) -> bytes:
+        return await self._inner.read_bytes(path)
 
-    def read_head_bytes(self, path: str, n: int) -> bytes:
-        return self._inner.read_head_bytes(path, n)
+    async def iter_lines(self, path: str) -> Iterable[str]:
+        async for line in self._inner.iter_lines(path):
+            yield line
 
-    def sha256_bytes(self, path: str) -> str:
-        return self._inner.sha256_bytes(path)
+    async def read_head_bytes(self, path: str, n: int) -> bytes:
+        return await self._inner.read_head_bytes(path, n)
 
-    def listdir(self, path: str) -> list:
-        return self._inner.listdir(path)
+    async def sha256_bytes(self, path: str) -> str:
+        return await self._inner.sha256_bytes(path)
 
-    def walk(self, path: str) -> list:
-        return self._inner.walk(path)
+    async def listdir(self, path: str) -> list:
+        return await self._inner.listdir(path)
 
-    def iter_walk(
+    async def walk(self, path: str) -> list:
+        return await self._inner.walk(path)
+
+    async def iter_walk(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[tuple[str, bool]]:
-        return self._inner.iter_walk(path, should_descend=should_descend)
+        async for item in self._inner.iter_walk(
+            path, should_descend=should_descend
+        ):
+            yield item
 
-    def walk_entries(self, path: str, *, prune_names=(), prune_dot_dirs: bool = False) -> list:
-        return self._inner.walk_entries(
+    async def walk_entries(
+        self, path: str, *, prune_names=(), prune_dot_dirs: bool = False
+    ) -> list:
+        return await self._inner.walk_entries(
             path, prune_names=prune_names, prune_dot_dirs=prune_dot_dirs
         )
 
-    def iter_walk_entries(
+    async def iter_walk_entries(
         self,
         path: str,
         *,
@@ -412,20 +527,24 @@ class TrackingFsBackend:
         prune_names=(),
         prune_dot_dirs: bool = False,
     ):
-        return self._inner.iter_walk_entries(
+        async for entry in self._inner.iter_walk_entries(
             path,
             should_descend=should_descend,
             prune_names=prune_names,
             prune_dot_dirs=prune_dot_dirs,
-        )
+        ):
+            yield entry
 
-    def iter_files(
+    async def iter_files(
         self,
         path: str,
         *,
         should_descend: Optional[Callable[[str], bool]] = None,
     ) -> Iterable[str]:
-        return self._inner.iter_files(path, should_descend=should_descend)
+        async for item in self._inner.iter_files(
+            path, should_descend=should_descend
+        ):
+            yield item
 
     def normpath(self, path: str) -> str:
         return self._inner.normpath(path)

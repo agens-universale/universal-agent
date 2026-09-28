@@ -1,16 +1,19 @@
 """McpScreen — статус MCP-серверов (read-only, снимок сессии). Карточки."""
+
 from __future__ import annotations
+
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
-from gc_tui.palette import TOOL_NAME as _TOOL_NAME
-from gc_tui.palette import OK as _OK
-from gc_tui.palette import ERR as _ERR
-from gc_tui.palette import DIM as _DIM
+
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
+from gc_tui.palette import DIM as _DIM
+from gc_tui.palette import ERR as _ERR
+from gc_tui.palette import OK as _OK
+from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 
 _FOOTER = "[Enter] раскрыть  [↑↓] серверы  [PgUp PgDn] прокрутка  [Esc] back"
 
@@ -23,7 +26,7 @@ def _truncate(text: str, limit: int = 80) -> str:
     return (text[: limit - 1] + "…") if len(text) > limit else text
 
 
-_TOOL_DESC_LIMIT = 80   # описание тула в раскрытом списке — одна строка
+_TOOL_DESC_LIMIT = 80  # описание тула в раскрытом списке — одна строка
 
 
 class ServerCard(Static):
@@ -103,7 +106,7 @@ class ServerCard(Static):
             prefix = f"mcp_{self._name}_"
             shorts = [
                 (
-                    (tt.get("name") or "")[len(prefix):]
+                    (tt.get("name") or "")[len(prefix) :]
                     if (tt.get("name") or "").startswith(prefix)
                     else (tt.get("name") or ""),
                     (tt.get("description") or ""),
@@ -114,7 +117,9 @@ class ServerCard(Static):
             for n, d in shorts:
                 t.append(f"\n    {n.ljust(width)}", style=_TOOL_NAME)
                 if d:
-                    t.append(f"  {_truncate(d, _TOOL_DESC_LIMIT)}", style=_DEEP_DIM)
+                    t.append(
+                        f"  {_truncate(d, _TOOL_DESC_LIMIT)}", style=_DEEP_DIM
+                    )
         elif not connected and self._info.get("reason"):
             full = str(self._info["reason"])
             for ln in full.splitlines():
@@ -122,12 +127,14 @@ class ServerCard(Static):
 
 
 class McpScreen(Screen):
-    def __init__(self, *, config: dict | None = None,
-                 tools_snapshot: dict | None = None) -> None:
+    def __init__(
+        self, *, config: dict | None = None, tools_snapshot: dict | None = None
+    ) -> None:
         super().__init__()
         self._snapshot = tools_snapshot  # {server: {status,reason,description,tools}} | None
         self.cards: list[ServerCard] = [
-            ServerCard(name, info) for name, info in (tools_snapshot or {}).items()
+            ServerCard(name, info)
+            for name, info in (tools_snapshot or {}).items()
         ]
 
     def on_mount(self) -> None:
@@ -183,7 +190,9 @@ class McpScreen(Screen):
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
             with Horizontal(id="header"):
-                yield Static("mcp · серверы и тулы", id="header-left", markup=False)
+                yield Static(
+                    "mcp · серверы и тулы", id="header-left", markup=False
+                )
             trace = VerticalScroll(id="trace")
             trace.can_focus = False  # фокус живёт на карточках; глобальный
             # #trace:focus-outline рисуется поверх контента — здесь не нужен
@@ -193,5 +202,7 @@ class McpScreen(Screen):
                     yield Static(empty)
                 else:
                     yield from self.cards
-                    yield Static(self._summary_renderable(), classes="mcp-summary")
+                    yield Static(
+                        self._summary_renderable(), classes="mcp-summary"
+                    )
             yield Static(_FOOTER, id="footer", markup=False)

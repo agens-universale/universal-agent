@@ -1,4 +1,5 @@
 """TraceScreen integration с InputHistory: ↑/↓, draft, reset."""
+
 import pytest
 
 
@@ -24,7 +25,9 @@ async def test_history_initialized_on_attach(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.services.input_history import InputHistory
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -38,14 +41,18 @@ async def test_history_available_in_empty_state(tmp_path):
     pytest.importorskip("textual")
     import json
     from pathlib import Path
+
     from gc_tui.app import TuiApp
 
     project_dir = Path(tmp_path)
     threads_dir = project_dir / "threads"
     threads_dir.mkdir()
     (project_dir / "input_history.jsonl").write_text(
-        json.dumps({"ts": "2026-06-10T00:00:00+00:00", "text": "прошлая реплика"},
-                   ensure_ascii=False) + "\n",
+        json.dumps(
+            {"ts": "2026-06-10T00:00:00+00:00", "text": "прошлая реплика"},
+            ensure_ascii=False,
+        )
+        + "\n",
         encoding="utf-8",
     )
 
@@ -64,7 +71,9 @@ async def test_history_prev_substitutes_last(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -87,7 +96,9 @@ async def test_history_prev_walks_back(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -108,7 +119,9 @@ async def test_history_next_restores_draft(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -130,7 +143,9 @@ async def test_history_prev_noop_on_empty(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -147,7 +162,9 @@ async def test_up_arrow_triggers_history_prev_on_first_line(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -164,8 +181,8 @@ async def test_cursor_visual_line_helpers_with_soft_wrap():
     переносится → курсор логически в row 0, но визуально может быть на нижней
     строке. first/last_visual_line отражают визуальный ряд, а не логический."""
     pytest.importorskip("textual")
-    from textual.app import App, ComposeResult
     from gc_tui.widgets.command_input import CommandTextArea
+    from textual.app import App, ComposeResult
 
     class _Host(App):
         def compose(self) -> ComposeResult:
@@ -175,7 +192,9 @@ async def test_cursor_visual_line_helpers_with_soft_wrap():
         ta = pilot.app.query_one(CommandTextArea)
         ta.text = "aaaa bbbb cccc dddd eeee ffff gggg"
         await pilot.pause()
-        assert ta.wrapped_document.height > 1   # предусловие: реально перенеслось
+        assert (
+            ta.wrapped_document.height > 1
+        )  # предусловие: реально перенеслось
 
         ta.move_cursor((0, 0))
         assert ta.cursor_on_first_visual_line() is True
@@ -187,14 +206,18 @@ async def test_cursor_visual_line_helpers_with_soft_wrap():
 
 
 @pytest.mark.asyncio
-async def test_up_on_wrapped_lower_visual_line_does_not_trigger_history(tmp_path):
+async def test_up_on_wrapped_lower_visual_line_does_not_trigger_history(
+    tmp_path,
+):
     """↑ при курсоре на нижней ВИЗУАЛЬНОЙ строке переноса → курсор вверх, история
     не трогается (раньше логич. row 0 ложно звал history_prev — баг soft-wrap)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(size=(24, 12)) as pilot:
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(
+        size=(24, 12)
+    ) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -205,23 +228,27 @@ async def test_up_on_wrapped_lower_visual_line_does_not_trigger_history(tmp_path
         long_line = "aaaa bbbb cccc dddd eeee ffff gggg hhhh"
         inp.text = long_line
         await pilot.pause()
-        assert inp.wrapped_document.height > 1          # перенос случился
+        assert inp.wrapped_document.height > 1  # перенос случился
         inp.move_cursor((0, len(long_line)))
-        assert not inp.cursor_on_first_visual_line()    # есть куда вверх
+        assert not inp.cursor_on_first_visual_line()  # есть куда вверх
         await pilot.press("up")
         await pilot.pause()
-        assert inp.text == long_line                    # история НЕ подменила текст
+        assert inp.text == long_line  # история НЕ подменила текст
 
 
 @pytest.mark.asyncio
-async def test_down_on_wrapped_upper_visual_line_moves_cursor_not_history(tmp_path):
+async def test_down_on_wrapped_upper_visual_line_moves_cursor_not_history(
+    tmp_path,
+):
     """↓ при курсоре на верхней визуальной строке переноса → курсор спускается на
     строку ниже (history_next не перехватывает)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.widgets.command_input import CommandTextArea
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(size=(24, 12)) as pilot:
+    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test(
+        size=(24, 12)
+    ) as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -233,12 +260,16 @@ async def test_down_on_wrapped_upper_visual_line_moves_cursor_not_history(tmp_pa
         await pilot.pause()
         assert inp.wrapped_document.height > 1
         inp.move_cursor((0, 0))
-        assert not inp.cursor_on_last_visual_line()     # есть куда вниз
-        before_y = inp.wrapped_document.location_to_offset(inp.cursor_location).y
+        assert not inp.cursor_on_last_visual_line()  # есть куда вниз
+        before_y = inp.wrapped_document.location_to_offset(
+            inp.cursor_location
+        ).y
         await pilot.press("down")
         await pilot.pause()
-        after_y = inp.wrapped_document.location_to_offset(inp.cursor_location).y
-        assert after_y > before_y                       # курсор спустился визуально
+        after_y = inp.wrapped_document.location_to_offset(
+            inp.cursor_location
+        ).y
+        assert after_y > before_y  # курсор спустился визуально
 
 
 @pytest.mark.asyncio
@@ -247,7 +278,9 @@ async def test_send_appends_to_history_and_resets_state(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()
@@ -267,7 +300,9 @@ async def test_text_change_resets_navigation_state(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    async with TuiApp(threads_dir=str(tmp_path / "threads")).run_test() as pilot:
+    async with TuiApp(
+        threads_dir=str(tmp_path / "threads")
+    ).run_test() as pilot:
         scr = pilot.app.screen
         scr.attach_active_task("task-1")
         await pilot.pause()

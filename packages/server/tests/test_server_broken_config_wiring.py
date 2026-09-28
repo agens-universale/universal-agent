@@ -6,13 +6,18 @@
 Изоляция от хостового config.yml — тем же приёмом, что tests/test_swarm_endpoints.py
 (сброс sys.modules['server'] + патч rest_api.server_config.* ДО импорта).
 """
+
 import sys
 from unittest.mock import patch
 
 import pytest
 
-pytest.importorskip("fastapi", reason="server-side dep, install via server_requirements.txt")
-pytest.importorskip("starlette", reason="server-side dep, install via server_requirements.txt")
+pytest.importorskip(
+    "fastapi", reason="server-side dep, install via server_requirements.txt"
+)
+pytest.importorskip(
+    "starlette", reason="server-side dep, install via server_requirements.txt"
+)
 
 
 def _reset_server_module():
@@ -40,8 +45,13 @@ def _reset_server_module():
 
 def _minimal_server_config():
     return {
-        "server": {}, "defaults": {"system": "generic"}, "agent": {},
-        "agent_overrides": {}, "logging": {}, "swarm": {}, "threads_cleanup": {},
+        "server": {},
+        "defaults": {"system": "generic"},
+        "agent": {},
+        "agent_overrides": {},
+        "logging": {},
+        "swarm": {},
+        "threads_cleanup": {},
     }
 
 
@@ -51,15 +61,20 @@ def test_import_server_exits_cleanly_when_agent_config_broken():
     с текстом причины, а не поднять ValueError наружу."""
     _reset_server_module()
     try:
-        with patch(
-            "gc_server.rest_api.server_config.load_server_config",
-            return_value=_minimal_server_config(),
-        ), patch(
-            "gc_server.rest_api.server_config.build_agent_config_for_server",
-            side_effect=ValueError('C:\\gc\\config.yml: невалидный YAML: boom'),
+        with (
+            patch(
+                "gc_server.rest_api.server_config.load_server_config",
+                return_value=_minimal_server_config(),
+            ),
+            patch(
+                "gc_server.rest_api.server_config.build_agent_config_for_server",
+                side_effect=ValueError(
+                    "C:\\gc\\config.yml: невалидный YAML: boom"
+                ),
+            ),
         ):
             with pytest.raises(SystemExit) as exc_info:
-                from gc_server import server
+                from gc_server import server  # noqa: F401  # сам импорт и есть предмет проверки
         assert "невалидный YAML" in str(exc_info.value)
     finally:
         _reset_server_module()
@@ -78,6 +93,6 @@ def test_import_server_exits_cleanly_when_server_config_broken():
             side_effect=yaml.YAMLError("boom"),
         ):
             with pytest.raises(SystemExit):
-                from gc_server import server
+                from gc_server import server  # noqa: F401  # сам импорт и есть предмет проверки
     finally:
         _reset_server_module()

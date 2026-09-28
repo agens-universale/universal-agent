@@ -1,12 +1,13 @@
 """Smoke: bang-shell ветка submit не стартует агента и монтирует трейс."""
+
 from __future__ import annotations
 
 import pytest
 
 
 def _trace_text(screen) -> str:
-    from textual.widgets import Static
     from gc_tui.widgets.trace_row import TraceRow
+    from textual.widgets import Static
 
     parts: list[str] = []
     for row in screen.query(TraceRow):
@@ -44,13 +45,15 @@ async def test_bang_echo_mounts_trace_not_agent(tmp_path, monkeypatch):
         def stop(self):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}})
+    app = TuiApp(
+        threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}}
+    )
     app._executor_factory = lambda: None
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(pilot.app, "get_runner", lambda: _FakeRunner())
-        scr.on_command_text_area_submitted(
+        await scr.on_command_text_area_submitted(
             CommandTextArea.Submitted(value="! echo hello")
         )
         await pilot.pause()
@@ -77,7 +80,9 @@ async def test_bang_empty_no_spawn(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="!"))
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="!")
+        )
         await pilot.pause()
         assert "пустая команда" in _trace_text(scr)
 
@@ -91,14 +96,18 @@ async def test_bang_preflight_vim(tmp_path):
     app = TuiApp(threads_dir=str(tmp_path))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! vim x"))
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="! vim x")
+        )
         await pilot.pause()
         text = _trace_text(scr)
         assert "$ vim x" in text
         assert "интерактив" in text.lower()
 
 
-async def _await_bang_done(pilot, scr, needle: str, *, rounds: int = 50) -> None:
+async def _await_bang_done(
+    pilot, scr, needle: str, *, rounds: int = 50
+) -> None:
     await pilot.pause()
     for _ in range(rounds):
         if needle in _trace_text(scr):
@@ -107,7 +116,9 @@ async def _await_bang_done(pilot, scr, needle: str, *, rounds: int = 50) -> None
     pytest.fail(f"{needle!r} not in trace: {_trace_text(scr)!r}")
 
 
-async def _await_bang_gone(pilot, scr, *needles: str, rounds: int = 50) -> None:
+async def _await_bang_gone(
+    pilot, scr, *needles: str, rounds: int = 50
+) -> None:
     """Дождаться, пока блоки уйдут из трейса.
 
     remove_children() в Textual — отложенный prune (см. TraceScreen._clear_trace):
@@ -138,17 +149,25 @@ async def test_bang_clear_all(tmp_path, monkeypatch):
         def stop(self):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}})
+    app = TuiApp(
+        threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(pilot.app, "get_runner", lambda: _FakeRunner())
-        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! echo one"))
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="! echo one")
+        )
         await _await_bang_done(pilot, scr, "one")
-        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! echo two"))
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="! echo two")
+        )
         await _await_bang_done(pilot, scr, "two")
         assert "one" in _trace_text(scr) and "two" in _trace_text(scr)
 
-        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! clear"))
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="! clear")
+        )
         await _await_bang_gone(pilot, scr, "one", "two")
         text = _trace_text(scr)
         assert "one" not in text
@@ -173,17 +192,21 @@ async def test_bang_clear_last_n(tmp_path, monkeypatch):
         def stop(self):
             pass
 
-    app = TuiApp(threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}})
+    app = TuiApp(
+        threads_dir=str(tmp_path), config={"tui_bang_shell": {"enabled": True}}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         monkeypatch.setattr(pilot.app, "get_runner", lambda: _FakeRunner())
         for word in ("alpha", "beta", "gamma"):
-            scr.on_command_text_area_submitted(
+            await scr.on_command_text_area_submitted(
                 CommandTextArea.Submitted(value=f"! echo {word}")
             )
             await _await_bang_done(pilot, scr, word)
 
-        scr.on_command_text_area_submitted(CommandTextArea.Submitted(value="! clear 2"))
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value="! clear 2")
+        )
         await _await_bang_gone(pilot, scr, "beta", "gamma")
         text = _trace_text(scr)
         assert "alpha" in text

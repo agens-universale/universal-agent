@@ -6,6 +6,7 @@
 В git-mode (v2 hybrid) полный wipe ``.gc/diffs/`` отключён — только
 точечный stale-cleanup git-visible ключей через ``evict_stale_cache``.
 """
+
 from __future__ import annotations
 
 import logging
@@ -35,7 +36,7 @@ def resolve_mode(launch_root: Union[str, Path]) -> DiffMode:
 
 
 def evict_stale_cache(
-    store: "DiffStore",
+    store: DiffStore,
     *,
     git_visible_keys: Set[str],
 ) -> int:
@@ -47,9 +48,8 @@ def evict_stale_cache(
         return 0
     removed = 0
     for key in list(store.load_index()):
-        if key in git_visible_keys:
-            if store.drop_entry(key):
-                removed += 1
+        if key in git_visible_keys and store.drop_entry(key):
+            removed += 1
     if removed:
         _logger.info(
             "evicted %s stale cache key(s) superseded by git", removed

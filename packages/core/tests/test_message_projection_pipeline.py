@@ -7,7 +7,9 @@ from gc_core.message_projection import (
     project_assistant_text,
     project_text_for_model,
 )
-from gc_core.message_projection.projectors.strip_tagged_blocks import strip_think_blocks
+from gc_core.message_projection.projectors.strip_tagged_blocks import (
+    strip_think_blocks,
+)
 
 
 def test_default_pipeline_strips_think_only_without_extra_tags():
@@ -34,7 +36,10 @@ def test_extra_tag_strips_in_pipeline():
 
 
 def test_think_in_tags_with_strip_think_true_dedupes():
-    assert project_text_for_model("<think>x</think>Y", tags=["think", "THINK"]) == "Y"
+    assert (
+        project_text_for_model("<think>x</think>Y", tags=["think", "THINK"])
+        == "Y"
+    )
 
 
 def test_effective_for_model_tags_puts_think_first():
@@ -50,16 +55,13 @@ def test_effective_for_model_tags_puts_think_first():
         "think",
         "redacted_thinking",
     )
-    assert effective_for_model_tags(("redacted_thinking",), strip_think=False) == (
-        "redacted_thinking",
-    )
+    assert effective_for_model_tags(
+        ("redacted_thinking",), strip_think=False
+    ) == ("redacted_thinking",)
 
 
 def test_unclosed_extra_tag_inside_think_does_not_eat_answer():
-    text = (
-        "<think>let me use <redacted_thinking> here</think>"
-        "Final answer to the user."
-    )
+    text = "<think>let me use <redacted_thinking> here</think>Final answer to the user."
     assert (
         project_text_for_model(text, tags=["redacted_thinking"])
         == "Final answer to the user."
@@ -82,7 +84,12 @@ def test_strip_think_false_empty_tags_keeps_think_prose():
 
 
 def test_strip_think_false_think_in_tags_strips_prose_only():
-    assert project_text_for_model("<think>x</think>Y", tags=["think"], strip_think=False) == "Y"
+    assert (
+        project_text_for_model(
+            "<think>x</think>Y", tags=["think"], strip_think=False
+        )
+        == "Y"
+    )
     assert (
         project_text_for_model(
             "<redacted_thinking>r</redacted_thinking>ok",
@@ -131,7 +138,10 @@ def test_project_text_accepts_custom_pipeline():
         return f"[{text}]"
 
     pipeline = MessageProjectionPipeline([strip_think_blocks, wrap])
-    assert project_text_for_model("<think>t</think>hi", pipeline=pipeline) == "[hi]"
+    assert (
+        project_text_for_model("<think>t</think>hi", pipeline=pipeline)
+        == "[hi]"
+    )
 
 
 def test_project_assistant_text_string_and_list():

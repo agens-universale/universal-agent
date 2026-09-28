@@ -1,23 +1,29 @@
 import difflib
 import json
-import traceback
-
-import sys
 import logging
-from typing import Any, Dict, Iterable, Tuple, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 
-from gc_core.tools.connect_mcp import get_mcp_tools_data
-from gc_core.tools.arguments_validation import WrongFunctionArgumentsException, annotate_output_with_dropped_arguments, parse_and_validate_tool_arguments
-from gc_core.tools.skills.registry import get_skills_registry
-from gc_core.tools.skills.skills_tools import get_skills_tools_data
-from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
-from gc_core.tools.skills.registry import SkillsRegistry
+from gc_core.tools.arguments_validation import (
+    WrongFunctionArgumentsException,
+    annotate_output_with_dropped_arguments,
+    parse_and_validate_tool_arguments,
+)
+from gc_core.tools.inject_tool_fields import (
+    apply_injected_fields_to_spec,
+    resolve_inject_tool_fields,
+    strip_injected_tool_args,
+)
+from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
+from gc_core.tools.schema_optional import (
+    apply_openai_strict_parameters,
+    augment_optional_property_descriptions,
+)
+from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_core.tools.skills.skills_tools import get_skills_tools_data
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
-from gc_core.tools.inject_tool_fields import apply_injected_fields_to_spec, resolve_inject_tool_fields, strip_injected_tool_args
-from gc_core.tools.schema_optional import apply_openai_strict_parameters, augment_optional_property_descriptions
 
 _fallback_logger = logging.getLogger(__name__)
 _LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
@@ -80,27 +86,26 @@ def is_internal_tool_error_output(output: str) -> bool:
         return False
     try:
         parsed = json.loads(output)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return False
     if not isinstance(parsed, dict):
         return False
-    return parsed.get("ok") is False and parsed.get("error") == INTERNAL_TOOL_ERROR
+    return (
+        parsed.get("ok") is False
+        and parsed.get("error") == INTERNAL_TOOL_ERROR
+    )
 
 
-def format_unknown_tool_output(tool_name: str, available_names: Iterable[str]) -> str:
+def format_unknown_tool_output(
+    tool_name: str, available_names: Iterable[str]
+) -> str:
     suggestions = difflib.get_close_matches(
         tool_name, list(available_names), n=5, cutoff=0.3
     )
     error_message = f"No tool named '{tool_name}' on client."
-    use_only = (
-        "Use only tools from the provided tool list "
-        "in section <tools> in system prompt."
-    )
+    use_only = "Use only tools from the provided tool list in section <tools> in system prompt."
     if suggestions:
-        message = (
-            f"Unknown tool '{tool_name}'. Maybe you mean tools: "
-            f"{', '.join(suggestions)}. {use_only}"
-        )
+        message = f"Unknown tool '{tool_name}'. Maybe you mean tools: {', '.join(suggestions)}. {use_only}"
     else:
         message = f"Unknown tool '{tool_name}'. {use_only}"
     payload = {
@@ -123,7 +128,7 @@ def is_unknown_tool_output(output: str) -> bool:
         return True
     try:
         parsed = json.loads(output)
-    except (json.JSONDecodeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return False
     if not isinstance(parsed, dict):
         return False
@@ -154,7 +159,9 @@ def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
     params = spec.get("parameters")
     if isinstance(params, dict):
         # OpenAI strict rejects bare property $ref; inline Pydantic $defs if present.
-        from gc_core.tools.connect_mcp.agent_tools import _inline_parameter_schema_refs
+        from gc_core.tools.connect_mcp.agent_tools import (
+            _inline_parameter_schema_refs,
+        )
 
         _inline_parameter_schema_refs(params)
         apply_openai_strict_parameters(params)
@@ -162,6 +169,35 @@ def _apply_openai_strict_tools_schema(spec: Dict[str, Any]) -> None:
 
 SUBAGENT_TOOLS_ALLOW_KEY = "subagent_tools_allow"
 SUBAGENT_TOOLS_STOP_KEY = "subagent_tools_stop"
+
+
+def _warn_unknown_filter_names(
+    tools_data: Dict[str, Any], allow, stop, logger: Any
+) -> None:
+    unknown = sorted(((allow or set()) | stop) - set(tools_data))
+    if not unknown:
+        return
+    # Опечатка в имени тула не должна ронять ран: определение уже прошло
+    # проверку обязательных тулов, а остальное — предпочтения оператора.
+    subagent_names = [name for name in unknown if name.startswith("subagent_")]
+    rest = [name for name in unknown if not name.startswith("subagent_")]
+    log = logger or _fallback_logger
+    if subagent_names:
+        # Глубина всегда 1: ребёнку сабагенты не выдаются в принципе.
+        log.warning(
+            "subagent_tools_filter_nested_ignored names=%s",
+            ", ".join(subagent_names),
+            extra={
+                "event": "subagent_tools_filter_nested_ignored",
+                "names": subagent_names,
+            },
+        )
+    if rest:
+        log.warning(
+            "subagent_tools_filter_unknown names=%s",
+            ", ".join(rest),
+            extra={"event": "subagent_tools_filter_unknown", "names": rest},
+        )
 
 
 def apply_subagent_tools_filter(
@@ -190,32 +226,11 @@ def apply_subagent_tools_filter(
     if allow is None and not stop:
         return tools_data
 
-    from gc_core.tools.subagents.custom.file_subagent import REQUIRED_TOOL_NAMES
+    from gc_core.tools.subagents.custom.file_subagent import (
+        REQUIRED_TOOL_NAMES,
+    )
 
-    known = set(tools_data)
-    unknown = sorted(((allow or set()) | stop) - known)
-    if unknown:
-        # Опечатка в имени тула не должна ронять ран: определение уже прошло
-        # проверку обязательных тулов, а остальное — предпочтения оператора.
-        subagent_names = [name for name in unknown if name.startswith("subagent_")]
-        rest = [name for name in unknown if not name.startswith("subagent_")]
-        log = logger or _fallback_logger
-        if subagent_names:
-            # Глубина всегда 1: ребёнку сабагенты не выдаются в принципе.
-            log.warning(
-                "subagent_tools_filter_nested_ignored names=%s",
-                ", ".join(subagent_names),
-                extra={
-                    "event": "subagent_tools_filter_nested_ignored",
-                    "names": subagent_names,
-                },
-            )
-        if rest:
-            log.warning(
-                "subagent_tools_filter_unknown names=%s",
-                ", ".join(rest),
-                extra={"event": "subagent_tools_filter_unknown", "names": rest},
-            )
+    _warn_unknown_filter_names(tools_data, allow, stop, logger)
 
     filtered = {
         name: entry
@@ -232,26 +247,17 @@ def apply_subagent_tools_filter(
     return filtered
 
 
-def build_tools_data(
+def _collect_local_tools_data(
     config_dict: Dict[str, Any],
-    on_progress=None,
     *,
-    os_backend: FsBackend | None = None,
-    skills_registry: SkillsRegistry | None = None,
-    logger: Any = None,
-    registered_names: Optional[list] = None,
-) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
-    """
-    Собрать единый словарь tools_data и производные списки spec/description
-    на основе config_dict.
+    os_backend: FsBackend | None,
+    skills_registry: SkillsRegistry | None,
+) -> Dict[str, Dict[str, Any]]:
+    """Тулы, которые не требуют сети: builtin и скиллы.
 
-    ``stop_tools`` режет уже слитый набор (builtin + скиллы + MCP + сабагенты),
-    до сабагентского фильтра: тот возвращает служебное ядро только из входящего
-    набора и не должен восстанавливать глобально снятое.
-
-    ``registered_names`` — опциональный out-список. Если передан, в него
-    записываются имена до вычитания ``stop_tools`` (для валидатора: успешно
-    снятый тул не опечатка).
+    Отдельно от MCP, потому что дискавери — единственный дорогой источник
+    (866–1405 мс против 2.4–6.9 мс на всё это), и только она бывает
+    асинхронной. Обе формы ``build_tools_data`` зовут этот сборщик как есть.
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
@@ -259,21 +265,104 @@ def build_tools_data(
     for k, v in builtin_tools_data.items():
         tools_data[k] = v
 
-    registry = skills_registry or get_skills_registry(config_dict, backend=os_backend)
+    registry = skills_registry or get_skills_registry(
+        config_dict, backend=os_backend
+    )
     skills_tools_data = get_skills_tools_data(registry)
     for k, v in skills_tools_data.items():
         tools_data[k] = v
+    return tools_data
 
-    mcp_tools_data, mcp_status = get_mcp_tools_data(
-        config_dict, on_progress=on_progress, os_backend=os_backend
+
+async def abuild_tools_data(
+    config_dict: Dict[str, Any],
+    on_progress=None,
+    *,
+    os_backend: FsBackend | None = None,
+    skills_registry: SkillsRegistry | None = None,
+    logger: Any = None,
+    tools_cache: Any = None,
+    registered_names: Optional[list] = None,
+) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
+    """То же, что ``build_tools_data``, но дискавери ждётся без потока.
+
+    Дискавери — 99.7% времени сборки (866–1405 мс против 2.4–6.9 мс на всё
+    остальное), и только она здесь асинхронна. Остальные источники — builtin,
+    скиллы, субагенты — это словари в памяти.
+    """
+    from gc_core.tools.connect_mcp.agent_tools import (
+        aget_mcp_tools_data_for_config,
     )
+
+    tools_data = _collect_local_tools_data(
+        config_dict, os_backend=os_backend, skills_registry=skills_registry
+    )
+    # `os_backend` обязателен: без него `runs_in_agent_runtime` считает любой
+    # MCP-сервер «своим», и `execute_on: os_backend` молча исполнялся на хосте,
+    # мимо песочницы. develop передаёт его здесь же; при переводе аргумент
+    # потерялся.
+    mcp_tools_data, mcp_status = await aget_mcp_tools_data_for_config(
+        config_dict,
+        on_progress,
+        tools_cache=tools_cache,
+        os_backend=os_backend,
+    )
+    return _finish_tools_data(
+        tools_data,
+        mcp_tools_data,
+        mcp_status,
+        config_dict,
+        logger=logger,
+        registered_names=registered_names,
+    )
+
+
+def _normalize_tool_spec(
+    spec: Dict[str, Any],
+    entry: Dict[str, Any],
+    *,
+    inject_tool_fields,
+    openai_strict: bool,
+    send_tool_strict: bool,
+) -> None:
+    _ensure_spec_has_required(spec)
+    if inject_tool_fields:
+        injected = apply_injected_fields_to_spec(spec, inject_tool_fields)
+        entry["injected_fields"].extend(injected)
+    if openai_strict:
+        _apply_openai_strict_tools_schema(spec)
+    augment_optional_property_descriptions(spec, openai_strict=openai_strict)
+    if not send_tool_strict:
+        spec.pop("strict", None)
+
+
+def _finish_tools_data(
+    tools_data: Dict[str, Dict[str, Any]],
+    mcp_tools_data: Dict[str, Dict[str, Any]],
+    mcp_status: dict,
+    config_dict: Dict[str, Any],
+    *,
+    logger: Any,
+    registered_names: Optional[list] = None,
+) -> Tuple[Dict[str, Dict[str, Any]], list, list, dict]:
+    """Досборка после дискавери: субагенты, фильтры, спеки. Ни сети, ни ожидания.
+
+    Одно тело на обе формы вызова — синхронную и асинхронную. Между ними
+    отличается ровно то, как дождаться MCP.
+    """
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 
     local_subagents_cfg = config_dict.get("use_local_subagents", False)
-    backend_mode = str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-    if subagents_enabled(local_subagents_cfg) and backend_mode == "chat_completions":
+    backend_mode = (
+        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    )
+    if (
+        subagents_enabled(local_subagents_cfg)
+        and backend_mode == "chat_completions"
+    ):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
+
         # Реестр уже применил список из use_local_subagents к кастомным;
         # встроенные семь доступны всегда, пока фича включена.
         subagent_tools = get_subagents_tools_data(config_dict, logger=logger)
@@ -290,7 +379,9 @@ def build_tools_data(
         registered_names[:] = list(tools_data)
 
     tools_data = _apply_stop_tools(tools_data, config_dict)
-    tools_data = apply_subagent_tools_filter(tools_data, config_dict, logger=logger)
+    tools_data = apply_subagent_tools_filter(
+        tools_data, config_dict, logger=logger
+    )
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
@@ -305,20 +396,47 @@ def build_tools_data(
         v.setdefault("injected_fields", [])
         spec = v.get("spec")
         if isinstance(spec, dict):
-            _ensure_spec_has_required(spec)
-            if inject_tool_fields:
-                injected = apply_injected_fields_to_spec(spec, inject_tool_fields)
-                v["injected_fields"].extend(injected)
-            if openai_strict:
-                _apply_openai_strict_tools_schema(spec)
-            augment_optional_property_descriptions(spec, openai_strict=openai_strict)
-            if not send_tool_strict:
-                spec.pop("strict", None)
+            _normalize_tool_spec(
+                spec,
+                v,
+                inject_tool_fields=inject_tool_fields,
+                openai_strict=openai_strict,
+                send_tool_strict=send_tool_strict,
+            )
 
     tools_spec = [v["spec"] for v in tools_data.values()]
     tools_description = [v["description"] for v in tools_data.values()]
 
     return tools_data, tools_spec, tools_description, mcp_status
+
+
+class _SubagentTool:
+    """Вызов субагента, отложенный до диспетчера.
+
+    Раньше подготовка вызова исполняла субагента прямо в себе. Пока всё было
+    синхронным, это было незаметно; теперь подготовка общая для sync- и
+    async-пути и не может решать за них, как ждать долгий вложенный прогон.
+
+    ``acall`` — быстрый путь для async-диспетчера (субагент идёт на том же
+    loop). ``__call__`` — синхронный, для прямых вызовов apply_tool и тестов.
+    """
+
+    def __init__(
+        self, runner, *, tool_name, arguments, run_agent_func, parent_call_id
+    ):
+        self._runner = runner
+        self._tool_name = tool_name
+        self._arguments = arguments
+        self._run_agent_func = run_agent_func
+        self._parent_call_id = parent_call_id
+
+    async def acall(self) -> str:
+        return await self._runner.arun(
+            self._tool_name,
+            self._arguments,
+            self._run_agent_func,
+            parent_call_id=self._parent_call_id,
+        )
 
 
 def tool_arguments_valid(
@@ -349,15 +467,87 @@ def tool_arguments_valid(
     return True
 
 
-def apply_tool(
+def _config_dict_for_call(
+    ctx: Optional[Any], kwargs: Dict[str, Any]
+) -> Dict[str, Any]:
+    if ctx is not None and hasattr(ctx, "config_dict"):
+        cfg = ctx.config_dict or {}
+    else:
+        cfg = kwargs.get("config_dict")
+    return cfg if isinstance(cfg, dict) else {}
+
+
+def _logger_for_call(ctx: Optional[Any]) -> logging.Logger:
+    if ctx is not None and hasattr(ctx, "logger"):
+        candidate = ctx.logger
+        if isinstance(candidate, logging.Logger):
+            return candidate
+    return _fallback_logger
+
+
+def _prepare_subagent_call(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Dict[str, Dict[str, Any]],
+    ctx: Optional[Any],
+    config_dict: Dict[str, Any],
+    kwargs: Dict[str, Any],
+) -> "tuple[Any, Dict[str, Any], list[str]] | str":
+    from gc_core.tools.subagents.runner import SubagentRunner
+
+    orchestrator_state = kwargs.get("state")
+    run_agent_func = kwargs.get("run_agent_func")
+    if orchestrator_state is None or run_agent_func is None:
+        return f"Subagent {tool_name}: missing state or run_agent_func"
+    entry = tools_data_.get(tool_name) or {}
+    tool_spec = entry.get("spec", {}) or {}
+    dropped_unknown: list[str] = []
+    parsed_args = parse_and_validate_tool_arguments(
+        tool_name=tool_name,
+        arguments=arguments,
+        tool_spec=tool_spec,
+        allow_empty_for_empty_schema=False,
+        tool_fabric=entry.get("tool_fabric"),
+        dropped_unknown=dropped_unknown,
+    )
+    prepare = getattr(
+        entry.get("tool_fabric"), "prepare_args_before_strip", None
+    )
+    if callable(prepare):
+        parsed_args = prepare(parsed_args)
+    parsed_args = strip_injected_tool_args(
+        parsed_args,
+        injected_fields=entry.get("injected_fields") or [],
+    )
+    runner = SubagentRunner(ctx, orchestrator_state, config_dict)
+    return (
+        _SubagentTool(
+            runner,
+            tool_name=tool_name,
+            arguments=parsed_args,
+            run_agent_func=run_agent_func,
+            parent_call_id=kwargs.get("call_id"),
+        ),
+        {},
+        dropped_unknown,
+    )
+
+
+def _prepare_tool_call(
     tool_name: str,
     arguments: str | Dict[str, Any],
     tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
     ctx: Optional[Any] = None,
     **kwargs: Any,
-) -> str:
+) -> "tuple[Any, Dict[str, Any], list[str]] | str":
     """
-    Вызвать тул по имени.
+    Подготовить вызов тула: вернуть ``(тул, аргументы)`` либо готовую строку-ответ.
+
+    Строка — это ранний выход, к самому вызову не ведущий: неизвестный тул,
+    серверный сабагент, результат локального SubagentRunner. Общая часть для
+    синхронного ``apply_tool`` и асинхронного ``aapply_tool``: валидация,
+    strip инжектируемых полей и сборка фабрики у них одна и та же, различается
+    ТОЛЬКО способ позвать сам тул.
 
     - tools_data_ — явный словарь tools_data (обычный путь в тестах/утилитах);
     - ctx — RunContext; если передан и tools_data_ не задан, берём tools_data из ctx.
@@ -365,28 +555,20 @@ def apply_tool(
     """
     if tools_data_ is None:
         if ctx is None or not hasattr(ctx, "tools_data"):
-            raise RuntimeError("apply_tool requires tools_data_ or ctx with tools_data")
+            raise RuntimeError(
+                "apply_tool requires tools_data_ or ctx with tools_data"
+            )
         tools_data_ = ctx.tools_data
 
     # Настройки server subagents
-    use_server_subagents = False
-    server_tool_prefix: Optional[str] = None
-    config_dict: Dict[str, Any] = {}
-
-    if ctx is not None and hasattr(ctx, "config_dict"):
-        cfg = getattr(ctx, "config_dict") or {}
-        if isinstance(cfg, dict):
-            config_dict = cfg
-    else:
-        cfg = kwargs.get("config_dict")
-        if isinstance(cfg, dict):
-            config_dict = cfg
-
+    config_dict = _config_dict_for_call(ctx, kwargs)
     use_server_subagents = config_dict.get("use_server_subagents", False)
     server_tool_prefix = config_dict.get("server_tool_prefix")
 
-    if use_server_subagents and server_tool_prefix and tool_name.startswith(
-        server_tool_prefix
+    if (
+        use_server_subagents
+        and server_tool_prefix
+        and tool_name.startswith(server_tool_prefix)
     ):
         return f"{tool_name} call"
 
@@ -396,46 +578,12 @@ def apply_tool(
     if subagents_enabled(local_subagents_cfg) and is_subagent_tool(
         tool_name, config_dict
     ):
-        from gc_core.tools.subagents.runner import SubagentRunner
-        orchestrator_state = kwargs.get("state")
-        run_agent_func = kwargs.get("run_agent_func")
-        if orchestrator_state is None or run_agent_func is None:
-            return f"Subagent {tool_name}: missing state or run_agent_func"
-        entry = tools_data_.get(tool_name) or {}
-        tool_spec = entry.get("spec", {}) or {}
-        dropped_unknown: list[str] = []
-        parsed_args = parse_and_validate_tool_arguments(
-            tool_name=tool_name,
-            arguments=arguments,
-            tool_spec=tool_spec,
-            allow_empty_for_empty_schema=False,
-            tool_fabric=entry.get("tool_fabric"),
-            dropped_unknown=dropped_unknown,
-        )
-        prepare = getattr(entry.get("tool_fabric"), "prepare_args_before_strip", None)
-        if callable(prepare):
-            parsed_args = prepare(parsed_args)
-        parsed_args = strip_injected_tool_args(
-            parsed_args,
-            injected_fields=entry.get("injected_fields") or [],
-        )
-        runner = SubagentRunner(ctx, orchestrator_state, config_dict)
-        return annotate_output_with_dropped_arguments(
-            runner.run(
-                tool_name,
-                parsed_args,
-                run_agent_func,
-                parent_call_id=kwargs.get("call_id"),
-            ),
-            dropped_unknown,
+        return _prepare_subagent_call(
+            tool_name, arguments, tools_data_, ctx, config_dict, kwargs
         )
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
-    log = _fallback_logger
-    if ctx is not None and hasattr(ctx, "logger"):
-        candidate = getattr(ctx, "logger")
-        if isinstance(candidate, logging.Logger):
-            log = candidate
+    log = _logger_for_call(ctx)
 
     try:
         tool_fabric = tools_data_[tool_name]["tool_fabric"]
@@ -478,56 +626,114 @@ def apply_tool(
     if config_dict:
         fabric_kwargs.setdefault("config_dict", config_dict)
     tool = tool_fabric(**fabric_kwargs)
-    # log.debug(
-    #    "apply_tool log:\nkwargs:\n%s\narguments:\n %s\ntool_fabric:\n%s\ntool:\n%s",
-    #    kwargs,
-    #    arguments,
-    #    tool_fabric,
-    #    tool,
-    #)
-    call_id = kwargs.get("call_id")
+    return tool, arguments, dropped_unknown
+
+
+def _tool_failure_output(
+    exc: BaseException,
+    *,
+    tool_name: str,
+    ctx: Optional[Any],
+    call_id: Any,
+) -> str:
+    """Общий разбор упавшего тула для обоих входов.
+
+    Стек остаётся в логах, модель получает слим-конверт (контракт
+    docs_md/actual/2026-08-14-apply-tool-internal-error-CONTRACT.ru.md).
+
+    Один хелпер, а не копия на каждый вход: асинхронный путь отдавал модели
+    `str(exc)` вместе с полным traceback — доперезаписанная форма, которую
+    develop заменил конвертом. Расхождение было незаметным: тул падал, агент
+    получал текст, всё «работало» — только контракт в синхронном и
+    асинхронном вызове был разный, а traceback уезжал в контекст модели.
+    """
+    log = _fallback_logger
+    if ctx is not None and hasattr(ctx, "logger"):
+        candidate = ctx.logger
+        if isinstance(candidate, logging.Logger):
+            log = candidate
+
     if not isinstance(call_id, str):
         call_id = None
 
-    try:
-        res = tool.__call__(**arguments)
-    except Exception as e:  # noqa: BLE001
-        # Stack stays in logs only — tool output is a slim JSON envelope for the LLM.
-        # See docs_md/actual/2026-08-14-apply-tool-internal-error-CONTRACT.ru.md
-        log.exception(
-            "apply_tool internal error tool=%s call_id=%s",
-            tool_name,
-            call_id,
-        )
-        return annotate_output_with_dropped_arguments(
-            format_internal_tool_error_output(
-                tool_name=tool_name,
-                exc=e,
-                call_id=call_id,
-            ),
-            dropped_unknown,
-        )
+    log.exception(
+        "apply_tool internal error tool=%s call_id=%s",
+        tool_name,
+        call_id,
+    )
+    return format_internal_tool_error_output(
+        tool_name=tool_name,
+        exc=exc,
+        call_id=call_id,
+    )
 
+
+def _tool_result_to_text(res: Any) -> str:
     if isinstance(res, str):
-        res_str = res
-    elif isinstance(res, list):
-        res_str = json.dumps(res, ensure_ascii=False)
-    elif isinstance(res, dict):
-        res_str = json.dumps(res, ensure_ascii=False)
-    else:
-        res_str = str(res)
+        return res
+    if isinstance(res, (list, dict)):
+        return json.dumps(res, ensure_ascii=False)
+    return str(res)
 
-    return annotate_output_with_dropped_arguments(res_str, dropped_unknown)
+
+async def aapply_tool(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
+    ctx: Optional[Any] = None,
+    **kwargs: Any,
+) -> str:
+    """
+    Вызвать тул по имени. Форма у тула ОДНА — ``acall``.
+
+    Раньше здесь было три ступени: ``acall``, корутинный ``__call__`` и, как
+    запасной путь, ``asyncio.to_thread`` для синхронного тула. Третья ступень
+    существовала «ради встраивающих», но зарегистрировать свой Python-класс-тул
+    извне нельзя вовсе: ``build_tools_data`` собирает набор из ``config_dict``,
+    параметра для чужих тулов у ``create_run_context`` нет, механизма плагинов
+    нет. Точка расширения — MCP, и она асинхронна насквозь.
+
+    Асинхронность формы не означает, что тело что-то ждёт: файловые и короткие
+    тулы исполняют его инлайн на loop (см. ``test_file_tools_run_inline``).
+    """
+    prepared = _prepare_tool_call(
+        tool_name, arguments, tools_data_, ctx, **kwargs
+    )
+    if isinstance(prepared, str):
+        return prepared
+    tool, args, dropped = prepared
+    acall = getattr(tool, "acall", None)
+    if not callable(acall):
+        # Жёстко, а не тихим уходом в поток: тул без `acall` — это ошибка
+        # проводки, и она обязана быть видна сразу, а не размазаться по
+        # прогону лишним слотом пула.
+        raise TypeError(
+            f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); the tool contract is async-only"
+        )
+    try:
+        res = await acall(**args)
+    except Exception as e:
+        return annotate_output_with_dropped_arguments(
+            _tool_failure_output(
+                e, tool_name=tool_name, ctx=ctx, call_id=kwargs.get("call_id")
+            ),
+            dropped,
+        )
+    # Заметка об отброшенных аргументах — на ОБОИХ выходах, как на develop:
+    # модель обязана узнать, что часть переданных полей схема не приняла,
+    # независимо от того, отработал тул или упал.
+    return annotate_output_with_dropped_arguments(
+        _tool_result_to_text(res), dropped
+    )
 
 
 __all__ = [
-    "WrongFunctionArgumentsException",
     "INTERNAL_TOOL_ERROR",
-    "build_tools_data",
-    "apply_tool",
-    "tool_arguments_valid",
+    "WrongFunctionArgumentsException",
+    "aapply_tool",
     "format_internal_tool_error_output",
     "format_unknown_tool_output",
     "is_internal_tool_error_output",
     "is_unknown_tool_output",
+    "tool_arguments_valid",
 ]

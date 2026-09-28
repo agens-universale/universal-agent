@@ -37,4 +37,6 @@ def test_prompt_is_universal_and_agent_writes(tmp_path):
     assert "run a single" in p  # «how to run a single test»
     # agent-writes контракт (старая концовка убрана)
     assert "write_to_file" in p
-    assert "Return the complete AGENTS.md markdown as your final answer" not in p
+    assert (
+        "Return the complete AGENTS.md markdown as your final answer" not in p
+    )

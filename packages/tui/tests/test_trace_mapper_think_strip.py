@@ -8,7 +8,9 @@ def test_normal_single_think_stripped():
 def test_nested_or_quoted_think_greedy_stripped():
     # Reasoning that quotes/discusses think tags → mismatched/nested tags.
     # Greedy strip (first <think> → last </think>) removes the whole span.
-    content = "<think>рассуждаю про <think>цитата</think> теги и ещё</think>Ответ."
+    content = (
+        "<think>рассуждаю про <think>цитата</think> теги и ещё</think>Ответ."
+    )
     assert _extract_assistant_text(content) == "Ответ."
 
 

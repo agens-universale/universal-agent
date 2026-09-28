@@ -12,20 +12,18 @@ Layout: Horizontal(prefix-Static, content-Static) — wrap длинных args/r
 - done     — есть result: ✓/✗;
 - interrupted — стоп/обрыв до output: · + «прервано».
 """
+
 from __future__ import annotations
 
 import time
 from typing import Optional
 
 from rich.text import Text
-
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.message import Message
 from textual.widget import Widget
 from textual.widgets import Static
-
-from gc_tui.widgets.click_model import ClickModelMixin
 
 from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR
@@ -33,13 +31,22 @@ from gc_tui.palette import OK as _OK
 from gc_tui.palette import RUN_COLOR as _RUN
 from gc_tui.palette import TOOL_NAME as _TOOL_NAME
 from gc_tui.services.duration_format import format_duration
+from gc_tui.widgets.click_model import ClickModelMixin
 
 # Пульс яркости running-глифа ▸: амбер тускло→ярко→тускло (ping-pong, пик —
 # RUN_COLOR). Двигается на собственном 0.1с-тике строки (см. on_mount) → плавное
 # дыхание 10fps; 10 кадров → цикл ≈1.0с.
 _PULSE_SHADES = [
-    "#8a6a3a", "#977448", "#a47f55", "#b18a62", "#c4986b",
-    "#d4a574", "#c4986b", "#b18a62", "#a47f55", "#977448",
+    "#8a6a3a",
+    "#977448",
+    "#a47f55",
+    "#b18a62",
+    "#c4986b",
+    "#d4a574",
+    "#c4986b",
+    "#b18a62",
+    "#a47f55",
+    "#977448",
 ]
 
 
@@ -75,12 +82,20 @@ class ToolCallRow(ClickModelMixin, Widget):
     """
     can_focus = True
 
-    _PREFIX = "   "   # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
+    _PREFIX = "   "  # отступ-индент тула (без «лесенки» |-); статус-глиф ✓/✗/▸ — следом
     _NESTED_PREFIX = "       "  # nested под subagent: +4 пробела
 
-    def __init__(self, *, call_id: str, tool_name: str,
-                 args_summary: str, event_no: int = 0,
-                 waiting: bool = False, nested: bool = False, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        call_id: str,
+        tool_name: str,
+        args_summary: str,
+        event_no: int = 0,
+        waiting: bool = False,
+        nested: bool = False,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self.call_id = call_id
         self._tool_name = tool_name
@@ -88,14 +103,18 @@ class ToolCallRow(ClickModelMixin, Widget):
         self._event_no = event_no
         self._result: Optional[str] = None
         self._is_error: bool = False
-        self._interrupted: bool = False  # терминальное «прервано» (стоп/обрыв run)
+        self._interrupted: bool = (
+            False  # терминальное «прервано» (стоп/обрыв run)
+        )
         self._waiting: bool = bool(waiting)
         self._nested: bool = bool(nested)
-        self._live_status: Optional[str] = None  # step/last для корневого субагента
+        self._live_status: Optional[str] = (
+            None  # step/last для корневого субагента
+        )
         self._content_static: Optional[Static] = None
         self._prefix_static: Optional[Static] = None
         self._pulse_frame: int = 0
-        self._pulse_timer = None     # собственный 0.1с-тик дыхания ▸ (on_mount)
+        self._pulse_timer = None  # собственный 0.1с-тик дыхания ▸ (on_mount)
         # line-tool на самом widget'е — color: $dim каскадится в prefix-Static.
         self.add_class("line-tool")
         if self._nested:
@@ -209,7 +228,11 @@ class ToolCallRow(ClickModelMixin, Widget):
             self._paused_at = None
 
     def _elapsed_s(self) -> int:
-        now = self._paused_at if self._paused_at is not None else time.monotonic()
+        now = (
+            self._paused_at
+            if self._paused_at is not None
+            else time.monotonic()
+        )
         return int(now - self._start_monotonic - self._paused_total)
 
     def _status_glyph(self) -> tuple[str, str]:
@@ -247,7 +270,9 @@ class ToolCallRow(ClickModelMixin, Widget):
                 text.append(f"· {self._live_status} · ", style=_DIM)
                 text.append(format_duration(self._elapsed_s()), style=_RUN)
             else:
-                text.append(f"· {format_duration(self._elapsed_s())}", style=_RUN)
+                text.append(
+                    f"· {format_duration(self._elapsed_s())}", style=_RUN
+                )
             return text
         text.append(")", style=_DIM)
         if self._is_error or self._result:
@@ -257,4 +282,5 @@ class ToolCallRow(ClickModelMixin, Widget):
     def _open_request(self) -> Optional[Message]:
         # Клик/Enter → детальный экран call + output.
         from gc_tui.messages import OpenToolCallDetailRequest
+
         return OpenToolCallDetailRequest(self.call_id)

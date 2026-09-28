@@ -3,6 +3,7 @@
 `+` → OK (зелёный), `-` → ERR (красный), заголовки/@@ → MUTED,
 контекст и прочее — CODE_BLOCK (как раньше монохромный дифф).
 """
+
 from __future__ import annotations
 
 from rich.text import Text
@@ -31,7 +32,7 @@ def render_unified_diff_widget(text: str) -> Static:
 
 
 def _line_style(line: str) -> str:
-    if line.startswith("---") or line.startswith("+++"):
+    if line.startswith(("---", "+++")):
         return MUTED
     if line.startswith("@@"):
         return MUTED

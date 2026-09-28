@@ -1,10 +1,14 @@
 import json
 
 from gc_core.tools.fs.file_info import FileInfo
-from gc_core.utils.file_text import BINARY_SAMPLE_BYTES, sha256_hex_of_bytes, sha256_hex_of_file_bytes
-
-
+from gc_core.utils.file_text import (
+    BINARY_SAMPLE_BYTES,
+    sha256_hex_of_bytes,
+    sha256_hex_of_file_bytes,
+)
 from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.helpers.crossplatform import require_symlinks
+
 
 def test_file_info_missing_path(tmp_path):
     missing = tmp_path / "nope.txt"
@@ -16,7 +20,7 @@ def test_file_info_missing_path(tmp_path):
 
 def test_file_info_fast_defaults(tmp_path):
     p = tmp_path / "a.txt"
-    p.write_text("hello\nworld\n", encoding="utf-8")
+    p.write_text("hello\nworld\n", encoding="utf-8", newline="")
     res = json.loads(with_local_ctx(FileInfo)(path=str(p)))
     assert res["ok"] is True
     assert res["exists"] is True
@@ -32,7 +36,7 @@ def test_file_info_fast_defaults(tmp_path):
 def test_file_info_with_hash_and_line_count(tmp_path):
     text = "alpha\nbeta\n"
     p = tmp_path / "b.txt"
-    p.write_text(text, encoding="utf-8")
+    p.write_text(text, encoding="utf-8", newline="")
     res = json.loads(
         with_local_ctx(FileInfo)(
             path=str(p),
@@ -57,7 +61,7 @@ def test_file_info_crlf_hash_is_raw_bytes(tmp_path):
 
 def test_file_info_large_utf8_markdown_not_binary(tmp_path):
     prefix = ("а" * 4095 + "x").encode("utf-8")
-    data = prefix + "а".encode("utf-8") + b"\n" * 340
+    data = prefix + "а".encode() + b"\n" * 340
     path = tmp_path / "report.md"
     path.write_bytes(data)
     assert len(data) > BINARY_SAMPLE_BYTES
@@ -82,7 +86,9 @@ def test_file_info_binary_hash_by_bytes(tmp_path):
     path = tmp_path / "blob.bin"
     path.write_bytes(data)
 
-    res = json.loads(with_local_ctx(FileInfo)(path=str(path), include_hash=True))
+    res = json.loads(
+        with_local_ctx(FileInfo)(path=str(path), include_hash=True)
+    )
     assert res["is_binary"] is True
     assert res["binary_detection_reason"] == "nul_byte"
     assert res["hash_mode"] == "bytes"
@@ -99,7 +105,9 @@ def test_file_info_cp1251_not_binary(tmp_path):
     path = tmp_path / "legacy.txt"
     path.write_bytes(data)
     res = json.loads(
-        with_local_ctx(FileInfo)(path=str(path), include_hash=True, include_line_count=True)
+        with_local_ctx(FileInfo)(
+            path=str(path), include_hash=True, include_line_count=True
+        )
     )
     assert res["ok"] is True
     assert res["is_binary"] is False
@@ -111,9 +119,12 @@ def test_file_info_cp1251_not_binary(tmp_path):
 
 
 def test_file_info_broken_symlink_reports_symlink(tmp_path):
+    require_symlinks(tmp_path)
     broken = tmp_path / "broken_link"
     broken.symlink_to(str(tmp_path / "does_not_exist"))
-    res = json.loads(with_local_ctx(FileInfo)(path=str(broken), follow_symlinks=False))
+    res = json.loads(
+        with_local_ctx(FileInfo)(path=str(broken), follow_symlinks=False)
+    )
     assert res["ok"] is True
     assert res["exists"] is True
     assert res["is_symlink"] is True
@@ -121,20 +132,27 @@ def test_file_info_broken_symlink_reports_symlink(tmp_path):
 
 
 def test_file_info_broken_symlink_follow_fails_stat(tmp_path):
+    require_symlinks(tmp_path)
     broken = tmp_path / "broken_link"
     broken.symlink_to(str(tmp_path / "does_not_exist"))
-    res = json.loads(with_local_ctx(FileInfo)(path=str(broken), follow_symlinks=True))
+    res = json.loads(
+        with_local_ctx(FileInfo)(path=str(broken), follow_symlinks=True)
+    )
     assert res["ok"] is False
     assert res["error"]["type"] == "stat_failed"
 
 
 def test_file_info_symlink_to_file_follow(tmp_path):
+    require_symlinks(tmp_path)
     real = tmp_path / "real.txt"
     real.write_text("payload", encoding="utf-8")
     link = tmp_path / "via_link"
     link.symlink_to(real)
-    res = json.loads(with_local_ctx(FileInfo)(path=str(link), follow_symlinks=True, include_hash=True))
+    res = json.loads(
+        with_local_ctx(FileInfo)(
+            path=str(link), follow_symlinks=True, include_hash=True
+        )
+    )
     assert res["ok"] is True
     assert res["type"] == "file"
     assert res["size_bytes"] == len("payload")
-

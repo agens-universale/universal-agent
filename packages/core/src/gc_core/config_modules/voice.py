@@ -7,17 +7,20 @@ from gc_core.utils.url_addr import same_service
 
 class VoiceConfig(BaseModel):
     """Секция voice: — голосовой ввод TUI (STT). Пустой url = фича выключена."""
+
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     # Провайдер один — /v1/audio/transcriptions-совместимый сервис (локальная батарейка
     # или облако). Поле оставлено точкой расширения: появится второй протокол — добавим
     # значение, не ломая конфиги, где оно уже прописано.
     provider: Literal["openai"] = "openai"
-    url: str = ""              # полный endpoint /v1/audio/transcriptions
-    token: str = ""            # Bearer; локальному сервису и открытым endpoint'ам не нужен
+    url: str = ""  # полный endpoint /v1/audio/transcriptions
+    token: str = (
+        ""  # Bearer; локальному сервису и открытым endpoint'ам не нужен
+    )
     model: str = "whisper-1"
     language: str = "ru"
-    max_seconds: int = 120     # предохранитель: авто-стоп записи
+    max_seconds: int = 120  # предохранитель: авто-стоп записи
     timeout_seconds: int = 60
     verify_ssl: bool | str = Field(default=True, alias="verify-ssl")
 
@@ -36,7 +39,9 @@ def voice_enabled(voice: dict) -> bool:
     return bool(voice.get("url"))
 
 
-def overridden_user_voice(user_voice: Optional[dict], managed_url: str) -> Optional[str]:
+def overridden_user_voice(
+    user_voice: Optional[dict], managed_url: str
+) -> Optional[str]:
     """Юзерская voice-секция, которую перекрывает managed-слой, или None.
 
     Единственный владелец правила на всех, кто об этом перекрытии сообщает: установка
@@ -57,5 +62,5 @@ def overridden_user_voice(user_voice: Optional[dict], managed_url: str) -> Optio
     if not url and not token:
         return None
     if url and same_service(url, managed_url):
-        return None                     # человек вписал адрес той же батарейки
+        return None  # человек вписал адрес той же батарейки
     return url or "<без url>"

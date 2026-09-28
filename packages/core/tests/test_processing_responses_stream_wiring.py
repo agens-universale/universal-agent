@@ -2,6 +2,7 @@
 Tests: on_delta is wired from ctx.on_stream_delta into
 request_chat_completions_with_policy, gated by cfg["stream"].
 """
+
 import logging
 from types import SimpleNamespace
 
@@ -11,7 +12,7 @@ from gc_core import processing_responses as pr
 def _patch_policy(monkeypatch):
     seen = {}
 
-    def fake_policy(
+    async def fake_policy(
         *,
         payload_factory,
         initial_max_tokens,
@@ -34,11 +35,20 @@ def _patch_policy(monkeypatch):
         seen["on_delta"] = on_delta
         seen["salvage_reasoning"] = salvage_reasoning
         return (
-            {"choices": [{"message": {"role": "assistant", "content": "x"}, "finish_reason": "stop"}]},
+            {
+                "choices": [
+                    {
+                        "message": {"role": "assistant", "content": "x"},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
             {"max_tokens": initial_max_tokens},
         )
 
-    monkeypatch.setattr(pr, "request_chat_completions_with_policy", fake_policy)
+    monkeypatch.setattr(
+        pr, "arequest_chat_completions_with_policy", fake_policy
+    )
     return seen
 
 
@@ -72,6 +82,7 @@ def _make_ctx_state_messages(stream: bool):
 
 
 import pytest
+from gc_testkit import run_coro
 
 
 @pytest.fixture
@@ -84,7 +95,7 @@ def test_on_delta_passed_when_stream_on(monkeypatch, chat_state_ctx):
     ctx, state, messages = chat_state_ctx(stream=True)
     cb = lambda k, t: None
     ctx.on_stream_delta = cb
-    pr._request_backend_canonical(messages, state, ctx)
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
     assert seen["on_delta"] is cb
 
 
@@ -92,21 +103,23 @@ def test_on_delta_none_when_stream_off(monkeypatch, chat_state_ctx):
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=False)
     ctx.on_stream_delta = lambda k, t: None
-    pr._request_backend_canonical(messages, state, ctx)
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
     assert seen["on_delta"] is None
 
 
-def test_on_delta_none_when_stream_on_but_no_callback(monkeypatch, chat_state_ctx):
+def test_on_delta_none_when_stream_on_but_no_callback(
+    monkeypatch, chat_state_ctx
+):
     """stream=True but ctx.on_stream_delta is None → on_delta must be None (headless mode)."""
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=True)
     ctx.on_stream_delta = None
-    pr._request_backend_canonical(messages, state, ctx)
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
     assert seen["on_delta"] is None
 
 
 def test_main_agent_funnel_salvages_reasoning(monkeypatch, chat_state_ctx):
     seen = _patch_policy(monkeypatch)
     ctx, state, messages = chat_state_ctx(stream=False)
-    pr._request_backend_canonical(messages, state, ctx)
+    run_coro(pr._arequest_backend_canonical(messages, state, ctx))
     assert seen["salvage_reasoning"] is True

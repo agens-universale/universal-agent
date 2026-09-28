@@ -61,9 +61,15 @@ def guess_encoding(data: bytes) -> tuple[str | None, float | None]:
     detected = chardet.detect(data) or {}
     raw_name = detected.get("encoding")
     confidence = detected.get("confidence")
-    canonical = canonicalize_encoding_name(raw_name if isinstance(raw_name, str) else None)
+    canonical = canonicalize_encoding_name(
+        raw_name if isinstance(raw_name, str) else None
+    )
     conf = float(confidence) if isinstance(confidence, (int, float)) else None
-    if canonical is None or conf is None or conf < ENCODING_GUESS_MIN_CONFIDENCE:
+    if (
+        canonical is None
+        or conf is None
+        or conf < ENCODING_GUESS_MIN_CONFIDENCE
+    ):
         return None, conf
     return canonical, conf
 
@@ -127,7 +133,9 @@ def check_expected_file_sha256(
         return None
     if actual_sha256.lower() == expected_file_sha256.lower():
         return None
-    return stale_file_error(expected=expected_file_sha256, actual=actual_sha256)
+    return stale_file_error(
+        expected=expected_file_sha256, actual=actual_sha256
+    )
 
 
 def is_binary_error() -> dict[str, str]:
@@ -147,8 +155,7 @@ def encoding_required_error(
     err: dict[str, Any] = {
         "type": "encoding_required",
         "message": (
-            "File is not confident Unicode (no BOM / not strict UTF-8); "
-            "pass encoding= explicitly."
+            "File is not confident Unicode (no BOM / not strict UTF-8); pass encoding= explicitly."
         ),
         "encoding_guess": guess,
         "encoding_confidence": confidence,
@@ -232,7 +239,9 @@ def encode_failed_error(encoding: str) -> dict[str, Any]:
     }
 
 
-def resolve_encoding_arg(encoding: str | None) -> tuple[str | None, dict[str, Any] | None]:
+def resolve_encoding_arg(
+    encoding: str | None,
+) -> tuple[str | None, dict[str, Any] | None]:
     """Normalize optional encoding arg to allowlist canonical name."""
     if encoding is None or encoding == "":
         return None, None
@@ -248,7 +257,9 @@ def resolve_encoding_arg(encoding: str | None) -> tuple[str | None, dict[str, An
     return canonical, None
 
 
-_UTF16_FAMILY: Final[frozenset[str]] = frozenset({"utf-16", "utf-16-le", "utf-16-be"})
+_UTF16_FAMILY: Final[frozenset[str]] = frozenset(
+    {"utf-16", "utf-16-le", "utf-16-be"}
+)
 
 
 def _decode_explicit(data: bytes, encoding: str) -> str:
@@ -278,7 +289,10 @@ def decode_text_bytes(
     if enc_err is not None:
         return TextDecodeResult(ok=False, error=enc_err)
     if explicit is not None:
-        if explicit not in _UTF16_FAMILY and b"\x00" in data[:BINARY_SAMPLE_BYTES]:
+        if (
+            explicit not in _UTF16_FAMILY
+            and b"\x00" in data[:BINARY_SAMPLE_BYTES]
+        ):
             return TextDecodeResult(ok=False, error=is_binary_error())
         try:
             text = _decode_explicit(data, explicit)
@@ -315,9 +329,13 @@ def decode_text_bytes(
     except UnicodeDecodeError:
         return TextDecodeResult(
             ok=False,
-            error=encoding_required_error(data, include_preview=include_preview),
+            error=encoding_required_error(
+                data, include_preview=include_preview
+            ),
         )
-    return TextDecodeResult(ok=True, text=text, encoding_used=EDIT_TEXT_ENCODING)
+    return TextDecodeResult(
+        ok=True, text=text, encoding_used=EDIT_TEXT_ENCODING
+    )
 
 
 def encode_text_bytes(text: str, encoding: str) -> bytes:
@@ -345,7 +363,9 @@ def try_encode_text_bytes(
         return None, encode_failed_error(canonical)
 
 
-def encode_text_for_write(content: str, encoding: str = EDIT_TEXT_ENCODING) -> bytes:
+def encode_text_for_write(
+    content: str, encoding: str = EDIT_TEXT_ENCODING
+) -> bytes:
     """Strict allowlist encode for backend ``write``. Raises ``ValueError`` on fail."""
     data, err = try_encode_text_bytes(content, encoding)
     if err is not None:
@@ -387,7 +407,9 @@ def try_encode_text_bytes_for_append(
         return None, encode_failed_error(canonical)
 
 
-def encode_text_for_append(content: str, encoding: str = EDIT_TEXT_ENCODING) -> bytes:
+def encode_text_for_append(
+    content: str, encoding: str = EDIT_TEXT_ENCODING
+) -> bytes:
     """Strict allowlist encode for backend ``append``. Raises ``ValueError`` on fail.
 
     Unlike :func:`encode_text_for_write`, this never emits a leading BOM for utf-16
@@ -561,13 +583,17 @@ def _classify_bytes_sample(chunk: bytes) -> FileContentClassification:
     )
 
 
-def classify_content_from_sample(path: str, sample: bytes) -> FileContentClassification:
+def classify_content_from_sample(
+    path: str, sample: bytes
+) -> FileContentClassification:
     """Classify from a byte sample. ``path`` kept for call-site stability; NUL-only rule."""
     _ = path
     return _classify_bytes_sample(sample)
 
 
-def classify_file_content(path: str, sample_size: int = BINARY_SAMPLE_BYTES) -> FileContentClassification:
+def classify_file_content(
+    path: str, sample_size: int = BINARY_SAMPLE_BYTES
+) -> FileContentClassification:
     with open(path, "rb") as f:
         chunk = f.read(sample_size)
     return classify_content_from_sample(path, chunk)

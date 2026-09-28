@@ -9,6 +9,7 @@
 
 Кросс-платформенно: вне Windows и при отсутствии консоли — no-op.
 """
+
 from __future__ import annotations
 
 import sys

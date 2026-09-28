@@ -1,9 +1,12 @@
 """Фильтр набора тулов дочернего рана (allow/stop из определения сабагента)."""
+
 import logging
 
-import pytest
-
-from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY, apply_subagent_tools_filter
+from gc_core.tools import (
+    SUBAGENT_TOOLS_ALLOW_KEY,
+    SUBAGENT_TOOLS_STOP_KEY,
+    apply_subagent_tools_filter,
+)
 
 REQUIRED = (
     "turn_finish",
@@ -14,12 +17,19 @@ REQUIRED = (
 
 
 def _tools_data(*names):
-    return {name: {"spec": {"name": name}, "description": name} for name in names}
+    return {
+        name: {"spec": {"name": name}, "description": name} for name in names
+    }
 
 
 BASE = _tools_data(
-    "fs_read_file", "fs_write_file", "exec_command", "exec_python",
-    "mcp_jira_search_issues", "mcp_jira_create_issue", *REQUIRED,
+    "fs_read_file",
+    "fs_write_file",
+    "exec_command",
+    "exec_python",
+    "mcp_jira_search_issues",
+    "mcp_jira_create_issue",
+    *REQUIRED,
 )
 
 
@@ -63,7 +73,11 @@ class TestStopList:
 
     def test_stop_wins_over_allow(self):
         cfg = {
-            SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", "exec_command", *REQUIRED),
+            SUBAGENT_TOOLS_ALLOW_KEY: (
+                "fs_read_file",
+                "exec_command",
+                *REQUIRED,
+            ),
             SUBAGENT_TOOLS_STOP_KEY: ("exec_command",),
         }
         out = apply_subagent_tools_filter(dict(BASE), cfg)
@@ -104,15 +118,30 @@ class TestCore:
 
 class TestWarnings:
     def test_unknown_name_warns_and_does_not_raise(self, caplog):
-        cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", "fs_read_files", *REQUIRED)}
+        cfg = {
+            SUBAGENT_TOOLS_ALLOW_KEY: (
+                "fs_read_file",
+                "fs_read_files",
+                *REQUIRED,
+            )
+        }
         with caplog.at_level(logging.WARNING):
             out = apply_subagent_tools_filter(dict(BASE), cfg)
         assert "fs_read_file" in out
-        assert any("subagent_tools_filter_unknown" in r.getMessage() for r in caplog.records)
+        assert any(
+            "subagent_tools_filter_unknown" in r.getMessage()
+            for r in caplog.records
+        )
 
     def test_nested_subagent_names_get_their_own_warning(self, caplog):
         # Глубина всегда 1 — сабагенты ребёнку не выдаются в принципе.
-        cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", "subagent_worker", *REQUIRED)}
+        cfg = {
+            SUBAGENT_TOOLS_ALLOW_KEY: (
+                "fs_read_file",
+                "subagent_worker",
+                *REQUIRED,
+            )
+        }
         with caplog.at_level(logging.WARNING):
             apply_subagent_tools_filter(dict(BASE), cfg)
         msgs = [r.getMessage() for r in caplog.records]
@@ -120,16 +149,16 @@ class TestWarnings:
 
 
 class TestReachesSpec:
-    def test_filtered_set_reaches_tools_spec(self, tmp_path):
+    async def test_filtered_set_reaches_tools_spec(self, tmp_path):
         """Модель не должна видеть в схеме тул, который не сможет вызвать."""
-        from gc_core.tools import build_tools_data
+        from gc_core.tools import abuild_tools_data
 
         cfg = {
             "launch_root": str(tmp_path),
             "backend_api_mode": "chat_completions",
             SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", *REQUIRED),
         }
-        _data, spec, _descr, _mcp = build_tools_data(cfg)
+        _data, spec, _descr, _mcp = await abuild_tools_data(cfg)
         spec_names = {s.get("name") for s in spec}
         assert "fs_read_file" in spec_names
         assert "exec_command" not in spec_names

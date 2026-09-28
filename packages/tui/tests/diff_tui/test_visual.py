@@ -1,7 +1,12 @@
 """visual.py: context lines + truncation (spec2 T14)."""
+
 from __future__ import annotations
 
-from gc_tui.diff_tui.visual import build_unified_diff, build_visual_diff, truncate_diff
+from gc_tui.diff_tui.visual import (
+    build_unified_diff,
+    build_visual_diff,
+    truncate_diff,
+)
 
 
 def test_truncate_diff_respects_max_chars():
@@ -37,9 +42,7 @@ def test_build_unified_diff_includes_context_and_hunk():
 def test_build_unified_diff_truncates(tmp_path):
     old = "\n".join(f"line-{i}" for i in range(200)) + "\n"
     new = "\n".join(f"line-{i}-changed" for i in range(200)) + "\n"
-    out = build_unified_diff(
-        old, new, context_lines=3, max_diff_chars=80
-    )
+    out = build_unified_diff(old, new, context_lines=3, max_diff_chars=80)
     assert "[diff truncated]" in out
     assert len(out) <= 80 + len("\n... [diff truncated]\n")
 
@@ -63,7 +66,10 @@ def test_build_created_file_diff_empty_file_not_blank():
 
 
 def test_preview_change_lines_skips_headers_for_created():
-    from gc_tui.diff_tui.visual import build_created_file_diff, preview_change_lines
+    from gc_tui.diff_tui.visual import (
+        build_created_file_diff,
+        preview_change_lines,
+    )
 
     body = build_created_file_diff("a\nb\nc\n", tofile="f.py")
     head, remaining = preview_change_lines(body, limit=3)
@@ -146,7 +152,8 @@ def test_build_visual_diff_adaptive_boundary_one_more_uses_preview():
     n_lines = 6  # full_file_max_lines=5 → preview
     old = "\n".join(f"o{i}" for i in range(n_lines)) + "\n"
     new = (
-        "\n".join(["o0", "CHANGED"] + [f"o{i}" for i in range(2, n_lines)]) + "\n"
+        "\n".join(["o0", "CHANGED"] + [f"o{i}" for i in range(2, n_lines)])
+        + "\n"
     )
     out = build_visual_diff(
         old,
@@ -201,7 +208,7 @@ def test_build_visual_diff_adaptive_close_edits_merge_into_one_hunk():
     """
     old = "".join(f"line-{i}\n" for i in range(400))
     # два изменения в строках 10 и 20 — контексты (n=50) пересекаются
-    new_lines = list(f"line-{i}\n" for i in range(400))
+    new_lines = [f"line-{i}\n" for i in range(400)]
     new_lines[10] = "EDIT-A\n"
     new_lines[20] = "EDIT-B\n"
     new = "".join(new_lines)
@@ -214,7 +221,9 @@ def test_build_visual_diff_adaptive_close_edits_merge_into_one_hunk():
         max_diff_chars=500_000,
     )
     n_hunks = out.count("\n@@")
-    assert n_hunks == 1, f"близкие edit должны склеиться в 1 hunk, got {n_hunks}"
+    assert n_hunks == 1, (
+        f"близкие edit должны склеиться в 1 hunk, got {n_hunks}"
+    )
     assert "+EDIT-A" in out
     assert "+EDIT-B" in out
 
@@ -222,7 +231,7 @@ def test_build_visual_diff_adaptive_close_edits_merge_into_one_hunk():
 def test_build_visual_diff_adaptive_far_edits_stay_two_hunks():
     """Длинный файл + два далёких edit (>2n) → два отдельных hunk."""
     old = "".join(f"line-{i}\n" for i in range(400))
-    new_lines = list(f"line-{i}\n" for i in range(400))
+    new_lines = [f"line-{i}\n" for i in range(400)]
     new_lines[10] = "EDIT-A\n"
     new_lines[300] = "EDIT-B\n"  # далеко от 10: 300-10=290 >> 2*50
     new = "".join(new_lines)

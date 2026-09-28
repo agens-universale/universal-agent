@@ -1,18 +1,50 @@
 import unittest
 
-from gc_core.summarize.prompt_loading import default_prompt_path, load_prompt_template
-from gc_core.summarize.summary_spec import SUMMARY_SECTIONS, SUMMARY_OUTPUT_SHAPE_PLACEHOLDER, SUMMARY_SECTIONS_PLACEHOLDER, _SECTION_BODY_PATTERNS, agent_summary_slice_mode, agent_visible_section_tags, hint_section_tags, render_output_shape_for_prompt, assemble_summary_xml, extract_summary_bodies, format_section_tags_for_repair, merge_summary_bodies, render_sections_for_prompt, section_tags, slice_summary
-from gc_core.summarize.summary_validation import FALLBACK_SUMMARY, merge_repaired_summary, resolve_after_repair_failure, validate_summary_text
+from gc_core.summarize.prompt_loading import (
+    default_prompt_path,
+    load_prompt_template,
+)
+from gc_core.summarize.summary_spec import (
+    _SECTION_BODY_PATTERNS,
+    SUMMARY_OUTPUT_SHAPE_PLACEHOLDER,
+    SUMMARY_SECTIONS,
+    SUMMARY_SECTIONS_PLACEHOLDER,
+    agent_summary_slice_mode,
+    agent_visible_section_tags,
+    assemble_summary_xml,
+    extract_summary_bodies,
+    format_section_tags_for_repair,
+    hint_section_tags,
+    merge_summary_bodies,
+    render_output_shape_for_prompt,
+    render_sections_for_prompt,
+    section_tags,
+    slice_summary,
+)
+from gc_core.summarize.summary_validation import (
+    FALLBACK_SUMMARY,
+    merge_repaired_summary,
+    resolve_after_repair_failure,
+    validate_summary_text,
+)
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 
 class SummarySpecTest(unittest.TestCase):
     def test_agent_summary_slice_mode_table(self) -> None:
-        self.assertEqual(agent_summary_slice_mode(num_batches=1, patch_executed=True), "short")
-        self.assertEqual(agent_summary_slice_mode(num_batches=2, patch_executed=False), "full")
+        self.assertEqual(
+            agent_summary_slice_mode(num_batches=1, patch_executed=True),
+            "short",
+        )
+        self.assertEqual(
+            agent_summary_slice_mode(num_batches=2, patch_executed=False),
+            "full",
+        )
 
     def test_section_tags_follow_summary_sections_canon(self) -> None:
-        self.assertEqual(section_tags(), tuple(s.tag for s in SUMMARY_SECTIONS))
+        self.assertEqual(
+            section_tags(), tuple(s.tag for s in SUMMARY_SECTIONS)
+        )
         self.assertEqual(set(_SECTION_BODY_PATTERNS), set(section_tags()))
 
     def test_extract_roundtrip_all_canon_tags(self) -> None:
@@ -38,7 +70,9 @@ class SummarySpecTest(unittest.TestCase):
             self.assertIn(f"<{tag}>", loaded)
         shape = render_output_shape_for_prompt()
         self.assertIn(shape, loaded)
-        self.assertTrue(loaded.index("<summary>") < loaded.index("<task_and_context>"))
+        self.assertTrue(
+            loaded.index("<summary>") < loaded.index("<task_and_context>")
+        )
 
     def test_render_matches_spec_tags(self) -> None:
         block = render_sections_for_prompt()
@@ -47,12 +81,17 @@ class SummarySpecTest(unittest.TestCase):
             self.assertIn(section.description.strip().splitlines()[0], block)
 
     def test_repair_lists_same_tags(self) -> None:
-        self.assertEqual(tuple(format_section_tags_for_repair().split(", ")), section_tags())
+        self.assertEqual(
+            tuple(format_section_tags_for_repair().split(", ")), section_tags()
+        )
 
     def test_merge_repair_keeps_preserved_tags(self) -> None:
         pad = "- test content for validation padding."
         invalid = assemble_summary_xml(
-            {"task_and_context": f"keep-me\n{pad}", "open_tasks": f"mode: execution\n{pad}"}
+            {
+                "task_and_context": f"keep-me\n{pad}",
+                "open_tasks": f"mode: execution\n{pad}",
+            }
         )
         repaired = assemble_summary_xml(
             {
@@ -63,7 +102,9 @@ class SummarySpecTest(unittest.TestCase):
             },
             only_present=True,
         )
-        merged = merge_repaired_summary(invalid_text=invalid, repaired_text=repaired)
+        merged = merge_repaired_summary(
+            invalid_text=invalid, repaired_text=repaired
+        )
         ok, reason = validate_summary_text(merged)
         self.assertTrue(ok, reason)
         self.assertIn("keep-me", merged)
@@ -78,7 +119,9 @@ class SummarySpecTest(unittest.TestCase):
             self.assertNotIn(f"<{tag}>", short)
 
     def test_slice_full_all_canon_tags(self) -> None:
-        full = assemble_summary_xml({tag: f"body-{tag}" for tag in section_tags()})
+        full = assemble_summary_xml(
+            {tag: f"body-{tag}" for tag in section_tags()}
+        )
         sliced = slice_summary(full, "full")
         for tag in section_tags():
             self.assertIn(f"<{tag}>body-{tag}</{tag}>", sliced)
@@ -87,7 +130,9 @@ class SummarySpecTest(unittest.TestCase):
         pad = "- test content for validation padding."
         invalid = assemble_summary_xml({"task_and_context": f"keep\n{pad}"})
         repaired = "<summary></summary>"
-        merged = merge_repaired_summary(invalid_text=invalid, repaired_text=repaired)
+        merged = merge_repaired_summary(
+            invalid_text=invalid, repaired_text=repaired
+        )
         text, resolution = resolve_after_repair_failure(
             invalid_text=invalid,
             merged_text=merged,
@@ -130,13 +175,20 @@ class SummarySpecTest(unittest.TestCase):
         )
         self.assertEqual(merged["open_tasks"], "")
 
-    def test_merge_repaired_summary_empty_repair_tag_wipes_section(self) -> None:
+    def test_merge_repaired_summary_empty_repair_tag_wipes_section(
+        self,
+    ) -> None:
         pad = "- test content for validation padding."
         invalid = assemble_summary_xml(
-            {"task_and_context": f"keep-me\n{pad}", "open_tasks": f"mode: execution\n{pad}"}
+            {
+                "task_and_context": f"keep-me\n{pad}",
+                "open_tasks": f"mode: execution\n{pad}",
+            }
         )
         repaired = assemble_summary_xml({"open_tasks": ""}, only_present=True)
-        merged = merge_repaired_summary(invalid_text=invalid, repaired_text=repaired)
+        merged = merge_repaired_summary(
+            invalid_text=invalid, repaired_text=repaired
+        )
         self.assertIn("keep-me", merged)
         self.assertNotIn("mode: execution", merged)
         self.assertEqual(extract_summary_bodies(merged).get("open_tasks"), "")
@@ -178,21 +230,18 @@ class SummarySpecTest(unittest.TestCase):
 
     def test_extract_duplicate_tag_uses_last_match(self) -> None:
         bodies = extract_summary_bodies(
-            "<summary>"
-            "<open_tasks>first</open_tasks>"
-            "<open_tasks>second</open_tasks>"
-            "</summary>"
+            "<summary><open_tasks>first</open_tasks><open_tasks>second</open_tasks></summary>"
         )
         self.assertEqual(bodies["open_tasks"], "second")
 
     def test_validate_accepts_short_all_n_a_sections(self) -> None:
-        bodies = {tag: "- n/a" for tag in section_tags()}
+        bodies = dict.fromkeys(section_tags(), "- n/a")
         xml = assemble_summary_xml(bodies)
         ok, reason = validate_summary_text(xml)
         self.assertTrue(ok, reason)
 
     def test_validate_rejects_all_empty_tag_bodies(self) -> None:
-        xml = assemble_summary_xml({tag: "" for tag in section_tags()})
+        xml = assemble_summary_xml(dict.fromkeys(section_tags(), ""))
         ok, reason = validate_summary_text(xml)
         self.assertFalse(ok)
         self.assertEqual(reason, "empty_content")

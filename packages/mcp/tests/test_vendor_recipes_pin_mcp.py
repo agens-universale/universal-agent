@@ -19,12 +19,12 @@
 машине, где venv ещё не собран, — иначе поймала бы поломку только после того, как
 пользователь её словит.
 """
+
 from __future__ import annotations
 
 import tomllib
 
 import pytest
-
 from gc_testkit.paths import VENDOR
 
 #: Манифесты вендоренных MCP-серверов. Каталог сканируется, а не перечисляется:
@@ -35,7 +35,9 @@ _MANIFESTS = sorted(VENDOR.glob("*/pyproject.toml"))
 def _mcp_requirement(manifest) -> str | None:
     data = tomllib.loads(manifest.read_text(encoding="utf-8"))
     for dep in data.get("project", {}).get("dependencies", []) or []:
-        name = dep.split("[")[0].split(">")[0].split("<")[0].split("=")[0].strip()
+        name = (
+            dep.split("[")[0].split(">")[0].split("<")[0].split("=")[0].strip()
+        )
         if name == "mcp":
             return dep
     return None

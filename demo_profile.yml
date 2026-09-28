@@ -129,3 +129,7 @@ security:
 
 summary:
   chat_completions_summary_trigger_chars: 150000
+  # 0 — токенный порог выключен. Иначе input последнего главного запроса плюс хвост // 2.
+  chat_completions_summary_trigger_tokens: 0
+  # 0 — токенный turn-end выключен. Нет ключа — 60% от токенного mid-turn.
+  chat_completions_summary_turn_end_trigger_tokens: 0

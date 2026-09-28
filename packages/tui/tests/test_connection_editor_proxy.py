@@ -1,25 +1,29 @@
 """TDD Step 4: proxy field in ConnectionEditor."""
+
 from __future__ import annotations
 
 import pytest
+
 pytest.importorskip("textual")
 
+from gc_tui.editors.connection import ConnectionEditor
 from textual.app import App, ComposeResult
 from textual.widgets import Input
-
-from gc_tui.editors.connection import ConnectionEditor
 
 
 def _harness(editor):
     class _App(App):
         def compose(self) -> ComposeResult:
             yield editor
+
     return _App()
 
 
 async def test_proxy_renders_in_compose():
     """Proxy input mounts when proxy_current is non-empty."""
-    ed = ConnectionEditor(url_current="", auth_header=None, proxy_current="http://localhost:8080")
+    ed = ConnectionEditor(
+        url_current="", auth_header=None, proxy_current="http://localhost:8080"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -39,7 +43,11 @@ async def test_proxy_renders_empty_when_not_set():
 
 async def test_proxy_value_set_in_compose():
     """Proxy input pre-filled with proxy_current value."""
-    ed = ConnectionEditor(url_current="", auth_header=None, proxy_current="socks5h://localhost:1080")
+    ed = ConnectionEditor(
+        url_current="",
+        auth_header=None,
+        proxy_current="socks5h://localhost:1080",
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -49,7 +57,9 @@ async def test_proxy_value_set_in_compose():
 
 async def test_proxy_in_peek():
     """peek() returns proxy field value as 4th element."""
-    ed = ConnectionEditor(url_current="http://x", auth_header=None, proxy_current="http://p:8080")
+    ed = ConnectionEditor(
+        url_current="http://x", auth_header=None, proxy_current="http://p:8080"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -60,7 +70,9 @@ async def test_proxy_in_peek():
 
 async def test_proxy_submit_passes_through():
     """submit() returns proxy as 4th element; None=unchanged, str=value (""=clear)."""
-    ed = ConnectionEditor(url_current="http://x", auth_header=None, proxy_current="")
+    ed = ConnectionEditor(
+        url_current="http://x", auth_header=None, proxy_current=""
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -72,7 +84,9 @@ async def test_proxy_submit_passes_through():
 
 async def test_proxy_submit_empty_unchanged_returns_none():
     """Пустое поле при пустом initial → proxy=None (не менять)."""
-    ed = ConnectionEditor(url_current="http://x", auth_header=None, proxy_current="")
+    ed = ConnectionEditor(
+        url_current="http://x", auth_header=None, proxy_current=""
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -113,7 +127,9 @@ async def test_proxy_submit_unchanged_returns_none():
 
 async def test_proxy_dirty_when_changed():
     """Changing proxy field makes editor dirty."""
-    ed = ConnectionEditor(url_current="http://x", auth_header=None, proxy_current="http://old:80")
+    ed = ConnectionEditor(
+        url_current="http://x", auth_header=None, proxy_current="http://old:80"
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -123,13 +139,19 @@ async def test_proxy_dirty_when_changed():
 
 async def test_proxy_not_dirty_when_unchanged():
     """No change to proxy → not dirty."""
-    ed = ConnectionEditor(url_current="http://x", auth_header=None, proxy_current="http://px:8080")
+    ed = ConnectionEditor(
+        url_current="http://x",
+        auth_header=None,
+        proxy_current="http://px:8080",
+    )
     assert ed.is_dirty() is False
 
 
 async def test_navigation_includes_proxy():
     """move() cycles through all positions; proxy is reachable."""
-    ed = ConnectionEditor(url_current="http://x", auth_header=None, proxy_current="")
+    ed = ConnectionEditor(
+        url_current="http://x", auth_header=None, proxy_current=""
+    )
     app = _harness(ed)
     async with app.run_test() as pilot:
         await pilot.pause()

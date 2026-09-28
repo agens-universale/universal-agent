@@ -4,7 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.intent_log import ACTION_FINAL_ANSWER, ACTION_TOOL_AGGREGATED, ACTION_TOOL_RAW, append_final_answer, append_tool_aggregated, append_tool_raw
+from gc_core.intent_log import (
+    ACTION_FINAL_ANSWER,
+    ACTION_TOOL_AGGREGATED,
+    ACTION_TOOL_RAW,
+    append_final_answer,
+    append_tool_aggregated,
+    append_tool_raw,
+)
 
 
 def _current_has_aggregated(
@@ -34,22 +41,26 @@ def _current_has_raw(
     output: Any,
 ) -> bool:
     name = str(tool_name or "").strip()
-    for record in current:
-        if record.action != ACTION_TOOL_RAW or record.tool_name != name:
-            continue
-        if not isinstance(record.content, dict):
-            continue
-        expected_args = None if arguments is None else dict(arguments)
-        got_args = record.content.get("arguments")
-        if expected_args is None:
-            if "arguments" in record.content:
-                continue
-        elif dict(got_args or {}) != expected_args:
-            continue
-        if record.content.get("output") != output:
-            continue
-        return True
-    return False
+    expected_args = None if arguments is None else dict(arguments)
+    return any(
+        _raw_record_matches(record, name, expected_args, output)
+        for record in current
+    )
+
+
+def _raw_record_matches(
+    record: Any, name: str, expected_args: dict | None, output: Any
+) -> bool:
+    if record.action != ACTION_TOOL_RAW or record.tool_name != name:
+        return False
+    if not isinstance(record.content, dict):
+        return False
+    if expected_args is None:
+        if "arguments" in record.content:
+            return False
+    elif dict(record.content.get("arguments") or {}) != expected_args:
+        return False
+    return record.content.get("output") == output
 
 
 def append_tool_aggregated_to_current(
@@ -103,10 +114,10 @@ def append_tool_raw_to_current(
 
 def _current_has_final_answer(current: list[Any], content: str) -> bool:
     body = str(content or "")
-    for record in current:
-        if record.action == ACTION_FINAL_ANSWER and str(record.content) == body:
-            return True
-    return False
+    return any(
+        record.action == ACTION_FINAL_ANSWER and str(record.content) == body
+        for record in current
+    )
 
 
 def append_final_answer_to_current(state: Any, content: str) -> bool:

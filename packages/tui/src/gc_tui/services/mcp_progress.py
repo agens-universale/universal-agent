@@ -2,6 +2,7 @@
 
 Sink наполняется из worker-потоков дискавери (через on_progress-колбэк),
 читается TUI-поллингом. «Один активный run за раз» — здесь (MVP)."""
+
 from __future__ import annotations
 
 import threading
@@ -15,7 +16,7 @@ class McpProgress:
 
     def begin(self, server_names) -> None:
         with self._lock:
-            self._servers = {name: None for name in server_names}
+            self._servers = dict.fromkeys(server_names)
 
     def update(self, server: str, status: dict) -> None:
         with self._lock:
@@ -27,7 +28,9 @@ class McpProgress:
 
     def all_reported(self) -> bool:
         with self._lock:
-            return bool(self._servers) and all(v is not None for v in self._servers.values())
+            return bool(self._servers) and all(
+                v is not None for v in self._servers.values()
+            )
 
 
 def _glyph(status: Optional[dict]) -> str:
@@ -46,10 +49,16 @@ def format_mcp_progress(servers: dict) -> str:
     """Многострочный блок: заголовок + по строке на сервер (имя + статус-глиф).
     При >_MAX_VISIBLE_SERVERS список усекается до (CAP-1) строк + «… ещё +N»."""
     width = max((len(name) for name in servers), default=0)
-    lines = ["подключаю MCP:", ""]   # заголовок + пустая строка-отступ перед списком
+    lines = [
+        "подключаю MCP:",
+        "",
+    ]  # заголовок + пустая строка-отступ перед списком
     items = list(servers.items())
     if len(items) > _MAX_VISIBLE_SERVERS:
-        shown, hidden = items[: _MAX_VISIBLE_SERVERS - 1], len(items) - (_MAX_VISIBLE_SERVERS - 1)
+        shown, hidden = (
+            items[: _MAX_VISIBLE_SERVERS - 1],
+            len(items) - (_MAX_VISIBLE_SERVERS - 1),
+        )
         for name, st in shown:
             lines.append(f"{name.ljust(width)}  {_glyph(st)}")
         lines.append(f"… ещё +{hidden}")

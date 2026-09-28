@@ -1,10 +1,8 @@
-from typing import Any, Dict, Optional
-
+import asyncio
 import json
-import threading
-import time
-
 import logging
+import time
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
@@ -23,7 +21,11 @@ def _humanize_discovery_error(exc: BaseException, server_cfg: dict) -> str:
     if isinstance(exc, TimeoutError):
         return "таймаут подключения"
     name = exc.__class__.__name__
-    if "Connection" in name or "ConnectError" in name or isinstance(exc, OSError):
+    if (
+        "Connection" in name
+        or "ConnectError" in name
+        or isinstance(exc, OSError)
+    ):
         target = server_cfg.get("url") or server_cfg.get("command") or "?"
         return f"нет соединения с {target}"
     msg = str(exc).strip()
@@ -60,7 +62,11 @@ def _normalize_tool(
     if server_description:
         extra_desc += f"\nServer description: {server_description}"
 
-    full_description = (base_description + extra_desc) if base_description else extra_desc.lstrip()
+    full_description = (
+        (base_description + extra_desc)
+        if base_description
+        else extra_desc.lstrip()
+    )
 
     parameters_schema = (
         tool.get("inputSchema")
@@ -99,7 +105,7 @@ def _registry_entry(
     """
     Собрать финальную запись реестра в формате `{"tool", "metadata"}`.
 
-    `_discover_one` отдаёт уже нормализованные tool-dict'ы (несут
+    `_adiscover_one` отдаёт уже нормализованные tool-dict'ы (несут
     `_spec`/`_metadata`). На случай сырого tool-dict (без `_spec`) —
     нормализуем здесь, чтобы запись всегда была валидной.
     """
@@ -108,7 +114,11 @@ def _registry_entry(
 
     cfg = server_cfg if isinstance(server_cfg, dict) else {}
     transport = cfg.get("transport") or ""
-    url = "" if transport in ("stdio", "stream_stdio") else (cfg.get("url") or "")
+    url = (
+        ""
+        if transport in ("stdio", "stream_stdio")
+        else (cfg.get("url") or "")
+    )
     server_display_name = (
         cfg.get("server-name") or cfg.get("serever-name") or server_name
     )
@@ -134,9 +144,7 @@ def _apply_tools_whitelist(
     allowed = {
         str(t).strip() for t in (wl.get("tools") or []) if str(t).strip()
     }
-    present = {
-        str(t.get("name")) for t in tools_raw if isinstance(t, dict)
-    }
+    present = {str(t.get("name")) for t in tools_raw if isinstance(t, dict)}
     missing = sorted(allowed - present)
     if missing:
         logger.warning(
@@ -159,19 +167,29 @@ def _apply_tools_whitelist(
     return filtered
 
 
-def _discover_one(
+async def _adiscover_one(
     server_name: str,
     server_cfg: Dict[str, Any],
     *,
     timeout: float,
     os_backend: Any = None,
 ) -> tuple[list, dict]:
-    """
-    Дискавери тулов одного MCP-сервера (одна попытка, без backoff).
+    """Дискавери тулов одного MCP-сервера. Одна попытка, без backoff.
 
-    Возвращает `(tools, status)`, где `tools` — список нормализованных
-    tool-dict'ов (каждый несёт `_spec`/`_metadata`), а `status` — структура
-    `{"status", "reason", "tool_count", "elapsed_ms"}`. Никогда не бросает.
+    Возвращает ``(tools, status)``: список нормализованных tool-dict'ов (каждый
+    несёт ``_spec``/``_metadata``) и структуру
+    ``{"status", "reason", "tool_count", "elapsed_ms"}``. Никогда не бросает.
+
+    Форма ОДНА, и это существенно. Раньше их было три: синхронный
+    ``_discover_one``, корутинный ``_adiscover_one_sdk`` для SDK-транспортов и
+    маршрутизатор над ними. Разбор конфига, применение whitelist, нормализация
+    и оформление ошибок были в двух экземплярах — расходились бы молча.
+
+    Как ходить в сервер, решает КЛИЕНТ, а не эта функция: ``resolve_mcp_client``
+    отдаёт реализацию по паре «место исполнения + вид бэкенда», и у неё есть
+    ``alist_tools``. Внутри клиента и живут исключения: у долгоживущего stdio
+    обмен блокирующий (``Popen``, сессия переживает разные ``asyncio.run``), и
+    он сам уводит вызов в брошенный поток.
     """
     t0 = time.monotonic()
     try:
@@ -179,32 +197,36 @@ def _discover_one(
             raise ValueError("server_cfg не dict")
 
         url = server_cfg.get("url")
-        token = server_cfg.get("token")
         transport = server_cfg.get("transport")
-
-        if transport not in ("http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"):
+        if transport not in (
+            "http",
+            "sse",
+            "stdio",
+            "stream_sse",
+            "stream_http",
+            "stream_stdio",
+        ):
             raise ValueError(f"неподдерживаемый transport: {transport!r}")
         if transport in ("stdio", "stream_stdio"):
             if not server_cfg.get("command"):
                 raise ValueError("не задан command для stdio")
             url = ""  # stdio не использует url
-        else:
-            if not url:
-                raise ValueError("не задан url")
+        elif not url:
+            raise ValueError("не задан url")
 
-        # Доп. метаданные сервера для включения в описание тулов
-        server_display_name = (
-            server_cfg.get("server-name")
-            or server_cfg.get("serever-name")  # поддержку опечатки в конфиге оставим
-            or server_name
+        client = resolve_mcp_client(
+            server_name, server_cfg, os_backend=os_backend
         )
-        server_description = server_cfg.get("description") or ""
-
-        client = resolve_mcp_client(server_name, server_cfg, os_backend=os_backend)
-        tools_raw = client.list_tools(timeout=timeout)
-
+        tools_raw = await client.alist_tools(timeout=timeout)
         tools_raw = _apply_tools_whitelist(server_name, server_cfg, tools_raw)
 
+        server_display_name = (
+            server_cfg.get("server-name")
+            or server_cfg.get(
+                "serever-name"
+            )  # поддержку опечатки в конфиге оставим
+            or server_name
+        )
         tools: list = []
         for tool in tools_raw:
             normalized = _normalize_tool(
@@ -213,34 +235,74 @@ def _discover_one(
                 transport=transport,
                 url=url,
                 server_display_name=server_display_name,
-                server_description=server_description,
+                server_description=server_cfg.get("description") or "",
             )
             if normalized is not None:
                 tools.append(normalized)
 
-        elapsed = int((time.monotonic() - t0) * 1000)
         return tools, {
             "status": "connected",
             "reason": None,
             "tool_count": len(tools),
-            "elapsed_ms": elapsed,
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
-    except Exception as exc:
+    except Exception as exc:  # дискавери никогда не бросает наверх
         reason = _humanize_discovery_error(
             exc, server_cfg if isinstance(server_cfg, dict) else {}
         )
         logger.warning("MCP discovery failed for %s: %s", server_name, exc)
         print(f"[MCP] {server_name}: недоступен — {reason} (пропущен)")
-        elapsed = int((time.monotonic() - t0) * 1000)
         return [], {
             "status": "failed",
             "reason": reason,
             "tool_count": 0,
-            "elapsed_ms": elapsed,
+            "elapsed_ms": int((time.monotonic() - t0) * 1000),
         }
 
 
-def _build_tools_registry(
+def _discovery_timeout_status(discovery_timeout_sec: float) -> Dict[str, Any]:
+    return {
+        "status": "failed",
+        "reason": "таймаут подключения",
+        "tool_count": 0,
+        "elapsed_ms": int(discovery_timeout_sec * 1000),
+    }
+
+
+async def _adiscover_all(
+    items: list,
+    *,
+    timeout: float,
+    on_progress,
+    os_backend: Any,
+) -> Dict[str, tuple]:
+    """Параллельный дискавери всех серверов под общим дедлайном; не успевших в результате нет."""
+    results: Dict[str, tuple] = {}
+
+    async def _one(name: str, cfg: Dict[str, Any]) -> None:
+        # Нужен ли поток, решает КЛИЕНТ, а не дискавери: у долгоживущего
+        # stdio обмен блокирующий, и он сам уводит вызов в брошенный поток.
+        result = await _adiscover_one(
+            name, cfg, timeout=timeout, os_backend=os_backend
+        )
+        results[name] = result
+        if on_progress is not None:
+            on_progress(name, result[1])
+
+    # Общий дедлайн на весь веер — как и был. Не успевшие попадают в ветку
+    # «таймаут подключения» у вызывающего: их просто нет в results.
+    try:
+        async with asyncio.timeout(timeout):
+            await asyncio.gather(
+                *(_one(name, cfg) for name, cfg in items),
+                return_exceptions=True,
+            )
+    except TimeoutError:
+        pass
+    return results
+
+
+async def _abuild_tools_registry(
     servers_cfg: Dict[str, Dict[str, Any]],
     *,
     discovery_timeout_sec: float = 8,
@@ -267,47 +329,27 @@ def _build_tools_registry(
         ...
     }
     """
-    items = [(n, c) for n, c in servers_cfg.items()]
+    items = list(servers_cfg.items())
     all_tools: Dict[str, Dict[str, Any]] = {}
     status_map: Dict[str, Dict[str, Any]] = {}
     if not items:
         return all_tools, status_map
 
-    results: Dict[str, tuple] = {}
-
-    def _worker(name, cfg):
-        result = _discover_one(
-            name, cfg, timeout=discovery_timeout_sec, os_backend=os_backend
-        )
-        results[name] = result
-        if on_progress is not None:
-            on_progress(name, result[1])
-
-    threads = []
-    for name, cfg in items:
-        th = threading.Thread(
-            target=_worker,
-            args=(name, cfg),
-            daemon=True,
-            name=f"mcp-discover-{name}",
-        )
-        th.start()
-        threads.append((name, th))
-
-    deadline = time.monotonic() + discovery_timeout_sec
-    for name, th in threads:
-        th.join(timeout=max(0.0, deadline - time.monotonic()))
+    results = await _adiscover_all(
+        items,
+        timeout=discovery_timeout_sec,
+        on_progress=on_progress,
+        os_backend=os_backend,
+    )
 
     for name, cfg in items:
         if name in results:
             tools, status = results[name]
         else:
-            tools, status = [], {
-                "status": "failed",
-                "reason": "таймаут подключения",
-                "tool_count": 0,
-                "elapsed_ms": int(discovery_timeout_sec * 1000),
-            }
+            tools, status = (
+                [],
+                _discovery_timeout_status(discovery_timeout_sec),
+            )
             if on_progress is not None:
                 on_progress(name, status)
         status_map[name] = status
@@ -355,9 +397,38 @@ class ToolsCache:
         self._cache_key: Optional[str] = None
         self._status: Dict[str, Dict[str, Any]] = {}
 
+    @property
+    def os_backend(self) -> Any:
+        """Бэкенд, с которым кэш создали, — чтобы владельца можно было спросить.
+
+        Спрашивает сборка контекста: кэш приходит от вызывающего, и если у
+        него бэкенда нет, а у нас песочница, дискавери `execute_on: os_backend`
+        уйдёт мимо неё. Передать бэкенд задним числом нельзя (см. `rebind`), но
+        сказать об этом вслух — можно.
+        """
+        return self._os_backend
+
+    def rebind(self, cfg: Dict[str, Any]) -> None:
+        """Переключить кэш на новый config-словарь, СОХРАНИВ содержимое.
+
+        Нужно, когда кэшем владеет вызывающий (см. ``get_mcp_tools_data_for_config``):
+        каждая сборка контекста пересобирает ``cfg`` заново, и без этого кэш
+        считал бы TTL и таймаут по словарю, с которым его когда-то создали.
+
+        Данные НЕ сбрасываем: попадание определяется ключом от содержимого
+        ``mcp-servers`` (``_make_cache_key``), а не тождеством словаря. Набор
+        серверов не поменялся — кэш валиден; поменялся — ``_is_valid`` увидит
+        расхождение ключа и сходит в дискавери сам.
+        """
+        self._config = cfg
+
     def _discovery_timeout(self) -> int:
         meta = self._config.get("mcp-meta")
-        v = meta.get("discovery_timeout_sec") if isinstance(meta, dict) else None
+        v = (
+            meta.get("discovery_timeout_sec")
+            if isinstance(meta, dict)
+            else None
+        )
         try:
             return int(v) if v else 8
         except (TypeError, ValueError):
@@ -368,13 +439,19 @@ class ToolsCache:
 
     def _get_ttl(self) -> int:
         mcp_meta = self._config.get("mcp-meta")
-        ttl_cfg = mcp_meta.get("tools-cache-ttl") if isinstance(mcp_meta, dict) else None
+        ttl_cfg = (
+            mcp_meta.get("tools-cache-ttl")
+            if isinstance(mcp_meta, dict)
+            else None
+        )
         try:
             return int(ttl_cfg) if ttl_cfg is not None else self._ttl_default
         except (TypeError, ValueError):
             return self._ttl_default
 
-    def _make_cache_key(self, servers_cfg: Dict[str, Dict[str, Any]]) -> Optional[str]:
+    def _make_cache_key(
+        self, servers_cfg: Dict[str, Dict[str, Any]]
+    ) -> Optional[str]:
         """
         Построить ключ кэша на основе текущей конфигурации MCP-серверов.
         Если сериализация не удалась — возвращаем None и кэш не используем.
@@ -395,9 +472,13 @@ class ToolsCache:
 
         return (time.time() - self._fetched_at) < ttl
 
-    def get_tools(self, *, on_progress=None) -> Dict[str, Dict[str, Any]]:
-        """
-        Получить объединённый словарь тулов с учётом TTL и кэша.
+    async def aget_tools(
+        self, *, on_progress=None
+    ) -> Dict[str, Dict[str, Any]]:
+        """Объединённый словарь тулов с учётом TTL и кэша, без потока.
+
+        Попадание в кэш вообще не трогает сеть, поэтому дешёвый путь остаётся
+        дешёвым в обеих формах.
         """
         servers_cfg = self._config.get("mcp-servers") or {}
         ttl = self._get_ttl()
@@ -407,7 +488,7 @@ class ToolsCache:
             return self._data or {}
 
         # Кэш пустой или протух — перестраиваем реестр тулов.
-        fresh_tools, status = _build_tools_registry(
+        fresh_tools, status = await _abuild_tools_registry(
             servers_cfg,
             discovery_timeout_sec=self._discovery_timeout(),
             on_progress=on_progress,
@@ -423,30 +504,7 @@ class ToolsCache:
         return fresh_tools
 
 
-def get_all_tools(
-    servers_cfg: Dict[str, Dict[str, Any]],
-    mcp_meta: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Dict[str, Any]]:
-    """
-    Получить все MCP‑тулы для заданной конфигурации серверов.
-
-    Функция-обёртка: внутри создаётся временный ToolsCache на основе
-    переданных servers_cfg и mcp_meta и возвращается результат get_tools().
-
-    Для более тонкого управления кэшем (например, переиспользование
-    инстанса ToolsCache между вызовами) рекомендуется создавать и хранить
-    ToolsCache снаружи (например, в run_context).
-    """
-    cfg: Dict[str, Any] = {"mcp-servers": servers_cfg}
-    if mcp_meta is not None:
-        cfg["mcp-meta"] = mcp_meta
-
-    cache = ToolsCache(cfg)
-    return cache.get_tools()
-
-
 __all__ = [
-    "_build_tools_registry",
     "ToolsCache",
-    "get_all_tools",
+    "_abuild_tools_registry",
 ]

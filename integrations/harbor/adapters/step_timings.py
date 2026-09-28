@@ -1,7 +1,7 @@
 """Wall-clock split of a gc-cli harbor run: waiting on the LLM vs running tools.
 
-Wraps the two entry points of ``processing_responses`` — ``_request_backend_canonical``
-(every backend call) and ``apply_tool`` (every tool call) — and appends one ``open``
+Wraps the two entry points of ``processing_responses`` — ``_arequest_backend_canonical``
+(every backend call) and ``aapply_tool`` (every tool call) — and appends one ``open``
 and one ``end`` record per call to ``timings.jsonl`` in the agent's logs dir. Records
 are flushed immediately: when harbor kills a timed-out run, the ``open`` without a
 matching ``end`` is the call it was blocked on.
@@ -11,6 +11,7 @@ matching ``end`` is the call it was blocked on.
 counted twice. Routing is per thread (the agent loop and its subagents share one
 worker thread), so concurrent trials in one process keep separate sinks.
 """
+
 import json
 import threading
 import time
@@ -33,24 +34,33 @@ def _install_once() -> None:
             return
         from gc_core import processing_responses as pr
 
-        orig_llm = pr._request_backend_canonical
-        orig_tool = pr.apply_tool
+        # Оба шва ядра стали корутинами: синхронных ``_request_backend_canonical``
+        # и ``apply_tool`` в ``processing_responses`` больше нет — есть шимы над
+        # порталом, но агентский цикл ходит мимо них, прямо в ``a``-формы. Обёртка
+        # над шимом не увидела бы ни одного вызова и молча показала бы нули.
+        orig_llm = pr._arequest_backend_canonical
+        orig_tool = pr.aapply_tool
 
-        def llm_wrapper(messages, state, ctx, **kwargs):
+        async def llm_wrapper(messages, state, ctx, **kwargs):
             sink = _sink()
             if sink is None:
-                return orig_llm(messages, state, ctx, **kwargs)
+                return await orig_llm(messages, state, ctx, **kwargs)
             name = str(getattr(state, "default_model", None) or "llm")
-            return sink.span(
-                "llm", name, state, lambda: orig_llm(messages, state, ctx, **kwargs)
+            return await sink.aspan(
+                "llm",
+                name,
+                state,
+                lambda: orig_llm(messages, state, ctx, **kwargs),
             )
 
-        def tool_wrapper(*args, **kwargs):
+        async def tool_wrapper(*args, **kwargs):
             sink = _sink()
             if sink is None:
-                return orig_tool(*args, **kwargs)
-            name = str(kwargs.get("tool_name") or (args[0] if args else "tool"))
-            return sink.span(
+                return await orig_tool(*args, **kwargs)
+            name = str(
+                kwargs.get("tool_name") or (args[0] if args else "tool")
+            )
+            return await sink.aspan(
                 "tool",
                 name,
                 kwargs.get("state"),
@@ -58,8 +68,8 @@ def _install_once() -> None:
                 nested=True,
             )
 
-        pr._request_backend_canonical = llm_wrapper
-        pr.apply_tool = tool_wrapper
+        pr._arequest_backend_canonical = llm_wrapper
+        pr.aapply_tool = tool_wrapper
         _installed = True
 
 
@@ -80,7 +90,9 @@ class StepTimings:
     def attach(self) -> None:
         _install_once()
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._fh = self._path.open("a", encoding="utf-8")
+        fh = self._path.open("a", encoding="utf-8")
+        with self._lock:
+            self._fh = fh
         self._t0 = time.monotonic()
         _sinks[threading.get_ident()] = self
 
@@ -88,7 +100,8 @@ class StepTimings:
         for tid, sink in list(_sinks.items()):
             if sink is self:
                 del _sinks[tid]
-        fh, self._fh = self._fh, None
+        with self._lock:
+            fh, self._fh = self._fh, None
         if fh is not None:
             fh.close()
 
@@ -103,7 +116,7 @@ class StepTimings:
             "max_tool_sec": round(self.max_sec["tool"], 1),
         }
 
-    def span(
+    async def aspan(
         self,
         kind: str,
         name: str,
@@ -112,6 +125,29 @@ class StepTimings:
         *,
         nested: bool = False,
     ) -> Any:
+        """Асинхронный двойник :meth:`span` — оба шва ядра корутинные.
+
+        Учёт и формат записей общие (:meth:`_open_span` / :meth:`_close_span`):
+        две копии разошлись бы, и ``timings.jsonl`` синхронного и асинхронного
+        прогона перестал бы сравниваться.
+        """
+        depth, head, started = self._open_span(
+            kind, name, state, nested=nested
+        )
+        ok, error = True, None
+        try:
+            return await call()
+        except BaseException as exc:
+            ok, error = False, f"{type(exc).__name__}: {exc}"[:300]
+            raise
+        finally:
+            self._close_span(
+                kind, depth, head, started, ok, error, nested=nested
+            )
+
+    def _open_span(
+        self, kind: str, name: str, state: Any, *, nested: bool
+    ) -> "tuple[int, dict, float]":
         depth = getattr(self._local, "depth", 0)
         with self._lock:
             self._seq += 1
@@ -125,33 +161,65 @@ class StepTimings:
             "t": round(time.monotonic() - self._t0, 3),
         }
         self._emit({"ev": "open", **head})
-        started = time.monotonic()
-        ok, error = True, None
         if nested:
             self._local.depth = depth + 1
+        return depth, head, time.monotonic()
+
+    def _close_span(
+        self,
+        kind: str,
+        depth: int,
+        head: dict,
+        started: float,
+        ok: bool,
+        error: "str | None",
+        *,
+        nested: bool,
+    ) -> None:
+        if nested:
+            self._local.depth = depth
+        elapsed = time.monotonic() - started
+        if depth == 0:
+            self.totals[kind] += elapsed
+            self.counts[kind] += 1
+            self.max_sec[kind] = max(self.max_sec[kind], elapsed)
+        record = {"ev": "end", **head, "sec": round(elapsed, 3), "ok": ok}
+        if error is not None:
+            record["error"] = error
+        self._emit(record)
+
+    def span(
+        self,
+        kind: str,
+        name: str,
+        state: Any,
+        call: Callable[[], Any],
+        *,
+        nested: bool = False,
+    ) -> Any:
+        depth, head, started = self._open_span(
+            kind, name, state, nested=nested
+        )
+        ok, error = True, None
         try:
             return call()
         except BaseException as exc:
             ok, error = False, f"{type(exc).__name__}: {exc}"[:300]
             raise
         finally:
-            if nested:
-                self._local.depth = depth
-            elapsed = time.monotonic() - started
-            if depth == 0:
-                self.totals[kind] += elapsed
-                self.counts[kind] += 1
-                self.max_sec[kind] = max(self.max_sec[kind], elapsed)
-            record = {"ev": "end", **head, "sec": round(elapsed, 3), "ok": ok}
-            if error is not None:
-                record["error"] = error
-            self._emit(record)
+            self._close_span(
+                kind, depth, head, started, ok, error, nested=nested
+            )
 
     def _emit(self, record: dict) -> None:
-        fh = self._fh
-        if fh is None:
-            return
+        # Читаем дескриптор ПОД ТЕМ ЖЕ локом, под которым пишем. Снаружи была
+        # гонка на закрытии: `close()` успевал между чтением `self._fh` и
+        # входом в лок, и запись уходила в уже закрытый файл — ValueError из
+        # брошенного рабочего потока, который трайл переживает.
         with self._lock:
+            fh = self._fh
+            if fh is None:
+                return
             fh.write(json.dumps(record, ensure_ascii=False) + "\n")
             fh.flush()
 

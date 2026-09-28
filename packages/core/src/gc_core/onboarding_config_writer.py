@@ -2,6 +2,7 @@
 с сохранением комментариев. Бизнес-логики нет — кроме `write_profile_pointer`:
 склейку примитивов указателя (якорь → значение → валидация стека) держим здесь
 одну на всех, потому что её потребители порознь уже разъезжались."""
+
 import re
 from pathlib import Path
 
@@ -9,7 +10,6 @@ import yaml
 
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text
-
 
 # Ключ строки — либо квотированный скаляр ЦЕЛИКОМ, либо плоский до первого
 # двоеточия. Квотированные формы идут первыми не для красоты: `"llama3:8b":`
@@ -66,12 +66,48 @@ def set_scalar(text: str, key: str, value: str) -> str:
     Закомментированные строки (``# key:``) не матчатся: после отступа идёт
     ``#``, а не ``key``. Бросает KeyError, если строки нет.
     """
-    pattern = re.compile(rf"^(?P<indent>[ \t]*){re.escape(key)}:[ \t]*.*$", re.MULTILINE)
+    pattern = re.compile(
+        rf"^(?P<indent>[ \t]*){re.escape(key)}:[ \t]*.*$", re.MULTILINE
+    )
     match = pattern.search(text)
     if match is None:
         raise KeyError(key)
-    new_line = f'{match.group("indent")}{key}: {quote_scalar(value)}'
+    new_line = f"{match.group('indent')}{key}: {quote_scalar(value)}"
     return text[: match.start()] + new_line + text[match.end() :]
+
+
+def _find_key_line(
+    lines: list, lo: int, hi: int, part: str, depth: int, parent_indent: int
+):
+    """(индекс, отступ, match) первой строки ключа `part` в диапазоне; None, если нет."""
+    for i in range(lo, hi):
+        _, _, line = lines[i]
+        m = _KEY_LINE_RE.match(line)
+        if not m or m.group("key").strip() != part:
+            continue
+        indent = _indent_len(line)
+        if depth == 0 and indent != 0:
+            continue
+        if indent <= parent_indent:
+            continue
+        return i, indent, m
+    return None
+
+
+def _section_end_index(lines: list, lo: int, hi: int, indent: int) -> int:
+    """Индекс первой значащей строки с отступом <= indent (конец секции), либо hi."""
+    j = lo
+    while j < hi:
+        _, _, l2 = lines[j]
+        stripped = l2.strip()
+        if (
+            stripped
+            and not stripped.startswith("#")
+            and _indent_len(l2) <= indent
+        ):
+            break
+        j += 1
+    return j
 
 
 def find_anchor(text: str, dotted_key: str):
@@ -85,19 +121,7 @@ def find_anchor(text: str, dotted_key: str):
     lines = _lines_with_offsets(text)
     lo, hi, parent_indent = 0, len(lines), -1
     for depth, part in enumerate(parts):
-        found = None
-        for i in range(lo, hi):
-            _, _, line = lines[i]
-            m = _KEY_LINE_RE.match(line)
-            if not m or m.group("key").strip() != part:
-                continue
-            indent = _indent_len(line)
-            if depth == 0 and indent != 0:
-                continue
-            if indent <= parent_indent:
-                continue
-            found = (i, indent, m)
-            break
+        found = _find_key_line(lines, lo, hi, part, depth, parent_indent)
         if found is None:
             raise KeyError(dotted_key)
         i, indent, m = found
@@ -105,14 +129,7 @@ def find_anchor(text: str, dotted_key: str):
             start, end, _ = lines[i]
             return start, end, m.group("indent"), m.group("rest")
         lo = i + 1
-        j = lo
-        while j < hi:
-            _, _, l2 = lines[j]
-            stripped = l2.strip()
-            if stripped and not stripped.startswith("#") and _indent_len(l2) <= indent:
-                break
-            j += 1
-        hi = j
+        hi = _section_end_index(lines, lo, hi, indent)
         parent_indent = indent
     raise KeyError(dotted_key)  # недостижимо
 
@@ -124,7 +141,11 @@ def section_end(text: str, anchor_end: int, indent_str: str) -> int:
     pos = anchor_end
     for start, end, line in _lines_with_offsets(text[anchor_end:]):
         stripped = line.strip()
-        if stripped and not stripped.startswith("#") and _indent_len(line) <= base:
+        if (
+            stripped
+            and not stripped.startswith("#")
+            and _indent_len(line) <= base
+        ):
             return anchor_end + start
         pos = anchor_end + end
     return pos
@@ -135,10 +156,16 @@ def set_scalar_at_path(text: str, dotted_key: str, value: str) -> str:
     start, end, indent, _rest = find_anchor(text, dotted_key)
     key = dotted_key.split(".")[-1]
     newline = "\n" if text[start:end].endswith("\n") else ""
-    return text[:start] + f"{indent}{key}: {quote_scalar(value)}{newline}" + text[end:]
+    return (
+        text[:start]
+        + f"{indent}{key}: {quote_scalar(value)}{newline}"
+        + text[end:]
+    )
 
 
-def _attached_comment_start(text: str, anchor_start: int, indent_str: str) -> int:
+def _attached_comment_start(
+    text: str, anchor_start: int, indent_str: str
+) -> int:
     """Начало подряд идущих строк-комментариев с тем же отступом прямо над якорем."""
     lines = _lines_with_offsets(text[:anchor_start])
     cstart = anchor_start
@@ -160,7 +187,9 @@ def _exclude_next_attached_comment(text: str, raw_end: int) -> int:
     if raw_end >= len(text):
         return raw_end
     line_end = text.find("\n", raw_end)
-    next_line = text[raw_end:] if line_end == -1 else text[raw_end : line_end + 1]
+    next_line = (
+        text[raw_end:] if line_end == -1 else text[raw_end : line_end + 1]
+    )
     return _attached_comment_start(text, raw_end, " " * _indent_len(next_line))
 
 
@@ -210,7 +239,9 @@ def _top_level_insert_at(text: str, key: str, template_text: str):
             continue
         # Комментарий, прикреплённый к СЛЕДУЮЩЕЙ секции, принадлежит ей —
         # вставляемый блок встаёт перед ним, а не между ним и его ключом.
-        return _exclude_next_attached_comment(text, section_end(text, n_end, n_indent))
+        return _exclude_next_attached_comment(
+            text, section_end(text, n_end, n_indent)
+        )
     return None
 
 
@@ -257,7 +288,9 @@ def insert_missing(text: str, dotted_key: str, template_text: str) -> str:
             sep = "" if text.endswith("\n") else "\n"
             return text + sep + "\n" + block
     else:
-        _p_start, p_end, p_indent, _p_rest = find_anchor(text, ".".join(parts[:deepest]))
+        _p_start, p_end, p_indent, _p_rest = find_anchor(
+            text, ".".join(parts[:deepest])
+        )
         insert_at = section_end(text, p_end, p_indent)
     return _splice(text, insert_at, block)
 
@@ -301,7 +334,12 @@ def _find_child_anchor(text: str, parent_dotted: str, key: str):
             if m is None or _indent_len(line) != child_indent:
                 continue
             if _key_scalar(m.group("key").strip()) == wanted:
-                return p_end + start, p_end + end2, m.group("indent"), m.group("rest")
+                return (
+                    p_end + start,
+                    p_end + end2,
+                    m.group("indent"),
+                    m.group("rest"),
+                )
     raise KeyError(f"{parent_dotted}.{key}")
 
 
@@ -310,7 +348,8 @@ def _find_child_anchor(text: str, parent_dotted: str, key: str):
 # Всё прочее в этой позиции — рукописный НЕПУСТОЙ инлайновый мэппинг: у его
 # записей нет своих строк, и построчный писатель их не тронет.
 _EMPTY_PARENT_REST_RE = re.compile(
-    r"^(?:[ \t]*\{[ \t]*\})?(?P<comment>[ \t]*#.*)?[ \t]*$")
+    r"^(?:[ \t]*\{[ \t]*\})?(?P<comment>[ \t]*#.*)?[ \t]*$"
+)
 
 
 def _empty_parent_tail(rest: str, parent_dotted: str) -> str:
@@ -368,10 +407,18 @@ def upsert_mapping_entry(
     parent_key = parent_dotted.rsplit(".", 1)[-1]
     span_end = section_end(text, p_end, p_indent)
     existing_indent = _child_indent_len(text[p_end:span_end], len(p_indent))
-    child_indent = " " * existing_indent if existing_indent is not None else p_indent + "  "
-    new_block = "".join(f"{child_indent}{line}\n" if line else "\n" for line in block_lines)
+    child_indent = (
+        " " * existing_indent
+        if existing_indent is not None
+        else p_indent + "  "
+    )
+    new_block = "".join(
+        f"{child_indent}{line}\n" if line else "\n" for line in block_lines
+    )
     try:
-        k_start, k_end, k_indent, _ = _find_child_anchor(text, parent_dotted, key)
+        k_start, k_end, k_indent, _ = _find_child_anchor(
+            text, parent_dotted, key
+        )
     except KeyError:
         block_end = _exclude_next_attached_comment(text, span_end)
         if not _has_content(text[p_end:block_end]):
@@ -381,13 +428,24 @@ def upsert_mapping_entry(
             # не доедет: `_empty_parent_tail` отказывает. `block_end` здесь и
             # граница, и точка вставки — откатывать его нечем и незачем.
             tail = _empty_parent_tail(p_rest, parent_dotted)
-            return (text[:p_start] + f"{p_indent}{parent_key}:{tail}\n"
-                    + text[p_end:block_end] + new_block + text[block_end:])
-        return _splice(text, _trim_trailing_noise(text, p_end, block_end), new_block)
+            return (
+                text[:p_start]
+                + f"{p_indent}{parent_key}:{tail}\n"
+                + text[p_end:block_end]
+                + new_block
+                + text[block_end:]
+            )
+        return _splice(
+            text, _trim_trailing_noise(text, p_end, block_end), new_block
+        )
     entry_start = _attached_comment_start(text, k_start, k_indent)
     entry_end = _trim_trailing_noise(
-        text, k_start,
-        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
+        text,
+        k_start,
+        _exclude_next_attached_comment(
+            text, section_end(text, k_end, k_indent)
+        ),
+    )
     return text[:entry_start] + new_block + text[entry_end:]
 
 
@@ -395,7 +453,8 @@ def _has_content(segment: str) -> bool:
     """Есть ли в фрагменте хоть одна строка с реальным содержимым (не пустая,
     не комментарий) — тем же критерием, что цикл в `section_end`."""
     return any(
-        line.strip() and not line.strip().startswith("#") for line in segment.splitlines()
+        line.strip() and not line.strip().startswith("#")
+        for line in segment.splitlines()
     )
 
 
@@ -438,24 +497,38 @@ def remove_mapping_entry(text: str, parent_dotted: str, key: str) -> str:
     внутри секции и трейлинг-комментарий строки родителя схлопывание переживают:
     они описывают секцию, а не удаляемую запись."""
     try:
-        k_start, k_end, k_indent, _ = _find_child_anchor(text, parent_dotted, key)
+        k_start, k_end, k_indent, _ = _find_child_anchor(
+            text, parent_dotted, key
+        )
     except KeyError:
         return text
-    p_start, p_end, p_indent, p_rest = find_anchor(text, parent_dotted)  # родитель точно есть
+    p_start, p_end, p_indent, p_rest = find_anchor(
+        text, parent_dotted
+    )  # родитель точно есть
     parent_key = parent_dotted.rsplit(".", 1)[-1]
     entry_start = _attached_comment_start(text, k_start, k_indent)
     entry_end = _trim_trailing_noise(
-        text, k_start,
-        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
-    block_end = _exclude_next_attached_comment(text, section_end(text, p_end, p_indent))
+        text,
+        k_start,
+        _exclude_next_attached_comment(
+            text, section_end(text, k_end, k_indent)
+        ),
+    )
+    block_end = _exclude_next_attached_comment(
+        text, section_end(text, p_end, p_indent)
+    )
     remaining = text[p_end:entry_start] + text[entry_end:block_end]
     if not _has_content(remaining):
         # Схлопывание переписывает СТРОКУ родителя — трейлинг-комментарий на ней
         # описывает секцию, а не удаляемую запись; `remaining` — висячие комменты
         # внутри секции, тоже не её (свой, прикреплённый, уже ушёл в `entry_start`).
         tail = _empty_parent_tail(p_rest, parent_dotted)
-        return (text[:p_start] + f"{p_indent}{parent_key}: {{}}{tail}\n"
-                + remaining + text[block_end:])
+        return (
+            text[:p_start]
+            + f"{p_indent}{parent_key}: {{}}{tail}\n"
+            + remaining
+            + text[block_end:]
+        )
     return text[:entry_start] + text[entry_end:]
 
 
@@ -463,6 +536,17 @@ def _split_trailing_comment(rest: str) -> tuple[str, str]:
     """Хвост строки ключа → (значение, трейлинг-комментарий с ведущими пробелами
     либо ''). Решётка внутри кавычек — часть значения, а не комментарий; внутри
     двойных кавычек уважается escape `\\`, внутри одинарных — удвоение `''`."""
+    i = _trailing_comment_start(rest)
+    if i < 0:
+        return rest, ""
+    j = i
+    while j > 0 and rest[j - 1] in " \t":
+        j -= 1
+    return rest[:j], rest[j:]
+
+
+def _trailing_comment_start(rest: str) -> int:
+    """Индекс решётки, открывающей трейлинг-комментарий вне кавычек, либо -1."""
     quote = None
     i = 0
     while i < len(rest):
@@ -476,12 +560,9 @@ def _split_trailing_comment(rest: str) -> tuple[str, str]:
         elif ch in "\"'":
             quote = ch
         elif ch == "#" and (i == 0 or rest[i - 1] in " \t"):
-            j = i
-            while j > 0 and rest[j - 1] in " \t":
-                j -= 1
-            return rest[:j], rest[j:]
+            return i
         i += 1
-    return rest, ""
+    return -1
 
 
 def _value_scalar(value_text: str):
@@ -495,8 +576,9 @@ def _value_scalar(value_text: str):
         return value_text.strip()
 
 
-def carry_entry_comments(text: str, parent_dotted: str, key: str,
-                         block_lines: list[str]) -> list[str]:
+def carry_entry_comments(
+    text: str, parent_dotted: str, key: str, block_lines: list[str]
+) -> list[str]:
     """`block_lines` с комментариями СТАРОЙ записи `key` из `text`: прикреплённый
     комментарий записи — первыми строками (ровно тем каналом, который контракт
     `upsert_mapping_entry` и предлагает вызывающему), трейлинг-комментарии —
@@ -513,38 +595,63 @@ def carry_entry_comments(text: str, parent_dotted: str, key: str,
     построчная правка до пересборки. Ключ и значение сверяются как YAML-скаляры,
     а не побайтово. Записи нет в `text` — block_lines отдаются как есть."""
     try:
-        k_start, k_end, k_indent, _rest = _find_child_anchor(text, parent_dotted, key)
+        k_start, k_end, k_indent, _rest = _find_child_anchor(
+            text, parent_dotted, key
+        )
     except KeyError:
         return list(block_lines)
     entry_start = _attached_comment_start(text, k_start, k_indent)
-    attached = [line[len(k_indent):].rstrip("\r\n")
-                for _s, _e, line in _lines_with_offsets(text[entry_start:k_start])]
+    attached = [
+        line[len(k_indent) :].rstrip("\r\n")
+        for _s, _e, line in _lines_with_offsets(text[entry_start:k_start])
+    ]
     entry_end = _trim_trailing_noise(
-        text, k_start,
-        _exclude_next_attached_comment(text, section_end(text, k_end, k_indent)))
+        text,
+        k_start,
+        _exclude_next_attached_comment(
+            text, section_end(text, k_end, k_indent)
+        ),
+    )
+    old_comments = _collect_trailing_comments(text[k_start:entry_end])
+    out = [
+        _reattach_trailing_comment(line, old_comments) for line in block_lines
+    ]
+    return attached + out
+
+
+def _collect_trailing_comments(entry_text: str) -> list[tuple]:
+    """[(ключ-скаляр, значение-скаляр, трейлинг-комментарий)] строк записи с комментарием."""
     old_comments: list[tuple] = []
-    for _s, _e, line in _lines_with_offsets(text[k_start:entry_end]):
+    for _s, _e, line in _lines_with_offsets(entry_text):
         match = _KEY_LINE_RE.match(line)
         if match is None:
             continue
         value, comment = _split_trailing_comment(match.group("rest"))
         if comment.strip():
-            old_comments.append((_key_scalar(match.group("key").strip()),
-                                 _value_scalar(value), comment.rstrip("\r\n")))
-    out: list[str] = []
-    for line in block_lines:
-        match = _KEY_LINE_RE.match(line)
-        if match is not None:
-            value, own = _split_trailing_comment(match.group("rest"))
-            if not own:
-                wanted = (_key_scalar(match.group("key").strip()), _value_scalar(value))
-                for idx, (old_key, old_value, comment) in enumerate(old_comments):
-                    if (old_key, old_value) == wanted:
-                        line += comment
-                        del old_comments[idx]
-                        break
-        out.append(line)
-    return attached + out
+            old_comments.append(
+                (
+                    _key_scalar(match.group("key").strip()),
+                    _value_scalar(value),
+                    comment.rstrip("\r\n"),
+                )
+            )
+    return old_comments
+
+
+def _reattach_trailing_comment(line: str, old_comments: list[tuple]) -> str:
+    """Вернуть строке старый трейлинг, если ключ и значение те же (комментарий расходуется)."""
+    match = _KEY_LINE_RE.match(line)
+    if match is None:
+        return line
+    value, own = _split_trailing_comment(match.group("rest"))
+    if own:
+        return line
+    wanted = (_key_scalar(match.group("key").strip()), _value_scalar(value))
+    for idx, (old_key, old_value, comment) in enumerate(old_comments):
+        if (old_key, old_value) == wanted:
+            del old_comments[idx]
+            return line + comment
+    return line
 
 
 def entry_uses_yaml_anchors(text: str, parent_dotted: str, key: str) -> bool:
@@ -559,7 +666,9 @@ def entry_uses_yaml_anchors(text: str, parent_dotted: str, key: str) -> bool:
     по позиции: событие с якорем внутри диапазона записи. Записи нет или текст
     не разбирается — False: негодный YAML отбивает своя проверка вызывающего."""
     try:
-        k_start, k_end, k_indent, _rest = _find_child_anchor(text, parent_dotted, key)
+        k_start, k_end, k_indent, _rest = _find_child_anchor(
+            text, parent_dotted, key
+        )
     except KeyError:
         return False
     entry_end = section_end(text, k_end, k_indent)
@@ -574,7 +683,9 @@ def entry_uses_yaml_anchors(text: str, parent_dotted: str, key: str) -> bool:
     return False
 
 
-def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) -> None:
+def write_profile_pointer(
+    path, name: str, *, base_path, extra_candidates=None
+) -> None:
     """Запись `profile: "<name>"` (пустое имя — деактивация): якорь (топ-уровневый
     `profile:` из пакетного шаблона) и значение собираются В ПАМЯТИ и уходят ОДНОЙ
     валидируемой записью (`write_text`) — тот же принцип, что у записи реестра
@@ -628,7 +739,11 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
     нечем (ревью MR #80, #2). Активация и переименование остаются строгими:
     их запись меняет САМ СОСТАВ стека — активирует или переносит поломку — и
     поблажка здесь подменяла бы отказ чужой причиной (регресс L19)."""
-    from gc_core.config import _default_config_path, validate_config_text_with_sections
+    from gc_core.config import (
+        _default_config_path,
+        validate_config_text_with_sections,
+    )
+
     path = Path(path)
     is_base = path.resolve() == Path(base_path).resolve()
     lenient_prebroken = name == ""
@@ -636,20 +751,28 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
         candidate = f"profile: {quote_scalar(name)}\n"
         if is_base:
             validate_config_text_with_sections(
-                candidate, base_path=path, extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                candidate,
+                base_path=path,
+                extra_candidates=extra_candidates,
+                lenient_prebroken=lenient_prebroken,
+            )
         else:
             validate_config_text_with_sections(
-                candidate, base_path=base_path, target=path,
+                candidate,
+                base_path=base_path,
+                target=path,
                 extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                lenient_prebroken=lenient_prebroken,
+            )
         create_pointer_file(path, name)
         return
     text = read_user_text(path)
     try:
         find_anchor(text, "profile")
     except KeyError:
-        text = insert_missing(text, "profile", read_user_text(_default_config_path()))
+        text = insert_missing(
+            text, "profile", read_user_text(_default_config_path())
+        )
     try:
         text = set_scalar(text, "profile", name)
     except KeyError:
@@ -658,15 +781,22 @@ def write_profile_pointer(path, name: str, *, base_path, extra_candidates=None) 
 
         def validate(candidate: str) -> None:
             validate_config_text_with_sections(
-                candidate, base_path=path, extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                candidate,
+                base_path=path,
+                extra_candidates=extra_candidates,
+                lenient_prebroken=lenient_prebroken,
+            )
     else:
 
         def validate(candidate: str) -> None:
             validate_config_text_with_sections(
-                candidate, base_path=base_path, target=path,
+                candidate,
+                base_path=base_path,
+                target=path,
                 extra_candidates=extra_candidates,
-                lenient_prebroken=lenient_prebroken)
+                lenient_prebroken=lenient_prebroken,
+            )
+
     write_text(path, text, validate=validate)
 
 
@@ -744,7 +874,9 @@ def ensure_pointer_anchor(path, template_path, key: str = "profile") -> None:
             tmp.unlink(missing_ok=True)
 
 
-def ensure_section_anchor_text(text: str, section: str, template_text: str) -> str:
+def ensure_section_anchor_text(
+    text: str, section: str, template_text: str
+) -> str:
     """Текст с гарантированным топ-уровневым якорем `<section>:` (`models`/`slots`/
     `assign`) — обобщение `ensure_pointer_anchor` на произвольный топ-ключ (тот же
     приём, но `template_text` — уже готовая строка, не путь: для config.yml это
@@ -821,8 +953,12 @@ def uncomment_template_block(template_text: str, top_key: str) -> str:
     voice — фича не включена «из коробки»). KeyError, если блока нет.
     """
     lines = template_text.splitlines(keepends=True)
-    head_re = re.compile(_COMMENTED_TOP_KEY_RE_TMPL.format(key=re.escape(top_key)))
-    start = next((i for i, line in enumerate(lines) if head_re.match(line)), None)
+    head_re = re.compile(
+        _COMMENTED_TOP_KEY_RE_TMPL.format(key=re.escape(top_key))
+    )
+    start = next(
+        (i for i, line in enumerate(lines) if head_re.match(line)), None
+    )
     if start is None:
         raise KeyError(top_key)
     # Прикреплённое описание: подряд идущие строки-комментарии прямо над якорем.
@@ -841,12 +977,64 @@ def uncomment_template_block(template_text: str, top_key: str) -> str:
         if not body[:1].isspace() or not _KEY_LINE_RE.match(body):
             break
         end += 1
-    out = [lines[i] for i in range(cstart, start)]            # описание — как есть
-    out += [_uncomment(lines[i]) for i in range(start, end)]  # шапка + поля — раскомментированы
+    out = [lines[i] for i in range(cstart, start)]  # описание — как есть
+    out += [
+        _uncomment(lines[i]) for i in range(start, end)
+    ]  # шапка + поля — раскомментированы
     return "".join(out)
 
 
-def write_values(path, values: dict, *, template_path=None, validate=None) -> list[str]:
+def _try_set(text: str, key: str, value, setter) -> "str | None":
+    try:
+        return setter(text, key, value)
+    except KeyError:
+        return None
+
+
+def _set_from_template(
+    text: str, key: str, value, setter, template_text: str
+) -> "str | None":
+    """Записать dotted-ключ, которого в тексте нет, опираясь на шаблон; None — не удалось."""
+    section = key.split(".")[0]
+    try:
+        return setter(insert_missing(text, key, template_text), key, value)
+    except KeyError:
+        pass
+    try:
+        find_anchor(text, section)
+    except KeyError:
+        section_alive = False
+    else:
+        section_alive = True
+    try:
+        block = uncomment_template_block(template_text, section)
+        if section_alive:
+            # Секция ЖИВАЯ, но этого под-ключа в ней нет. `insert_missing` выше не
+            # нашёл его и в шаблоне — потому что шаблон несёт такие секции
+            # закомментированными (voice). Разворачиваем блок шаблона во временный
+            # текст и берём строку оттуда: дописать под-ключ в живую секцию можно,
+            # а дублировать саму секцию нельзя (см. ветку ниже). Находка ревью:
+            # раньше здесь сдавались, и ключ уходил в `missing`.
+            return setter(insert_missing(text, key, block), key, value)
+        # Секции нет в файле вообще (не только у этого ключа) — можно
+        # безопасно развернуть блок шаблона. Если секция уже живая
+        # (юзер завёл её сам, частично) — трогать текст нельзя: второй
+        # top-level блок задублировал бы ключ, а PyYAML на дублях не
+        # ругается и молча берёт последний, затирая юзерские значения.
+        # Разворот — в отдельную переменную, а не в `text`: если ключа нет
+        # и в блоке шаблона, setter упадёт KeyError уже ПОСЛЕ разворота, и
+        # присвоенный `text` дошёл бы до записи. Юзер получил бы включённой
+        # секцию, которую сознательно держал закомментированной, — при том
+        # что ключ честно отчитан как не записанный.
+        sep = "" if text.endswith("\n") else "\n"
+        return setter(text + sep + "\n" + block, key, value)
+    except KeyError:
+        return None
+
+
+def write_values(
+    path, values: dict, *, template_path=None, validate=None
+) -> list[str]:
     """Записать {ключ: значение} в YAML-файл path (атомарно).
 
     Ключ — dotted-путь (path-aware) или legacy-leaf (первое совпадение).
@@ -860,56 +1048,17 @@ def write_values(path, values: dict, *, template_path=None, validate=None) -> li
     missing: list[str] = []
     for key, value in values.items():
         setter = set_scalar_at_path if "." in key else set_scalar
-        try:
-            text = setter(text, key, value)
-            continue
-        except KeyError:
-            pass
-        if template_path is not None and "." in key:
+        new_text = _try_set(text, key, value, setter)
+        if new_text is None and template_path is not None and "." in key:
             if template_text is None:
                 template_text = read_user_text(template_path)
-            try:
-                text = insert_missing(text, key, template_text)
-                text = setter(text, key, value)
-                continue
-            except KeyError:
-                pass
-            try:
-                find_anchor(text, key.split(".")[0])
-            except KeyError:
-                # Секции нет в файле вообще (не только у этого ключа) — можно
-                # безопасно развернуть блок шаблона. Если секция уже живая
-                # (юзер завёл её сам, частично) — трогать текст нельзя: второй
-                # top-level блок задублировал бы ключ, а PyYAML на дублях не
-                # ругается и молча берёт последний, затирая юзерские значения.
-                # Разворот — в отдельную переменную, а не в `text`: если ключа нет
-                # и в блоке шаблона, setter упадёт KeyError уже ПОСЛЕ разворота, и
-                # присвоенный `text` дошёл бы до записи. Юзер получил бы включённой
-                # секцию, которую сознательно держал закомментированной, — при том
-                # что ключ честно отчитан как не записанный.
-                try:
-                    block = uncomment_template_block(template_text, key.split(".")[0])
-                    sep = "" if text.endswith("\n") else "\n"
-                    expanded = text + sep + "\n" + block
-                    text = setter(expanded, key, value)
-                    continue
-                except KeyError:
-                    pass
-            else:
-                # Секция ЖИВАЯ, но этого под-ключа в ней нет. `insert_missing` выше не
-                # нашёл его и в шаблоне — потому что шаблон несёт такие секции
-                # закомментированными (voice). Разворачиваем блок шаблона во временный
-                # текст и берём строку оттуда: дописать под-ключ в живую секцию можно,
-                # а дублировать саму секцию нельзя (см. ветку выше). Находка ревью:
-                # раньше здесь сдавались, и ключ уходил в `missing`.
-                try:
-                    unfolded = uncomment_template_block(template_text, key.split(".")[0])
-                    text = insert_missing(text, key, unfolded)
-                    text = setter(text, key, value)
-                    continue
-                except KeyError:
-                    pass
-        missing.append(key)
+            new_text = _set_from_template(
+                text, key, value, setter, template_text
+            )
+        if new_text is None:
+            missing.append(key)
+        else:
+            text = new_text
     if missing:
         # Всё или ничего: записать половину значений хуже, чем не записать ничего.
         # Прежде соседи по вызову ложились в файл, а про несохранённые человек узнавал

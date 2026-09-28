@@ -3,9 +3,14 @@
 from typing import Any, Dict, List, Optional
 
 from gc_core.config_modules.merge import deep_merge
-from gc_core.config_modules.strip_tags_projection import projection_tags_from_config
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
 from gc_core.message_projection import project_text_for_model
-from gc_core.utils.llm_chat_client import log_llm_prompt_and_result, request_chat_completion_text
+from gc_core.utils.llm_chat_client import (
+    arequest_chat_completion_text,
+    log_llm_prompt_and_result,
+)
 
 
 def _require_auxiliary_llm(ctx: Any) -> Any:
@@ -39,7 +44,9 @@ def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
     Читает ``auxiliary_llm_params.judge_max_tokens`` / YAML
     ``chat_completions.auxiliary_llm.judge_max_tokens`` (отдельно от summary ``max_tokens``).
     """
-    from gc_core.config_modules.chat_completions import DEFAULT_JUDGE_MAX_TOKENS
+    from gc_core.config_modules.chat_completions import (
+        DEFAULT_JUDGE_MAX_TOKENS,
+    )
 
     auxiliary_llm = _require_auxiliary_llm(ctx)
     value = getattr(auxiliary_llm, "judge_max_tokens", None)
@@ -48,7 +55,7 @@ def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
     return DEFAULT_JUDGE_MAX_TOKENS
 
 
-def request_auxiliary_completion_text(
+async def arequest_auxiliary_completion_text(
     *,
     ctx: Any,
     state: Any,
@@ -70,7 +77,7 @@ def request_auxiliary_completion_text(
     только канон ``state.messages``, не судья / finish-gate / summary.
     Extra-теги из ``strip_tags_projection.tags`` по-прежнему применяются.
     """
-    raw = request_chat_completion_text(
+    raw = await arequest_chat_completion_text(
         ctx=ctx,
         state=state,
         messages=messages,
@@ -80,7 +87,9 @@ def request_auxiliary_completion_text(
         payload_overrides=payload_overrides,
     )
     if log_prompt:
-        active_logger = logger if logger is not None else getattr(ctx, "logger", None)
+        active_logger = (
+            logger if logger is not None else getattr(ctx, "logger", None)
+        )
         log_llm_prompt_and_result(
             logger=active_logger,
             label=request_label,
@@ -91,7 +100,7 @@ def request_auxiliary_completion_text(
     return project_text_for_model(raw, tags=tags, strip_think=True)
 
 
-def request_summary_text(
+async def arequest_summary_text(
     *,
     ctx: Any,
     state: Any,
@@ -113,13 +122,22 @@ def request_summary_text(
         raise RuntimeError(
             "RunContext.auxiliary_llm.max_tokens must be a positive int"
         )
-    return request_auxiliary_completion_text(
+    return await arequest_auxiliary_completion_text(
         ctx=ctx,
         state=state,
         messages=messages,
-        max_tokens=max_tokens if max_tokens is not None else default_max_tokens,
+        max_tokens=max_tokens
+        if max_tokens is not None
+        else default_max_tokens,
         request_label=request_label,
         consumer=consumer,
         payload_overrides=effective_overrides,
         logger=logger,
     )
+
+
+#
+# Нужны вызывающим вне цикла агента (ручной /compact в TUI, тесты). Внутри
+# асинхронного цикла звать их НЕЛЬЗЯ — и не потому, что «что-то откажет»:
+# синхронный вызов заморозил бы loop на всё время aux-LLM, а fail-open вокруг
+# судей проглотил бы такую ошибку и молча выключил проверку.

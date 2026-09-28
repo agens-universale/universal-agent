@@ -1,17 +1,72 @@
-from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
-from gc_core.tools.simple_tool_base import AbstractSimpleTool
-from typing import Any, Dict, Optional
 import json
+from typing import Any, Dict, Optional
 
-from gc_core.utils.tool_report_paths import tool_report_abspath
+from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.read_guard import enforce_read_guard
 from gc_core.tools.schema_optional import coalesce_optional_string
+from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import decode_text_bytes, sha256_hex_of_bytes
 from gc_core.utils.fs_size_limits import (
     DEFAULT_FS_READ_MAX_BYTES as DEFAULT_READ_FILE_MAX_BYTES,  # noqa: F401  # re-export для тестов
+)
+from gc_core.utils.fs_size_limits import (
     check_file_size,
     fs_read_max_bytes,
 )
+from gc_core.utils.tool_report_paths import tool_report_abspath
+
+
+def _read_arg_error(offset, limit) -> "tuple[str, str] | None":
+    """(field, message) для невалидного offset/limit либо None."""
+    if offset is not None and not isinstance(offset, int):
+        return (
+            "offset",
+            f"Argument 'offset' must be an integer or None. Got: {type(offset)} ({offset})",
+        )
+    if limit is not None and not isinstance(limit, int):
+        return (
+            "limit",
+            f"Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})",
+        )
+    return None
+
+
+def _decode_error_payload(error) -> "tuple[dict, dict | None]":
+    """Ошибка декодирования → (err для ответа, extra_fields для encoding_required)."""
+    err = error or {"type": "read_failed", "message": "Failed to decode file."}
+    if err.get("type") != "encoding_required":
+        return err, None
+    extra = {
+        "encoding_guess": err.get("encoding_guess"),
+        "encoding_confidence": err.get("encoding_confidence"),
+        "preview": err.get("preview"),
+        "preview_encoding": err.get("preview_encoding"),
+        "preview_truncated": err.get("preview_truncated"),
+    }
+    err = {
+        "type": "encoding_required",
+        "message": err.get("message"),
+        "encoding_guess": err.get("encoding_guess"),
+        "encoding_confidence": err.get("encoding_confidence"),
+    }
+    return err, extra
+
+
+def _line_window(total_lines: int, offset, limit) -> "tuple[int, int]":
+    """Диапазон строк (1-based, включительно) с клампом к размеру файла."""
+    start_1_based = 1 if offset is None else max(1, offset)
+    if limit is not None and limit < 1:
+        # Ноль (и отрицательное) — «не задан»: strict-схема заставляет слать все
+        # поля, и «не использую» модель говорит нулём. Кламп до одной строки
+        # отдавал ОДНУ строку как успех — модель считала файл однострочным.
+        limit = None
+    end_1_based = total_lines if limit is None else start_1_based + limit - 1
+    if start_1_based > total_lines:
+        start_1_based = total_lines
+        end_1_based = total_lines
+    if end_1_based > total_lines:
+        end_1_based = total_lines
+    return start_1_based, end_1_based
 
 
 @loop_warn_on_repeat(**READ_PROFILE)
@@ -86,10 +141,10 @@ class ReadFile(AbstractSimpleTool):
             payload.update(extra_fields)
         return json.dumps(payload, ensure_ascii=False)
 
-    def _lookup_file_size_bytes(self, path: str) -> Optional[int]:
+    async def _lookup_file_size_bytes(self, path: str) -> Optional[int]:
         try:
-            if self._backend.is_file(path):
-                return self._backend.getsize(path)
+            if await self._backend.is_file(path):
+                return await self._backend.getsize(path)
         except OSError:
             return None
         return None
@@ -109,7 +164,7 @@ class ReadFile(AbstractSimpleTool):
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "The path of the file to read. Must be a valid file path and not a directory."
+                        "description": "The path of the file to read. Must be a valid file path and not a directory.",
                     },
                     "offset": {
                         "type": "integer",
@@ -118,8 +173,7 @@ class ReadFile(AbstractSimpleTool):
                     "limit": {
                         "type": "integer",
                         "description": (
-                            "Max lines to read starting from offset. "
-                            "Default: to end of file."
+                            "Max lines to read starting from offset. Default: to end of file."
                         ),
                     },
                     "encoding": {
@@ -132,15 +186,15 @@ class ReadFile(AbstractSimpleTool):
                     },
                 },
                 "required": ["path"],
-                "additionalProperties": False
+                "additionalProperties": False,
             },
-            "strict": True
+            "strict": True,
         }
         return description
 
     @classmethod
     def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        description = '''Tool name: fs_read_file
+        description = """Tool name: fs_read_file
 Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256.
 Input schema: {
   "type": "object",
@@ -178,11 +232,11 @@ Usage:
 - Always use this tool to inspect the contents of any file before modifying it.
 - Line range defaults to offset=1 through end of file; narrow with offset/limit when needed.
 - On file_too_large: file_size_bytes is set; error.max_bytes has the limit; follow error.message.
-'''
+"""
         return description
 
     @enforce_read_guard(path_arg="path")
-    def __call__(
+    async def acall(
         self,
         path: str,
         offset: Optional[int] = None,
@@ -200,27 +254,19 @@ Usage:
                 file_size_bytes=None,
             )
 
-        file_size_bytes = self._lookup_file_size_bytes(path)
+        file_size_bytes = await self._lookup_file_size_bytes(path)
 
-        if offset is not None and not isinstance(offset, int):
+        arg_error = _read_arg_error(offset, limit)
+        if arg_error is not None:
             return self._error_result(
                 path=path,
                 error_type="invalid_argument",
-                field="offset",
-                message=f"Argument 'offset' must be an integer or None. Got: {type(offset)} ({offset})",
+                field=arg_error[0],
+                message=arg_error[1],
                 file_size_bytes=file_size_bytes,
             )
 
-        if limit is not None and not isinstance(limit, int):
-            return self._error_result(
-                path=path,
-                error_type="invalid_argument",
-                field="limit",
-                message=f"Argument 'limit' must be an integer or None. Got: {type(limit)} ({limit})",
-                file_size_bytes=file_size_bytes,
-            )
-
-        if not self._backend.exists(path):
+        if not await self._backend.exists(path):
             return self._error_result(
                 path=path,
                 error_type="not_found",
@@ -228,7 +274,7 @@ Usage:
                 file_size_bytes=None,
             )
 
-        if self._backend.is_dir(path):
+        if await self._backend.is_dir(path):
             return self._error_result(
                 path=path,
                 error_type="not_a_file",
@@ -237,7 +283,7 @@ Usage:
             )
 
         max_bytes = fs_read_max_bytes(self._config_dict)
-        if file_size_bytes is None and self._backend.exists(path):
+        if file_size_bytes is None and await self._backend.exists(path):
             return self._error_result(
                 path=path,
                 error_type="io_error",
@@ -259,12 +305,15 @@ Usage:
                         "not a full read through this tool. "
                         "Raise fs_tools.max_read_bytes in config if needed."
                     ),
-                    error_details={"max_bytes": max_bytes, "actual_bytes": file_size_bytes},
+                    error_details={
+                        "max_bytes": max_bytes,
+                        "actual_bytes": file_size_bytes,
+                    },
                     file_size_bytes=file_size_bytes,
                 )
 
         try:
-            raw = self._backend.read_bytes(path)
+            raw = await self._backend.read_bytes(path)
         except OSError as e:
             return self._error_result(
                 path=path,
@@ -272,31 +321,21 @@ Usage:
                 message=f"Failed to read file: {e}",
                 file_size_bytes=file_size_bytes,
             )
-        decoded = decode_text_bytes(raw, encoding=encoding, include_preview=True)
+        decoded = decode_text_bytes(
+            raw, encoding=encoding, include_preview=True
+        )
         if not decoded.ok:
-            err = decoded.error or {"type": "read_failed", "message": "Failed to decode file."}
-            extra = None
-            if err.get("type") == "encoding_required":
-                extra = {
-                    "encoding_guess": err.get("encoding_guess"),
-                    "encoding_confidence": err.get("encoding_confidence"),
-                    "preview": err.get("preview"),
-                    "preview_encoding": err.get("preview_encoding"),
-                    "preview_truncated": err.get("preview_truncated"),
-                }
-                err = {
-                    "type": "encoding_required",
-                    "message": err.get("message"),
-                    "encoding_guess": err.get("encoding_guess"),
-                    "encoding_confidence": err.get("encoding_confidence"),
-                }
+            err, extra = _decode_error_payload(decoded.error)
             return self._error_result(
                 path=path,
                 error_type=err["type"],
                 message=err.get("message"),
                 error_details={
-                    k: v for k, v in err.items() if k not in ("type", "message")
-                } or None,
+                    k: v
+                    for k, v in err.items()
+                    if k not in ("type", "message")
+                }
+                or None,
                 file_size_bytes=file_size_bytes,
                 extra_fields=extra,
             )
@@ -306,27 +345,7 @@ Usage:
         lines = full_text.splitlines(keepends=True)
         total_lines = len(lines)
 
-        start_1_based = 1 if offset is None else offset
-        if start_1_based < 1:
-            start_1_based = 1
-
-        if limit is not None and limit < 1:
-            # Ноль (и отрицательное) — «не задан»: strict-схема заставляет слать все
-            # поля, и «не использую» модель говорит нулём. Кламп до одной строки
-            # отдавал ОДНУ строку как успех — модель считала файл однострочным.
-            limit = None
-        if limit is None:
-            end_1_based = total_lines
-        else:
-            end_1_based = start_1_based + limit - 1
-
-        if start_1_based > total_lines:
-            start_1_based = total_lines
-            end_1_based = total_lines
-
-        if end_1_based > total_lines:
-            end_1_based = total_lines
-
+        start_1_based, end_1_based = _line_window(total_lines, offset, limit)
         start_idx = max(0, start_1_based - 1)
         selected_lines = lines[start_idx:end_1_based]
         content = "".join(selected_lines)

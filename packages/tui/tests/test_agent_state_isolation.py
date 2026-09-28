@@ -1,4 +1,5 @@
 """I3: TUI-тесты не должны трогать реальный ~/.gc/agent_state.json."""
+
 import pytest
 
 pytest.importorskip("textual")
@@ -10,4 +11,5 @@ def test_autouse_state_path_redirects_to_tmp(tmp_path):
     upgrade_gate писал бы в реальный конфиг-каталог пользователя
     (env_vars.effective_config_dir()), что и происходило до фикса."""
     from gc_core import upgrade_gate
+
     assert upgrade_gate._state_path().parent == tmp_path

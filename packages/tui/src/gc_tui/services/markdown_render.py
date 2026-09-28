@@ -11,12 +11,17 @@ API:
 - списки `- item`   → ink, маркер `• `
 - fenced ``` блок ``` → code-block (мягкий серый)
 """
+
 from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from rich.text import Text
+
+if TYPE_CHECKING:
+    from rich.table import Table
 
 from gc_tui.palette import ACCENT as _ACC
 from gc_tui.palette import CODE as _CODE
@@ -30,6 +35,7 @@ class Block:
 
     `lang` — только для kind="code-block". `headers`/`rows`/`aligns` — только для kind="table".
     """
+
     kind: str  # 'prose' | 'code-block' | 'table'
     content: str = ""
     lang: str | None = None
@@ -63,7 +69,10 @@ def _parse_table_aligns(sep_line: str, ncols: int) -> list[str]:
     aligns: list[str] = []
     for c in _split_table_row(sep_line):
         left, right = c.startswith(":"), c.endswith(":")
-        aligns.append("center" if left and right else "right" if right else "left")
+        if left and right:
+            aligns.append("center")
+        else:
+            aligns.append("right" if right else "left")
     return (aligns + ["left"] * ncols)[:ncols]
 
 
@@ -98,7 +107,11 @@ def segment_answer(text: str) -> list[Block]:
             segs.append(Block("code-block", "\n".join(chunk), lang_tag))
             i = j + 1
             continue
-        if "|" in ln and i + 1 < len(lines) and _is_table_separator(lines[i + 1]):
+        if (
+            "|" in ln
+            and i + 1 < len(lines)
+            and _is_table_separator(lines[i + 1])
+        ):
             _flush()
             headers = _split_table_row(ln)
             ncols = len(headers)
@@ -106,9 +119,13 @@ def segment_answer(text: str) -> list[Block]:
             rows: list[list[str]] = []
             j = i + 2
             while j < len(lines) and "|" in lines[j] and lines[j].strip():
-                rows.append((_split_table_row(lines[j]) + [""] * ncols)[:ncols])
+                rows.append(
+                    (_split_table_row(lines[j]) + [""] * ncols)[:ncols]
+                )
                 j += 1
-            segs.append(Block("table", headers=headers, rows=rows, aligns=aligns))
+            segs.append(
+                Block("table", headers=headers, rows=rows, aligns=aligns)
+            )
             i = j
             continue
         prose.append(ln)
@@ -183,9 +200,9 @@ def render_prose(text: str) -> Text:
     return out
 
 
-
-def build_markdown_table(headers: list[str], rows: list[list[str]],
-                         aligns: list[str]) -> "Table":
+def build_markdown_table(
+    headers: list[str], rows: list[list[str]], aligns: list[str]
+) -> Table:
     """Структура таблицы → rich.Table (полная сетка box.SQUARE, рамка dim,
     заголовок accent-bold, в ячейках — inline-разметка). Ширину не фиксируем
     здесь: её задаёт вызывающий `table_render.table_to_text(..., width=)`,
@@ -194,8 +211,13 @@ def build_markdown_table(headers: list[str], rows: list[list[str]],
     from rich.table import Table
     from rich.text import Text as _Text
 
-    table = Table(box=_box.SQUARE, border_style=_DEEP_DIM,
-                  show_header=True, expand=False, pad_edge=True)
+    table = Table(
+        box=_box.SQUARE,
+        border_style=_DEEP_DIM,
+        show_header=True,
+        expand=False,
+        pad_edge=True,
+    )
     for h, a in zip(headers, aligns):
         table.add_column(h, justify=a, header_style=f"{_ACC} bold")
     for row in rows:
@@ -208,26 +230,27 @@ def build_markdown_table(headers: list[str], rows: list[list[str]],
     return table
 
 
-def table_block_to_markdown(headers: list[str], rows: list[list[str]],
-                            aligns: list[str]) -> str:
+def table_block_to_markdown(
+    headers: list[str], rows: list[list[str]], aligns: list[str]
+) -> str:
     """Реконструировать валидный markdown таблицы из Block (для clipboard).
 
     left → ``---`` (GFM-дефолт). ``|`` в ячейке → ``\\|`` для вставки в редактор.
     Round-trip через текущий segment_answer для ячеек с ``|`` НЕ обещаем:
     парсер режет по сырому ``|`` без escape.
     """
+
     def esc(cell: str) -> str:
         return cell.replace("|", r"\|")
 
     lines = ["| " + " | ".join(esc(h) for h in headers) + " |"]
     sep: list[str] = []
     for a in aligns:
-        sep.append(":---:" if a == "center"
-                   else "---:" if a == "right"
-                   else "---")
+        if a == "center":
+            sep.append(":---:")
+        else:
+            sep.append("---:" if a == "right" else "---")
     lines.append("| " + " | ".join(sep) + " |")
     for row in rows:
         lines.append("| " + " | ".join(esc(c) for c in row) + " |")
     return "\n".join(lines)
-
-

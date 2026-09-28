@@ -3,9 +3,28 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from gc_core.project_memory.compaction import CompactionResult, SOFT_APPEND_INPUT_LIMIT_CHARS, compact_text
-from gc_core.project_memory.status import attach_status_to_prompt_vars, build_project_memory_status, build_project_memory_status_for_cwd, fill_percent
-from gc_core.project_memory.storage import ProjectMemoryError, ProjectMemoryStat, DEFAULT_MAX_CHARS, MAX_CHARS, append, content_hash, read, stat, write
+from gc_core.project_memory.compaction import (
+    SOFT_APPEND_INPUT_LIMIT_CHARS,
+    CompactionResult,
+    acompact_text,
+)
+from gc_core.project_memory.status import (
+    attach_status_to_prompt_vars,
+    build_project_memory_status,
+    build_project_memory_status_for_cwd,
+    fill_percent,
+)
+from gc_core.project_memory.storage import (
+    DEFAULT_MAX_CHARS,
+    MAX_CHARS,
+    ProjectMemoryError,
+    ProjectMemoryStat,
+    append,
+    content_hash,
+    read,
+    stat,
+    write,
+)
 
 _PROJECT_MEMORY_FILE = "project_memory.md"
 
@@ -24,21 +43,22 @@ def get_hash(ctx: Any | None = None) -> str | None:
     """Хеш содержимого long memory для baseline/changed hints (D10, D40)."""
     return content_hash(resolve_project_memory_path(ctx))
 
+
 __all__ = [
-    "CompactionResult",
-    "ProjectMemoryError",
-    "ProjectMemoryStat",
     "DEFAULT_MAX_CHARS",
     "MAX_CHARS",
     "SOFT_APPEND_INPUT_LIMIT_CHARS",
+    "CompactionResult",
+    "ProjectMemoryError",
+    "ProjectMemoryStat",
+    "acompact_text",
     "append",
     "attach_status_to_prompt_vars",
-    "content_hash",
-    "get_hash",
     "build_project_memory_status",
     "build_project_memory_status_for_cwd",
+    "content_hash",
     "fill_percent",
-    "compact_text",
+    "get_hash",
     "read",
     "resolve_project_memory_path",
     "stat",

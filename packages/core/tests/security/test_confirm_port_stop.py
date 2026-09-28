@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+
 from gc_core.security.confirm_port import _ask_human_enabled
 
 

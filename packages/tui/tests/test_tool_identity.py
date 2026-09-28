@@ -1,4 +1,5 @@
 """tool_identity: wire-имя тула → канонический id (старое голое имя)."""
+
 from gc_tui.services.tool_identity import tool_id
 
 
@@ -31,7 +32,9 @@ def test_legacy_names_pass_through():
 
 
 def test_unknown_and_empty_pass_through():
-    assert tool_id("session_memory") == "session_memory"   # не маппим (generic-рендер)
+    assert (
+        tool_id("session_memory") == "session_memory"
+    )  # не маппим (generic-рендер)
     assert tool_id("some_future_tool") == "some_future_tool"
     assert tool_id("") == ""
     assert tool_id(None) is None
@@ -55,7 +58,7 @@ def test_find_in_files_summary_keeps_the_pattern():
             "query_mode": "text",
             "file_pattern": "*.py",
             "path": "/proj",
-            "pattern": "def build_tools_data",
+            "pattern": "def abuild_tools_data",
         },
     )
-    assert "def build_tools_data" in summary
+    assert "def abuild_tools_data" in summary

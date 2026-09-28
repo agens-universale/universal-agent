@@ -4,6 +4,7 @@ Tests themselves are added in Task 9; this file currently contains only the
 fixture to keep TDD ordering clean."""
 
 import pytest
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 @pytest.fixture
@@ -18,7 +19,7 @@ def reg_with_packs(tmp_path):
     for inner in ("shared-name", "unique-name"):
         (system / "alpha" / inner).mkdir(parents=True)
         (system / "alpha" / inner / "SKILL.md").write_text(
-            f"---\nid: {inner}\nname: {inner}\ndescription: \"\"\n---\n# body\n",
+            f'---\nid: {inner}\nname: {inner}\ndescription: ""\n---\n# body\n',
             encoding="utf-8",
         )
     (system / "alpha" / "pack.yaml").write_text(
@@ -28,7 +29,7 @@ def reg_with_packs(tmp_path):
     # Pack "beta" with inner skill "shared-name"
     (system / "beta" / "shared-name").mkdir(parents=True)
     (system / "beta" / "shared-name" / "SKILL.md").write_text(
-        "---\nid: shared-name\nname: shared-name\ndescription: \"\"\n---\n# body\n",
+        '---\nid: shared-name\nname: shared-name\ndescription: ""\n---\n# body\n',
         encoding="utf-8",
     )
     (system / "beta" / "pack.yaml").write_text(
@@ -45,8 +46,10 @@ def reg_with_packs(tmp_path):
 def test_skills_list_default_hides_pack_internals(reg_with_packs):
     """Default skills_list: только bootstrap-скиллы пакетов и flat. Internal скрыты."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
-    tool = SkillsListTool(reg_with_packs)
+
+    tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool())
     assert payload["ok"] is True
     ids = {s["id"] for s in payload["result"]["skills"]}
@@ -57,8 +60,10 @@ def test_skills_list_default_hides_pack_internals(reg_with_packs):
 def test_skills_list_with_pack_returns_internals(reg_with_packs):
     """skills_list(pack='alpha') возвращает все internal alpha-пакета."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
-    tool = SkillsListTool(reg_with_packs)
+
+    tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool(pack="alpha"))
     assert payload["ok"] is True
     ids = {s["id"] for s in payload["result"]["skills"]}
@@ -68,8 +73,10 @@ def test_skills_list_with_pack_returns_internals(reg_with_packs):
 def test_skills_list_payload_has_is_pack_bootstrap_field(reg_with_packs):
     """Все entries имеют is_pack_bootstrap (true для bootstrap, false иначе)."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
-    tool = SkillsListTool(reg_with_packs)
+
+    tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool())
     by_id = {s["id"]: s for s in payload["result"]["skills"]}
     assert by_id["alpha:unique-name"]["is_pack_bootstrap"] is True
@@ -81,8 +88,10 @@ def test_skills_list_payload_has_is_pack_bootstrap_field(reg_with_packs):
 def test_skills_list_internal_skill_payload_fields(reg_with_packs):
     """Internal non-bootstrap скиллы: is_pack_bootstrap=false, нет pack_size."""
     import json
+
     from gc_core.tools.skills.skills_tools import SkillsListTool
-    tool = SkillsListTool(reg_with_packs)
+
+    tool = CallableTool(SkillsListTool(reg_with_packs))
     payload = json.loads(tool(pack="alpha"))
     by_id = {s["id"]: s for s in payload["result"]["skills"]}
     inner = by_id["alpha:shared-name"]
@@ -93,18 +102,27 @@ def test_skills_list_internal_skill_payload_fields(reg_with_packs):
 def test_skills_load_ambiguous_returns_envelope_error(reg_with_packs):
     """skills_load("shared-name") → AMBIGUOUS_SKILL_ID envelope (alpha + beta оба имеют)."""
     import json
+
     from gc_core.tools.skills.skills_tools import LoadSkillTool
-    tool = LoadSkillTool(reg_with_packs)
+
+    tool = CallableTool(LoadSkillTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name"))
     assert payload["ok"] is False
     assert payload["error"]["code"] == "AMBIGUOUS_SKILL_ID"
-    assert set(payload["error"]["candidates"]) == {"alpha:shared-name", "beta:shared-name"}
+    assert set(payload["error"]["candidates"]) == {
+        "alpha:shared-name",
+        "beta:shared-name",
+    }
 
 
-def test_skills_load_reference_ambiguous_returns_envelope_error(reg_with_packs):
+def test_skills_load_reference_ambiguous_returns_envelope_error(
+    reg_with_packs,
+):
     import json
+
     from gc_core.tools.skills.skills_tools import LoadReferenceTool
-    tool = LoadReferenceTool(reg_with_packs)
+
+    tool = CallableTool(LoadReferenceTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name", slug="anything"))
     assert payload["ok"] is False
     assert payload["error"]["code"] == "AMBIGUOUS_SKILL_ID"
@@ -112,8 +130,10 @@ def test_skills_load_reference_ambiguous_returns_envelope_error(reg_with_packs):
 
 def test_skills_load_asset_ambiguous_returns_envelope_error(reg_with_packs):
     import json
+
     from gc_core.tools.skills.skills_tools import LoadAssetTool
-    tool = LoadAssetTool(reg_with_packs)
+
+    tool = CallableTool(LoadAssetTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name", slug="anything"))
     assert payload["ok"] is False
     assert payload["error"]["code"] == "AMBIGUOUS_SKILL_ID"
@@ -121,8 +141,10 @@ def test_skills_load_asset_ambiguous_returns_envelope_error(reg_with_packs):
 
 def test_run_skill_script_ambiguous_returns_envelope_error(reg_with_packs):
     import json
+
     from gc_core.tools.skills.skills_tools import RunSkillScriptTool
-    tool = RunSkillScriptTool(reg_with_packs)
+
+    tool = CallableTool(RunSkillScriptTool(reg_with_packs))
     payload = json.loads(tool(skill_id="shared-name"))
     assert payload["ok"] is False
     assert payload["error"]["code"] == "AMBIGUOUS_SKILL_ID"

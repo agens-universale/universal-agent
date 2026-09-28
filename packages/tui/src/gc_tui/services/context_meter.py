@@ -6,6 +6,7 @@
 по мере заполнения. Фон на пробелах-ячейках — терминал-независимо (без shade-глифов).
 Спека: docs/tui/specs/2026-07-05-context-gradient-meter-design.md.
 """
+
 from __future__ import annotations
 
 from rich.style import Style
@@ -61,6 +62,11 @@ def render_context_meter(chars: int, threshold: int) -> Text | None:
 
     t = Text()
     for i, ch in enumerate(cells):
-        bold = ch != " " and i >= pct_start and pct > 90   # проценты жирным при кризисе
-        t.append(ch, style=Style(color=_WHITE, bgcolor=_cell_bg(i, filled), bold=bold))
+        bold = (
+            ch != " " and i >= pct_start and pct > 90
+        )  # проценты жирным при кризисе
+        t.append(
+            ch,
+            style=Style(color=_WHITE, bgcolor=_cell_bg(i, filled), bold=bold),
+        )
     return t

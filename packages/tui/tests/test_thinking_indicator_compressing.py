@@ -1,4 +1,5 @@
 """ThinkingIndicator: состояние compressing → фикс-текст «сжимаю контекст…»."""
+
 from gc_tui.widgets.thinking_indicator import ThinkingIndicator
 
 

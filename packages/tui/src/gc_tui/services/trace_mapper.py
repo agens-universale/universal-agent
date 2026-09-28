@@ -1,4 +1,5 @@
 """raw message dict → TraceEvent (§3 спеки)."""
+
 from __future__ import annotations
 
 import json
@@ -8,7 +9,6 @@ from typing import Any, Optional
 from gc_tui.models import TraceEvent
 from gc_tui.services.tool_identity import tool_id
 
-
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
 # модель цитирует/обсуждает think-теги внутри рассуждения (рассогласованные/
@@ -17,7 +17,9 @@ _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Вторая ветка (<think>.*) — если </think> нет вовсе (модель не закрыла тег),
 # режем до конца строки (зеркалит stream_sink._THINK_RE), иначе сырое рассуждение
 # течёт в трейс. Порядок важен: закрытый спан матчим первым.
-_THINK_BLOCK_RE = re.compile(r"<think>.*</think>|<think>.*", re.DOTALL | re.IGNORECASE)
+_THINK_BLOCK_RE = re.compile(
+    r"<think>.*</think>|<think>.*", re.DOTALL | re.IGNORECASE
+)
 _SUMMARY_TAG_RE = re.compile(r"<summary[^>]*>(.*?)</summary>", re.DOTALL)
 _SUMMARIZED_PREFIX_RE = re.compile(
     r"^Summarized context from previous dialogue\.\s*", re.IGNORECASE
@@ -136,10 +138,15 @@ def map_message(
         if "display_content" in msg:
             disp = (msg.get("display_content") or "").strip()
             if not disp:
-                return None                      # mid-run доставка → реплику не рисуем
+                return None  # mid-run доставка → реплику не рисуем
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="user",
-                title="", summary=disp, full_payload=msg, message_id=mid,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="user",
+                title="",
+                summary=disp,
+                full_payload=msg,
+                message_id=mid,
             )
         content = msg.get("content")
         if isinstance(content, str) and content.strip():
@@ -148,7 +155,10 @@ def map_message(
             # error_message — показываем (бэкенд-ошибки нужны пользователю).
             # Остальные (bounce, summary, context) — hidden=True: kind=system
             # учитывается polling-логикой (thinking_indicator), но в трейс не рендерится.
-            if stripped.startswith("<technical") and "</technical>" in stripped:
+            if (
+                stripped.startswith("<technical")
+                and "</technical>" in stripped
+            ):
                 m = _TECHNICAL_TAG_RE.search(stripped)
                 inner_text = (m.group(1).strip() if m else stripped)[:120]
                 tech_type = ""
@@ -159,9 +169,13 @@ def map_message(
                     # Ошибки бэкенда — заметная красная строка (см. _render_event).
                     cid = msg.get("call_id")
                     return TraceEvent(
-                        no=no, event_ts_utc_iso=ts, kind="error_msg",
-                        title="!", summary=inner_text,
-                        full_payload=msg, message_id=mid,
+                        no=no,
+                        event_ts_utc_iso=ts,
+                        kind="error_msg",
+                        title="!",
+                        summary=inner_text,
+                        full_payload=msg,
+                        message_id=mid,
                         call_id=cid if isinstance(cid, str) else None,
                     )
                 if tech_type == "dialog_summary":
@@ -169,33 +183,50 @@ def map_message(
                     # Берём ПОЛНЫЙ inner (не обрезанный [:120]).
                     full_inner = m.group(1) if m else stripped
                     return TraceEvent(
-                        no=no, event_ts_utc_iso=ts, kind="summary",
-                        title="summary", summary="контекст сжат",
+                        no=no,
+                        event_ts_utc_iso=ts,
+                        kind="summary",
+                        title="summary",
+                        summary="контекст сжат",
                         summary_content=_clean_summary(full_inner),
-                        full_payload=msg, message_id=mid, hidden=False,
+                        full_payload=msg,
+                        message_id=mid,
+                        hidden=False,
                     )
                 # bounce / current_context — служебное, скрываем.
                 return TraceEvent(
-                    no=no, event_ts_utc_iso=ts, kind="system",
-                    title="policy", summary=f"[policy] {inner_text}",
-                    full_payload=msg, message_id=mid,
+                    no=no,
+                    event_ts_utc_iso=ts,
+                    kind="system",
+                    title="policy",
+                    summary=f"[policy] {inner_text}",
+                    full_payload=msg,
+                    message_id=mid,
                     hidden=True,
                 )
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="user",
-                title="", summary=stripped,
-                full_payload=msg, message_id=mid,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="user",
+                title="",
+                summary=stripped,
+                full_payload=msg,
+                message_id=mid,
             )
         return None
 
-    # AGENT (text)
+    # AGENT (text)  # noqa: ERA001  # описание формата, не выключенный код
     if role == "assistant":
         text = _extract_assistant_text(msg.get("content"))
         if text:
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="agent",
-                title="", summary=text,
-                full_payload=msg, message_id=mid,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=text,
+                full_payload=msg,
+                message_id=mid,
             )
         return None
 
@@ -208,15 +239,23 @@ def map_message(
     # Special tool-event handling (must precede generic function_call mapping).
     name = msg.get("name") if isinstance(msg.get("name"), str) else None
     name = tool_id(name)
-    call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    call_id = (
+        msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    )
 
     # SKIPPED turn_finish (processing_responses.partition_work_then_finish): лишний
     # finish после первого или все finish после ask_human. Ни synthetic
     # skip-output (`skipped: true`), ни парный `function_call` не рендерим —
     # служебный статус, не ошибка. В data_*.jsonl и raw-payload всё остаётся.
-    if typ == "function_call_output" and _output_marked_skipped(msg.get("output")):
+    if typ == "function_call_output" and _output_marked_skipped(
+        msg.get("output")
+    ):
         return None
-    if typ == "function_call" and skipped_call_ids and call_id in skipped_call_ids:
+    if (
+        typ == "function_call"
+        and skipped_call_ids
+        and call_id in skipped_call_ids
+    ):
         return None
 
     # ASK_HUMAN — kind=ask_human, summary=question (TraceScreen mounts banner).
@@ -225,10 +264,15 @@ def map_message(
         question = args.get("question", "")
         if isinstance(question, str) and question.strip():
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="ask_human",
-                title="ask_human", summary=question.strip(),
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name=name,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="ask_human",
+                title="ask_human",
+                summary=question.strip(),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
             )
         return None
 
@@ -243,10 +287,15 @@ def map_message(
             if isinstance(comment, str) and comment.strip():
                 payload["_submit_comment"] = comment.strip()
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="agent",
-                title="", summary=report.strip(),
-                full_payload=payload, message_id=mid,
-                call_id=call_id, tool_name=name,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=report.strip(),
+                full_payload=payload,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
             )
         return None
 
@@ -257,10 +306,15 @@ def map_message(
         answer = args.get("answer") or ""
         if isinstance(answer, str) and answer.strip():
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="agent",
-                title="", summary=answer.strip(),
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name="intermediate_reply",
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="agent",
+                title="",
+                summary=answer.strip(),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name="intermediate_reply",
             )
         return None
 
@@ -269,13 +323,19 @@ def map_message(
     # call-строку, статус сбоя виден механикой (не врём «чек-лист очищен»).
     if typ == "function_call" and name == "session_todo":
         from gc_core.tools.subagents.progress import todo_items_from_arguments
+
         _todo_items = todo_items_from_arguments(msg.get("arguments"))
         if _todo_items is not None:
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="todo",
-                title="session_todo", summary=_todo_checklist_summary(_todo_items),
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name=name,
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="todo",
+                title="session_todo",
+                summary=_todo_checklist_summary(_todo_items),
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name=name,
             )
 
     # INTERMEDIATE_REPLY output — глушим (машинный статус не нужен). Как и у
@@ -290,7 +350,10 @@ def map_message(
                 _ir_data = json.loads(_ir_out)
             except json.JSONDecodeError:
                 _ir_data = None
-            if isinstance(_ir_data, dict) and tool_id(_ir_data.get("tool")) == "intermediate_reply":
+            if (
+                isinstance(_ir_data, dict)
+                and tool_id(_ir_data.get("tool")) == "intermediate_reply"
+            ):
                 return None
 
     # SESSION_TODO output — успешный глушим (машинный статус не нужен; чек-лист
@@ -305,7 +368,8 @@ def map_message(
             except json.JSONDecodeError:
                 _st_data = None
         _st_is_todo = name == "session_todo" or (
-            isinstance(_st_data, dict) and tool_id(_st_data.get("tool")) == "session_todo"
+            isinstance(_st_data, dict)
+            and tool_id(_st_data.get("tool")) == "session_todo"
         )
         if _st_is_todo and not (
             isinstance(_st_data, dict) and _st_data.get("ok") is False
@@ -329,7 +393,10 @@ def map_message(
                 _data = json.loads(_out)
             except json.JSONDecodeError:
                 _data = None
-            if isinstance(_data, dict) and tool_id(_data.get("tool")) == "submit_solution":
+            if (
+                isinstance(_data, dict)
+                and tool_id(_data.get("tool")) == "submit_solution"
+            ):
                 return None
 
     # ASK_HUMAN output — Фикс A. Идентификация в двух режимах (как в
@@ -349,22 +416,35 @@ def map_message(
                     _data = json.loads(_out)
                 except json.JSONDecodeError:
                     _data = None
-                if isinstance(_data, dict) and tool_id(_data.get("tool")) == "ask_human":
+                if (
+                    isinstance(_data, dict)
+                    and tool_id(_data.get("tool")) == "ask_human"
+                ):
                     is_ask_human = True
         if is_ask_human:
             response_text = _extract_ask_human_response(msg.get("output"))
             if response_text:
                 return TraceEvent(
-                    no=no, event_ts_utc_iso=ts, kind="user",
-                    title="", summary=response_text,
-                    full_payload=msg, message_id=mid,
-                    call_id=call_id, tool_name="ask_human",
+                    no=no,
+                    event_ts_utc_iso=ts,
+                    kind="user",
+                    title="",
+                    summary=response_text,
+                    full_payload=msg,
+                    message_id=mid,
+                    call_id=call_id,
+                    tool_name="ask_human",
                 )
             return TraceEvent(
-                no=no, event_ts_utc_iso=ts, kind="system",
-                title="ask_human", summary="Агент спрашивал (без ответа)",
-                full_payload=msg, message_id=mid,
-                call_id=call_id, tool_name="ask_human",
+                no=no,
+                event_ts_utc_iso=ts,
+                kind="system",
+                title="ask_human",
+                summary="Агент спрашивал (без ответа)",
+                full_payload=msg,
+                message_id=mid,
+                call_id=call_id,
+                tool_name="ask_human",
             )
 
     # function_call / function_call_output — Task 2.6
@@ -472,13 +552,20 @@ def _arg_summary(name: str, args: dict) -> str:
         p = args.get("path")
         return f"path={p!r}" if isinstance(p, str) else ""
     if name in ("write_to_file", "append_to_file"):
-        p = args.get("path"); c = args.get("content", "")
+        p = args.get("path")
+        c = args.get("content", "")
         clen = len(c) if isinstance(c, str) else 0
-        return f"path={p!r}, content=<{clen} chars>" if isinstance(p, str) else ""
+        return (
+            f"path={p!r}, content=<{clen} chars>" if isinstance(p, str) else ""
+        )
     if name == "search_and_replace":
-        p = args.get("path"); o = args.get("old", ""); n = args.get("new", "")
-        return (f"path={p!r}, old=<{len(o) if isinstance(o, str) else 0} chars>, "
-                f"new=<{len(n) if isinstance(n, str) else 0} chars>")
+        p = args.get("path")
+        o = args.get("old", "")
+        n = args.get("new", "")
+        return (
+            f"path={p!r}, old=<{len(o) if isinstance(o, str) else 0} chars>, "
+            f"new=<{len(n) if isinstance(n, str) else 0} chars>"
+        )
     if name == "search_files":
         q = args.get("query") or args.get("pattern")
         return f"query={q!r}" if isinstance(q, str) else ""
@@ -522,6 +609,7 @@ def _summarize_output(output: Any, *, error: bool) -> str:
     # Единый unwrap: голый dict, double-encoded, list-обёртка, stored_tool_output
     # envelope (с partial-parser для truncated). Та же логика что у preview.
     from gc_tui.services.tool_preview import unwrap_tool_output_dict
+
     data = unwrap_tool_output_dict(output)
     if data is None:
         # output вообще не JSON — просто короткий plain fallback.
@@ -546,7 +634,11 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         err = data.get("error") or data.get("message") or ""
         # error может быть dict {type, message, ...} — извлекаем message/type.
         if isinstance(err, dict):
-            err = err.get("message") or err.get("type") or json.dumps(err, ensure_ascii=False)
+            err = (
+                err.get("message")
+                or err.get("type")
+                or json.dumps(err, ensure_ascii=False)
+            )
         elif isinstance(err, str) and data.get("message"):
             # Плоский код ошибки (напр. internal_tool_error) сам по себе ничего
             # не сообщает, а человекочитаемый текст лежит рядом в "message".
@@ -594,16 +686,23 @@ def _map_function_event(
     typ = msg.get("type")
     name = msg.get("name") if isinstance(msg.get("name"), str) else None
     name = tool_id(name)
-    call_id = msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    call_id = (
+        msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
+    )
 
     if typ == "function_call":
         args = coerce_args(msg.get("arguments"))
         summary = f"{name or '<tool>'}({_arg_summary(name or '', args)})"
         return TraceEvent(
-            no=no, event_ts_utc_iso=ts, kind="call",
-            title=name or "", summary=summary,
-            full_payload=msg, message_id=mid,
-            call_id=call_id, tool_name=name,
+            no=no,
+            event_ts_utc_iso=ts,
+            kind="call",
+            title=name or "",
+            summary=summary,
+            full_payload=msg,
+            message_id=mid,
+            call_id=call_id,
+            tool_name=name,
         )
 
     if typ == "function_call_output":
@@ -612,10 +711,15 @@ def _map_function_event(
         kind = "error" if is_err else "result"
         summary = _summarize_output(output, error=is_err)
         return TraceEvent(
-            no=no, event_ts_utc_iso=ts, kind=kind,
-            title="", summary=summary,
-            full_payload=msg, message_id=mid,
-            call_id=call_id, tool_name=name,
+            no=no,
+            event_ts_utc_iso=ts,
+            kind=kind,
+            title="",
+            summary=summary,
+            full_payload=msg,
+            message_id=mid,
+            call_id=call_id,
+            tool_name=name,
         )
 
     return None

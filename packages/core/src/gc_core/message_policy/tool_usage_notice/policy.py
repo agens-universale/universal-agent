@@ -6,11 +6,18 @@ from gc_core.config_modules.message_notice import (
     ToolUsageNoticeRule,
     tool_usage_notice_policy_enabled,
 )
-from gc_core.message_policy.user_message_policy import wrap_technical_user_content, TECHNICAL_TYPE_CURRENT_CONTEXT
-from gc_core.utils.generate_message_id import generate_msg_id_sha256 as generate_message_id
+from gc_core.message_policy.user_message_policy import (
+    TECHNICAL_TYPE_CURRENT_CONTEXT,
+    wrap_technical_user_content,
+)
+from gc_core.utils.generate_message_id import (
+    generate_msg_id_sha256 as generate_message_id,
+)
 
 
-def batch_used_tool(step_messages: list[dict[str, Any]], tool_name: str) -> bool:
+def batch_used_tool(
+    step_messages: list[dict[str, Any]], tool_name: str
+) -> bool:
     target = str(tool_name or "").strip()
     if not target:
         return False
@@ -42,7 +49,9 @@ def _get_tool_usage_notice_counters(state: Any) -> dict[str, int]:
     return out
 
 
-def _set_tool_usage_notice_counters(state: Any, counters: dict[str, int]) -> None:
+def _set_tool_usage_notice_counters(
+    state: Any, counters: dict[str, int]
+) -> None:
     state.tool_usage_notice_cnt = dict(counters)
 
 
@@ -58,7 +67,9 @@ def update_tool_usage_notice_after_persist(
     counters = _get_tool_usage_notice_counters(state)
     for rule in rules:
         tool_name = rule.tool_name
-        if tool_name in reset_tool_names or batch_used_tool(step_messages, tool_name):
+        if tool_name in reset_tool_names or batch_used_tool(
+            step_messages, tool_name
+        ):
             counters[tool_name] = 0
             continue
         counters[tool_name] = counters.get(tool_name, 0) + 1
@@ -106,7 +117,9 @@ def collect_tool_usage_notices(
     return emitted
 
 
-def build_subagent_thread_memory_bootstrap_message(registers: dict[str, str] | None) -> str:
+def build_subagent_thread_memory_bootstrap_message(
+    registers: dict[str, str] | None,
+) -> str:
     reg = registers if isinstance(registers, dict) else {}
     non_empty = {
         name: content
@@ -168,4 +181,6 @@ def wrap_thread_memory_technical_user_message(
 
 
 def wrap_tool_usage_notice_user_message(text: str) -> dict[str, Any]:
-    return wrap_thread_memory_technical_user_message(text, message_id_suffix="tool_usage_notice")
+    return wrap_thread_memory_technical_user_message(
+        text, message_id_suffix="tool_usage_notice"
+    )

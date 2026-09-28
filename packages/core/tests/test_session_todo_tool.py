@@ -3,6 +3,7 @@ import json
 from gc_core.states import SharedStateData, State
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.session.todo import SessionTodo
+from gc_testkit.helpers.tool_ctx import CallableTool
 
 
 def _state() -> State:
@@ -28,19 +29,23 @@ ITEMS = [
 
 def test_write_replaces_list_in_shared_state():
     state = _state()
-    tool = SessionTodo(state=state)
+    tool = CallableTool(SessionTodo(state=state))
     out = json.loads(tool(todos=list(ITEMS)))
     assert out["ok"] is True
     assert state.shared.session_todo == ITEMS
     # replace-семантика: второй вызов замещает целиком
-    out2 = json.loads(tool(todos=[{"content": "Новый план", "status": "pending"}]))
+    out2 = json.loads(
+        tool(todos=[{"content": "Новый план", "status": "pending"}])
+    )
     assert out2["ok"] is True
-    assert state.shared.session_todo == [{"content": "Новый план", "status": "pending"}]
+    assert state.shared.session_todo == [
+        {"content": "Новый план", "status": "pending"}
+    ]
 
 
 def test_response_contains_counts():
     state = _state()
-    out = json.loads(SessionTodo(state=state)(todos=list(ITEMS)))
+    out = json.loads(CallableTool(SessionTodo(state=state))(todos=list(ITEMS)))
     assert out["count"] == 3
     assert out["completed"] == 1
     assert out["in_progress"] == 1
@@ -49,7 +54,7 @@ def test_response_contains_counts():
 
 def test_empty_list_clears():
     state = _state()
-    tool = SessionTodo(state=state)
+    tool = CallableTool(SessionTodo(state=state))
     tool(todos=list(ITEMS))
     out = json.loads(tool(todos=[]))
     assert out["ok"] is True
@@ -59,7 +64,7 @@ def test_empty_list_clears():
 
 def test_invalid_status_is_error_and_state_untouched():
     state = _state()
-    tool = SessionTodo(state=state)
+    tool = CallableTool(SessionTodo(state=state))
     tool(todos=list(ITEMS))
     out = json.loads(tool(todos=[{"content": "x", "status": "done"}]))
     assert out["ok"] is False
@@ -69,20 +74,24 @@ def test_invalid_status_is_error_and_state_untouched():
 
 def test_empty_content_is_error():
     state = _state()
-    out = json.loads(SessionTodo(state=state)(todos=[{"content": "  ", "status": "pending"}]))
+    out = json.loads(
+        CallableTool(SessionTodo(state=state))(
+            todos=[{"content": "  ", "status": "pending"}]
+        )
+    )
     assert out["ok"] is False
     assert out["error"]["type"] == "invalid_item"
 
 
 def test_todos_not_list_is_error():
     state = _state()
-    out = json.loads(SessionTodo(state=state)(todos="1. do x"))
+    out = json.loads(CallableTool(SessionTodo(state=state))(todos="1. do x"))
     assert out["ok"] is False
     assert out["error"]["type"] == "invalid_todos"
 
 
 def test_no_state_is_error():
-    out = json.loads(SessionTodo()(todos=[]))
+    out = json.loads(CallableTool(SessionTodo())(todos=[]))
     assert out["ok"] is False
     assert out["error"]["type"] == "no_state"
 

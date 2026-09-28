@@ -42,13 +42,13 @@ def _validate_tool_arguments(
         parts.append(f"path='{path}': {err.message}")
 
     message = (
-        f"Arguments for tool '{tool_name}' do not match its schema. "
-        f"Details:\n" + "\n".join(parts)
+        f"Arguments for tool '{tool_name}' do not match its schema. Details:\n"
+        + "\n".join(parts)
     )
     raise ValueError(message)
 
 
 __all__ = [
-    "format_mcp_tool_result",
     "_validate_tool_arguments",
+    "format_mcp_tool_result",
 ]

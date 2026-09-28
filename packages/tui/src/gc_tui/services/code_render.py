@@ -8,6 +8,7 @@
 Владелец «как код выглядит в трейсе». Экран события (json_payload) имеет свой
 путь и здесь не участвует.
 """
+
 from __future__ import annotations
 
 from rich.style import Style

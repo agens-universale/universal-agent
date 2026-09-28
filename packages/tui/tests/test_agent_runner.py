@@ -1,9 +1,9 @@
 """agent_runner: бэкенд-агностичная обёртка над AgentExecutor."""
+
 import threading
 import time
 
 import pytest
-
 from gc_tui.services.agent_runner import AgentRunner
 
 
@@ -15,16 +15,30 @@ class _FakeExecutor:
         self.stopped = False
         self.messages_added: list[dict] = []
         self._event = threading.Event()
-        self.started = threading.Event()   # выставляется, когда run реально начался
+        self.started = (
+            threading.Event()
+        )  # выставляется, когда run реально начался
 
-    def run(self, messages, *, thread_id, start_new_thread=False,
-            system=None, verbose=None, discard_writes_after_stop=False,
-            message_ids=None, display_contents=None, skills_loaded=None):
+    async def arun(
+        self,
+        messages,
+        *,
+        thread_id,
+        start_new_thread=False,
+        system=None,
+        verbose=None,
+        discard_writes_after_stop=False,
+        message_ids=None,
+        display_contents=None,
+        skills_loaded=None,
+    ):
         self.run_called_with = {
-            "messages": messages, "thread_id": thread_id,
-            "start_new_thread": start_new_thread, "system": system,
+            "messages": messages,
+            "thread_id": thread_id,
+            "start_new_thread": start_new_thread,
+            "system": system,
         }
-        self.started.set()   # детерминированный сигнал вместо sleep в тестах
+        self.started.set()  # детерминированный сигнал вместо sleep в тестах
         self._event.wait(timeout=2.0)
         return None
 
@@ -40,7 +54,7 @@ def test_runner_starts_in_background_and_stops():
     fake = _FakeExecutor()
     runner = AgentRunner(executor=fake)
     runner.start(query="привет", thread_id="t1")
-    assert fake.started.wait(2.0)          # ждём реального старта, без гонки sleep
+    assert fake.started.wait(2.0)  # ждём реального старта, без гонки sleep
     assert fake.run_called_with is not None
     assert fake.run_called_with["messages"] == ["привет"]
     assert fake.run_called_with["thread_id"] == "t1"
@@ -77,7 +91,7 @@ def test_submit_ask_human_reply_terminates_real_read_loop():
     captured = {}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             # Воспроизводим точную логику ask_human.__call__ read-loop
             lines = []
             while True:
@@ -86,8 +100,12 @@ def test_submit_ask_human_reply_terminates_real_read_loop():
                     break
                 lines.append(line)
             captured["response"] = "\n".join(lines).strip()
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     runner = AgentRunner(executor=_Fake())
     runner.start(query="hi", thread_id="t1")
@@ -103,7 +121,7 @@ def test_cancel_ask_human_yields_empty_response():
     captured = {}
 
     class _Fake:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             lines = []
             while True:
                 line = input()
@@ -111,8 +129,12 @@ def test_cancel_ask_human_yields_empty_response():
                     break
                 lines.append(line)
             captured["response"] = "\n".join(lines).strip()
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     runner = AgentRunner(executor=_Fake())
     runner.start(query="hi", thread_id="t1")
@@ -126,13 +148,26 @@ def test_start_passes_message_id_as_message_ids():
     seen = []
 
     class _Stub:
-        def run(self, messages, *, thread_id, start_new_thread=False, system=None,
-                verbose=None, discard_writes_after_stop=False, message_ids=None,
-                display_contents=None, skills_loaded=None):
+        async def arun(
+            self,
+            messages,
+            *,
+            thread_id,
+            start_new_thread=False,
+            system=None,
+            verbose=None,
+            discard_writes_after_stop=False,
+            message_ids=None,
+            display_contents=None,
+            skills_loaded=None,
+        ):
             seen.append(message_ids)
 
-        def stop_run(self): pass
-        def add_message(self, m): pass
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     runner = AgentRunner(executor=_Stub())
     runner.start(query="hi", thread_id="t1", system="cli", message_id="m_abc")
@@ -146,17 +181,29 @@ async def test_runner_start_passes_discard_writes_after_stop_kwarg():
     from gc_tui.services.agent_runner import AgentRunner
 
     calls = []
+
     class _StubExec:
-        def run(self, messages, *, thread_id, start_new_thread, system,
-                discard_writes_after_stop=False, message_ids=None,
-                display_contents=None, skills_loaded=None):
-            calls.append({
-                "messages": messages,
-                "thread_id": thread_id,
-                "start_new_thread": start_new_thread,
-                "system": system,
-                "discard_writes_after_stop": discard_writes_after_stop,
-            })
+        async def arun(
+            self,
+            messages,
+            *,
+            thread_id,
+            start_new_thread,
+            system,
+            discard_writes_after_stop=False,
+            message_ids=None,
+            display_contents=None,
+            skills_loaded=None,
+        ):
+            calls.append(
+                {
+                    "messages": messages,
+                    "thread_id": thread_id,
+                    "start_new_thread": start_new_thread,
+                    "system": system,
+                    "discard_writes_after_stop": discard_writes_after_stop,
+                }
+            )
 
     runner = AgentRunner(executor=_StubExec())
     started = runner.start(query="hello", thread_id="t1", system="cli")
@@ -172,10 +219,14 @@ def test_run_exception_calls_on_error_with_exception():
     called = threading.Event()
 
     class _Boom:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             raise RuntimeError("упало в run")
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     def on_error(exc):
         seen.append(exc)
@@ -199,12 +250,16 @@ def test_marked_stopped_skips_on_error():
     release = threading.Event()
 
     class _BoomAfterHold:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             entered.set()
             assert release.wait(timeout=5.0)
             raise RuntimeError("хвост после replace")
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     def on_error(exc):
         seen.append(exc)
@@ -227,12 +282,16 @@ def test_stop_requested_skips_on_error():
     release = threading.Event()
 
     class _BoomAfterHold:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             entered.set()
             assert release.wait(timeout=5.0)
             raise RuntimeError("ошибка во время stop")
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     runner = AgentRunner(
         executor=_BoomAfterHold(),
@@ -253,10 +312,14 @@ def test_stop_during_factory_build_skips_run():
     run_calls: list = []
 
     class _Ex:
-        def run(self, messages, *, thread_id, **kw):
+        async def arun(self, messages, *, thread_id, **kw):
             run_calls.append(messages)
-        def stop_run(self): pass
-        def add_message(self, m): pass
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
 
     def factory():
         factory_entered.set()
@@ -276,10 +339,12 @@ def test_stop_during_factory_build_skips_run():
 
 def test_ensure_executor_build_once():
     from gc_tui.services.agent_runner import AgentRunner
+
     calls = {"n": 0}
 
     class _Ex:
-        def stop_run(self): pass
+        def stop_run(self):
+            pass
 
     def factory():
         calls["n"] += 1
@@ -293,13 +358,20 @@ def test_ensure_executor_build_once():
 
 def test_warm_builds_executor_in_background():
     import time
+
     from gc_tui.services.agent_runner import AgentRunner
+
     calls = {"n": 0}
 
     class _Ex:
-        def stop_run(self): pass
+        def stop_run(self):
+            pass
 
-    r = AgentRunner(executor_factory=lambda: (calls.__setitem__("n", calls["n"] + 1) or _Ex()))
+    r = AgentRunner(
+        executor_factory=lambda: (
+            calls.__setitem__("n", calls["n"] + 1) or _Ex()
+        )
+    )
     r.warm()
     for _ in range(100):
         if r._executor is not None:
@@ -311,13 +383,20 @@ def test_warm_builds_executor_in_background():
 
 def test_warm_idempotent():
     import time
+
     from gc_tui.services.agent_runner import AgentRunner
+
     calls = {"n": 0}
 
     class _Ex:
-        def stop_run(self): pass
+        def stop_run(self):
+            pass
 
-    r = AgentRunner(executor_factory=lambda: (calls.__setitem__("n", calls["n"] + 1) or _Ex()))
+    r = AgentRunner(
+        executor_factory=lambda: (
+            calls.__setitem__("n", calls["n"] + 1) or _Ex()
+        )
+    )
     r.warm()
     for _ in range(100):
         if r._executor is not None:
@@ -332,11 +411,18 @@ def test_warm_idempotent():
 # confirm-канал (T1) — ConfirmChoice: once|session|deny
 # ---------------------------------------------------------------------------
 
+
 class _SimpleStub:
     """Минимальный stub-executor для тестов confirm-канала (без блокирующего run)."""
-    def run(self, messages, *, thread_id, **kw): pass
-    def stop_run(self): pass
-    def add_message(self, m): pass
+
+    async def arun(self, messages, *, thread_id, **kw):
+        pass
+
+    def stop_run(self):
+        pass
+
+    def add_message(self, m):
+        pass
 
 
 def test_confirm_submit_allow_remember_returns_allow_remember():
@@ -347,6 +433,7 @@ def test_confirm_submit_allow_remember_returns_allow_remember():
         def _reply():
             time.sleep(0.05)
             runner.submit_confirm_reply("allow_remember")
+
         threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)
@@ -362,6 +449,7 @@ def test_confirm_submit_allow_once_returns_allow_once():
         def _reply():
             time.sleep(0.05)
             runner.submit_confirm_reply("allow_once")
+
         threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)
@@ -377,6 +465,7 @@ def test_confirm_submit_deny_remember_returns_deny_remember():
         def _reply():
             time.sleep(0.05)
             runner.submit_confirm_reply("deny_remember")
+
         threading.Thread(target=_reply, daemon=True).start()
 
     confirm = runner.make_tui_confirm(present)

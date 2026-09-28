@@ -1,9 +1,9 @@
 """Harbor walk B1: private 50M channel, fail-closed on ceiling hit."""
+
 import asyncio
 import threading
 
 import pytest
-
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
@@ -45,7 +45,7 @@ def loop_in_thread():
     t.join(timeout=2)
 
 
-def test_walk_uses_elevated_cap_not_tool_60k(loop_in_thread):
+async def test_walk_uses_elevated_cap_not_tool_60k(loop_in_thread):
     env = FakeEnv()
     # Exceed tool 60k but stay under walk 50M.
     lines = [f"dir/sub/f{i:05d}_long_name_padding.txt\tf" for i in range(2500)]
@@ -59,7 +59,7 @@ def test_walk_uses_elevated_cap_not_tool_60k(loop_in_thread):
 
     env.exec = big_walk
     backend = HarborBackend(env, loop_in_thread)
-    rows = backend.walk("/work")
+    rows = await backend.walk("/work")
     assert len(rows) == 2500
     assert rows[0][0].startswith("dir/sub/f00000")
     assert rows[0][1] is False
@@ -71,12 +71,12 @@ def test_walk_uses_elevated_cap_not_tool_60k(loop_in_thread):
         return FakeExecResult(stdout="Y" * 100_000, return_code=0)
 
     env.exec = huge_tool
-    res = backend.exec("echo y")
+    res = await backend.aexec("echo y")
     assert len(res.stdout) == DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
     assert res.stdout_hit_capture_cap is True
 
 
-def test_walk_hit_ceiling_raises(loop_in_thread):
+async def test_walk_hit_ceiling_raises(loop_in_thread):
     env = FakeEnv()
     ceiling = 1000
     body = "a" * (ceiling + 50)
@@ -85,16 +85,14 @@ def test_walk_hit_ceiling_raises(loop_in_thread):
         return FakeExecResult(stdout=body, return_code=0)
 
     env.exec = over
-    backend = HarborBackend(
-        env, loop_in_thread, walk_output_max_chars=ceiling
-    )
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=ceiling)
     with pytest.raises(WalkOutputTooLargeError) as ei:
-        backend.walk("/work")
+        await backend.walk("/work")
     assert ei.value.ceiling_chars == ceiling
     assert "/work" in str(ei.value)
 
 
-def test_listdir_hit_ceiling_raises(loop_in_thread):
+async def test_listdir_hit_ceiling_raises(loop_in_thread):
     env = FakeEnv()
     ceiling = 500
     body = "x\tf\n" * 200
@@ -103,14 +101,12 @@ def test_listdir_hit_ceiling_raises(loop_in_thread):
         return FakeExecResult(stdout=body, return_code=0)
 
     env.exec = over
-    backend = HarborBackend(
-        env, loop_in_thread, walk_output_max_chars=ceiling
-    )
+    backend = HarborBackend(env, loop_in_thread, walk_output_max_chars=ceiling)
     with pytest.raises(WalkOutputTooLargeError):
-        backend.listdir("/work")
+        await backend.listdir("/work")
 
 
-def test_walk_parse_ok_under_ceiling(loop_in_thread):
+async def test_walk_parse_ok_under_ceiling(loop_in_thread):
     env = FakeEnv()
 
     async def ok(command, **kw):
@@ -118,4 +114,4 @@ def test_walk_parse_ok_under_ceiling(loop_in_thread):
 
     env.exec = ok
     backend = HarborBackend(env, loop_in_thread)
-    assert backend.walk("/work") == [("src", True), ("src/a.py", False)]
+    assert await backend.walk("/work") == [("src", True), ("src/a.py", False)]

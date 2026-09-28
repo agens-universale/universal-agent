@@ -5,17 +5,24 @@ import sys
 from types import SimpleNamespace
 
 import pytest
-
-from gc_core.tools import apply_tool, build_tools_data
+from gc_core.tools import aapply_tool, abuild_tools_data
 
 
 @pytest.fixture(autouse=True)
 def _ensure_real_tools_module():
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
     yield
-    stale = [name for name in sys.modules if name == "gc_core.tools" or name.startswith("gc_core.tools.")]
+    stale = [
+        name
+        for name in sys.modules
+        if name == "gc_core.tools" or name.startswith("gc_core.tools.")
+    ]
     for name in stale:
         sys.modules.pop(name, None)
 
@@ -36,15 +43,15 @@ def _inject_config(**overrides):
     return cfg
 
 
-def test_apply_tool_session_think_reason_only_ok_with_inject():
+async def test_apply_tool_session_think_reason_only_ok_with_inject():
     """session_think({reason: long text}) with inject → ok; content not lost after strip."""
-    tools_data, _, _, _ = build_tools_data(_inject_config())
+    tools_data, _, _, _ = await abuild_tools_data(_inject_config())
     ctx = SimpleNamespace(
         config_dict=_inject_config(),
         tools_data=tools_data,
         logger=None,
     )
-    raw = apply_tool(
+    raw = await aapply_tool(
         tool_name="session_think",
         arguments=json.dumps(
             {"reason": "Need to weigh trade-offs before editing the parser."}
@@ -56,14 +63,14 @@ def test_apply_tool_session_think_reason_only_ok_with_inject():
     assert data.get("error") is None
 
 
-def test_apply_tool_session_think_explicit_thoughts_unchanged():
-    tools_data, _, _, _ = build_tools_data(_inject_config())
+async def test_apply_tool_session_think_explicit_thoughts_unchanged():
+    tools_data, _, _, _ = await abuild_tools_data(_inject_config())
     ctx = SimpleNamespace(
         config_dict=_inject_config(),
         tools_data=tools_data,
         logger=None,
     )
-    raw = apply_tool(
+    raw = await aapply_tool(
         tool_name="session_think",
         arguments=json.dumps(
             {
@@ -78,14 +85,14 @@ def test_apply_tool_session_think_explicit_thoughts_unchanged():
     assert data.get("error") is None
 
 
-def test_apply_tool_session_think_empty_after_strip_still_fails():
-    tools_data, _, _, _ = build_tools_data(_inject_config())
+async def test_apply_tool_session_think_empty_after_strip_still_fails():
+    tools_data, _, _, _ = await abuild_tools_data(_inject_config())
     ctx = SimpleNamespace(
         config_dict=_inject_config(),
         tools_data=tools_data,
         logger=None,
     )
-    raw = apply_tool(
+    raw = await aapply_tool(
         tool_name="session_think",
         arguments=json.dumps({"reason": "   "}),
         ctx=ctx,

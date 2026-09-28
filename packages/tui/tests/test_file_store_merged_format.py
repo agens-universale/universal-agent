@@ -3,15 +3,11 @@
 Тест не мокает формат вручную — он вызывает ядро thread_store для записи,
 затем проверяет, что FileTaskStore корректно читает результат.
 """
+
 from __future__ import annotations
 
-import json
-
-import pytest
-
-from gc_core.thread_store import ThreadSession, append_new_thread_messages, save_thread_meta, load_thread_meta
+from gc_core.thread_store import ThreadSession, save_thread_meta
 from gc_tui.services.stores.file_store import FileTaskStore
-
 
 _SYSTEM = "cli"
 _TID = "roundtrip01"
@@ -35,6 +31,7 @@ def _make_session(threads_dir: str) -> ThreadSession:
 # ---------------------------------------------------------------------------
 # 1. list_tasks — meta-поля
 # ---------------------------------------------------------------------------
+
 
 def test_file_store_list_tasks_reads_core_meta(tmp_path):
     """list_tasks() понимает мета, сохранённое через save_thread_meta."""
@@ -68,13 +65,27 @@ def test_file_store_list_tasks_reads_core_meta(tmp_path):
 def test_file_store_list_tasks_reads_token_usage(tmp_path):
     """list_tasks() прокидывает meta.token_usage в TaskSummary."""
     threads_dir = str(tmp_path)
-    usage = {"by_category": {"main": {"input": 100, "output": 20, "cached": 0,
-                                      "calls": 1, "missing_usage_calls": 0}}}
-    save_thread_meta(threads_dir, _SYSTEM, _TID, {
-        "thread_id": _TID,
-        "messages_count": 1,
-        "token_usage": usage,
-    })
+    usage = {
+        "by_category": {
+            "main": {
+                "input": 100,
+                "output": 20,
+                "cached": 0,
+                "calls": 1,
+                "missing_usage_calls": 0,
+            }
+        }
+    }
+    save_thread_meta(
+        threads_dir,
+        _SYSTEM,
+        _TID,
+        {
+            "thread_id": _TID,
+            "messages_count": 1,
+            "token_usage": usage,
+        },
+    )
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
     tasks = store.list_tasks()
     assert len(tasks) == 1
@@ -85,7 +96,8 @@ def test_file_store_list_tasks_reads_token_usage(tmp_path):
 # 2. read_all_events — envelope полей (type, seq, payload)
 # ---------------------------------------------------------------------------
 
-def test_file_store_read_all_events_reads_core_data(tmp_path):
+
+async def test_file_store_read_all_events_reads_core_data(tmp_path):
     """read_all_events() правильно читает записи ядра: envelope type/seq/payload."""
     threads_dir = str(tmp_path)
     session = _make_session(threads_dir)
@@ -94,7 +106,7 @@ def test_file_store_read_all_events_reads_core_data(tmp_path):
         {"role": "user", "content": "привет"},
         {"role": "assistant", "content": "хай"},
     ]
-    session.persist_batch(msgs, previous_response_id=None)
+    await session.apersist_batch(msgs, previous_response_id=None)
 
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
     records, cursor = store.read_all_events(_TID)
@@ -120,20 +132,23 @@ def test_file_store_read_all_events_reads_core_data(tmp_path):
 # 3. stream-reset epoch: last_summary_archive_suffix / last_summarized_at
 # ---------------------------------------------------------------------------
 
-def test_file_store_epoch_from_last_summary_archive_suffix(tmp_path):
+
+async def test_file_store_epoch_from_last_summary_archive_suffix(tmp_path):
     """storage_epoch берётся из last_summary_archive_suffix, если есть."""
     threads_dir = str(tmp_path)
     session = _make_session(threads_dir)
 
     msgs = [{"role": "user", "content": "start"}]
-    session.persist_batch(msgs, previous_response_id=None)
+    await session.apersist_batch(msgs, previous_response_id=None)
 
     # Симулируем суммаризацию через archive_and_compact_summary_payload
-    result = session.archive_and_compact_summary_payload({
-        "summary_message_content": "Диалог начался.",
-        "user_intent_log": [],
-        "dialog_steps_offset": 0,
-    })
+    result = await session.aarchive_and_compact_summary_payload(
+        {
+            "summary_message_content": "Диалог начался.",
+            "user_intent_log": [],
+            "dialog_steps_offset": 0,
+        }
+    )
     archive_suffix = result["archive_suffix"]
 
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
@@ -158,7 +173,9 @@ def test_file_store_epoch_fallback_to_last_summarized_at(tmp_path):
 
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
     # Создаём пустой data-файл
-    (tmp_path / f"data_{_SYSTEM}_{_TID}.jsonl").write_text("", encoding="utf-8")
+    (tmp_path / f"data_{_SYSTEM}_{_TID}.jsonl").write_text(
+        "", encoding="utf-8"
+    )
 
     _, cursor = store.read_all_events(_TID)
     assert cursor.storage_epoch == "2026-06-04T10:00:00+00:00"
@@ -168,7 +185,8 @@ def test_file_store_epoch_fallback_to_last_summarized_at(tmp_path):
 # 4. read_segments — архивная glob и is_compaction_summary
 # ---------------------------------------------------------------------------
 
-def test_file_store_read_segments_with_core_compaction(tmp_path):
+
+async def test_file_store_read_segments_with_core_compaction(tmp_path):
     """read_segments читает сегменты после реальной компакции через archive_and_compact."""
     threads_dir = str(tmp_path)
     session = _make_session(threads_dir)
@@ -178,16 +196,18 @@ def test_file_store_read_segments_with_core_compaction(tmp_path):
         {"role": "user", "content": "вопрос-0"},
         {"role": "assistant", "content": "ответ-0"},
     ]
-    session.persist_batch(msgs1, previous_response_id=None)
-    session.archive_and_compact_summary_payload({
-        "summary_message_content": "СИНТЕЗ-1",
-        "user_intent_log": [],
-        "dialog_steps_offset": 0,
-    })
+    await session.apersist_batch(msgs1, previous_response_id=None)
+    await session.aarchive_and_compact_summary_payload(
+        {
+            "summary_message_content": "СИНТЕЗ-1",
+            "user_intent_log": [],
+            "dialog_steps_offset": 0,
+        }
+    )
 
     # Шаг 2: записываем ещё сообщения
     msgs2 = [{"role": "user", "content": "вопрос-1"}]
-    session.persist_batch(msgs2, previous_response_id=None)
+    await session.apersist_batch(msgs2, previous_response_id=None)
 
     store = FileTaskStore(threads_dir=threads_dir, system=_SYSTEM)
     segs = store.read_segments(_TID)
@@ -206,18 +226,21 @@ def test_file_store_read_segments_with_core_compaction(tmp_path):
 # 5. delete_task — сигнатура delete_thread(threads_dir, system, thread_id)
 # ---------------------------------------------------------------------------
 
-def test_file_store_delete_task_removes_all_files(tmp_path):
+
+async def test_file_store_delete_task_removes_all_files(tmp_path):
     """delete_task удаляет data + meta + pre_summary архивы через delete_thread."""
     threads_dir = str(tmp_path)
     session = _make_session(threads_dir)
 
     msgs = [{"role": "user", "content": "x"}]
-    session.persist_batch(msgs, previous_response_id=None)
-    session.archive_and_compact_summary_payload({
-        "summary_message_content": "sum",
-        "user_intent_log": [],
-        "dialog_steps_offset": 0,
-    })
+    await session.apersist_batch(msgs, previous_response_id=None)
+    await session.aarchive_and_compact_summary_payload(
+        {
+            "summary_message_content": "sum",
+            "user_intent_log": [],
+            "dialog_steps_offset": 0,
+        }
+    )
 
     # Убеждаемся, что файлы существуют
     files_before = list(tmp_path.glob(f"*{_TID}*"))

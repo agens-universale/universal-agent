@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 
-
 def _manifest_errors():
     from recommended_mcp.manifest import ManifestError
 
@@ -90,7 +89,6 @@ def resolve_install_manifest_path(config: Path | str | None) -> Path:
     resolved = resolve_agent_manifest_path({})
     if resolved is None:
         raise ManifestError(
-            "manifest not found: задай --config PATH или положи config.local.yml в "
-            f"{_gc_config_recommended_dir()}"
+            f"manifest not found: задай --config PATH или положи config.local.yml в {_gc_config_recommended_dir()}"
         )
     return resolved

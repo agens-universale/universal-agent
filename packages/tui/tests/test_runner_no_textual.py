@@ -1,12 +1,12 @@
 """main() без textual должен дать понятный stderr и exit 1, без трейсбэка."""
+
 import builtins
-import io
 import sys
 
-import pytest
 
-
-def test_main_without_textual_returns_1_and_prints_to_stderr(monkeypatch, capsys):
+def test_main_without_textual_returns_1_and_prints_to_stderr(
+    monkeypatch, capsys
+):
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):
@@ -22,6 +22,7 @@ def test_main_without_textual_returns_1_and_prints_to_stderr(monkeypatch, capsys
             sys.modules.pop(mod, None)
 
     from gc_tui import main
+
     rc = main(argv=[])
 
     err = capsys.readouterr().err

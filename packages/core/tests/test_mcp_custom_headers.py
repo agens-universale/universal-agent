@@ -1,6 +1,3 @@
-import pytest
-
-
 def test_mcp_server_config_accepts_headers():
     from gc_core.config_modules.mcp import McpServerConfig
 
@@ -15,7 +12,7 @@ def test_mcp_server_config_accepts_headers():
     assert cfg.headers["X-API-Key"] == "k"
 
 
-def test_discovery_http_transport_passes_custom_headers(monkeypatch):
+async def test_discovery_http_transport_passes_custom_headers(monkeypatch):
     """
     Проверяем прокидывание headers для transport=http:
     - Authorization из headers переопределяет token
@@ -60,8 +57,13 @@ def test_discovery_http_transport_passes_custom_headers(monkeypatch):
             }
         return {}, {}
 
-    # Патчим sync http transport: discovery в registry идёт через client.py
-    monkeypatch.setattr(transport_mod, "_request_http", fake_request_http)
+    # Дискавери идёт КОРУТИННЫМ транспортом: синхронный путь остался только
+    # для долгоживущего stdio. Заголовки собирает тот же `_mcp_headers`,
+    # поэтому предмет теста не изменился.
+    async def fake_arequest_http(url, headers, json_payload, timeout, **_kw):
+        return fake_request_http(url, headers, json_payload, timeout)
+
+    monkeypatch.setattr(transport_mod, "_arequest_http", fake_arequest_http)
 
     server_cfg = {
         "transport": "http",
@@ -70,7 +72,7 @@ def test_discovery_http_transport_passes_custom_headers(monkeypatch):
         "headers": {"Authorization": "Bearer CUSTOM", "X-Test": "1"},
     }
 
-    tools, status = reg._discover_one("s", server_cfg, timeout=1.0)
+    tools, status = await reg._adiscover_one("s", server_cfg, timeout=1.0)
     assert status["status"] == "connected"
     assert any(t.get("name") == "hello" for t in tools)
 
@@ -102,4 +104,3 @@ def test_stream_http_client_merges_custom_headers(monkeypatch):
     assert captured["headers"] is not None
     assert captured["headers"]["Authorization"] == "Bearer CUSTOM"
     assert captured["headers"]["X-Test"] == "1"
-

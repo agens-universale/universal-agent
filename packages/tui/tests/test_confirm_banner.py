@@ -1,11 +1,10 @@
 import pytest
-
 from gc_tui.widgets.confirm_banner import (
+    _OPTIONS,
     ConfirmBanner,
     _fmt_field_value,
     _fmt_payload_value,
     _is_payload_label,
-    _OPTIONS,
     choice_for,
 )
 
@@ -13,7 +12,10 @@ from gc_tui.widgets.confirm_banner import (
 def test_banner_has_four_options():
     assert [k for k, _, _ in _OPTIONS] == ["[Y]", "[O]", "[N]", "[T]"]
     assert [c for _, _, c in _OPTIONS] == [
-        "allow_remember", "allow_once", "deny_remember", "deny_once",
+        "allow_remember",
+        "allow_once",
+        "deny_remember",
+        "deny_once",
     ]
     labels = [lab for _, lab, _ in _OPTIONS]
     assert "подобные в сессии" in labels[0]
@@ -63,7 +65,9 @@ def test_fmt_payload_value_safety_net_only():
 
 
 def test_banner_holds_question_and_options():
-    b = ConfirmBanner(banner_title="Write guard", question="Allow write to AGENTS.md?")
+    b = ConfirmBanner(
+        banner_title="Write guard", question="Allow write to AGENTS.md?"
+    )
     assert b.question == "Allow write to AGENTS.md?"
     assert b.banner_title == "Write guard"
 
@@ -75,7 +79,9 @@ def test_banner_defaults_to_no_fields():
 
 def test_banner_stores_fields():
     fields = [("Tool", "execute_command"), ("Команда", "rm -rf /tmp/x")]
-    b = ConfirmBanner(banner_title="Command moderation", question="Разрешить?", fields=fields)
+    b = ConfirmBanner(
+        banner_title="Command moderation", question="Разрешить?", fields=fields
+    )
     assert b.fields == fields
 
 
@@ -96,20 +102,34 @@ def test_fmt_field_value_truncates_long():
 async def test_banner_renders_payload_and_meta_fields(tmp_path):
     """Payload-поле рендерится cb-payload; meta-поля cb-field; пустые пропускаются."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
+    from textual.widgets import Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr.show_confirm_banner(
             "Command moderation",
             "Разрешить выполнение команды?",
-            [("Команда", "rm -rf /tmp/x"), ("Риск", "destructive"), ("Reason", "")],
+            [
+                ("Команда", "rm -rf /tmp/x"),
+                ("Риск", "destructive"),
+                ("Reason", ""),
+            ],
         )
         await pilot.pause()
-        payload_texts = [str(s.render()) for s in scr.query(Static) if s.has_class("cb-payload")]
-        meta_texts = [str(s.render()) for s in scr.query(Static) if s.has_class("cb-field")]
+        payload_texts = [
+            str(s.render())
+            for s in scr.query(Static)
+            if s.has_class("cb-payload")
+        ]
+        meta_texts = [
+            str(s.render())
+            for s in scr.query(Static)
+            if s.has_class("cb-field")
+        ]
         payload_joined = "\n".join(payload_texts)
         meta_joined = "\n".join(meta_texts)
         assert "Команда: rm -rf /tmp/x" in payload_joined
@@ -123,16 +143,18 @@ async def test_banner_renders_payload_and_meta_fields(tmp_path):
 async def test_banner_long_payload_keeps_options_visible(tmp_path):
     """Длинный multiline payload не выталкивает Y/O/N/T за край баннера."""
     pytest.importorskip("textual")
-    from textual.widgets import Static
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
+    from textual.widgets import Static
 
     # Много строк + длинные path'ы (как на скрине) — soft-wrap раньше съедал экран.
     long_code = "\n".join(
         f'path_{i} = "/home/alex/very/long/directory/tree/file_{i}.html"'
         for i in range(40)
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test(size=(100, 28)) as pilot:
         scr = pilot.app.screen
         scr.show_confirm_banner(
@@ -164,7 +186,9 @@ async def test_banner_long_payload_keeps_options_visible(tmp_path):
         assert o_region.bottom >= b_region.bottom - 2
         assert o_region.y > b_region.y + 2  # below title/question
         # Full payload is in the widget (scrollable); not soft-truncated.
-        payload = [s for s in banner.query(Static) if s.has_class("cb-payload")]
+        payload = [
+            s for s in banner.query(Static) if s.has_class("cb-payload")
+        ]
         assert payload
         rendered = str(payload[0].render())
         assert "path_0" in rendered
@@ -183,7 +207,9 @@ async def test_banner_hugs_short_content(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test(size=(100, 40)) as pilot:
         scr = pilot.app.screen
         scr.show_confirm_banner(
@@ -209,7 +235,9 @@ async def test_banner_body_scrolls_from_keyboard(tmp_path):
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
     long_code = "\n".join(f"line_{i} = {i}" for i in range(60))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
         scr.show_confirm_banner(
@@ -241,7 +269,9 @@ async def test_scroll_keys_do_not_answer_the_banner(tmp_path):
     from gc_tui.app import TuiApp
 
     long_code = "\n".join(f"line_{i}" for i in range(60))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test(size=(100, 30)) as pilot:
         scr = pilot.app.screen
         scr.show_confirm_banner("Проверка", "Разрешить?", [("Код", long_code)])

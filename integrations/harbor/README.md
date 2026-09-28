@@ -7,7 +7,7 @@
 Запускает gc-cli как **External**-агент Harbor: цикл агента крутится **в раннере** (вне
 контейнера задачи), а файловые/shell-тулы gc-cli работают **внутри контейнера задачи**
 через `BaseEnvironment` Harbor (`os_backend: harbor` в конфиге → `ctx.os_backend` =
-`HarborBackend`, собирается в `create_run_context`). **В контейнер задачи ничего не устанавливается** —
+`HarborBackend`, собирается в `acreate_run_context`). **В контейнер задачи ничего не устанавливается** —
 это и есть смысл External-паттерна (важно для честности замеров: установка чего-либо
 в контейнер может неявно изменить условия задачи).
 
@@ -30,7 +30,7 @@ DeepAgents: **тул определён один раз** (валидация, �
 - `harbor.py` — `HarborBackend`: контейнер задачи через `BaseEnvironment`
   (`is_sandbox = True`; exec-timeout из `agent.exec_timeout_sec`, в bench — 600s).
 
-Резолв: `create_run_context` собирает `ctx.os_backend` через `tools/backends/factory.py`
+Резолв: `acreate_run_context` собирает `ctx.os_backend` через `tools/backends/factory.py`
 (`os_backend: local` по умолчанию, `harbor` — при запуске через адаптер). Тулы читают
 `self._ctx.os_backend`. Отдельного harbor-пака тулов **нет** — контейнерный режим и
 хост-режим гоняют один и тот же код тулов.
@@ -99,8 +99,8 @@ import_path: adapters.gc_cli_external:GcCliExternal
 model: openai/MiniMaxAI/MiniMax-M2.7
 agent_kwargs:
   gc_cli_config:
-    max_steps: 300                      # дефолт 200
-    no_tool_call_max_count: 3           # дефолт 3 (0 = обрыв с первой ошибки тула)
+    max_steps: 300                      # дефолт схемы: 1000
+    no_tool_call_max_count: 3           # дефолт схемы: 5 (0 = обрыв с первой ошибки тула)
     chat_completion_kwargs:             # сэмплинг агента
       temperature: 1.0
       top_p: 0.95

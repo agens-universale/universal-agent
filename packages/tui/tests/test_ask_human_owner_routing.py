@@ -5,7 +5,10 @@ import pytest
 async def test_owner_reset_on_unmount(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._ask_human_owner_runner = object()
@@ -17,7 +20,10 @@ async def test_owner_reset_on_unmount(tmp_path):
 async def test_owner_reset_on_reset_render_state(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._ask_human_owner_runner = object()
@@ -28,10 +34,14 @@ async def test_owner_reset_on_reset_render_state(tmp_path):
 def _ask_human_rec():
     return {
         "payload": {
-            "type": "function_call", "name": "turn_ask_human", "call_id": "c1",
-            "arguments": '{"question": "Какой вопрос?"}', "id": "fc1",
+            "type": "function_call",
+            "name": "turn_ask_human",
+            "call_id": "c1",
+            "arguments": '{"question": "Какой вопрос?"}',
+            "id": "fc1",
         },
-        "seq": 1, "ts": "2026-06-08T00:00:00+00:00",
+        "seq": 1,
+        "ts": "2026-06-08T00:00:00+00:00",
     }
 
 
@@ -39,10 +49,14 @@ def _ask_human_rec():
 async def test_owner_set_on_live_render(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
 
     class _Runner:
-        def is_running(self): return True
+        def is_running(self):
+            return True
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -57,29 +71,39 @@ async def test_owner_set_on_live_render(tmp_path):
 async def test_owner_not_set_on_replay_render(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
 
     class _Runner:
-        def is_running(self): return True
+        def is_running(self):
+            return True
 
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         app.active_runner = _Runner()
-        scr._render_records([_ask_human_rec()])   # live=False по умолчанию
+        scr._render_records([_ask_human_rec()])  # live=False по умолчанию
         await pilot.pause()
         assert scr._ask_human_owner_runner is None
 
 
 class _R:
-    def __init__(self, running=True): self._running = running
-    def is_running(self): return self._running
+    def __init__(self, running=True):
+        self._running = running
+
+    def is_running(self):
+        return self._running
 
 
 @pytest.mark.asyncio
 async def test_target_is_owner_when_live_and_active(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         r = _R(running=True)
@@ -92,7 +116,10 @@ async def test_target_is_owner_when_live_and_active(tmp_path):
 async def test_target_none_when_owner_differs(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._ask_human_owner_runner = _R(running=True)
@@ -104,7 +131,10 @@ async def test_target_none_when_owner_differs(tmp_path):
 async def test_target_none_when_owner_none(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._ask_human_owner_runner = None
@@ -116,7 +146,10 @@ async def test_target_none_when_owner_none(tmp_path):
 async def test_target_none_when_not_running(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         r = _R(running=False)
@@ -126,7 +159,8 @@ async def test_target_none_when_not_running(tmp_path):
 
 
 class _Evt:
-    def __init__(self, value): self.value = value
+    def __init__(self, value):
+        self.value = value
 
 
 class _FakeRunner:
@@ -135,14 +169,24 @@ class _FakeRunner:
         self.submitted = []
         self.started = []
         self.stopped = False
-    def is_running(self): return self._running
-    def submit_ask_human_reply(self, text): self.submitted.append(text)
-    def start(self, **kw): self.started.append(kw); return True
-    def stop(self): self.stopped = True
+
+    def is_running(self):
+        return self._running
+
+    def submit_ask_human_reply(self, text):
+        self.submitted.append(text)
+
+    def start(self, **kw):
+        self.started.append(kw)
+        return True
+
+    def stop(self):
+        self.stopped = True
 
 
 def _set_ask_human_state(app):
     from gc_tui.state import AskHumanState
+
     app.tui_state.ask_human_state = AskHumanState(call_id="c1", question="Q?")
 
 
@@ -150,26 +194,33 @@ def _set_ask_human_state(app):
 async def test_live_owner_answer_goes_to_stdin(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         r = _FakeRunner(running=True)
         app.active_runner = r
         scr._ask_human_owner_runner = r
         _set_ask_human_state(app)
-        scr.on_command_text_area_submitted(_Evt("мой ответ"))
+        await scr.on_command_text_area_submitted(_Evt("мой ответ"))
         await pilot.pause()
-        assert r.submitted == ["мой ответ"]      # ушло владельцу в stdin
-        assert r.started == []                     # новый ход не стартовал
+        assert r.submitted == ["мой ответ"]  # ушло владельцу в stdin
+        assert r.started == []  # новый ход не стартовал
 
 
 @pytest.mark.asyncio
 async def test_replay_banner_answer_starts_new_turn(tmp_path):
     pytest.importorskip("textual")
     import uuid
+
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         # Воспроизведённая плашка: владельца нет; в ячейке — мёртвый раннер.
@@ -181,28 +232,37 @@ async def test_replay_banner_answer_starts_new_turn(tmp_path):
         scr._active_task_id = tid
         scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
         _set_ask_human_state(app)
-        scr.on_command_text_area_submitted(_Evt("ответ новым ходом"))
+        await scr.on_command_text_area_submitted(_Evt("ответ новым ходом"))
         await pilot.pause()
-        assert r.submitted == []                   # в stdin не писали
-        assert any(kw.get("query") == "ответ новым ходом" for kw in r.started)  # новый ход
+        assert r.submitted == []  # в stdin не писали
+        assert any(
+            kw.get("query") == "ответ новым ходом" for kw in r.started
+        )  # новый ход
 
 
 @pytest.mark.asyncio
 async def test_nonowner_running_is_stopped_then_new_turn(tmp_path):
     pytest.importorskip("textual")
     import uuid
+
     from gc_tui.app import TuiApp
     from gc_tui.services.stores.file_store import FileTaskStore
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        busy = _FakeRunner(running=True)           # чужой живой раннер в ячейке
+        busy = _FakeRunner(running=True)  # чужой живой раннер в ячейке
         app.active_runner = busy
-        scr._ask_human_owner_runner = _FakeRunner(running=True)  # владелец — другой
+        scr._ask_human_owner_runner = _FakeRunner(
+            running=True
+        )  # владелец — другой
         fresh = _FakeRunner(running=False)
         # get_runner после _stop_and_replace_runner (active_runner=None) создаст
         # новый раннер из фабрики — подменим конструктор AgentRunner на возврат fresh.
         from gc_tui.services import agent_runner as _ar
+
         orig = _ar.AgentRunner
         _ar.AgentRunner = lambda *a, **k: fresh
         try:
@@ -211,10 +271,12 @@ async def test_nonowner_running_is_stopped_then_new_turn(tmp_path):
             scr._active_task_id = tid
             scr._store = FileTaskStore(threads_dir=str(tmp_path), system="cli")
             _set_ask_human_state(app)
-            scr.on_command_text_area_submitted(_Evt("ответ"))
+            await scr.on_command_text_area_submitted(_Evt("ответ"))
             await pilot.pause()
         finally:
             _ar.AgentRunner = orig
-        assert busy.stopped is True                # чужой живой раннер остановлен
-        assert busy.submitted == []                # ему в stdin не писали
-        assert any(kw.get("query") == "ответ" for kw in fresh.started)  # новый ход
+        assert busy.stopped is True  # чужой живой раннер остановлен
+        assert busy.submitted == []  # ему в stdin не писали
+        assert any(
+            kw.get("query") == "ответ" for kw in fresh.started
+        )  # новый ход

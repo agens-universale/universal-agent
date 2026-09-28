@@ -1,13 +1,22 @@
 """Спека 04: unknown tool → JSON + suggestions; streak stop; tool_error_cnt."""
+
 from __future__ import annotations
 
 import json
 from types import SimpleNamespace
 
-import pytest
-
 from gc_core.states import State
-from gc_core.tools import apply_tool, is_unknown_tool_output
+from gc_core.tools import aapply_tool, is_unknown_tool_output
+from gc_testkit import run_coro
+
+
+def _async_noop(fn):
+    """Заглушка корутинного хука: ядро зовёт async-двойник напрямую."""
+
+    async def _wrapped(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return _wrapped
 
 
 def _make_state(**overrides):
@@ -30,7 +39,14 @@ def _registry(*names: str):
     return {
         name: {
             "tool_fabric": lambda **_kw: None,
-            "spec": {"name": name, "parameters": {"type": "object", "properties": {}, "required": []}},
+            "spec": {
+                "name": name,
+                "parameters": {
+                    "type": "object",
+                    "properties": {},
+                    "required": [],
+                },
+            },
             "description": {"name": name},
             "injected_fields": [],
         }
@@ -41,11 +57,13 @@ def _registry(*names: str):
 # --- A: apply_tool unknown JSON -------------------------------------------------
 
 
-def test_apply_tool_unknown_returns_json_with_suggestions():
-    raw = apply_tool(
+async def test_apply_tool_unknown_returns_json_with_suggestions():
+    raw = await aapply_tool(
         tool_name="read_file",
         arguments="{}",
-        tools_data_=_registry("fs_read_file", "fs_read_file_range", "session_think"),
+        tools_data_=_registry(
+            "fs_read_file", "fs_read_file_range", "session_think"
+        ),
     )
     payload = json.loads(raw)
     assert payload["ok"] is False
@@ -57,8 +75,8 @@ def test_apply_tool_unknown_returns_json_with_suggestions():
     assert is_unknown_tool_output(raw) is True
 
 
-def test_apply_tool_unknown_empty_suggestions_for_distant_name():
-    raw = apply_tool(
+async def test_apply_tool_unknown_empty_suggestions_for_distant_name():
+    raw = await aapply_tool(
         tool_name="zzzz_totally_unrelated_name_999",
         arguments="{}",
         tools_data_=_registry("session_think"),
@@ -68,11 +86,17 @@ def test_apply_tool_unknown_empty_suggestions_for_distant_name():
     assert payload["error"]["type"] == "unknown_tool"
     assert payload["error"]["suggestions"] == []
     assert "Maybe you mean tools:" not in payload["message"]
-    assert "Use only tools from the provided tool list in section <tools> in system prompt." in payload["message"]
+    assert (
+        "Use only tools from the provided tool list in section <tools> in system prompt."
+        in payload["message"]
+    )
 
 
 def test_is_unknown_tool_output_legacy_substring():
-    assert is_unknown_tool_output("phase1 - there is not such tool on client") is True
+    assert (
+        is_unknown_tool_output("phase1 - there is not such tool on client")
+        is True
+    )
     assert is_unknown_tool_output('{"ok": true, "message": "ok"}') is False
 
 
@@ -82,10 +106,8 @@ def test_is_unknown_tool_output_legacy_substring():
 def test_process_tool_calls_updates_unknown_streak(monkeypatch):
     from gc_core import processing_responses as pr
 
-    monkeypatch.setattr(
-        pr,
-        "apply_tool",
-        lambda **kw: json.dumps(
+    async def fake_apply(**kw):
+        return json.dumps(
             {
                 "ok": False,
                 "error": {
@@ -96,34 +118,48 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
                 },
                 "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
             }
-        ),
+        )
+
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
     )
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     state = _make_state()
     ctx = SimpleNamespace(config_dict={}, logger=None)
     messages = [
-        {"type": "function_call", "name": "phase1", "call_id": "c1", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "phase1",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
     ]
-    outs = pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    outs = run_coro(
+        pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None)
+    )
     assert len(outs) == 1
     assert state.last_unknown_tool_name == "phase1"
     assert state.unknown_tool_repeat_count == 1
     assert state.last_batch_unknown_tool_count == 1
 
-    pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.unknown_tool_repeat_count == 2
 
-    pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.unknown_tool_repeat_count == 3
 
 
 def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
     from gc_core import processing_responses as pr
 
-    def fake_apply(**kw):
+    async def fake_apply(**kw):
         if kw["tool_name"] == "phase1":
             return json.dumps(
                 {
@@ -139,9 +175,15 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
             )
         return json.dumps({"ok": True, "message": "done"})
 
-    monkeypatch.setattr(pr, "apply_tool", fake_apply)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     state = _make_state()
@@ -149,10 +191,20 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
     state.unknown_tool_repeat_count = 2
     ctx = SimpleNamespace(config_dict={}, logger=None)
     messages = [
-        {"type": "function_call", "name": "phase1", "call_id": "c1", "arguments": "{}"},
-        {"type": "function_call", "name": "session_think", "call_id": "c2", "arguments": "{}"},
+        {
+            "type": "function_call",
+            "name": "phase1",
+            "call_id": "c1",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call",
+            "name": "session_think",
+            "call_id": "c2",
+            "arguments": "{}",
+        },
     ]
-    pr.process_tool_calls(messages, state, ctx, run_agent_func=None)
+    run_coro(pr.aprocess_tool_calls(messages, state, ctx, run_agent_func=None))
     assert state.last_unknown_tool_name is None
     assert state.unknown_tool_repeat_count == 0
     assert state.last_batch_unknown_tool_count == 1
@@ -176,13 +228,23 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
             "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
         }
     )
-    monkeypatch.setattr(pr, "apply_tool", lambda **_kw: unknown_payload)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+
+    async def fake_apply(**_kw):
+        return unknown_payload
+
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
 
     round_id = {"n": 0}
 
-    def fake_process_tool_outputs(messages, state, ctx):
+    async def fake_process_tool_outputs(messages, state, ctx):
         round_id["n"] += 1
         return (
             [
@@ -196,7 +258,7 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
             f"resp_{round_id['n']}",
         )
 
-    monkeypatch.setattr(pr, "process_tool_outputs", fake_process_tool_outputs)
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", fake_process_tool_outputs)
 
     state = _make_state(max_steps=50)
     ctx = SimpleNamespace(
@@ -217,7 +279,7 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
             "arguments": "{}",
         }
     ]
-    result = pr.run_agent(messages, state, ctx)
+    result = run_coro(pr.arun_agent(messages, state, ctx))
     assert state.terminal_outcome == "tool_errors"
     assert "phase1" in result
     assert "repeated unknown tool" in result.lower()
@@ -240,13 +302,23 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
             "message": "Unknown tool 'phase1'. Use only tools from the provided tool list.",
         }
     )
-    monkeypatch.setattr(pr, "apply_tool", lambda **_kw: unknown_payload)
-    monkeypatch.setattr(pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res)
-    monkeypatch.setattr(pr, "maybe_update_intent_scope_from_tool", lambda **_kw: None)
+
+    async def fake_apply(**_kw):
+        return unknown_payload
+
+    monkeypatch.setattr(pr, "aapply_tool", fake_apply)
+    monkeypatch.setattr(
+        pr, "maybe_store_and_wrap_tool_output", lambda res, **_kw: res
+    )
+    monkeypatch.setattr(
+        pr,
+        "amaybe_update_intent_scope_from_tool",
+        _async_noop(lambda **_kw: None),
+    )
 
     round_id = {"n": 0}
 
-    def fake_process_tool_outputs(messages, state, ctx):
+    async def fake_process_tool_outputs(messages, state, ctx):
         round_id["n"] += 1
         return (
             [
@@ -260,7 +332,7 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
             f"resp_{round_id['n']}",
         )
 
-    monkeypatch.setattr(pr, "process_tool_outputs", fake_process_tool_outputs)
+    monkeypatch.setattr(pr, "aprocess_tool_outputs", fake_process_tool_outputs)
 
     state = _make_state(max_steps=50)
     ctx = SimpleNamespace(
@@ -281,7 +353,7 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
             "arguments": "{}",
         }
     ]
-    result = pr.run_agent(messages, state, ctx)
+    result = run_coro(pr.arun_agent(messages, state, ctx))
     assert state.terminal_outcome == "tool_errors"
     assert "tool" in result.lower()
     # Если бы сбрасывали cnt в 0 после каждого unknown-батча — дошли бы до max_steps.

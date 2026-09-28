@@ -2,24 +2,25 @@
 
 См. .superpowers/sdd/2026-07-27-profiles-wave-a-plan/task-5-brief.md.
 """
+
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core import run_context as rc
 from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.states import State
 from gc_core.turn_boundary import begin_turn
+from gc_testkit import as_coro
 
 
 @pytest.fixture
 def minimal_config_dict(monkeypatch):
     monkeypatch.setattr(
         rc,
-        "build_tools_data",
-        lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {}),
+        "abuild_tools_data",
+        as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
     return {"model": "M", "level": "max"}
 
@@ -45,37 +46,51 @@ def _make_state(model: str = "unused-legacy-default") -> State:
 # --- create_run_context: model_router + level_provider ---------------------------
 
 
-def test_create_run_context_without_level_provider_reads_config_level(minimal_config_dict):
-    ctx = rc.create_run_context(minimal_config_dict)
+async def test_create_run_context_without_level_provider_reads_config_level(
+    minimal_config_dict,
+):
+    ctx = await rc.acreate_run_context(minimal_config_dict)
     assert isinstance(ctx.model_router, ModelRouter)
     assert ctx.model_router.active_level() == "max"
 
 
-def test_create_run_context_with_level_provider_uses_callable(minimal_config_dict):
+async def test_create_run_context_with_level_provider_uses_callable(
+    minimal_config_dict,
+):
     level = {"value": "light"}
-    ctx = rc.create_run_context(minimal_config_dict, level_provider=lambda: level["value"])
+    ctx = await rc.acreate_run_context(
+        minimal_config_dict, level_provider=lambda: level["value"]
+    )
     assert ctx.model_router.active_level() == "light"
     level["value"] = "default"
-    assert ctx.model_router.active_level() == "default"  # провайдер живой, не закэширован
+    assert (
+        ctx.model_router.active_level() == "default"
+    )  # провайдер живой, не закэширован
 
 
-def test_create_run_context_model_router_resolves_legacy_main(minimal_config_dict):
-    ctx = rc.create_run_context(minimal_config_dict)
+async def test_create_run_context_model_router_resolves_legacy_main(
+    minimal_config_dict,
+):
+    ctx = await rc.acreate_run_context(minimal_config_dict)
     resolved = ctx.model_router.resolve("main")
     assert resolved.model == "M"
 
 
-def test_create_run_context_force_legacy_propagates_to_router(minimal_config_dict):
+async def test_create_run_context_force_legacy_propagates_to_router(
+    minimal_config_dict,
+):
     """Task 10: `--model` при непустом реестре -> `force_legacy=True` доезжает от
     CLI до ModelRouter через create_run_context (спека §2)."""
-    ctx = rc.create_run_context(minimal_config_dict, force_legacy=True)
+    ctx = await rc.acreate_run_context(minimal_config_dict, force_legacy=True)
     resolved = ctx.model_router.resolve("main")
     assert resolved.model == "M"
     assert resolved.source == "легаси-форс --model"
 
 
-def test_create_run_context_default_force_legacy_is_false(minimal_config_dict):
-    ctx = rc.create_run_context(minimal_config_dict)
+async def test_create_run_context_default_force_legacy_is_false(
+    minimal_config_dict,
+):
+    ctx = await rc.acreate_run_context(minimal_config_dict)
     resolved = ctx.model_router.resolve("main")
     assert resolved.source == "легаси"
 
@@ -83,7 +98,9 @@ def test_create_run_context_default_force_legacy_is_false(minimal_config_dict):
 # --- begin_turn: юнит + фиксация на ход -------------------------------------------
 
 
-def test_begin_turn_sets_default_model_from_router_resolve_main(minimal_config_dict):
+def test_begin_turn_sets_default_model_from_router_resolve_main(
+    minimal_config_dict,
+):
     router = ModelRouter(minimal_config_dict, level_provider=lambda: "max")
     ctx = SimpleNamespace(model_router=router)
     state = _make_state()
@@ -107,13 +124,15 @@ def test_begin_turn_is_noop_without_model_router():
 def test_begin_turn_refixes_model_between_turns_when_level_changes():
     """Спека §6.4: смена активного уровня меняет default_model следующего хода —
     только через явный begin_turn, не сама по себе внутри текущего хода."""
-    snapshot = _snapshot({
-        "models": {
-            "fast": {"url": "http://fast/v1", "token": ""},
-            "smart": {"url": "http://smart/v1", "token": ""},
-        },
-        "slots": {"light": "fast", "max": "smart"},
-    })
+    snapshot = _snapshot(
+        {
+            "models": {
+                "fast": {"url": "http://fast/v1", "token": ""},
+                "smart": {"url": "http://smart/v1", "token": ""},
+            },
+            "slots": {"light": "fast", "max": "smart"},
+        }
+    )
     level = {"value": "light"}
     router = ModelRouter(snapshot, level_provider=lambda: level["value"])
     ctx = SimpleNamespace(model_router=router)
@@ -135,13 +154,15 @@ def test_begin_turn_refixes_model_between_turns_when_level_changes():
 
 
 def _two_slot_router(level_box: dict) -> ModelRouter:
-    snapshot = _snapshot({
-        "models": {
-            "fast": {"url": "http://fast/v1", "token": ""},
-            "smart": {"url": "http://smart/v1", "token": ""},
-        },
-        "slots": {"light": "fast", "max": "smart"},
-    })
+    snapshot = _snapshot(
+        {
+            "models": {
+                "fast": {"url": "http://fast/v1", "token": ""},
+                "smart": {"url": "http://smart/v1", "token": ""},
+            },
+            "slots": {"light": "fast", "max": "smart"},
+        }
+    )
     return ModelRouter(snapshot, level_provider=lambda: level_box["value"])
 
 
@@ -159,11 +180,11 @@ def test_main_transport_resolve_is_pinned_to_turn_level():
     begin_turn(state, ctx)
     assert pr._resolve_main_for_turn(state, ctx).alias == "fast"
 
-    level["value"] = "max"                     # живой /level посреди хода
+    level["value"] = "max"  # живой /level посреди хода
     assert pr._resolve_main_for_turn(state, ctx).alias == "fast"
     assert pr._resolve_main_for_turn(state, ctx).url == "http://fast/v1"
 
-    begin_turn(state, ctx)                     # следующий ход
+    begin_turn(state, ctx)  # следующий ход
     assert pr._resolve_main_for_turn(state, ctx).alias == "smart"
 
 
@@ -213,5 +234,7 @@ def test_pinned_main_resolve_keeps_subagent_override():
     begin_turn(state, SimpleNamespace(model_router=parent))
     assert state.turn_level == "light"
 
-    resolved = pr._resolve_main_for_turn(state, SimpleNamespace(model_router=child))
+    resolved = pr._resolve_main_for_turn(
+        state, SimpleNamespace(model_router=child)
+    )
     assert resolved.alias == "smart"

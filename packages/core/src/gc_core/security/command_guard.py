@@ -2,6 +2,7 @@
 обращения к protected-путям (rm -rf .gc и т.п.). Это НЕ гарантия — обфускация
 не ловится; второй рубеж — LLM-судья (command_moderation), страховка — бэкап
 памяти (Спека B §7)."""
+
 from __future__ import annotations
 
 import functools
@@ -12,9 +13,20 @@ import re
 import shlex
 from typing import Any, Callable
 
-from gc_core.security.command_moderation import NO_WORKAROUND_NOTICE, effective_command_cwd
-from gc_core.security.path_policy import resolve_tool_context, _extract_config_dict
-from gc_core.security.protected_paths import classify_path, protected_paths, protection_enabled
+from gc_core.security.command_moderation import (
+    NO_WORKAROUND_NOTICE,
+    effective_command_cwd,
+)
+from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.path_policy import (
+    _extract_config_dict,
+    resolve_tool_context,
+)
+from gc_core.security.protected_paths import (
+    classify_path,
+    protected_paths,
+    protection_enabled,
+)
 
 _TOKEN_RE = re.compile(r"[\s=;&|()<>]+")
 
@@ -105,11 +117,134 @@ def scan_command_for_protected(command: str, *, cwd: str, extra=None) -> str:
     for tok in _tokens(command):
         cand = tok if os.path.isabs(tok) else os.path.join(cwd, tok)
         cls = classify_path(cand, ps)
-        decision = {"skills": "allow", "none": "allow",
-                    "instructions": "ask", "operational": "deny"}[cls]
+        decision = {
+            "skills": "allow",
+            "none": "allow",
+            "instructions": "ask",
+            "operational": "deny",
+        }[cls]
         if rank[decision] > rank[worst]:
             worst = decision
     return worst
+
+
+def _blocked_command_result(
+    self_obj: Any,
+    effective_tool_name: str,
+    err: dict,
+    args: tuple,
+    kwargs: dict,
+) -> str:
+    # Use tool's own blocked-result method if available (mirrors moderation pattern).
+    blocked_method = getattr(
+        self_obj, "_command_moderation_blocked_result", None
+    )
+    if callable(blocked_method):
+        return blocked_method(err, *args[1:], **kwargs)
+    return json.dumps(
+        {"tool": effective_tool_name, "ok": False, "error": err},
+        ensure_ascii=False,
+    )
+
+
+def _extract_payload(
+    func: Callable[..., str], payload_arg: str, args: tuple, kwargs: dict
+) -> str | None:
+    """Строка команды/кода из аргументов вызова; None — проверять нечего."""
+    try:
+        bound = inspect.signature(func).bind_partial(*args, **kwargs)
+        payload = bound.arguments.get(payload_arg)
+    except Exception:
+        return None
+    return payload if isinstance(payload, str) else None
+
+
+def _command_guard_flow(
+    func: Callable[..., str],
+    payload_arg: str,
+    tool_name: str,
+    args: tuple,
+    kwargs: dict,
+):
+    # Тело — ГЕНЕРАТОР, а не обычная функция: `dual_wrap` строит по нему и
+    # синхронную, и асинхронную обёртку. Обычный декоратор здесь ломался
+    # молча: на `async def acall` он в ветке отказа возвращал СТРОКУ вместо
+    # корутины, и вызывающий получал «a coroutine was expected».
+    # `return (yield)` — точка, где вызывается сам тул.
+    self_obj = args[0] if args else None
+    ctx_obj = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
+    cfg = _extract_config_dict(self_obj, ctx_obj, kwargs)
+
+    if not protection_enabled(cfg):
+        return (yield)
+
+    # Extract the payload (command string or code string).
+    payload = _extract_payload(func, payload_arg, args, kwargs)
+    if payload is None:
+        return (yield)
+
+    # For the security scan we need the project root (launch_root) so that
+    # project_gc_dir resolves the correct .gc directory.  Relative path
+    # tokens in commands are also resolved against launch_root — the
+    # project root is the canonical base for policy checks.
+    context = resolve_tool_context(*args, **kwargs)
+    effective_tool_name = tool_name or getattr(func, "__name__", "")
+    launch_root = context.launch_root
+    if not launch_root:
+        # Fallback: use effective command cwd
+        launch_root = effective_command_cwd(
+            effective_tool_name, kwargs, context
+        )
+
+    extra = list(context.write_guard.extra_paths) or None
+    decision = scan_command_for_protected(
+        payload, cwd=launch_root, extra=extra
+    )
+
+    if decision == "allow":
+        return (yield)
+
+    if decision == "ask":
+        from gc_core.security.confirm_port import request_confirm
+
+        confirmed = yield OffLoop(
+            functools.partial(
+                request_confirm,
+                title="Защищённый путь",
+                question="Команда затрагивает защищённый путь. Выполнить?",
+                fields=[("command", payload)],
+                ctx=ctx_obj,
+                decision_key=f"command:{payload}",
+            ),
+            on_interrupt=False,
+        )
+        if confirmed:
+            return (yield)
+        # ask not confirmed → instructive blocked result
+        err = {
+            "type": "protected_path_denied",
+            "message": "User declined the command.",
+            # Та же форма, что и у ветки deny ниже: запрет на обход —
+            # отдельным полем, а не приклейкой к message. Иначе один и
+            # тот же гвард отдаёт модели два разных конверта.
+            "guidance": NO_WORKAROUND_NOTICE,
+        }
+        return _blocked_command_result(
+            self_obj, effective_tool_name, err, args, kwargs
+        )
+
+    # deny → static blocked result
+    err = {
+        "type": "protected_path_denied",
+        "message": "Command targets a protected path (.gc / config).",
+        # Тот же класс обхода, что и у судьи: заблокированную команду
+        # модель переписывает в эквивалент. Запрет — одной формулировкой
+        # с модерацией (NO_WORKAROUND_NOTICE).
+        "guidance": NO_WORKAROUND_NOTICE,
+    }
+    return _blocked_command_result(
+        self_obj, effective_tool_name, err, args, kwargs
+    )
 
 
 def enforce_command_guard(
@@ -124,88 +259,20 @@ def enforce_command_guard(
 
     Activated only when protection_enabled(config_dict) is True.
     """
+
     def decorator(func: Callable[..., str]) -> Callable[..., str]:
-        @functools.wraps(func)
-        def wrapper(*args: Any, **kwargs: Any) -> str:
-            self_obj = args[0] if args else None
-            ctx_obj = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
-            cfg = _extract_config_dict(self_obj, ctx_obj, kwargs)
-
-            if not protection_enabled(cfg):
-                return func(*args, **kwargs)
-
-            # Extract the payload (command string or code string).
-            try:
-                bound = inspect.signature(func).bind_partial(*args, **kwargs)
-                payload = bound.arguments.get(payload_arg)
-                if not isinstance(payload, str):
-                    return func(*args, **kwargs)
-            except Exception:
-                return func(*args, **kwargs)
-
-            # For the security scan we need the project root (launch_root) so that
-            # project_gc_dir resolves the correct .gc directory.  Relative path
-            # tokens in commands are also resolved against launch_root — the
-            # project root is the canonical base for policy checks.
-            context = resolve_tool_context(*args, **kwargs)
-            effective_tool_name = tool_name or getattr(func, "__name__", "")
-            launch_root = context.launch_root
-            if not launch_root:
-                # Fallback: use effective command cwd
-                launch_root = effective_command_cwd(effective_tool_name, kwargs, context)
-
-            extra = list(context.write_guard.extra_paths) or None
-            decision = scan_command_for_protected(payload, cwd=launch_root, extra=extra)
-
-            if decision == "allow":
-                return func(*args, **kwargs)
-
-            if decision == "ask":
-                from gc_core.security.confirm_port import request_confirm
-                confirmed = request_confirm(
-                    title="Защищённый путь",
-                    question="Команда затрагивает защищённый путь. Выполнить?",
-                    fields=[("command", payload)],
-                    ctx=ctx_obj,
-                    decision_key=f"command:{payload}",
+        # Тело — ГЕНЕРАТОР, а не обычная функция: `dual_wrap` строит по нему и
+        # синхронную, и асинхронную обёртку. Обычный декоратор здесь ломался
+        # молча: на `async def acall` он в ветке отказа возвращал СТРОКУ вместо
+        # корутины, и вызывающий получал «a coroutine was expected».
+        # `return (yield)` — точка, где вызывается сам тул.
+        def _flow(*args: Any, **kwargs: Any):
+            return (
+                yield from _command_guard_flow(
+                    func, payload_arg, tool_name, args, kwargs
                 )
-                if confirmed:
-                    return func(*args, **kwargs)
-                # ask not confirmed → instructive blocked result
-                err = {
-                    "type": "protected_path_denied",
-                    "message": "User declined the command.",
-                    # Та же форма, что и у ветки deny ниже: запрет на обход —
-                    # отдельным полем, а не приклейкой к message. Иначе один и
-                    # тот же гвард отдаёт модели два разных конверта.
-                    "guidance": NO_WORKAROUND_NOTICE,
-                }
-                blocked_method = getattr(self_obj, "_command_moderation_blocked_result", None)
-                if callable(blocked_method):
-                    return blocked_method(err, *args[1:], **kwargs)
-                return json.dumps(
-                    {"tool": effective_tool_name, "ok": False, "error": err},
-                    ensure_ascii=False,
-                )
-
-            # deny → static blocked result
-            err = {
-                "type": "protected_path_denied",
-                "message": "Command targets a protected path (.gc / config).",
-                # Тот же класс обхода, что и у судьи: заблокированную команду
-                # модель переписывает в эквивалент. Запрет — одной формулировкой
-                # с модерацией (NO_WORKAROUND_NOTICE).
-                "guidance": NO_WORKAROUND_NOTICE,
-            }
-            # Use tool's own blocked-result method if available (mirrors moderation pattern).
-            blocked_method = getattr(self_obj, "_command_moderation_blocked_result", None)
-            if callable(blocked_method):
-                return blocked_method(err, *args[1:], **kwargs)
-            return json.dumps(
-                {"tool": effective_tool_name, "ok": False, "error": err},
-                ensure_ascii=False,
             )
 
-        return wrapper
+        return dual_wrap(func, _flow)
 
     return decorator
