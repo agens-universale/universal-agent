@@ -228,6 +228,31 @@ async def test_append_to_file_records_append_with_baseline(roots):
     )
 
 
+async def test_append_to_crlf_file_records_the_bytes_that_hit_the_disk(roots):
+    """CRLF-файл: тул нормализует дописанный кусок к CRLF, и в журнал обязано
+    уйти то, что легло на диск, а не исходный LF-кусок — иначе хэш «после»
+    не совпадёт с файлом, и следующая правка увидит разрыв цепочки («извне»)."""
+    launch_root, threads_dir = roots
+    target = launch_root / "win.txt"
+    old_bytes = b"one\r\ntwo\r\n"
+    target.write_bytes(old_bytes)
+
+    res = json.loads(
+        await _tool(
+            AppendToFile, launch_root, threads_dir, call_id="call-crlf"
+        ).acall(path=str(target), content="three\n", separator="")
+    )
+    assert res["ok"] is True
+    assert target.read_bytes() == b"one\r\ntwo\r\nthree\r\n"
+    assert res["bytes_appended"] == len(b"three\r\n")
+
+    rec = _records(threads_dir)[0]
+    assert rec.op == "append"
+    assert rec.before_sha256 == _sha(old_bytes)
+    assert rec.after_sha256 == _sha(target.read_bytes())
+    assert rec.add == 1
+
+
 async def test_append_over_mutate_cap_records_partial_without_baseline(roots):
     launch_root, threads_dir = roots
     target = launch_root / "big.log"

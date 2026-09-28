@@ -15,7 +15,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from gc_core.agent_edits import git_ops, shell_delta
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
 from gc_core.agent_edits.shell_delta import ShellDelta
@@ -23,6 +22,7 @@ from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
 from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.config_modules import env_vars
 from gc_core.thread_store import edits_journal_path
+from gc_testkit.helpers.crossplatform import require_symlinks
 
 
 def _git(root: Path, *args: str) -> None:
@@ -967,10 +967,8 @@ def test_symlink_out_of_the_perimeter_stays_out_of_the_pocket(repo, tmp_path):
     launch_root, threads_dir = repo
     outside = tmp_path / "outside.txt"
     outside.write_text("чужое\n", encoding="utf-8")
-    try:
-        os.symlink(str(outside), str(launch_root / "link.txt"))
-    except (OSError, NotImplementedError):
-        pytest.skip("симлинки недоступны в этой среде")
+    require_symlinks(tmp_path)
+    os.symlink(str(outside), str(launch_root / "link.txt"))
 
     delta = ShellDelta.begin(_ctx(launch_root, threads_dir))
     _run_command(launch_root, "open('link.txt','wb').write(b'changed\\n')")
@@ -2452,15 +2450,13 @@ def test_file_facts_are_read_once_per_path(repo, monkeypatch):
     assert len(calls) == 4
 
 
-@pytest.mark.skipif(
-    os.name == "nt", reason="симлинки без прав разработчика на Windows"
-)
 def test_a_repointed_symlink_never_passes_for_an_edit_of_its_target(repo):
     """Перенаправленный симлинк не выдаётся за правку файла-цели.
 
     Ключ пути раскрывает ссылку до цели, а дифф и база git читаются по самой
     ссылке: `ln -sfn b.txt link` записывал «правку» `b.txt` с точной базой —
     строкой `a.txt`, и откат затёр бы `b.txt` этой строкой."""
+    require_symlinks(repo[0].parent)
     launch_root, threads_dir = repo
     (launch_root / "a.txt").write_bytes(b"alpha\n")
     (launch_root / "b.txt").write_bytes(b"beta\n")
@@ -2478,15 +2474,13 @@ def test_a_repointed_symlink_never_passes_for_an_edit_of_its_target(repo):
     assert (launch_root / "b.txt").read_bytes() == b"beta\n"
 
 
-@pytest.mark.skipif(
-    os.name == "nt", reason="симлинки без прав разработчика на Windows"
-)
 def test_a_symlink_repointed_at_a_missing_target_is_not_recorded(repo):
     """Висячий симлинк — тоже ссылка: git-подканал его не записывает.
 
     Цель не существует, ключ ссылку не раскрывает и совпадает с путём из git:
     базой ложился git-блоб ссылки (текст `a.txt`), и откат поставил бы на
     место ссылки обычный файл с этим текстом."""
+    require_symlinks(repo[0].parent)
     launch_root, threads_dir = repo
     (launch_root / "a.txt").write_bytes(b"alpha\n")
     os.symlink("a.txt", launch_root / "link")
@@ -2557,9 +2551,6 @@ def test_a_path_through_a_junction_is_not_recorded(repo, monkeypatch):
     assert "d/a.txt" not in [r.path for r in _records(threads_dir)]
 
 
-@pytest.mark.skipif(
-    os.name == "nt", reason="симлинки без прав разработчика на Windows"
-)
 def test_a_path_through_a_directory_turned_symlink_is_not_recorded(repo):
     """Путь через папку, ставшую ссылкой, не выдаётся за правку чужого файла.
 
@@ -2568,6 +2559,7 @@ def test_a_path_through_a_directory_turned_symlink_is_not_recorded(repo):
     `other/a.txt`. Проверка одного последнего звена ссылку в середине не видит:
     правка `other/a.txt`, которой агент не делал, ложилась в журнал с базой из
     `d/a.txt`, и откат затёр бы ею чужой файл."""
+    require_symlinks(repo[0].parent)
     launch_root, threads_dir = repo
     for rel, text in (("d/a.txt", b"old\n"), ("other/a.txt", b"mine\n")):
         (launch_root / rel).parent.mkdir(exist_ok=True)

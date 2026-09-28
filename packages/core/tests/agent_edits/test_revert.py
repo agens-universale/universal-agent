@@ -11,16 +11,16 @@ import stat
 from pathlib import Path
 
 import pytest
-
 from gc_core.agent_edits.deltas import FileEntry
 from gc_core.agent_edits.revert import (
     REASON_NO_BASELINE,
-    REASON_NOTHING_TO_DELETE,
     REASON_NOT_REVERTABLE,
+    REASON_NOTHING_TO_DELETE,
     REASON_THROUGH_LINK,
     REASON_WRITE_FAILED,
     revert_paths,
 )
+from gc_testkit.helpers.crossplatform import require_symlinks
 
 
 def _entry(
@@ -318,10 +318,8 @@ def _link_dir(link: Path, target: Path) -> None:
 
 
 def _link_file(link: Path, target: Path) -> None:
-    try:
-        link.symlink_to(target)
-    except (OSError, NotImplementedError):
-        pytest.skip("среда не даёт создать symlink на файл")
+    require_symlinks(link.parent)
+    link.symlink_to(target)
 
 
 def test_planted_tmp_link_does_not_redirect_the_restore(tmp_path):
