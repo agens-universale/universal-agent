@@ -11,7 +11,7 @@ from gc_core.summarize.summary_message_body import (
     build_intent_blocks_prefix,
     format_summary_block,
 )
-from gc_core.summarize.summary_spec import hint_section_tags
+from gc_core.summarize.summary_spec import agent_visible_section_tags
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 
 
@@ -41,7 +41,7 @@ def test_xml_summary_not_double_wrapped_in_dialog_body():
     )
     assert body.count("<summary>") == 1
     assert body.count("</summary>") == 1
-    assert any(f"<{tag}>" in body for tag in hint_section_tags())
+    assert any(f"<{tag}>" in body for tag in agent_visible_section_tags())
 
 
 def test_session_memory_block_inlined():

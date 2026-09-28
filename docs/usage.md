@@ -157,7 +157,12 @@ Agent Client Protocol. В VS Code своего клиента нет: поста
 `uv tool install -e packages/acp`.
 
 В `settings.json` аргументы оставьте пустыми. Конфиг ищется так же, как у
-`gc-cli`, без `--config`:
+`gc-cli`, без `--config`. Канал ACP по умолчанию: проза без tool-call разрешена
+(`acp.text_answer_mode: allow`), finish-gate выключен (`off`), todo-reminder выключен,
+плюс hint «discussion ≠ implementation». TUI-шный `tui.text_answer_mode: judge`
+на этот канал не действует. Явный профиль-оверлей —
+`packages/acp/profiles/acp.yml` (скопируйте в `~/.config/gc/profiles/acp.yml`
+и при желании укажите `"args": ["--profile", "acp"]`):
 
 ```json
 {

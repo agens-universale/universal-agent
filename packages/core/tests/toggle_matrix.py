@@ -731,6 +731,9 @@ NOT_IN_MATRIX = {
     # Только TUI: матрица гоняет CLI-прогон.
     "tui.stream": "только TUI",
     "tui.text_answer_mode": "только TUI",
+    "acp.text_answer_mode": "только ACP",
+    "acp.finish_gate_mode": "только ACP",
+    "acp.todo_reminder_steps": "только ACP",
     "tui.finish_gate_mode": "только TUI",
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",

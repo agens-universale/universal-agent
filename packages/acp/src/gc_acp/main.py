@@ -50,8 +50,39 @@ def main(argv: list[str] | None = None) -> int:
     # stdout с первой строки принадлежит протоколу. При console_trace ядро
     # пишет jsonl-трейс и человекочитаемый рендер в stdout.
     config["console_trace"] = False
+    apply_acp_runtime_defaults(config)
     asyncio.run(serve(config))
     return 0
+
+
+def apply_acp_runtime_defaults(config: dict) -> None:
+    """Канальные дефолты ACP → runtime-ключи run_agent.
+
+    TUI копирует свои tui_* ключи сам; CLI/server не ставят text_answer_mode
+    (→ deny) и держат finish-gate всегда on. ACP — IDE-чат: проза allow,
+    finish-gate soft, todo-reminder off, свой special_instructions hint.
+    """
+    from gc_acp.prompt_assets import acp_special_instructions_path
+
+    mode = config.get("acp_text_answer_mode") or "allow"
+    config["text_answer_mode"] = mode
+
+    gate = config.get("acp_finish_gate_mode") or "off"
+    config["strict_turn_finish_validation"] = gate != "off"
+    config["finish_gate_smart"] = gate == "smart"
+
+    todo_params = dict(config.get("todo_params") or {})
+    reminder = config.get("acp_todo_reminder_steps")
+    todo_params["reminder_steps"] = 0 if reminder is None else int(reminder)
+    config["todo_params"] = todo_params
+
+    config["chat_completions_special_instructions_path"] = (
+        acp_special_instructions_path()
+    )
+
+
+# backward-compatible alias (tests / call sites)
+apply_acp_turn_contract = apply_acp_runtime_defaults
 
 
 def backend_rejection(config: dict) -> str | None:
