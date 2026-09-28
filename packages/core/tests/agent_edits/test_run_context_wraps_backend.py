@@ -7,9 +7,9 @@
 стал привилегией TUI.
 
 Ветка правок вернула обёртку в ядро, но уже без нарушения границ: подсистема
-`gc_core.agent_edits` — своя, ядру не нужно знать про diff-экран. Взамен журнал
-работает во ВСЕХ режимах: правки из CLI и сервера попадают в журнал треда так
-же, как из TUI.
+`gc_core.agent_edits` — своя, ядру не нужно знать про diff-экран. Пишет журнал
+тот режим, которому он включён (`agent_edits.record`): TUI — по умолчанию, CLI и
+сервер — по конфигу. Где запись выключена, обёртки вокруг команд нет вовсе.
 """
 from gc_core.agent_edits.tracking import TrackingFsBackend
 from gc_core.backends.local import LocalFsBackend
@@ -18,13 +18,22 @@ from gc_core.run_context import acreate_run_context
 _CFG = {"backend_api_mode": "chat_completions", "save_logs": False}
 
 
-async def test_core_wraps_the_backend_outside_tui_too():
-    """Журнал — не привилегия TUI: CLI и сервер пишут в него так же."""
-    ctx = await acreate_run_context(_CFG, is_tui=False)
+async def test_outside_tui_the_backend_is_not_wrapped_by_default():
+    """CLI без включённой записи — ни одного лишнего слоя вокруг команд: обёртка
+    зовёт `git status` до и после каждой команды, а журнал там никто не смотрит."""
+    ctx = await acreate_run_context({**_CFG, "run_mode": "cli"}, is_tui=False)
+
+    assert isinstance(ctx.os_backend, LocalFsBackend)
+    assert ctx.is_tui is False
+
+
+async def test_cli_with_recording_enabled_wraps_the_backend():
+    """Запись включена CLI в конфиге — обёртка стоит, как в TUI."""
+    cfg = {**_CFG, "run_mode": "cli", "agent_edits": {"record": {"cli": True}}}
+    ctx = await acreate_run_context(cfg, is_tui=False)
 
     assert isinstance(ctx.os_backend, TrackingFsBackend)
     assert isinstance(ctx.os_backend.inner, LocalFsBackend)
-    assert ctx.is_tui is False
 
 
 async def test_workspace_points_at_the_wrapper():

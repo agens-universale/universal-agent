@@ -5,7 +5,7 @@
 """
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 DEFAULT_SNAPSHOTS_MAX_FILES = 500
@@ -16,6 +16,24 @@ DEFAULT_SHELL_TRACKING = True
 DEFAULT_TRACE_INLINE_MAX_LINES = 30
 DEFAULT_REPLAY_EXPANDED_TURNS = 20
 DEFAULT_TURN_SUMMARY_IN_STATUS = True
+
+
+class AgentEditsRecordConfig(BaseModel):
+    """Где вести журнал правок — по режиму запуска.
+
+    Журнал питает дифф в ленте, сводку хода и экран изменений — всё это есть
+    только в TUI, поэтому там запись включена по умолчанию, а ``tui: false``
+    выключает все три разом. ``gc-cli`` (с ним — стенд и фоновые прогоны) и
+    сервер по умолчанию не пишут: там журнал никто не смотрит, а запись стоила
+    бы снимков файлов на диске и ``git status`` вокруг каждой команды.
+    Библиотечное использование ядра режима не объявляет и не пишет.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    tui: bool = True
+    cli: bool = False
+    server: bool = False
 
 
 class AgentEditsConfig(BaseModel):
@@ -40,3 +58,4 @@ class AgentEditsConfig(BaseModel):
     trace_inline_max_lines: int = DEFAULT_TRACE_INLINE_MAX_LINES
     replay_expanded_turns: int = DEFAULT_REPLAY_EXPANDED_TURNS
     turn_summary_in_status: bool = DEFAULT_TURN_SUMMARY_IN_STATUS
+    record: AgentEditsRecordConfig = Field(default_factory=AgentEditsRecordConfig)

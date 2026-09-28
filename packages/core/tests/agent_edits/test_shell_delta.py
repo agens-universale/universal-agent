@@ -85,6 +85,7 @@ def repo(tmp_path, monkeypatch):
 
 def _ctx(launch_root, threads_dir, *, shell_tracking=True, turn_id="turn-1"):
     return SimpleNamespace(
+        is_tui=True,             # режим с записью правок по умолчанию
         config_dict={
             "launch_root": str(launch_root),
             "agent_edits": {"shell_tracking": shell_tracking},
@@ -2308,3 +2309,14 @@ def test_a_path_through_a_directory_turned_symlink_is_not_recorded(repo):
     store = _snapshot_store(launch_root)
     assert store.session_baseline("other/a.txt") is None
     assert (launch_root / "other" / "a.txt").read_bytes() == b"mine\n"
+
+
+def test_shell_channel_does_not_start_where_recording_is_off(repo):
+    """Режим запуска запись не включил (gc-cli по умолчанию) — шелл-канал не
+    поднимается вовсе: ни `git status` вокруг команды, ни записи."""
+    launch_root, threads_dir = repo
+    ctx = _ctx(launch_root, threads_dir)
+    ctx.is_tui = False
+    ctx.config_dict["run_mode"] = "cli"
+
+    assert ShellDelta.begin(ctx) is None

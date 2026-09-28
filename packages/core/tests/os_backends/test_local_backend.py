@@ -130,11 +130,11 @@ async def test_tool_backend_resolution():
     from gc_core.tools.fs.read_file import ReadFile
 
     cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
-    ctx = await acreate_run_context(cfg)
+    ctx = await acreate_run_context(cfg, is_tui=True)
     t = CallableTool(ReadFile(ctx=ctx))
-    # Свой Local приходит в тул ОБЁРНУТЫМ трекером правок — но ровно тем же
-    # объектом, что лежит в ctx.os_backend, поэтому утверждение про голый
-    # LocalFsBackend сюда не подходит: он теперь внутри, под `.inner`.
+    # Свой Local приходит в тул ОБЁРНУТЫМ трекером правок (в TUI запись правок
+    # включена) — но ровно тем же объектом, что лежит в ctx.os_backend, поэтому
+    # утверждение про голый LocalFsBackend сюда не подходит: он внутри, под `.inner`.
     assert t._backend is ctx.os_backend
     assert isinstance(t._backend.inner, LocalFsBackend)
 

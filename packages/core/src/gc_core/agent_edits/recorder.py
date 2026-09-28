@@ -23,7 +23,8 @@ from typing import Any
 
 from gc_core.agent_edits.ctx import (identity_from_ctx,
                                      launch_root_from_ctx, limit,
-                                     protected_extra_from_ctx)
+                                     protected_extra_from_ctx,
+                                     recording_enabled)
 from gc_core.agent_edits.deltas import truncate_hunks, build_diff, decode_edit_text
 from gc_core.agent_edits.git_ops import head_rev_from_files
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
@@ -47,13 +48,14 @@ _logger = logging.getLogger(__name__)
 
 
 def is_recording(ctx: Any) -> bool:
-    """Ведётся ли запись правок для этого ctx (есть thread-identity).
+    """Ведётся ли запись правок для этого ctx: режим запуска её включил
+    (``agent_edits.ctx.recording_enabled``) и есть thread-identity.
 
     Дешёвый предикат без файловых операций: тулу нужно знать заранее, стоит
     ли поднимать в память старый контент файла ради журнала. Периметр пути
     здесь не проверяется — он известен только по конкретному пути правки.
     """
-    return identity_from_ctx(ctx) is not None
+    return recording_enabled(ctx) and identity_from_ctx(ctx) is not None
 
 
 async def record_edit(
@@ -132,6 +134,10 @@ def _record_edit(
     if backup:
         return
 
+    # Часть тулов зовёт запись без предварительной проверки (у них старое
+    # содержимое и так прочитано) — режим запуска проверяется здесь.
+    if not recording_enabled(ctx):
+        return
     identity = identity_from_ctx(ctx)
     if identity is None:
         return

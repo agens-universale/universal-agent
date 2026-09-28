@@ -41,6 +41,7 @@ def roots(tmp_path, monkeypatch):
 def _tool(tool_cls, launch_root, threads_dir, *, call_id="call-1", identity=True, config=None):
     """Тул с ctx как в тестах tools/fs (local_ctx) + thread-identity для журнала."""
     ctx = local_ctx({"launch_root": str(launch_root), **(config or {})})
+    ctx.is_tui = True                # режим с записью правок по умолчанию
     if identity:
         ctx.threads_dir = str(threads_dir)
         ctx.system_id = "cli"

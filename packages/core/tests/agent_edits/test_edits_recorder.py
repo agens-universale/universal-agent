@@ -26,6 +26,7 @@ def roots(tmp_path, monkeypatch):
 
 def _ctx(launch_root, threads_dir, *, system_id="cli", thread_id="th1", turn_id="turn-1"):
     return SimpleNamespace(
+        is_tui=True,             # режим с записью правок по умолчанию
         config_dict={"launch_root": str(launch_root)},
         threads_dir=str(threads_dir),
         system_id=system_id,
@@ -1119,3 +1120,30 @@ async def test_tool_edit_after_a_shell_edit_does_not_pass_for_the_session_start(
                       new_bytes=b"after-tool\n", op="edit", call_id="c1")
 
     assert _snapshot_store(launch_root, threads_dir).session_baseline("src/foo.py") is None
+
+
+async def test_nothing_is_recorded_where_recording_is_off(tmp_path):
+    """Тред есть, но режим запуска запись не включил (CLI по умолчанию): ни
+    журнала, ни снимков — правка тула не оставляет следа."""
+    launch_root, threads_dir = tmp_path / "proj", tmp_path / "threads"
+    launch_root.mkdir()
+    threads_dir.mkdir()
+    target = launch_root / "a.py"
+    target.write_bytes(b"new\n")
+    ctx = SimpleNamespace(
+        is_tui=False,
+        config_dict={"launch_root": str(launch_root), "run_mode": "cli"},
+        threads_dir=str(threads_dir),
+        system_id="cli",
+        thread_id="th1",
+        turn_id="turn-1",
+    )
+
+    assert is_recording(ctx) is False
+    await record_edit(
+        ctx, abs_path=str(target), old_bytes=b"old\n", new_bytes=b"new\n",
+        op="edit", call_id="call-1",
+    )
+
+    assert list(threads_dir.glob("edits_*.jsonl")) == []
+    assert not (launch_root / ".gc").exists()

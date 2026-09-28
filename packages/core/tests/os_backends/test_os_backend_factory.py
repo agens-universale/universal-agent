@@ -66,15 +66,13 @@ def test_resolve_harbor_rejects_non_string_exec_init():
         loop.close()
 
 
-async def test_create_run_context_wraps_local_os_backend_without_tui():
-    """Свой Local оборачивается трекером правок во всех режимах, не только в TUI."""
-    from gc_core.agent_edits.tracking import TrackingFsBackend
-
+async def test_create_run_context_leaves_local_bare_where_recording_is_off():
+    """Вне TUI без включённой записи правок (`agent_edits.record`) Local не
+    оборачивается: трекер зовёт `git status` вокруг каждой команды зря."""
     ctx = await acreate_run_context(
         {"backend_api_mode": "chat_completions", "save_logs": False}
     )
-    assert isinstance(ctx.os_backend, TrackingFsBackend)
-    assert isinstance(ctx.os_backend.inner, LocalFsBackend)
+    assert isinstance(ctx.os_backend, LocalFsBackend)
     assert getattr(ctx, "is_tui", False) is False
 
 
@@ -120,7 +118,7 @@ async def test_workspace_is_assembled_once_even_when_wrapped(monkeypatch):
     )
 
     ctx = await acreate_run_context(
-        {"backend_api_mode": "chat_completions", "save_logs": False}
+        {"backend_api_mode": "chat_completions", "save_logs": False}, is_tui=True,
     )
 
     assert isinstance(ctx.os_backend, TrackingFsBackend)

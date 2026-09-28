@@ -50,6 +50,7 @@ def repo(tmp_path, monkeypatch):
 
 def _ctx(launch_root, threads_dir):
     ctx = local_ctx({"launch_root": str(launch_root)})
+    ctx.is_tui = True                # режим с записью правок по умолчанию
     ctx.threads_dir = str(threads_dir)
     ctx.system_id = "cli"
     ctx.thread_id = "th1"

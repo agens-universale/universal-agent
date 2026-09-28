@@ -21,6 +21,34 @@ def agent_edits_config(ctx: Any) -> dict:
     section = config_from_ctx(ctx).get("agent_edits") or {}
     return section if isinstance(section, dict) else {}
 
+# Служебный ключ конфига: режим запуска, объявленный фронтендом (в файле конфига
+# его нет, как и `launch_root`). TUI узнаётся по признаку контекста `is_tui` —
+# его ставит `acreate_run_context`, и дочерний контекст субагента его наследует.
+RUN_MODE_KEY = "run_mode"
+RUN_MODE_TUI = "tui"
+RUN_MODE_CLI = "cli"
+RUN_MODE_SERVER = "server"
+
+
+def recording_enabled(ctx: Any) -> bool:
+    """Включена ли запись правок в режиме этого запуска (``agent_edits.record``).
+
+    Режим не объявлен (ядро как библиотека) или неизвестен — не пишем: журнал
+    ведётся там, где его показывают или где его явно попросили.
+    """
+    if getattr(ctx, "is_tui", False):
+        mode = RUN_MODE_TUI
+    else:
+        mode = config_from_ctx(ctx).get(RUN_MODE_KEY)
+    if mode not in (RUN_MODE_TUI, RUN_MODE_CLI, RUN_MODE_SERVER):
+        return False
+    record = agent_edits_config(ctx).get("record")
+    if not isinstance(record, dict):
+        record = {}
+    default = mode == RUN_MODE_TUI
+    return bool(record.get(mode, default))
+
+
 def identity_from_ctx(ctx: Any) -> tuple[str, str, str] | None:
     """threads_dir/system_id/thread_id — тем же способом, что sidecar."""
     threads_dir = getattr(ctx, "threads_dir", None)

@@ -450,9 +450,10 @@ def _finish_run_context(
         tools_cache=tools_cache,
         thread_store=thread_store,
     )
-    # ``is_tui`` контекст только ПОМЕЧАЕТ, обёртка от режима не зависит:
-    # ``TrackingFsBackend`` ставится ЗДЕСЬ и во всех режимах (CLI / server /
-    # TUI), потому что журнал правок — свойство прогона, а не интерфейса.
+    # ``TrackingFsBackend`` ставится ЗДЕСЬ — в том режиме, которому запись
+    # правок включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
+    # по конфигу). Где запись выключена, обёртки нет вовсе: она зовёт
+    # ``git status`` до и после каждой команды, а журнал там никто не смотрит.
     # Живёт обёртка в ``gc_core.agent_edits.tracking``, то есть зависимости
     # ядра от фронтенда тут нет (страж ``tests/test_core_does_not_import_frontends``).
     #
@@ -466,7 +467,9 @@ def _finish_run_context(
     # уже не отличает «передали свой» от «собрали дефолтный» (см. докстринг
     # ``backend_was_overridden``), и сравнение с ним делало условие вечно
     # ложным, а обёртку — мёртвым кодом.
-    if not prep.backend_was_overridden:
+    from gc_core.agent_edits.ctx import recording_enabled
+
+    if not prep.backend_was_overridden and recording_enabled(ctx):
         from gc_core.agent_edits.tracking import wrap_local_for_tracking
 
         wrapped = wrap_local_for_tracking(backend, ctx)

@@ -68,6 +68,8 @@ def _config(tmp_path):
         "completions_url": "http://localhost:1/v1/chat/completions",
         "model": "test-model",
         "launch_root": str(tmp_path),
+        "run_mode": "cli",
+        "agent_edits": {"record": {"cli": True}},
         "max_steps": 0,
         "system_prompt_id": "v1",
         "chat_completions_system_prompt_path": str(_prompt_file(tmp_path)),
@@ -151,6 +153,8 @@ def _subagent_parent_ctx(tmp_path, monkeypatch, *, turn_id: str | None):
         "chat_completions_params": {"llm": {"max_tokens": 128, "completion_kwargs": {}}},
     }
     parent = local_ctx(cfg)
+    # Режим с записью правок: дочерний ctx субагента наследует его от родителя.
+    parent.is_tui = True
     parent.run_id = "p1"
     parent.auth_connector = None
     parent.logger = None

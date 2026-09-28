@@ -59,7 +59,8 @@ def git_roots(roots):
 
 
 async def _cli_ctx(launch_root: Path, threads_dir: Path, *, identity: bool = True):
-    """RunContext так, как его собирает gc-cli: is_tui не передаётся (False).
+    """RunContext так, как его собирает gc-cli с ВКЛЮЧЁННОЙ записью правок
+    (`agent_edits.record.cli`): is_tui не передаётся (False), режим — `cli`.
 
     Identity вешается тем же способом, что AgentExecutor.arun(): при ``-t`` —
     bind_thread_identity, без треда — clear_thread_identity.
@@ -69,6 +70,8 @@ async def _cli_ctx(launch_root: Path, threads_dir: Path, *, identity: bool = Tru
             "backend_api_mode": "chat_completions",
             "save_logs": False,
             "launch_root": str(launch_root),
+            "run_mode": "cli",
+            "agent_edits": {"record": {"cli": True}},
         }
     )
     if identity:

@@ -4,6 +4,7 @@ from typing import Any, Dict
 
 import yaml
 
+from gc_core.agent_edits.ctx import RUN_MODE_KEY, RUN_MODE_SERVER
 from gc_core.config import apply_cli_overrides, load_config, sync_logging_flat_and_params
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.bundled_assets import bundled_root, repo_root
@@ -228,6 +229,9 @@ def build_agent_config_for_server(server_cfg: Dict[str, Any]) -> Dict[str, Any]:
     # В серверном режиме ограничиваем проектные метаданные,
     # чтобы не передавать структуру файловой системы пользователя.
     cfg.setdefault("limit_project_metadata", True)
+    # Режим запуска для ядра: от него зависит запись журнала правок
+    # (`agent_edits.record.server`, по умолчанию выключена).
+    cfg[RUN_MODE_KEY] = RUN_MODE_SERVER
 
     return cfg
 

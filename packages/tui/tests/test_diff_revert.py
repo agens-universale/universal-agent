@@ -2140,6 +2140,7 @@ async def test_text_file_overwritten_by_binary_is_restorable(tmp_path, monkeypat
     ws = _Workspace(tmp_path)
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc_home")
     ctx = SimpleNamespace(
+        is_tui=True,
         config_dict={"launch_root": str(ws.root)},
         threads_dir=str(ws.threads_dir), system_id="cli", thread_id="th1",
         turn_id="t1",

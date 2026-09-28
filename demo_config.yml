@@ -218,6 +218,12 @@ agent_edits:
   trace_inline_max_lines: 30   # ЭКРАННЫХ рядов диффа в ленте до свёртки
   replay_expanded_turns: 20    # сколько последних ходов разворачивать при открытии треда (0 — все)
   turn_summary_in_status: true # сводка правок в статусной строке хода
+  # Где вести журнал правок (дифф в ленте, сводка хода, экран /diff) — по режиму запуска.
+  # tui: false выключает все три; в gc-cli и на сервере журнал по умолчанию не пишется.
+  record:
+    tui: true
+    cli: false
+    server: false
 
 agent:
   model: MiniMax-M2.7

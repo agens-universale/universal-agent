@@ -58,4 +58,5 @@ def test_flatten_exposes_agent_edits(tmp_path):
         "trace_inline_max_lines": 30,
         "replay_expanded_turns": 20,
         "turn_summary_in_status": True,
+        "record": {"tui": True, "cli": False, "server": False},
     }

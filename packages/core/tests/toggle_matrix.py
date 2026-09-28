@@ -503,6 +503,12 @@ NOT_IN_MATRIX = {
     "agent_edits.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
     "agent_edits.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
     "agent_edits.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
+    # Запись журнала правок по режиму запуска: пишет отдельный канал (журнал и
+    # снимки), сравниваемый дамп его не читает, а сценарий матрицы файлов не
+    # правит. Покрыто agent_edits/test_ctx и test_run_context_wraps_backend.
+    "agent_edits.record.tui": "запись журнала правок в TUI; покрыто agent_edits/test_ctx",
+    "agent_edits.record.cli": "запись журнала правок в gc-cli; там же",
+    "agent_edits.record.server": "запись журнала правок на сервере; там же",
 }
 
 

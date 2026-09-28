@@ -95,3 +95,36 @@ def test_sane_values_pass_through():
                  DEFAULT_MAX_DIFF_SOURCE_BYTES) == 512
     assert limit(None, ctx, "snapshots_max_files",
                  DEFAULT_SNAPSHOTS_MAX_FILES) == 42
+
+
+# --- запись правок по режимам запуска ------------------------------------------
+
+import pytest  # noqa: E402
+
+from gc_core.agent_edits.ctx import recording_enabled  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "is_tui, run_mode, record, expected",
+    [
+        (True, None, {}, True),                          # TUI — пишет по умолчанию
+        (True, None, {"tui": False}, False),             # …и выключается явно
+        (False, "cli", {}, False),                       # CLI — по умолчанию нет
+        (False, "cli", {"cli": True}, True),
+        (False, "server", {}, False),                    # сервер — по умолчанию нет
+        (False, "server", {"server": True}, True),
+        (False, None, {"cli": True, "server": True}, False),  # библиотека: режима нет
+        (False, "что-то", {"cli": True}, False),         # неизвестный режим — нет
+    ],
+)
+def test_recording_is_decided_by_the_run_mode(is_tui, run_mode, record, expected):
+    """Журнал правок пишется там, где его смотрят: в TUI — всегда (по умолчанию),
+    в `gc-cli` и на сервере — только если включено; библиотечное использование
+    ядра режима не объявляет и не пишет. TUI узнаётся по признаку контекста, CLI и
+    сервер — по служебному `run_mode`, который ставит сам фронтенд."""
+    config = {"agent_edits": {"record": record}}
+    if run_mode is not None:
+        config["run_mode"] = run_mode
+    ctx = SimpleNamespace(is_tui=is_tui, config_dict=config)
+
+    assert recording_enabled(ctx) is expected
