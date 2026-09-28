@@ -16,6 +16,7 @@ CATEGORY_FINISH_GATE = "finish_gate"
 CATEGORY_COMMAND_MODERATION = "command_moderation"
 CATEGORY_PROJECT_MEMORY = "project_memory"
 CATEGORY_INTENT_SCOPE = "intent_scope"
+CATEGORY_STRUCTURED_OUTPUT = "structured_output"
 CATEGORY_SUBAGENT = "subagent"
 CATEGORY_UNCATEGORIZED = "uncategorized"
 
@@ -26,6 +27,7 @@ _KNOWN_CATEGORIES = (
     CATEGORY_COMMAND_MODERATION,
     CATEGORY_PROJECT_MEMORY,
     CATEGORY_INTENT_SCOPE,
+    CATEGORY_STRUCTURED_OUTPUT,
     CATEGORY_SUBAGENT,
     CATEGORY_UNCATEGORIZED,
 )
@@ -90,6 +92,8 @@ def category_for_request_label(request_label: str | None) -> str:
         return CATEGORY_PROJECT_MEMORY
     if "intent_scope" in label:
         return CATEGORY_INTENT_SCOPE
+    if label == "structured_output":
+        return CATEGORY_STRUCTURED_OUTPUT
     return CATEGORY_MAIN
 
 
