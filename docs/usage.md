@@ -140,6 +140,39 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 умноженное на 3."
 ```
 
+## VS Code (ACP)
+
+Редактор поднимает агента отдельным процессом `gc-acp` и говорит с ним по
+Agent Client Protocol. В VS Code своего клиента нет: поставьте расширение
+[ACP Client](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
+(`formulahendry.acp-client`) — Extensions, поиск `ACP Client`, либо
+`code --install-extension formulahendry.acp-client`.
+
+Команда приезжает вместе с полным агентом (`uv tool install -e .` или
+установка `gc-ua` из раздела выше) и лежит в `PATH` рядом с `gc-ua`. Путь
+для настройки: `which gc-acp` (обычно `~/.local/bin/gc-acp`). В клоне для
+разработки после `uv sync` это `<корень>/.venv/bin/gc-acp`. Узкий профиль
+`gc-cli` эту команду наружу не кладёт: `uv tool` экспортирует только скрипты
+запрошенного дистрибутива. Тогда отдельно
+`uv tool install -e packages/acp`.
+
+В `settings.json` аргументы оставьте пустыми. Конфиг ищется так же, как у
+`gc-cli`, без `--config`:
+
+```json
+{
+  "acp.agents": {
+    "gc-acp": {
+      "command": "/абсолютный/путь/gc-acp",
+      "args": []
+    }
+  }
+}
+```
+
+Панель ACP на боковой панели, агент `gc-acp`, Connect. В конфиге нужен
+`os_backend: local`.
+
 ## Ключи запуска gc-cli
 
 **Ключи запуска gc-cli** (см. `packages/cli/src/gc_cli/arg_parser.py`):
