@@ -2,7 +2,7 @@
 
 import functools
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, NamedTuple, Optional
 
 from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
 from gc_core.request_backend_policy import (
@@ -209,6 +209,28 @@ def _build_chat_completion_payload(
     return payload
 
 
+class ChatCompletionText(NamedTuple):
+    """Текст choice и причина остановки. ``finish_reason`` может отсутствовать."""
+
+    text: str
+    finish_reason: str | None
+
+
+def _completion_text_and_finish(res: Any) -> ChatCompletionText:
+    """Текст и ``finish_reason`` первого choice. Пустой ответ — пустая строка."""
+    text = ""
+    finish_reason = None
+    if isinstance(res, dict):
+        choice = res.get("choices", [{}])[0]
+        text = choice.get("message", {}).get("content")
+        finish = choice.get("finish_reason")
+        if isinstance(finish, str):
+            finish_reason = finish
+    return ChatCompletionText(
+        text=(text or "").strip(), finish_reason=finish_reason
+    )
+
+
 async def _asend_chat_completion_text(
     *,
     ctx: Any,
@@ -218,7 +240,7 @@ async def _asend_chat_completion_text(
     request_label: str,
     payload_overrides: Optional[Dict[str, Any]],
     resolved: Optional[ResolvedModel],
-) -> str:
+) -> ChatCompletionText:
     cfg = getattr(ctx, "config_dict", {}) or {}
     log_params = cfg.get("logging_params")
     full_log_backend = (
@@ -284,15 +306,10 @@ async def _asend_chat_completion_text(
         _log_completion_response_meta(
             logger=logger, label=request_label, res=res
         )
-    text = (
-        res.get("choices", [{}])[0].get("message", {}).get("content")
-        if isinstance(res, dict)
-        else ""
-    )
-    return (text or "").strip()
+    return _completion_text_and_finish(res)
 
 
-async def arequest_chat_completion_text(
+async def arequest_chat_completion_outcome(
     *,
     ctx: Any,
     state: Any,
@@ -301,8 +318,9 @@ async def arequest_chat_completion_text(
     consumer: str,
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
-) -> str:
-    """``consumer`` — canonical id из ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
+) -> ChatCompletionText:
+    """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
+    ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
     заново на каждый вызов из ``ctx.model_router`` (снимок хода) — не глобально/один раз.
 
     Класс 1 фоллбэков недоступности (спека §8): если консьюмер резолвится через
@@ -380,6 +398,29 @@ async def arequest_chat_completion_text(
         ):
             router.breaker.trip(active_resolved.alias, _breaker_reason(exc))
         raise
+
+
+async def arequest_chat_completion_text(
+    *,
+    ctx: Any,
+    state: Any,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    consumer: str,
+    request_label: str = "chat_completion",
+    payload_overrides: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Текст choice. Причина остановки — в ``arequest_chat_completion_outcome``."""
+    outcome = await arequest_chat_completion_outcome(
+        ctx=ctx,
+        state=state,
+        messages=messages,
+        max_tokens=max_tokens,
+        consumer=consumer,
+        request_label=request_label,
+        payload_overrides=payload_overrides,
+    )
+    return outcome.text
 
 
 def _resolve_active_model(router: Any):

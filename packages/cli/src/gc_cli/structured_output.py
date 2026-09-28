@@ -13,11 +13,21 @@ from typing import Any
 from gc_core.config_modules.chat_completions import (
     DEFAULT_AUXILIARY_LLM_MAX_TOKENS,
 )
-from gc_core.summarize.llm import (
-    arequest_auxiliary_completion_text,
-    auxiliary_llm_completion_kwargs,
+from gc_core.config_modules.strip_tags_projection import (
+    projection_tags_from_config,
+)
+from gc_core.message_projection import project_text_for_model
+from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
+from gc_core.utils.backend_errors import (
+    FINISH_KIND_LENGTH,
+    classify_finish_kind,
+    finish_prevents_text_final,
 )
 from gc_core.utils.json_text import format_json_for_display
+from gc_core.utils.llm_chat_client import (
+    arequest_chat_completion_outcome,
+    log_llm_prompt_and_result,
+)
 
 REQUEST_LABEL = "structured_output"
 _CONSUMER = "summary"
@@ -90,7 +100,12 @@ async def arephrase_turn_outcome(
     state: Any,
     terminal_outcome: str | None,
 ) -> str:
-    """Один aux-запрос. Пустой ответ и сбой транспорта — ошибка шага."""
+    """Один aux-запрос. Пустой ответ, обрыв, отказ и сбой — ошибка шага.
+
+    Обрыв — ``finish_reason=length``. Отказ — ``content_filter``,
+    ``refusal``, ``safety``. ``stop`` и незнакомая причина при непустом
+    тексте принимаются: файл формы не схема, тело не разбирается.
+    """
     if terminal_outcome or state is None:
         raise StructuredOutputError(_no_outcome_message(terminal_outcome))
     outcome = turn_outcome_text(response)
@@ -99,7 +114,7 @@ async def arephrase_turn_outcome(
     max_tokens = _auxiliary_max_tokens(ctx)
     user = f"Format description:\n{format_text}\n\nTurn outcome:\n{outcome}"
     try:
-        text = await arequest_auxiliary_completion_text(
+        text, finish_reason = await _arequest_rephrase(
             ctx=ctx,
             state=state,
             messages=[
@@ -107,15 +122,15 @@ async def arephrase_turn_outcome(
                 {"role": "user", "content": user},
             ],
             max_tokens=max_tokens,
-            request_label=REQUEST_LABEL,
-            consumer=_CONSUMER,
-            payload_overrides=auxiliary_llm_completion_kwargs(ctx),
-            logger=getattr(ctx, "logger", None),
         )
     except Exception as exc:
         raise StructuredOutputError(
             f"structured-output-format: запрос перефраза не удался: {exc}"
         ) from exc
+    if finish_prevents_text_final(finish_reason):
+        raise StructuredOutputError(
+            _unfinished_rephrase_message(finish_reason)
+        )
     rendered = str(text or "").strip()
     if not rendered:
         raise StructuredOutputError(
@@ -192,6 +207,56 @@ def _auxiliary_max_tokens(ctx: Any) -> int:
     if isinstance(max_tokens, int) and max_tokens >= 1:
         return max_tokens
     return DEFAULT_AUXILIARY_LLM_MAX_TOKENS
+
+
+async def _arequest_rephrase(
+    *,
+    ctx: Any,
+    state: Any,
+    messages: list[dict[str, str]],
+    max_tokens: int,
+) -> tuple[str, str | None]:
+    """Служебный запрос перефраза: текст после проекции и причина остановки.
+
+    Грязный ответ пишется в лог. Наружу — текст без ``<think>`` и тегов из
+    ``strip_tags_projection``, как у прочих служебных вызовов. Причина
+    остановки берётся из сырого choice.
+    """
+    outcome = await arequest_chat_completion_outcome(
+        ctx=ctx,
+        state=state,
+        messages=messages,
+        max_tokens=max_tokens,
+        request_label=REQUEST_LABEL,
+        consumer=_CONSUMER,
+        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
+    )
+    logger = getattr(ctx, "logger", None)
+    log_llm_prompt_and_result(
+        logger=logger,
+        label=REQUEST_LABEL,
+        messages=messages,
+        output_text=outcome.text,
+    )
+    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    projected = project_text_for_model(
+        outcome.text, tags=tags, strip_think=True
+    )
+    return projected, outcome.finish_reason
+
+
+def _unfinished_rephrase_message(finish_reason: str | None) -> str:
+    """Обрыв по длине и отказ провайдера. Фрагмент наружу не отдаётся."""
+    shown = finish_reason if isinstance(finish_reason, str) else ""
+    if classify_finish_kind(finish_reason) == FINISH_KIND_LENGTH:
+        return (
+            "structured-output-format: ответ перефраза оборван "
+            f"(finish_reason={shown})"
+        )
+    return (
+        "structured-output-format: ответ перефраза отклонён "
+        f"(finish_reason={shown})"
+    )
 
 
 def _no_outcome_message(terminal_outcome: str | None) -> str:

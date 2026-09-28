@@ -56,8 +56,8 @@ class _Logger:
         self.infos = []
         self.warnings = []
 
-    def info(self, msg, extra=None):
-        self.infos.append((msg, extra))
+    def info(self, msg, *args, extra=None):
+        self.infos.append((msg % args if args else msg, extra))
 
     def warning(self, msg, *args, extra=None):
         self.warnings.append((msg % args if args else msg, extra))
@@ -138,10 +138,10 @@ async def test_rephrase_sends_format_and_fields(monkeypatch):
 
     async def _fake(**kwargs):
         captured.update(kwargs)
-        return "  ## Итог\n4\n"
+        return SimpleNamespace(text="  ## Итог\n4\n", finish_reason="stop")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output.arequest_chat_completion_outcome",
         _fake,
     )
     text = await arephrase_turn_outcome(
@@ -182,10 +182,10 @@ async def test_rephrase_refuses_aborted_run_and_accepts_prose(monkeypatch):
 
     async def _fake(**kwargs):
         captured.update(kwargs)
-        return "ok"
+        return "ok", "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output._arequest_rephrase",
         _fake,
     )
     text = await arephrase_turn_outcome(
@@ -205,10 +205,10 @@ async def test_rephrase_uses_default_max_tokens_when_unset(monkeypatch):
 
     async def _fake(**kwargs):
         captured.update(kwargs)
-        return "ok"
+        return "ok", None
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output._arequest_rephrase",
         _fake,
     )
     ctx = _Ctx()
@@ -227,10 +227,10 @@ async def test_rephrase_uses_default_max_tokens_when_unset(monkeypatch):
 @pytest.mark.asyncio
 async def test_rephrase_empty_answer_is_an_error(monkeypatch):
     async def _empty(**_kwargs):
-        return "  \n"
+        return "  \n", "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output._arequest_rephrase",
         _empty,
     )
     with pytest.raises(StructuredOutputError, match="пустой ответ"):
@@ -244,12 +244,66 @@ async def test_rephrase_empty_answer_is_an_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("finish_reason", "match"),
+    [
+        ("length", "оборван"),
+        ("content_filter", "отклонён"),
+        ("refusal", "отклонён"),
+        ("safety", "отклонён"),
+    ],
+)
+async def test_rephrase_unfinished_reason_is_an_error(
+    monkeypatch, finish_reason, match
+):
+    async def _cut(**_kwargs):
+        return '{"result": "answer', finish_reason
+
+    monkeypatch.setattr(
+        "gc_cli.structured_output._arequest_rephrase",
+        _cut,
+    )
+    with pytest.raises(StructuredOutputError, match=match):
+        await arephrase_turn_outcome(
+            format_text="json",
+            response=_finish(),
+            ctx=_Ctx(),
+            state=object(),
+            terminal_outcome=None,
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "finish_reason", ["stop", "tool_calls", None, "weird"]
+)
+async def test_rephrase_keeps_text_when_reason_does_not_block(
+    monkeypatch, finish_reason
+):
+    async def _done(**_kwargs):
+        return "форма", finish_reason
+
+    monkeypatch.setattr(
+        "gc_cli.structured_output._arequest_rephrase",
+        _done,
+    )
+    text = await arephrase_turn_outcome(
+        format_text="json",
+        response=_finish(),
+        ctx=_Ctx(),
+        state=object(),
+        terminal_outcome=None,
+    )
+    assert text == "форма"
+
+
+@pytest.mark.asyncio
 async def test_rephrase_transport_error_stays_structured(monkeypatch):
     async def _boom(**_kwargs):
         raise RuntimeError("backend down")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output._arequest_rephrase",
         _boom,
     )
     with pytest.raises(StructuredOutputError, match="backend down"):
@@ -274,10 +328,10 @@ async def test_emit_prints_text_when_stdout_is_not_jsonl(
     monkeypatch, capsys, config_dict
 ):
     async def _ok(**_kwargs):
-        return '{"n": 4}'
+        return '{"n": 4}', "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output._arequest_rephrase",
         _ok,
     )
     ctx = _Ctx()
@@ -303,10 +357,10 @@ async def test_emit_jsonl_stream_keeps_stdout_free_of_raw_text(
     """Сырая строка в потоке событий перестаёт быть jsonl."""
 
     async def _ok(**_kwargs):
-        return '{"n": 4}'
+        return '{"n": 4}', "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output._arequest_rephrase",
         _ok,
     )
     ctx = _Ctx()
@@ -363,7 +417,7 @@ async def test_emit_failure_logs_raw_answer_then_rephrase_error(
         raise RuntimeError("backend down")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_auxiliary_completion_text",
+        "gc_cli.structured_output._arequest_rephrase",
         _boom,
     )
     ctx = _Ctx()
@@ -506,3 +560,53 @@ async def test_rephrase_tokens_are_in_the_snapshot_taken_after_it(
     out, err = capsys.readouterr()
     assert out == "форма\n"
     assert err == ""
+
+
+@pytest.mark.asyncio
+async def test_truncated_rephrase_is_not_printed(monkeypatch, capsys):
+    """finish_reason=length читается из choice, фрагмент в stdout не попадает."""
+
+    async def _headers(*_args, **_kwargs):
+        return {}
+
+    async def _policy(**_kwargs):
+        return {
+            "choices": [
+                {
+                    "message": {"content": '{"result": "answer'},
+                    "finish_reason": "length",
+                }
+            ]
+        }, {}
+
+    monkeypatch.setattr(
+        "gc_core.utils.llm_chat_client.acreate_call_headers",
+        _headers,
+    )
+    monkeypatch.setattr(
+        "gc_core.utils.llm_chat_client.arequest_chat_completions_with_policy",
+        _policy,
+    )
+    executor = _executor_with_open_accounting()
+    raw = _finish()
+    code = await aemit_structured_result(
+        response=raw,
+        config_dict=executor._ctx.config_dict,
+        ctx=executor._ctx,
+        state=executor.get_state(),
+        terminal_outcome=None,
+        format_text="json",
+    )
+    assert code == 1
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert "оборван" in err
+    assert "finish_reason=length" in err
+    finals = [
+        extra
+        for extra in executor._ctx.logger.events
+        if extra.get("event") == "final_answer"
+    ]
+    assert len(finals) == 1
+    assert '"task_report"' in finals[0]["answer"]
+    assert '"result": "answer' not in finals[0]["answer"]
