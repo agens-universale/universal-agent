@@ -15,6 +15,7 @@ from textual.widgets import Static
 from gc_tui.messages import CopyBlockRequest
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.skill_view import truncate_path_left
+from gc_tui.services.trace_retention import subagent_parent_ids_in_window
 
 _PATH_MAXLEN = 48
 
@@ -69,9 +70,20 @@ class PreviewScreen(Screen[bool]):
         )
 
         trace = self.query_one("#trace", VerticalScroll)
-        calls = render_segments_readonly(trace, self._segments)
-        if self._subagent_records:
-            merge_nested_readonly(trace, self._subagent_records, calls)
+        segments = self._segments
+        records = self._subagent_records
+        calls = render_segments_readonly(trace, segments)
+        if records:
+            merge_nested_readonly(
+                trace,
+                records,
+                calls,
+                allowed_parent_ids=subagent_parent_ids_in_window(segments),
+            )
+        # Сырьё сегментов и sidecar после монтажа не держим: в виджетах уже
+        # короткий трейс, тяжёлые tool output / nested вне окна не нужны.
+        self._segments = []
+        self._subagent_records = []
 
     def action_resume(self) -> None:
         self.dismiss(True)
