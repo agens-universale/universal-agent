@@ -6960,7 +6960,7 @@ class SettingsScreen(Screen):
             if ed is not None and ed.reload_presets():
                 event.stop()
                 self._refresh_footer()  # обещания клавиш меняются вместе со списком
-            return
+                return
         if (
             event.key in (_KEY_CTRL_AT, _KEY_CTRL_SPACE, _KEY_CTRL_AT_SIGN)
             and self._view in _PROBE_SECTIONS
@@ -7097,7 +7097,7 @@ class SettingsScreen(Screen):
                 if ctrl is not None and ctrl.reload():
                     event.stop()
                     self._refresh_footer()
-                return
+                    return
             if event.key in (_KEY_CTRL_AT, _KEY_CTRL_SPACE, _KEY_CTRL_AT_SIGN):
                 # Проба — только в облачной панели (§2.5 спеки 2026-08-06): локальная
                 # адреса не спрашивает (канон §9.2), проверять там нечего — клавиша
