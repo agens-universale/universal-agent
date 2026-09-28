@@ -12,6 +12,7 @@ import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
+from gc_core.agent_edits.snapshots import purge_thread_snapshots
 from gc_core.config_modules.agent import (
     merge_special_instructions_with_model_steering,
 )
@@ -56,7 +57,6 @@ from gc_core.summarize.config import (
 from gc_core.thread_store import (
     ThreadSession,
     make_message_key,
-    purge_thread_snapshots,
     resolve_threads_dir,
 )
 from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
@@ -275,7 +275,10 @@ class AgentExecutor:
             # Снимки баз — не забота хранилища: тем же ``reset`` ходит
             # запасной путь компакции, где сносить базы отката нельзя.
             # Пользовательский сброс знает, что чистит, и чистит здесь.
-            purge_thread_snapshots(
+            # Вне цикла событий: снимков у долгого треда тысячи, и снос
+            # каталога прямо в корутине подвешивал бы старт нового треда.
+            await asyncio.to_thread(
+                purge_thread_snapshots,
                 resolve_threads_dir(config_dict),
                 system_id,
                 thread_id,

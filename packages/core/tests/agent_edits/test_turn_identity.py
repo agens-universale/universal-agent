@@ -249,3 +249,46 @@ class TestSubagentEditsCarryParentTurnId:
         child = await _child_ctx(parent, cfg)
 
         assert current_turn_id(child) is None
+
+
+class TestUserResetPurgesThreadSnapshots:
+    """Новый тред (`start_new_thread`, `-n`) сносит снимки баз треда, а
+    продолжение и прогон без треда — нет. Вызов живёт в исполнителе, а не в
+    хранилище: тем же сбросом хранилища ходит запасной путь компакции."""
+
+    @staticmethod
+    def _seed(tmp_path, thread_id):
+        from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
+
+        store = SnapshotStore(
+            snapshots_root(str(tmp_path)), f"cli_{thread_id}"
+        )
+        store.capture_session("a.py", b"old")
+        return store
+
+    async def _run(self, tmp_path, **kwargs):
+        ctx = await acreate_run_context(_config(tmp_path))
+
+        async def _fake_run_agent(messages, state, _ctx, **_kwargs):
+            state.messages += list(messages)
+            return "ok"
+
+        with patch.object(
+            agent_executor_module, "arun_agent", side_effect=_fake_run_agent
+        ):
+            executor = agent_executor_module.AgentExecutor(ctx)
+            await executor.arun(["ход"], system="cli", verbose=False, **kwargs)
+
+    async def test_new_thread_purges_its_snapshots(self, tmp_path):
+        store = self._seed(tmp_path, "thr-reset")
+
+        await self._run(tmp_path, thread_id="thr-reset", start_new_thread=True)
+
+        assert store.session_baseline("a.py") is None
+
+    async def test_continuing_the_thread_keeps_snapshots(self, tmp_path):
+        store = self._seed(tmp_path, "thr-keep")
+
+        await self._run(tmp_path, thread_id="thr-keep")
+
+        assert store.session_baseline("a.py") == b"old"

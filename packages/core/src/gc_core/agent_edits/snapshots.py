@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 import re
 import time
@@ -49,6 +50,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Tuple
 
+from gc_core.thread_store import (
+    edits_journal_path,
+    sanitize_system_id,
+    validate_thread_id,
+)
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.file_lock import file_lock
 
@@ -177,6 +183,8 @@ def _apply_marks(
         index.pop(key, None)
     return True
 
+
+_logger = logging.getLogger(__name__)
 
 def snapshots_root(launch_root: str) -> Path:
     """Каталог снапшотов правок агента в проекте пользователя."""
@@ -920,7 +928,7 @@ class SnapshotStore:
     def purge_thread(self) -> int:
         """Снести снимки и записи индекса ЭТОГО треда. Возвращает число файлов.
 
-        Зовётся при сбросе треда (``thread_store.reset_thread_files``). Без неё
+        Зовётся при сбросе треда (``purge_thread_snapshots``). Без неё
         сброс уносил журнал, но не базы: ключ снимков — ``system_id_thread_id``,
         сброс его не меняет, а ``capture_session`` пишет только при отсутствии.
         Новая сессия брала бы за «до» состояние прошлой, и откат записал бы его
@@ -1032,3 +1040,33 @@ def _unlink_quietly(p: Path) -> bool:
     except OSError:
         return False
     return True
+
+
+def purge_thread_snapshots(
+    threads_dir: str, system_id: str, thread_id: str, *, launch_root: str
+) -> None:
+    """Снести СНИМКИ баз этого треда при ПОЛЬЗОВАТЕЛЬСКОМ сбросе (``-n``).
+
+    Не в хранилище тредов: оно о проекте не знает, а тем же ``reset`` ходит
+    запасной путь КОМПАКЦИИ, где снести базы отката значило бы молча стереть
+    работу пользователя. Снимки убирает тот, кто знает, что сброс именно
+    пользовательский, — ``agent_executor``.
+
+    Пустой ``launch_root`` — проект неизвестен, снимки не наши.
+    """
+    if not launch_root:
+        return
+    try:
+        journal = edits_journal_path(
+            threads_dir,
+            sanitize_system_id(system_id),
+            validate_thread_id(thread_id),
+        )
+        SnapshotStore(
+            snapshots_root(launch_root), thread_key_from_journal_path(journal)
+        ).purge_thread()
+    except Exception:
+        # Сброс не имеет права упасть из-за уборки снимков: файлы треда уже
+        # удалены, и исключение оставило бы вызывающего с полусброшенным
+        # состоянием.
+        _logger.warning("снимки сброшенного треда не убраны", exc_info=True)

@@ -227,68 +227,17 @@ def _remove_existing(paths: Sequence[str]) -> List[str]:
     return deleted
 
 
-def purge_thread_snapshots(
-    threads_dir: str, system_id: str, thread_id: str, *, launch_root: str
-) -> None:
-    """Снести СНИМКИ баз этого треда; файлы треда — забота вызывающего.
-
-    Вынесено из ``reset_thread_files`` ради ВТОРОГО вызывающего. После перехода
-    на хранилище-порт пользовательский сброс (``-n``) идёт через
-    ``store.areset``, а хранилище о проекте не знает и знать не должно: тем же
-    ``reset`` пользуется запасной путь КОМПАКЦИИ (``thread_store`` →
-    ``areplace_messages``), и снести там базы отката значило бы молча стереть
-    работу пользователя. Поэтому снимки убирает тот, кто знает, что сброс
-    именно пользовательский.
-
-    Пустой ``launch_root`` — законный случай «проект неизвестен, снимки не
-    мои»: так зовёт файловое хранилище.
-    """
-    if not launch_root:
-        return
-    # Импорт локальный: `agent_edits` импортирует `thread_store`, и модульная
-    # зависимость в обратную сторону дала бы цикл.
-    from gc_core.agent_edits.snapshots import (
-        SnapshotStore,
-        snapshots_root,
-        thread_key_from_journal_path,
-    )
-
-    try:
-        journal = edits_journal_path(
-            threads_dir,
-            sanitize_system_id(system_id),
-            validate_thread_id(thread_id),
-        )
-        SnapshotStore(
-            snapshots_root(launch_root), thread_key_from_journal_path(journal)
-        ).purge_thread()
-    except Exception:
-        # Сброс не имеет права упасть из-за уборки снимков: файлы треда уже
-        # удалены, и исключение оставило бы вызывающего с полусброшенным
-        # состоянием.
-        _logger.warning("снимки сброшенного треда не убраны", exc_info=True)
-
-
 def reset_thread_files(
-    threads_dir: str, system_id: str, thread_id: str, *, launch_root: str
+    threads_dir: str, system_id: str, thread_id: str
 ) -> List[str]:
     """
     Удалить файлы конкретного треда (data/meta/lock/sidecar), включая legacy data/meta.
     Возвращает список удалённых путей.
 
-    ``launch_root`` — корень проекта, параметр ОБЯЗАТЕЛЬНЫЙ. Вместе с журналом
-    правок уносятся и СНИМКИ баз этого треда. Необязательным он уже был —
-    и вызывающий его не передал: уборка молча не случилась, поймал это только
-    живой смок. Забыть теперь нельзя, вызов без него не соберётся. Без них сброс оставлял живую базу
-    отсчёта под воскресший журнал: ключ снимков сброс не меняет, а
-    ``capture_session`` пишет только при отсутствии, и откат новой сессии
-    записал бы состояние прошлой поверх работы пользователя (пятый раунд
-    ревью, находка 1). У ``delete_thread`` случай другой — там журнал не
-    возвращается, и снимки подбирает эвикция.
-
-    Снимки живут в проекте, а не в ``threads_dir``, поэтому корень приходит
-    параметром: без него эта функция его знать не может. Возвращаемый список —
-    по-прежнему только файлы треда: снимки считаются внутренней уборкой.
+    Снимки баз журнала правок здесь НЕ трогаются: тем же сбросом ходит
+    запасной путь компакции (хранилище → ``areplace_messages``), где сносить
+    базы отката нельзя. Их убирает пользовательский сброс треда
+    (``agent_edits.snapshots.purge_thread_snapshots`` из ``agent_executor``).
     """
     sys_norm = sanitize_system_id(system_id)
     normalized_thread_id = validate_thread_id(thread_id)
@@ -312,10 +261,6 @@ def reset_thread_files(
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
 
     deleted = _remove_existing(paths)
-
-    purge_thread_snapshots(
-        threads_dir, sys_norm, normalized_thread_id, launch_root=launch_root
-    )
 
     # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
     with _sidecar_seq_lock:

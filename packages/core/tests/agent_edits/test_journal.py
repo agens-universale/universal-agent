@@ -1,7 +1,11 @@
 """Журнал правок агента: модель EditRecord и I/O EditsJournal."""
 
 from gc_core.agent_edits.journal import EditRecord, EditsJournal
-from gc_core.agent_edits.snapshots import SnapshotStore, snapshots_root
+from gc_core.agent_edits.snapshots import (
+    purge_thread_snapshots,
+    SnapshotStore,
+    snapshots_root,
+)
 from gc_core.thread_store import (
     delete_thread,
     edits_journal_path,
@@ -101,45 +105,57 @@ def test_edits_journal_path_matches_touched_style(tmp_path):
     assert p.name == "edits_sys_th.jsonl"
 
 
-def test_reset_thread_files_removes_snapshots_of_that_thread(tmp_path):
-    """Сброс уносит и снимки треда — иначе новая сессия считает от чужой базы.
-
-    Ключ снимков — `system_id_thread_id`, и сброс его не меняет. А
-    `capture_session` пишет ТОЛЬКО при отсутствии. Значит после `gc-cli -t X -n`
-    прежние `.orig`, `.accepted` и отметки создания остаются живыми, новая
-    сессия берёт за «до» состояние из прошлой, а откат записывает его поверх
-    работы, которую пользователь сделал между сессиями, — молча (пятый раунд
-    ревью, находка 1).
-
-    От `delete_thread` случай отличается принципиально: там журнал не
-    возвращается, и снимки становятся вытесняемыми сами. Здесь журнал
-    создаётся заново тут же.
-    """
+def _seed_two_threads(tmp_path):
     threads_dir = tmp_path / "threads"
     threads_dir.mkdir()
     launch_root = tmp_path / "proj"
     launch_root.mkdir()
     journal = edits_journal_path(str(threads_dir), "cli", "demo-thread")
     journal.write_text('{"path": "a.py"}\n', encoding="utf-8")
-
     ours = SnapshotStore(snapshots_root(str(launch_root)), "cli_demo-thread")
     ours.capture_session("a.py", b"old")
     ours.capture_accepted("a.py", b"accepted", head_oid=None)
     alien = SnapshotStore(snapshots_root(str(launch_root)), "cli_other-thread")
     alien.capture_session("a.py", b"old")
+    return threads_dir, launch_root, journal, ours, alien
 
-    reset_thread_files(
-        str(threads_dir),
-        system_id="cli",
-        thread_id="demo-thread",
-        launch_root=str(launch_root),
+
+def test_purge_thread_snapshots_removes_only_that_thread(tmp_path):
+    """Пользовательский сброс уносит снимки треда — иначе новая сессия
+    считает от чужой базы.
+
+    Ключ снимков — `system_id_thread_id`, и сброс его не меняет. А
+    `capture_session` пишет ТОЛЬКО при отсутствии. Значит после `gc-cli -t X -n`
+    прежние `.orig`, `.accepted` и отметки создания остались бы живыми, новая
+    сессия взяла бы за «до» состояние из прошлой, а откат записал бы его поверх
+    работы, которую пользователь сделал между сессиями, — молча.
+    """
+    threads_dir, launch_root, _journal, ours, alien = _seed_two_threads(
+        tmp_path
     )
 
-    assert not journal.exists()
+    purge_thread_snapshots(
+        str(threads_dir), "cli", "demo-thread", launch_root=str(launch_root)
+    )
+
     assert ours.session_baseline("a.py") is None
     assert ours.accepted_state("a.py") is None
     # чужой тред не задет
     assert alien.session_baseline("a.py") == b"old"
+
+
+def test_reset_thread_files_leaves_snapshots_alone(tmp_path):
+    """Сброс ХРАНИЛИЩА снимков не трогает: тем же `reset` ходит запасной путь
+    компакции, и снос баз там молча стёр бы право отката. Снимки убирает
+    только пользовательский сброс (`purge_thread_snapshots`)."""
+    threads_dir, _root, journal, ours, _alien = _seed_two_threads(tmp_path)
+
+    reset_thread_files(
+        str(threads_dir), system_id="cli", thread_id="demo-thread"
+    )
+
+    assert not journal.exists()
+    assert ours.session_baseline("a.py") == b"old"
 
 
 def test_reset_thread_files_removes_edits_journal(tmp_path):
@@ -150,10 +166,7 @@ def test_reset_thread_files_removes_edits_journal(tmp_path):
     assert journal_path.exists()
 
     deleted = reset_thread_files(
-        str(threads_dir),
-        system_id="cli",
-        thread_id="demo-thread",
-        launch_root=str(tmp_path),
+        str(threads_dir), system_id="cli", thread_id="demo-thread"
     )
 
     assert str(journal_path) in deleted
