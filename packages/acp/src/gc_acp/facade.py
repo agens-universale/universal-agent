@@ -16,6 +16,7 @@ from gc_core.thread_store import (
     resolve_threads_dir,
     validate_thread_id,
 )
+from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_acp.ask_human import bind_ask_human
 from gc_acp.capabilities import initialize_result
@@ -380,7 +381,10 @@ class AcpFacade:
             await self._emit_tools(live, flow)
         if live.cancel_requested:
             return
-        final = getattr(live.agent, "last_answer", None)
+        final = SubmitSolution.present_result(
+            getattr(live.agent, "last_answer", None),
+            shown=assembler.answer,
+        )
         for update in assembler.flush_answer(final):
             await self._notify(live.session_id, update)
 

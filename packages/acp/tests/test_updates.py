@@ -1,5 +1,7 @@
 """kind ядра → session/update и досылка last_answer."""
 
+import json
+
 from gc_acp.updates import ChunkAssembler, history_updates
 
 
@@ -90,6 +92,82 @@ def test_history_places_a_tool_call_between_prose():
         "toolCallId": "c1",
         "status": "failed",
     }
+
+
+def _finish(call_id, report, **extra):
+    payload = {
+        "solution_type": "direct_answer",
+        "task": "прочитать README",
+        "task_report": report,
+        "handoff": "{}",
+    }
+    payload.update(extra)
+    return {
+        "type": "function_call",
+        "name": "turn_finish",
+        "call_id": call_id,
+        "arguments": json.dumps(payload, ensure_ascii=False),
+    }
+
+
+def test_history_shows_finish_report_and_hides_the_judge():
+    updates = history_updates(
+        [
+            {"role": "user", "content": "прочитай"},
+            _finish(
+                "bad",
+                "черновик",
+                comment="рано",
+                message="Finish gate: continue_work.",
+            ),
+            {
+                "type": "function_call_output",
+                "call_id": "bad",
+                "output": json.dumps(
+                    {
+                        "tool": "turn_finish",
+                        "ok": False,
+                        "status": "rejected_by_finish_gate",
+                        "message": "Finish gate: continue_work.",
+                        "finish_gate": {"action": "continue_work"},
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+            _finish("ok", "В README одна фраза.", comment="файл короткий"),
+            {
+                "type": "function_call_output",
+                "call_id": "ok",
+                "output": json.dumps(
+                    {
+                        "tool": "turn_finish",
+                        "ok": True,
+                        "status": "submitted",
+                        "finish_gate": {"action": "accept"},
+                    }
+                ),
+            },
+        ]
+    )
+    texts = [item["content"]["text"] for item in updates]
+    assert texts == [
+        "прочитай",
+        "В README одна фраза.\n\n* заметка: файл короткий",
+    ]
+    assert all("Finish gate" not in text for text in texts)
+    assert all("finish_gate" not in text for text in texts)
+
+
+def test_history_skips_finish_report_already_shown_as_prose():
+    updates = history_updates(
+        [
+            {"role": "assistant", "content": "В README одна фраза."},
+            _finish("ok", "В README одна фраза.", comment="файл короткий"),
+        ]
+    )
+    assert [item["content"]["text"] for item in updates] == [
+        "В README одна фраза."
+    ]
 
 
 def test_history_skips_tool_role_and_non_text_parts():

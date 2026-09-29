@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
+from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.message_projection import project_assistant_text
+from gc_core.tools.turn.submit_solution import SubmitSolution
 
 from gc_acp.tool_flow import report_from_record
 
@@ -42,6 +45,10 @@ class ChunkAssembler:
         self._kind: str | None = None
         self._message_id: str | None = None
         self._answer = ""
+
+    @property
+    def answer(self) -> str:
+        return self._answer
 
     def feed(self, kind: str, text: str) -> list[dict]:
         if kind == "reset":
@@ -90,19 +97,90 @@ def history_updates(messages: list[Any]) -> list[dict]:
     """Проигрыш треда: у каждого сообщения свой messageId.
 
     function_call встаёт карточкой между прозой. Результат тула — смена
-    статуса той же карточки, не текст ответа.
+    статуса той же карточки, не текст ответа. Принятый turn_finish
+    становится отчётом; отклонённая попытка и вердикт судьи не показываются.
     """
     rendered: list[dict] = []
     seen: set[str] = set()
+    rejected = _rejected_finish_ids(messages)
+    last_agent = ""
     for message in messages:
         tool = _tool_report(message, seen)
         if tool is not None:
             rendered.append(tool)
             continue
+        if _is_finish_call(message):
+            text = _accepted_finish_text(message, rejected, last_agent)
+            if text != "":
+                rendered.append(text_chunk(_ANSWER, text, new_message_id()))
+                last_agent = text
+            continue
         chunk = _history_chunk(message)
         if chunk is not None:
             rendered.append(chunk)
+            if chunk["sessionUpdate"] == _ANSWER:
+                last_agent = chunk["content"]["text"]
     return rendered
+
+
+def _is_finish_call(message: Any) -> bool:
+    return (
+        isinstance(message, dict)
+        and message.get("type") == "function_call"
+        and message.get("name") == FINISH_TOOL_NAME
+    )
+
+
+def _rejected_finish_ids(messages: list[Any]) -> set[str]:
+    """Попытки, которые тул или судья отклонили. Их отчёт в ленту не идёт."""
+    finish_ids: set[str] = set()
+    for message in messages:
+        if not _is_finish_call(message):
+            continue
+        call_id = message.get("call_id")
+        if isinstance(call_id, str) and call_id != "":
+            finish_ids.add(call_id)
+    rejected: set[str] = set()
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        if message.get("type") != "function_call_output":
+            continue
+        call_id = message.get("call_id")
+        failed = _output_failed(message.get("output"))
+        if call_id not in finish_ids or not failed:
+            continue
+        rejected.add(call_id)
+    return rejected
+
+
+def _output_failed(output: Any) -> bool:
+    if isinstance(output, dict):
+        payload = output
+    elif isinstance(output, str):
+        try:
+            payload = json.loads(output)
+        except json.JSONDecodeError:
+            return False
+    else:
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("ok") is False
+
+
+def _accepted_finish_text(
+    message: dict, rejected: set[str], last_agent: str
+) -> str:
+    call_id = message.get("call_id")
+    if isinstance(call_id, str) and call_id in rejected:
+        return ""
+    view = SubmitSolution.finish_view(message.get("arguments"))
+    if view is None or view.report == "":
+        return ""
+    if last_agent.strip() == view.report:
+        return ""
+    return view.render()
 
 
 def _tool_report(message: Any, seen: set[str]) -> dict | None:

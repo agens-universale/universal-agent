@@ -276,6 +276,78 @@ async def test_prompt_streams_and_second_turn_keeps_the_thread(tmp_path):
     await facade.shutdown()
 
 
+def _finish_answer():
+    return json.dumps(
+        {
+            "solution_type": "direct_answer",
+            "task": "прочитать README",
+            "task_report": "В README одна фраза.",
+            "comment": "файл короткий",
+            "handoff": '{"artifacts":["README.md"]}',
+            "message": "Finish gate: accept.",
+            "finish_gate": {"action": "accept"},
+        },
+        ensure_ascii=False,
+    )
+
+
+async def test_prompt_renders_finish_arguments_as_the_report(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = []
+    agent.answer = _finish_answer()
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    texts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+    assert texts == ["В README одна фраза.\n\n* заметка: файл короткий"]
+    assert all("Finish gate" not in text for text in texts)
+    await facade.shutdown()
+
+
+async def test_prompt_does_not_repeat_a_streamed_report(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agent = agents[0]
+    agent.deltas = [("answer", "В README одна фраза.")]
+    agent.answer = _finish_answer()
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    texts = [
+        item["content"]["text"]
+        for item in _updates(writer)
+        if item["sessionUpdate"] == "agent_message_chunk"
+    ]
+    assert texts == ["В README одна фраза."]
+    await facade.shutdown()
+
+
 async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
     facade, writer, agents = _open(tmp_path)
     await _init(facade)
