@@ -7,6 +7,9 @@ import uuid
 from typing import Any
 
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
+from gc_core.message_policy.user_message_policy import (
+    extract_real_user_message_text,
+)
 from gc_core.message_projection import project_assistant_text
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
@@ -99,6 +102,8 @@ def history_updates(messages: list[Any]) -> list[dict]:
     function_call встаёт карточкой между прозой. Результат тула — смена
     статуса той же карточки, не текст ответа. Принятый turn_finish
     становится отчётом; отклонённая попытка и вердикт судьи не показываются.
+    Служебные user-сообщения ядра (сводка, чек-лист, technical) в ленту
+    не идут — та же ручка, что у заголовка сессии.
     """
     rendered: list[dict] = []
     seen: set[str] = set()
@@ -196,7 +201,7 @@ def _history_chunk(message: Any) -> dict | None:
     kind = _ROLE_KIND.get(role)
     if kind is None:
         return None
-    text = _role_text(role, message.get("content")).strip()
+    text = _role_text(role, message).strip()
     if text == "":
         return None
     return text_chunk(kind, text, new_message_id())
@@ -209,10 +214,17 @@ def _skipped(message: dict) -> bool:
     return str(message.get("role") or "").strip().lower() == "tool"
 
 
-def _role_text(role: str, content: Any) -> str:
-    plain = plain_text(content)
-    if role != "assistant":
-        return plain
+def _role_text(role: str, message: dict) -> str:
+    if role == "user":
+        real = extract_real_user_message_text(message)
+        if real == "":
+            return ""
+        # display_content — уже человеко-текст; иначе только text/output_text,
+        # без сырого JSON картинок из user_content_to_text.
+        if message.get("display_content") is not None:
+            return real
+        return plain_text(message.get("content"))
+    plain = plain_text(message.get("content"))
     return project_assistant_text(plain, strip_think=True)
 
 
@@ -243,4 +255,5 @@ def _text_items(content: list) -> list[str]:
 
 
 def _is_text_part(item: dict) -> bool:
-    return item.get("type") in (None, "text")
+    # Ядро пишет прозу каноном output_text (convertations._canonical_message_item).
+    return item.get("type") in (None, "text", "output_text")

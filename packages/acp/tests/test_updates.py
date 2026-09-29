@@ -170,6 +170,70 @@ def test_history_skips_finish_report_already_shown_as_prose():
     ]
 
 
+def test_history_reads_canonical_output_text():
+    updates = history_updates(
+        [
+            {"role": "user", "content": "прочитай"},
+            {
+                "type": "message",
+                "role": "assistant",
+                "content": [
+                    {
+                        "type": "output_text",
+                        "annotations": [],
+                        "text": "<think>r</think>В README одна фраза.",
+                    }
+                ],
+            },
+        ]
+    )
+    assert [item["sessionUpdate"] for item in updates] == [
+        "user_message_chunk",
+        "agent_message_chunk",
+    ]
+    assert updates[1]["content"]["text"] == "В README одна фраза."
+
+
+def test_history_skips_technical_user_messages():
+    updates = history_updates(
+        [
+            {"role": "user", "content": "прочитай README"},
+            {
+                "role": "user",
+                "content": (
+                    '<technical type="dialog_summary">'
+                    "<dialog_summary>\n"
+                    "<summary>сжатый контекст</summary>\n"
+                    "</dialog_summary>"
+                    "</technical>"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    '<technical type="technical">'
+                    "Your task checklist (session_todo) has not been updated "
+                    "for a while."
+                    "</technical>"
+                ),
+            },
+            {
+                "role": "user",
+                "content": "<skill…>\nдавай обсудим",
+                "display_content": "давай обсудим",
+            },
+            {"role": "assistant", "content": "готово"},
+        ]
+    )
+    texts = [item["content"]["text"] for item in updates]
+    assert texts == ["прочитай README", "давай обсудим", "готово"]
+    assert [item["sessionUpdate"] for item in updates] == [
+        "user_message_chunk",
+        "user_message_chunk",
+        "agent_message_chunk",
+    ]
+
+
 def test_history_skips_tool_role_and_non_text_parts():
     updates = history_updates(
         [
