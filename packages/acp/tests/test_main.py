@@ -52,6 +52,7 @@ def test_acp_special_instructions_asset_exists():
         text = fd.read()
     assert "Discussion vs implementation" in text
     assert "don't write code" in text.lower() or "Do not write" in text
+    assert "Do not call a tool to ask" in text
 
 
 def test_backend_rejection_names_harbor_and_accepts_local():
