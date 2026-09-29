@@ -235,6 +235,15 @@ EXPERT_ONLY_KEYS: set = {
     "assign.memory_compaction",
     "assign.auto_judge",
     "assign.subagents",
+    # --- responses: HTTP-фасад gc-responses, не шаблон CLI/TUI ---
+    "responses.host",
+    "responses.port",
+    "responses.auth_token",
+    "responses.cors_origins",
+    "responses.launch_root",
+    "responses.text_answer_mode",
+    "responses.finish_gate_mode",
+    "responses.todo_reminder_steps",
 }
 
 

@@ -47,6 +47,7 @@ from gc_core.config_modules.quality_gate import (
     QualityGateConfig,
     normalize_quality_gate_config,
 )
+from gc_core.config_modules.responses import ResponsesConfig
 from gc_core.config_modules.security import SecurityConfig
 from gc_core.config_modules.stored_outputs import normalize_tool_output_limits
 from gc_core.config_modules.strip_tags_projection import (
@@ -107,6 +108,7 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+    responses: ResponsesConfig = Field(default_factory=ResponsesConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     endpoint_presets: list[EndpointPreset] = Field(
         default_factory=default_endpoint_presets

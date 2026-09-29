@@ -732,6 +732,18 @@ NOT_IN_MATRIX = {
     "tui.stream": "только TUI",
     "tui.text_answer_mode": "только TUI",
     "tui.finish_gate_mode": "только TUI",
+    "responses.host": "только HTTP-фасад Responses",
+    "responses.port": "только HTTP-фасад Responses",
+    "responses.auth_token": "только HTTP-фасад Responses",
+    "responses.cors_origins": "только HTTP-фасад Responses",
+    "responses.launch_root": "только HTTP-фасад Responses",
+    "responses.text_answer_mode": "только HTTP-фасад Responses",
+    "responses.finish_gate_mode": "только HTTP-фасад Responses",
+    "responses.todo_reminder_steps": "только HTTP-фасад Responses",
+    "todo.reminder_steps": (
+        "напоминание чеклиста; матрица гоняет CLI и этот лист не "
+        "переключает. Канал Responses пишет его в runtime"
+    ),
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",
     "tui.bang_shell.max_output_bytes": "только TUI",

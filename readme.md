@@ -167,6 +167,7 @@ assign:
 - [Сабагенты](docs/subagents.md) — делегирование задач, кастомные сабагенты, лимиты и бюджет вызовов.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).
+- [HTTP-фасад Responses](docs/responses.md) — `gc-responses`, секция `responses` в общем `config.yml`, ход через `POST /v1/responses`.
 - [Swarm-режим](docs/swarm.md) — изолированные bubblewrap-песочницы для каждой задачи, pipeline запроса, эндпоинты, AR-1..AR-9, troubleshooting.
 - [TUI режим (gc-ua)](docs/tui.md) — кроссплатформенный TUI поверх агента: установка, запуск, основные команды и экраны.
 - [RootBox режим](docs/rootbox.md) — Roox box режим, конфиги (command_moderation, read_guard, root_box (write_guard), url_policy)
