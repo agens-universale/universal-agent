@@ -62,6 +62,70 @@ def test_poll_skips_bytes_already_on_disk_and_hides_bookkeeping(tmp_path):
     assert flow.poll() == []
 
 
+def test_poll_after_compaction_rewrites_shorter_file(tmp_path):
+    path = tmp_path / "data_acp_s.jsonl"
+    path.write_text(
+        _line(
+            {
+                "type": "function_call",
+                "name": "fs_read_file",
+                "call_id": "before",
+                "arguments": '{"path": "a.py"}',
+            }
+        )
+        + "\n"
+        + _line({"role": "assistant", "content": "длинный хвост " * 40})
+        + "\n",
+        encoding="utf-8",
+    )
+    flow = ToolFlow(str(path))
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _line(
+                {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "mid",
+                    "arguments": '{"path": "b.py"}',
+                }
+            )
+            + "\n"
+        )
+    assert flow.poll()[0]["toolCallId"] == "mid"
+
+    path.write_text(
+        _line(
+            {
+                "role": "user",
+                "content": '<technical type="dialog_summary">сводка</technical>',
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            _line(
+                {
+                    "type": "function_call",
+                    "name": "exec_command",
+                    "call_id": "after",
+                    "arguments": '{"command": "ls"}',
+                }
+            )
+            + "\n"
+        )
+    updates = flow.poll()
+    assert updates == [
+        {
+            "sessionUpdate": "tool_call",
+            "toolCallId": "after",
+            "title": "exec_command(command='ls')",
+            "status": "in_progress",
+        }
+    ]
+
+
 def test_report_without_call_id_is_skipped():
     seen: set[str] = set()
     assert (
