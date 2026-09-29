@@ -216,7 +216,14 @@ def _messages_to_steps(messages: list) -> list:
         if classified is None:
             continue
         source, text = classified
-        step = Step(step_id=len(steps) + 1, source=source, message=text)
+        step = Step(
+            step_id=len(steps) + 1,
+            source=source,
+            message=text,
+            reasoning_content=(
+                m.get("reasoning_content") if source == "agent" else None
+            ),
+        )
         steps.append(step)
         if source == "agent":
             last_agent = step

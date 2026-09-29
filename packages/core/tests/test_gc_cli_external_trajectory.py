@@ -4,6 +4,7 @@ Requires the `harbor` framework (dependency-group `test`).
 """
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -75,6 +76,74 @@ def test_orphan_tool_result_falls_back_to_user_step():
     assert len(steps) == 1
     assert steps[0].source == "user"
     assert steps[0].message == "orphan"
+
+
+@pytest.mark.parametrize("content", ["answer", "", None])
+def test_agent_reasoning_is_exported_separately(content):
+    messages = [
+        {
+            "role": "assistant",
+            "content": content,
+            "reasoning_content": "inspect the failing route",
+        }
+    ]
+    steps = _messages_to_steps(messages)
+    assert steps[0].message == (content or "")
+    assert steps[0].reasoning_content == "inspect the failing route"
+    assert messages[0]["content"] == content
+
+
+def test_non_agent_reasoning_is_not_exported():
+    steps = _messages_to_steps(
+        [
+            {
+                "role": "user",
+                "content": "request",
+                "reasoning_content": "ignored",
+            },
+            {"role": "assistant", "content": "answer"},
+            {
+                "role": "tool",
+                "content": "result",
+                "reasoning_content": "ignored",
+            },
+        ]
+    )
+    assert all(step.reasoning_content is None for step in steps)
+    assert steps[1].observation.results[0].content == "result"
+
+
+def test_trajectory_json_preserves_archived_and_live_reasoning(tmp_path):
+    agent = GcCliExternal(logs_dir=tmp_path, model_name="openai/m")
+    agent._evicted_messages = [
+        {
+            "role": "assistant",
+            "content": "old",
+            "reasoning_content": "old thought",
+        },
+    ]
+    state = SimpleNamespace(
+        messages=[
+            {
+                "role": "assistant",
+                "content": "",
+                "reasoning_content": "new thought",
+            },
+            {
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": "{}",
+            },
+            {"type": "function_call_output", "output": "done"},
+        ]
+    )
+    assert agent._write_trajectory(state) == 3
+    payload = json.loads((tmp_path / "trajectory.json").read_text())
+    assert payload["steps"][0]["reasoning_content"] == "old thought"
+    assert payload["steps"][1]["reasoning_content"] == "new thought"
+    assert (
+        payload["steps"][2]["observation"]["results"][0]["content"] == "done"
+    )
 
 
 def test_stringify_handles_none_str_and_parts():
