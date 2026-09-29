@@ -14,6 +14,10 @@ def test_apply_acp_runtime_defaults_allow_gate_off_todo_off():
     assert cfg["chat_completions_special_instructions_path"] == (
         acp_special_instructions_path()
     )
+    assert cfg["stop_tools"] == [
+        "turn_ask_human",
+        "turn_intermediate_reply",
+    ]
 
 
 def test_apply_acp_runtime_defaults_respects_overrides():
@@ -27,6 +31,16 @@ def test_apply_acp_runtime_defaults_respects_overrides():
     assert cfg["strict_turn_finish_validation"] is True
     assert cfg["finish_gate_smart"] is True
     assert cfg["todo_params"]["reminder_steps"] == 7
+
+
+def test_apply_acp_runtime_defaults_keeps_existing_stop_tools():
+    cfg = {"stop_tools": ["project_memory", "turn_ask_human"]}
+    apply_acp_runtime_defaults(cfg)
+    assert cfg["stop_tools"] == [
+        "project_memory",
+        "turn_ask_human",
+        "turn_intermediate_reply",
+    ]
 
 
 def test_acp_special_instructions_asset_exists():
@@ -127,6 +141,8 @@ def test_local_start_applies_runtime_defaults(monkeypatch, tmp_path):
     assert cfg["chat_completions_special_instructions_path"].endswith(
         "chat_completions_acp_special_instructions.md"
     )
+    assert "turn_ask_human" in cfg["stop_tools"]
+    assert "turn_intermediate_reply" in cfg["stop_tools"]
 
 
 def test_unsupported_backend_is_rejected():

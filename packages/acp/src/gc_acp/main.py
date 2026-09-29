@@ -17,6 +17,10 @@ from gc_core.config import (
     load_config_ex,
     resolve_config_path,
 )
+from gc_core.constants.tool_names import (
+    ASK_HUMAN_TOOL_NAME,
+    INTERMEDIATE_REPLY_TOOL_NAME,
+)
 from gc_core.onboarding import explain_broken_config
 from gc_core.tools.connect_mcp.registry import ToolsCache
 
@@ -61,6 +65,8 @@ def apply_acp_runtime_defaults(config: dict) -> None:
     TUI копирует свои tui_* ключи сам; CLI/server не ставят text_answer_mode
     (→ deny) и держат finish-gate всегда on. ACP — IDE-чат: проза allow,
     finish-gate soft, todo-reminder off, свой special_instructions hint.
+    turn_ask_human и turn_intermediate_reply в схему не попадают: их текст
+    клиенту не уходит (вопрос — пустой порт, промежуточный ответ — stderr).
     """
     from gc_acp.prompt_assets import acp_special_instructions_path
 
@@ -79,6 +85,21 @@ def apply_acp_runtime_defaults(config: dict) -> None:
     config["chat_completions_special_instructions_path"] = (
         acp_special_instructions_path()
     )
+    _stop_user_invisible_tools(config)
+
+
+# Текст этих тулов клиент ACP не видит: карточки скрыты, вопрос человека
+# возвращает пустую строку, промежуточный ответ печатается в stderr.
+_USER_INVISIBLE_TOOLS = (ASK_HUMAN_TOOL_NAME, INTERMEDIATE_REPLY_TOOL_NAME)
+
+
+def _stop_user_invisible_tools(config: dict) -> None:
+    current = config.get("stop_tools")
+    names = list(current) if isinstance(current, list) else []
+    for name in _USER_INVISIBLE_TOOLS:
+        if name not in names:
+            names.append(name)
+    config["stop_tools"] = names
 
 
 # backward-compatible alias (tests / call sites)
