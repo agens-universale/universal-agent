@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
-from typing import Any
+from typing import Any, TextIO
 
 from gc_core.aio.agent import AsyncAgent
 from gc_core.backends.factory import (
@@ -51,12 +51,28 @@ def main(argv: list[str] | None = None) -> int:
     if rejection is not None:
         print(rejection, file=sys.stderr)
         return 1
-    # stdout с первой строки принадлежит протоколу. При console_trace ядро
-    # пишет jsonl-трейс и человекочитаемый рендер в stdout.
+    # stdout с первой строки принадлежит протоколу. console_trace ядро пишет
+    # в stdout; безусловный print() (например MCP discovery) — тоже.
     config["console_trace"] = False
     apply_acp_runtime_defaults(config)
-    asyncio.run(serve(config))
+    protocol_out = _claim_protocol_stdout()
+    try:
+        asyncio.run(serve(config, protocol_out))
+    finally:
+        sys.stdout = protocol_out
     return 0
+
+
+def _claim_protocol_stdout() -> TextIO:
+    """Отдать текущий stdout писателю JSON-RPC, sys.stdout направить в stderr.
+
+    Дальше print() без file= попадает в диагностический канал, а не между
+    ответами протокола. Исходный поток возвращаем при выходе из main: процесс
+    всё равно завершается, а тесты не должны оставлять подмену.
+    """
+    protocol_out = sys.stdout
+    sys.stdout = sys.stderr
+    return protocol_out
 
 
 def apply_acp_runtime_defaults(config: dict) -> None:
@@ -122,13 +138,13 @@ def backend_rejection(config: dict) -> str | None:
     )
 
 
-def build_facade(config: dict) -> AcpFacade:
+def build_facade(config: dict, protocol_out: TextIO) -> AcpFacade:
     auth = build_auth_connector(config)
     backend = resolve_os_backend(config)
     cache = ToolsCache(config, os_backend=backend)
     return AcpFacade(
         config=config,
-        writer=StdoutWriter(),
+        writer=StdoutWriter(protocol_out),
         agent_factory=_create_agent,
         auth_connector=auth,
         tools_cache=cache,
@@ -136,8 +152,8 @@ def build_facade(config: dict) -> AcpFacade:
     )
 
 
-async def serve(config: dict) -> None:
-    facade = build_facade(config)
+async def serve(config: dict, protocol_out: TextIO) -> None:
+    facade = build_facade(config, protocol_out)
     try:
         async for line in stdin_lines():
             await facade.handle_line(line)

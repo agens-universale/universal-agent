@@ -12,7 +12,7 @@ import re
 import sys
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TextIO
 
 PARSE_ERROR = -32700
 INVALID_REQUEST = -32600
@@ -90,16 +90,21 @@ def notification(method: str, params: dict) -> dict:
 
 
 class StdoutWriter:
-    """Одна строка JSON и flush под общим lock."""
+    """Одна строка JSON и flush под общим lock.
 
-    def __init__(self) -> None:
+    stream — поток протокола. В gc-acp это исходный stdout: после старта
+    sys.stdout направлен в stderr, и print ядра не смешивается с JSON-RPC.
+    """
+
+    def __init__(self, stream: TextIO | None = None) -> None:
         self._lock = asyncio.Lock()
+        self._stream = sys.stdout if stream is None else stream
 
     async def send(self, payload: dict) -> None:
         line = json.dumps(payload, ensure_ascii=False) + "\n"
         async with self._lock:
-            sys.stdout.write(line)
-            sys.stdout.flush()
+            self._stream.write(line)
+            self._stream.flush()
 
 
 async def _read_stdin_line(reader: asyncio.StreamReader) -> bytes:

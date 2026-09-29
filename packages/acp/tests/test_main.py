@@ -1,7 +1,10 @@
 """Старт процесса: конфиг, harbor, тишина в stdout, ACP runtime defaults."""
 
+import json
+
 from gc_acp.main import apply_acp_runtime_defaults, backend_rejection, main
 from gc_acp.prompt_assets import acp_special_instructions_path
+from gc_acp.protocol import StdoutWriter
 
 
 def test_apply_acp_runtime_defaults_allow_gate_off_todo_off():
@@ -127,8 +130,9 @@ def test_local_start_applies_runtime_defaults(monkeypatch, tmp_path):
             "threads_data_path": str(tmp_path),
         }, None
 
-    async def serve(config):
+    async def serve(config, protocol_out):
         held["config"] = config
+        held["protocol_out"] = protocol_out
 
     monkeypatch.setattr("gc_acp.main.load_config_ex", load)
     monkeypatch.setattr("gc_acp.main.serve", serve)
@@ -143,6 +147,31 @@ def test_local_start_applies_runtime_defaults(monkeypatch, tmp_path):
     )
     assert "turn_ask_human" in cfg["stop_tools"]
     assert "turn_intermediate_reply" in cfg["stop_tools"]
+
+
+def test_core_print_stays_off_protocol_stdout(monkeypatch, capsys, tmp_path):
+    def load(path, profile_override=None):
+        return {
+            "os_backend": "local",
+            "threads_data_path": str(tmp_path),
+        }, None
+
+    async def serve(_config, protocol_out):
+        print("[MCP] demo: недоступен — connection refused (пропущен)")
+        await StdoutWriter(protocol_out).send(
+            {"jsonrpc": "2.0", "id": 1, "result": {}}
+        )
+
+    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.serve", serve)
+    assert main(["--config", "c.yml"]) == 0
+    print("after")
+    captured = capsys.readouterr()
+    lines = captured.out.splitlines()
+    assert json.loads(lines[0]) == {"jsonrpc": "2.0", "id": 1, "result": {}}
+    assert lines[-1] == "after"
+    assert "[MCP]" in captured.err
+    assert "[MCP]" not in captured.out
 
 
 def test_unsupported_backend_is_rejected():

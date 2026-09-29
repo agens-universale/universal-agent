@@ -1,12 +1,13 @@
 """Разбор строки JSON-RPC и запись одной строки в stdout."""
 
 import asyncio
+import io
 import json
 
 from gc_acp.protocol import (
+    _STDIN_LINE_LIMIT,
     Incoming,
     StdoutWriter,
-    _STDIN_LINE_LIMIT,
     _read_stdin_line,
     parse_line,
 )
@@ -83,6 +84,13 @@ async def test_stdout_writer_is_one_line(capsys):
     assert out.endswith("\n")
     assert out.count("\n") == 1
     assert json.loads(out)["result"] == {"a": 1}
+
+
+async def test_stdout_writer_uses_given_stream_not_sys_stdout(capsys):
+    stream = io.StringIO()
+    await StdoutWriter(stream).send({"jsonrpc": "2.0", "id": 2, "result": {}})
+    assert json.loads(stream.getvalue())["id"] == 2
+    assert capsys.readouterr().out == ""
 
 
 async def test_read_stdin_line_accepts_prompt_over_default_64k():
