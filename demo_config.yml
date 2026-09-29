@@ -203,6 +203,16 @@ tui:
     # null / omit = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn.
     page_lines: null
 
+# Канал IDE через Agent Client Protocol (gc-acp). Не влияет на TUI/CLI/server:
+# канальные дефолты копируются в runtime в apply_acp_runtime_defaults.
+acp:
+  # deny | judge | allow — в IDE по умолчанию allow (обсуждение без tool-call нормально)
+  text_answer_mode: allow
+  # on | off | smart — в IDE обычно off (человек сам сверяет ответ). "off" в кавычках!
+  finish_gate_mode: "off"
+  # Каждые N шагов без session_todo — technical reminder. 0 = выкл (дефолт IDE).
+  todo_reminder_steps: 0
+
 # Обновление агента (спека D)
 update:
   check: auto            # auto | off — фоновая проверка новой версии при старте TUI

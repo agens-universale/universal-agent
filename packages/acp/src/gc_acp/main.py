@@ -78,8 +78,10 @@ def apply_acp_runtime_defaults(config: dict) -> None:
     config["finish_gate_smart"] = gate == "smart"
 
     todo_params = dict(config.get("todo_params") or {})
-    reminder = config.get("acp_todo_reminder_steps")
-    todo_params["reminder_steps"] = 0 if reminder is None else int(reminder)
+    todo_reminder_steps = config.get("acp_todo_reminder_steps")
+    todo_params["reminder_steps"] = (
+        0 if todo_reminder_steps is None else int(todo_reminder_steps)
+    )
     config["todo_params"] = todo_params
 
     config["chat_completions_special_instructions_path"] = (

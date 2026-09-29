@@ -74,7 +74,7 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
     ),
     SummarySection(
         tag="active_constraints",
-        agent_visible=True,
+        agent_visible=False,
         memory_patch_hint="binding requirements → merge into `<constraints>`",
         description=(
             "- Requirements, compatibility, acceptance criteria, or preferences still binding for continuation.\n"
