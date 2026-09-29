@@ -230,6 +230,33 @@ def _messages_to_steps(messages: list) -> list:
     return steps
 
 
+def _skill_source(
+    entry: dict[str, Any], root: Any, sources: dict[str, str]
+) -> str:
+    """Атрибуция profile/task для одной записи registry.
+
+    `sources` ключуется именем директории верхнего уровня, которую загрузил
+    профиль, но канонический id pack-скилла — `<pack>:<skill>`: pack id берётся
+    из pack.yaml и не обязан совпадать с именем директории. Загруженную
+    директорию однозначно определяет root_path записи (путь под корнем скиллов);
+    точное совпадение по id оставлено как fallback для flat-скиллов и минимальных
+    тестовых стабов без пути.
+    """
+    path = str(entry.get("root_path") or "")
+    root_str = str(root or "")
+    top = None
+    if path and root_str:
+        try:
+            parts = Path(path).relative_to(root_str).parts
+        except ValueError:
+            parts = ()
+        top = parts[0] if parts else None
+    value = sources.get(top) if top else None
+    if value is None:
+        value = sources.get(str(entry["id"]))
+    return "profile" if value == "profile" else "task"
+
+
 class GcCliExternal(BaseAgent):
     SUPPORTS_ATIF: bool = False
 
@@ -364,22 +391,33 @@ class GcCliExternal(BaseAgent):
 
     @staticmethod
     def _resolve_profile_skill_dirs(skills_root: Path) -> list[Path]:
-        """SKILL.md-bearing directories under a runner-local skills root.
+        """Skill/pack directories under a runner-local skills root.
 
         Mirrors the rule the fleet runner applies to task skills
         (`dind_runner._resolve_task_skill_paths`): a SKILL.md directly in the root
         makes the root one skill, otherwise every immediate subdirectory holding a
         SKILL.md is one. Unrelated siblings are skipped rather than rejected —
         harbor's stricter `resolve_skills` would refuse the whole set.
+
+        pack.yaml works the same way as SKILL.md: a root-level pack.yaml makes
+        the whole root one pack (pack.yaml must reach the container, or the pack
+        namespace and its bootstrap logic are lost), and a subdirectory holding
+        pack.yaml is one pack even without a root SKILL.md.
         """
         if not skills_root.is_dir():
             return []
-        if (skills_root / "SKILL.md").is_file():
+        if (skills_root / "SKILL.md").is_file() or (
+            skills_root / "pack.yaml"
+        ).is_file():
             return [skills_root]
         return [
             child
             for child in sorted(skills_root.iterdir())
-            if child.is_dir() and (child / "SKILL.md").is_file()
+            if child.is_dir()
+            and (
+                (child / "SKILL.md").is_file()
+                or (child / "pack.yaml").is_file()
+            )
         ]
 
     async def _merge_profile_skills(
@@ -446,22 +484,20 @@ class GcCliExternal(BaseAgent):
             config_dict = getattr(ctx, "config_dict", {}) or {}
             root = config_dict.get("skills_data_path")
             registry = get_skills_registry(config_dict, backend=ctx.os_backend)
-            loaded = sorted(str(s["id"]) for s in await registry.list_skills())
+            entries = sorted(
+                await registry.list_skills(), key=lambda e: str(e["id"])
+            )
+            # A name in `sources` mapped to "skipped" means the profile's copy was
+            # NOT uploaded because the task already provided that name — the copy
+            # the agent actually sees still comes from the task, not the profile.
+            # Only an explicit "profile" entry means the profile's copy won.
+            loaded = [
+                {"id": str(e["id"]), "source": _skill_source(e, root, sources)}
+                for e in entries
+            ]
             payload = {
                 "skills_root": root,
-                # A name in `sources` mapped to "skipped" means the profile's copy was
-                # NOT uploaded because the task already provided that name — the copy
-                # the agent actually sees still comes from the task, not the profile.
-                # Only an explicit "profile" entry means the profile's copy won.
-                "loaded": [
-                    {
-                        "id": sid,
-                        "source": "profile"
-                        if sources.get(sid) == "profile"
-                        else "task",
-                    }
-                    for sid in loaded
-                ],
+                "loaded": loaded,
                 "skipped": sorted(
                     k for k, v in sources.items() if v == "skipped"
                 ),
