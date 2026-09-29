@@ -1,8 +1,15 @@
 """Разбор строки JSON-RPC и запись одной строки в stdout."""
 
+import asyncio
 import json
 
-from gc_acp.protocol import Incoming, StdoutWriter, parse_line
+from gc_acp.protocol import (
+    Incoming,
+    StdoutWriter,
+    _STDIN_LINE_LIMIT,
+    _read_stdin_line,
+    parse_line,
+)
 
 
 def test_blank_line_is_ignored():
@@ -76,3 +83,29 @@ async def test_stdout_writer_is_one_line(capsys):
     assert out.endswith("\n")
     assert out.count("\n") == 1
     assert json.loads(out)["result"] == {"a": 1}
+
+
+async def test_read_stdin_line_accepts_prompt_over_default_64k():
+    reader = asyncio.StreamReader(limit=_STDIN_LINE_LIMIT)
+    payload = (
+        b'{"jsonrpc":"2.0","id":1,"method":"session/prompt","params":{"text":"'
+        + b"x" * 70_000
+        + b'"}}\n'
+    )
+    reader.feed_data(payload)
+    reader.feed_eof()
+    raw = await _read_stdin_line(reader)
+    assert len(raw) == len(payload)
+    assert json.loads(raw.decode())["id"] == 1
+
+
+async def test_read_stdin_line_over_limit_still_returns_full_line():
+    reader = asyncio.StreamReader(limit=100)
+    big = b'{"id":7,"x":"' + b"y" * 200 + b'"}\n'
+    small = b'{"id":2,"method":"ping"}\n'
+    reader.feed_data(big + small)
+    reader.feed_eof()
+    first = await _read_stdin_line(reader)
+    assert json.loads(first.decode())["id"] == 7
+    second = await _read_stdin_line(reader)
+    assert json.loads(second.decode())["id"] == 2

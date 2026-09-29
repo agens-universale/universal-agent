@@ -24,6 +24,12 @@ SESSION_NOT_FOUND = -32002
 _ID_STRING = re.compile(r'"id"\s*:\s*"((?:\\.|[^"\\])*)"')
 _ID_NUMBER = re.compile(r'"id"\s*:\s*(-?\d+)')
 
+# asyncio.StreamReader по умолчанию — 64 KiB; длинный JSON-RPC (промпт IDE) роняет
+# readline() и весь процесс gc-acp. 16 MiB хватает для типичных session/prompt.
+_STDIN_LINE_LIMIT = 16 * 1024 * 1024
+# Префикс слишком длинной строки — только чтобы _salvage_id ответил -32700.
+_OVERSIZE_SALVAGE = 256 * 1024
+
 
 @dataclass(frozen=True)
 class Incoming:
@@ -96,14 +102,31 @@ class StdoutWriter:
             sys.stdout.flush()
 
 
+async def _read_stdin_line(reader: asyncio.StreamReader) -> bytes:
+    """Одна строка протокола (до \\n). Не readline(): при превышении limit он
+    выбрасывает строку из буфера без возврата вызывающему."""
+    try:
+        return await reader.readuntil(b"\n")
+    except asyncio.IncompleteReadError as exc:
+        return exc.partial
+    except asyncio.LimitOverrunError as exc:
+        isep = exc.consumed
+        if not isinstance(isep, int):
+            raise
+        line = await reader.read(isep + 1)
+        if len(line) <= _OVERSIZE_SALVAGE:
+            return line
+        return line[:_OVERSIZE_SALVAGE]
+
+
 async def stdin_lines() -> AsyncIterator[str]:
     """Читать stdin до EOF, не ожидая конца хода."""
     loop = asyncio.get_running_loop()
-    reader = asyncio.StreamReader()
+    reader = asyncio.StreamReader(limit=_STDIN_LINE_LIMIT)
     protocol = asyncio.StreamReaderProtocol(reader)
     await loop.connect_read_pipe(lambda: protocol, sys.stdin)
     while True:
-        raw = await reader.readline()
+        raw = await _read_stdin_line(reader)
         if not raw:
             break
         line = _decode_line(raw)
