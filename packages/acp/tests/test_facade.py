@@ -488,6 +488,55 @@ async def test_cancel_request_and_exception_from_the_turn(tmp_path):
     await facade.shutdown()
 
 
+async def test_cancel_before_second_prompt_starts_skips_the_turn(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await facade._sessions[session_id].prompt_task
+    assert len(agents[0].calls) == 1
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    run_prompt = facade._run_prompt
+
+    async def hold_until_cancel(live, request_id, text):
+        entered.set()
+        await release.wait()
+        await run_prompt(live, request_id, text)
+
+    facade._run_prompt = hold_until_cancel
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "b"}],
+            },
+            4,
+        )
+    )
+    await entered.wait()
+    await facade.handle_line(
+        _line("session/cancel", {"sessionId": session_id}, notify=True)
+    )
+    release.set()
+    await facade._sessions[session_id].prompt_task
+    assert len(agents[0].calls) == 1
+    assert _by_id(writer, 4)["result"] == {"stopReason": "cancelled"}
+    await facade.shutdown()
+
+
 async def test_late_cancel_does_not_rewrite_stop_reason(tmp_path):
     facade, _writer, agents = _open(tmp_path)
     writer = GatedWriter()

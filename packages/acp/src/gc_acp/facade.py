@@ -356,7 +356,11 @@ class AcpFacade:
     ) -> None:
         assembler = ChunkAssembler()
         try:
-            await self._stream_prompt(live, assembler, text)
+            # Отмена после create_task и до старта хода пишет stop в state
+            # прошлого прогона, а AsyncAgent.run его сбрасывает: ход шёл бы
+            # целиком, клиенту всё равно ушёл бы cancelled. В stream не входим.
+            if not live.cancel_requested:
+                await self._stream_prompt(live, assembler, text)
         except asyncio.CancelledError:
             live.cancel_requested = True
         except Exception:
