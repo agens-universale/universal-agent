@@ -2,7 +2,12 @@
 
 import json
 
-from gc_acp.main import apply_acp_runtime_defaults, backend_rejection, main
+from gc_acp.main import (
+    _parse_args,
+    apply_acp_runtime_defaults,
+    backend_rejection,
+    main,
+)
 from gc_acp.prompt_assets import acp_special_instructions_path
 from gc_acp.protocol import StdoutWriter
 
@@ -179,3 +184,49 @@ def test_unsupported_backend_is_rejected():
     text = backend_rejection({"os_backend": "docker"})
     assert text is not None
     assert "docker" in text
+
+
+def test_parse_args_keeps_own_flags_and_ignores_the_rest():
+    bare = _parse_args([])
+    assert bare.config is None
+    assert bare.profile is None
+
+    jetbrains = _parse_args(
+        ["acp", "--experimental", "--config", "c.yml", "--profile", "work"]
+    )
+    assert jetbrains.config == "c.yml"
+    assert jetbrains.profile == "work"
+
+    vscode = _parse_args(["--profile", "acp"])
+    assert vscode.profile == "acp"
+    assert vscode.config is None
+
+    junk = _parse_args(["nope", "--foo", "bar", "acp"])
+    assert junk.config is None
+    assert junk.profile is None
+
+
+def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
+    held = {}
+
+    def load(path, profile_override=None):
+        held["path"] = path
+        held["profile"] = profile_override
+        return {
+            "os_backend": "local",
+            "threads_data_path": str(tmp_path),
+        }, None
+
+    async def serve(config, protocol_out):
+        held["started"] = True
+        held["text_answer_mode"] = config["text_answer_mode"]
+
+    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.serve", serve)
+    assert main(["acp", "--config", "c.yml", "--profile", "work"]) == 0
+    assert held == {
+        "path": "c.yml",
+        "profile": "work",
+        "started": True,
+        "text_answer_mode": "allow",
+    }

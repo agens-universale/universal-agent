@@ -177,10 +177,18 @@ async def _create_agent(
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """Разобрать запуск. Чужие аргументы не роняют процесс.
+
+    Точка входа одна. Свои флаги — только ``--config`` и ``--profile``
+    (пустой args у VS Code и ``--profile acp`` в его настройках).
+    Остальное клиенты дописывают сами: JetBrains передаёт позиционный
+    ``acp``. Такие токены отбрасываются.
+    """
     parser = argparse.ArgumentParser(prog="gc-acp")
     parser.add_argument("--config", default=None, help="путь к config.yml")
     parser.add_argument("--profile", default=None, help="имя профиля")
-    return parser.parse_args(argv)
+    args, _unknown = parser.parse_known_args(argv)
+    return args
 
 
 def _force_utf8_stdio() -> None:
