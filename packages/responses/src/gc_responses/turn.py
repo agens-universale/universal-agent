@@ -6,6 +6,8 @@ import asyncio
 import logging
 from typing import Any
 
+from gc_core.tools.turn.submit_solution import SubmitSolution
+
 from gc_responses.index_store import ResponseIndex, ResponseRecord
 from gc_responses.sse import encode_sse, is_terminal
 from gc_responses.status import incomplete_details, turn_status
@@ -145,6 +147,11 @@ class TurnRun:
             raise asyncio.CancelledError
 
     async def _forward(self) -> None:
+        # Отмена до stream() пишет stop в state прошлого прогона, а
+        # AsyncAgent.run его сбрасывает: модель отработала бы целиком,
+        # клиенту всё равно ушёл бы cancelled.
+        if self.cancel_requested:
+            return
         async for kind, text in self.agent.stream(
             self._prompt, thread_id=self.thread_id, system=SYSTEM
         ):
@@ -164,7 +171,10 @@ class TurnRun:
         async with self._emit_lock:
             events = self._tool_events()
             if failed is None and not self.cancel_requested:
-                answer = getattr(self.agent, "last_answer", None)
+                answer = SubmitSolution.present_result(
+                    getattr(self.agent, "last_answer", None),
+                    shown=self._mapper.shown_answer,
+                )
                 events.extend(self._mapper.flush_unseen(answer))
             _put(self._queue, events)
 

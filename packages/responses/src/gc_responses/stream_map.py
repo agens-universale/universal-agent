@@ -58,6 +58,11 @@ class StreamMap:
         self._open: _OpenText | None = None
         self._answer_since_reset = ""
 
+    @property
+    def shown_answer(self) -> str:
+        """Проза answer, уже отданная после последнего reset."""
+        return self._answer_since_reset
+
     def opening_events(self) -> list[dict]:
         return [
             {"type": "response.created", "response": self.snapshot()},

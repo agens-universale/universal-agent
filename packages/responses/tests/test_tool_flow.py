@@ -157,3 +157,65 @@ def test_offset_skips_lines_from_before_this_turn(tmp_path):
     )
     reports = flow.poll()
     assert [item["call_id"] for item in reports] == ["new"]
+
+
+def test_poll_after_compaction_reads_rewritten_shorter_file(tmp_path):
+    path = tmp_path / "thread.jsonl"
+    _write(
+        path,
+        [
+            {
+                "type": "function_call",
+                "name": "read_file",
+                "call_id": "before",
+                "arguments": "{}",
+            },
+            {"role": "assistant", "content": "длинный хвост " * 40},
+        ],
+    )
+    flow = ToolFlow(str(path))
+    _write(
+        path,
+        [
+            {
+                "type": "function_call",
+                "name": "read_file",
+                "call_id": "mid",
+                "arguments": json.dumps({"path": "b.py"}),
+            }
+        ],
+    )
+    assert flow.poll()[0]["call_id"] == "mid"
+
+    path.write_text(
+        json.dumps(
+            {
+                "type": "message",
+                "payload": {
+                    "role": "user",
+                    "content": (
+                        '<technical type="dialog_summary">сводка</technical>'
+                    ),
+                },
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _write(
+        path,
+        [
+            {
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "after",
+                "arguments": json.dumps({"command": "ls"}),
+            }
+        ],
+    )
+    reports = flow.poll()
+    assert [item["call_id"] for item in reports] == ["after"]
+    assert reports[0]["op"] == "open"
+    assert reports[0]["title"] == "exec_command(command='ls')"
+    assert "сводка" not in json.dumps(reports)

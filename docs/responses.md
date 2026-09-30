@@ -96,7 +96,7 @@ gc-responses --config ./config.yml --profile <имя>
 
 Элементы `output`: `message` (проза), `reasoning` (сплошная серия мыслей), `gc_tool_call`. Клиентского `function_call` фасад не пишет.
 
-Карточка тула — имя, короткий заголовок и статус (`in_progress`, затем `completed` или `failed`). Сырых аргументов и тела результата в событии нет. `turn_finish`, `turn_ask_human`, `turn_intermediate_reply` и `session_think` наружу не выходят.
+Карточка тула — имя, короткий заголовок и статус (`in_progress`, затем `completed` или `failed`). Сырых аргументов и тела результата в событии нет. `turn_ask_human`, `turn_intermediate_reply` и `session_think` наружу не выходят. Ход, закрытый `turn_finish` без прозы, отдаёт `task_report` и заметку: сырые аргументы, вердикт судьи и отклонённая попытка в ответ не попадают. Если тот же отчёт уже был в прозе хода, заметка повторно не дописывается.
 
 `GET /v1/models` отдаёт один элемент: `id` — модель из конфига агента.
 

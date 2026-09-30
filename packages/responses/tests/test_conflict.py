@@ -1,11 +1,13 @@
 """Второй ход того же треда, пока первый не зафиксирован, — 409 без send."""
 
 import asyncio
+import json
 
 import pytest
 from gc_responses.errors import ApiError
 from gc_responses.facade import ResponsesFacade
 from gc_responses.index_store import ResponseIndex
+from gc_responses.turn import TurnRun
 
 
 class FakeAgent:
@@ -17,6 +19,7 @@ class FakeAgent:
         self.started = asyncio.Event()
         self._hold = True
         self._answer = "готово"
+        self.chunks: list[tuple[str, str]] | None = None
         self.executor = type("E", (), {})()
         self.executor.last_terminal_outcome = None
         self.executor._ctx = type("C", (), {})()
@@ -26,7 +29,9 @@ class FakeAgent:
             {"prompt": prompt, "thread_id": thread_id, "system": system}
         )
         self.started.set()
-        yield ("answer", "кусок")
+        chunks = [("answer", "кусок")] if self.chunks is None else self.chunks
+        for kind, text in chunks:
+            yield (kind, text)
         if self._hold:
             self._hold = False
             await self.release.wait()
@@ -204,4 +209,101 @@ async def test_cwd_mismatch_does_not_start(tmp_path):
             }
         )
     assert caught.value.status == 400
+    assert len(agent.calls) == 1
+
+
+def _finish_arguments(**extra) -> dict:
+    payload = {
+        "solution_type": "direct_answer",
+        "task": "прочитать README",
+        "task_report": "В README одна фраза.",
+        "handoff": '{"artifacts":["README.md"]}',
+    }
+    payload.update(extra)
+    return payload
+
+
+def _output_text(body: dict) -> str:
+    parts: list[str] = []
+    for item in body["output"]:
+        if item.get("type") != "message":
+            continue
+        for block in item.get("content") or []:
+            text = block.get("text")
+            if isinstance(text, str):
+                parts.append(text)
+    return "".join(parts)
+
+
+async def test_finish_arguments_become_report_not_raw_json(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = []
+    agent._answer = json.dumps(
+        _finish_arguments(
+            comment="файл короткий",
+            message="Finish gate: accept.",
+            finish_gate={"action": "accept"},
+        ),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await handle.wait_finished()
+    text = _output_text(body)
+    assert text == "В README одна фраза.\n\n* заметка: файл короткий"
+    assert "solution_type" not in text
+    assert "Finish gate" not in text
+
+
+async def test_shown_report_is_not_repeated_with_a_note(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    agent.chunks = [("answer", "В README одна фраза.")]
+    agent._answer = json.dumps(
+        _finish_arguments(comment="файл короткий"),
+        ensure_ascii=False,
+    )
+    facade = _facade(tmp_path, agent)
+    handle = await facade.open({"model": "m", "input": "прочитай"})
+    body = await handle.wait_finished()
+    assert _output_text(body) == "В README одна фраза."
+
+
+async def test_cancel_before_second_turn_skips_the_model(tmp_path):
+    agent = FakeAgent(asyncio.Event())
+    agent._hold = False
+    facade = _facade(tmp_path, agent)
+    first = await facade.open({"model": "m", "input": "первый"})
+    await first.wait_finished()
+    assert len(agent.calls) == 1
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = TurnRun._forward
+
+    async def hold(self):
+        entered.set()
+        await release.wait()
+        await original(self)
+
+    TurnRun._forward = hold
+    try:
+        second = await facade.open(
+            {
+                "model": "m",
+                "input": "второй",
+                "previous_response_id": first.response_id,
+            }
+        )
+        await entered.wait()
+        cancel_task = asyncio.create_task(facade.cancel(second.response_id))
+        while not second.cancel_requested:
+            await asyncio.sleep(0)
+        release.set()
+        body = await cancel_task
+    finally:
+        TurnRun._forward = original
+
+    assert body["status"] == "cancelled"
     assert len(agent.calls) == 1

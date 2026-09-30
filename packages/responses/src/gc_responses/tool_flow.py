@@ -113,6 +113,12 @@ def _file_size(path: str) -> int:
 
 def _read_new(path: str, flow: ToolFlow) -> bytes:
     try:
+        size = os.path.getsize(path)
+        # Компакция переписывает jsonl короткой сводкой: старый offset за EOF,
+        # seek+read даёт пусто, и карточки хода больше не появляются.
+        if size < flow._offset:
+            flow._offset = 0
+            flow._pending = b""
         with open(path, "rb") as handle:
             handle.seek(flow._offset)
             chunk = handle.read()
