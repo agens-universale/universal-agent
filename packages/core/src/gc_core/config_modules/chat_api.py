@@ -13,8 +13,8 @@ class ChatApiConfig(BaseModel):
     port: int = Field(default=8090, ge=1, le=65535)
     # Пустая строка — заголовок Authorization не проверяется.
     auth_token: str = ""
-    # Пустой список — Access-Control-Allow-Origin не ставится. ``*`` не
-    # подставляется: такая запись из списка выбрасывается.
+    # Пустой список — любой origin. Непустой — только эти. ``*`` из
+    # списка выбрасывается: произвольный origin задаётся пустым списком.
     cors_origins: list[str] = Field(default_factory=list)
     # Рабочий каталог нового хода, если в запросе нет абсолютного metadata.cwd.
     launch_root: str | None = None

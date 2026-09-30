@@ -26,9 +26,9 @@ chat_api:
   # к /v1/ несёт Authorization: Bearer <token>, иначе 401.
   auth_token: ""
 
-  # Пустой список — заголовок Access-Control-Allow-Origin не ставится.
-  # Непустой — эти origin, методы GET, POST, OPTIONS, заголовок Authorization.
-  # Запись "*" из списка выбрасывается и wildcard не становится.
+  # Пустой список — любой origin (Access-Control-Allow-Origin: *).
+  # Непустой — только эти origin, методы GET, POST, OPTIONS, заголовок
+  # Authorization. Запись "*" из списка выбрасывается.
   cors_origins: []
 
   # Рабочий каталог нового хода, если в запросе нет абсолютного metadata.cwd.

@@ -41,11 +41,11 @@ def mount(app: FastAPI) -> None:
 
 
 def _install_cors(app: FastAPI, origins: list[str]) -> None:
-    if not origins:
-        return
+    """Пустой список — любой origin. Непустой — только перечисленные."""
+    allow = list(origins) if origins else ["*"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=list(origins),
+        allow_origins=allow,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
     )

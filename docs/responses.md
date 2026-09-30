@@ -44,7 +44,7 @@ gc-chat --config ./config.yml --profile <имя>
 | `chat_api.host` | `127.0.0.1` | Адрес bind. Пустая строка отклоняется при загрузке. |
 | `chat_api.port` | `8090` | Порт, 1–65535. |
 | `chat_api.auth_token` | `""` | Пусто — заголовок не проверяется. Иначе каждый запрос к `/v1/` несёт `Authorization: Bearer <token>`, иначе 401 `invalid_api_key`. |
-| `chat_api.cors_origins` | `[]` | Пусто — `Access-Control-Allow-Origin` не ставится. Иначе эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. |
+| `chat_api.cors_origins` | `[]` | Пусто — любой origin (`Access-Control-Allow-Origin: *`). Непусто — только эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. |
 | `chat_api.launch_root` | `null` | Рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`. Относительный путь не используется: тогда берётся каталог процесса. |
 | `chat_api.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в runtime-ключ `text_answer_mode`. |
 | `chat_api.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `strict_turn_finish_validation` (`true`, когда режим не `off`) и `finish_gate_smart` (`true` только для `smart`). |

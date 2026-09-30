@@ -90,6 +90,16 @@ def test_models_and_auth_and_cors(tmp_path):
     assert models.status_code == 200
     assert models.json()["data"][0]["id"] == "agent-model"
     assert "access-control-allow-origin" not in models.headers
+    preflight = client.options(
+        "/v1/models",
+        headers={
+            "Origin": "http://anywhere",
+            "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Headers": "authorization,content-type",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == "*"
 
     locked, _agent = _app(tmp_path, token="secret", origins=["http://ui"])
     guarded = TestClient(locked)
@@ -105,6 +115,14 @@ def test_models_and_auth_and_cors(tmp_path):
     )
     assert ok.status_code == 200
     assert ok.headers["access-control-allow-origin"] == "http://ui"
+    foreign = guarded.options(
+        "/v1/models",
+        headers={
+            "Origin": "http://other",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert foreign.status_code == 400
 
 
 def test_non_stream_failure_is_500(tmp_path):
@@ -182,6 +200,15 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
     assert "/v1/responses" in paths
     assert "/v1/chat/completions" in paths
     assert "/v1/models" in paths
+    preflight = TestClient(captured["app"]).options(
+        "/v1/models",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert preflight.status_code == 200
+    assert preflight.headers["access-control-allow-origin"] == "*"
     out = capsys.readouterr()
     assert out.out == ""
     assert "без авторизации" in out.err
