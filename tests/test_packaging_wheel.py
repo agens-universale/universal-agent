@@ -46,8 +46,7 @@ MANIFESTS = {
     "gc_tui": "packages/tui",
     "gc_server": "packages/server",
     "gc_mcp": "packages/mcp",
-    "gc_responses": "packages/responses",
-    "gc_completions": "packages/completions",
+    "gc_chat": "packages/chat",
 }
 
 
@@ -316,8 +315,7 @@ OWN_COMMANDS = {
     "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
-    "gc_responses": {"gc-responses"},
-    "gc_completions": {"gc-completions"},
+    "gc_chat": {"gc-chat"},
 }
 
 
@@ -400,8 +398,7 @@ def test_meta_pulls_every_profile():
         f"gc-tui=={ver}",
         f"gc-server=={ver}",
         f"gc-mcp=={ver}",
-        f"gc-responses=={ver}",
-        f"gc-completions=={ver}",
+        f"gc-chat=={ver}",
     }
 
 
@@ -428,8 +425,7 @@ def test_versions_are_pinned_together():
         "packages/tui",
         "packages/server",
         "packages/mcp",
-        "packages/responses",
-        "packages/completions",
+        "packages/chat",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -440,8 +436,7 @@ def test_versions_are_pinned_together():
         "packages/tui",
         "packages/server",
         "packages/mcp",
-        "packages/responses",
-        "packages/completions",
+        "packages/chat",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")

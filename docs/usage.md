@@ -39,7 +39,7 @@ uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#su
 uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
 ```
 
-`gc-responses` в таблицу не входит. Это отдельная команда HTTP-фасада: установка и секция конфига — [responses.md](responses.md).
+`gc-chat` в таблицу не входит. Это отдельная команда HTTP-фасадов Responses и Chat Completions: установка и секция конфига — [responses.md](responses.md).
 
 Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
 корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки

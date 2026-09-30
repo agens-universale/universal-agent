@@ -18,11 +18,10 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "gc-chat",
     "gc-cli",
-    "gc-completions",
     "gc-core",
     "gc-mcp",
-    "gc-responses",
     "gc-server",
     "gc-testkit",
     "gc-tui",
@@ -1056,6 +1055,23 @@ wheels = [
 ]
 
 [[package]]
+name = "gc-chat"
+version = "0.3.1"
+source = { editable = "packages/chat" }
+dependencies = [
+    { name = "fastapi" },
+    { name = "gc-core" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gc-core", editable = "packages/core" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
+]
+
+[[package]]
 name = "gc-cli"
 version = "0.3.1"
 source = { editable = "packages/cli" }
@@ -1068,23 +1084,6 @@ dependencies = [
 requires-dist = [
     { name = "gc-core", editable = "packages/core" },
     { name = "gc-mcp", editable = "packages/mcp" },
-]
-
-[[package]]
-name = "gc-completions"
-version = "0.3.1"
-source = { editable = "packages/completions" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "gc-core" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "gc-core", editable = "packages/core" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
 
 [[package]]
@@ -1133,23 +1132,6 @@ dependencies = [
 requires-dist = [
     { name = "gc-core", editable = "packages/core" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-]
-
-[[package]]
-name = "gc-responses"
-version = "0.3.1"
-source = { editable = "packages/responses" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "gc-core" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "gc-core", editable = "packages/core" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
 ]
 
 [[package]]
@@ -1220,11 +1202,10 @@ name = "gc-ua"
 version = "0.3.1"
 source = { editable = "." }
 dependencies = [
+    { name = "gc-chat" },
     { name = "gc-cli" },
-    { name = "gc-completions" },
     { name = "gc-core" },
     { name = "gc-mcp" },
-    { name = "gc-responses" },
     { name = "gc-server" },
     { name = "gc-tui" },
 ]
@@ -1277,11 +1258,10 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gc-chat", editable = "packages/chat" },
     { name = "gc-cli", editable = "packages/cli" },
-    { name = "gc-completions", editable = "packages/completions" },
     { name = "gc-core", editable = "packages/core" },
     { name = "gc-mcp", editable = "packages/mcp" },
-    { name = "gc-responses", editable = "packages/responses" },
     { name = "gc-server", editable = "packages/server" },
     { name = "gc-tui", editable = "packages/tui" },
 ]

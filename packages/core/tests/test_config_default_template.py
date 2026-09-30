@@ -235,24 +235,15 @@ EXPERT_ONLY_KEYS: set = {
     "assign.memory_compaction",
     "assign.auto_judge",
     "assign.subagents",
-    # --- responses: HTTP-фасад gc-responses, не шаблон CLI/TUI ---
-    "responses.host",
-    "responses.port",
-    "responses.auth_token",
-    "responses.cors_origins",
-    "responses.launch_root",
-    "responses.text_answer_mode",
-    "responses.finish_gate_mode",
-    "responses.todo_reminder_steps",
-    # --- completions: HTTP-фасад gc-completions, не шаблон CLI/TUI ---
-    "completions.host",
-    "completions.port",
-    "completions.auth_token",
-    "completions.cors_origins",
-    "completions.launch_root",
-    "completions.text_answer_mode",
-    "completions.finish_gate_mode",
-    "completions.todo_reminder_steps",
+    # --- chat_api: порт процесса gc-chat, не шаблон CLI/TUI ---
+    "chat_api.host",
+    "chat_api.port",
+    "chat_api.auth_token",
+    "chat_api.cors_origins",
+    "chat_api.launch_root",
+    "chat_api.text_answer_mode",
+    "chat_api.finish_gate_mode",
+    "chat_api.todo_reminder_steps",
 }
 
 

@@ -1,8 +1,10 @@
 [Назад к README](../readme.md)
 
-# HTTP-фасад Responses (`gc-responses`)
+# HTTP-фасад Responses (`gc-chat`)
 
-Отдельный процесс. Внешнее приложение открывает ход агента через `POST /v1/responses` и читает стрим прозы, рассуждения и коротких карточек тулов. Конверт близок к OpenAI Responses API. Петля тулов остаётся внутри ядра: клиент присылает текст и не исполняет тулы сам.
+Отдельный процесс `gc-chat`. Внешнее приложение открывает ход агента через `POST /v1/responses` и читает стрим прозы, рассуждения и коротких карточек тулов. Конверт близок к OpenAI Responses API. Петля тулов остаётся внутри ядра: клиент присылает текст и не исполняет тулы сам.
+
+Тот же процесс и тот же порт отдают `POST /v1/chat/completions`. Клиент выбирает путь. У Chat Completions другой контракт: клиент каждый раз присылает `messages`, тред хода эфемерный, трейс уходит внутри `<think>`.
 
 Это не `gc-serve`. У вебхука другой контракт: он отвечает `started` и просит опрашивать статус. Здесь соединение живёт, пока жив ход. Флага у `gc-cli` и маршрутов в `gc-serve` нет.
 
@@ -10,56 +12,56 @@
 
 ## Установка и запуск
 
-Зависимости FastAPI и uvicorn живут в дистрибутиве `gc-responses`. Базовая установка CLI их не ставит.
+Зависимости FastAPI и uvicorn живут в дистрибутиве `gc-chat`. Базовая установка CLI их не ставит.
 
 ```bash
-uv tool install -e packages/responses
+uv tool install -e packages/chat
 # без клонирования репозитория:
-uv tool install "gc-responses @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/responses"
+uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
 ```
 
 В корпоративной сети к `uv tool install` добавляйте `--system-certs`.
 
 ```bash
-gc-responses --config ./config.yml
-gc-responses --config ./config.yml --profile <имя>
+gc-chat --config ./config.yml
+gc-chat --config ./config.yml --profile <имя>
 ```
 
 Без `--config` поиск конфига тот же, что у остальных команд: явный путь, затем `config.yml` в каталоге Config, затем пакетный шаблон. Конфиг не читается — сообщение в stderr, код выхода 1, порт не открывается.
 
 `os_backend` обязан быть `local`. `harbor` и неизвестный бэкенд завершают процесс с кодом 1 до bind.
 
-По умолчанию слушает `127.0.0.1:8090`. Логи — в stderr. Тело ответа в stderr не пишется. Пустой `responses.auth_token` даёт на старте одну строку: сервер без авторизации.
+По умолчанию слушает `127.0.0.1:8090`. Логи — в stderr. Тело ответа в stderr не пишется. Пустой `chat_api.auth_token` даёт на старте одну строку: сервер без авторизации.
 
 ## Конфиг
 
-Секция `responses` — часть общей схемы `config.yml`. Аннотированный образец — [`demo_config_responses.yml`](../demo_config_responses.yml) в корне репозитория: скопируйте блок в свой конфиг агента. В шаблон CLI (`config.default.yml`) и в справочник `demo_config.yml` секция не входит. Без неё схема подставляет дефолты, и процесс стартует.
+Секция `chat_api` — часть общей схемы `config.yml`. Аннотированный образец — [`demo_config_chat.yml`](../demo_config_chat.yml) в корне репозитория: скопируйте блок в свой конфиг агента. В шаблон CLI (`config.default.yml`) и в справочник `demo_config.yml` секция не входит. Без неё схема подставляет дефолты, и процесс стартует.
 
-Ключи читает только этот процесс. gc-cli и TUI их не применяют.
+Ключи читает только `gc-chat`. gc-cli и TUI их не применяют. Оба пути, Responses и Chat Completions, берут host, port, токен, CORS и режимы хода из этой секции.
 
 | Ключ | Дефолт | Смысл |
 |---|---|---|
-| `responses.host` | `127.0.0.1` | Адрес bind. Пустая строка отклоняется при загрузке. |
-| `responses.port` | `8090` | Порт, 1–65535. |
-| `responses.auth_token` | `""` | Пусто — заголовок не проверяется. Иначе каждый запрос к `/v1/` несёт `Authorization: Bearer <token>`, иначе 401 `invalid_api_key`. |
-| `responses.cors_origins` | `[]` | Пусто — `Access-Control-Allow-Origin` не ставится. Иначе эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. |
-| `responses.launch_root` | `null` | Рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`. Относительный путь не используется: тогда берётся каталог процесса. |
-| `responses.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в runtime-ключ `text_answer_mode`. |
-| `responses.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `strict_turn_finish_validation` (`true`, когда режим не `off`) и `finish_gate_smart` (`true` только для `smart`). |
-| `responses.todo_reminder_steps` | `0` | Напоминания про `session_todo`. `0` — не напоминать. Сам тул остаётся. Значение пишется в `todo_params.reminder_steps` этого процесса. |
+| `chat_api.host` | `127.0.0.1` | Адрес bind. Пустая строка отклоняется при загрузке. |
+| `chat_api.port` | `8090` | Порт, 1–65535. |
+| `chat_api.auth_token` | `""` | Пусто — заголовок не проверяется. Иначе каждый запрос к `/v1/` несёт `Authorization: Bearer <token>`, иначе 401 `invalid_api_key`. |
+| `chat_api.cors_origins` | `[]` | Пусто — `Access-Control-Allow-Origin` не ставится. Иначе эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. |
+| `chat_api.launch_root` | `null` | Рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`. Относительный путь не используется: тогда берётся каталог процесса. |
+| `chat_api.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в runtime-ключ `text_answer_mode`. |
+| `chat_api.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `strict_turn_finish_validation` (`true`, когда режим не `off`) и `finish_gate_smart` (`true` только для `smart`). |
+| `chat_api.todo_reminder_steps` | `0` | Напоминания про `session_todo`. `0` — не напоминать. Сам тул остаётся. Значение пишется в `todo_params.reminder_steps` этого процесса. |
 
 Значения `off` и `on` в yaml пишите в кавычках: без них YAML читает их как boolean, и загрузка конфига падает.
 
 `agent.strict_turn_finish_validation` и уже лежащий в конфиге `text_answer_mode` на этом процессе не действуют: фасад перекрывает оба ключа после загрузки. Дефолт канала — проза без тула принимается, судья на `turn_finish` не зовётся. `session_todo` остаётся в схеме. Напоминания о нём этот процесс ставит в `0`, если в секции не задано другое число.
 
-После загрузки режим дописывает в `stop_tools` имена `turn_ask_human` и `turn_intermediate_reply`: ни вопроса человеку, ни промежуточной реплики в схеме нет. Прогресс пишется прозой. В системный промпт подставляется ролевая вставка режима (`chat_completions_responses_special_instructions.md`): вопрос пользователю — проза ответа, следующий запрос — ответ человека. Свой `paths.chat_completions_special_instructions_path` на этом процессе не читается. Порт `ask_human` остаётся и сразу возвращает пустую строку, чтобы случайный вызов не читал stdin.
+После загрузки режим дописывает в `stop_tools` имена `turn_ask_human` и `turn_intermediate_reply`: ни вопроса человеку, ни промежуточной реплики в схеме нет. Прогресс пишется прозой. Ролевая вставка ставится на копию конфига перед созданием агента, не в общий словарь процесса. У хода Responses это `chat_completions_responses_special_instructions.md`: вопрос пользователю — проза ответа, следующий запрос — ответ человека. У хода Chat Completions другой файл: следующий запрос не увидит трейс. Свой `paths.chat_completions_special_instructions_path` на этом процессе не читается. Порт `ask_human` остаётся и сразу возвращает пустую строку, чтобы случайный вызов не читал stdin.
 
-Неизвестный ключ внутри `responses` загрузка отклоняет (`extra=forbid`).
+Неизвестный ключ внутри `chat_api` загрузка отклоняет (`extra=forbid`).
 
 Рабочий каталог хода, по порядку:
 
 1. абсолютный `metadata.cwd` нового запроса;
-2. иначе абсолютный `responses.launch_root`;
+2. иначе абсолютный `chat_api.launch_root`;
 3. иначе каталог процесса.
 
 На продолжении присланный `metadata.cwd` должен совпасть с каталогом, записанным у прошлого ответа. Чужой путь — 400, ход не стартует.

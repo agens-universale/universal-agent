@@ -13,8 +13,8 @@ from gc_core.config_modules.agent import (
     AgentConfig,
 )
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.chat_api import ChatApiConfig
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
-from gc_core.config_modules.completions import CompletionsConfig
 from gc_core.config_modules.diff_tui import DiffTuiConfig
 from gc_core.config_modules.endpoint_presets import (
     EndpointPreset,
@@ -48,7 +48,6 @@ from gc_core.config_modules.quality_gate import (
     QualityGateConfig,
     normalize_quality_gate_config,
 )
-from gc_core.config_modules.responses import ResponsesConfig
 from gc_core.config_modules.security import SecurityConfig
 from gc_core.config_modules.stored_outputs import normalize_tool_output_limits
 from gc_core.config_modules.strip_tags_projection import (
@@ -109,8 +108,7 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
-    responses: ResponsesConfig = Field(default_factory=ResponsesConfig)
-    completions: CompletionsConfig = Field(default_factory=CompletionsConfig)
+    chat_api: ChatApiConfig = Field(default_factory=ChatApiConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     endpoint_presets: list[EndpointPreset] = Field(
         default_factory=default_endpoint_presets
