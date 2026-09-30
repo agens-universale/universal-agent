@@ -122,8 +122,31 @@ def test_tool_card_sits_between_messages_without_bodies():
         "message",
     ]
     assert final["output"][1]["status"] == "failed"
+    assert "parent_call_id" not in final["output"][1]
     assert final["status"] == "completed"
     assert final["model"] == "ui-model"
+
+
+def test_nested_tool_card_keeps_the_parent_call_id():
+    mapper = _map()
+    opened = mapper.apply_tool(
+        {
+            "op": "open",
+            "call_id": "sub/c1",
+            "parent_call_id": "sub",
+            "name": "read_file",
+            "title": "read_file",
+        }
+    )
+    card = opened[-1]["item"]
+    assert card["call_id"] == "sub/c1"
+    assert card["parent_call_id"] == "sub"
+    assert card["id"] == "gtc_sub/c1"
+    closed = mapper.apply_tool(
+        {"op": "close", "call_id": "sub/c1", "status": "completed"}
+    )
+    assert closed[0]["item"]["status"] == "completed"
+    assert closed[0]["item"]["parent_call_id"] == "sub"
 
 
 def test_terminal_event_names():

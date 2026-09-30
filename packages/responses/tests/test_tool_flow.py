@@ -219,3 +219,154 @@ def test_poll_after_compaction_reads_rewritten_shorter_file(tmp_path):
     assert reports[0]["op"] == "open"
     assert reports[0]["title"] == "exec_command(command='ls')"
     assert "сводка" not in json.dumps(reports)
+
+
+def _sidecar(path, records: list[dict]) -> None:
+    with open(path, "a", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+def _nested_call(parent: str, call_id: str, name: str, arguments: str) -> dict:
+    return {
+        "seq": 1,
+        "parent_call_id": parent,
+        "child_run_id": "child",
+        "kind": "call",
+        "payload": {
+            "type": "function_call",
+            "name": name,
+            "call_id": call_id,
+            "arguments": arguments,
+        },
+    }
+
+
+def test_sidecar_tool_is_a_card_under_the_parent(tmp_path):
+    thread = tmp_path / "data_responses_t.jsonl"
+    thread.write_text("", encoding="utf-8")
+    flow = ToolFlow(str(thread))
+    sidecar = tmp_path / "data_subagents_responses_t.jsonl"
+    _sidecar(
+        sidecar,
+        [
+            _nested_call(
+                "sub",
+                "c1",
+                "read_file",
+                json.dumps({"path": "src/app.py"}),
+            ),
+            {
+                "parent_call_id": "sub",
+                "kind": "user",
+                "payload": {"role": "user", "content": "служебное"},
+            },
+            {
+                "parent_call_id": "sub",
+                "kind": "intermediate_reply",
+                "payload": {"prose": "промежуточная проза"},
+            },
+            {
+                "parent_call_id": "sub",
+                "kind": "child_summary",
+                "payload": {"synthesis": "сводка"},
+            },
+            _nested_call("sub", "hide", "turn_finish", "{}"),
+            {
+                "parent_call_id": "sub",
+                "kind": "result",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": json.dumps({"ok": True, "files": ["a.py"]}),
+                },
+            },
+        ],
+    )
+    reports = flow.poll()
+    assert [item["op"] for item in reports] == ["open", "close"]
+    opened, closed = reports
+    assert opened["call_id"] == "sub/c1"
+    assert opened["parent_call_id"] == "sub"
+    assert opened["name"] == "read_file"
+    assert opened["title"].startswith("read_file(")
+    assert closed == {
+        "op": "close",
+        "call_id": "sub/c1",
+        "status": "completed",
+    }
+    blob = json.dumps(reports, ensure_ascii=False)
+    assert "src/app.py" in opened["title"]
+    assert "arguments" not in opened
+    assert "a.py" not in blob
+    assert "служебное" not in blob
+    assert "промежуточная" not in blob
+    assert "turn_finish" not in blob
+
+
+def test_same_child_call_id_under_two_parents_are_two_cards(tmp_path):
+    thread = tmp_path / "thread.jsonl"
+    flow = ToolFlow(str(thread))
+    sidecar = tmp_path / "thread.subagents.jsonl"
+    _sidecar(
+        sidecar,
+        [
+            _nested_call("left", "c1", "read_file", "{}"),
+            _nested_call("right", "c1", "exec_command", "{}"),
+        ],
+    )
+    reports = flow.poll()
+    assert [item["call_id"] for item in reports] == ["left/c1", "right/c1"]
+    assert [item["parent_call_id"] for item in reports] == ["left", "right"]
+
+
+def test_sidecar_error_closes_the_card_as_failed(tmp_path):
+    thread = tmp_path / "thread.jsonl"
+    flow = ToolFlow(str(thread))
+    sidecar = tmp_path / "thread.subagents.jsonl"
+    _sidecar(sidecar, [_nested_call("sub", "c1", "exec_command", "{}")])
+    assert flow.poll()[0]["op"] == "open"
+    _sidecar(
+        sidecar,
+        [
+            {
+                "parent_call_id": "sub",
+                "kind": "error",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": "не json",
+                },
+            }
+        ],
+    )
+    assert flow.poll() == [
+        {"op": "close", "call_id": "sub/c1", "status": "failed"}
+    ]
+
+
+def test_sidecar_after_rewrite_still_reports_the_new_call(tmp_path):
+    thread = tmp_path / "thread.jsonl"
+    flow = ToolFlow(str(thread))
+    sidecar = tmp_path / "thread.subagents.jsonl"
+    _sidecar(
+        sidecar,
+        [_nested_call("sub", "before", "read_file", "{}")]
+        + [{"role": "pad", "content": "длинный хвост " * 40}],
+    )
+    assert flow.poll()[0]["call_id"] == "sub/before"
+    sidecar.write_text(
+        json.dumps(
+            {
+                "parent_call_id": "sub",
+                "kind": "child_summary",
+                "payload": {"synthesis": "сводка"},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    _sidecar(sidecar, [_nested_call("sub", "after", "exec_command", "{}")])
+    reports = flow.poll()
+    assert [item["call_id"] for item in reports] == ["sub/after"]

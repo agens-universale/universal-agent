@@ -211,6 +211,9 @@ class StreamMap:
             "title": report["title"],
             "status": "in_progress",
         }
+        parent = report.get("parent_call_id")
+        if isinstance(parent, str) and parent != "":
+            item["parent_call_id"] = parent
         events.append(_item_added(self._append(item), item))
         return events
 
