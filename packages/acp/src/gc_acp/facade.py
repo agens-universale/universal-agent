@@ -331,7 +331,10 @@ class AcpFacade:
             system_id=ACP_SYSTEM,
             thread_id=session_id,
         )
-        for update in history_updates(thread.get_full_history_messages()):
+        for update in history_updates(
+            thread.get_full_history_messages(),
+            subagent_records=self._index.subagent_records(session_id),
+        ):
             await self._notify(session_id, update)
 
     async def _open_agent(self, cwd: str) -> Any:
@@ -374,7 +377,10 @@ class AcpFacade:
     async def _stream_prompt(
         self, live: LiveSession, assembler: ChunkAssembler, text: str
     ) -> None:
-        flow = ToolFlow(self._index.thread_path(live.session_id))
+        flow = ToolFlow(
+            self._index.thread_path(live.session_id),
+            sidecar_path=self._index.subagent_path(live.session_id),
+        )
         stop = asyncio.Event()
         watch = asyncio.create_task(self._watch_tools(live, flow, stop))
         try:

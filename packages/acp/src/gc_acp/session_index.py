@@ -19,7 +19,9 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.thread_store import (
     delete_thread,
     load_thread_messages,
+    read_subagent_trace,
     sanitize_system_id,
+    subagent_trace_path,
     validate_thread_id,
 )
 from gc_core.utils.atomic_io import atomic_replace
@@ -63,6 +65,19 @@ class SessionIndex:
     def thread_path(self, session_id: str) -> str:
         """jsonl треда. Ядро дописывает сюда function_call по ходу."""
         return _thread_data_path(self._threads_dir, session_id)
+
+    def subagent_path(self, session_id: str) -> str:
+        """jsonl вызовов внутри субагента, data_subagents_acp_*."""
+        return subagent_trace_path(self._threads_dir, ACP_SYSTEM, session_id)
+
+    def subagent_records(self, session_id: str) -> list[dict]:
+        """Уже записанный sidecar. Нет файла или битый id — пустой список."""
+        try:
+            return read_subagent_trace(
+                self._threads_dir, ACP_SYSTEM, session_id
+            )
+        except ValueError:
+            return []
 
     def load(self, session_id: str) -> SessionFile | None:
         try:

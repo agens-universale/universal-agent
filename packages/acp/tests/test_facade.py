@@ -146,13 +146,20 @@ def _append_output(path, call_id, output):
     )
 
 
-def _append_record(path, payload):
+def _append_record(path, payload, ts=None):
     path.parent.mkdir(parents=True, exist_ok=True)
-    line = json.dumps(
-        {"type": "message", "payload": payload}, ensure_ascii=False
-    )
+    envelope = {"type": "message", "payload": payload}
+    if ts is not None:
+        envelope["ts"] = ts
+    line = json.dumps(envelope, ensure_ascii=False)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(line + "\n")
+
+
+def _append_sidecar(path, record):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 async def _wait_for_tool(writer, call_id):
@@ -393,6 +400,98 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
     titles = [item.get("title") for item in _updates(writer)]
     assert titles[1] == "fs_read_file(path='src/a.py')"
     assert _by_id(writer, 3)["result"] == {"stopReason": "end_turn"}
+    await facade.shutdown()
+
+
+async def test_prompt_reports_tools_inside_a_subagent(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work/app")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    path = tmp_path / f"data_acp_{session_id}.jsonl"
+    sidecar = tmp_path / f"data_subagents_acp_{session_id}.jsonl"
+    agent = agents[0]
+    agent.lead = [("answer", "смотрю")]
+    agent.hold = True
+    agent.deltas = [("answer", "готово")]
+    agent.answer = "готово"
+
+    def write_call():
+        _append_record(
+            path,
+            {
+                "type": "function_call",
+                "name": "subagent_explore",
+                "call_id": "sub",
+                "arguments": json.dumps({"task": "найти"}),
+            },
+            ts="2026-01-01T00:00:01+00:00",
+        )
+        _append_sidecar(
+            sidecar,
+            {
+                "ts": "2026-01-01T00:00:02+00:00",
+                "seq": 1,
+                "parent_call_id": "sub",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "c1",
+                    "arguments": json.dumps({"path": "a.py"}),
+                },
+            },
+        )
+        _append_sidecar(
+            sidecar,
+            {
+                "ts": "2026-01-01T00:00:02.500000+00:00",
+                "seq": 2,
+                "parent_call_id": "sub",
+                "kind": "result",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": json.dumps({"ok": True}),
+                },
+            },
+        )
+        _append_record(
+            path,
+            {
+                "type": "function_call_output",
+                "call_id": "sub",
+                "output": json.dumps({"ok": True}),
+            },
+            ts="2026-01-01T00:00:03+00:00",
+        )
+
+    agent.on_pause = write_call
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await _wait_for_tool(writer, "sub:c1")
+    agent.release.set()
+    await facade._sessions[session_id].prompt_task
+    flow = [
+        (item["sessionUpdate"], item.get("toolCallId"), item.get("status"))
+        for item in _updates(writer)
+    ]
+    assert flow == [
+        ("agent_message_chunk", None, None),
+        ("tool_call", "sub", "in_progress"),
+        ("tool_call", "sub:c1", "in_progress"),
+        ("tool_call_update", "sub:c1", "completed"),
+        ("tool_call_update", "sub", "completed"),
+        ("agent_message_chunk", None, None),
+    ]
     await facade.shutdown()
 
 

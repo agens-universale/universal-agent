@@ -257,3 +257,87 @@ def test_history_skips_tool_role_and_non_text_parts():
     assert updates[0]["content"]["text"] == "see"
     assert updates[1]["content"]["text"] == "done"
     assert updates[0]["messageId"] != updates[1]["messageId"]
+
+
+def test_history_shows_subagent_tools_as_agent_actions():
+    updates = history_updates(
+        [
+            {"role": "assistant", "content": "делегирую"},
+            {
+                "type": "function_call",
+                "name": "subagent_explore",
+                "call_id": "sub",
+                "arguments": '{"task": "найти"}',
+            },
+            {
+                "type": "function_call_output",
+                "call_id": "sub",
+                "output": '{"ok": true}',
+            },
+            {"role": "assistant", "content": "готово"},
+        ],
+        subagent_records=[
+            {
+                "seq": 1,
+                "parent_call_id": "sub",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "subagent_inner",
+                    "call_id": "inner",
+                    "arguments": '{"task": "глубже"}',
+                },
+            },
+            {
+                "seq": 2,
+                "parent_call_id": "inner",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "c1",
+                    "arguments": '{"path": "a.py"}',
+                },
+            },
+            {
+                "seq": 3,
+                "parent_call_id": "inner",
+                "kind": "error",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": '{"ok": false}',
+                },
+            },
+            {
+                "seq": 4,
+                "parent_call_id": "sub",
+                "kind": "result",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "inner",
+                    "output": '{"ok": true}',
+                },
+            },
+            {
+                "seq": 5,
+                "parent_call_id": "sub",
+                "kind": "intermediate_reply",
+                "payload": {"prose": "ещё смотрю"},
+            },
+        ],
+    )
+    assert [
+        (item["sessionUpdate"], item.get("toolCallId"), item.get("status"))
+        for item in updates
+    ] == [
+        ("agent_message_chunk", None, None),
+        ("tool_call", "sub", "in_progress"),
+        ("tool_call", "sub:inner", "in_progress"),
+        ("tool_call", "inner:c1", "in_progress"),
+        ("tool_call_update", "inner:c1", "failed"),
+        ("tool_call_update", "sub:inner", "completed"),
+        ("tool_call_update", "sub", "completed"),
+        ("agent_message_chunk", None, None),
+    ]
+    assert updates[3]["title"] == "fs_read_file(path='a.py')"

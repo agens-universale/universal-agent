@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass, field
 from typing import Any
 
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
@@ -13,7 +14,7 @@ from gc_core.message_policy.user_message_policy import (
 from gc_core.message_projection import project_assistant_text
 from gc_core.tools.turn.submit_solution import SubmitSolution
 
-from gc_acp.tool_flow import report_from_record
+from gc_acp.tool_flow import report_from_record, report_from_sidecar
 
 _ANSWER = "agent_message_chunk"
 _THINK = "agent_thought_chunk"
@@ -96,7 +97,11 @@ def unseen_answer(sent: str, final: Any) -> str:
     return final
 
 
-def history_updates(messages: list[Any]) -> list[dict]:
+def history_updates(
+    messages: list[Any],
+    *,
+    subagent_records: list[Any] | None = None,
+) -> list[dict]:
     """Проигрыш треда: у каждого сообщения свой messageId.
 
     function_call встаёт карточкой между прозой. Результат тула — смена
@@ -104,28 +109,79 @@ def history_updates(messages: list[Any]) -> list[dict]:
     становится отчётом; отклонённая попытка и вердикт судьи не показываются.
     Служебные user-сообщения ядра (сводка, чек-лист, technical) в ленту
     не идут — та же ручка, что у заголовка сессии.
+
+    Вызовы из sidecar субагента встают сразу после карточки этого субагента,
+    до его результата: для клиента это такие же действия, как тулы родителя.
     """
-    rendered: list[dict] = []
-    seen: set[str] = set()
-    rejected = _rejected_finish_ids(messages)
-    last_agent = ""
+    records = subagent_records or []
+    replay = _Replay(
+        seen=set(),
+        grouped=_records_by_parent(records),
+        rejected=_rejected_finish_ids(messages),
+    )
     for message in messages:
-        tool = _tool_report(message, seen)
-        if tool is not None:
-            rendered.append(tool)
-            continue
-        if _is_finish_call(message):
-            text = _accepted_finish_text(message, rejected, last_agent)
-            if text != "":
-                rendered.append(text_chunk(_ANSWER, text, new_message_id()))
-                last_agent = text
-            continue
-        chunk = _history_chunk(message)
-        if chunk is not None:
-            rendered.append(chunk)
-            if chunk["sessionUpdate"] == _ANSWER:
-                last_agent = chunk["content"]["text"]
-    return rendered
+        _append_history_message(replay, message)
+    replay.rendered.extend(
+        _leftover_tool_updates(records, replay.consumed, replay.seen)
+    )
+    return replay.rendered
+
+
+@dataclass
+class _Replay:
+    seen: set[str]
+    grouped: dict[str, list[dict]]
+    rejected: set[str]
+    consumed: set[int] = field(default_factory=set)
+    stack: set[str] = field(default_factory=set)
+    rendered: list[dict] = field(default_factory=list)
+    last_agent: str = ""
+
+
+def _append_history_message(replay: _Replay, message: Any) -> None:
+    tool = _tool_report(message, replay.seen)
+    if tool is not None:
+        _append_tool(replay, tool)
+        return
+    if _is_finish_call(message):
+        _append_finish(replay, message)
+        return
+    _append_prose(replay, message)
+
+
+def _append_tool(replay: _Replay, tool: dict) -> None:
+    replay.rendered.append(tool)
+    if tool.get("sessionUpdate") != "tool_call":
+        return
+    call_id = tool.get("toolCallId")
+    if not isinstance(call_id, str) or call_id == "":
+        return
+    replay.rendered.extend(
+        _nested_tool_updates(
+            call_id,
+            replay.grouped,
+            replay.seen,
+            replay.consumed,
+            replay.stack,
+        )
+    )
+
+
+def _append_finish(replay: _Replay, message: Any) -> None:
+    text = _accepted_finish_text(message, replay.rejected, replay.last_agent)
+    if text == "":
+        return
+    replay.rendered.append(text_chunk(_ANSWER, text, new_message_id()))
+    replay.last_agent = text
+
+
+def _append_prose(replay: _Replay, message: Any) -> None:
+    chunk = _history_chunk(message)
+    if chunk is None:
+        return
+    replay.rendered.append(chunk)
+    if chunk["sessionUpdate"] == _ANSWER:
+        replay.last_agent = chunk["content"]["text"]
 
 
 def _is_finish_call(message: Any) -> bool:
@@ -192,6 +248,78 @@ def _tool_report(message: Any, seen: set[str]) -> dict | None:
     if not isinstance(message, dict):
         return None
     return report_from_record(message, seen)
+
+
+def _records_by_parent(records: list[Any]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        parent = record.get("parent_call_id")
+        if not isinstance(parent, str) or parent == "":
+            continue
+        grouped.setdefault(parent, []).append(record)
+    for rows in grouped.values():
+        rows.sort(key=_record_seq)
+    return grouped
+
+
+def _record_seq(record: dict) -> int:
+    seq = record.get("seq")
+    if isinstance(seq, int):
+        return seq
+    return 0
+
+
+def _nested_tool_updates(
+    parent_id: str,
+    grouped: dict[str, list[dict]],
+    seen: set[str],
+    consumed: set[int],
+    stack: set[str],
+) -> list[dict]:
+    """Тулы субагента и, рекурсивно, тулы вложенного субагента."""
+    rows = grouped.get(parent_id)
+    if not rows or parent_id in stack:
+        return []
+    stack.add(parent_id)
+    updates: list[dict] = []
+    for record in rows:
+        mark = id(record)
+        if mark in consumed:
+            continue
+        consumed.add(mark)
+        report = report_from_sidecar(record, seen)
+        if report is not None:
+            updates.append(report)
+        if record.get("kind") != "call":
+            continue
+        payload = record.get("payload")
+        raw = payload.get("call_id") if isinstance(payload, dict) else None
+        if isinstance(raw, str) and raw != "":
+            updates.extend(
+                _nested_tool_updates(raw, grouped, seen, consumed, stack)
+            )
+    stack.remove(parent_id)
+    return updates
+
+
+def _leftover_tool_updates(
+    records: list[Any], consumed: set[int], seen: set[str]
+) -> list[dict]:
+    """Sidecar, чей родительский вызов в тред не попал."""
+    pending = [
+        record
+        for record in records
+        if isinstance(record, dict) and id(record) not in consumed
+    ]
+    pending.sort(key=_record_seq)
+    updates: list[dict] = []
+    for record in pending:
+        report = report_from_sidecar(record, seen)
+        if report is not None:
+            updates.append(report)
+    return updates
 
 
 def _history_chunk(message: Any) -> dict | None:
