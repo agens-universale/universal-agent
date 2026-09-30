@@ -112,6 +112,8 @@ def history_updates(
 
     Вызовы из sidecar субагента встают сразу после карточки этого субагента,
     до его результата: для клиента это такие же действия, как тулы родителя.
+    Шаг, чей родительский вызов в тред не попал, не показывается: после
+    компакции карточка субагента уже в сводке, и его шаги исчезают вместе с ней.
     """
     records = subagent_records or []
     replay = _Replay(
@@ -121,9 +123,6 @@ def history_updates(
     )
     for message in messages:
         _append_history_message(replay, message)
-    replay.rendered.extend(
-        _leftover_tool_updates(records, replay.consumed, replay.seen)
-    )
     return replay.rendered
 
 
@@ -301,24 +300,6 @@ def _nested_tool_updates(
                 _nested_tool_updates(raw, grouped, seen, consumed, stack)
             )
     stack.remove(parent_id)
-    return updates
-
-
-def _leftover_tool_updates(
-    records: list[Any], consumed: set[int], seen: set[str]
-) -> list[dict]:
-    """Sidecar, чей родительский вызов в тред не попал."""
-    pending = [
-        record
-        for record in records
-        if isinstance(record, dict) and id(record) not in consumed
-    ]
-    pending.sort(key=_record_seq)
-    updates: list[dict] = []
-    for record in pending:
-        report = report_from_sidecar(record, seen)
-        if report is not None:
-            updates.append(report)
     return updates
 
 

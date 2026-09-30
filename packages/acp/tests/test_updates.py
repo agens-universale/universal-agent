@@ -341,3 +341,64 @@ def test_history_shows_subagent_tools_as_agent_actions():
         ("agent_message_chunk", None, None),
     ]
     assert updates[3]["title"] == "fs_read_file(path='a.py')"
+
+
+def test_history_drops_subagent_steps_after_compaction():
+    updates = history_updates(
+        [
+            {
+                "role": "user",
+                "content": (
+                    '<technical type="dialog_summary">'
+                    "<dialog_summary>\n"
+                    "<summary>сжатый контекст</summary>\n"
+                    "</dialog_summary>"
+                    "</technical>"
+                ),
+            },
+            {"role": "user", "content": "ещё раз"},
+            {"role": "assistant", "content": "готово"},
+        ],
+        subagent_records=[
+            {
+                "seq": 1,
+                "parent_call_id": "gone",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "c1",
+                    "arguments": '{"path": "a.py"}',
+                },
+            },
+            {
+                "seq": 2,
+                "parent_call_id": "gone",
+                "kind": "result",
+                "payload": {
+                    "type": "function_call_output",
+                    "call_id": "c1",
+                    "output": '{"ok": true}',
+                },
+            },
+            {
+                "seq": 3,
+                "parent_call_id": "gone",
+                "kind": "call",
+                "payload": {
+                    "type": "function_call",
+                    "name": "fs_read_file",
+                    "call_id": "c2",
+                    "arguments": '{"path": "b.py"}',
+                },
+            },
+        ],
+    )
+    assert [item["sessionUpdate"] for item in updates] == [
+        "user_message_chunk",
+        "agent_message_chunk",
+    ]
+    assert [item["content"]["text"] for item in updates] == [
+        "ещё раз",
+        "готово",
+    ]
