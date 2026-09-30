@@ -740,6 +740,14 @@ NOT_IN_MATRIX = {
     "responses.text_answer_mode": "только HTTP-фасад Responses",
     "responses.finish_gate_mode": "только HTTP-фасад Responses",
     "responses.todo_reminder_steps": "только HTTP-фасад Responses",
+    "completions.host": "только HTTP-фасад Chat Completions",
+    "completions.port": "только HTTP-фасад Chat Completions",
+    "completions.auth_token": "только HTTP-фасад Chat Completions",
+    "completions.cors_origins": "только HTTP-фасад Chat Completions",
+    "completions.launch_root": "только HTTP-фасад Chat Completions",
+    "completions.text_answer_mode": "только HTTP-фасад Chat Completions",
+    "completions.finish_gate_mode": "только HTTP-фасад Chat Completions",
+    "completions.todo_reminder_steps": "только HTTP-фасад Chat Completions",
     "todo.reminder_steps": (
         "напоминание чеклиста; матрица гоняет CLI и этот лист не "
         "переключает. Канал Responses пишет его в runtime"

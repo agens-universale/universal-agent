@@ -31,6 +31,7 @@ CORE_REQUIRED = [
     "gc_core/assets/prompts/chat_completions_system_prompt.md",
     "gc_core/assets/prompts/chat_completions_tui_special_instructions.md",
     "gc_core/assets/prompts/chat_completions_responses_special_instructions.md",
+    "gc_core/assets/prompts/chat_completions_completions_special_instructions.md",
     "gc_core/assets/config.default.yml",
     "gc_core/config.py",
 ]
@@ -46,6 +47,7 @@ MANIFESTS = {
     "gc_server": "packages/server",
     "gc_mcp": "packages/mcp",
     "gc_responses": "packages/responses",
+    "gc_completions": "packages/completions",
 }
 
 
@@ -315,6 +317,7 @@ OWN_COMMANDS = {
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
     "gc_responses": {"gc-responses"},
+    "gc_completions": {"gc-completions"},
 }
 
 
@@ -398,6 +401,7 @@ def test_meta_pulls_every_profile():
         f"gc-server=={ver}",
         f"gc-mcp=={ver}",
         f"gc-responses=={ver}",
+        f"gc-completions=={ver}",
     }
 
 
@@ -425,6 +429,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/responses",
+        "packages/completions",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -436,6 +441,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/responses",
+        "packages/completions",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")

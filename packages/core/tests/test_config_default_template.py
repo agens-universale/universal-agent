@@ -244,6 +244,15 @@ EXPERT_ONLY_KEYS: set = {
     "responses.text_answer_mode",
     "responses.finish_gate_mode",
     "responses.todo_reminder_steps",
+    # --- completions: HTTP-фасад gc-completions, не шаблон CLI/TUI ---
+    "completions.host",
+    "completions.port",
+    "completions.auth_token",
+    "completions.cors_origins",
+    "completions.launch_root",
+    "completions.text_answer_mode",
+    "completions.finish_gate_mode",
+    "completions.todo_reminder_steps",
 }
 
 
