@@ -117,7 +117,14 @@ def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     assert html.index('id="filesbar"') < html.index('id="artifactList"')
     assert 'id="dialogsToggle"' in html
     assert 'id="chatToggle"' in html
+    assert ">Чат</button>" in html
     assert 'id="filesToggle"' in html
+    assert 'id="paneTabs"' in html
+    assert 'id="dialogsTab"' in html
+    assert 'id="filesTab"' in html
+    assert 'id="chatTab"' in html
+    assert "max-width: 1199px" in html
+    assert "aside.collapsed, #chatpane.collapsed { display: none; }" in html
     assert "gc-ua-chat-panes" in html
     assert "Папка пуста." in html
     assert "gc-ua-chat-thread" in html
@@ -322,6 +329,91 @@ def test_dialog_title_follows_tui_prompt_and_task(tmp_path):
     assert by_id["short-then-long"]["title"] == long_prompt
     assert by_id["only-short"]["title"] == "ты тут?"
     assert by_id["task-wins"]["title"] == "прочитать файл"
+
+
+def _ask(text: str, turn: int = 1) -> dict:
+    return {
+        "turn": turn,
+        "ts": "2026-10-01T12:00:00Z",
+        "action": "user_ask",
+        "tool_name": None,
+        "content": text,
+    }
+
+
+def _meta(index: ResponseIndex, thread_id: str, body: dict) -> None:
+    data_path = index.thread_path(thread_id)
+    meta_path = os.path.join(
+        os.path.dirname(data_path),
+        "meta_"
+        + os.path.basename(data_path)[len("data_") : -len(".jsonl")]
+        + ".json",
+    )
+    with open(meta_path, "w", encoding="utf-8") as handle:
+        json.dump(body, handle)
+
+
+def test_dialog_title_reads_intent_log_after_summary(tmp_path):
+    app, index, _threads = _joint(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    long_prompt = "переписать разбор заголовка диалога целиком"
+    later = "ещё более длинная формулировка следующей задачи после сводки"
+    summary = '<technical type="dialog_summary">сводка без имени</technical>'
+    _save(index, n=1, thread_id="summed", cwd=str(cwd), created=10)
+    _jsonl(index, "summed", [_user(summary), _user("ок")])
+    _meta(
+        index,
+        "summed",
+        {
+            "user_intent_log": [_ask("ты тут?"), _ask(long_prompt, 2)],
+            "current_user_intent": [_ask("спасибо", 3)],
+        },
+    )
+    _save(index, n=2, thread_id="open-ask", cwd=str(cwd), created=20)
+    _jsonl(index, "open-ask", [_user(summary)])
+    _meta(
+        index,
+        "open-ask",
+        {
+            "user_intent_log": [_ask("ты тут?")],
+            "current_user_intent": [_ask(later, 2)],
+        },
+    )
+    _save(index, n=3, thread_id="task-still-wins", cwd=str(cwd), created=30)
+    _jsonl(
+        index,
+        "task-still-wins",
+        [
+            _user(long_prompt),
+            _call("fs_read_file", {"path": "a"}),
+            _call("turn_finish", {"task": "сжать лог"}),
+        ],
+    )
+    _meta(
+        index,
+        "task-still-wins",
+        {"user_intent_log": [_ask(later)]},
+    )
+    _save(index, n=4, thread_id="broken-meta", cwd=str(cwd), created=5)
+    _jsonl(index, "broken-meta", [_user(summary)])
+    data_path = index.thread_path("broken-meta")
+    meta_path = os.path.join(
+        os.path.dirname(data_path),
+        "meta_"
+        + os.path.basename(data_path)[len("data_") : -len(".jsonl")]
+        + ".json",
+    )
+    with open(meta_path, "w", encoding="utf-8") as handle:
+        handle.write("{not json")
+    client = TestClient(app)
+    by_id = {
+        item["thread_id"]: item for item in client.get("/v1/dialogs").json()
+    }
+    assert by_id["summed"]["title"] == long_prompt
+    assert by_id["open-ask"]["title"] == later
+    assert by_id["task-still-wins"]["title"] == "сжать лог"
+    assert by_id["broken-meta"]["title"] == ""
 
 
 def test_dialog_feed_is_chain_order_with_text_and_output(tmp_path):

@@ -75,7 +75,26 @@
     text-align: left;
   }
   .side-toggle::after { content: none; }
-  @media (min-width: 721px) {
+  .pane-tabs { display: none; }
+  .pane-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    padding: 11px 8px 9px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--mut);
+    font-size: 14px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pane-tab:hover { color: var(--tx); }
+  .pane-tab.active { color: var(--acc); border-bottom-color: var(--acc); }
+  @media (min-width: 1200px) {
     .side-toggle { pointer-events: none; }
     #chatToggle { display: none; }
   }
@@ -386,40 +405,22 @@
   .hint { margin: 6px 0 0; color: var(--mut2); font-size: 12px; }
   .panel-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
   .form-alert { min-height: 1.2em; margin: 8px 0 0; color: var(--bad); font-size: 13px; }
-  @media (max-width: 720px) {
-    .shell { flex-direction: column; }
-    aside {
-      width: auto;
-      border-right: 0;
-      border-left: 0;
+  @media (max-width: 1199px) {
+    .pane-tabs {
+      display: flex;
+      flex: none;
+      padding: 0 12px;
       border-bottom: 1px solid var(--bd);
     }
-    #filesbar { order: 3; border-bottom: 0; border-top: 1px solid var(--bd); }
-    .center { order: 2; flex-direction: column; align-items: stretch; }
-    .side-toggle { pointer-events: auto; margin: 0; padding: 10px 6px; cursor: pointer; }
-    .side-toggle:hover { background: var(--panel); }
-    #chatToggle { display: flex; }
-    .side-toggle::after {
-      content: "";
-      width: 0;
-      height: 0;
-      border-left: 4px solid transparent;
-      border-right: 4px solid transparent;
-      border-top: 5px solid var(--mut2);
-    }
-    .collapsed > .side-toggle::after {
-      border-top: 4px solid transparent;
-      border-bottom: 4px solid transparent;
-      border-left: 5px solid var(--mut2);
-      border-right: 0;
-    }
-    aside.collapsed,
-    #chatpane.collapsed { flex: none; }
+    .shell { flex-direction: column; overflow: hidden; }
+    .side-toggle { display: none; }
+    aside, #chatpane { width: 100%; border: 0; }
+    .center { flex-direction: column; align-items: stretch; }
+    aside.collapsed, #chatpane.collapsed { display: none; }
     aside:not(.collapsed),
-    #chatpane:not(.collapsed) { flex: 1 1 auto; min-height: 0; }
-    aside.collapsed #dialogList,
-    aside.collapsed #artifactList,
-    #chatpane.collapsed .maincol { display: none; }
+    #chatpane:not(.collapsed) { display: flex; flex: 1 1 0%; min-height: 0; }
+  }
+  @media (max-width: 720px) {
     header { align-items: flex-start; }
     .actions { flex: 1 1 100%; justify-content: flex-start; }
     .sub { white-space: normal; }
@@ -454,6 +455,11 @@
       <button type="button" class="btn" id="settingsBtn">Настройки</button>
     </div>
   </header>
+  <nav class="pane-tabs" id="paneTabs" aria-label="Разделы">
+    <button type="button" class="pane-tab active" id="chatTab" data-pane="chatpane" role="tab" aria-selected="true" aria-controls="chatpane">Чат</button>
+    <button type="button" class="pane-tab" id="filesTab" data-pane="filesbar" role="tab" aria-selected="false" aria-controls="filesbar">Файлы</button>
+    <button type="button" class="pane-tab" id="dialogsTab" data-pane="sidebar" role="tab" aria-selected="false" aria-controls="sidebar">Диалоги</button>
+  </nav>
   <div class="shell">
   <aside id="sidebar" class="collapsed">
     <button type="button" class="side-toggle" id="dialogsToggle" data-pane="sidebar" aria-expanded="false" aria-controls="dialogList">Диалоги</button>
@@ -514,7 +520,8 @@
   var MESSAGES_KEY = "gc-ua-chat-messages";
   var THREAD_KEY = "gc-ua-chat-thread";
   var PANE_KEY = "gc-ua-chat-panes";
-  var narrowMedia = window.matchMedia("(max-width: 720px)");
+  var narrowMedia = window.matchMedia("(max-width: 1199px)");
+  var PANE_IDS = ["sidebar", "chatpane", "filesbar"];
   var DEFAULTS = { api: "responses", token: "", model: "" };
 
   var settings = loadSettings();
@@ -576,15 +583,18 @@
     if (e.key === "Escape" && !settingsEl.hidden) closeSettings();
   });
   loadPanes();
+  ensureSinglePane();
   syncPaneToggles();
-  narrowMedia.addEventListener("change", syncPaneToggles);
-  document.querySelectorAll(".side-toggle").forEach(function (btn) {
+  narrowMedia.addEventListener("change", function () {
+    ensureSinglePane();
+    syncPaneToggles();
+  });
+  document.querySelectorAll(".side-toggle, .pane-tab").forEach(function (btn) {
     btn.addEventListener("click", function () {
       if (!narrowMedia.matches) return;
-      var pane = document.getElementById(btn.getAttribute("data-pane"));
-      var closing = !pane.classList.contains("collapsed");
-      if (closing && openPaneCount() < 2) return;
-      pane.classList.toggle("collapsed");
+      var id = btn.getAttribute("data-pane");
+      if (paneOpen(id)) return;
+      showOnlyPane(id);
       closeFileMenu();
       syncPaneToggles();
       savePanes();
@@ -599,8 +609,18 @@
     return !document.getElementById(id).classList.contains("collapsed");
   }
 
-  function openPaneCount() {
-    return ["sidebar", "chatpane", "filesbar"].filter(paneOpen).length;
+  function showOnlyPane(id) {
+    PANE_IDS.forEach(function (paneId) {
+      document.getElementById(paneId).classList.toggle("collapsed", paneId !== id);
+    });
+  }
+
+  function ensureSinglePane() {
+    if (!narrowMedia.matches) return;
+    var open = PANE_IDS.filter(paneOpen);
+    if (open.length === 1) return;
+    showOnlyPane(open.indexOf("chatpane") >= 0 ? "chatpane" : (open[0] || "chatpane"));
+    savePanes();
   }
 
   function loadPanes() {
@@ -628,6 +648,11 @@
       var open = wide || !pane.classList.contains("collapsed");
       btn.setAttribute("aria-expanded", open ? "true" : "false");
       btn.tabIndex = wide ? -1 : 0;
+    });
+    document.querySelectorAll(".pane-tab").forEach(function (btn) {
+      var open = paneOpen(btn.getAttribute("data-pane"));
+      btn.classList.toggle("active", open);
+      btn.setAttribute("aria-selected", open ? "true" : "false");
     });
   }
 
@@ -1734,7 +1759,7 @@
     saveMessages();
     setAlert(status === "in_progress" ? "Последний ход ещё идёт" : "");
     if (narrowMedia.matches) {
-      document.getElementById("chatpane").classList.remove("collapsed");
+      showOnlyPane("chatpane");
       syncPaneToggles();
       savePanes();
     }

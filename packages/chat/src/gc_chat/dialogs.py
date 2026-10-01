@@ -6,6 +6,8 @@
 Тот же разбор каталога принимает корень нового хода без треда.
 
 Читает уже лежащие индекс и jsonl. Новый архив не заводит.
+После компакции промпты в живом jsonl пропадают: имя тогда берётся
+из ``user_intent_log`` и ``current_user_intent`` в meta треда.
 Треды субагентов не обходит.
 """
 
@@ -65,7 +67,13 @@ def dialog_list(index: ResponseIndex) -> list[dict]:
         if scan.foreign:
             continue
         chain = _chain(records)
-        title = _dialog_title(scan.records) if scan.intact else ""
+        title = (
+            _dialog_title(
+                scan.records, _intent_asks(index.thread_path(thread_id))
+            )
+            if scan.intact
+            else ""
+        )
         items.append(_summary(thread_id, chain, title))
     items.sort(key=lambda item: (-item["updated_at"], item["thread_id"]))
     return items
@@ -330,14 +338,77 @@ class _Name:
         self.tools = 0
 
 
-def _dialog_title(records: list[dict]) -> str:
-    """Имя как в TUI: ``task`` хода, иначе авто-имя из промптов."""
+def _dialog_title(records: list[dict], asks: list[str] | None = None) -> str:
+    """Имя как в TUI: ``task`` хода, иначе авто-имя из промптов.
+
+    ``asks`` — ``user_ask`` из meta. Они переживают компакцию, живой jsonl нет.
+    Сначала они, потом промпты живого файла: короткий хвост длинное имя не сбивает.
+    """
     name = _Name()
+    for text in asks or []:
+        name.last_actual = _next_prompt(name.last_actual, text)
     for record in records:
         _fold_name(name, _message(record))
     if name.task:
         return name.task
     return name.last_actual
+
+
+def _intent_asks(data_path: str) -> list[str]:
+    """Тексты ``user_ask`` из meta: закрытый лог, затем открытый ход."""
+    meta = _read_meta(_meta_path(data_path))
+    if meta is None:
+        return []
+    texts: list[str] = []
+    for key in ("user_intent_log", "current_user_intent"):
+        texts.extend(_user_asks(meta.get(key)))
+    return texts
+
+
+def _meta_path(data_path: str) -> str:
+    directory, name = os.path.split(data_path)
+    if not name.startswith("data_") or not name.endswith(".jsonl"):
+        return ""
+    stem = name[len("data_") : -len(".jsonl")]
+    return os.path.join(directory, f"meta_{stem}.json")
+
+
+def _read_meta(path: str) -> dict | None:
+    if path == "" or not os.path.isfile(path):
+        return None
+    try:
+        with open(path, encoding="utf-8") as handle:
+            meta = json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    return meta
+
+
+def _user_asks(raw: object) -> list[str]:
+    if not isinstance(raw, list):
+        return []
+    texts: list[str] = []
+    for item in raw:
+        text = _ask_text(item)
+        if text is None:
+            continue
+        texts.append(text)
+    return texts
+
+
+def _ask_text(item: object) -> str | None:
+    if isinstance(item, str):
+        text = item.strip()
+    elif isinstance(item, dict) and item.get("action") == "user_ask":
+        content = item.get("content")
+        text = content.strip() if isinstance(content, str) else ""
+    else:
+        return None
+    if text == "" or is_technical_user_message_text(text):
+        return None
+    return text
 
 
 def _fold_name(name: _Name, message: dict) -> None:
