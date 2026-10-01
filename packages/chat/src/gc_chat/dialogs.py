@@ -36,6 +36,7 @@ from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
 # любое имя, следующий заменяет его только если длиннее минимума.
 _PROMPT_MIN = 30
 _NAME_MAX = 200
+_TEXT_PROBE = 8192
 _ENVELOPE = "message"
 _RESPONSES = "responses"
 _CALL = "function_call"
@@ -523,8 +524,9 @@ def _entries(cwd: str, relative: str, resolved: str) -> list[dict] | None:
         if _checked(cwd_abs, child, directory=True) is not None:
             found.append({"name": name, "path": child, "kind": "dir"})
             continue
-        if _checked(cwd_abs, child, directory=False) is not None:
-            found.append({"name": name, "path": child, "kind": "file"})
+        placed = _checked(cwd_abs, child, directory=False)
+        if placed is not None:
+            found.append(_file_entry(name, child, placed[1]))
     found.sort(
         key=lambda item: (
             item["kind"] != "dir",
@@ -533,6 +535,42 @@ def _entries(cwd: str, relative: str, resolved: str) -> list[dict] | None:
         )
     )
     return found
+
+
+def _file_entry(name: str, child: str, resolved: str) -> dict:
+    return {
+        "name": name,
+        "path": child,
+        "kind": "file",
+        "text": _file_is_text(resolved),
+    }
+
+
+def _file_is_text(path: str) -> bool:
+    """Начало файла — UTF-8 без нулевого байта. Пустой файл — текст."""
+    try:
+        with open(path, "rb") as handle:
+            sample = handle.read(_TEXT_PROBE)
+            rest = handle.read(1)
+    except OSError:
+        return False
+    if b"\0" in sample:
+        return False
+    return _utf8_sample(sample, cut=rest != b"")
+
+
+def _utf8_sample(sample: bytes, *, cut: bool) -> bool:
+    try:
+        sample.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        if not cut or exc.start < len(sample) - 3:
+            return False
+        try:
+            sample[: exc.start].decode("utf-8")
+        except UnicodeDecodeError:
+            return False
+        return True
+    return True
 
 
 def _has_dotdot(raw: str) -> bool:

@@ -121,6 +121,9 @@ def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     assert "Папка пуста." in html
     assert "gc-ua-chat-thread" in html
     assert "showFilesForCurrent" in html
+    assert "Просмотреть" in html
+    assert "item.text" in html
+    assert "white-space:pre-wrap" in html
     assert "Скачать" in html
     assert "Скопировать путь" in html
     assert "Открыть" in html
@@ -407,9 +410,24 @@ def test_folder_lists_one_level_without_tool_calls(tmp_path):
             {"name": "Docs", "path": "Docs", "kind": "dir"},
             {"name": "inside", "path": "inside", "kind": "dir"},
             {"name": "sub", "path": "sub", "kind": "dir"},
-            {"name": "inner.txt", "path": "inner.txt", "kind": "file"},
-            {"name": "Later.txt", "path": "Later.txt", "kind": "file"},
-            {"name": "via.txt", "path": "via.txt", "kind": "file"},
+            {
+                "name": "inner.txt",
+                "path": "inner.txt",
+                "kind": "file",
+                "text": True,
+            },
+            {
+                "name": "Later.txt",
+                "path": "Later.txt",
+                "kind": "file",
+                "text": True,
+            },
+            {
+                "name": "via.txt",
+                "path": "via.txt",
+                "kind": "file",
+                "text": True,
+            },
         ],
     }
     nested_list = client.get(
@@ -419,14 +437,24 @@ def test_folder_lists_one_level_without_tool_calls(tmp_path):
     assert nested_list.json() == {
         "path": "sub",
         "entries": [
-            {"name": "nested.txt", "path": "sub/nested.txt", "kind": "file"},
+            {
+                "name": "nested.txt",
+                "path": "sub/nested.txt",
+                "kind": "file",
+                "text": True,
+            },
         ],
     }
     via_link = client.get(
         "/v1/dialogs/files/artifacts", params={"path": "inside"}
     )
     assert via_link.json()["entries"] == [
-        {"name": "nested.txt", "path": "inside/nested.txt", "kind": "file"},
+        {
+            "name": "nested.txt",
+            "path": "inside/nested.txt",
+            "kind": "file",
+            "text": True,
+        },
     ]
     missing = client.get("/v1/dialogs/no-such/artifacts")
     assert missing.status_code == 404
@@ -452,6 +480,29 @@ def test_folder_lists_one_level_without_tool_calls(tmp_path):
         "/v1/dialogs/files/artifacts", params={"path": "sub/.hidden"}
     )
     assert nested_hidden.status_code == 404
+
+
+def test_folder_marks_text_and_binary(tmp_path):
+    app, index, _threads = _joint(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    (cwd / "note.md").write_bytes("заголовок\n".encode())
+    (cwd / "empty.txt").write_bytes(b"")
+    (cwd / "blob.bin").write_bytes(b"\x00\x01")
+    (cwd / "latin.bin").write_bytes(b"\xff\xfe")
+    split = b"a" * 8191 + "я".encode()
+    (cwd / "split.txt").write_bytes(split)
+    _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
+    client = TestClient(app)
+    by_name = {
+        item["name"]: item
+        for item in client.get("/v1/dialogs/files/artifacts").json()["entries"]
+    }
+    assert by_name["note.md"]["text"] is True
+    assert by_name["empty.txt"]["text"] is True
+    assert by_name["split.txt"]["text"] is True
+    assert by_name["blob.bin"]["text"] is False
+    assert by_name["latin.bin"]["text"] is False
 
 
 def test_download_returns_any_file_inside_cwd(tmp_path, capsys):
@@ -656,7 +707,12 @@ def test_workspace_lists_new_dialog_root(tmp_path, monkeypatch):
         "path": "",
         "entries": [
             {"name": "src", "path": "src", "kind": "dir"},
-            {"name": "readme.txt", "path": "readme.txt", "kind": "file"},
+            {
+                "name": "readme.txt",
+                "path": "readme.txt",
+                "kind": "file",
+                "text": True,
+            },
         ],
     }
     inside = client.get("/v1/workspace/artifacts", params={"path": "src"})
@@ -664,7 +720,12 @@ def test_workspace_lists_new_dialog_root(tmp_path, monkeypatch):
         "cwd": os.path.normpath(str(root)),
         "path": "src",
         "entries": [
-            {"name": "main.py", "path": "src/main.py", "kind": "file"},
+            {
+                "name": "main.py",
+                "path": "src/main.py",
+                "kind": "file",
+                "text": True,
+            },
         ],
     }
     assert (
@@ -692,6 +753,7 @@ def test_workspace_lists_new_dialog_root(tmp_path, monkeypatch):
         "name": "here.txt",
         "path": "here.txt",
         "kind": "file",
+        "text": True,
     } in process.json()["entries"]
     relative = TestClient(
         _joint(tmp_path, launch_root="relative/path")[0]
