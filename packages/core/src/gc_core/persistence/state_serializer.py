@@ -43,6 +43,7 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     snapshot.setdefault("pending_tool_attachments", [])
     snapshot.setdefault("vision_audience", None)
     snapshot.setdefault("vision_live_ids", frozenset())
+    snapshot.setdefault("vision_request_limit", None)
     state.__dict__ = snapshot
 
     shared_raw = state.__dict__.get("shared")
@@ -129,6 +130,7 @@ class StateSerializer:
         # это не данные треда (спека §9.1).
         raw.pop("vision_audience", None)
         raw.pop("vision_live_ids", None)
+        raw.pop("vision_request_limit", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (

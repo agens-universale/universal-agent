@@ -1,7 +1,7 @@
 """Картиночная ошибка запроса (спека §10): отказ модели от картинок или предел их числа.
 Повтор в том же шаге с меньшим числом картинок (0 — записки). Явный факт — отказ от
-зрения, названный предел — запоминается на процесс сразу; выведенное делением пополам
-(413, «слишком много» без числа) действует только на свой запрос. Пометка в ленте —
+зрения, названный предел — запоминается на процесс сразу; успешный выведенный потолок
+(413, «слишком много» без числа) сохраняется для своего хода и контекста. Пометка в ленте —
 только когда модель впервые стала слепой и смотреть больше некому. Запрос без картинок
 идёт прежним путём.
 
@@ -494,10 +494,50 @@ def test_a_limit_without_a_number_halves_until_the_request_fits(
     )  # 413 — про объём, не про модель
     assert notes == []
 
-    run_coro(
-        pr._arequest_backend_canonical([message], state, ctx)
-    )  # следующий шаг — заново
-    assert [_image_parts(request) for request in spy.requests[3:]] == [4, 2, 1]
+    run_coro(pr._arequest_backend_canonical([message], state, ctx))
+    assert [_image_parts(request) for request in spy.requests[3:]] == [1]
+
+
+@pytest.mark.parametrize(
+    "reset", ["turn", "history", "images", "model", "url"]
+)
+def test_an_inferred_limit_is_rechecked_after_its_scope_changes(
+    tmp_path, monkeypatch, reset
+):
+    spy = install_transport(
+        monkeypatch,
+        _refuse_over(1, lambda: httpx.Response(413, text=NGINX_413)),
+    )
+    ctx = _ctx(tmp_path, _cfg(), [])
+    _atts, message = _user_with_images(ctx.image_store, 4)
+    state = _state([message])
+    run_coro(pr._arequest_backend_canonical([message], state, ctx))
+    run_coro(pr._arequest_backend_canonical([message], state, ctx))
+    assert [_image_parts(request) for request in spy.requests[3:]] == [1]
+
+    if reset == "turn":
+        state.user_turn_seq = 1
+    elif reset == "history":
+        state.dialog_steps_offset = 1
+    elif reset == "images":
+        _atts, message = _user_with_images(ctx.image_store, 5)
+        state.messages = [message]
+    elif reset == "model":
+        ctx.model_router = ModelRouter(
+            _cfg(model="another-model"), level_provider=lambda: "default"
+        )
+    else:
+        ctx.model_router = ModelRouter(
+            _cfg(completions_url=URL + "/other"),
+            level_provider=lambda: "default",
+        )
+    start = len(spy.requests)
+    run_coro(pr._arequest_backend_canonical([message], state, ctx))
+
+    expected = [5, 2, 1] if reset == "images" else [4, 2, 1]
+    assert [_image_parts(request) for request in spy.requests[start:]] == (
+        expected
+    )
 
 
 def test_a_proxy_that_takes_no_image_goes_with_notes_without_blaming_the_model(
@@ -520,6 +560,11 @@ def test_a_proxy_that_takes_no_image_goes_with_notes_without_blaming_the_model(
     assert [_image_parts(request) for request in spy.requests] == [2, 1, 0]
     assert process_image_rejects().cap(URL, "blind-model") is None
     assert notes == []
+
+    run_coro(pr._arequest_backend_canonical([message], state, ctx))
+
+    assert [_image_parts(request) for request in spy.requests[3:]] == [0]
+    assert process_image_rejects().contains(URL, "blind-model") is False
 
 
 def test_a_request_that_fails_even_without_images_raises_its_error(
@@ -547,3 +592,4 @@ def test_a_request_that_fails_even_without_images_raises_its_error(
     ] * retry_attempts
     assert process_image_rejects().cap(URL, "blind-model") is None
     assert notes == []
+    assert getattr(state, "vision_request_limit", None) is None

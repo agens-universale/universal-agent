@@ -3,8 +3,9 @@
 
 Потолок узнаётся по факту: запрос с картинками получил картиночную ошибку
 (`utils.backend_errors.is_image_request_error`). Запоминается только явное — отказ от
-зрения и названный предел; выведенное (413, «слишком много» без числа) действует на
-один запрос. Проб, флагов в конфиге и фоновых проверок нет.
+зрения и названный предел. Выведенное (413, «слишком много» без числа) после
+успешного повтора сохраняется отдельно в State для текущего хода и контекста.
+Проб и фоновых проверок нет.
 Ключ — фактический адрес запроса и id модели: одна и та же модель за разными адресами
 (свой vLLM без зрения, OpenRouter со зрением) видит по-разному.
 
@@ -17,6 +18,7 @@
 from __future__ import annotations
 
 import threading
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Mapping, Optional
 
 from gc_core.utils.backend_errors import (
@@ -28,6 +30,17 @@ if TYPE_CHECKING:
     from gc_core.model_router import ResolvedModel
 
 _Key = tuple[str, str]
+
+
+@dataclass(frozen=True)
+class ImageRequestLimit:
+    """Успешный потолок своего запроса: адрес, модель, ход, сжатие и живые id.
+
+    Не означает слепоту и не разделяется между запусками или субагентами.
+    """
+
+    scope: tuple[str, str, int, int, frozenset[str]]
+    cap: int
 
 
 class ImageRejects:
@@ -107,8 +120,8 @@ def learn_image_cap(
 ) -> bool:
     """Запомнить на процесс то, что бэкенд сказал о картинках явно: отказ от зрения —
     потолок 0, названный предел («At most N image(s)») — N. Выведенное делением пополам
-    (413 — он зависит от объёма истории, «слишком много» без числа) не запоминается:
-    оно действует только на свой запрос (`ImageRejects.with_limit`). True — модель
+    (413 — он зависит от объёма истории, «слишком много» без числа) в этот реестр
+    не попадает: успешный потолок своего контекста хранит State. True — модель
     только что стала слепой: строку в ленте показывает только этот вызов."""
     if is_image_rejection_error(exc):
         return mark_blind(resolved, fallback_url=fallback_url)

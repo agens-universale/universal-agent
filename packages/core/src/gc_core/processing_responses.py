@@ -154,6 +154,7 @@ from gc_core.vision.audience import (
 from gc_core.vision.notes import note_blind
 from gc_core.vision.rejects import (
     ImageRejects,
+    ImageRequestLimit,
     learn_image_cap,
     next_image_cap,
     process_image_rejects,
@@ -720,6 +721,25 @@ def _request_live_ids(
     )
 
 
+def _image_request_rejects(state, resolved, fallback_url, live_ids):
+    """Постоянные отказы плюс успешный потолок своего хода и контекста."""
+    if resolved is None:
+        return None, process_image_rejects()
+    url = request_url(resolved, fallback_url)
+    scope = (
+        url,
+        resolved.model,
+        getattr(state, "user_turn_seq", 0),
+        getattr(state, "dialog_steps_offset", 0),
+        live_ids,
+    )
+    rejects = process_image_rejects()
+    limit = getattr(state, "vision_request_limit", None)
+    if limit is not None and limit.scope == scope:
+        rejects = rejects.with_limit(url, resolved.model, limit.cap)
+    return scope, rejects
+
+
 async def _asend_with_image_fallback(
     state: State,
     ctx: Any,
@@ -734,8 +754,9 @@ async def _asend_with_image_fallback(
     (модель не видит, предел числа картинок, тело больше предела прокси) → повтор в
     том же шаге с меньшим числом картинок (`next_image_cap`: 0 — записки). Явный
     факт — отказ от зрения, названный предел — запоминается на процесс сразу
-    (`learn_image_cap`); выведенное делением пополам живёт только в копии реестра
-    этого запроса. Каждый повтор шлёт строго меньше картинок — цепочка конечна; не
+    (`learn_image_cap`); успешный потолок повторов — в state до нового хода,
+    сжатия истории или смены живых картинок, модели или адреса. Каждый повтор
+    шлёт строго меньше картинок — цепочка конечна; не
     прошёл даже запрос без картинок — наверх уходит его ошибка. Запрос без картинок
     и прочие ошибки — наверх без изменений (прежние пути)."""
     live_ids_for = functools.partial(
@@ -745,18 +766,29 @@ async def _asend_with_image_fallback(
         resolved=resolved,
         fallback_url=fallback_url,
     )
+    live_ids = live_ids_for(process_image_rejects())
+    scope, rejects = _image_request_rejects(
+        state, resolved, fallback_url, live_ids
+    )
     audience = _request_audience(
         state,
         ctx,
         resolved=resolved,
         fallback_url=fallback_url,
         api_mode="chat_completions",
+        rejects=rejects,
     )
-    live_ids = live_ids_for(process_image_rejects())
+    live_ids = live_ids_for(rejects)
     reject_log = getattr(ctx, "logger", None) or _fallback_logger
+    trial_cap = None
     while True:
         try:
-            return await send(audience, live_ids)
+            result = await send(audience, live_ids)
+            if trial_cap is not None:
+                state.vision_request_limit = ImageRequestLimit(
+                    scope, trial_cap
+                )
+            return result
         except Exception as exc:
             if not (
                 request_carries_images(audience, live_ids)
@@ -767,10 +799,11 @@ async def _asend_with_image_fallback(
             newly_blind = learn_image_cap(
                 resolved, exc, fallback_url=fallback_url
             )
+            trial_cap = next_image_cap(exc, sent)
             trial = process_image_rejects().with_limit(
                 request_url(resolved, fallback_url),
                 resolved.model,
-                next_image_cap(exc, sent),
+                trial_cap,
             )
             audience = _request_audience(
                 state,
