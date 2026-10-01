@@ -46,6 +46,32 @@ def test_flush_sends_only_the_unseen_tail():
     assert tail[0]["sessionUpdate"] == "agent_message_chunk"
 
 
+def test_flush_delivers_short_report_found_inside_earlier_prose():
+    assembler = ChunkAssembler()
+    earlier = assembler.feed("answer", "Готово, сейчас проверю…")
+    report = assembler.flush_answer("Готово")
+    assert report[0]["content"]["text"] == "Готово"
+    assert report[0]["sessionUpdate"] == "agent_message_chunk"
+    assert report[0]["messageId"] != earlier[0]["messageId"]
+
+
+def test_flush_delivers_report_that_only_appeared_in_an_earlier_message():
+    assembler = ChunkAssembler()
+    assembler.feed("answer", "Готово, сейчас проверю…")
+    assembler.feed("think", "хм")
+    assembler.feed("answer", "файл на месте")
+    report = assembler.flush_answer("Готово")
+    assert report[0]["content"]["text"] == "Готово"
+
+
+def test_flush_skips_report_equal_to_the_last_message():
+    assembler = ChunkAssembler()
+    assembler.feed("answer", "Готово, сейчас проверю…")
+    assembler.feed("think", "хм")
+    assembler.feed("answer", "файл на месте")
+    assert assembler.flush_answer("файл на месте") == []
+
+
 def test_flush_after_think_uses_a_new_answer_id():
     assembler = ChunkAssembler()
     thought = assembler.feed("think", "x")

@@ -396,6 +396,7 @@ async def test_prompt_reports_a_tool_call_between_prose(tmp_path):
         ("tool_call", "call-1", "in_progress"),
         ("tool_call_update", "call-1", "completed"),
         ("agent_message_chunk", None, None),
+        ("agent_message_chunk", None, None),
     ]
     titles = [item.get("title") for item in _updates(writer)]
     assert titles[1] == "fs_read_file(path='src/a.py')"
@@ -490,6 +491,7 @@ async def test_prompt_reports_tools_inside_a_subagent(tmp_path):
         ("tool_call", "sub:c1", "in_progress"),
         ("tool_call_update", "sub:c1", "completed"),
         ("tool_call_update", "sub", "completed"),
+        ("agent_message_chunk", None, None),
         ("agent_message_chunk", None, None),
     ]
     await facade.shutdown()

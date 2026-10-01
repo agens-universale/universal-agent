@@ -49,6 +49,7 @@ class ChunkAssembler:
         self._kind: str | None = None
         self._message_id: str | None = None
         self._answer = ""
+        self._last = ""
 
     @property
     def answer(self) -> str:
@@ -63,20 +64,34 @@ class ChunkAssembler:
             return []
         if not isinstance(text, str) or text == "":
             return []
+        fresh = kind != self._kind or self._message_id is None
         self._continue(kind)
         if kind == "answer":
+            self._last = text if fresh else self._last + text
             self._answer += text
         update = _ANSWER if kind == "answer" else _THINK
         return [text_chunk(update, text, self._message_id or "")]
 
     def flush_answer(self, last_answer: Any) -> list[dict]:
-        """Дослать прозу, которой не было в answer-чанках этого хода."""
-        extra = unseen_answer(self._answer, last_answer)
+        """Дослать отчёт, которого не было в последней answer-реплике."""
+        if isinstance(last_answer, str) and last_answer == self._answer:
+            return []
+        extra = unseen_answer(self._last, last_answer)
         if extra == "":
             return []
-        if self._kind != "answer":
+        continued = (
+            self._kind == "answer"
+            and self._message_id is not None
+            and isinstance(last_answer, str)
+            and self._last != ""
+            and last_answer.startswith(self._last)
+        )
+        if continued:
+            self._last += extra
+        else:
             self._kind = "answer"
             self._message_id = new_message_id()
+            self._last = extra
         self._answer += extra
         return [text_chunk(_ANSWER, extra, self._message_id or "")]
 
@@ -88,12 +103,16 @@ class ChunkAssembler:
 
 
 def unseen_answer(sent: str, final: Any) -> str:
+    """Хвост финала относительно последней answer-реплики.
+
+    ``sent`` — текст последней реплики, не вся проза хода. Совпадение
+    и продолжение этой реплики дают только недостающий хвост. Подстрока
+    более ранней прозы финал не отменяет.
+    """
     if not isinstance(final, str) or final == "":
         return ""
     if final.startswith(sent):
         return final[len(sent) :]
-    if final in sent:
-        return ""
     return final
 
 
