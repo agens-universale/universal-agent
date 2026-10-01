@@ -27,8 +27,10 @@ from gc_core.utils.backend_errors import (
     HTTP_TRANSPORT_ERRORS,
     http_status_code,
     is_empty_completion,
+    is_image_request_error,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError, OnDelta
+from gc_core.utils.data_urls import mask_data_urls
 from gc_core.utils.format_messages import (
     format_message_chat_completions_to_send_backend,
 )
@@ -196,7 +198,13 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     - HTTP 404: LLM-прокси отдаёт его, пока route модели нет после обрыва
       туннеля (транзиентно); честный 404 просто ждёт retry-бюджет.
     - иногда рвётся стрим: ошибки парсинга/валидации
+
+    Картиночная ошибка запроса (модель не принимает картинки или не столько) не
+    ретраится ни в какой форме: тот же запрос её не лечит, а OpenRouter отвечает на
+    картинку 404-м, SSE-ошибкой — vLLM в стриме.
     """
+    if is_image_request_error(exc):
+        return False
     if isinstance(exc, HTTP_STATUS_ERRORS):
         status_code = http_status_code(exc)
         if status_code is None:
@@ -213,15 +221,17 @@ def _log_backend_request(
     logger, api_mode: str, url: str, payload: Dict
 ) -> None:
     """Лог исходящего запроса. Один на оба транспорта: расхождение в логах
-    между sync и async путями искало бы себя часами."""
+    между sync и async путями искало бы себя часами. Картинки в лог не идут:
+    data-URL маскируется до ``data:<mime>;base64,<N bytes>``."""
     if logger is None:
         return
+    logged = mask_data_urls(payload)
     try:
         logger.debug(
             "Send request to backend %s url=%s payload=%s",
             api_mode,
             url,
-            json.dumps(payload, ensure_ascii=False),
+            json.dumps(logged, ensure_ascii=False),
         )
     except Exception:
         # Не роняем процесс из-за проблем с сериализацией payload.
@@ -232,7 +242,7 @@ def _log_backend_request(
             "event": "backend_request",
             "api_mode": api_mode,
             "url": url,
-            "payload": payload,
+            "payload": logged,
         },
     )
 
@@ -381,7 +391,7 @@ async def arequest_backend_responses(
                 "event": "backend_request",
                 "api_mode": "responses",
                 "url": url,
-                "payload": data,
+                "payload": mask_data_urls(data),
             },
         )
 
@@ -800,7 +810,9 @@ def create_call_data_responses(
         resolved.model if resolved is not None else state.default_model
     )
     call_data["input"] = _responses_input_without_message_call_id(messages)
-    call_data["tools"] = tools if tools else state.tools
+    # Явный набор (в том числе пустой) — решение вызывающего: главный цикл
+    # фильтрует набор на запрос (`fs_view_image`, спека §9.2). None — набор state.
+    call_data["tools"] = tools if tools is not None else state.tools
     call_data["metadata"] = state.call_metadata
     call_data["previous_response_id"] = (
         state.previous_response_id if set_previous_response_id else None

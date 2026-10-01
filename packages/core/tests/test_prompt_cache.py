@@ -250,3 +250,62 @@ def test_prompt_cache_enabled_setting_beats_autodetect(
     setting, model_id, expected
 ):
     assert prompt_cache_enabled(setting, model_id) is expected
+
+
+def _image_turn_payload() -> dict:
+    """Ход с картинкой после проекции вложений: content — список частей, текст последним."""
+    return {
+        "model": "anthropic/claude-opus-5",
+        "messages": [
+            {"role": "system", "content": "sys"},
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": "data:image/png;base64,AAAA"},
+                    },
+                    {"type": "text", "text": "[Изображение #1] что тут?"},
+                ],
+            },
+        ],
+    }
+
+
+def test_tail_with_images_marks_its_last_text_part():
+    payload = _image_turn_payload()
+    result = apply_prompt_cache(payload)
+    image_part, text_part = result["messages"][-1]["content"]
+    assert image_part is payload["messages"][-1]["content"][0]
+    assert text_part == {
+        "type": "text",
+        "text": "[Изображение #1] что тут?",
+        "cache_control": {"type": "ephemeral"},
+    }
+
+
+def test_tail_with_images_input_is_not_mutated():
+    payload = _image_turn_payload()
+    snapshot = deepcopy(payload)
+    apply_prompt_cache(payload)
+    assert payload == snapshot
+
+
+def test_list_tail_without_text_is_skipped():
+    payload = _image_turn_payload()
+    payload["messages"].append(
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": "data:image/png;base64,BBBB"},
+                }
+            ],
+        }
+    )
+    result = apply_prompt_cache(payload)
+    assert result["messages"][-1] is payload["messages"][-1]
+    assert result["messages"][-2]["content"][1]["cache_control"] == {
+        "type": "ephemeral"
+    }

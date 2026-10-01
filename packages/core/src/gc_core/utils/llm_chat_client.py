@@ -18,6 +18,7 @@ from gc_core.utils.connect_backend import (
     backend_override_value,
     resolve_network_params,
 )
+from gc_core.utils.data_urls import mask_data_urls
 
 # РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
 # «модель привязки недоступна → повтор активной моделью». `auto_judge` в таблице
@@ -34,6 +35,7 @@ CONSUMER_RU_LABEL = {
     "summary": "суммаризация",
     "intent_scope": "intent scope",
     "memory_compaction": "компакция памяти",
+    "vision": "модель для зрения",
 }
 
 _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(
@@ -123,13 +125,16 @@ def log_llm_prompt_and_result(
 ) -> None:
     if logger is None:
         return
+    # Картинка «глаз» — часть content; в лог она идёт маской data-URL, не байтами.
     system_part = "\n\n".join(
-        str(m.get("content", ""))
+        str(mask_data_urls(m.get("content", "")))
         for m in messages
         if m.get("role") == "system"
     )
     user_part = "\n\n".join(
-        str(m.get("content", "")) for m in messages if m.get("role") == "user"
+        str(mask_data_urls(m.get("content", "")))
+        for m in messages
+        if m.get("role") == "user"
     )
     logger.info(
         "summary_llm_prompt label=%s system=\n%s\n\nuser=\n%s",
@@ -309,6 +314,21 @@ async def _asend_chat_completion_text(
     return _completion_text_and_finish(res)
 
 
+def _require_text_only(messages: List[Dict[str, Any]]) -> None:
+    """Служебная воронка шлёт текст (спека §5): список частей в ``content`` или
+    ключ ``attachments`` — это картинки, и без ``allow_images=True`` это
+    регрессия вызывающего, а не данные для провода. Только проверка типа."""
+    for message in messages:
+        if (
+            isinstance(message.get("content"), list)
+            or "attachments" in message
+        ):
+            raise ValueError(
+                "служебный вызов без allow_images=True получил картинки: "
+                "список частей в content или ключ attachments"
+            )
+
+
 async def arequest_chat_completion_outcome(
     *,
     ctx: Any,
@@ -318,6 +338,7 @@ async def arequest_chat_completion_outcome(
     consumer: str,
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
+    allow_images: bool = False,
 ) -> ChatCompletionText:
     """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
     ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
@@ -329,9 +350,14 @@ async def arequest_chat_completion_outcome(
     повторяется ОДИН РАЗ активной моделью + notice. Если и деградированный вызов
     падает — исключение уходит наверх без изменений (существующая per-consumer
     fail-семантика: finish_gate/text_answer_judge fail-open, summary — пропуск
-    цикла, command_judge — fail-closed)."""
+    цикла, command_judge — fail-closed).
+
+    ``allow_images=True`` — вызов несёт картинки (``content`` списком частей): так
+    зовут только «глаза» (``vision/eyes``). Без флага картинки — ``ValueError``."""
     if max_tokens < 1:
         raise ValueError("max_tokens must be >= 1")
+    if not allow_images:
+        _require_text_only(messages)
 
     router = getattr(ctx, "model_router", None)
     send = functools.partial(
@@ -409,6 +435,7 @@ async def arequest_chat_completion_text(
     consumer: str,
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
+    allow_images: bool = False,
 ) -> str:
     """Текст choice. Причина остановки — в ``arequest_chat_completion_outcome``."""
     outcome = await arequest_chat_completion_outcome(
@@ -419,6 +446,7 @@ async def arequest_chat_completion_text(
         consumer=consumer,
         request_label=request_label,
         payload_overrides=payload_overrides,
+        allow_images=allow_images,
     )
     return outcome.text
 

@@ -67,18 +67,54 @@ def _with_cache_control(message: dict) -> dict:
     return marked
 
 
+def _last_text_part(message: dict) -> int | None:
+    """Индекс последней текстовой части с непробельным текстом у ``content``-списка
+    (сообщение с картинками после проекции вложений); иначе None."""
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+    for index in range(len(content) - 1, -1, -1):
+        part = content[index]
+        if (
+            isinstance(part, dict)
+            and part.get("type") == "text"
+            and isinstance(part.get("text"), str)
+            and part["text"].strip()
+        ):
+            return index
+    return None
+
+
+def _with_cache_control_on_part(message: dict, part_index: int) -> dict:
+    """Копия сообщения с меткой на части ``part_index``; остальные части — те же
+    объекты (картинка метку не несёт)."""
+    parts = list(message["content"])
+    parts[part_index] = {
+        **parts[part_index],
+        "cache_control": dict(CACHE_CONTROL),
+    }
+    marked = dict(message)
+    marked["content"] = parts
+    return marked
+
+
 def _mark_last_tail_candidate(messages: list) -> list:
     """Метка B — последнее сообщение роли user/tool с непробельным текстом (скользящая
-    точка: провайдер кэширует префикс до неё, следующий вызов читает его)."""
+    точка: провайдер кэширует префикс до неё, следующий вызов читает его). У
+    сообщения-списка (картинки и текст) метка ставится на последнюю текстовую часть."""
     marked = list(messages)
     for index in range(len(marked) - 1, -1, -1):
         message = marked[index]
-        if (
-            isinstance(message, dict)
-            and message.get("role") in _TAIL_ROLES
-            and _is_candidate(message)
+        if not (
+            isinstance(message, dict) and message.get("role") in _TAIL_ROLES
         ):
+            continue
+        if _is_candidate(message):
             marked[index] = _with_cache_control(message)
+            break
+        part_index = _last_text_part(message)
+        if part_index is not None:
+            marked[index] = _with_cache_control_on_part(message, part_index)
             break
     return marked
 

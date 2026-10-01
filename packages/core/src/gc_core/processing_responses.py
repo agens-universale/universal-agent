@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import gc
 import inspect
 import json
@@ -73,6 +74,7 @@ from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.backend_errors import (
     is_auth_error,
     is_context_overflow_error,
+    is_image_request_error,
     is_model_unavailable_error,
 )
 from gc_core.utils.connect_backend import (
@@ -93,10 +95,21 @@ _MAX_CONTEXT_OVERFLOW_RETRIES = 3
 import logging
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
+from gc_core.config_modules.images import read_images_config
+from gc_core.message_policy.attachments_outbound import (
+    compute_live_ids,
+    count_live_images,
+    project_outbound,
+    request_carries_images,
+)
+from gc_core.message_policy.chat_completions import is_bridge_echo
 from gc_core.message_policy.no_tool_call_bounce import (
     NO_TOOL_CALL_BOUNCE_MESSAGE,
     extract_last_assistant_text,
     format_no_tool_call_bounce,
+)
+from gc_core.message_policy.tool_attachments import (
+    build_tool_attachments_message,
 )
 from gc_core.message_policy.tool_usage_notice.apply import (
     apply_tool_usage_notice_before_llm,
@@ -105,6 +118,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_ERROR_MESSAGE,
     TECHNICAL_TYPE_TECHNICAL,
     build_invalid_tool_call_feedback_message,
+    extract_real_user_message_text,
     wrap_technical_user_content,
 )
 from gc_core.states import State
@@ -130,6 +144,20 @@ from gc_core.utils.convertations import (
 from gc_core.utils.format_messages import format_message_responses
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
+)
+from gc_core.vision.audience import (
+    Audience,
+    compute_audience,
+    tools_for_request,
+    view_tool_in_set,
+)
+from gc_core.vision.notes import note_blind
+from gc_core.vision.rejects import (
+    ImageRejects,
+    learn_image_cap,
+    next_image_cap,
+    process_image_rejects,
+    request_url,
 )
 
 _fallback_logger = logging.getLogger(__name__)
@@ -401,6 +429,69 @@ def begin_turn_main_trace(state: State, ctx: Any) -> None:
         raise
 
 
+def _request_audience(
+    state: State,
+    ctx: Any,
+    *,
+    resolved: Optional[Any],
+    fallback_url: str,
+    api_mode: str,
+    rejects: Optional[ImageRejects] = None,
+) -> Audience:
+    """«Кто смотрит» на картинки этого запроса (спека §9.1). Считается на каждый
+    запрос и кладётся в ``state.vision_audience`` — оттуда его читает тул
+    ``fs_view_image`` (тулы в контроллер не ходят). Без ``ctx.model_router``
+    (``resolved is None``: легаси-двойники тестов) видеть некому. ``rejects`` —
+    потолки картинок; по умолчанию реестр процесса, в повторе после картиночной
+    ошибки — он же с пробным потолком шага."""
+    if resolved is None:
+        audience = Audience(native=None, eyes=None, tool_visible=False)
+    else:
+        audience = compute_audience(
+            ctx.model_router,
+            rejects if rejects is not None else process_image_rejects(),
+            request_resolved=resolved,
+            fallback_url=fallback_url,
+            api_mode=api_mode,
+            tool_in_set=view_tool_in_set(getattr(state, "tools", None) or []),
+            config=getattr(ctx, "config_dict", None) or {},
+        )
+    state.vision_audience = audience
+    return audience
+
+
+def _image_bytes_reader(ctx: Any) -> Callable[[Any], Optional[bytes]]:
+    """Чем проекция читает байты вложений — хранилищем картинок контекста.
+    Контекст, собранный в обход фабрики, хранилища не имеет: байт нет, живая
+    картинка уходит запиской «файл недоступен» — как при удалённом файле."""
+    store = getattr(ctx, "image_store", None)
+    if store is None:
+        return lambda _attachment: None
+    return store.read_for_send
+
+
+def _read_once(
+    read_bytes: Callable[[Any], Optional[bytes]],
+) -> Callable[[Any], Optional[bytes]]:
+    """Байты картинок на один запрос: проекция идёт по двум спискам (state и батч),
+    картинки батча есть в обоих — читать и сверять файл второй раз незачем."""
+    cache: Dict[str, Optional[bytes]] = {}
+
+    def read(attachment: Any) -> Optional[bytes]:
+        if attachment.id not in cache:
+            cache[attachment.id] = read_bytes(attachment)
+        return cache[attachment.id]
+
+    return read
+
+
+def _vision_fallback_url(cfg: Dict[str, Any]) -> str:
+    """Запасной адрес в ключе пометок зрения (`vision.rejects.request_url`) — адрес
+    воронки chat_completions в обоих режимах API: через неё ходят «глаза», а у
+    модели реестра адрес свой. Один для модели запроса и для «глаз»."""
+    return str(cfg.get("completions_url") or "")
+
+
 async def _arequest_backend_canonical(
     messages: List[Dict],
     state: State,
@@ -470,9 +561,27 @@ async def _arequest_responses_once(
     # url остаётся легаси-ключом agent_url.
     verify, cert, use_retry, request_timeout_sec, config_proxy = network
     url = cfg["agent_url"]
-    call_data = create_call_data(
-        messages,
+    # Нативного показа картинок в responses нет (спека §20.5): вложения уходят
+    # записками, ключ attachments на провод не попадает, и ни одна картинка не
+    # оседает в цепочке previous_response_id.
+    audience = _request_audience(
         state,
+        ctx,
+        resolved=resolved,
+        fallback_url=_vision_fallback_url(cfg),
+        api_mode="responses",
+    )
+    state.vision_live_ids = frozenset()
+    call_data = create_call_data(
+        project_outbound(
+            messages,
+            audience=audience,
+            live_ids=frozenset(),
+            api_mode="responses",
+            read_bytes=_image_bytes_reader(ctx),
+        ),
+        state,
+        tools=tools_for_request(getattr(state, "tools", None) or [], audience),
         set_previous_response_id=set_previous_response_id,
         resolved=resolved,
     )
@@ -529,6 +638,161 @@ def _first_choice_finish_reason(res: Dict[str, Any]) -> Any:
         if isinstance(_ch0, dict):
             return _ch0.get("finish_reason")
     return None
+
+
+async def _asend_chat_completions(
+    state: State,
+    audience: Audience,
+    live_ids: frozenset[str],
+    *,
+    sanitized_messages: List[Dict],
+    sanitized_state_messages: List[Dict],
+    read_bytes: Callable[[Any], Optional[bytes]],
+    cfg: Dict[str, Any],
+    resolved: Any,
+    request_kwargs: Dict[str, Any],
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Один поход в транспорт под данные «кто смотрит» и живые картинки: проекция
+    обоих списков и набор тулов запроса считаются от них (спека §5, §9.2). Что
+    ушло модели целиком, кладётся в state — для тула `fs_view_image`."""
+    backend_mode = "chat_completions"
+    state.vision_live_ids = (
+        live_ids if audience.native is not None else frozenset()
+    )
+    read_bytes = _read_once(read_bytes)
+    chat_state = SimpleNamespace(
+        messages=project_outbound(
+            sanitized_state_messages,
+            audience=audience,
+            live_ids=live_ids,
+            api_mode=backend_mode,
+            read_bytes=read_bytes,
+        ),
+        tools=getattr(state, "tools", []),
+        default_model=getattr(state, "default_model", None),
+    )
+    outbound_batch = project_outbound(
+        sanitized_messages,
+        audience=audience,
+        live_ids=live_ids,
+        api_mode=backend_mode,
+        read_bytes=read_bytes,
+    )
+    request_tools = tools_for_request(
+        getattr(state, "tools", None) or [], audience
+    )
+
+    def _create_payload(max_tokens: int) -> Dict[str, Any]:
+        return create_call_data_completions(
+            outbound_batch,
+            chat_state,
+            tools=request_tools,
+            max_tokens=max_tokens,
+            config_dict=cfg,
+            resolved=resolved,
+        )
+
+    with usage_scope(
+        getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode
+    ):
+        return await arequest_chat_completions_with_policy(
+            payload_factory=_create_payload, **request_kwargs
+        )
+
+
+def _request_live_ids(
+    merged_messages: List[Dict],
+    images_config: Any,
+    rejects: ImageRejects,
+    *,
+    resolved: Any,
+    fallback_url: str,
+) -> frozenset[str]:
+    """Живые картинки запроса; потолок модели — из реестра (или пробный, в повторе
+    после картиночной ошибки)."""
+    cap = (
+        rejects.cap(request_url(resolved, fallback_url), resolved.model)
+        if resolved is not None
+        else None
+    )
+    return compute_live_ids(
+        merged_messages, images=images_config, max_images=cap
+    )
+
+
+async def _asend_with_image_fallback(
+    state: State,
+    ctx: Any,
+    *,
+    send: Callable[..., Any],
+    resolved: Any,
+    fallback_url: str,
+    merged_messages: List[Dict],
+    images_config: Any,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Спека §10: запрос нёс живые картинки, а бэкенд ответил картиночной ошибкой
+    (модель не видит, предел числа картинок, тело больше предела прокси) → повтор в
+    том же шаге с меньшим числом картинок (`next_image_cap`: 0 — записки). Явный
+    факт — отказ от зрения, названный предел — запоминается на процесс сразу
+    (`learn_image_cap`); выведенное делением пополам живёт только в копии реестра
+    этого запроса. Каждый повтор шлёт строго меньше картинок — цепочка конечна; не
+    прошёл даже запрос без картинок — наверх уходит его ошибка. Запрос без картинок
+    и прочие ошибки — наверх без изменений (прежние пути)."""
+    live_ids_for = functools.partial(
+        _request_live_ids,
+        merged_messages,
+        images_config,
+        resolved=resolved,
+        fallback_url=fallback_url,
+    )
+    audience = _request_audience(
+        state,
+        ctx,
+        resolved=resolved,
+        fallback_url=fallback_url,
+        api_mode="chat_completions",
+    )
+    live_ids = live_ids_for(process_image_rejects())
+    reject_log = getattr(ctx, "logger", None) or _fallback_logger
+    while True:
+        try:
+            return await send(audience, live_ids)
+        except Exception as exc:
+            if not (
+                request_carries_images(audience, live_ids)
+                and is_image_request_error(exc)
+            ):
+                raise
+            sent = count_live_images(merged_messages, live_ids)
+            newly_blind = learn_image_cap(
+                resolved, exc, fallback_url=fallback_url
+            )
+            trial = process_image_rejects().with_limit(
+                request_url(resolved, fallback_url),
+                resolved.model,
+                next_image_cap(exc, sent),
+            )
+            audience = _request_audience(
+                state,
+                ctx,
+                resolved=resolved,
+                fallback_url=fallback_url,
+                api_mode="chat_completions",
+                rejects=trial,
+            )
+            live_ids = live_ids_for(trial)
+            reject_log.warning(
+                "модель %s не приняла картинки (%s в запросе) → повтор с %s: %s",
+                resolved.model,
+                sent,
+                count_live_images(merged_messages, live_ids),
+                exc,
+            )
+            # Строка в ленте — только тому, кто впервые сделал модель слепой, и
+            # только когда смотреть больше некому: при связке «слепая основная +
+            # глаза» — тишина.
+            if newly_blind and audience.nobody:
+                note_blind(ctx, resolved, eyes=False, logger=reject_log)
 
 
 async def _arequest_backend_canonical_once(
@@ -596,11 +860,6 @@ async def _arequest_backend_canonical_once(
         getattr(state, "messages", []) or [],
         invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
     )
-    chat_state = SimpleNamespace(
-        messages=sanitized_state_messages,
-        tools=getattr(state, "tools", []),
-        default_model=getattr(state, "default_model", None),
-    )
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
     # маленькой модели меньше глобального потолка, и без оверрайда адаптивный цикл
     # долбил бы её от чужого потолка к чужому полу. Тот же приём, что в служебной
@@ -609,41 +868,50 @@ async def _arequest_backend_canonical_once(
         cfg, resolved_for_network
     )
 
-    def _create_payload(max_tokens: int) -> Dict[str, Any]:
-        return create_call_data_completions(
-            sanitized_messages,
-            chat_state,
-            max_tokens=max_tokens,
-            config_dict=cfg,
-            resolved=resolved,
-        )
-
     _stream_on = resolve_tui_stream_enabled(cfg)
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
     prompt_message_count = len(getattr(state, "messages", []) or [])
 
-    with usage_scope(
-        getattr(state, "usage", None), USAGE_CATEGORY_MAIN, backend_mode
-    ):
-        res, call_data = await arequest_chat_completions_with_policy(
-            payload_factory=_create_payload,
-            initial_max_tokens=completions_max_tokens,
-            min_response_tokens=min_response_tokens,
-            headers=call_headers,
-            url=url,
-            verify=verify,
-            cert=cert,
-            use_retry=use_retry,
-            retry_embedded_choice_errors=retry_embedded_choice_errors,
-            salvage_reasoning=True,
-            logger=getattr(ctx, "logger", None),
-            on_delta=_on_delta,
-            request_label="main_agent",
-            runtime_notices_enabled=bool(getattr(ctx, "is_tui", False)),
-            notice_url=url,
-            timeout=request_timeout_sec,
-            config_proxy=config_proxy,
-        )
+    send = functools.partial(
+        _asend_chat_completions,
+        state,
+        sanitized_messages=sanitized_messages,
+        sanitized_state_messages=sanitized_state_messages,
+        read_bytes=_image_bytes_reader(ctx),
+        cfg=cfg,
+        resolved=resolved,
+        request_kwargs={
+            "initial_max_tokens": completions_max_tokens,
+            "min_response_tokens": min_response_tokens,
+            "headers": call_headers,
+            "url": url,
+            "verify": verify,
+            "cert": cert,
+            "use_retry": use_retry,
+            "retry_embedded_choice_errors": retry_embedded_choice_errors,
+            "salvage_reasoning": True,
+            "logger": getattr(ctx, "logger", None),
+            "on_delta": _on_delta,
+            "request_label": "main_agent",
+            "runtime_notices_enabled": bool(getattr(ctx, "is_tui", False)),
+            "notice_url": url,
+            "timeout": request_timeout_sec,
+            "config_proxy": config_proxy,
+        },
+    )
+    res, call_data = await _asend_with_image_fallback(
+        state,
+        ctx,
+        send=send,
+        resolved=resolved,
+        fallback_url=_vision_fallback_url(cfg),
+        # Вложения (спека §5): запрос собирается из ВСЕЙ истории плюс батч с
+        # дедупликацией по id (`create_call_data_completions`). Живость считается по
+        # слитой последовательности (повтор по id считается один раз), проекция
+        # ложится на оба списка и сохраняет id — дедупликация видит те же ключи.
+        merged_messages=[*sanitized_state_messages, *sanitized_messages],
+        images_config=read_images_config(cfg),
+    )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")
     _run_log = getattr(ctx, "logger", None) or _fallback_logger
@@ -712,10 +980,33 @@ def remember_main_prompt_tokens(
     state.last_main_prompt_message_count = message_count
 
 
+def _is_tool_outputs_with_technical_tail(messages: List[Dict]) -> bool:
+    """Батч «ответы тулов + технический хвост» (напоминание loop detector, картинки
+    тулов): хотя бы один ``function_call_output``, а кроме них — только
+    user-сообщения без реплики человека (``extract_real_user_message_text`` пуст).
+    Ни вызовов, ни ответа модели.
+
+    Такой батч продолжает ответы тулов, а не открывает запрос человека. Реплика в
+    батче (в т.ч. пара «текст + @-сноска» из очереди TUI) или вызов в нём (хвост
+    ``session_compact`` несёт пары call/output) оставляют ``user_ask``.
+    """
+    has_output = False
+    for message in messages:
+        if message.get("type") == "function_call_output":
+            has_output = True
+        elif message.get("role") != "user" or extract_real_user_message_text(
+            message
+        ):
+            return False
+    return has_output
+
+
 def check_mode(messages, logger) -> Union[str, None]:
     if len(messages) == 0:
         raise ValueError("Empty messages list")
     if messages[-1].get("role", None) == "user":
+        if _is_tool_outputs_with_technical_tail(messages):
+            return "function_call_output"
         return "user_ask"
     for message in messages:
         if message.get("type", None) == "function_call":
@@ -733,7 +1024,8 @@ def check_mode(messages, logger) -> Union[str, None]:
 
 
 def _batch_has_pending_function_calls(messages: List[Dict]) -> bool:
-    """True, если в батче есть function_call — их надо исполнить до step/token/tool лимитов.
+    """True, если в батче есть function_call — их надо исполнить до step/token/tool лимитов
+    и до разбора очереди реплик.
 
     Иначе лимит между «модель уже вернула tools» и process_tool_calls даёт
     orphan call без output и теряет заявленную работу (sidecar/диск/summary).
@@ -1179,6 +1471,8 @@ async def _afinalize_tool_batch(
         # Прогон остановлен: notice агенту не нужен, окно прошлого батча
         # не должно всплыть при продолжении сессии.
         clear_loop_detector(state)
+        # Картинки батча тоже: ход остановлен, смотреть их некому.
+        state.pending_tool_attachments = []
 
     if getattr(state, "session_compact_applied", False):
         tools_outputs = _apply_session_compact_to_batch(
@@ -1191,6 +1485,19 @@ async def _afinalize_tool_batch(
             _make_technical_feedback_user_message(
                 notice,
                 technical_type=TECHNICAL_TYPE_TECHNICAL,
+            )
+        )
+
+    # Картинки из тулов и из ответа на turn_ask_human — одним техническим
+    # сообщением в самом конце батча (спека §7.1): tool-сообщение картинку не
+    # несёт. После принятого turn_finish оно уходит вместе с хвостом
+    # (`_split_batch_new_around_finish`).
+    pending_attachments = state.pending_tool_attachments
+    state.pending_tool_attachments = []
+    if pending_attachments:
+        tools_outputs.append(
+            build_tool_attachments_message(
+                pending_attachments, message_id=generate_message_id_func("m")
             )
         )
 
@@ -1301,6 +1608,10 @@ async def aprocess_tool_calls(
     batch_snapshot = list(messages)
     state._session_compact_batch_snapshot = batch_snapshot
     state.session_compact_applied = False
+    # Картинки батча (fs_view_image, ответ на turn_ask_human) копятся здесь и
+    # уходят одним техническим сообщением в конце. Остаток прерванного батча
+    # (исключение посреди исполнения) в новый батч не протекает.
+    state.pending_tool_attachments = []
 
     tools_outputs = []
     # Work, затем не больше одного finish; skipped — лишние turn_finish.
@@ -1552,18 +1863,30 @@ class _AgentLoop:
 
     # ----------------------------------------------------------- iteration
     def _poll_pending(self, messages, *, first_poll: bool):
-        """Подхват сообщений из очереди (``get_pending_messages``) перед шагом цикла."""
+        """Подхват сообщений из очереди (``get_pending_messages``) перед шагом цикла.
+
+        `messages` здесь ещё не записан в state (запись — после опроса). Свежий
+        ответ модели с вызовами очередь не разбирает: вызовы исполняются в этом
+        проходе, реплики дождутся следующего опроса (дописанная реплика увела бы
+        шаг в user_ask, и вызовы остались бы без исполнения). К ответам тулов (с
+        техническим хвостом) реплики ДОПИСЫВАЮТСЯ: подмена оставляла в state
+        вызов без ответа. Первый опрос тоже дописывает: стартовый батч — не ответ
+        модели, а вызовы в нём (responses без previous_response_id) — история
+        треда; сообщение, пришедшее между стартом прогона и первым запросом к
+        модели, иначе вытесняло бы стартовое. Прочее (текстовый ответ модели,
+        отскок, подхваченный новый ход) реплика подменяет, как раньше: ответ
+        модели, дописанный к реплике, в responses ушёл бы в дельте повторно — он
+        уже в цепочке сервера."""
         if self.get_pending_messages is None:
+            return messages
+        if not first_poll and _batch_has_pending_function_calls(messages):
             return messages
         pending = self.get_pending_messages()
         if not pending:
             return messages
-        # На ПЕРВОМ опросе склеиваем со стартовым батчем, а не
-        # подменяем его: сообщение, пришедшее между стартом прогона и
-        # первым запросом к модели, иначе вытесняло стартовое — и оно
-        # не доходило ни до модели, ни до треда. Дальше подмена верна:
-        # там `messages` — это уже ответ модели, а не просьба человека.
-        return [*messages, *pending] if first_poll else pending
+        if first_poll or _is_tool_outputs_with_technical_tail(messages):
+            return [*messages, *pending]
+        return pending
 
     def _technical_bounce(self, text: str) -> List[Dict]:
         return [
@@ -2065,6 +2388,10 @@ class _AgentLoop:
         # мусор и крутит до no_tool_call_max_count / сдаёт ход.
         # Payload уже в state/jsonl; reject → bounce, не discard.
         if finish_prevents_text_final(last_finish):
+            return False, None
+        # Модель повторила наш мост «(tool results received)» — шаблон из истории,
+        # не итог: напоминание вызвать тул, как при прозе без вызова.
+        if is_bridge_echo(assistant_text):
             return False, None
         decision = await ashould_return_text_answer(
             self.ctx, self.state, assistant_text

@@ -28,6 +28,12 @@ test_aapply_tool_offloads_sync_tool_to_thread``.
 ``skills_run_script`` в этот набор не входит: он читает файл скрипта, но потом
 запускает subprocess на весь таймаут. У запуска процесса нативная асинхронная
 форма ЕСТЬ, и он идёт через неё — сторожит ``test_skills_run_script_native.py``.
+
+``fs_view_image`` в набор тоже не входит, и это исключение осознанное: байты
+файла он читает инлайн, как все, но декодирование и ужатие картинки (Pillow) —
+CPU на сотни миллисекунд для 5K-скриншота, инлайн это разрыв цикла на всё время
+работы. В пул уходит ровно нормализация вместе с записью копии в хранилище —
+сторожит ``test_view_image_sends_only_normalization_to_the_pool`` ниже.
 """
 
 import json
@@ -242,3 +248,60 @@ async def test_dispatcher_reads_file_on_the_loop_thread(tmp_path, monkeypatch):
     assert went_to_pool == [], (
         f"fs_read_file уехал в пул ({went_to_pool}) — диспетчер снова уводит тул в поток вместо того, чтобы звать acall"
     )
+
+
+async def test_view_image_sends_only_normalization_to_the_pool(
+    tmp_path, monkeypatch
+):
+    """Чтение байт — инлайн; в пул уходят нормализация (Pillow) и запись копии."""
+    import asyncio
+    import io
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    from gc_core.attachments.store import ImageStore
+    from gc_core.model_router import ResolvedModel
+    from gc_core.tools.fs.view_image import ViewImage
+    from gc_core.vision.audience import Audience
+
+    target = tmp_path / "shot.png"
+    buf = io.BytesIO()
+    Image.new("RGB", (64, 48), "red").save(buf, format="PNG")
+    target.write_bytes(buf.getvalue())
+    ctx = local_ctx()
+    ctx.image_store = ImageStore(str(tmp_path / "images"))
+    native = ResolvedModel(
+        alias="vis",
+        model="vis-model",
+        url="http://backend.local/v1/chat/completions",
+        authorization=None,
+        backend_overrides={},
+        tariff=None,
+        source="test",
+    )
+    state = SimpleNamespace(
+        vision_audience=Audience(native=native, eyes=None, tool_visible=True),
+        pending_tool_attachments=[],
+    )
+
+    went_to_pool = []
+    real_to_thread = asyncio.to_thread
+
+    async def _spy(fn, /, *a, **kw):
+        went_to_pool.append(getattr(fn, "__name__", repr(fn)))
+        return await real_to_thread(fn, *a, **kw)
+
+    monkeypatch.setattr(asyncio, "to_thread", _spy)
+
+    out = await aapply_tool(
+        ViewImage.registered_tool_name(),
+        {"path": str(target)},
+        _tools_data(ViewImage),
+        ctx=ctx,
+        state=state,
+    )
+
+    assert json.loads(out)["attached"] is True
+    # Pillow и запись копии — в пуле; решение по id (живая, в шаге, лимит) — на loop.
+    assert went_to_pool == ["_normalized", "_store"]
