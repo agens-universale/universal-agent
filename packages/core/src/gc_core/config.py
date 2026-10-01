@@ -316,6 +316,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
         "send_tool_strict": app_cfg.backend.send_tool_strict,
         "claude_prompt_cache": app_cfg.backend.claude_prompt_cache,
+        "backend_vision": app_cfg.backend.vision,
         "use_ssl": app_cfg.backend.use_ssl,
         "cert_path": app_cfg.backend.cert_path,
         "key_path": app_cfg.backend.key_path,
@@ -461,6 +462,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         else {},
         "diff_tui": app_cfg.diff_tui.model_dump(),
         "fs_tools": app_cfg.fs_tools.model_dump(),
+        "images": app_cfg.images.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
         # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).
         # Router работает от этого снимка, а не от app_cfg напрямую (§6.4).

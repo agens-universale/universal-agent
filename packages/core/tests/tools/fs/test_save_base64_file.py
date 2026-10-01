@@ -33,3 +33,9 @@ def test_save_base64_parent_is_file_returns_parent_not_found(tmp_path):
     res = json.loads(with_local_ctx(SaveBase64File)(path=path, data=data))
     assert res["ok"] is False
     assert res["error"]["type"] == "parent_not_found"
+
+
+def test_description_points_to_view_image():
+    """Сохранённый скриншот смотрят тулом fs_view_image, а не читают как текст."""
+    assert "fs_view_image" in SaveBase64File.tool_description()["description"]
+    assert "fs_view_image" in SaveBase64File.prompt_description()

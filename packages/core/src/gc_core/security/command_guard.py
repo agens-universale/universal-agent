@@ -18,6 +18,7 @@ from gc_core.security.command_moderation import (
     effective_command_cwd,
 )
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.media_roots import media_roots
 from gc_core.security.path_policy import (
     _extract_config_dict,
     resolve_tool_context,
@@ -110,8 +111,10 @@ def _tokens(command: str) -> list[str]:
     return out
 
 
-def scan_command_for_protected(command: str, *, cwd: str, extra=None) -> str:
-    ps = protected_paths(cwd=cwd, extra=extra)
+def scan_command_for_protected(
+    command: str, *, cwd: str, extra=None, media=()
+) -> str:
+    ps = protected_paths(cwd=cwd, extra=extra, media=media)
     worst = "allow"
     rank = {"allow": 0, "ask": 1, "deny": 2}
     for tok in _tokens(command):
@@ -121,6 +124,7 @@ def scan_command_for_protected(command: str, *, cwd: str, extra=None) -> str:
             "skills": "allow",
             "none": "allow",
             "instructions": "ask",
+            "media": "ask",
             "operational": "deny",
         }[cls]
         if rank[decision] > rank[worst]:
@@ -198,7 +202,7 @@ def _command_guard_flow(
 
     extra = list(context.write_guard.extra_paths) or None
     decision = scan_command_for_protected(
-        payload, cwd=launch_root, extra=extra
+        payload, cwd=launch_root, extra=extra, media=media_roots(cfg)
     )
 
     if decision == "allow":
