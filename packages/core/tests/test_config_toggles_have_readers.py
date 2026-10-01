@@ -52,7 +52,6 @@ KNOWN_UNREAD: dict = {
     "agent.stored_tool_outputs_max_entries": "",
     "project_memory.enable_project_memory_notice": "",
     # --- не спроецированы и не читаются ---
-    "todo.reminder_steps": "",
     "tui.stream_display": "",
     # --- не упомянуты нигде, даже в demo-конфигах ---
     "mcp.meta.recommended_mcp_manifest": "",

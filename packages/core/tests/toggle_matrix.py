@@ -627,6 +627,10 @@ NOT_IN_MATRIX = {
     # test_summary_token_trigger.py и test_context_meter_threshold.py.
     "summary.chat_completions_summary_trigger_tokens": "новый рычаг; эталон develop его не содержит, покрытие в test_summary_token_trigger",
     "summary.chat_completions_summary_turn_end_trigger_tokens": "новый рычаг; эталон develop его не содержит, покрытие в test_summary_token_trigger",
+    # Порог напоминания чек-листа. Числился непрочитанным и потому не сверялся
+    # с матрицей; эталон develop случаев с ним не содержит. Сам рычаг покрыт
+    # test_todo_config.py и test_todo_reminder.py.
+    "todo.reminder_steps": "эталон develop его не содержит, покрытие в test_todo_config и test_todo_reminder",
     # --- приехало с develop при вливании 09.09.2026 (PR #97, #99, #100) -------
     #
     # Оба ключа меняют ФОРМУ вывода, а не путь исполнения: preview-края режут
@@ -731,6 +735,9 @@ NOT_IN_MATRIX = {
     # Только TUI: матрица гоняет CLI-прогон.
     "tui.stream": "только TUI",
     "tui.text_answer_mode": "только TUI",
+    "acp.text_answer_mode": "только ACP",
+    "acp.finish_gate_mode": "только ACP",
+    "acp.todo_reminder_steps": "только ACP",
     "tui.finish_gate_mode": "только TUI",
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",

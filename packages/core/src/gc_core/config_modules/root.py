@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
+from gc_core.config_modules.acp import AcpConfig
 from gc_core.config_modules.agent import (
     DEFAULT_FINISH_GATE_MAX_ITERATIONS,
     DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
@@ -107,6 +108,7 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+    acp: AcpConfig = Field(default_factory=AcpConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     endpoint_presets: list[EndpointPreset] = Field(
         default_factory=default_endpoint_presets
