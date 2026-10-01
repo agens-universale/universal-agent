@@ -70,7 +70,7 @@ def test_stream_emits_created_delta_and_completed(tmp_path):
     client = TestClient(app)
     response = client.post(
         "/v1/responses",
-        json={"model": "ui", "input": "привет", "stream": True},
+        json={"model": "GC-UA", "input": "привет", "stream": True},
     )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
@@ -80,7 +80,7 @@ def test_stream_emits_created_delta_and_completed(tmp_path):
     assert "response.output_text.delta" in kinds
     assert kinds[-1] == "response.completed"
     assert events[-1]["response"]["status"] == "completed"
-    assert events[-1]["response"]["model"] == "ui"
+    assert events[-1]["response"]["model"] == "GC-UA"
 
 
 def test_models_and_auth_and_cors(tmp_path):
@@ -88,7 +88,10 @@ def test_models_and_auth_and_cors(tmp_path):
     client = TestClient(open_app)
     models = client.get("/v1/models")
     assert models.status_code == 200
-    assert models.json()["data"][0]["id"] == "agent-model"
+    ids = [item["id"] for item in models.json()["data"]]
+    assert ids == ["GC-UA", "agent-model"]
+    assert models.json()["data"][1]["object"] == "model"
+    assert models.json()["data"][1]["created"] == 0
     assert "access-control-allow-origin" not in models.headers
     preflight = client.options(
         "/v1/models",
@@ -144,7 +147,9 @@ def test_non_stream_failure_is_500(tmp_path):
         index=ResponseIndex(str(threads)),
     )
     client = TestClient(create_app(facade))
-    response = client.post("/v1/responses", json={"model": "m", "input": "x"})
+    response = client.post(
+        "/v1/responses", json={"model": "GC-UA", "input": "x"}
+    )
     assert response.status_code == 500
     body = response.json()
     assert body["status"] == "failed"
@@ -205,10 +210,12 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
         headers={
             "Origin": "http://localhost:3000",
             "Access-Control-Request-Method": "GET",
+            "Access-Control-Request-Private-Network": "true",
         },
     )
     assert preflight.status_code == 200
     assert preflight.headers["access-control-allow-origin"] == "*"
+    assert preflight.headers["access-control-allow-private-network"] == "true"
     out = capsys.readouterr()
     assert out.out == ""
     assert "без авторизации" in out.err

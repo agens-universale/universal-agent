@@ -10,6 +10,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
+from gc_chat.model_route import AGENT_ID, models_body
 from gc_chat.responses.errors import ApiError, error_payload
 from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.turn import TurnRun
@@ -41,13 +42,18 @@ def mount(app: FastAPI) -> None:
 
 
 def _install_cors(app: FastAPI, origins: list[str]) -> None:
-    """Пустой список — любой origin. Непустой — только перечисленные."""
+    """Пустой список — любой origin. Непустой — только перечисленные.
+
+    ``allow_private_network`` отвечает на preflight Chrome к loopback:
+    страница чата открыта как файл или с другого порта.
+    """
     allow = list(origins) if origins else ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
+        allow_private_network=True,
     )
 
 
@@ -60,7 +66,7 @@ async def models(request: Request) -> Response:
     denied = _unauthorized(request, facade.auth_token)
     if denied is not None:
         return denied
-    return _json(_models_body(facade.model_id))
+    return _json(models_body(facade.model_id))
 
 
 async def create_response(request: Request) -> Response:
@@ -71,6 +77,9 @@ async def create_response(request: Request) -> Response:
     body, rejected = await _object_body(request)
     if rejected is not None:
         return rejected
+    if body.get("model") != AGENT_ID:
+        exc = ApiError(400, "invalid_request", "unknown model")
+        return _json(error_payload(exc), 400)
     opened = await _open_turn(facade, body)
     if isinstance(opened, Response):
         return opened
@@ -123,20 +132,6 @@ async def _finished_body(run: TurnRun, request: Request) -> Response:
         raise
     code = 500 if payload.get("status") == "failed" else 200
     return _json(payload, code)
-
-
-def _models_body(model_id: str) -> dict:
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": model_id,
-                "object": "model",
-                "created": 0,
-                "owned_by": "gc-chat",
-            }
-        ],
-    }
 
 
 def _unauthorized(request: Request, token: str) -> Response | None:

@@ -26,11 +26,16 @@ def create_app(
 
 
 def _install_cors(app: FastAPI, origins: list[str]) -> None:
-    """Пустой список — любой origin. Непустой — только перечисленные."""
+    """Пустой список — любой origin. Непустой — только перечисленные.
+
+    ``allow_private_network`` отвечает на preflight Chrome к loopback:
+    страница чата открыта как файл или с другого порта.
+    """
     allow = list(origins) if origins else ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
+        allow_private_network=True,
     )

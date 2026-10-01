@@ -29,6 +29,9 @@ chat_api:
   # Пустой список — любой origin (Access-Control-Allow-Origin: *).
   # Непустой — только эти origin, методы GET, POST, OPTIONS, заголовок
   # Authorization. Запись "*" из списка выбрасывается.
+  # Страница integrations/web_ui/gigacode-chat.html открывается с диска и
+  # ходит на этот порт. Preflight Chrome к loopback получает
+  # Access-Control-Allow-Private-Network: true.
   cors_origins: []
 
   # Рабочий каталог нового хода, если в запросе нет абсолютного metadata.cwd.

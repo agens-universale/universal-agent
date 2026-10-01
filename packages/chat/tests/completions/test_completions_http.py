@@ -99,7 +99,7 @@ def test_stream_wraps_trace_and_matches_non_stream(tmp_path):
     app, _agent, threads = _app(tmp_path)
     client = TestClient(app)
     body = {
-        "model": "ui",
+        "model": "GC-UA",
         "messages": [
             {"role": "user", "content": "вопрос"},
             {
@@ -125,10 +125,14 @@ def test_stream_wraps_trace_and_matches_non_stream(tmp_path):
 
     plain = client.post(
         "/v1/chat/completions",
-        json={"model": "ui", "messages": [{"role": "user", "content": "ещё"}]},
+        json={
+            "model": "GC-UA",
+            "messages": [{"role": "user", "content": "ещё"}],
+        },
     )
     assert plain.status_code == 200
     payload = plain.json()
+    assert payload["model"] == "GC-UA"
     assert payload["choices"][0]["message"]["content"] == text
     assert payload["choices"][0]["finish_reason"] == "stop"
     assert payload["usage"] is None
@@ -141,11 +145,13 @@ def test_models_and_missing_user(tmp_path):
     client = TestClient(app)
     models = client.get("/v1/models")
     assert models.status_code == 200
-    assert models.json()["data"][0]["id"] == "agent-model"
+    ids = [item["id"] for item in models.json()["data"]]
+    assert ids == ["GC-UA", "agent-model"]
+    assert models.json()["data"][0]["owned_by"] == "gc-chat"
     rejected = client.post(
         "/v1/chat/completions",
         json={
-            "model": "ui",
+            "model": "GC-UA",
             "messages": [{"role": "assistant", "content": "x"}],
         },
     )

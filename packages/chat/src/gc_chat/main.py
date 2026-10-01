@@ -27,6 +27,7 @@ from gc_core.tools.connect_mcp.registry import ToolsCache
 
 from gc_chat.app import create_app
 from gc_chat.completions.facade import CompletionsFacade
+from gc_chat.model_route import reserved_model_reason
 from gc_chat.responses.facade import ResponsesFacade
 
 
@@ -52,6 +53,10 @@ def main(argv: list[str] | None = None) -> int:
     rejection = backend_rejection(config)
     if rejection is not None:
         print(rejection, file=sys.stderr)
+        return 1
+    collision = reserved_model_reason(str(config.get("model") or ""))
+    if collision is not None:
+        print(collision, file=sys.stderr)
         return 1
     apply_chat_runtime_defaults(config)
     if not str(config.get("chat_api_auth_token") or ""):

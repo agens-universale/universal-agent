@@ -19,6 +19,8 @@ from gc_chat.completions.sse import (
     encode_done,
 )
 from gc_chat.completions.turn import TurnRun
+from gc_chat.direct_completions import DirectCompletions
+from gc_chat.model_route import completions_route, models_body
 
 _JSON = "application/json"
 _POLL_S = 0.05
@@ -42,13 +44,18 @@ def mount(app: FastAPI) -> None:
 
 
 def _install_cors(app: FastAPI, origins: list[str]) -> None:
-    """Пустой список — любой origin. Непустой — только перечисленные."""
+    """Пустой список — любой origin. Непустой — только перечисленные.
+
+    ``allow_private_network`` отвечает на preflight Chrome к loopback:
+    страница чата открыта как файл или с другого порта.
+    """
     allow = list(origins) if origins else ["*"]
     app.add_middleware(
         CORSMiddleware,
         allow_origins=allow,
         allow_methods=["GET", "POST", "OPTIONS"],
         allow_headers=["Authorization", "Content-Type"],
+        allow_private_network=True,
     )
 
 
@@ -61,7 +68,7 @@ async def models(request: Request) -> Response:
     denied = _unauthorized(request, facade.auth_token)
     if denied is not None:
         return denied
-    return _json(_models_body(facade.model_id))
+    return _json(models_body(facade.model_id))
 
 
 async def create_completion(request: Request) -> Response:
@@ -72,6 +79,15 @@ async def create_completion(request: Request) -> Response:
     body, rejected = await _object_body(request)
     if rejected is not None:
         return rejected
+    route = completions_route(body.get("model"), facade.model_id)
+    if route is None:
+        exc = ApiError(400, "invalid_request", "unknown model")
+        return _json(error_payload(exc), 400)
+    if route == "direct":
+        direct = DirectCompletions(
+            config=facade._config, auth_connector=facade._auth
+        )
+        return await direct.forward(body, request)
     opened = await _open_turn(facade, body)
     if isinstance(opened, Response):
         return opened
@@ -181,20 +197,6 @@ async def _pull_until(run: TurnRun, request: Request) -> tuple | None:
         if await _disconnected(request):
             await run.request_stop()
             return None
-
-
-def _models_body(model_id: str) -> dict:
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": model_id,
-                "object": "model",
-                "created": 0,
-                "owned_by": "gc-chat",
-            }
-        ],
-    }
 
 
 def _unauthorized(request: Request, token: str) -> Response | None:

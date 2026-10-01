@@ -44,7 +44,7 @@ gc-chat --config ./config.yml --profile <имя>
 | `chat_api.host` | `127.0.0.1` | Адрес bind. Пустая строка отклоняется при загрузке. |
 | `chat_api.port` | `8090` | Порт, 1–65535. |
 | `chat_api.auth_token` | `""` | Пусто — заголовок не проверяется. Иначе каждый запрос к `/v1/` несёт `Authorization: Bearer <token>`, иначе 401 `invalid_api_key`. |
-| `chat_api.cors_origins` | `[]` | Пусто — любой origin (`Access-Control-Allow-Origin: *`). Непусто — только эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. |
+| `chat_api.cors_origins` | `[]` | Пусто — любой origin (`Access-Control-Allow-Origin: *`). Непусто — только эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. Preflight с `Access-Control-Request-Private-Network` получает `Access-Control-Allow-Private-Network: true`, чтобы страница чата с диска открывала loopback. |
 | `chat_api.launch_root` | `null` | Рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`. Относительный путь не используется: тогда берётся каталог процесса. |
 | `chat_api.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в runtime-ключ `text_answer_mode`. |
 | `chat_api.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `strict_turn_finish_validation` (`true`, когда режим не `off`) и `finish_gate_smart` (`true` только для `smart`). |
@@ -110,4 +110,4 @@ gc-chat --config ./config.yml --profile <имя>
 
 ## Чего в этом релизе нет
 
-Веб-UI, Conversations API, `background: true`, картинки и аудио во входе, клиентские `tools`, которые UI исполняет сам, `DELETE /v1/responses/{id}`, смена модели полем `model`, песочница Harbor. Вопрос человеку в канал отдельным событием не выходит: модель пишет его прозой и завершает ход.
+Веб-UI внутри процесса `gc-chat` нет. Отдельная страница без установки — [`integrations/web_ui/gigacode-chat.html`](../integrations/web_ui/gigacode-chat.html): открывается в браузере и ходит в эти ручки. Также нет Conversations API, `background: true`, картинок и аудио во входе, клиентских `tools`, которые UI исполняет сам, `DELETE /v1/responses/{id}`, смены модели полем `model`, песочницы Harbor. Вопрос человеку в канал отдельным событием не выходит: модель пишет его прозой и завершает ход.
