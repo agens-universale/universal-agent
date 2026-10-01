@@ -160,6 +160,20 @@ parser.add_argument(
 )
 
 parser.add_argument(
+    # Объявлен явно: необъявленный `--image PATH` молча ушёл бы в переопределения
+    # конфига (`_parse_unknown_args`), и запрос ушёл бы без картинки.
+    "--image",
+    metavar="PATH",
+    action="append",
+    default=None,
+    dest="images",
+    help=(
+        "Приложить изображение к запросу -q; ключ повторяется, не больше "
+        "images.max_per_message. С -t картинка хранится вместе с тредом"
+    ),
+)
+
+parser.add_argument(
     "--config",
     type=str,
     help="Путь к кастомному конфигурационному файлу",
