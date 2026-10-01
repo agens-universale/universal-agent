@@ -242,6 +242,27 @@ def entry_has_own_connection(entry) -> bool:
     )
 
 
+def _fetch_models_trying_auth(fetch, url: str, auth: str | None, **kwargs):
+    """Список моделей: сначала заголовок как есть, при пустом ответе — другая
+    форма того же токена (голый ключ ↔ ``Bearer``).
+
+    Пустой ответ первой формы не кэшируется (`make_cached_fetch` пишет только
+    непустой список), поэтому вторая форма не залипает на чужом промахе.
+    Успех первой формы вторую не вызывает."""
+    from gc_core.onboarding import authorization_attempts
+
+    attempts = authorization_attempts(auth) or [auth]
+    models = None
+    for header in attempts:
+        try:
+            models = fetch(url, header, **kwargs)
+        except Exception:
+            models = None
+        if models:
+            return models
+    return models
+
+
 def _resolved_for_request(
     url: str, auth: str | None
 ) -> tuple[str, str | None]:
@@ -1308,16 +1329,14 @@ class ModelEntryForm(Vertical):
         self, url: str, auth: str | None, gen: int, refresh: bool
     ) -> None:
         url, auth = _resolved_for_request(url, auth)
-        try:
-            models = self._fetch(
-                url,
-                auth,
-                verify=self._verify,
-                config_proxy=self._config_proxy,
-                refresh=refresh,
-            )
-        except Exception:
-            models = None
+        models = _fetch_models_trying_auth(
+            self._fetch,
+            url,
+            auth,
+            verify=self._verify,
+            config_proxy=self._config_proxy,
+            refresh=refresh,
+        )
         self.app.call_from_thread(self._on_models, models, gen, refresh)
 
     def _on_models(self, models, gen: int, refresh: bool) -> None:

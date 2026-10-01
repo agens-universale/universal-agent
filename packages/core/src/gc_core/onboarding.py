@@ -46,6 +46,33 @@ def authorization_header(raw: str) -> str:
     return s if " " in s else f"Bearer {s}"
 
 
+def authorization_attempts(raw: str | None) -> list[str]:
+    """Варианты заголовка Authorization для пробы и списка моделей.
+
+    Человек вставляет ключ как есть, без схемы. Часть серверов ждёт именно
+    его, часть — ``Bearer <ключ>``. Пробуем оба, не дублируя и не приписывая
+    схему туда, где она уже есть (``Basic …`` и явный ``Bearer …``).
+
+    Порядок: как передано, затем вторая форма. Первая удача останавливает
+    перебор — лишний запрос уходит только когда первая форма отвергнута.
+    """
+    if raw is None:
+        return []
+    s = str(raw).strip()
+    if not s:
+        return []
+    attempts = [s]
+    if s.lower().startswith("bearer "):
+        naked = s.split(" ", 1)[1].strip()
+        if naked and " " not in naked and naked not in attempts:
+            attempts.append(naked)
+    elif " " not in s:
+        prefixed = f"Bearer {s}"
+        if prefixed not in attempts:
+            attempts.append(prefixed)
+    return attempts
+
+
 def mask_authorization(header: str) -> str:
     """Mask authorization header for logging: show scheme and first 3 chars of secret.
 

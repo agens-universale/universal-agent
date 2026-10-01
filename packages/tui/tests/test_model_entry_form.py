@@ -1635,13 +1635,20 @@ async def test_the_probe_and_the_model_list_of_a_namesake_go_to_the_shadowed_pai
         for _ in range(3):
             await pilot.pause()
         assert seen and all(e == _SHADOWED["url"] for e, _ in seen), seen
-        assert [auth for _, auth in seen] == [None, "Bearer BASE-TOKEN"], seen
+        assert [auth for _, auth in seen] == [
+            None,
+            "Bearer BASE-TOKEN",
+            "BASE-TOKEN",
+        ], seen
         form.escape()  # свернуть пресеты входа
         form.move(-1)
         form.move(-1)  # адрес → алиас → id модели
         for _ in range(3):
             await pilot.pause()
-        assert calls == [(_SHADOWED["url"], "Bearer BASE-TOKEN")], calls
+        assert calls == [
+            (_SHADOWED["url"], "Bearer BASE-TOKEN"),
+            (_SHADOWED["url"], "BASE-TOKEN"),
+        ], calls
 
 
 async def test_the_shadowed_record_is_read_in_its_second_writing_too():
@@ -1824,6 +1831,40 @@ async def test_the_model_list_loads_itself_on_field_entry():
         assert form.list_open is False
         hint = str(form.query(".mef-model-hint").last().render())
         assert hint == "Alt+↓ — перечитать список", hint
+
+
+async def test_the_model_list_opens_when_only_the_bare_token_is_accepted():
+    """Сервер принимает ключ без Bearer и отвергает форму со схемой.
+    Список всё равно открывается — второй попыткой."""
+    calls = []
+
+    def fetch(url, auth, **kwargs):
+        calls.append(auth)
+        if auth == "sk-live":
+            return _models()
+        return None
+
+    form = _form(
+        initial={
+            "alias": "litellm",
+            "url": "https://proxy.example/v1/chat/completions",
+            "token": "sk-live",
+        },
+        existing_aliases={"litellm"},
+        fetch=fetch,
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        form.escape()
+        form.move(1)
+        form.move(1)
+        form.move(1)
+        for _ in range(4):
+            await pilot.pause()
+        assert calls == ["Bearer sk-live", "sk-live"], calls
+        assert form.list_open is True
+        rows = [str(w.render()) for w in _rows(form)]
+        assert any("gemini" in row for row in rows), rows
 
 
 async def test_changed_credentials_retry_the_autoload(tmp_path):

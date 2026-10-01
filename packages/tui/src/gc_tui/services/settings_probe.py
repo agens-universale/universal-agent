@@ -28,6 +28,7 @@ _DUMMY_MODEL = "gc-connection-probe"
 # него тем же, что на пользовательский, — он их не различает, и «принят» заявлять
 # нельзя (LiteLLM отдаёт 400 «No connected db.» на любой неизвестный ключ).
 _CANARY_TOKEN = "Bearer gc-probe-invalid-token"
+_CANARY_NAKED = "gc-probe-invalid-token"
 
 
 def _non_latin1_reason(auth: Optional[str]) -> str:
@@ -357,6 +358,17 @@ def interpret_auth(
     return control
 
 
+def _canary_for(auth: str) -> str:
+    """Канарейка в той же форме, что и проверяемый заголовок.
+
+    Сервер, который отличает «голый ключ» от ``Bearer``, на чужой схеме
+    ответит одинаково и на рабочий токен, и на мусор — сравнение было бы
+    не про этот токен."""
+    if auth.lower().startswith("bearer "):
+        return _CANARY_TOKEN
+    return _CANARY_NAKED
+
+
 def probe_connection(
     endpoint: str,
     token: Optional[str],
@@ -373,10 +385,17 @@ def probe_connection(
     спорную ветку: сервер отказал не 401-м, и без неё пришлось бы гадать, отказ
     это про токен или уже про модель.
 
+    Токен пробуется в двух формах (`authorization_attempts`): как передан и
+    со схемой ``Bearer``, если её не было. Вторая форма уходит только когда
+    первая отвергнута 401 — принятый заголовок вторым запросом не проверяем.
+
     Живёт здесь, а не в экранах: пробу зовут и /settings, и мастер, а скопированный
     differential-танец разъехался бы при первой правке одной из копий."""
+    from gc_core.onboarding import authorization_attempts
+
     run = probe_fn or probe_auth
-    has_token = bool(token)
+    attempts = authorization_attempts(token)
+    has_token = bool(attempts)
     control = run(endpoint, None, verify, model, config_proxy=config_proxy)
     with_token = canary = None
     if (
@@ -384,17 +403,25 @@ def probe_connection(
         and control.http_status == 401
         and has_token
     ):
-        with_token = run(
-            endpoint, token, verify, model, config_proxy=config_proxy
-        )
-        st = with_token.http_status
-        ambiguous = st is not None and st != 401 and not (200 <= st < 300)
-        if ambiguous:
-            canary = run(
-                endpoint,
-                _CANARY_TOKEN,
-                verify,
-                model,
-                config_proxy=config_proxy,
+        for index, variant in enumerate(attempts):
+            with_token = run(
+                endpoint, variant, verify, model, config_proxy=config_proxy
             )
+            status = with_token.http_status
+            if status == 401 and index + 1 < len(attempts):
+                continue
+            ambiguous = (
+                status is not None
+                and status != 401
+                and not (200 <= status < 300)
+            )
+            if ambiguous:
+                canary = run(
+                    endpoint,
+                    _canary_for(variant),
+                    verify,
+                    model,
+                    config_proxy=config_proxy,
+                )
+            break
     return interpret_auth(control, with_token, has_token, canary=canary)

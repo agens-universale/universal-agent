@@ -448,8 +448,64 @@ def test_probe_connection_skips_canary_on_plain_401():
     r = probe_connection(
         "http://x/v1/chat/completions", "Bearer bad", True, "", probe_fn=fake
     )
-    assert len(calls) == 2  # control + токен, канарейки нет
+    # control + Bearer + голый ключ: 401 первой формы не приговор, пока не
+    # проверена вторая.
+    assert calls == [None, "Bearer bad", "bad"]
     assert r.auth_state == "rejected"
+
+
+def test_probe_connection_accepts_the_other_token_shape():
+    """Сервер отвергает голый ключ и принимает Bearer — и наоборот.
+    Вторая форма уходит только после 401 первой."""
+    from gc_tui.services.settings_probe import probe_connection
+
+    def scripted(accepted: str):
+        calls = []
+
+        def fake(
+            endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+        ):
+            calls.append(auth)
+            if auth is None:
+                return ProbeResult(
+                    "rejected", 401, None, 5, "токен отклонён (401)"
+                )
+            if auth == accepted:
+                return ProbeResult("ok", 200, None, 5, "доступен")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
+
+        return calls, fake
+
+    calls, fake = scripted("Bearer sk-live")
+    result = probe_connection(
+        "http://x/v1/chat/completions", "sk-live", True, "", probe_fn=fake
+    )
+    assert calls == [None, "sk-live", "Bearer sk-live"]
+    assert result.auth_state == "accepted"
+
+    calls, fake = scripted("sk-live")
+    result = probe_connection(
+        "http://x/v1/chat/completions",
+        "Bearer sk-live",
+        True,
+        "",
+        probe_fn=fake,
+    )
+    assert calls == [None, "Bearer sk-live", "sk-live"]
+    assert result.auth_state == "accepted"
+
+    calls, fake = scripted("Bearer sk-live")
+    result = probe_connection(
+        "http://x/v1/chat/completions",
+        "Bearer sk-live",
+        True,
+        "",
+        probe_fn=fake,
+    )
+    assert calls == [None, "Bearer sk-live"]
+    assert result.auth_state == "accepted"
 
 
 def test_probe_connection_skips_probing_when_server_needs_no_token():
