@@ -125,6 +125,11 @@ def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     assert "Просмотреть" in html
     assert "item.text" in html
     assert "white-space:pre-wrap" in html
+    assert 'data-line="' in html
+    assert "FILE_PATH" in html
+    assert "Скопировано" in html
+    assert "Ctrl+C или «Копировать»" in html
+    assert "mouseup" not in html.split("function previewPage", 1)[-1]
     assert "Скачать" in html
     assert "Скопировать путь" in html
     assert "Открыть" in html
