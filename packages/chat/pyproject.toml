@@ -19,6 +19,9 @@ gc-chat = "gc_chat.main:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_chat"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"src/gc_chat/chat_page.html" = "gc_chat/chat_page.html"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"

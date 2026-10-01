@@ -46,8 +46,9 @@ def mount(app: FastAPI) -> None:
 def _install_cors(app: FastAPI, origins: list[str]) -> None:
     """Пустой список — любой origin. Непустой — только перечисленные.
 
-    ``allow_private_network`` отвечает на preflight Chrome к loopback:
-    страница чата открыта как файл или с другого порта.
+    ``allow_private_network`` отвечает на preflight Chrome к loopback.
+    Страница чата этого процесса идёт с того же origin. Заголовок
+    нужен чужим клиентам.
     """
     allow = list(origins) if origins else ["*"]
     app.add_middleware(

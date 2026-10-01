@@ -20,6 +20,7 @@ chat_api:
   # Куда слушать. По умолчанию только loopback.
   host: "127.0.0.1"
   port: 8090
+  # Страница чата открывается с этого порта: http://127.0.0.1:8090/
 
   # Пустая строка — заголовок Authorization не проверяется, на старте одна
   # строка в stderr: сервер без авторизации. Непустая строка — каждый запрос
@@ -29,8 +30,8 @@ chat_api:
   # Пустой список — любой origin (Access-Control-Allow-Origin: *).
   # Непустой — только эти origin, методы GET, POST, OPTIONS, заголовок
   # Authorization. Запись "*" из списка выбрасывается.
-  # Страница integrations/web_ui/gigacode-chat.html открывается с диска и
-  # ходит на этот порт. Preflight Chrome к loopback получает
+  # Страница чата открывается с порта этого процесса и CORS не использует.
+  # Заголовок нужен чужим клиентам. Preflight Chrome к loopback получает
   # Access-Control-Allow-Private-Network: true.
   cors_origins: []
 

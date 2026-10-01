@@ -66,6 +66,21 @@ class ResponseIndex:
         path = self._path(response_id)
         return _read(path, response_id)
 
+    def load_all(self) -> list[ResponseRecord]:
+        """Все целые записи. Битый файл и чужое имя пропускаются."""
+        directory = self._directory()
+        if not os.path.isdir(directory):
+            return []
+        found: list[ResponseRecord] = []
+        for name in os.listdir(directory):
+            if not name.endswith(_JSON):
+                continue
+            response_id = name[: -len(_JSON)]
+            record = self.load(response_id)
+            if record is not None:
+                found.append(record)
+        return found
+
     def _path(self, response_id: str) -> str:
         return os.path.join(self._directory(), response_id + _JSON)
 

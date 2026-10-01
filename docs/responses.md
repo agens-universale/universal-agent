@@ -44,7 +44,7 @@ gc-chat --config ./config.yml --profile <имя>
 | `chat_api.host` | `127.0.0.1` | Адрес bind. Пустая строка отклоняется при загрузке. |
 | `chat_api.port` | `8090` | Порт, 1–65535. |
 | `chat_api.auth_token` | `""` | Пусто — заголовок не проверяется. Иначе каждый запрос к `/v1/` несёт `Authorization: Bearer <token>`, иначе 401 `invalid_api_key`. |
-| `chat_api.cors_origins` | `[]` | Пусто — любой origin (`Access-Control-Allow-Origin: *`). Непусто — только эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. Preflight с `Access-Control-Request-Private-Network` получает `Access-Control-Allow-Private-Network: true`, чтобы страница чата с диска открывала loopback. |
+| `chat_api.cors_origins` | `[]` | Пусто — любой origin (`Access-Control-Allow-Origin: *`). Непусто — только эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. Preflight с `Access-Control-Request-Private-Network` получает `Access-Control-Allow-Private-Network: true`. Страница чата открывается с порта этого процесса и CORS не использует; заголовок нужен чужим клиентам. |
 | `chat_api.launch_root` | `null` | Рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`. Относительный путь не используется: тогда берётся каталог процесса. |
 | `chat_api.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в runtime-ключ `text_answer_mode`. |
 | `chat_api.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `strict_turn_finish_validation` (`true`, когда режим не `off`) и `finish_gate_smart` (`true` только для `smart`). |
@@ -108,6 +108,20 @@ gc-chat --config ./config.yml --profile <имя>
 
 Индекс лежит рядом с каталогом тредов: `responses-index/<response_id>.json`. История хода — в обычном jsonl треда, `system="responses"`.
 
+## Страница и диалоги
+
+`GET /` отдаёт страницу чата, `Content-Type: text/html; charset=utf-8`. Токен на этот ответ не нужен: его вводят на странице, дальше он уходит заголовком `Authorization`. Запросы страницы — относительные `/v1/…` на тот же порт. Каталог хода этот маршрут не раздаёт.
+
+`GET /v1/dialogs` — прошлые диалоги Responses, сначала недавно обновлённые. Один элемент на `thread_id`: `latest_response_id` (ход, на который не ссылается `previous_response_id` другого хода этого треда), `cwd` последнего хода, `created_at` первого, `updated_at` и `status` последнего, `title` — текст первого пользовательского сообщения, обрезанный до 80 символов. Треды Chat Completions и чужой `system` в список не входят. Битый файл индекса пропускается. Нет целого jsonl — тред остаётся с пустым `title`.
+
+`GET /v1/dialogs/{thread_id}` — ходы по цепочке `previous_response_id`, от первого к последнему. У хода: `response_id`, `previous_response_id`, `created_at`, `status`, `text` пользователя из jsonl, `output` сохранённого ответа. Нет треда — 404.
+
+`GET /v1/dialogs/{thread_id}/artifacts` — файлы, которые тулы записи этого треда успешно создали или изменили внутри `cwd`: `fs_write_file`, `fs_append_file`, `fs_apply_file_edits`, `fs_search_and_replace`, `fs_save_base64_file`. Элемент — `path` и `name`. `path` относительный, разделитель `/`. `dry_run`, проза, `exec_command`, `exec_python`, каталог, отсутствующий файл, симлинк наружу и `..` в список не входят. Повтор пути схлопывается, порядок — первое появление.
+
+`GET /v1/dialogs/{thread_id}/artifacts/download?path=` отдаёт байты файла из этого списка. `Content-Type: application/octet-stream`, `Content-Disposition: attachment`. Чужой путь, каталог или файл не из списка — 404. Тело файла в stderr не пишется.
+
+Эти `GET /v1/dialogs…` проверяют Bearer так же, как остальные `/v1/`. Пустой `chat_api.auth_token` — проверки нет.
+
 ## Чего в этом релизе нет
 
-Веб-UI внутри процесса `gc-chat` нет. Отдельная страница без установки — [`integrations/web_ui/gigacode-chat.html`](../integrations/web_ui/gigacode-chat.html): открывается в браузере и ходит в эти ручки. Также нет Conversations API, `background: true`, картинок и аудио во входе, клиентских `tools`, которые UI исполняет сам, `DELETE /v1/responses/{id}`, смены модели полем `model`, песочницы Harbor. Вопрос человеку в канал отдельным событием не выходит: модель пишет его прозой и завершает ход.
+Нет Conversations API, `background: true`, картинок и аудио во входе, клиентских `tools`, которые UI исполняет сам, `DELETE /v1/responses/{id}`, смены модели полем `model`, песочницы Harbor, просмотра всего дерева каталога и загрузки файлов с браузера. Вопрос человеку в канал отдельным событием не выходит: модель пишет его прозой и завершает ход.
