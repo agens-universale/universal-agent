@@ -38,3 +38,12 @@ class CopyBlockRequest(Message):
     def __init__(self, payload: str) -> None:
         super().__init__()
         self.payload = payload
+
+
+class OpenImageRequest(Message):
+    """Ctrl+клик по плашке или подстроке картинки → экран открывает файл
+    просмотрщиком ОС (или показывает отказ, если файла нет)."""
+
+    def __init__(self, path: str) -> None:
+        super().__init__()
+        self.path = path
