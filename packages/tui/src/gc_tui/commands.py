@@ -101,7 +101,7 @@ def build_default_registry() -> CommandRegistry:
             "diff",
             (),
             "",
-            "Просмотр pending-диффов, принять/откатить",
+            "Правки агента: обзор, принятие, откат",
             hotkey="F3 · Ctrl+D",
         ),
         Command(

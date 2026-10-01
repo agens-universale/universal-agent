@@ -93,6 +93,35 @@ def read_text_for_edit(path: str) -> str:
     )
 
 
+def split_lines_lf(text: str, *, keepends: bool = False) -> list[str]:
+    """Разбить текст на строки ТОЛЬКО по ``\n`` — как это делает git.
+
+    ``str.splitlines`` сверх ``\n`` режет ещё по ``\r``, вертикальной
+    табуляции, переводу страницы, ``\x1c``–``\x1e``, ``\x85``, ``U+2028`` и
+    ``U+2029``. Git концом строки считает ровно один ``\n``, остальное для
+    него — обычные символы внутри строки.
+
+    Разойтись с ним нельзя ни в счёте, ни в разборе: лишний разделитель
+    добавляет строку в счётчики, сдвигает номера в хэнках, а разбор тела
+    теряет место в хэнке и всё, что идёт дальше (пятый раунд ревью, находка 3).
+
+    Семантика — как у ``splitlines``: у текста с завершающим переводом строки
+    пустого хвоста нет, у пустого текста строк нет вовсе.
+    """
+    if not text:
+        return []
+    parts = text.split("\n")
+    trailing_newline = parts[-1] == ""
+    if trailing_newline:
+        parts.pop()
+    if not keepends:
+        return parts
+    lines = [part + "\n" for part in parts]
+    if lines and not trailing_newline:
+        lines[-1] = lines[-1][:-1]
+    return lines
+
+
 def sha256_hex_of_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 

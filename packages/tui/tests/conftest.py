@@ -41,7 +41,6 @@ _SNAPSHOT_DRIFT = {
     "test_main_full_dialog_snapshot",
     "test_main_running_snapshot",
     "test_palette_open_snapshot",
-    "test_sessions_picker_full_snapshot",
     "test_unknown_command_snapshot",
 }
 

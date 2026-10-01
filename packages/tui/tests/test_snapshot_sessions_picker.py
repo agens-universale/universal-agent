@@ -43,6 +43,8 @@ def _write_task(
     branch=None,
     first_prompt="",
 ):
+    from gc_tui.services.session_title import normalize_prompt_title
+
     updated = (_FIXED_NOW - timedelta(hours=hours_ago)).isoformat()
     meta = {
         "thread_id": tid,
@@ -55,6 +57,13 @@ def _write_task(
         tui["skills"] = skills
     if branch:
         tui["branch"] = branch
+    if first_prompt:
+        # Имя сессии пикер берёт ТОЛЬКО из `tui.last_actual`/`tui.title` и
+        # намеренно не сканирует jsonl (см. `session_title`). В проде это поле
+        # сеет первый же промпт (`TraceScreen._seed_or_update_last_actual`), и
+        # фикстура обязана повторять прод — иначе снимок молча показывает
+        # «Без названия» и перестаёт проверять заголовки вовсе.
+        tui["last_actual"] = normalize_prompt_title(first_prompt)
     if tui:
         meta["tui"] = tui
     (tmp_path / f"meta_cli_{tid}.json").write_text(

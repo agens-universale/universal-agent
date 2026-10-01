@@ -1,7 +1,11 @@
 import json
 from pathlib import Path
 
-from gc_core.thread_store import load_thread_messages, reset_thread_files
+from gc_core.thread_store import (
+    edits_journal_path,
+    load_thread_messages,
+    reset_thread_files,
+)
 
 
 def test_reset_thread_files_deletes_only_target_thread_files(
@@ -35,6 +39,30 @@ def test_reset_thread_files_deletes_only_target_thread_files(
     assert not target_lock.exists()
     assert other_data.exists()
     assert other_meta.exists()
+
+
+def test_reset_thread_files_deletes_edits_journal_lock(tmp_path: Path) -> None:
+    """`file_lock` (`gc_core.utils.file_lock`) кладёт межпроцессный лок
+    журнала правок рядом как `<путь>.lock` и его не удаляет сам — лок живёт,
+    пока живёт журнал. Сброс сносит журнал, но обязан снести и лок: иначе
+    осиротевший `.lock`-файл остаётся в `threads_dir` навсегда (находка ревью
+    про сиротские локи журнала)."""
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+
+    journal = edits_journal_path(str(threads_dir), "cli", "demo-thread")
+    journal.write_text("", encoding="utf-8")
+    journal_lock = Path(str(journal) + ".lock")
+    journal_lock.write_bytes(b"")
+
+    deleted = reset_thread_files(
+        str(threads_dir), system_id="cli", thread_id="demo-thread"
+    )
+
+    assert str(journal) in deleted
+    assert str(journal_lock) in deleted
+    assert not journal.exists()
+    assert not journal_lock.exists()
 
 
 def test_reset_thread_files_deletes_legacy_thread_files(
@@ -85,3 +113,68 @@ def test_load_thread_messages_accepts_double_encoded_jsonl_rows(
     assert len(messages) == 1
     assert messages[0]["role"] == "user"
     assert max_seq == 1
+
+
+def test_reset_survives_a_lock_held_by_another_process(tmp_path: Path) -> None:
+    """Захваченный лок журнала не имеет права сорвать сброс.
+
+    `file_lock` держит дескриптор `<журнал>.lock` весь захват, и на Windows
+    `os.remove` по нему даёт `PermissionError`. Лок — первый в списке файл,
+    который чужой процесс держит открытым ПО СВОЕЙ ПРИРОДЕ: раньше цикл
+    удаления был голый, и сброс падал трейсбеком посреди работы — часть файлов
+    снесена, а остальные файлы треда оставались лежать.
+    """
+    from gc_core.utils.file_lock import file_lock
+
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+    journal = edits_journal_path(str(threads_dir), "cli", "demo-thread")
+    journal.write_text("", encoding="utf-8")
+    data = threads_dir / "data_cli_demo-thread.jsonl"
+    data.write_text("x\n", encoding="utf-8")
+
+    with file_lock(journal, timeout=5.0):
+        deleted = reset_thread_files(
+            str(threads_dir), system_id="cli", thread_id="demo-thread"
+        )
+
+    assert str(data) in deleted
+    assert not data.exists()
+
+
+def test_reset_keeps_going_when_one_file_refuses_to_die(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Отказ удаления ОДНОГО файла не срывает сброс остальных файлов треда.
+
+    Проверка честная на любой ОС: отказ имитируется на конкретном пути, а не
+    ждёт от платформы нужной семантики блокировок.
+    """
+    import os as _os
+
+    threads_dir = tmp_path / "threads"
+    threads_dir.mkdir()
+    journal = edits_journal_path(str(threads_dir), "cli", "demo-thread")
+    journal.write_text("", encoding="utf-8")
+    journal_lock = Path(str(journal) + ".lock")
+    journal_lock.write_bytes(b"")
+    data = threads_dir / "data_cli_demo-thread.jsonl"
+    data.write_text("x\n", encoding="utf-8")
+
+    real_remove = _os.remove
+
+    def stubborn_remove(path, *args, **kwargs):
+        if str(path) == str(journal_lock):
+            raise PermissionError(22, "файл занят другим процессом")
+        return real_remove(path, *args, **kwargs)
+
+    monkeypatch.setattr(_os, "remove", stubborn_remove)
+
+    deleted = reset_thread_files(
+        str(threads_dir), system_id="cli", thread_id="demo-thread"
+    )
+
+    assert str(data) in deleted
+    assert str(journal) in deleted
+    assert str(journal_lock) not in deleted, "неудалённый файл не «удалён»"
+    assert journal_lock.exists()

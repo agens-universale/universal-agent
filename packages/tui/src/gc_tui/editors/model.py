@@ -29,6 +29,7 @@ from gc_tui.editors.field_list import (
     LIST_LOADING,
     FieldListController,
 )
+from gc_tui.form_frame import REVEAL_WITH_TAIL
 from gc_tui.palette import ACCENT, DEEP_DIM
 from gc_tui.widgets.paste_input import PasteInput
 
@@ -67,7 +68,10 @@ class ModelEditor(Vertical):
         active_overridden: bool = False,
         config_proxy: str | None = None,
     ) -> None:
-        super().__init__(classes="onb-dyn")
+        # Курсор подводится вместе с хвостом блока: под рамкой поля — счётчик,
+        # источник списка и ⚠, а `Ctrl+↓` здесь перечитывает список, не
+        # прокручивая (см. REVEAL_WITH_TAIL).
+        super().__init__(classes=f"onb-dyn {REVEAL_WITH_TAIL}")
         self._active_overridden = (
             active_overridden  # модель из файла перекрыта оверлеем
         )
