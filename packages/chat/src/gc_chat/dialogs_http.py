@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
@@ -252,7 +253,11 @@ def _disposition(name: str) -> str:
     )
     if cleaned == "":
         return "attachment"
-    return 'attachment; filename="' + cleaned + '"'
+    if cleaned.isascii():
+        return 'attachment; filename="' + cleaned + '"'
+    # Windows и Mac берут имя из filename*, не из latin-1 в filename.
+    encoded = quote(cleaned, safe="")
+    return "attachment; filename*=UTF-8''" + encoded
 
 
 def _body(payload: object, status_code: int = 200) -> Response:

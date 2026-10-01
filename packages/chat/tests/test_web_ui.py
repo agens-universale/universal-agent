@@ -2,6 +2,7 @@
 
 import json
 import os
+from urllib.parse import quote
 
 from fastapi.testclient import TestClient
 from gc_chat.app import create_app
@@ -530,6 +531,28 @@ def test_download_returns_any_file_inside_cwd(tmp_path, capsys):
     disposition = got.headers["content-disposition"]
     assert disposition.startswith("attachment")
     assert "note.txt" in disposition
+    report = cwd / "репорт.txt"
+    report.write_bytes("отчёт".encode())
+    (cwd / "报告.txt").write_bytes(b"zh")
+    cyrillic = client.get(
+        "/v1/dialogs/files/artifacts/download",
+        params={"path": "репорт.txt"},
+    )
+    assert cyrillic.status_code == 200
+    assert cyrillic.content == "отчёт".encode()
+    header = cyrillic.headers["content-disposition"]
+    header.encode("latin-1")
+    assert header == "attachment; filename*=UTF-8''" + quote(
+        "репорт.txt", safe=""
+    )
+    han = client.get(
+        "/v1/dialogs/files/artifacts/download",
+        params={"path": "报告.txt"},
+    )
+    assert han.status_code == 200
+    assert han.headers["content-disposition"] == (
+        "attachment; filename*=UTF-8''" + quote("报告.txt", safe="")
+    )
     err = capsys.readouterr()
     assert payload not in err.err.encode("utf-8", errors="replace")
     assert b"<html>" not in err.err.encode("utf-8", errors="replace")

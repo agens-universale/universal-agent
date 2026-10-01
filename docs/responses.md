@@ -122,7 +122,7 @@ gc-chat --config ./config.yml --profile <имя>
 
 `GET /v1/workspace/artifacts/download?path=`, `POST /v1/workspace/artifacts` и `DELETE /v1/workspace/artifacts?path=` читают и пишут этот же корень. Тело создания, имя каталога и правила удаления совпадают с ручками диалога. Идущий ход эти ручки не блокирует: диалога ещё нет.
 
-`GET /v1/dialogs/{thread_id}/artifacts/download?path=` отдаёт байты обычного файла внутри этого каталога. `Content-Type: application/octet-stream`, `Content-Disposition: attachment`. Пустой путь, каталог, чужой путь, `..`, симлинк наружу и путь со скрытым сегментом — 404. Тело файла в stderr не пишется.
+`GET /v1/dialogs/{thread_id}/artifacts/download?path=` отдаёт байты обычного файла внутри этого каталога. `Content-Type: application/octet-stream`, `Content-Disposition: attachment`. Имя из ASCII остаётся в `filename`. Любое другое имя уходит целиком в `filename*` как UTF-8: так его читают браузеры на Windows и Mac. Пустой путь, каталог, чужой путь, `..`, симлинк наружу и путь со скрытым сегментом — 404. Тело файла в stderr не пишется.
 
 `POST /v1/dialogs/{thread_id}/artifacts` с телом `{"path", "name"}` создаёт каталог `name` внутри уже открытого `path`. Пустой `path` — корень `cwd` хода. `name` — одно имя: без `/`, `\`, пустой строки и ведущей точки. Ответ: `path` созданного каталога и `kind: dir`. Такое имя уже занято — 409 `already exists`. Имя не годится — 400. Нет треда или родительского каталога — 404.
 
