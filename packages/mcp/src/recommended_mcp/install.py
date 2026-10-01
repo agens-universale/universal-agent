@@ -773,12 +773,12 @@ def _install_manifest(
     print(f"[state] {state.bin_dir}")
     paths = _node_install_paths(agent_dep_dir)
     if paths["npx"].exists():
-        from gc_core.config_modules.env_vars import gc_paths
+        from gc_core.config_modules.env_vars import gc_paths, mcp_media_dir
 
         cache = gc_paths()["cache"]
         print(f"[paths] config command: {paths['npx']}")
         print(f"[paths] playwright --output-dir: {cache / 'playwright-mcp'}")
-        print(f"[paths] MCP media (agent default): {cache / 'mcp-media'}")
+        print(f"[paths] MCP media (agent default): {mcp_media_dir()}")
     print("[done] install complete")
 
 

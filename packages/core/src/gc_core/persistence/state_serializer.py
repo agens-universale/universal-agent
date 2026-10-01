@@ -40,6 +40,9 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     snapshot.setdefault("logger", None)
     snapshot.setdefault("loop_detector_window", [])
     snapshot.setdefault("loop_detector_pending", [])
+    snapshot.setdefault("pending_tool_attachments", [])
+    snapshot.setdefault("vision_audience", None)
+    snapshot.setdefault("vision_live_ids", frozenset())
     state.__dict__ = snapshot
 
     shared_raw = state.__dict__.get("shared")
@@ -122,6 +125,10 @@ class StateSerializer:
         # Loop detector window is per-run in-memory; do not persist.
         raw.pop("loop_detector_window", None)
         raw.pop("loop_detector_pending", None)
+        # «Кто смотрит» считается заново на каждый запрос и держит ResolvedModel —
+        # это не данные треда (спека §9.1).
+        raw.pop("vision_audience", None)
+        raw.pop("vision_live_ids", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (

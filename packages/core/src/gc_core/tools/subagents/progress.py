@@ -60,6 +60,9 @@ class SubagentProgressEvent:
     error_brief: Optional[str] = None  # ≤120 chars when set by emitters
     usage_delta: Optional[Dict[str, Any]] = None
     todo_items: Optional[List[Dict[str, str]]] = None
+    # Картинки реплики человека ребёнку (``user_message``) — словари вложений в
+    # треде, как в записях треда.
+    attachments: Optional[List[Dict[str, Any]]] = None
 
 
 @runtime_checkable
@@ -295,6 +298,7 @@ def emit_progress(
     error_brief: Optional[str] = None,
     usage_delta: Optional[Dict[str, Any]] = None,
     todo_items: Optional[List[Dict[str, str]]] = None,
+    attachments: Optional[List[Dict[str, Any]]] = None,
 ) -> None:
     """Emit a progress event when running as a child with a sink; else no-op."""
     if not child_progress_enabled(ctx):
@@ -318,6 +322,7 @@ def emit_progress(
             error_brief=error_brief,
             usage_delta=usage_delta,
             todo_items=todo_items,
+            attachments=attachments,
         )
     )
 

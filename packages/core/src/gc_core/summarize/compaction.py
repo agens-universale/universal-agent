@@ -1,5 +1,14 @@
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    Optional,
+    Sequence,
+)
 
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
@@ -30,6 +39,7 @@ from gc_core.summarize.summary_logging import (
 )
 from gc_core.summarize.summary_message_body import (
     build_dialog_summary_content,
+    render_summary_images_block,
     resolve_intent_log_preview_chars,
 )
 from gc_core.summarize.summary_spec import (
@@ -169,6 +179,7 @@ def apply_summary_state_patch(
     memory_replace_touched: Iterable[str] | None = None,
     summarized_messages_count: int,
     intent_log_preview_chars: int | None = None,
+    kept_messages: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     shared = _ensure_shared(state)
 
@@ -200,6 +211,10 @@ def apply_summary_state_patch(
         if intent_log_preview_chars is not None
         else resolve_intent_log_preview_chars(None)
     )
+    # Сворачивается весь state.messages (ниже он заменяется сводкой): ваши картинки
+    # из него переезжают в тело сводки блоком <images> — указателем на файлы; кроме
+    # сообщений, которые вернутся как есть (`kept_messages`).
+    collapsed = getattr(state, "messages", None)
     summary_message_content = build_dialog_summary_content(
         summary_text=str(raw_summary or ""),
         last_dialog_steps=str(last_dialog_steps or ""),
@@ -207,6 +222,10 @@ def apply_summary_state_patch(
         session_todo_block=session_todo_block,
         user_intent_log_preview=tail_preview(closed_records, preview_chars),
         current_user_intent_jsonl=serialize(open_records),
+        images_block=render_summary_images_block(
+            collapsed if isinstance(collapsed, list) else [],
+            kept=kept_messages,
+        ),
     )
     prev_offset = int(getattr(state, "dialog_steps_offset", 0) or 0)
     state.dialog_steps_offset = prev_offset + max(
@@ -380,8 +399,10 @@ async def arun_summary_compaction(
     trigger_threshold_chars: int | None = None,
     exceeded_chars: bool = False,
     exceeded_tokens: bool = False,
+    kept_messages: Sequence[Mapping[str, Any]] = (),
 ) -> None:
     """Сжать историю треда: суммаризация, патч состояния, событие хосту.
+    ``kept_messages`` — что вызывающий вернёт в историю как есть после сжатия.
 
     Основная и единственная реализация: синхронное имя ``run_summary_compaction``
     Сетевой шаг один —
@@ -476,6 +497,7 @@ async def arun_summary_compaction(
         memory_replace_touched=memory_replace_touched,
         summarized_messages_count=len(full_messages),
         intent_log_preview_chars=preview_chars,
+        kept_messages=kept_messages,
     )
     if isinstance(trace, dict):
         _fill_trace_final_output(
