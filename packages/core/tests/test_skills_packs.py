@@ -374,13 +374,18 @@ async def test_override_inner_skill_project_layer(tmp_path):
     assert "from project" in detail["description"]
 
 
-async def test_single_source_escape_disables_pack_walk(tmp_path):
-    """skills_data_path в config → single-source режим, паки игнорируются."""
+async def test_single_source_loads_packs(tmp_path):
+    """skills_data_path в config → single-source режим читает и паки тоже.
+
+    REGRESSION: раньше single-source выставлял _walk_packs_enabled=False, и пак
+    (папка с pack.yaml, без корневого SKILL.md) молча игнорировался, а
+    repo-профиль приносил именно паки (cybergym).
+    """
     from gc_core.tools.skills.registry import get_skills_registry
 
     custom = tmp_path / "custom"
     custom.mkdir()
-    # Кладём папку с pack.yaml — в three-layer стала бы пакетом
+    # Кладём папку с pack.yaml — в single-source должна стать пакетом
     _write_pack(
         custom,
         "would-be-pack",
@@ -392,10 +397,9 @@ async def test_single_source_escape_disables_pack_walk(tmp_path):
 
     reg = get_skills_registry({"skills_data_path": str(custom)})
     items = {i["id"] for i in await reg.list_skills()}
-    # В single-source режиме папка с pack.yaml без SKILL.md на корне игнорируется
+    # Flat-скилл виден, пак загрузился: bootstrap доступен по canonical id
     assert "flat-skill" in items
-    assert "would-be-pack:inner-a" not in items
-    assert "would-be-pack" not in items
+    assert "would-be-pack:inner-a" in items
 
 
 async def test_bootstrap_resolved_by_folder_name_when_frontmatter_id_differs(

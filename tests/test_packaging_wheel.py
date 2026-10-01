@@ -35,7 +35,7 @@ CORE_REQUIRED = [
 ]
 
 # Ядро не должно содержать код фронтендов — ради этого всё и затевалось.
-CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/"]
+CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/", "gc_acp/"]
 
 MANIFESTS = {
     "gc_ua": ".",
@@ -44,6 +44,7 @@ MANIFESTS = {
     "gc_tui": "packages/tui",
     "gc_server": "packages/server",
     "gc_mcp": "packages/mcp",
+    "gc_acp": "packages/acp",
 }
 
 
@@ -328,6 +329,7 @@ OWN_COMMANDS = {
     "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
+    "gc_acp": {"gc-acp"},
 }
 
 
@@ -410,6 +412,7 @@ def test_meta_pulls_every_profile():
         f"gc-tui=={ver}",
         f"gc-server=={ver}",
         f"gc-mcp=={ver}",
+        f"gc-acp=={ver}",
     }
 
 
@@ -436,6 +439,7 @@ def test_versions_are_pinned_together():
         "packages/tui",
         "packages/server",
         "packages/mcp",
+        "packages/acp",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -446,6 +450,7 @@ def test_versions_are_pinned_together():
         "packages/tui",
         "packages/server",
         "packages/mcp",
+        "packages/acp",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -495,6 +500,7 @@ def test_profile_subdirs_match_layout():
         "gc-tui": "packages/tui",
         "gc-server": "packages/server",
         "gc-mcp": "packages/mcp",
+        "gc-acp": "packages/acp",
     }
     assert set(app_version.PROFILE_DISTS) - set(
         app_version.PROFILE_SUBDIRS

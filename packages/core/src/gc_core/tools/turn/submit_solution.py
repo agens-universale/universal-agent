@@ -1,4 +1,5 @@
 import json
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -20,6 +21,47 @@ SOLUTION_TYPES = (
 )
 
 TASK_REPORT_MAX_CHARS = 10000
+
+_FINISH_KEYS = ("solution_type", "task", "task_report", "handoff")
+
+
+@dataclass(frozen=True)
+class TurnFinishView:
+    """Отчёт и заметка ``turn_finish`` для ленты.
+
+    ``solution_type``, ``task``, ``handoff`` и вердикт судьи сюда не входят.
+    """
+
+    report: str
+    comment: str
+
+    def render(self) -> str:
+        if self.comment == "":
+            return self.report
+        return f"{self.report}\n\n* заметка: {self.comment}"
+
+
+def _json_object(value: Any) -> dict | None:
+    if isinstance(value, dict):
+        return value
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text.startswith("{"):
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def _is_finish_payload(data: dict) -> bool:
+    if any(key not in data for key in _FINISH_KEYS):
+        return False
+    return data.get("solution_type") in SOLUTION_TYPES
 
 
 class SubmitSolution(AbstractSimpleTool):
@@ -253,6 +295,38 @@ Success return format (compact JSON ack): {"tool":"turn_finish","ok":true,"statu
 Validation failure return format: {"tool":"turn_finish","ok":false,"status":"rejected","message":"...","error":{...},"task_report":""}
 """
         )
+
+    @classmethod
+    def finish_view(cls, arguments: Any) -> TurnFinishView | None:
+        """Аргументы финализатора. Не финализатор — ``None``."""
+        data = _json_object(arguments)
+        if data is None or not _is_finish_payload(data):
+            return None
+        report = data.get("task_report")
+        comment = data.get("comment")
+        return TurnFinishView(
+            report.strip() if isinstance(report, str) else "",
+            comment.strip() if isinstance(comment, str) else "",
+        )
+
+    @classmethod
+    def present_result(cls, result: Any, *, shown: str = "") -> Any:
+        """Текст хода для фасада.
+
+        Аргументы ``turn_finish`` становятся отчётом и строкой заметки.
+        Проза и прочие значения возвращаются как есть. Если тот же отчёт
+        уже есть в ``shown``, возвращается ``shown``: заметка повторно
+        не дописывается. Пустой отчёт — пустая строка, сырой JSON и
+        вердикт судьи наружу не идут.
+        """
+        view = cls.finish_view(result)
+        if view is None:
+            return result
+        if view.report == "":
+            return ""
+        if shown.strip() == view.report:
+            return shown
+        return view.render()
 
     async def acall(
         self,

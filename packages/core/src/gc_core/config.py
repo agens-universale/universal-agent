@@ -339,6 +339,9 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "tui_stream": app_cfg.tui.stream,
         "tui_stream_display": app_cfg.tui.stream_display,
         "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
+        "acp_text_answer_mode": app_cfg.acp.text_answer_mode,
+        "acp_finish_gate_mode": app_cfg.acp.finish_gate_mode,
+        "acp_todo_reminder_steps": app_cfg.acp.todo_reminder_steps,
         "tui_finish_gate_mode": app_cfg.tui.finish_gate_mode,
         "tui_finish_gate_mode_explicit": "finish_gate_mode"
         in app_cfg.tui.model_fields_set,

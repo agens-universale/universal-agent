@@ -20,7 +20,15 @@ from typing import Callable, NamedTuple, Optional
 # а --update переустанавливал не тот дистрибутив. Профили-приложения от вставки
 # не страдают: они перечислены выше и находятся раньше, а gc-mcp от них не
 # зависит и подменить их не может.
-PROFILE_DISTS = ("gc-ua", "gc-tui", "gc-server", "gc-cli", "gc-mcp", "gc-core")
+PROFILE_DISTS = (
+    "gc-ua",
+    "gc-tui",
+    "gc-server",
+    "gc-cli",
+    "gc-acp",
+    "gc-mcp",
+    "gc-core",
+)
 
 # Подкаталог манифеста каждого профиля в репозитории. Нужен для переустановки:
 # uv читает из git только КОРНЕВОЙ pyproject.toml, поэтому лист без
@@ -34,6 +42,7 @@ PROFILE_SUBDIRS = {
     "gc-tui": "packages/tui",
     "gc-server": "packages/server",
     "gc-mcp": "packages/mcp",
+    "gc-acp": "packages/acp",
 }
 
 # Канонический git-URL репозитория. Живёт рядом с PROFILE_SUBDIRS намеренно:

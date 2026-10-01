@@ -64,6 +64,39 @@ async def test_factory_single_source_when_path_set(monkeypatch, tmp_path):
     assert items[0]["source"] == "user"
 
 
+async def test_factory_single_source_loads_packs(monkeypatch, tmp_path):
+    """single-source (skills_data_path) читает и паки, не только flat-скиллы.
+
+    Регрессия: single-source выставлял _walk_packs_enabled=False, поэтому пак
+    (папка с pack.yaml, без корневого SKILL.md) молча игнорировался, а
+    repo-профиль приносил именно паки (cybergym). Пак должен резолвиться через
+    свой bootstrap_skill.
+    """
+    custom = tmp_path / "custom_skills"
+    custom.mkdir()
+    _write_skill(custom, "lonely-skill", "only here")  # flat
+    pack_dir = custom / "cybergym"
+    pack_dir.mkdir()
+    (pack_dir / "pack.yaml").write_text(
+        "id: cybergym\nname: CyberGym\nbootstrap_skill: using-cybergym\ndescription: pack\n"
+    )
+    (pack_dir / "using-cybergym").mkdir()
+    (pack_dir / "using-cybergym" / "SKILL.md").write_text(
+        "---\nname: using-cybergym\ndescription: entry\n---\n# Using\n"
+    )
+
+    fake = EnvVars(gc_home=tmp_path / "home")
+    monkeypatch.setattr(env_vars, "env", fake)
+    monkeypatch.chdir(tmp_path)
+
+    reg = get_skills_registry({"skills_data_path": str(custom)})
+    items = await reg.list_skills()
+    ids = {it["id"] for it in items}
+    assert "lonely-skill" in ids
+    # Пак загрузился, inner-скилл доступен по canonical cybergym:using-cybergym.
+    assert "cybergym:using-cybergym" in ids
+
+
 async def test_factory_empty_skills_data_path_falls_back_to_three_layer(
     monkeypatch, tmp_path
 ):
