@@ -26,7 +26,10 @@ def _reset_image_rejects_between_tests():
     не останется без сброса, а чужой старый набор не упадёт на импорте модуля,
     которого в его ядре нет."""
     from gc_core.vision.rejects import reset_image_rejects_for_tests
+    from gc_core.vision.registry import reset_vision_probes_for_tests
 
     reset_image_rejects_for_tests()
+    reset_vision_probes_for_tests()
     yield
     reset_image_rejects_for_tests()
+    reset_vision_probes_for_tests()
