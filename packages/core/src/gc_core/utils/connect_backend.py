@@ -618,7 +618,11 @@ async def aresolve_auth_token(auth_connector, *, force: bool = False) -> str:
 
 
 async def acreate_call_headers(
-    state, ctx, resolved: Optional[ResolvedModel] = None
+    state,
+    ctx,
+    resolved: Optional[ResolvedModel] = None,
+    *,
+    api_mode: str | None = None,
 ) -> Dict[str, str]:
     """Заголовки вызова backend. ЕДИНСТВЕННАЯ форма этой операции.
 
@@ -636,7 +640,9 @@ async def acreate_call_headers(
     token = None
     if auth_connector is not None:
         token = await aresolve_auth_token(auth_connector)
-    return build_call_headers(state, ctx, resolved, token=token)
+    return build_call_headers(
+        state, ctx, resolved, token=token, api_mode=api_mode
+    )
 
 
 def _authorization_header(
@@ -663,6 +669,13 @@ def _authorization_header(
             "берёт токен вне loop."
         )
     return f"Bearer {token}"
+
+
+def _set_call_header(headers, name, value):
+    for existing in list(headers):
+        if existing.lower() == name.lower():
+            del headers[existing]
+    headers[name] = value
 
 
 def _apply_chat_completion_headers(
@@ -705,7 +718,7 @@ def _apply_chat_completion_headers(
         v = str(raw_val).strip()
         if not v:
             continue
-        call_headers[k] = v
+        _set_call_header(call_headers, k, v)
 
 
 def build_call_headers(
@@ -714,6 +727,7 @@ def build_call_headers(
     resolved: Optional[ResolvedModel] = None,
     *,
     token: Optional[str] = None,
+    api_mode: str | None = None,
 ) -> Dict[str, str]:
     """
     Собрать заголовки вызова для backend API на основе State и RunContext.
@@ -729,7 +743,9 @@ def build_call_headers(
     config_dict = getattr(ctx, "config_dict", {}) or {}
     auth_connector = getattr(ctx, "auth_connector", None)
     backend_mode = (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        str(api_mode or config_dict.get("backend_api_mode", "responses"))
+        .strip()
+        .lower()
     )
     resolved_for_headers = (
         resolved if backend_mode == "chat_completions" else None
@@ -776,7 +792,11 @@ def build_call_headers(
     # отправляет литерал "None".
     trace_id = trace_id_from_config(config_dict)
     if trace_id and model_trace_header_enabled(config_dict):
-        call_headers[trace_header_name(config_dict, "x_trace_id")] = trace_id
+        _set_call_header(
+            call_headers,
+            trace_header_name(config_dict, "x_trace_id"),
+            trace_id,
+        )
     return call_headers
 
 

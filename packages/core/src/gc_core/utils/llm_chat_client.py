@@ -1,11 +1,16 @@
 """Shared chat/completions client helpers for controller-level modules."""
 
+import copy
 import functools
 import json
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
 from gc_core.request_backend_policy import (
+    _raise_on_embedded_choice_error,
     arequest_chat_completions_with_policy,
 )
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
@@ -15,6 +20,7 @@ from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     acreate_call_headers,
+    arequest_backend_chat_completions,
     backend_override_value,
     resolve_network_params,
 )
@@ -234,6 +240,102 @@ def _completion_text_and_finish(res: Any) -> ChatCompletionText:
     return ChatCompletionText(
         text=(text or "").strip(), finish_reason=finish_reason
     )
+
+
+@dataclass(frozen=True)
+class PreparedChatCompletion:
+    """Effective recipient and settings, fixed before authorizing pixels."""
+
+    resolved: ResolvedModel = field(repr=False)
+    url: str
+    headers: Mapping[str, str] = field(repr=False)
+    network_kwargs: Mapping[str, Any] = field(repr=False)
+    payload_kwargs: Mapping[str, Any] = field(repr=False)
+    volatile_headers: frozenset[str] = field(default=frozenset(), repr=False)
+
+
+def snapshot_chat_completion(ctx, state, *, resolved, headers):
+    """Snapshot an already authenticated call without fetching another token."""
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    verify, cert, _, timeout, proxy, _ = resolve_network_params(cfg, resolved)
+    payload = _build_chat_completion_payload(
+        ctx=ctx, state=state, messages=[], max_tokens=512, resolved=resolved
+    )
+    payload.pop("model")
+    payload.pop("messages")
+    extra = backend_override_value(resolved, "chat_completion_headers")
+    if extra is NO_BACKEND_OVERRIDE:
+        extra = cfg.get("chat_completion_headers", {})
+    explicit = {str(k).strip().lower() for k, v in (extra or {}).items() if v}
+    volatile = {
+        "x_rq_id",
+        "x-session-id",
+        "traceparent",
+        "tracestate",
+        "x_trace_id",
+    }
+    from gc_core.trace_id import trace_header_name
+
+    volatile.add(trace_header_name(cfg, "x_trace_id").lower())
+    return PreparedChatCompletion(
+        resolved,
+        resolved.url,
+        MappingProxyType(dict(headers)),
+        MappingProxyType(
+            {
+                "verify": verify,
+                "cert": cert,
+                "timeout": timeout,
+                "config_proxy": proxy,
+            }
+        ),
+        MappingProxyType(copy.deepcopy(payload)),
+        frozenset(volatile - explicit),
+    )
+
+
+async def aprepare_chat_completion(ctx, state, *, resolved):
+    headers = await acreate_call_headers(
+        state, ctx, resolved=resolved, api_mode="chat_completions"
+    )
+    return snapshot_chat_completion(
+        ctx, state, resolved=resolved, headers=headers
+    )
+
+
+async def arequest_chat_completion_once(
+    ctx, state, *, prepared, messages, max_tokens, request_label
+) -> ChatCompletionText:
+    """One pinned HTTP attempt, no adaptive retry or model fallback."""
+    payload = copy.deepcopy(dict(prepared.payload_kwargs))
+    token_key = (
+        "max_tokens" if "max_tokens" in payload else "max_completion_tokens"
+    )
+    payload[token_key] = max_tokens
+    for key in (
+        "tools",
+        "tool_choice",
+        "response_format",
+        "stream",
+        "previous_response_id",
+    ):
+        payload.pop(key, None)
+    payload.update(model=prepared.resolved.model, messages=messages)
+    with usage_scope(
+        getattr(state, "usage", None),
+        category_for_request_label(request_label),
+        "chat_completions",
+    ):
+        res = await arequest_backend_chat_completions(
+            payload,
+            dict(prepared.headers),
+            url=prepared.url,
+            **prepared.network_kwargs,
+            use_retry=False,
+            logger=getattr(ctx, "logger", None),
+        )
+        _raise_on_embedded_choice_error(res)
+    return _completion_text_and_finish(res)
 
 
 async def _asend_chat_completion_text(

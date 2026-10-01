@@ -96,3 +96,28 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_explicit_chat_mode_uses_model_headers_in_responses():
+    from gc_core.model_router import ResolvedModel
+
+    ctx = SimpleNamespace(
+        config_dict={"backend_api_mode": "responses"}, auth_connector=None
+    )
+    resolved = ResolvedModel(
+        alias="eyes",
+        model="vision-model",
+        url="https://example.test/chat",
+        authorization="Bearer eyes-token",
+        backend_overrides={"chat_completion_headers": {"x-target": "eyes"}},
+        tariff=None,
+        source="test",
+    )
+    headers = build_call_headers(
+        _StateStub(), ctx, resolved, api_mode="chat_completions"
+    )
+    assert headers["Authorization"] == "Bearer eyes-token"
+    assert headers["x-target"] == "eyes"
+    assert "Authorization" not in build_call_headers(
+        _StateStub(), ctx, resolved
+    )
