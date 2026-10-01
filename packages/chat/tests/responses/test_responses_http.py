@@ -220,3 +220,17 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
     assert out.out == ""
     assert "без авторизации" in out.err
     assert "event:" not in out.err
+    origin = "http://127.0.0.1:8090"
+    for line in (
+        "GET " + origin + "/",
+        "GET " + origin + "/v1/models",
+        "POST " + origin + "/v1/responses",
+        "GET " + origin + "/v1/responses/{response_id}",
+        "POST " + origin + "/v1/responses/{response_id}/cancel",
+        "POST " + origin + "/v1/chat/completions",
+        "GET " + origin + "/v1/dialogs",
+        "GET " + origin + "/v1/dialogs/{thread_id}",
+        "GET " + origin + "/v1/dialogs/{thread_id}/artifacts",
+        "GET " + origin + "/v1/dialogs/{thread_id}/artifacts/download",
+    ):
+        assert "gc-chat: " + line in out.err

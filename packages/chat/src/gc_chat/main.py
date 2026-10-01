@@ -159,6 +159,7 @@ async def serve(config: dict) -> None:
     app = create_app(responses, completions)
     host = str(config.get("chat_api_host") or "127.0.0.1")
     port = int(config.get("chat_api_port") or 8090)
+    _log_routes(app, host, port)
     server = uvicorn.Server(
         uvicorn.Config(
             app,
@@ -172,6 +173,34 @@ async def serve(config: dict) -> None:
         await server.serve()
     finally:
         await responses.shutdown()
+
+
+def _log_routes(app: Any, host: str, port: int) -> None:
+    """Метод и адрес каждой ручки. В stderr, до bind."""
+    origin = _origin(host, port)
+    for method, path in _routes(app):
+        print(f"gc-chat: {method} {origin}{path}", file=sys.stderr)
+
+
+def _routes(app: Any) -> list[tuple[str, str]]:
+    found: list[tuple[str, str]] = []
+    for route in getattr(app, "routes", ()):
+        methods = getattr(route, "methods", None)
+        path = getattr(route, "path", None)
+        if not methods or not isinstance(path, str):
+            continue
+        for method in sorted(methods):
+            if method == "HEAD":
+                continue
+            found.append((method, path))
+    return found
+
+
+def _origin(host: str, port: int) -> str:
+    shown = host
+    if ":" in host and not host.startswith("["):
+        shown = "[" + host + "]"
+    return "http://" + shown + ":" + str(port)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
