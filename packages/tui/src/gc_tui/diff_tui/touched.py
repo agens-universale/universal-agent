@@ -14,14 +14,10 @@ from pathlib import Path
 from typing import Iterable, Set
 
 from gc_core.thread_store import touched_journal_path
+from gc_core.thread_store_journal import thread_read_scope
 from gc_core.utils.atomic_io import atomic_replace
 
 _logger = logging.getLogger(__name__)
-
-try:
-    import fcntl
-except ImportError:  # pragma: no cover — Windows
-    fcntl = None  # type: ignore[assignment]
 
 
 class TouchedJournal:
@@ -32,6 +28,7 @@ class TouchedJournal:
     ) -> None:
         self.path = touched_journal_path(threads_dir, system_id, thread_id)
         self._file = Path(self.path)
+        self._thread_identity = (threads_dir, system_id, thread_id)
 
     def _empty(self) -> dict:
         return {"paths": {}}
@@ -67,32 +64,9 @@ class TouchedJournal:
 
     @contextmanager
     def _locked(self):
-        """Exclusive lock на load→mutate→save. Без fcntl — без межпроцессной блокировки."""
-        if fcntl is None:
+        """The same recovery/lock order used by thread reset and compaction."""
+        with thread_read_scope(*self._thread_identity):
             yield
-            return
-        lock_path = self._file.with_suffix(".json.lock")
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        fd = None
-        try:
-            fd = open(lock_path, "a+", encoding="utf-8")  # noqa: SIM115  # дескриптор держит блокировку
-            fcntl.flock(fd.fileno(), fcntl.LOCK_EX)
-            yield
-        except OSError as exc:
-            _logger.warning(
-                "touched journal lock failed path=%s: %s", self.path, exc
-            )
-            yield
-        finally:
-            if fd is not None:
-                try:
-                    fcntl.flock(fd.fileno(), fcntl.LOCK_UN)
-                except OSError:
-                    pass
-                try:
-                    fd.close()
-                except OSError:
-                    pass
 
     def paths(self) -> Set[str]:
         with self._locked():

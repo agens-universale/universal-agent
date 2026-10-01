@@ -56,6 +56,9 @@ def _compile_glob_fullmatch(
 class FindFilesByName(AbstractSimpleTool):
     """Full-tree locate by basename, path glob, or path substring (not file contents)."""
 
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
+
     @classmethod
     def tool_description(
         cls, config_dict: Optional[Dict[str, Any]] = None

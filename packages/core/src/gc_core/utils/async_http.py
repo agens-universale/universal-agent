@@ -19,9 +19,11 @@ import os
 import ssl
 import threading
 import weakref
-from typing import Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Union
 
-import httpx
+if TYPE_CHECKING:
+    import httpx
+
 
 #: ``ключ -> (слабая ссылка на loop, клиент)``. Слабая ссылка — не украшение.
 #:
@@ -58,6 +60,8 @@ def build_ssl_context(
     как httpx. Для MCP включён ради корпоративных CA; клиенты модели
     по-прежнему берут CA из явного конфига. На netrc и прокси флаг не влияет.
     """
+    import httpx
+
     if verify is False:
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
         # Явный opt-in verify=False; обоснование: CONTRIBUTING.md.
@@ -98,6 +102,8 @@ def mounts_from_proxies(
     дефолтах httpx, и настроенный прокси молча отменял бы корпоративный CA и
     клиентский сертификат — запросы шли бы мимо TLS-настроек вызывающего.
     """
+    import httpx
+
     if not proxies:
         return None
     mounts: dict[str, Any] = {}
@@ -133,6 +139,8 @@ def get_async_client(
     proxies: Optional[dict] = None,
 ) -> httpx.AsyncClient:
     """Клиент для текущего loop. Переиспользуется — пул соединений живёт."""
+    import httpx
+
     loop = asyncio.get_running_loop()
     loop_key = id(loop)
     proxy_key = tuple(sorted((proxies or {}).items()))

@@ -439,7 +439,12 @@ async def acall_mcp_tool(
             target.base_tool_name, target.arguments_obj, timeout=timeout
         )
 
-    data = await _ado_mcp_call(use_retry=target.use_retry, logger=logger)
+    from gc_core.tools.connect_mcp.durable_scope import durable_calls_enabled
+
+    data = await _ado_mcp_call(
+        use_retry=target.use_retry and not durable_calls_enabled(),
+        logger=logger,
+    )
 
     raw = data.get("result", data) if isinstance(data, dict) else data
     return _wrap_mcp_result(

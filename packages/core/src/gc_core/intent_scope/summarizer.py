@@ -6,6 +6,11 @@ from typing import Any, List
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.intent_scope import IntentScopeConfig
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.intent_log.serialize import (
     deserialize_list,
     records_to_jsonl_lines,
@@ -20,24 +25,19 @@ from gc_core.utils.user_text import read_user_text
 
 _logger = logging.getLogger(__name__)
 
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_PROJECT_ROOT = str(bundled_root())
-_DEFAULT_PROMPT_PATH = os.path.join(
-    _PROJECT_ROOT, "prompts", "intent_scope_tool_summary_prompt.md"
-)
-_DEFAULT_FINAL_ANSWER_PROMPT_PATH = os.path.join(
-    _PROJECT_ROOT, "prompts", "intent_scope_final_answer_summary_prompt.md"
-)
-
 
 def _resolve_final_answer_prompt_path(ctx: Any) -> str:
     cfg = _scope_cfg(ctx)
     raw = str(cfg.intent_scope_final_answer_summary_prompt_path or "").strip()
     if not raw:
-        return _DEFAULT_FINAL_ANSWER_PROMPT_PATH
+        return str(
+            bundled_root()
+            / "prompts"
+            / "intent_scope_final_answer_summary_prompt.md"
+        )
     if os.path.isabs(raw):
         return raw
-    return os.path.abspath(os.path.join(_PROJECT_ROOT, raw))
+    return os.path.abspath(os.path.join(str(bundled_root()), raw))
 
 
 def _load_prompt_file(path: str) -> str:
@@ -62,10 +62,12 @@ def _resolve_prompt_path(ctx: Any) -> str:
     cfg = _scope_cfg(ctx)
     raw = str(cfg.intent_scope_tool_summary_prompt_path or "").strip()
     if not raw:
-        return _DEFAULT_PROMPT_PATH
+        return str(
+            bundled_root() / "prompts" / "intent_scope_tool_summary_prompt.md"
+        )
     if os.path.isabs(raw):
         return raw
-    return os.path.abspath(os.path.join(_PROJECT_ROOT, raw))
+    return os.path.abspath(os.path.join(str(bundled_root()), raw))
 
 
 def _load_system_prompt(ctx: Any) -> str:
@@ -133,7 +135,17 @@ async def asummarize_tool_intent_line(
 
     prior = list(getattr(state, "current_user_intent", []) or [])
     request_messages = [
-        {"role": "system", "content": _load_system_prompt(ctx)},
+        {
+            "role": "system",
+            "content": await aload_prompt_resource(
+                ctx,
+                PromptResourceRequest(
+                    "intent_tool",
+                    path=scope_cfg.intent_scope_tool_summary_prompt_path,
+                ),
+                local=lambda: _load_system_prompt(ctx),
+            ),
+        },
         {
             "role": "user",
             "content": _build_user_prompt(
@@ -155,6 +167,8 @@ async def asummarize_tool_intent_line(
             consumer="intent_scope",
             logger=log,
         )
+    except ExecutionFailure:
+        raise
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=%s error=%s",
@@ -226,8 +240,15 @@ async def asummarize_final_answer_line(
         request_messages = [
             {
                 "role": "system",
-                "content": _load_prompt_file(
-                    _resolve_final_answer_prompt_path(ctx)
+                "content": await aload_prompt_resource(
+                    ctx,
+                    PromptResourceRequest(
+                        "intent_final",
+                        path=scope_cfg.intent_scope_final_answer_summary_prompt_path,
+                    ),
+                    local=lambda: _load_prompt_file(
+                        _resolve_final_answer_prompt_path(ctx)
+                    ),
                 ),
             },
             {
@@ -245,6 +266,8 @@ async def asummarize_final_answer_line(
             consumer="intent_scope",
             logger=log,
         )
+    except ExecutionFailure:
+        raise
     except Exception as exc:
         log.warning(
             "intent_scope summary_failed tool=final_answer error=%s",

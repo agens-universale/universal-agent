@@ -185,6 +185,8 @@ def build_run_usage_report(
     pricing: Any,
     model_name: Optional[str],
     endpoint_url: Optional[str] = None,
+    *,
+    provider_currency: str | None = None,
 ) -> Optional[str]:
     """Готовый текст отчёта по usage прогона или None, если считать нечего.
 
@@ -192,7 +194,13 @@ def build_run_usage_report(
     """
     if not isinstance(run_usage, UsageAccount) or run_usage.is_empty():
         return None
-    cost_report = compute_cost(run_usage, pricing, model_name, endpoint_url)
+    cost_report = compute_cost(
+        run_usage,
+        pricing,
+        model_name,
+        endpoint_url,
+        provider_currency=provider_currency,
+    )
     return render_cost_report(
         cost_report, model_name=model_name, title="Run usage"
     )
@@ -203,6 +211,8 @@ def build_run_usage_dict(
     pricing: Any,
     model_name: Optional[str],
     endpoint_url: Optional[str] = None,
+    *,
+    provider_currency: str | None = None,
 ) -> Optional[dict]:
     """Структурный (JSON-friendly) отчёт по usage прогона или None, если считать нечего.
 
@@ -211,7 +221,13 @@ def build_run_usage_dict(
     """
     if not isinstance(run_usage, UsageAccount) or run_usage.is_empty():
         return None
-    report = compute_cost(run_usage, pricing, model_name, endpoint_url)
+    report = compute_cost(
+        run_usage,
+        pricing,
+        model_name,
+        endpoint_url,
+        provider_currency=provider_currency,
+    )
 
     categories: dict[str, dict[str, Any]] = {}
     for c in report.categories:

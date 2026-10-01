@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import sys
+from functools import partial
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Callable
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
+from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
 
 CONFIRM_ALLOW_REMEMBER = (
     "allow_remember"  # Y — exec + session True + few-shot allowed
@@ -87,6 +89,8 @@ def _ask_human_enabled(ctx: Any) -> bool:
 
 
 def confirm_available(ctx: Any) -> bool:
+    if callable(getattr(ctx, "human_request", None)):
+        return True
     if getattr(ctx, "is_tui", False):
         return True
     if not _ask_human_enabled(ctx):
@@ -100,7 +104,27 @@ def _via_name(ctx: Any) -> str | None:
     return name if isinstance(name, str) and name.strip() else None
 
 
-def _ask_choice(ctx: Any, *, title: str, question: str, fields: list) -> str:
+def _ask_choice(
+    ctx: Any,
+    *,
+    title: str,
+    question: str,
+    fields: list,
+    decision_key: str | None = None,
+) -> str:
+    request_port = getattr(ctx, "confirm_request", None)
+    if callable(request_port):
+        return coerce_confirm_choice(
+            request_port(
+                HumanRequest(
+                    kind="confirm",
+                    title=title,
+                    question=question,
+                    fields=[[str(key), str(value)] for key, value in fields],
+                    decision_key=decision_key,
+                )
+            )
+        )
     # Confirm недоступен / AFK-like: block without teaching (deny_once).
     # Explicit invalid UI choice → deny_remember (fail-closed + few-shot).
     if not confirm_available(ctx):
@@ -180,12 +204,26 @@ def request_confirm(
             return cached
     if current_call_abandoned():
         return False
-    choice = _ask_choice(ctx, title=title, question=question, fields=fields)
+    choice = _ask_choice(
+        ctx,
+        title=title,
+        question=question,
+        fields=fields,
+        decision_key=decision_key,
+    )
     if current_call_abandoned():
         # Вопрос бросили (Ctrl+C), пока человек думал: ответ, если он и пришёл,
         # набран уже для ДРУГОГО вопроса. Записать его — значит выдать
         # разрешение на путь, в котором человек только что отказал.
         return False
+    return apply_confirm_choice(choice, store=store, decision_key=decision_key)
+
+
+def apply_confirm_choice(
+    choice: Any, *, store: Any, decision_key: str | None
+) -> bool:
+    """Apply the native four-choice policy after a completed human reply."""
+    choice = coerce_confirm_choice(choice)
     allow = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_ALLOW_ONCE)
     if store is not None and decision_key is not None:
         # 2×2 record matrix: (allow, session) per choice.
@@ -196,3 +234,70 @@ def request_confirm(
         session = choice in (CONFIRM_ALLOW_REMEMBER, CONFIRM_DENY_REMEMBER)
         store.record(decision_key, allow, session=session)
     return allow
+
+
+async def arequest_confirm(request: HumanRequest, *, ctx: Any) -> bool:
+    """Wait through an async port; cancellation never records permission."""
+    if request.kind != "confirm" or request.schema_version != 1:
+        raise ValueError("Unsupported confirmation request")
+    port = getattr(ctx, "human_request", None)
+    if not callable(port):
+        from gc_core.security.dual_wrapper import off_loop
+
+        return await off_loop(
+            partial(
+                request_confirm,
+                title=request.title,
+                question=request.question,
+                fields=[tuple(field) for field in request.fields],
+                ctx=ctx,
+                decision_key=request.decision_key,
+            )
+        )
+    store = getattr(ctx, "permission_store", None)
+    if store is not None and request.decision_key is not None:
+        cached = store.decision_for(request.decision_key)
+        if cached is not None:
+            return cached
+    try:
+        choice = await port(request)
+    except HumanRequestInterrupted:
+        return False
+    return apply_confirm_choice(
+        choice,
+        store=store,
+        decision_key=request.decision_key,
+    )
+
+
+def confirmation_step(
+    *,
+    title: str,
+    question: str,
+    fields: list[tuple[str, object]],
+    ctx: Any,
+    decision_key: str | None = None,
+    local_request: Callable[..., bool] | None = None,
+    local_wait: Callable[[], bool] | None = None,
+) -> Any:
+    """One native guard request with local UI and durable async drivers."""
+    from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop
+
+    request = HumanRequest(
+        kind="confirm",
+        title=title,
+        question=question,
+        fields=[[str(key), str(value)] for key, value in fields],
+        decision_key=decision_key,
+    )
+    if callable(getattr(ctx, "human_request", None)):
+        return AwaitOnCaller(lambda: arequest_confirm(request, ctx=ctx))
+    wait = local_wait or partial(
+        local_request or request_confirm,
+        title=title,
+        question=question,
+        fields=fields,
+        ctx=ctx,
+        decision_key=decision_key,
+    )
+    return OffLoop(wait, on_interrupt=False)

@@ -4,6 +4,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.intent_guard.agent_logging import (
     log_finish_gate_decision,
     log_finish_gate_skipped,
@@ -11,9 +12,6 @@ from gc_core.intent_guard.agent_logging import (
     log_finish_gate_validate_start,
 )
 from gc_core.intent_guard.feedback import build_finish_gate_feedback
-from gc_core.intent_guard.final_report_consistency import (
-    avalidate_final_report_vs_user_intent,
-)
 from gc_core.intent_guard.trace_digest import build_finish_gate_trace_digest
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
@@ -211,6 +209,8 @@ class FinishGateGuard:
                 context_user_messages=user_intent_log,
                 finish_handoff_arguments=finish_handoff_arguments,
             )
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             self._logger.warning(
                 "finish_gate validator error; fail-open accept so pending finish handoff "
@@ -265,3 +265,11 @@ class FinishGateGuard:
             feedback_preview=feedback_text,
         )
         return decision
+
+
+async def avalidate_final_report_vs_user_intent(**kwargs):
+    from gc_core.intent_guard.final_report_consistency import (
+        avalidate_final_report_vs_user_intent as validate,
+    )
+
+    return await validate(**kwargs)

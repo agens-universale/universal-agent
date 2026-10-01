@@ -126,6 +126,9 @@ class _ScanParams:
 class FindInFiles(AbstractSimpleTool):
     """Поиск совпадений текста/регулярки внутри файлов файловой системы."""
 
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
+
     max_line_content_chars = 500
     line_content_match_pad = 50
     # Context window budget. Without it one match on a minified (single-line)

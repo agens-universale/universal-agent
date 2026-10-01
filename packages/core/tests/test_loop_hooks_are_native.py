@@ -16,23 +16,34 @@
 import ast
 import inspect
 
+import pytest
 from gc_testkit.paths import REPO
 
-_SRC = REPO / "packages/core/src/gc_core/processing_responses.py"
+_SOURCES = (
+    REPO / "packages/core/src/gc_core/processing_responses.py",
+    REPO / "packages/core/src/gc_core/execution/loop.py",
+    REPO / "packages/core/src/gc_core/execution/policy.py",
+)
 
 
 def _hook_arguments() -> list:
-    """``(строка, имя)`` для каждого первого аргумента ``_acall_blocking_hook``."""
-    tree = ast.parse(_SRC.read_text(encoding="utf-8"))
+    """Вызовы в общем цикле, включая зависимости через ``self.bindings``."""
     found = []
-    for node in ast.walk(tree):
-        if (
-            isinstance(node, ast.Call)
-            and isinstance(node.func, ast.Name)
-            and node.func.id == "_acall_blocking_hook"
-            and node.args
-        ):
-            found.append((node.lineno, ast.unparse(node.args[0])))
+    for source in _SOURCES:
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not node.args:
+                continue
+            if isinstance(node.func, ast.Name):
+                called = node.func.id
+            elif isinstance(node.func, ast.Attribute):
+                called = node.func.attr
+            else:
+                continue
+            if called == "_acall_blocking_hook":
+                argument = ast.unparse(node.args[0])
+                name = argument.removeprefix("self.bindings.")
+                found.append((source.name, node.lineno, name))
     return found
 
 
@@ -45,18 +56,35 @@ def test_every_hook_is_passed_by_its_async_name():
     """
     from gc_core import processing_responses as module
 
+    hooks = _hook_arguments()
+    assert hooks, "не нашёл вызовов хуков — тест больше не проверяет цикл"
+    checked = []
     offenders = []
-    for lineno, name in _hook_arguments():
+    for filename, lineno, name in hooks:
         target = getattr(module, name, None)
         if target is None:
             continue  # параметр функции, а не импорт — см. соседний тест
+        checked.append(name)
         if not inspect.iscoroutinefunction(target):
-            offenders.append(f"processing_responses.py:{lineno} — {name}")
+            offenders.append(f"{filename}:{lineno} — {name}")
 
+    assert checked, "не найден ни один импортированный хук — тест устарел"
     assert offenders == [], (
         "хук передан синхронным именем — это поток из пула плюс портальный "
         "loop вместо готового await:\n  " + "\n  ".join(offenders)
     )
+
+
+def test_synchronous_binding_in_shared_loop_is_detected(monkeypatch):
+    from gc_core import processing_responses as module
+
+    monkeypatch.setattr(
+        module, "amaybe_update_intent_scope_from_tool", lambda **kwargs: None
+    )
+    with pytest.raises(
+        AssertionError, match="amaybe_update_intent_scope_from_tool"
+    ):
+        test_every_hook_is_passed_by_its_async_name()
 
 
 def test_compaction_hooks_arrive_as_coroutines():

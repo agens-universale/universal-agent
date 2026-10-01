@@ -1,13 +1,16 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 import os
 import re
 from copy import deepcopy
-from typing import Any, Dict, List, Optional, Tuple
-from uuid import uuid4
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
-import httpx
+if TYPE_CHECKING:
+    import httpx
+from uuid import uuid4
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
 from gc_core.message_policy.chat_completions import (
@@ -21,12 +24,11 @@ from gc_core.trace_id import (
 )
 from gc_core.usage.context import record_usage
 from gc_core.utils.aretry import retry_with_backoff_async
-from gc_core.utils.async_http import get_async_client
 from gc_core.utils.backend_errors import (
-    HTTP_STATUS_ERRORS,
-    HTTP_TRANSPORT_ERRORS,
     http_status_code,
     is_empty_completion,
+    is_http_status_error,
+    is_http_transport_error,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError, OnDelta
 from gc_core.utils.format_messages import (
@@ -43,6 +45,13 @@ logger = logging.getLogger(__name__)
 # Сентинел «оверрайда нет» — отличим от легального override-значения None/"" в
 # ResolvedModel.backend_overrides (см. backend_override_value).
 NO_BACKEND_OVERRIDE = object()
+
+
+def get_async_client(*args, **kwargs):
+    """Load the worker HTTP pool only when a request actually starts."""
+    from gc_core.utils.async_http import get_async_client as get_client
+
+    return get_client(*args, **kwargs)
 
 
 def backend_override_value(
@@ -197,13 +206,13 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
       туннеля (транзиентно); честный 404 просто ждёт retry-бюджет.
     - иногда рвётся стрим: ошибки парсинга/валидации
     """
-    if isinstance(exc, HTTP_STATUS_ERRORS):
+    if is_http_status_error(exc):
         status_code = http_status_code(exc)
         if status_code is None:
             return False
         return status_code in (404, 429) or status_code >= 500
 
-    if isinstance(exc, HTTP_TRANSPORT_ERRORS):
+    if is_http_transport_error(exc):
         return True
 
     return isinstance(exc, (json.JSONDecodeError, ValueError))
@@ -316,7 +325,7 @@ def _report_chat_http_error(*, status, err_text, url, data, logger) -> None:
         print(f"request messages summary={messages_summary}")
 
 
-async def _aiter_utf8_lines(response: "httpx.Response"):
+async def _aiter_utf8_lines(response: httpx.Response):
     """Строки SSE, декодированные строго как UTF-8.
 
     ``httpx.aiter_lines()`` декодирует по charset из заголовка ответа, а
@@ -339,7 +348,7 @@ async def _aiter_utf8_lines(response: "httpx.Response"):
         yield buf.decode("utf-8", errors="replace")
 
 
-async def _aread_error_text(response: "httpx.Response") -> Optional[str]:
+async def _aread_error_text(response: httpx.Response) -> Optional[str]:
     """Тело ответа-ошибки. У стримового ответа оно недоступно до aread()."""
     try:
         await response.aread()
@@ -370,6 +379,8 @@ async def arequest_backend_responses(
     timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
     config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый запрос.
     """
+    import httpx
+
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 
@@ -450,6 +461,8 @@ async def _astream_chat_completions(
     logger,
     on_delta: OnDelta,
 ):
+    import httpx
+
     stream_data = dict(data)
     stream_data["stream"] = True
     # OpenAI-совместимые провайдеры отдают usage в стриме только по явному
@@ -533,6 +546,8 @@ async def arequest_backend_chat_completions(
     """
     # `use_retry` забирает из kwargs декоратор ретраев (retry_with_backoff_async) —
     # до тела функции он не доходит; в сигнатуре остаётся как часть интерфейса.
+    import httpx
+
     del use_retry
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)

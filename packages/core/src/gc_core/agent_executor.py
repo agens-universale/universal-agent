@@ -12,12 +12,10 @@ import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
-from gc_core.config_modules.agent import (
-    merge_special_instructions_with_model_steering,
-)
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.intent_log.user_turn import (
     append_user_ask_deduped,
     append_user_asks_from_messages,
@@ -40,7 +38,7 @@ from gc_core.processing_responses import (
 from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import (
     RunSummaryCoordinator,
-    areset_stale_summarizing_flag,
+    areset_run_flags,
     aset_tui_finalizing,
     aset_tui_finish_gate_checking,
 )
@@ -56,10 +54,6 @@ from gc_core.thread_store import (
     ThreadSession,
     make_message_key,
     resolve_threads_dir,
-)
-from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
-from gc_core.tools.connect_mcp.stream_client import (
-    _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
 )
 from gc_core.tools.subagents.active_scope import (
     active_parent_call_id,
@@ -130,6 +124,8 @@ async def _aappend_trace_id_to_meta(
         await port.aupdate_runtime_meta(
             sys_norm, thread_id, {"trace_ids": ids}
         )
+    except ExecutionFailure:
+        raise
     except Exception as exc:
         if logger is not None:
             try:
@@ -154,6 +150,13 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     Вынесено из `finally` отдельной функцией не ради красоты: внутри `finally`
     это свойство проверялось бы только копией блока в тесте, то есть никак.
     """
+    from gc_core.tools.connect_mcp.persistent_stdio import (
+        PersistentStdioRegistry,
+    )
+    from gc_core.tools.connect_mcp.stream_client import (
+        _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
+    )
+
     cancelled: Optional[BaseException] = None
     try:
         # Долгоживущие stdio (напр. @playwright/mcp + Chromium): владелец
@@ -206,7 +209,8 @@ class AgentExecutor:
 
     def __init__(self, ctx: RunContext) -> None:
         self._ctx = ctx
-        self._lock = threading.Lock()
+        lock_factory = getattr(ctx, "lock_factory", None) or threading.Lock
+        self._lock = lock_factory()
         self._pending_messages: list[dict] = []
         #: То, что прогон не успел съесть, снятое с очереди на выходе из цикла.
         #: Держим отдельно, а не выбрасываем: клиенту на эти сообщения уже
@@ -242,6 +246,26 @@ class AgentExecutor:
             self._undelivered_messages = []
             self._pending_messages = []
             return out
+
+    def _take_pending_messages(self) -> list[dict]:
+        with self._lock:
+            out = self._pending_messages[:]
+            self._pending_messages.clear()
+            return out
+
+    def _is_stop_requested(self) -> bool:
+        with self._lock:
+            return (
+                self._state.stop_requested
+                if self._state is not None
+                else False
+            )
+
+    async def _alist_skills(self):
+        loader = getattr(self._ctx, "skills_loader", None)
+        if loader is None:
+            loader = self._ctx.skills_registry.list_skills
+        return await loader()
 
     async def _aopen_thread_session(
         self,
@@ -343,47 +367,35 @@ class AgentExecutor:
         self, *, effective_verbose: bool, logger
     ) -> tuple:
         """(system prompt, special instructions) для chat/completions из файлов конфига."""
-        config_dict = self._ctx.config_dict
-        chat_completions_system_prompt: str | None = None
-        prompt_path = config_dict.get("chat_completions_system_prompt_path")
-        if isinstance(prompt_path, str) and prompt_path.strip():
-            try:
-                with open(prompt_path, encoding="utf-8") as fd:
-                    chat_completions_system_prompt = fd.read().strip()
-            # Путь берётся из конфига — файл человека, кодировка его.
-            # `UnicodeDecodeError` подкласс `ValueError`, а не `OSError`: он
-            # уходил мимо этой ветки, то есть run падал БЕЗ объяснения, какой
-            # файл виноват.
-            except (OSError, UnicodeDecodeError) as e:
-                if effective_verbose:
-                    print(
-                        f"Не удалось прочитать chat_completions system prompt: {prompt_path}"
-                    )
-                if logger is not None:
-                    logger.warning(
-                        "system_prompt_read_failed",
-                        extra={
-                            "event": "system_prompt_read_failed",
-                            "path": prompt_path,
-                        },
-                    )
-                raise e
-
-        # Клиент-специфичные инструкции (напр. TUI) — отсутствие/нечитаемость
-        # файла деградирует тихо (None), не роняя run.
-        special_instructions: str | None = None
-        si_path = config_dict.get("chat_completions_special_instructions_path")
-        if isinstance(si_path, str) and si_path.strip():
-            try:
-                with open(si_path.strip(), encoding="utf-8") as fd:
-                    special_instructions = fd.read().strip() or None
-            except (OSError, UnicodeDecodeError):
-                special_instructions = None
-        special_instructions = merge_special_instructions_with_model_steering(
-            special_instructions,
-            config_dict=config_dict,
+        from gc_core.run_preparation import (
+            PromptPreparationRequest,
+            load_run_prompts,
         )
-        return chat_completions_system_prompt, special_instructions
+
+        prepared = load_run_prompts(
+            PromptPreparationRequest.from_config(
+                self._ctx.config_dict, verbose=effective_verbose
+            ),
+            logger=logger,
+        )
+        return prepared.system_prompt, prepared.special_instructions
+
+    async def _aload_chat_completions_prompts(
+        self, *, effective_verbose: bool, logger
+    ) -> tuple:
+        loader = getattr(self._ctx, "prompt_loader", None)
+        if loader is None:
+            return self._load_chat_completions_prompts(
+                effective_verbose=effective_verbose, logger=logger
+            )
+        from gc_core.run_preparation import PromptPreparationRequest
+
+        prepared = await loader(
+            PromptPreparationRequest.from_config(
+                self._ctx.config_dict, verbose=effective_verbose
+            )
+        )
+        return prepared.system_prompt, prepared.special_instructions
 
     async def _abuild_run_state(
         self,
@@ -429,7 +441,21 @@ class AgentExecutor:
         }
         if subagents_enabled(config_dict.get("use_local_subagents", False)):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
-        state = await State.acreate(**state_data)
+        preparer = getattr(self._ctx, "state_preparer", None)
+        if preparer is None:
+            state = await State.acreate(**state_data)
+        else:
+            from gc_core.state_preparation import StatePreparationRequest
+
+            prepared = await preparer(
+                StatePreparationRequest(
+                    agent_md_path=state_data["agent_md_path"],
+                    is_tui=state_data["is_tui"],
+                    agentsmd_override=state_data["agentsmd_override"],
+                    verbose=effective_verbose,
+                )
+            )
+            state = State.from_prepared(prepared, **state_data)
         # Старт рана — первая из двух точек начала хода (спека §6.4): фиксируем
         # модель этого хода через Router, дальше внутри хода не перечитываем.
         # Открытый активный алиас (trip прошлого хода / персист breaker при attach)
@@ -678,6 +704,9 @@ class AgentExecutor:
                 config_dict.get("pricing"),
                 config_dict.get("model"),
                 config_dict.get("completions_url"),
+                provider_currency=getattr(
+                    self._ctx, "provider_currency", None
+                ),
             )
             if usage_text:
                 if logger is not None:
@@ -692,6 +721,9 @@ class AgentExecutor:
                     config_dict.get("pricing"),
                     config_dict.get("model"),
                     config_dict.get("completions_url"),
+                    provider_currency=getattr(
+                        self._ctx, "provider_currency", None
+                    ),
                 )
                 if usage_dict:
                     logger.info(
@@ -751,6 +783,38 @@ class AgentExecutor:
                 task.uncancel()
         await self.aclose_run_accounting()
 
+    async def _ateardown_run(self, owner_reset: Any) -> BaseException | None:
+        # Keep the unconsumed queue before the await; messages arriving during
+        # MCP cleanup remain pending and are returned by take_undelivered_messages.
+        with self._lock:
+            self._undelivered_messages.extend(self._pending_messages)
+            self._pending_messages = []
+        try:
+            cleanup = getattr(self._ctx, "mcp_cleanup", None)
+            if cleanup is None:
+                await _aclose_mcp_and_release(owner_reset)
+            else:
+                try:
+                    await cleanup()
+                finally:
+                    reset_owner(owner_reset)
+        except asyncio.CancelledError as exc:
+            # arun persists accounting for a completed loop before re-raising.
+            return exc
+        return None
+
+    def _report_log_path(self, logger: Any) -> None:
+        if human_console_enabled(self._ctx.config_dict):
+            print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
+        if logger is not None:
+            logger.info(
+                "log_path",
+                extra={
+                    "event": "log_path",
+                    "path": getattr(self._ctx, "logging_path", None),
+                },
+            )
+
     async def arun(
         self,
         messages: list[str],
@@ -801,7 +865,7 @@ class AgentExecutor:
             if verbose is not None
             else config_dict.get("verbose", False)
         )
-        skills_list = await self._ctx.skills_registry.list_skills()
+        skills_list = await self._alist_skills()
         backend_api_mode = (
             str(config_dict.get("backend_api_mode", "responses"))
             .strip()
@@ -822,13 +886,9 @@ class AgentExecutor:
         self._thread_session = thread_session
         is_cli_mode = system_id == "cli"
 
-        # Снять протухший флаг компакции от прерванного прошлого run'а: на старте
-        # компакция не идёт, иначе TUI вечно показывает «сжимаю контекст».
-        await areset_stale_summarizing_flag(thread_session)
-        # Снять протухший флаг финализации от прерванного прошлого run'а.
-        await aset_tui_finalizing(thread_session, False)
-        # Снять протухший флаг «судья работает» от прерванного прошлого run'а.
-        await aset_tui_finish_gate_checking(thread_session, False)
+        # Снять протухшие runtime-индикаторы одним атомарным store batch,
+        # сохраняя прежний путь у пользовательских хранилищ без capability.
+        await areset_run_flags(thread_session)
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
         summary_trigger_chars = parse_summary_trigger_chars(config_dict)
@@ -843,11 +903,12 @@ class AgentExecutor:
         chat_completions_system_prompt: str | None = None
         special_instructions: str | None = None
         if backend_api_mode == "chat_completions":
-            chat_completions_system_prompt, special_instructions = (
-                self._load_chat_completions_prompts(
-                    effective_verbose=effective_verbose,
-                    logger=logger,
-                )
+            (
+                chat_completions_system_prompt,
+                special_instructions,
+            ) = await self._aload_chat_completions_prompts(
+                effective_verbose=effective_verbose,
+                logger=logger,
             )
 
         state, rendered_system_prompt = await self._abuild_run_state(
@@ -934,20 +995,6 @@ class AgentExecutor:
             )
         )
 
-        def get_pending_messages() -> list[dict]:
-            with self._lock:
-                out = self._pending_messages[:]
-                self._pending_messages.clear()
-                return out
-
-        def check_stop() -> bool:
-            with self._lock:
-                return (
-                    self._state.stop_requested
-                    if self._state is not None
-                    else False
-                )
-
         # Снимок usage до прогона: для resume треда state.usage гидрирован кумулятивом,
         # отчёт же показывает токены именно этого прогона (дельту). Тот же baseline
         # кладём на state — по нему TUI-футер считает live-«запрос» текущего хода.
@@ -964,9 +1011,7 @@ class AgentExecutor:
         # Накопленное ДО старта уходит в ПЕРВЫЙ батч, после собственных
         # сообщений прогона: клиент, которому ответили `queued`, должен попасть
         # к модели в том же запросе, а не ждать следующего хода.
-        with self._lock:
-            queued_before_loop = self._pending_messages[:]
-            self._pending_messages.clear()
+        queued_before_loop = self._take_pending_messages()
         if queued_before_loop:
             messages = [*messages, *queued_before_loop]
         try:
@@ -984,8 +1029,8 @@ class AgentExecutor:
                 pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
                 force_compact_hook=summary.aforce_compact_once,
-                get_pending_messages=get_pending_messages,
-                check_stop=check_stop,
+                get_pending_messages=self._take_pending_messages,
+                check_stop=self._is_stop_requested,
                 session_meta=(
                     thread_session.meta if thread_session is not None else None
                 ),
@@ -1003,28 +1048,7 @@ class AgentExecutor:
                 state, "terminal_outcome", None
             )
         finally:
-            # Несъеденное циклом откладываем в сторону: оно не должно молча
-            # уехать следующему прогону позади его запроса. Это НЕ граница
-            # «чистого листа»: ниже ещё `await` сноса MCP, и то, что ляжет в
-            # очередь за это время, окажется там же, где и раньше. Оба куска
-            # забирает владелец одним `take_undelivered_messages`.
-            with self._lock:
-                # КОПИМ, а не присваиваем: иначе следующий прогон затрёт хвост
-                # предыдущего пустым списком — то самое молчаливое исчезновение,
-                # ради которого всё и затевалось.
-                self._undelivered_messages.extend(self._pending_messages)
-                self._pending_messages = []
-            # Закрываем долгоживущие stdio MCP-сессии (напр. @playwright/mcp + Chromium),
-            # чтобы они не переживали конкретный запуск агента.
-            # Ждём напрямую, без потока: блокирующим в закрытии было только
-            # ожидание смерти процесса, и оно переведено на опрос. Подробности
-            # и разбор отмены — в самой `_aclose_mcp_and_release`.
-            # Отмену здесь не выпускаем: иначе учёт ниже не выполнится, а цикл
-            # уже закончился. Проброс — после записи.
-            try:
-                await _aclose_mcp_and_release(_owner_reset)
-            except asyncio.CancelledError as exc:
-                teardown_cancel = exc
+            teardown_cancel = await self._ateardown_run(_owner_reset)
 
         if teardown_cancel is not None:
             # Незавершённый цикл сюда не попадает: его исключение выходит из
@@ -1038,16 +1062,7 @@ class AgentExecutor:
         if account_run:
             await self.aclose_run_accounting()
 
-        if human_console_enabled(config_dict):
-            print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
-        if logger is not None:
-            logger.info(
-                "log_path",
-                extra={
-                    "event": "log_path",
-                    "path": getattr(self._ctx, "logging_path", None),
-                },
-            )
+        self._report_log_path(logger)
         return response
 
     def add_message(self, message: dict) -> None:

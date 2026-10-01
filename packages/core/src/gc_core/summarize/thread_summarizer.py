@@ -4,6 +4,10 @@ from gc_core.config import _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.intent_log import IntentRecord, serialize_for_meta
 from gc_core.message_format import dialog_history as dialog_history
 from gc_core.summarize import (
@@ -560,11 +564,14 @@ async def asummarize_dialog_via_chat_completions(
     max_dialogue_chars = lim.max_dialogue_chars
     max_accumulated_summary_chars = lim.max_accumulated_summary_chars
     batch_chars_limit = lim.batch_chars_limit
-    prompt_path = (
-        summary_params.get("chat_completions_summary_prompt_path")
-        or prompt_loading.default_prompt_path()
+    prompt_path = summary_params.get("chat_completions_summary_prompt_path")
+    system_prompt = await aload_prompt_resource(
+        ctx,
+        PromptResourceRequest("summary", path=prompt_path),
+        local=lambda: prompt_loading.load_prompt_template(
+            str(prompt_path or prompt_loading.default_prompt_path())
+        ),
     )
-    system_prompt = prompt_loading.load_prompt_template(str(prompt_path))
 
     history_for_summary = dialog_history.trim_history_to_max_dialogue_chars(
         full_history_messages,

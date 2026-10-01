@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 
+from gc_core.execution.state import SharedStateData
 from gc_core.intent_log.serialize import serialize_for_meta
 from gc_core.persistence.schema import (
     STATE_SCHEMA_VERSION,
@@ -13,7 +14,9 @@ from gc_core.persistence.schema import (
     serialize_shared_block,
     validate_thread_meta_for_load,
 )
-from gc_core.states import SharedStateData, State
+
+if TYPE_CHECKING:
+    from gc_core.states import State
 
 
 def read_optional_nonneg_int(value: Any) -> Optional[int]:

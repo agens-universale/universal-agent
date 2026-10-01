@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.states import State
+from gc_core.execution.state import ExecutionState as State
 
 
 def begin_turn(state: State, ctx: Any) -> None:

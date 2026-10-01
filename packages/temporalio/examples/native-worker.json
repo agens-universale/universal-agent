@@ -1,0 +1,38 @@
+{
+  "address": "localhost:7233",
+  "namespace": "default",
+  "workflow_queue": "ua-native-workflow",
+  "model_queue": "ua-native-model",
+  "resource_queue": "ua-native-resource-local",
+  "worker_id": "native-local",
+  "receipts_database": "${ENV:UA_NATIVE_STATE}/receipts.sqlite",
+  "thread_stores": {
+    "files": {
+      "kind": "file",
+      "path": "${ENV:UA_NATIVE_STATE}/threads"
+    }
+  },
+  "profiles": {
+    "production": {
+      "revision": "v1",
+      "workspace": "${ENV:UA_NATIVE_WORKSPACE}",
+      "store_id": "files",
+      "preview_stream": false,
+      "core": {
+        "backend": {
+          "api_mode": "chat_completions",
+          "completions_url": "${ENV:UA_MODEL_URL}",
+          "chat_completion_headers": {
+            "Authorization": "Bearer ${ENV:UA_MODEL_API_TOKEN}"
+          },
+          "chat_completion_kwargs": {
+            "stream": false
+          }
+        },
+        "agent": {
+          "model": "${ENV:UA_MODEL_NAME}"
+        }
+      }
+    }
+  }
+}

@@ -11,10 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.intent_guard.feedback import build_text_answer_reject_feedback
-from gc_core.intent_guard.final_report_consistency import (
-    avalidate_final_report_vs_user_intent,
-)
 from gc_core.intent_guard.guard import judge_available
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
@@ -45,6 +43,8 @@ async def ajudge_text_answer(
             finish_handoff_arguments=assistant_text,
             consumer="text_answer_judge",
         )
+    except ExecutionFailure:
+        raise
     except Exception:
         return None
 
@@ -77,3 +77,11 @@ async def ashould_return_text_answer(
             False, build_text_answer_reject_feedback(result)
         )
     return TextAnswerDecision(False)
+
+
+async def avalidate_final_report_vs_user_intent(**kwargs):
+    from gc_core.intent_guard.final_report_consistency import (
+        avalidate_final_report_vs_user_intent as validate,
+    )
+
+    return await validate(**kwargs)

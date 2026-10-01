@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import threading
+from contextlib import nullcontext
 from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -20,6 +21,7 @@ from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
 from gc_core.constants.tool_names import SESSION_MEMORY_TOOL_NAME
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution_workspace import ExecutionWorkspace
 from gc_core.intent_log.user_turn import (
     append_user_asks_from_messages,
@@ -49,6 +51,7 @@ from gc_core.model_router import (
 from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.state_preparation import prepare_state
 from gc_core.states import State
 from gc_core.summarize.config import (
     parse_summary_trigger_chars,
@@ -66,6 +69,10 @@ from gc_core.tools.subagents.progress import emit_progress
 from gc_core.tools.subagents.registry import (
     get_subagent_class,
     resolve_subagent_definitions,
+)
+from gc_core.tools.subagents.runner_preparation import (
+    PreparedChildState,
+    SubagentPreparation,
 )
 from gc_core.tools.subagents.sidecar import (
     apersist_subagent_trace,
@@ -174,9 +181,27 @@ class SubagentRunner:
     """Создаёт дочерний State и запускает run_agent для субагента."""
 
     def __init__(
-        self, ctx: Any, orchestrator_state: State, config_dict: Dict[str, Any]
+        self,
+        ctx: Any,
+        orchestrator_state: State,
+        config_dict: Dict[str, Any],
+        *,
+        preparation: Optional[SubagentPreparation] = None,
+        input_scope_factory: Optional[Callable] = None,
     ):
         self._ctx = ctx
+        self._preparation = preparation or getattr(
+            ctx, "subagent_preparation", None
+        )
+        self._input_scope_factory = (
+            input_scope_factory
+            or getattr(ctx, "subagent_input_scope_factory", None)
+            or (
+                partial(activate_child_input, thread_safe=False)
+                if getattr(ctx, "tool_effect", None) is not None
+                else activate_child_input
+            )
+        )
         self._orchestrator_state = orchestrator_state
         self._config = config_dict
         self._parent_call_id: str = ""
@@ -210,9 +235,23 @@ class SubagentRunner:
         Производственных вызывающих у них не было ни одного: ``apply_tool``
         ходит корутиной, остальные 48 вызовов жили в тестах.
         """
+        executor = getattr(self._ctx, "subagent_executor", None)
+        if executor is not None:
+            return await executor(
+                self, tool_name, arguments, parent_call_id=parent_call_id or ""
+            )
         self._parent_call_id = parent_call_id or ""
         self._active_tool_name = tool_name
-        subagent_cls = get_subagent_class(tool_name, self._config)
+        if (
+            self._preparation is None
+            and getattr(self._ctx, "tool_effect", None) is not None
+        ):
+            raise RuntimeError("Native subagents require explicit preparation")
+        subagent_cls = (
+            self._preparation.resolve_subagent(tool_name)
+            if self._preparation is not None
+            else get_subagent_class(tool_name, self._config)
+        )
         if subagent_cls is None:
             return self._error_response(
                 tool_name=tool_name,
@@ -338,6 +377,8 @@ class SubagentRunner:
                 messages=messages, child_ctx=child_ctx, **loop_kwargs
             )
             return result, child_ctx, None
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             fallback_ctx = self._maybe_pin_fallback(
                 child_ctx=child_ctx,
@@ -366,6 +407,8 @@ class SubagentRunner:
             result = await self._arun_child_loop(
                 messages=retry_messages, child_ctx=child_ctx, **loop_kwargs
             )
+        except ExecutionFailure:
+            raise
         except Exception as retry_exc:
             return (
                 None,
@@ -453,6 +496,8 @@ class SubagentRunner:
                 await instance.afinalize_role(
                     child_ctx, self._orchestrator_state
                 )
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return (
                 None,
@@ -468,6 +513,8 @@ class SubagentRunner:
 
         try:
             child_state = await self._build_child_state(agent_role)
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return (
                 None,
@@ -539,6 +586,8 @@ class SubagentRunner:
                 ),
                 **extra,
             )
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -549,6 +598,8 @@ class SubagentRunner:
 
         try:
             child_ctx = await self._build_child_ctx(tool_name=tool_name)
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             return self._error_response(
                 tool_name=tool_name,
@@ -660,9 +711,14 @@ class SubagentRunner:
             # прогон ушёл на запасной контекст (первый раньше утекал), и ранние
             # выходы после сборки контекста.
             final_child_logger = getattr(child_ctx, "logger", None)
-            release_run_logger(primary_child_logger)
-            if final_child_logger is not primary_child_logger:
-                release_run_logger(final_child_logger)
+            if self._preparation is not None:
+                await await_callback(
+                    self._preparation.release_child_context(child_ctx)
+                )
+            else:
+                release_run_logger(primary_child_logger)
+                if final_child_logger is not primary_child_logger:
+                    release_run_logger(final_child_logger)
 
     async def _arun_child_loop(
         self,
@@ -679,7 +735,7 @@ class SubagentRunner:
         Вынесено отдельно, чтобы класс-1 фоллбэк (спека §8, ``_maybe_pin_fallback``)
         мог вызвать его повторно (рестарт/деградация) со свежим scope — переиспользовать
         уже закрытый ``scope`` первой попытки небезопасно (его `__exit__` уже отработал)."""
-        with activate_child_input(
+        with self._input_scope_factory(
             self._ctx, parent_call_id=self._parent_call_id
         ) as scope:
             # Колбэк enqueue приходит из ЧУЖОГО потока: его дёргает
@@ -698,7 +754,10 @@ class SubagentRunner:
             # собираются и дожидаются на границе прогона. Лок — потому что
             # добавляет их чужой поток, а разбирает loop.
             trace_writes: list = []
-            trace_writes_lock = threading.Lock()
+            thread_safe = getattr(scope, "thread_safe", True)
+            trace_writes_lock = (
+                threading.Lock() if thread_safe else nullcontext()
+            )
 
             def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
                 prose = extract_real_user_message_text(message)
@@ -717,11 +776,13 @@ class SubagentRunner:
                 msg_id = message.get("id")
                 if isinstance(msg_id, str) and msg_id:
                     payload["id"] = msg_id
-                future = asyncio.run_coroutine_threadsafe(
-                    apersist_subagent_trace(
-                        child_ctx, kind="user", payload=payload
-                    ),
-                    loop,
+                write = apersist_subagent_trace(
+                    child_ctx, kind="user", payload=payload
+                )
+                future = (
+                    asyncio.run_coroutine_threadsafe(write, loop)
+                    if thread_safe
+                    else asyncio.create_task(write)
                 )
                 with trace_writes_lock:
                     trace_writes.append(future)
@@ -747,7 +808,12 @@ class SubagentRunner:
                 # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
                 # добавляет futures, и дренаж гонялся бы за собственным хвостом.
                 scope.set_on_enqueue(None)
-                await _drain_trace_writes(trace_writes, trace_writes_lock)
+                if thread_safe:
+                    await _drain_trace_writes(trace_writes, trace_writes_lock)
+                # Signals and the child loop share one event loop. Await all
+                # sidecar writes before returning; storage failure propagates.
+                elif trace_writes:
+                    await asyncio.gather(*trace_writes)
 
     def _maybe_pin_fallback(
         self,
@@ -914,6 +980,9 @@ class SubagentRunner:
         # Live spend → касса родителя (футер TUI читает parent state.usage).
         self._push_usage_delta(child_state, child_ctx)
         self._push_tool_calls_delta(child_state)
+        checkpoint = getattr(self._ctx, "subagent_checkpoint", None)
+        if checkpoint is not None:
+            checkpoint(self._orchestrator_state, self._ctx)
 
     def _build_child_config(self) -> Dict[str, Any]:
         """Единственная сборка конфига дочернего рана.
@@ -933,6 +1002,8 @@ class SubagentRunner:
         ``_build_child_model_router``) утекла бы в ``self._config`` и оттуда —
         во все последующие ходы/субагентов сессии.
         """
+        if self._preparation is not None:
+            return self._preparation.build_child_config(self)
         child_config = {**self._config, "use_local_subagents": False}
         for key in _CHILD_CONFIG_DEEP_COPY_KEYS:
             if key in child_config:
@@ -1017,8 +1088,7 @@ class SubagentRunner:
             unbound_override=resolved,
         )
 
-    async def _build_child_state(self, agent_role: str) -> State:
-        """Создать дочерний State, наследуя общие данные от оркестратора."""
+    async def _prepare_local_child_state(self) -> PreparedChildState:
         child_config = self._build_child_config()
         parent_backend = getattr(self._ctx, "os_backend", None)
         (
@@ -1039,17 +1109,42 @@ class SubagentRunner:
         child_system_prompt = self._resolve_subagent_system_prompt()
 
         parent = self._orchestrator_state
-        child_state = await State.acreate(
+        prepared = await prepare_state(
+            workspace_config=child_config,
+            workspace=getattr(parent, "workspace", None),
+            agent_md_path=parent.agent_md_path,
+            verbose=parent.verbose,
+            logger=parent.logger,
+        )
+        return PreparedChildState(
+            child_config,
+            child_tools_spec,
+            child_tools_descr,
+            child_system_prompt,
+            prepared,
+        )
+
+    async def _build_child_state(self, agent_role: str) -> State:
+        """Assemble the same State from local or externally prepared facts."""
+        prepared = (
+            await self._preparation.prepare_child_state(self)
+            if self._preparation is not None
+            else await self._prepare_local_child_state()
+        )
+        child_config = prepared.config_dict
+        parent = self._orchestrator_state
+        child_state = State.from_prepared(
+            prepared.state,
             parent_state_id=parent.state_id,
             verbose=parent.verbose,
             model=parent.default_model,
-            tools_spec=child_tools_spec,
-            tools_descr=child_tools_descr,
+            tools_spec=prepared.tools_spec,
+            tools_descr=prepared.tools_description,
             skills_list=parent.skills_list,
             max_steps=self._config.get("subagent_max_steps", 50),
             system_prompt_id=parent.system_prompt_id,
             use_server_subagents=False,
-            chat_completions_system_prompt=child_system_prompt,
+            chat_completions_system_prompt=prepared.system_prompt,
             specific_role=agent_role,
             agent_md_path=parent.agent_md_path,
             shared=parent.shared,
@@ -1153,6 +1248,11 @@ class SubagentRunner:
 
     async def _build_child_ctx(self, tool_name: str) -> Any:
         """Построить RunContext для дочернего агента (без субагентов в tools)."""
+        if self._preparation is not None:
+            child_ctx = await self._preparation.build_child_context(
+                self, tool_name
+            )
+            return self._bind_child_context(child_ctx, tool_name)
         child_config = self._build_child_config()
         child_router = self._build_child_model_router(tool_name, child_config)
         child_run_id = generate_run_id()
@@ -1216,6 +1316,10 @@ class SubagentRunner:
             # платили бы полную дискавери на каждый спавн.
             tools_cache=getattr(self._ctx, "tools_cache", None),
         )
+        return self._bind_child_context(child_ctx, tool_name)
+
+    def _bind_child_context(self, child_ctx: Any, tool_name: str) -> Any:
+        """Common parent identity, shared human frontend and sidecar binding."""
         # Режим родителя (C3 gc.force_collect default on CLI/TUI) — наследуем,
         # иначе child process_tool_calls видит оба флага False и collect выключается.
         child_ctx.is_tui = bool(getattr(self._ctx, "is_tui", False))
@@ -1268,7 +1372,8 @@ class SubagentRunner:
         # файловое хранилище по умолчанию. У встраивающего, отдавшего свой стор
         # (`AsyncAgent.create(cfg, thread_store=…)`), трасса либо терялась, либо
         # ложилась на диск хоста мимо него.
-        child_ctx.thread_store = getattr(self._ctx, "thread_store", None)
+        if getattr(child_ctx, "thread_store", None) is None:
+            child_ctx.thread_store = getattr(self._ctx, "thread_store", None)
         child_ctx.subagent_tool_name = tool_name
         return child_ctx
 

@@ -10,10 +10,11 @@ import json
 import threading
 from typing import Callable, List, Optional
 
-import httpx
-
 from gc_core.startup_notices import Notice
-from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_core.utils.backend_errors import (
+    EmbeddedChoiceError,
+    is_http_status_error,
+)
 from gc_core.utils.chat_completions_stream import BackendStreamError
 
 _MAX_NOTICES = 50
@@ -152,7 +153,7 @@ def _http_status_and_body(exc: BaseException) -> tuple[Optional[int], str]:
     # `httpx`, а не `requests`: ядро ходит в сеть только через него. У обоих
     # исключений форма одинаковая (`exc.response.status_code` / `.text`), но
     # вторая библиотека держалась в зависимостях ровно ради этой строки.
-    if isinstance(exc, httpx.HTTPStatusError):
+    if is_http_status_error(exc):
         resp = getattr(exc, "response", None)
         status = getattr(resp, "status_code", None)
         try:

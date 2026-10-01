@@ -8,7 +8,9 @@
 
 from __future__ import annotations
 
+import inspect
 import json
+from functools import wraps
 from pathlib import Path
 from typing import Optional, Sequence
 
@@ -20,10 +22,26 @@ from gc_core.thread_store import (
     delete_thread,
     discard_message_by_id,
     read_subagent_trace,
+    update_tui_meta,
 )
+from gc_core.thread_store_journal import thread_read_scope
 
 from gc_tui.models import TailResult, TaskCursor, TaskSummary
 from gc_tui.services.trace_mapper import _clean_summary
+
+
+def _coherent_thread_read(method):
+    """Keep epoch, file bytes and cursor in one recovered store snapshot."""
+    signature = inspect.signature(method)
+
+    @wraps(method)
+    def read(self, task_id, *args, **kwargs):
+        arguments = signature.bind(self, task_id, *args, **kwargs).arguments
+        system = arguments.get("system") or self._system
+        with thread_read_scope(str(self._dir), system, task_id):
+            return method(self, task_id, *args, **kwargs)
+
+    return read
 
 
 class FileTaskStore:
@@ -48,9 +66,9 @@ class FileTaskStore:
             # live-meta с тем же thread_id, в picker /sessions не должны попадать.
             if "__pre_summary__" in meta_path.name:
                 continue
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
+            candidate_id = meta_path.stem[len(prefix) :]
+            meta = self.get_task_meta(candidate_id)
+            if not meta:
                 continue
             tid = meta.get("thread_id") or meta_path.stem[len(prefix) :]
             # Исход сессии: TUI-владелец пишет в meta.tui.status (completed/stopped/
@@ -86,6 +104,7 @@ class FileTaskStore:
 
     # ---- per-task -----------------------------------------------------
 
+    @_coherent_thread_read
     def get_task_meta(
         self, task_id: str, system: Optional[str] = None
     ) -> dict:
@@ -104,20 +123,7 @@ class FileTaskStore:
     ) -> None:
         """Объединяет patch с meta.tui sub-dict и сохраняет (TUI-owned)."""
         sys_ = system or self._system
-        meta_path = self._meta_path(task_id, sys_)
-        meta = self.get_task_meta(task_id, system=sys_)
-        if not meta:
-            meta = {"thread_id": task_id, "system_id": sys_}
-        tui_meta = dict(meta.get("tui") or {})
-        tui_meta.update(patch)
-        meta["tui"] = tui_meta
-        # Fresh project dir: TUI may write meta before the executor's first write
-        # (TraceScreen._track_pending on the very first send), so the threads dir
-        # need not exist yet. Own our write — create the dir.
-        meta_path.parent.mkdir(parents=True, exist_ok=True)
-        meta_path.write_text(
-            json.dumps(meta, ensure_ascii=False), encoding="utf-8"
-        )
+        update_tui_meta(str(self._dir), sys_, task_id, patch)
 
     def delete_task(self, task_id: str, system: Optional[str] = None) -> None:
         """Полностью удалить тред (все формы файлов). Делегирует в thread_store."""
@@ -156,9 +162,6 @@ class FileTaskStore:
     def _data_path(self, task_id: str, system: str) -> Path:
         return self._dir / f"data_{system}_{task_id}.jsonl"
 
-    def _meta_path(self, task_id: str, system: str) -> Path:
-        return self._dir / f"meta_{system}_{task_id}.json"
-
     def _read_epoch(self, task_id: str, system: str) -> Optional[str]:
         meta = self.get_task_meta(task_id, system=system)
         if "last_summary_archive_suffix" in meta:
@@ -177,6 +180,7 @@ class FileTaskStore:
             return None
         return rec
 
+    @_coherent_thread_read
     def read_all_events(
         self, task_id: str, system: Optional[str] = None
     ) -> tuple[list[dict], TaskCursor]:
@@ -217,6 +221,7 @@ class FileTaskStore:
             user_content_to_text(payload.get("content"))
         )
 
+    @_coherent_thread_read
     def read_raw_thread_jsonl(
         self, task_id: str, system: Optional[str] = None
     ) -> str:
@@ -235,6 +240,7 @@ class FileTaskStore:
             files.append(live)
         return "".join(f.read_text(encoding="utf-8") for f in files)
 
+    @_coherent_thread_read
     def read_segments(
         self, task_id: str, system: Optional[str] = None
     ) -> list[dict]:
@@ -302,6 +308,7 @@ class FileTaskStore:
             )
         return segments
 
+    @_coherent_thread_read
     def read_live_messages(
         self, task_id: str, system: Optional[str] = None
     ) -> list[dict]:
@@ -320,6 +327,7 @@ class FileTaskStore:
                     out.append(payload)
         return out
 
+    @_coherent_thread_read
     def tail_events(
         self, task_id: str, cursor: TaskCursor, system: Optional[str] = None
     ) -> TailResult:

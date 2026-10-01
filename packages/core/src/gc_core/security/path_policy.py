@@ -10,8 +10,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
-from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.trace_id import trace_id_from_config
+
+_WRITE_GUARD_TITLE = "Защита записи"
 
 
 @dataclass(frozen=True)
@@ -219,7 +223,19 @@ def _protected_write_block(
     _cfg = getattr(context.ctx, "config_dict", None) or {}
     if not protection_enabled(_cfg):
         return None
-    _decision = protected_decision(candidate_path, cwd=context.launch_root)
+    if callable(getattr(context.ctx, "guard_probe", None)):
+        facts = yield probe_step(
+            context.ctx,
+            GuardProbeRequest(
+                "protected_write",
+                _tool_name(func, args),
+                candidate_path,
+                context.launch_root,
+            ),
+        )
+        _decision = facts.protected_decision
+    else:
+        _decision = protected_decision(candidate_path, cwd=context.launch_root)
     if _decision == "deny":
         _err = {
             "type": "protected_path_denied",
@@ -243,16 +259,13 @@ def _protected_write_block(
         # Ожидание человека уходит в поток: в TUI это до 600 с, и
         # на event loop вместе с ним встали бы субагенты и
         # keep-alive MCP-сессий. Исполняет драйвер `dual_wrap`.
-        _ok = yield OffLoop(
-            functools.partial(
-                request_confirm,
-                title="Защита записи",
-                question=f"Разрешить запись в {candidate_path}?",
-                fields=[("path", candidate_path)],
-                ctx=context.ctx,
-                decision_key=f"write:{candidate_path}",
-            ),
-            on_interrupt=False,
+        _ok = yield confirmation_step(
+            local_request=request_confirm,
+            title=_WRITE_GUARD_TITLE,
+            question=f"Разрешить запись в {candidate_path}?",
+            fields=[("path", candidate_path)],
+            ctx=context.ctx,
+            decision_key=f"write:{candidate_path}",
         )
         if not _ok:
             _err = {
@@ -302,8 +315,18 @@ def _resolve_write_violation(
     if wg_mode == "ask":
         # Тот же приём, что и у защищённых путей выше: подтверждение
         # ждётся в потоке, а не на event loop вызывающего.
-        confirmed = yield OffLoop(
-            functools.partial(
+        confirmed = yield confirmation_step(
+            title=_WRITE_GUARD_TITLE,
+            question=f"Разрешить запись вне периметра проекта в {candidate_path}?",
+            fields=[
+                ("Tool", tool_name),
+                ("Operation", operation),
+                ("Path", candidate_path),
+                ("Allowed roots", exc.error.get("allowed_write_roots") or []),
+            ],
+            ctx=context.ctx,
+            decision_key=f"write:{candidate_path}",
+            local_wait=functools.partial(
                 _ask_user_confirmation_for_write,
                 tool_name=tool_name,
                 path=candidate_path,
@@ -312,7 +335,6 @@ def _resolve_write_violation(
                 ctx=context.ctx,
                 decision_key=f"write:{candidate_path}",
             ),
-            on_interrupt=False,
         )
         if confirmed:
             audit_policy_decision(
@@ -349,6 +371,37 @@ def _resolve_write_violation(
     )
 
 
+def check_write_guard_path(candidate_path, context, tool_name, operation):
+    """Apply the same write perimeter check to decorators and internal writes."""
+    if callable(getattr(context.ctx, "guard_probe", None)):
+        facts = yield probe_step(
+            context.ctx,
+            GuardProbeRequest(
+                "write_path",
+                tool_name,
+                candidate_path,
+                context.launch_root,
+                operation,
+            ),
+        )
+        if facts.violation is not None:
+            error = facts.violation
+            raise WriteGuardViolation(
+                launch_root=error["launch_root"],
+                allowed_write_roots=error["allowed_write_roots"],
+                path=error["path"],
+                operation=error["operation"],
+            )
+    else:
+        check_write_path_allowed(
+            candidate_path,
+            context.launch_root,
+            context.write_guard.extra_paths,
+            base_dir=context.launch_root,
+            operation=operation,
+        )
+
+
 def _write_guard_flow(
     func,
     args,
@@ -362,17 +415,9 @@ def _write_guard_flow(
     context = resolve_tool_context(*args, **kwargs)
     # Floor carve-out: runs BEFORE the write_guard.enabled gate so it
     # applies unconditionally (Spec B §6).
-    try:
-        candidate_path = _extract_named_value(
-            func,
-            args,
-            kwargs,
-            path_arg,
-            path_extractor,
-            "path",
-        )
-    except ValueError:
-        candidate_path = None
+    _, candidate_path = _guard_path_argument(
+        func, args, kwargs, path_arg, path_extractor
+    )
     if candidate_path is not None:
         blocked = yield from _protected_write_block(
             candidate_path,
@@ -393,24 +438,14 @@ def _write_guard_flow(
         )
         return (yield)
     if candidate_path is None:
-        try:
-            candidate_path = _extract_named_value(
-                func,
-                args,
-                kwargs,
-                path_arg,
-                path_extractor,
-                "path",
-            )
-        except ValueError:
+        extracted, candidate_path = _guard_path_argument(
+            func, args, kwargs, path_arg, path_extractor
+        )
+        if not extracted:
             return (yield)
     try:
-        check_write_path_allowed(
-            candidate_path,
-            context.launch_root,
-            context.write_guard.extra_paths,
-            base_dir=context.launch_root,
-            operation=operation,
+        yield from check_write_guard_path(
+            candidate_path, context, _tool_name(func, args), operation
         )
     except WriteGuardViolation as exc:
         allowed, blocked = yield from _resolve_write_violation(
@@ -511,6 +546,16 @@ def _extract_config_dict(
     if isinstance(self_config, dict):
         return self_config
     return {}
+
+
+def _guard_path_argument(func, args, kwargs, path_arg, path_extractor):
+    """Keep extractor values intact; missing paths defer to tool validation."""
+    try:
+        return True, _extract_named_value(
+            func, args, kwargs, path_arg, path_extractor, "path"
+        )
+    except ValueError:
+        return False, None
 
 
 def _extract_named_value(
@@ -760,7 +805,7 @@ def _ask_user_confirmation_for_write(
     from gc_core.security.confirm_port import request_confirm
 
     return request_confirm(
-        title="Защита записи",
+        title=_WRITE_GUARD_TITLE,
         question=f"Разрешить запись вне периметра проекта в {path}?",
         fields=[
             ("Tool", tool_name),

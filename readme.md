@@ -163,6 +163,7 @@ assign:
 - [Установка и запуск](docs/usage.md) — установка (uv/pip), запуск, ключи CLI.
 - [Упаковка и профили](docs/packaging.md) — как пять дистрибутивов собираются из одного репозитория, почему у частичных профилей `#subdirectory=`, как обновление сохраняет профиль.
 - [Тесты](docs/testing.md) — наборы при пакетах (`packages/*/tests`), общий тест-кит, `external/*`, полный прогон.
+- [Temporal](docs/temporal.md) — opt-in runtime: durable сессии, model/tool activities, MCP и child workflows.
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
 - [Сабагенты](docs/subagents.md) — делегирование задач, кастомные сабагенты, лимиты и бюджет вызовов.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.

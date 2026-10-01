@@ -44,6 +44,9 @@ def _matches(file_matcher, rel: str) -> bool:
 class ListFiles(AbstractSimpleTool):
     """List files and directories under a path with optional depth and glob filter."""
 
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
+
     @classmethod
     def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
         return {

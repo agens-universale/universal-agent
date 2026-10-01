@@ -1,11 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import html as html_lib
 import os
 import re
 from typing import Any, Dict, Optional
-
-import httpx
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import resolve_tool_context
@@ -193,6 +193,8 @@ class SimpleFetchUrl(FetchUrlBase):
         normalized_proxy,
     ):
         """(response, None) либо (None, kwargs ошибки для _result)."""
+        import httpx
+
         attempts = 1 + self.max_retries
         # Политику берём ТЕМ ЖЕ путём, что и гвард `enforce_url_policy`, —
         # через `resolve_tool_context`. Политика лежит на ВЕРХНЕМ уровне

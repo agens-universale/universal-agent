@@ -159,3 +159,12 @@ def test_heartbeat_does_not_touch_meta(tmp_path):
     assert try_acquire(str(tmp_path), "cli", "t1", "me") is True
     heartbeat(str(tmp_path), "cli", "t1", "me", last_mono=0.0, mono=2.0)
     assert meta.read_text(encoding="utf-8") == before
+
+
+def test_heartbeat_after_reset_cannot_resurrect_lease(tmp_path):
+    from gc_core.thread_store import reset_thread_files
+
+    assert try_acquire(str(tmp_path), "cli", "t1", "holder")
+    reset_thread_files(str(tmp_path), "cli", "t1")
+    assert heartbeat(str(tmp_path), "cli", "t1", "holder", mono=10) == 0
+    assert read_lock(lock_path(str(tmp_path), "cli", "t1")) is None

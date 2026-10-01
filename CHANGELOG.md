@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Feature — нативный Temporal backend
+
+- Добавлен опциональный пакет `gc-ua-temporalio`: штатные `AgentExecutor` и `ThreadSession` работают через workflow, а обращения к модели, внешние эффекты инструментов и операции хранилища выполняются в activities. Локальное исполнение остаётся режимом по умолчанию.
+- Добавлены native worker/client, backend `temporal-native` для server и remote CLI/TUI, подтверждения, stop, дочерние workflow и управление persistent MCP-ресурсами.
+- FileThreadStore и SQLite поддерживают квитанции операций и восстановление записи; неопределённый исход внешнего эффекта требует явного операторского решения. Continue-As-New сохраняет очередь доставки, включая большие checkpoint.
+- Конфигурация, архитектура и ограничения текущего deployment описаны в [документации Temporal](docs/temporal-configuration.md). Legacy workflow сохранён отдельно; автоматическая миграция его истории не выполняется.
+
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
 - When the main agent or a subagent hits a limit (`step_limit` / `tool_call_limit` / `token_limit`), the trace is now summarized by a single auxiliary LLM call and returned as a JSON envelope `{ok:false, status, message, raw_trace_summary}` instead of a flat string.

@@ -4,9 +4,10 @@ import json
 import logging
 from typing import Any, Callable, Dict, List, Optional
 
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.intent_guard.agent_logging import log_finish_gate_output_patched
+from gc_core.intent_guard.finish_output import apply_finish_gate_decision
 from gc_core.intent_guard.guard import FinishGateDecision
-from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_core.utils.aio_compat import await_callback
 
 _logger = logging.getLogger(__name__)
@@ -65,9 +66,7 @@ async def apply_finish_gate_to_turn_finish_output_in_state(
         )
         return False
 
-    patched_output = SubmitSolution.apply_finish_gate_decision(
-        raw_output, decision
-    )
+    patched_output = apply_finish_gate_decision(raw_output, decision)
     updated_message = patch_function_call_output(
         state.messages,
         call_id=finish_call_id,
@@ -106,6 +105,8 @@ async def apply_finish_gate_to_turn_finish_output_in_state(
     if persist_messages_callback is not None:
         try:
             await await_callback(persist_messages_callback([updated_message]))
+        except ExecutionFailure:
+            raise
         except Exception as exc:
             log.warning(
                 "finish_gate finish_turn_output_persist_warning call_id=%s error=%s",

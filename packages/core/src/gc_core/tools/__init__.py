@@ -1,10 +1,18 @@
-import difflib
 import json
 import logging
-from typing import Any, Dict, Iterable, Optional, Tuple
+from collections import OrderedDict
+from copy import deepcopy
+from types import SimpleNamespace
+from typing import Any, Dict, Optional, Tuple
 
 from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.backends.protocol import FsBackend
+from gc_core.execution.contracts import (
+    ExecutionFailure,
+    StateDelta,
+    ToolResult,
+)
+from gc_core.execution.reducers import apply_state_delta, tool_state_view
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
@@ -26,114 +34,24 @@ from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.selection import subagents_enabled
 
 _fallback_logger = logging.getLogger(__name__)
-_LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
-
-INTERNAL_TOOL_ERROR = "internal_tool_error"
-_INTERNAL_TOOL_ERROR_MESSAGE_CAP = 500
-_INTERNAL_TOOL_ERROR_GUIDANCE_CAP = 800
-_INTERNAL_TOOL_ERROR_GUIDANCE = (
-    "Client runtime failed while executing the tool "
-    "(not an arguments-schema rejection). "
-    "Do not retry the identical call hoping for a different schema outcome. "
-    "Change strategy, pick another tool, or report the failure if the task is blocked."
+from gc_core.execution.tool_feedback import (
+    INTERNAL_TOOL_ERROR as INTERNAL_TOOL_ERROR,
 )
-
-
-def _truncate_for_tool_output(text: str, cap: int) -> str:
-    if cap <= 0:
-        return ""
-    if len(text) <= cap:
-        return text
-    if cap <= 3:
-        return text[:cap]
-    return text[: cap - 3] + "..."
-
-
-def format_internal_tool_error_output(
-    *,
-    tool_name: str | None,
-    exc: BaseException,
-    call_id: str | None = None,
-) -> str:
-    """Slim JSON tool output for unexpected exceptions in apply_tool (no traceback)."""
-    message = str(exc).strip()
-    if not message:
-        message = type(exc).__name__
-    message = _truncate_for_tool_output(
-        message.replace("\n", " ").strip(),
-        _INTERNAL_TOOL_ERROR_MESSAGE_CAP,
-    )
-    guidance = _truncate_for_tool_output(
-        _INTERNAL_TOOL_ERROR_GUIDANCE,
-        _INTERNAL_TOOL_ERROR_GUIDANCE_CAP,
-    )
-    payload: Dict[str, Any] = {
-        "ok": False,
-        "error": INTERNAL_TOOL_ERROR,
-        "exception_type": type(exc).__name__,
-        "message": message,
-        "guidance": guidance,
-    }
-    if isinstance(tool_name, str) and tool_name:
-        payload["tool"] = tool_name
-    if isinstance(call_id, str) and call_id:
-        payload["call_id"] = call_id
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def is_internal_tool_error_output(output: str) -> bool:
-    if not isinstance(output, str) or not output:
-        return False
-    try:
-        parsed = json.loads(output)
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(parsed, dict):
-        return False
-    return (
-        parsed.get("ok") is False
-        and parsed.get("error") == INTERNAL_TOOL_ERROR
-    )
-
-
-def format_unknown_tool_output(
-    tool_name: str, available_names: Iterable[str]
-) -> str:
-    suggestions = difflib.get_close_matches(
-        tool_name, list(available_names), n=5, cutoff=0.3
-    )
-    error_message = f"No tool named '{tool_name}' on client."
-    use_only = "Use only tools from the provided tool list in section <tools> in system prompt."
-    if suggestions:
-        message = f"Unknown tool '{tool_name}'. Maybe you mean tools: {', '.join(suggestions)}. {use_only}"
-    else:
-        message = f"Unknown tool '{tool_name}'. {use_only}"
-    payload = {
-        "ok": False,
-        "error": {
-            "type": "unknown_tool",
-            "message": error_message,
-            "requested": tool_name,
-            "suggestions": suggestions,
-        },
-        "message": message,
-    }
-    return json.dumps(payload, ensure_ascii=False)
-
-
-def is_unknown_tool_output(output: str) -> bool:
-    if not isinstance(output, str) or not output:
-        return False
-    if _LEGACY_UNKNOWN_TOOL_MARKER in output:
-        return True
-    try:
-        parsed = json.loads(output)
-    except (TypeError, ValueError):
-        return False
-    if not isinstance(parsed, dict):
-        return False
-    error = parsed.get("error")
-    return isinstance(error, dict) and error.get("type") == "unknown_tool"
+from gc_core.execution.tool_feedback import (
+    _truncate_for_tool_output as _truncate_for_tool_output,
+)
+from gc_core.execution.tool_feedback import (
+    format_internal_tool_error_output as format_internal_tool_error_output,
+)
+from gc_core.execution.tool_feedback import (
+    format_unknown_tool_output as format_unknown_tool_output,
+)
+from gc_core.execution.tool_feedback import (
+    is_internal_tool_error_output as is_internal_tool_error_output,
+)
+from gc_core.execution.tool_feedback import (
+    is_unknown_tool_output as is_unknown_tool_output,
+)
 
 
 def _ensure_spec_has_required(spec: Dict[str, Any]) -> None:
@@ -477,10 +395,12 @@ def _config_dict_for_call(
     return cfg if isinstance(cfg, dict) else {}
 
 
-def _logger_for_call(ctx: Optional[Any]) -> logging.Logger:
+def _logger_for_call(
+    ctx: Optional[Any],
+) -> logging.Logger | logging.LoggerAdapter:
     if ctx is not None and hasattr(ctx, "logger"):
         candidate = ctx.logger
-        if isinstance(candidate, logging.Logger):
+        if isinstance(candidate, (logging.Logger, logging.LoggerAdapter)):
             return candidate
     return _fallback_logger
 
@@ -650,7 +570,7 @@ def _tool_failure_output(
     log = _fallback_logger
     if ctx is not None and hasattr(ctx, "logger"):
         candidate = ctx.logger
-        if isinstance(candidate, logging.Logger):
+        if isinstance(candidate, (logging.Logger, logging.LoggerAdapter)):
             log = candidate
 
     if not isinstance(call_id, str):
@@ -676,7 +596,7 @@ def _tool_result_to_text(res: Any) -> str:
     return str(res)
 
 
-async def aapply_tool(
+async def _aapply_tool_text(
     tool_name: str,
     arguments: str | Dict[str, Any],
     tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
@@ -711,7 +631,28 @@ async def aapply_tool(
             f"Tool {tool_name!r} ({type(tool).__name__}) has no acall(); the tool contract is async-only"
         )
     try:
-        res = await acall(**args)
+        from gc_core.execution.tool_effects import (
+            invoke_native_tool,
+            uses_leaf_effect,
+        )
+
+        if callable(getattr(ctx, "tool_effect", None)) and uses_leaf_effect(
+            tool_name, tool
+        ):
+            res = await invoke_native_tool(
+                tool,
+                tool_name,
+                args,
+                ctx=ctx,
+                state=kwargs.get("state"),
+                call_id=kwargs.get("call_id"),
+                operation_id=kwargs.get("tool_operation_id")
+                or str(kwargs.get("call_id") or "tool"),
+            )
+        else:
+            res = await acall(**args)
+    except ExecutionFailure:
+        raise
     except Exception as e:
         return annotate_output_with_dropped_arguments(
             _tool_failure_output(
@@ -727,10 +668,82 @@ async def aapply_tool(
     )
 
 
+async def aapply_tool_result(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
+    ctx: Optional[Any] = None,
+    **kwargs: Any,
+) -> ToolResult:
+    """Run a tool and return its explicitly owned state changes.
+
+    Stateful session tools receive a small private view, not the live State.
+    Other legacy tools keep their local contract; durable runtimes must opt in
+    only tools whose external effects and required state they can represent.
+    """
+    state = kwargs.get("state")
+    before = None
+    view = None
+    if (
+        tool_name in ("session_memory", "session_todo", "exec_fetch_url")
+        and state is not None
+    ):
+        before = tool_state_view(state)
+        view = SimpleNamespace(
+            shared=SimpleNamespace(
+                working_memory=deepcopy(before.working_memory),
+                fetch_url_cache=OrderedDict(deepcopy(before.fetch_url_cache)),
+            ),
+            session_todo=deepcopy(before.session_todo),
+        )
+        kwargs = {**kwargs, "state": view}
+    output = await _aapply_tool_text(
+        tool_name, arguments, tools_data_, ctx, **kwargs
+    )
+    delta = StateDelta()
+    if view is not None:
+        if view.shared.working_memory != before.working_memory:
+            delta.working_memory = deepcopy(view.shared.working_memory)
+        if view.session_todo != before.session_todo:
+            delta.session_todo = deepcopy(view.session_todo)
+        cache = [
+            [key, deepcopy(value)]
+            for key, value in view.shared.fetch_url_cache.items()
+        ]
+        if cache != before.fetch_url_cache:
+            delta.fetch_url_cache = cache
+    from gc_core.tools.subagents.progress import parse_tool_result_status
+
+    ok, _ = parse_tool_result_status(output)
+    return ToolResult(
+        output=output,
+        outcome="tool_error" if ok is False else "ok",
+        delta=delta,
+    )
+
+
+async def aapply_tool(
+    tool_name: str,
+    arguments: str | Dict[str, Any],
+    tools_data_: Optional[Dict[str, Dict[str, Any]]] = None,
+    ctx: Optional[Any] = None,
+    **kwargs: Any,
+) -> str:
+    """Compatible string API; the runner applies explicit state deltas once."""
+    result = await aapply_tool_result(
+        tool_name, arguments, tools_data_, ctx, **kwargs
+    )
+    state = kwargs.get("state")
+    if state is not None:
+        apply_state_delta(state, result.delta)
+    return result.output
+
+
 __all__ = [
     "INTERNAL_TOOL_ERROR",
     "WrongFunctionArgumentsException",
     "aapply_tool",
+    "aapply_tool_result",
     "format_internal_tool_error_output",
     "format_unknown_tool_output",
     "is_internal_tool_error_output",

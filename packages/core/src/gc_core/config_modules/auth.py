@@ -1,7 +1,10 @@
-from typing import Any, Dict, Optional
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Dict, Optional
 from uuid import uuid4
 
-from gc_core.utils.prod_auth import AuthConnector
+if TYPE_CHECKING:
+    from gc_core.utils.prod_auth import AuthConnector
 
 
 def build_auth_connector(
@@ -11,6 +14,8 @@ def build_auth_connector(
     auth_cfg = config_dict.get("agent_auth") or {}
     if not auth_cfg:
         return None
+
+    from gc_core.utils.prod_auth import AuthConnector
 
     entry_point = auth_cfg.get("auth_endpoint")
     if not entry_point:

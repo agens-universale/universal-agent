@@ -10,7 +10,6 @@ from gc_core.intent_scope.agent_logging import (
     log_intent_scope_skipped,
 )
 from gc_core.intent_scope.append import append_final_answer_to_current
-from gc_core.intent_scope.summarizer import asummarize_final_answer_line
 
 _logger = logging.getLogger(__name__)
 _LABEL = "final_answer"
@@ -76,3 +75,11 @@ async def amaybe_record_final_answer_intent(
         return
 
     log_intent_scope_skipped(log, tool_name=_LABEL, reason="empty_summary")
+
+
+async def asummarize_final_answer_line(**kwargs):
+    from gc_core.intent_scope.summarizer import (
+        asummarize_final_answer_line as summarize,
+    )
+
+    return await summarize(**kwargs)

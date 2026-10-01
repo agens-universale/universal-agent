@@ -71,6 +71,9 @@ def _line_window(total_lines: int, offset, limit) -> "tuple[int, int]":
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ReadFile(AbstractSimpleTool):
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
+
     def _result(
         self,
         *,

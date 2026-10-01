@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
@@ -16,6 +18,11 @@ from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     intent_scope_from_config_dict,
 )
+from gc_core.context_preparation import PreparedRunContext, RunContextBindings
+from gc_core.execution.contracts import ToolEffectExecutor
+from gc_core.execution.guard_contracts import GuardProbe
+from gc_core.execution.human import HumanRequester
+from gc_core.execution.ports import AgentOperations
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
@@ -23,11 +30,15 @@ from gc_core.execution_workspace import (
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.run_preparation import PromptLoader
+from gc_core.state_preparation import StatePreparer
 from gc_core.tools import abuild_tools_data
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
-from gc_core.utils.prod_auth import AuthConnector
+
+if TYPE_CHECKING:
+    from gc_core.utils.prod_auth import AuthConnector
 
 
 @dataclass
@@ -68,6 +79,22 @@ class RunContext:
     # Внешний trace_id этого рана; "" = отсутствует. Производное чтение
     # config_dict["trace_id"] — источник правды один, вычисление в одном месте
     # (create_run_context), чтобы значения не разъехались.
+    operations: Optional[AgentOperations] = None
+    # None keeps local file loading. External runtimes supply prepared values
+    # without changing prompt assembly or serializing live clients/loggers.
+    prompt_loader: Optional[PromptLoader] = None
+    state_preparer: Optional[StatePreparer] = None
+    human_request: Optional[HumanRequester] = None
+    guard_probe: Optional[GuardProbe] = None
+    tool_effect: Optional[ToolEffectExecutor] = None
+    lock_factory: Any = None
+    skills_loader: Any = None
+    mcp_cleanup: Any = None
+    prompt_resource: Any = None
+    project_memory_io: Any = None
+    project_memory_hash: Any = None
+    summary_trace_sink: Any = None
+    collect_garbage: Any = None
     trace_id: str = ""
     mcp_status: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     # Имена тулов до вычитания stop_tools. Валидатор сверяется с этим набором:
@@ -105,6 +132,68 @@ class RunContext:
     mcp_session_owner: str = ""
 
 
+def assemble_run_context(
+    prepared: PreparedRunContext, bindings: RunContextBindings
+) -> RunContext:
+    """Build the real RunContext from prepared values and explicit resources.
+
+    Both local creation and durable execution use this constructor. Discovery,
+    workspace probes, logging files and provider clients belong to preparation.
+    """
+    if prepared.schema_version != 1:
+        raise ValueError("Unsupported PreparedRunContext schema_version")
+    workspace = ExecutionWorkspace(
+        root=prepared.workspace_root,
+        backend=bindings.os_backend,
+        shell=prepared.workspace_shell,
+        os_name=prepared.workspace_os_name,
+        root_writable=prepared.workspace_root_writable,
+    )
+    ctx = RunContext(
+        config_dict=prepared.config_dict,
+        run_id=prepared.run_id,
+        trace_id=prepared.trace_id,
+        auth_connector=bindings.auth_connector,
+        logger=bindings.logger,
+        logging_path=prepared.logging_path,
+        summary_trace_path=prepared.summary_trace_path,
+        auxiliary_llm=auxiliary_llm_from_config_dict(prepared.config_dict),
+        intent_scope=intent_scope_from_config_dict(prepared.config_dict),
+        tools_data=bindings.tools_data,
+        tools_spec=prepared.tools_spec,
+        tools_description=prepared.tools_description,
+        mcp_status=prepared.mcp_status,
+        registered_tool_names=set(prepared.registered_tool_names),
+        project_gc_dir=Path(prepared.project_gc_dir),
+        environment=bindings.environment,
+        os_backend=bindings.os_backend,
+        skills_registry=bindings.skills_registry,
+        workspace=workspace,
+        model_router=bindings.model_router,
+        on_stream_delta=bindings.on_stream_delta,
+        on_messages_evicted=bindings.on_messages_evicted,
+        mcp_session_owner=prepared.mcp_session_owner,
+        tools_cache=bindings.tools_cache,
+        thread_store=bindings.thread_store,
+        operations=bindings.operations,
+        prompt_loader=bindings.prompt_loader,
+        state_preparer=bindings.state_preparer,
+        human_request=bindings.human_request,
+        guard_probe=bindings.guard_probe,
+        tool_effect=bindings.tool_effect,
+        lock_factory=bindings.lock_factory,
+        skills_loader=bindings.skills_loader,
+        mcp_cleanup=bindings.mcp_cleanup,
+        prompt_resource=bindings.prompt_resource,
+        project_memory_io=bindings.project_memory_io,
+        project_memory_hash=bindings.project_memory_hash,
+        summary_trace_sink=bindings.summary_trace_sink,
+        collect_garbage=bindings.collect_garbage,
+    )
+    ctx.is_tui = prepared.is_tui
+    return ctx
+
+
 async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     config_dict: Dict[str, Any],
     *,
@@ -125,6 +214,11 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     level_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
+    prompt_loader: Optional[PromptLoader] = None,
+    state_preparer: Optional[StatePreparer] = None,
+    human_request: Optional[HumanRequester] = None,
+    guard_probe: Optional[GuardProbe] = None,
+    tool_effect: Optional[ToolEffectExecutor] = None,
 ) -> RunContext:
     """Собрать RunContext, не блокируя event loop.
 
@@ -249,6 +343,11 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             level_provider=level_provider,
             circuit_breaker=circuit_breaker,
             force_legacy=force_legacy,
+            prompt_loader=prompt_loader,
+            state_preparer=state_preparer,
+            human_request=human_request,
+            guard_probe=guard_probe,
+            tool_effect=tool_effect,
         )
     except BaseException as exc:
         from gc_core.utils.logging_module import release_run_logger
@@ -366,7 +465,7 @@ def _prepare_run_context(
 
 def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     config_dict: Dict[str, Any],
-    prep: "_RunContextPrep",
+    prep: _RunContextPrep,
     tools: tuple,
     *,
     registered_names: Optional[list] = None,
@@ -380,6 +479,11 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     level_provider: Optional[Callable[[], str]] = None,
     circuit_breaker: Optional[CircuitBreaker] = None,
     force_legacy: bool = False,
+    prompt_loader: Optional[PromptLoader] = None,
+    state_preparer: Optional[StatePreparer] = None,
+    human_request: Optional[HumanRequester] = None,
+    guard_probe: Optional[GuardProbe] = None,
+    tool_effect: Optional[ToolEffectExecutor] = None,
 ) -> RunContext:
     """Досборка после тулов: логи старта, trace-binding, сам RunContext."""
     # Хранилище встраивающего проверяем ЗДЕСЬ — это и есть точка проводки.
@@ -438,7 +542,6 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
             },
         )
 
-    auxiliary_llm = auxiliary_llm_from_config_dict(config_dict)
     workspace = build_execution_workspace(backend, config_dict)
 
     effective_level_provider = level_provider or (
@@ -451,33 +554,43 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         force_legacy=force_legacy,
     )
 
-    ctx = RunContext(
+    prepared = PreparedRunContext(
         config_dict=config_dict,
         run_id=effective_run_id,
         trace_id=_trace_id,
-        auth_connector=auth_connector,
-        logger=run_logger,
         logging_path=logging_path,
         summary_trace_path=summary_trace_path,
-        auxiliary_llm=auxiliary_llm,
-        intent_scope=intent_scope_from_config_dict(config_dict),
-        tools_data=tools_data,
         tools_spec=tools_spec,
         tools_description=tools_description,
         mcp_status=mcp_status,
-        registered_tool_names=set(registered_names or []),
-        project_gc_dir=_resolve_project_gc_dir(),
+        registered_tool_names=list(registered_names or []),
+        project_gc_dir=str(_resolve_project_gc_dir()),
+        workspace_root=workspace.root,
+        workspace_shell=workspace.shell,
+        workspace_os_name=workspace.os_name,
+        workspace_root_writable=workspace.root_writable,
+        mcp_session_owner=mcp_session_owner,
+        is_tui=bool(is_tui),
+    )
+    bindings = RunContextBindings(
+        auth_connector=auth_connector,
+        logger=run_logger,
+        tools_data=tools_data,
         environment=environment,
         os_backend=backend,
         skills_registry=skills_registry,
-        workspace=workspace,
         model_router=model_router,
         on_stream_delta=on_stream_delta,
         on_messages_evicted=on_messages_evicted,
-        mcp_session_owner=mcp_session_owner,
         tools_cache=tools_cache,
         thread_store=thread_store,
+        prompt_loader=prompt_loader,
+        state_preparer=state_preparer,
+        human_request=human_request,
+        guard_probe=guard_probe,
+        tool_effect=tool_effect,
     )
+    ctx = assemble_run_context(prepared, bindings)
     # ``is_tui`` контекст только ПОМЕЧАЕТ. Обёртку в ``TrackingFsBackend``
     # (diff-журнал) ставит сам TUI — ``gc_tui.diff_tui.tracking.attach_to_context``,
     # его зовёт ``TuiApp``. Здесь стоял лениво-импортируемый вызов
@@ -485,8 +598,6 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     # фронтенда, и 27.08.2026 её сняли разделением на пакеты. Вливание веток
     # вернуло её — а вместе с ней и вторую обёртку поверх первой, потому что
     # TUI к этому моменту уже оборачивает сам.
-    ctx.is_tui = bool(is_tui)
-
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",
         effective_run_id,
@@ -501,4 +612,5 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
 __all__ = [
     "RunContext",
     "acreate_run_context",
+    "assemble_run_context",
 ]

@@ -30,12 +30,12 @@ from gc_testkit.paths import REPO
 _SRC = REPO / "packages/core/src/gc_core/tools/exec/download_file.py"
 
 
-def _acall_node() -> ast.AsyncFunctionDef:
+def _method_node(name="acall") -> ast.AsyncFunctionDef:
     tree = ast.parse(_SRC.read_text(encoding="utf-8"))
     return next(
         n
         for n in ast.walk(tree)
-        if isinstance(n, ast.AsyncFunctionDef) and n.name == "acall"
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == name
     )
 
 
@@ -45,16 +45,24 @@ def test_acall_writes_the_body_inline():
     Структурная, и намеренно: поведенческая проверка поймала бы возврат пула
     только замером на большом файле, а эта краснеет на самой правке.
     """
-    acall = _acall_node()
+    acall = _method_node("_download_effect")
+    assert any(
+        isinstance(n, ast.Await)
+        and isinstance(n.value, ast.Call)
+        and getattr(n.value.func, "attr", None) == "_publish"
+        for n in ast.walk(acall)
+    )
+    # Optional durable publisher moved to a helper; the default write remains inline.
+    publish = _method_node("_publish")
 
     direct = [
         n
-        for n in ast.walk(acall)
+        for n in ast.walk(publish)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == "_atomic_write"
     ]
-    assert direct, "не нашёл прямого вызова self._atomic_write(…) в acall"
+    assert direct, "не нашёл прямого вызова self._atomic_write(…) в _publish"
 
     # Запрет узкий — на ЗАПИСЬ, а не на поток вообще. Гард записи
     # (`_check_write_guard`) в поток уезжает законно: в режиме `ask` он ждёт
@@ -64,7 +72,7 @@ def test_acall_writes_the_body_inline():
     # (см. test_guard_confirm_off_loop).
     threaded_write = [
         n
-        for n in ast.walk(acall)
+        for n in ast.walk(publish)
         if isinstance(n, ast.Call)
         and isinstance(n.func, ast.Attribute)
         and n.func.attr == "to_thread"
@@ -83,7 +91,7 @@ def test_network_path_stays_natively_async():
     скачивание, loop встанет на всё время запроса — а вот у сети нативная
     асинхронная форма есть, и отказываться от неё незачем.
     """
-    acall = _acall_node()
+    acall = _method_node("_download_effect")
 
     awaited_http = [
         n

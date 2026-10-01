@@ -85,7 +85,7 @@ def test_judge_unavailable_allow_mode_skips_confirm(monkeypatch):
     assert not called  # confirm_available не должен вызываться для mode=allow
 
 
-def test_judge_unavailable_no_ctx_still_blocks(monkeypatch):
+def test_judge_unavailable_no_ctx_still_blocks():
     """Без ctx confirm недоступен → fail-closed (обратная совместимость)."""
     # confirm_available получит ctx=None и вернёт False (no isatty в тестовой среде)
     dec = decide_command_execution("deny", None, False, None)
@@ -131,7 +131,7 @@ def test_build_judge_payload_never_touch_paths_empty_on_error(
 ):
     """При ошибке protected_paths → never_touch_paths пустой список (не падаем)."""
 
-    def bad_ps(cwd):
+    def bad_ps(_cwd):
         raise RuntimeError("cannot load")
 
     monkeypatch.setattr(cm, "_get_protected_paths", bad_ps)
@@ -194,7 +194,7 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     @moderate_command_execution(
         payload_arg="command", tool_name="exec_command"
     )
-    def run(command: str, ctx=None) -> str:
+    def run(command: str, ctx=None) -> str:  # noqa: ARG001 - guard reads the named arguments
         return json.dumps({"ok": True})
 
     result = json.loads(run("echo hello", ctx=fake_ctx))
@@ -203,3 +203,37 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     assert received_ctx and received_ctx[0] is fake_ctx, (
         "ctx должен быть проброшен в confirm_available"
     )
+
+
+def test_prepared_never_touch_snapshot_never_loads_host_paths(
+    monkeypatch, tmp_path
+):
+    def forbidden(_cwd):
+        raise AssertionError(
+            "prepared command context must not read host paths"
+        )
+
+    monkeypatch.setattr(cm, "_get_protected_paths", forbidden)
+    for snapshot in ([], [str(tmp_path / ".gc")]):
+        context = ModerationContext(
+            tool_name="exec_command",
+            launch_root=str(tmp_path),
+            cwd=str(tmp_path),
+            prepared_never_touch_paths=snapshot,
+        )
+        payload = build_judge_payload("exec_command", "echo ok", context)
+        assert payload["never_touch_paths"] == snapshot
+        assert payload["never_touch_paths"] is not snapshot
+
+
+def test_command_host_probe_includes_real_protected_snapshot(tmp_path):
+    from gc_core.execution.guard_contracts import GuardProbeRequest
+    from gc_core.security.guard_probe import evaluate_guard_probe
+
+    request = GuardProbeRequest(
+        "command_host", "exec_command", str(tmp_path), str(tmp_path)
+    )
+    facts = evaluate_guard_probe(request, config_dict={})
+    expected = cm.load_never_touch_paths(str(tmp_path))
+    assert expected
+    assert facts.data["never_touch_paths"] == expected

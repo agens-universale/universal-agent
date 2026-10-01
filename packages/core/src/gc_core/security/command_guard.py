@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import functools
 import inspect
 import json
 import os
@@ -17,7 +16,9 @@ from gc_core.security.command_moderation import (
     NO_WORKAROUND_NOTICE,
     effective_command_cwd,
 )
-from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.path_policy import (
     _extract_config_dict,
     resolve_tool_context,
@@ -197,9 +198,21 @@ def _command_guard_flow(
         )
 
     extra = list(context.write_guard.extra_paths) or None
-    decision = scan_command_for_protected(
-        payload, cwd=launch_root, extra=extra
-    )
+    if callable(getattr(ctx_obj, "guard_probe", None)):
+        facts = yield probe_step(
+            ctx_obj,
+            GuardProbeRequest(
+                "command",
+                effective_tool_name,
+                payload,
+                launch_root,
+            ),
+        )
+        decision = facts.protected_decision
+    else:
+        decision = scan_command_for_protected(
+            payload, cwd=launch_root, extra=extra
+        )
 
     if decision == "allow":
         return (yield)
@@ -207,16 +220,13 @@ def _command_guard_flow(
     if decision == "ask":
         from gc_core.security.confirm_port import request_confirm
 
-        confirmed = yield OffLoop(
-            functools.partial(
-                request_confirm,
-                title="Защищённый путь",
-                question="Команда затрагивает защищённый путь. Выполнить?",
-                fields=[("command", payload)],
-                ctx=ctx_obj,
-                decision_key=f"command:{payload}",
-            ),
-            on_interrupt=False,
+        confirmed = yield confirmation_step(
+            local_request=request_confirm,
+            title="Защищённый путь",
+            question="Команда затрагивает защищённый путь. Выполнить?",
+            fields=[("command", payload)],
+            ctx=ctx_obj,
+            decision_key=f"command:{payload}",
         )
         if confirmed:
             return (yield)

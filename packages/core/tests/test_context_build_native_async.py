@@ -71,7 +71,7 @@ async def test_loop_stays_free_during_build(monkeypatch):
     import gc_core.tools.connect_mcp.agent_tools as agent_tools
     from gc_core.run_context import acreate_run_context
 
-    async def _slow(config_dict, on_progress=None, **_kw):
+    async def _slow(config_dict, on_progress=None, **_kw):  # noqa: ARG001 - callback contract
         await asyncio.sleep(0.2)
         return {}, {}
 
@@ -127,19 +127,10 @@ def test_acreate_is_not_a_thread_wrapper():
 
 
 def test_context_assembly_has_exactly_one_form():
-    """Сборка контекста должна быть ОДНА и корутинная.
+    """Only async creation may prepare resources; pure assembly is shared.
 
-    Раньше форм было две: синхронная `create_run_context` и корутинная. Тест
-    на их месте следил, чтобы они не разъехались — делят ли они
-    `_prepare_run_context` и `_finish_run_context`. Теперь стеречь нечего:
-    синхронная снята, и правильный инвариант сильнее — второй формы быть не
-    должно вовсе.
-
-    Держалась синхронная ради TUI, а docs объясняли её привязкой MCP-сессий к
-    loop'у. Обоснование было неверным: синхронная форма уводила дискавери в
-    `run_coro_blocking`, то есть на такой же одноразовый loop, умиравший до
-    первого хода. Настоящая причина была в том, что фабрика исполнителя в TUI
-    — обычная функция без своего loop; теперь она заводит его сама.
+    test_native_resources separately forbids I/O during assemble_run_context.
+    A synchronous resource-discovery entry point must not return.
     """
     src = (REPO / "packages/core/src/gc_core/run_context.py").read_text(
         encoding="utf-8"
@@ -153,7 +144,7 @@ def test_context_assembly_has_exactly_one_form():
         and "run_context" in n.name
         and not n.name.startswith("_")
     ]
-    assert sync_forms == [], (
+    assert sync_forms == ["assemble_run_context"], (
         f"вернулась синхронная сборка контекста: {sync_forms}"
     )
 

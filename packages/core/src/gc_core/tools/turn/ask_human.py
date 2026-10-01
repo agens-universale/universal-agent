@@ -4,6 +4,7 @@ import logging
 import sys
 from typing import Any, Dict, Optional
 
+from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
 _logger = logging.getLogger(__name__)
@@ -52,6 +53,14 @@ async def _aread_human_response(ctx: "Any", question: str) -> str:
     одноразовом потоке: всё, что порт держит привязанным к своему loop —
     очередь, соединение, сессия, — там просто не работало.
     """
+    native_port = getattr(ctx, "human_request", None)
+    if callable(native_port):
+        from gc_core.execution.human import HumanRequest
+
+        result = await native_port(
+            HumanRequest(kind="ask_human", question=question)
+        )
+        return (str(result) if result is not None else "").strip()
     port = getattr(ctx, "ask_human", None)
     if callable(port):
         result = port(question)
@@ -237,7 +246,7 @@ Do not implement until they confirm.
         question, via_name = prepared
         try:
             response = await _aread_human_response(self._ctx, question)
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, HumanRequestInterrupted):
             return self._ask_interrupted(question, via_name)
         except Exception as exc:  # EOFError, отказ порта встраивающего
             return self._ask_failed(question, via_name, exc)

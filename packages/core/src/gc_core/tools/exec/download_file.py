@@ -1,15 +1,15 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import os
-from typing import Any, Dict, Optional
-
-import httpx
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
 from gc_core.security.path_policy import (
     WriteGuardViolation,
     audit_policy_decision,
-    check_write_path_allowed,
+    check_write_guard_path,
     normalize_path_for_policy,
     resolve_tool_context,
 )
@@ -29,6 +29,9 @@ from gc_core.utils.async_http import get_async_client
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.utils.tool_report_paths import tool_report_abspath
+
+if TYPE_CHECKING:
+    import httpx
 
 _HTML_EXT = ".html"
 
@@ -244,6 +247,18 @@ class DownloadFile(AbstractSimpleTool):
         return False
 
     def _check_write_guard(self, dest: str) -> Optional[Dict[str, Any]]:
+        from gc_core.security.dual_wrapper import _drive_sync
+
+        _, result = _drive_sync(self._write_guard_flow(dest))
+        return result
+
+    async def _acheck_write_guard(self, dest: str) -> Optional[Dict[str, Any]]:
+        from gc_core.security.dual_wrapper import _drive_async
+
+        _, result = await _drive_async(self._write_guard_flow(dest))
+        return result
+
+    def _write_guard_flow(self, dest: str):
         context = resolve_tool_context(
             self,
             ctx=self._ctx,
@@ -253,12 +268,8 @@ class DownloadFile(AbstractSimpleTool):
         if not context.write_guard.enabled:
             return None
         try:
-            check_write_path_allowed(
-                dest,
-                context.launch_root,
-                context.write_guard.extra_paths,
-                base_dir=context.launch_root,
-                operation="write",
+            yield from check_write_guard_path(
+                dest, context, self.registered_tool_name(), "write"
             )
         except WriteGuardViolation as exc:
             wg_mode = (context.write_guard.mode or "deny").strip().lower()
@@ -272,9 +283,9 @@ class DownloadFile(AbstractSimpleTool):
                 )
                 return None
             if wg_mode == "ask":
-                from gc_core.security.confirm_port import request_confirm
+                from gc_core.security.confirm_port import confirmation_step
 
-                confirmed = request_confirm(
+                confirmed = yield confirmation_step(
                     title="Защита записи",
                     question=f"Разрешить запись вне периметра проекта в {dest}?",
                     fields=[
@@ -324,7 +335,7 @@ class DownloadFile(AbstractSimpleTool):
 
     def _stream_with_redirect_validation(
         self,
-        session: "httpx.AsyncClient",
+        session: httpx.AsyncClient,
         start_url: str,
         headers: Dict[str, str],
         timeout: int,
@@ -348,7 +359,7 @@ class DownloadFile(AbstractSimpleTool):
         )
 
     async def _read_bounded(
-        self, response: "httpx.Response", max_bytes: int
+        self, response: httpx.Response, max_bytes: int
     ) -> tuple[bytes, Optional[Dict[str, Any]]]:
         """Прочитать тело, оборвав его на ``max_bytes``.
 
@@ -378,6 +389,8 @@ class DownloadFile(AbstractSimpleTool):
     async def _http_get_bytes(
         self, url: str, max_bytes: int
     ) -> tuple[bytes, Optional[Dict[str, Any]]]:
+        import httpx
+
         context = resolve_tool_context(
             self,
             ctx=self._ctx,
@@ -474,32 +487,40 @@ class DownloadFile(AbstractSimpleTool):
 
     @enforce_url_policy(url_arg="url")
     async def acall(self, url: str, filename: str, **kwargs: Any) -> str:
-        if not isinstance(url, str):
-            return self._result(
-                error={"type": "invalid_argument", "field": "url"}
-            )
-        normalized_url = url.strip()
-        if not normalized_url:
-            return self._result(
-                error={
-                    "type": "invalid_argument",
-                    "field": "url",
-                    "message": "URL cannot be empty.",
-                }
-            )
-        if not normalized_url.startswith(("http://", "https://")):
-            return self._result(
-                error={
-                    "type": "invalid_argument",
-                    "field": "url",
-                    "message": "URL must start with http:// or https://.",
-                },
-            )
+        return await self._prepare_download(url, filename)
 
-        filename_result = self._validate_filename(filename)
-        if isinstance(filename_result, dict):
-            return self._result(error=filename_result)
-        validated_filename, ext = filename_result
+    @staticmethod
+    def _download_url_error(url):
+        if not isinstance(url, str):
+            return {"type": "invalid_argument", "field": "url"}
+        if not url.strip():
+            return {
+                "type": "invalid_argument",
+                "field": "url",
+                "message": "URL cannot be empty.",
+            }
+        if not url.strip().startswith(("http://", "https://")):
+            return {
+                "type": "invalid_argument",
+                "field": "url",
+                "message": "URL must start with http:// or https://.",
+            }
+        return None
+
+    async def _prepare_download(
+        self, url: str, filename: str, *, native_effect=None
+    ) -> str:
+        url_error = self._download_url_error(url)
+        if url_error is not None:
+            return self._result(error=url_error)
+        normalized_url = url.strip()
+
+        use_probe = callable(getattr(self._ctx, "guard_probe", None))
+        if not use_probe:
+            filename_result = self._validate_filename(filename)
+            if isinstance(filename_result, dict):
+                return self._result(error=filename_result)
+            validated_filename, ext = filename_result
 
         context = resolve_tool_context(
             self,
@@ -507,32 +528,70 @@ class DownloadFile(AbstractSimpleTool):
             state=self._state,
             config_dict=self._get_config_dict(),
         )
-        download_settings = self._resolve_download_settings(
-            context.launch_root
-        )
-        if isinstance(download_settings, dict):
-            return self._result(error=download_settings)
-        download_root, max_bytes = download_settings
+        if use_probe:
+            from gc_core.security.guard_probe import (
+                GuardProbeRequest,
+                probe_step,
+            )
 
-        dest = os.path.join(download_root, validated_filename)
+            facts = await probe_step(
+                self._ctx,
+                GuardProbeRequest(
+                    "download_destination",
+                    self.registered_tool_name(),
+                    filename,
+                    context.launch_root,
+                ),
+            ).make_coro()
+            if "error" in facts.data:
+                return self._result(error=facts.data["error"])
+            validated_filename = facts.data["filename"]
+            ext = facts.data["extension"]
+            download_root = facts.data["download_root"]
+            max_bytes = facts.data["max_bytes"]
+            dest = facts.canonical_path
+        else:
+            download_settings = self._resolve_download_settings(
+                context.launch_root
+            )
+            if isinstance(download_settings, dict):
+                return self._result(error=download_settings)
+            download_root, max_bytes = download_settings
+            dest = os.path.join(download_root, validated_filename)
+        if callable(getattr(self._ctx, "human_request", None)) or callable(
+            getattr(self._ctx, "guard_probe", None)
+        ):
+            write_guard_error = await self._acheck_write_guard(dest)
+        else:
+            from gc_core.security.dual_wrapper import off_loop
 
-        # Гард записи в режиме `ask` ждёт человека, а `_check_write_guard`
-        # синхронный: прямой вызов отсюда держал бы event loop вызывающего всё
-        # время ожидания. Уезжаем ТЕМ ЖЕ маршрутом, что гарды-декораторы
-        # (`OffLoop` → `run_abandonable_in`), а не через `asyncio.to_thread`:
-        # только он ставит вызову метку «брошен». Без метки подтверждение,
-        # оставшееся от снятого по Ctrl+C вызова, дожидается следующей строки и
-        # записывает по ней разрешение на запись вне периметра — ровно тот вред,
-        # который закрывали R4.2 и R5.1. Заодно поток берётся из слотов гвардов,
-        # а не из общего пула, который держит выход процесса.
-        from gc_core.security.dual_wrapper import off_loop
-
-        write_guard_error = await off_loop(self._check_write_guard, dest)
+            write_guard_error = await off_loop(self._check_write_guard, dest)
         if write_guard_error is not None:
             return self._result(
                 path=dest, filename=validated_filename, error=write_guard_error
             )
+        effect_data = dict(
+            normalized_url=normalized_url,
+            validated_filename=validated_filename,
+            ext=ext,
+            download_root=download_root,
+            max_bytes=max_bytes,
+            dest=dest,
+        )
+        if native_effect is not None:
+            return await native_effect(effect_data)
+        return await self._download_effect(**effect_data)
 
+    async def _download_effect(
+        self,
+        *,
+        normalized_url,
+        validated_filename,
+        ext,
+        download_root,
+        max_bytes,
+        dest,
+    ):
         if os.path.exists(dest):
             return self._result(
                 path=dest,
@@ -561,20 +620,7 @@ class DownloadFile(AbstractSimpleTool):
                 },
             )
 
-        try:
-            os.makedirs(download_root, exist_ok=True)
-        except OSError as exc:
-            return self._result(
-                path=dest,
-                filename=validated_filename,
-                error={"type": "write_failed", "message": str(exc)},
-            )
-
-        # Инлайн: нативной асинхронной записи в Python нет (все «async file»
-        # обёрнуты вокруг того же пула), а поток здесь не окупается — замерено
-        # 6.1 мс лага loop против 2.7 мс на записи 32 МиБ при бюджете приёмки
-        # 150 мс. Сеть выше остаётся асинхронной, поток убран только с записи.
-        write_error = self._atomic_write(dest, body)
+        write_error = await self._publish(download_root, dest, body)
         if write_error is not None:
             return self._result(
                 path=dest, filename=validated_filename, error=write_error
@@ -586,3 +632,14 @@ class DownloadFile(AbstractSimpleTool):
             filename=validated_filename,
             bytes_written=len(body),
         )
+
+    async def _publish(self, root, dest, body):
+        publisher = getattr(self._ctx, "download_publish", None)
+        if publisher is not None:
+            await publisher(dest, body)
+            return None
+        try:
+            os.makedirs(root, exist_ok=True)
+        except OSError as exc:
+            return {"type": "write_failed", "message": str(exc)}
+        return self._atomic_write(dest, body)

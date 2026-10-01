@@ -17,6 +17,7 @@ from gc_core.tools.connect_mcp.client import (
     _atools_list_request,
     forget_session,
 )
+from gc_core.tools.connect_mcp.durable_scope import require_no_reconnect
 from gc_core.tools.connect_mcp.persistent_stdio import (
     PersistentStdioRegistry,
     is_persistent_stdio,
@@ -290,6 +291,7 @@ class AgentRuntimeClient(McpClientPort):
         try:
             data = await ado_call(session_id)
         except httpx.HTTPStatusError:
+            require_no_reconnect()
             forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
                 self.server_name,
@@ -305,6 +307,7 @@ class AgentRuntimeClient(McpClientPort):
             data = await ado_call(session_id)
 
         if data == {} and transport == "sse":
+            require_no_reconnect()
             forget_session(self.server_name)
             session_id = await _aget_or_init_session_id(
                 self.server_name,

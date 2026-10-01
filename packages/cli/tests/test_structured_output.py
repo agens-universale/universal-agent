@@ -141,7 +141,7 @@ async def test_rephrase_sends_format_and_fields(monkeypatch):
         return SimpleNamespace(text="  ## Итог\n4\n", finish_reason="stop")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output.arequest_chat_completion_outcome",
+        "gc_core.structured_output.arequest_chat_completion_outcome",
         _fake,
     )
     text = await arephrase_turn_outcome(
@@ -185,7 +185,7 @@ async def test_rephrase_refuses_aborted_run_and_accepts_prose(monkeypatch):
         return "ok", "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _fake,
     )
     text = await arephrase_turn_outcome(
@@ -208,7 +208,7 @@ async def test_rephrase_uses_default_max_tokens_when_unset(monkeypatch):
         return "ok", None
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _fake,
     )
     ctx = _Ctx()
@@ -230,7 +230,7 @@ async def test_rephrase_empty_answer_is_an_error(monkeypatch):
         return "  \n", "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _empty,
     )
     with pytest.raises(StructuredOutputError, match="пустой ответ"):
@@ -260,7 +260,7 @@ async def test_rephrase_unfinished_reason_is_an_error(
         return '{"result": "answer', finish_reason
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _cut,
     )
     with pytest.raises(StructuredOutputError, match=match):
@@ -284,7 +284,7 @@ async def test_rephrase_keeps_text_when_reason_does_not_block(
         return "форма", finish_reason
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _done,
     )
     text = await arephrase_turn_outcome(
@@ -303,7 +303,7 @@ async def test_rephrase_transport_error_stays_structured(monkeypatch):
         raise RuntimeError("backend down")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _boom,
     )
     with pytest.raises(StructuredOutputError, match="backend down"):
@@ -331,7 +331,7 @@ async def test_emit_prints_text_when_stdout_is_not_jsonl(
         return '{"n": 4}', "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _ok,
     )
     ctx = _Ctx()
@@ -360,7 +360,7 @@ async def test_emit_jsonl_stream_keeps_stdout_free_of_raw_text(
         return '{"n": 4}', "stop"
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _ok,
     )
     ctx = _Ctx()
@@ -417,7 +417,7 @@ async def test_emit_failure_logs_raw_answer_then_rephrase_error(
         raise RuntimeError("backend down")
 
     monkeypatch.setattr(
-        "gc_cli.structured_output._arequest_rephrase",
+        "gc_core.structured_output._arequest_rephrase",
         _boom,
     )
     ctx = _Ctx()

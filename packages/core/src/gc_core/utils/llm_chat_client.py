@@ -319,6 +319,44 @@ async def arequest_chat_completion_outcome(
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
 ) -> ChatCompletionText:
+    """Request text and finish reason through the configured model boundary."""
+    from gc_core.execution.model import arequest_model
+
+    if max_tokens < 1:
+        raise ValueError("max_tokens must be >= 1")
+    operations = getattr(ctx, "operations", None)
+    if operations is None:
+        return await _arequest_chat_completion_outcome_local(
+            ctx=ctx,
+            state=state,
+            messages=messages,
+            max_tokens=max_tokens,
+            consumer=consumer,
+            request_label=request_label,
+            payload_overrides=payload_overrides,
+        )
+    result = await arequest_model(
+        operations,
+        state,
+        messages,
+        consumer=consumer,
+        max_tokens=max_tokens,
+        request_label=request_label,
+        payload_overrides=payload_overrides,
+    )
+    return ChatCompletionText(result.text or "", result.finish_reason)
+
+
+async def _arequest_chat_completion_outcome_local(
+    *,
+    ctx: Any,
+    state: Any,
+    messages: List[Dict[str, str]],
+    max_tokens: int,
+    consumer: str,
+    request_label: str = "chat_completion",
+    payload_overrides: Optional[Dict[str, Any]] = None,
+) -> ChatCompletionText:
     """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
     ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
     заново на каждый вызов из ``ctx.model_router`` (снимок хода) — не глобально/один раз.

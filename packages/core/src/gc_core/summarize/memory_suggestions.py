@@ -5,6 +5,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List
 
 from gc_core.bundled_assets import bundled_root
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.prompt_loading import load_memory_patch_replace_prompt
 from gc_core.summarize.working_memory_gateway import (
@@ -12,13 +16,11 @@ from gc_core.summarize.working_memory_gateway import (
     build_memory_deltas_format_repair_messages,
 )
 
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_PROJECT_ROOT = str(bundled_root())
-DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH = os.path.abspath(
-    os.path.join(
-        _PROJECT_ROOT, "prompts", "chat_completions_memory_patch_replace.md"
+
+def default_memory_patch_path() -> str:
+    return str(
+        bundled_root() / "prompts" / "chat_completions_memory_patch_replace.md"
     )
-)
 
 
 @dataclass
@@ -47,7 +49,7 @@ def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
         raise ValueError(f"summary_params.{config_key} is empty")
     if os.path.isabs(prompt_path_raw):
         return prompt_path_raw
-    return os.path.abspath(os.path.join(_PROJECT_ROOT, prompt_path_raw))
+    return os.path.abspath(os.path.join(str(bundled_root()), prompt_path_raw))
 
 
 async def _arequest_patch(
@@ -99,14 +101,28 @@ async def arequest_patch_replace(
 
     Основная реализация шага; ``request_patch_replace`` — синхронный шим.
     """
-    prompt_path = _resolve_prompt_path(
-        ctx,
-        "chat_completions_memory_patch_replace_prompt_path",
-        DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
-    )
+    params = (getattr(ctx, "config_dict", None) or {}).get(
+        "summary_params"
+    ) or {}
+    subagent = _is_subagent_state(state)
     # Soft-only: subagent addendum lives in system prompt only (no user duplicate).
-    system = load_memory_patch_replace_prompt(
-        prompt_path, subagent=_is_subagent_state(state)
+    system = await aload_prompt_resource(
+        ctx,
+        PromptResourceRequest(
+            "memory_patch",
+            path=params.get(
+                "chat_completions_memory_patch_replace_prompt_path"
+            ),
+            subagent=subagent,
+        ),
+        local=lambda: load_memory_patch_replace_prompt(
+            _resolve_prompt_path(
+                ctx,
+                "chat_completions_memory_patch_replace_prompt_path",
+                default_memory_patch_path(),
+            ),
+            subagent=subagent,
+        ),
     )
     user_prompt = (
         "<dialog_history>\n"

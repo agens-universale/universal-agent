@@ -300,6 +300,11 @@ class PersistentStdioSession:
             return
         # На случай если процесс умер между вызовами — чистим хендл.
         if self._proc is not None:
+            from gc_core.tools.connect_mcp.durable_scope import (
+                require_no_reconnect,
+            )
+
+            require_no_reconnect()
             dead = self._proc
             self._proc = None
             # И его читателя: реестр ключуется по id трубы, а запись мёртвого

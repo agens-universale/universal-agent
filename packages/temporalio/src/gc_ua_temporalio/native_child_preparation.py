@@ -1,0 +1,114 @@
+"""Worker preparation and workflow assembly for the real SubagentRunner."""
+
+from copy import copy
+from dataclasses import replace
+
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.model_router import CircuitBreaker, ModelRouter
+from gc_core.states import State
+from gc_core.tools.subagents.registry import resolve_subagent_definitions
+from gc_core.tools.subagents.runner import SubagentRunner
+from gc_core.tools.subagents.runner_preparation import (
+    resolve_prepared_subagent,
+)
+from temporalio import activity
+
+from gc_ua_temporalio.native_child_contracts import NativePreparedChild
+from gc_ua_temporalio.native_contracts import NativeCall
+
+
+async def prepare_native_child_context(call, parent_ctx):
+    """Host-local callback; run inside the parent's actor when resources are live."""
+    ref = call.child_context
+    if not ref or ref["tool_name"] not in parent_ctx.tools_data:
+        raise ExecutionFailure(
+            "Child tool is absent from the real parent registry"
+        )
+    parent = copy(parent_ctx)
+    parent.model_router = ModelRouter(
+        parent.config_dict,
+        level_provider=lambda: ref["frozen_level"],
+        force_legacy=ref["force_legacy"],
+        breaker=CircuitBreaker.restore(ref["circuit_breaker"]),
+    )
+    runner = SubagentRunner(parent, None, parent.config_dict)
+    runner._active_tool_name = ref["tool_name"]
+    child = await runner._build_child_ctx(ref["tool_name"])
+    child.run_id = call.owner_id
+    child.mcp_session_owner = parent.mcp_session_owner
+    child.mcp_status = parent.mcp_status
+    child.registered_tool_names = set(child.tools_data)
+    child._native_parent_context = parent
+    return child
+
+
+def prepared_subagent_factories(prepared):
+    """Registry metadata with fixed builtin/file bindings, without discovery."""
+    prepared.context.config_dict["_subagent_definitions_cache"] = (
+        prepared.subagent_definitions
+    )
+    return {
+        name: {"tool_fabric": None}
+        for name in prepared.tool_metadata
+        if resolve_prepared_subagent(name, prepared.subagent_definitions)
+        is not None
+    }
+
+
+class NativeChildActivities:
+    def __init__(self, native_activities):
+        self.native = native_activities
+
+    @activity.defn(name="agent.subagent.prepare")
+    async def prepare(self, call: NativeCall) -> NativePreparedChild:
+        return await self.native._recorded(
+            call, NativePreparedChild, self._prepare
+        )
+
+    async def _prepare(self, call, child_ctx):
+        parent_ctx = child_ctx._native_parent_context
+        parent_state = State.from_execution_snapshot(call.data["parent_state"])
+        parent_state.workspace = parent_ctx.workspace
+        parent_state.logger = parent_ctx.logger
+        runner = SubagentRunner(
+            parent_ctx, parent_state, parent_ctx.config_dict
+        )
+        runner._active_tool_name = call.child_context["tool_name"]
+        state = await runner._prepare_local_child_state()
+        context = await self.native._prepare(call, child_ctx)
+        context.subagent_definitions = resolve_subagent_definitions(
+            parent_ctx.config_dict
+        )
+        return NativePreparedChild(
+            context, replace(state, config_dict=context.context.config_dict)
+        )
+
+
+class PreparedNativeChild:
+    """Runtime adapter: preparation facts plus the ordinary child context."""
+
+    def __init__(self, prepared, child_context):
+        self.prepared, self.ctx = prepared, child_context
+
+    def resolve_subagent(self, tool_name):
+        return resolve_prepared_subagent(
+            tool_name, self.prepared.context.subagent_definitions
+        )
+
+    def build_child_config(self, _runner):
+        return self.prepared.state.config_dict
+
+    async def build_child_context(self, runner, tool_name):
+        self.ctx.model_router = runner._build_child_model_router(
+            tool_name, self.prepared.state.config_dict
+        )
+        self.ctx.operations.router = self.ctx.model_router
+        self.ctx.operations.router_provider = lambda: self.ctx.model_router
+        return self.ctx
+
+    async def prepare_child_state(self, _runner):
+        return self.prepared.state
+
+    def release_child_context(self, _ctx):
+        # The worker provider owns logs and the parent's live-resource lease.
+        return None

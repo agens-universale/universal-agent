@@ -927,3 +927,9 @@ mcp:
 CLI-флаги (`--max_steps 999` и т.п.) перебивают и global, и project. Файл опционален; если его нет — используется только global.
 
 Если через `--config` явно передан тот же файл, что и `<repo>/.gc/config.yml` — gc-cli применяет его как обычный config без второго слоя (особый случай для запусков с явным путём).
+
+## Temporal runtime
+
+Opt-in интеграция настраивается отдельно от локального `config.yml`: см.
+[профили, MCP host, server и remote API](temporal-configuration.md) и
+[запуск и восстановление](temporal.md).

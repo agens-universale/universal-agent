@@ -14,14 +14,14 @@ from gc_core.config_modules.project_memory import (
     DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS,
     project_memory_from_config_dict,
 )
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.summarize.llm import arequest_auxiliary_completion_text
 
 SOFT_APPEND_INPUT_LIMIT_CHARS: int = DEFAULT_PROJECT_MEMORY_MAX_APPEND_CHARS
-
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_COMPACTION_PROMPT_PATH = (
-    bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
-)
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,8 @@ _FAILURE_BACKEND_UNSUPPORTED = CompactionResult(
 
 
 def _load_prompt() -> str:
-    return _COMPACTION_PROMPT_PATH.read_text(encoding="utf-8")
+    path = bundled_root() / "prompts" / "project_memory_compaction_prompt.md"
+    return path.read_text(encoding="utf-8")
 
 
 async def acompact_text(
@@ -72,7 +73,11 @@ async def acompact_text(
     if mode != "chat_completions":
         return _FAILURE_BACKEND_UNSUPPORTED
 
-    system = _load_prompt()
+    system = await aload_prompt_resource(
+        ctx,
+        PromptResourceRequest("project_memory"),
+        local=_load_prompt,
+    )
     messages = [
         {"role": "system", "content": system},
         {"role": "user", "content": text},
@@ -87,6 +92,8 @@ async def acompact_text(
             request_label="project_memory_compaction",
             consumer="memory_compaction",
         )
+    except ExecutionFailure:
+        raise
     except Exception as exc:  # caller wants explicit ok=false, not exception.
         return CompactionResult(
             ok=False,

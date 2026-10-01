@@ -65,13 +65,22 @@ def _tool_reset_reasons(
 
 
 def _emit_project_memory_hints(
-    out: list, state: Any, meta: dict, ctx: Any, cfg: dict, *, enabled: bool
+    out: list,
+    state: Any,
+    meta: dict,
+    ctx: Any,
+    cfg: dict,
+    *,
+    enabled: bool,
+    get_hash_fn=None,
 ) -> list[str]:
     """Добавить в ``out`` подсказки project_memory; вернуть их тексты."""
     emitted: list[str] = []
     if not enabled:
         return emitted
-    for hint_text in collect_project_memory_hints(state, meta, ctx, cfg):
+    for hint_text in collect_project_memory_hints(
+        state, meta, ctx, cfg, get_hash_fn=get_hash_fn
+    ):
         out.append(
             wrap_project_memory_hint_user_message(
                 hint_text, suffix="mem_project"
@@ -110,6 +119,7 @@ def apply_tool_usage_notice_before_llm(
     *,
     step_messages: list[dict[str, Any]],
     logger: Any | None = None,
+    project_memory_hash_fn=None,
 ) -> list[dict[str, Any]]:
     """
     После persist-batch, перед LLM: независимые контуры project_memory K-тик и tool_usage_notice.
@@ -157,7 +167,13 @@ def apply_tool_usage_notice_before_llm(
     out = list(messages)
 
     emitted_project_hints = _emit_project_memory_hints(
-        out, state, meta, ctx, cfg, enabled=project_hints_enabled
+        out,
+        state,
+        meta,
+        ctx,
+        cfg,
+        enabled=project_hints_enabled,
+        get_hash_fn=project_memory_hash_fn,
     )
     project_check_final = (
         get_project_memory_check_cnt(meta) if project_hints_enabled else None
@@ -206,3 +222,45 @@ def apply_tool_usage_notice_before_llm(
         long_emit=bool(emitted_project_hints),
     )
     return out
+
+
+async def aapply_tool_usage_notice_before_llm(
+    messages,
+    state,
+    ctx,
+    meta,
+    *,
+    step_messages,
+    logger=None,
+):
+    """Fetch a project hash only when this step's existing policy needs it."""
+    loader = getattr(ctx, "project_memory_hash", None)
+    get_hash_fn = None
+    if loader is not None and _needs_project_hash(state, ctx, meta):
+        value = await loader()
+        get_hash_fn = lambda _ctx: value
+    return apply_tool_usage_notice_before_llm(
+        messages,
+        state,
+        ctx,
+        meta,
+        step_messages=step_messages,
+        logger=logger,
+        project_memory_hash_fn=get_hash_fn,
+    )
+
+
+def _needs_project_hash(state, ctx, meta) -> bool:
+    cfg = getattr(ctx, "config_dict", None) or {}
+    if not project_memory_hints_enabled(cfg):
+        return False
+    if not tool_is_available(
+        available_tool_names(ctx, state), PROJECT_MEMORY_TOOL_NAME
+    ):
+        return False
+    interval = project_memory_from_config_dict(cfg).check_interval_messages
+    return (
+        get_project_memory_check_cnt(meta if isinstance(meta, dict) else {})
+        + 1
+        >= interval
+    )

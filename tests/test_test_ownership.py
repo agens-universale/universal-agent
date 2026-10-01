@@ -27,13 +27,21 @@ from gc_testkit.paths import REPO
 #: доступны. Ядру — нет: оно тянет их лениво и обязано работать без них.
 ALLOWED = {
     "core": {"gc_core"},
+    "temporalio": {"gc_core", "gc_ua_temporalio"},
     "mcp": {"gc_core", "recommended_mcp"},
     "cli": {"gc_core", "gc_cli", "recommended_mcp"},
     "server": {"gc_core", "gc_server", "recommended_mcp"},
     "tui": {"gc_core", "gc_tui", "recommended_mcp"},
 }
 
-OUR_PACKAGES = {"gc_core", "gc_cli", "gc_tui", "gc_server", "recommended_mcp"}
+OUR_PACKAGES = {
+    "gc_core",
+    "gc_cli",
+    "gc_tui",
+    "gc_server",
+    "recommended_mcp",
+    "gc_ua_temporalio",
+}
 
 
 TESTKIT_SRC = REPO / "packages" / "testkit" / "src" / "gc_testkit"

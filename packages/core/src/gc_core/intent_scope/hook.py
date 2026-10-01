@@ -19,10 +19,6 @@ from gc_core.intent_scope.append import (
     append_tool_raw_to_current,
 )
 from gc_core.intent_scope.raw_payload import truncate_raw_tool_payload
-from gc_core.intent_scope.summarizer import (
-    asummarize_tool_intent_line,
-    build_fallback_aggregated_content,
-)
 
 _logger = logging.getLogger(__name__)
 
@@ -237,3 +233,19 @@ async def amaybe_update_intent_scope_from_tool(
         ctx=ctx,
         log=log,
     )
+
+
+async def asummarize_tool_intent_line(**kwargs):
+    from gc_core.intent_scope.summarizer import (
+        asummarize_tool_intent_line as summarize,
+    )
+
+    return await summarize(**kwargs)
+
+
+def build_fallback_aggregated_content(**kwargs):
+    from gc_core.intent_scope.summarizer import (
+        build_fallback_aggregated_content as build,
+    )
+
+    return build(**kwargs)

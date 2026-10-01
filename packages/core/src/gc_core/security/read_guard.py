@@ -12,16 +12,17 @@ path-policy). Контур 2 (sensitivity scan) и Контур 3 (anti-exfiltra
 from __future__ import annotations
 
 import fnmatch
-import functools
 import json
 import os
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from gc_core.security.confirm_port import request_confirm
-from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.confirm_port import confirmation_step, request_confirm
+from gc_core.security.dual_wrapper import dual_wrap
+from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.path_policy import (
     _extract_named_value,
+    _guard_path_argument,
     _tool_name,
     audit_policy_decision,
     resolve_tool_context,
@@ -372,10 +373,25 @@ def _operational_read_block(
         cand = _extract_named_value(
             func, args, kwargs, path_arg, path_extractor, "path"
         )
-        ps = protected_paths(cwd=context.launch_root)
     except ValueError:
         return None
-    if classify_path(cand, ps) != "operational":
+    if callable(getattr(context.ctx, "guard_probe", None)):
+        facts = yield probe_step(
+            context.ctx,
+            GuardProbeRequest(
+                "protected_read",
+                _tool_name(func, args),
+                cand,
+                context.launch_root,
+            ),
+        )
+        denied = facts.protected_decision == "deny"
+    else:
+        denied = (
+            classify_path(cand, protected_paths(cwd=context.launch_root))
+            == "operational"
+        )
+    if not denied:
         return None
     err = {
         "type": "protected_path_denied",
@@ -428,21 +444,18 @@ def _resolve_read_violation(
         return True, None
     if mode == "ask":
         _rg_path = exc.error.get("path", candidate_path)
-        confirmed = yield OffLoop(
-            functools.partial(
-                request_confirm,
-                title="Защита чтения",
-                question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
-                fields=[
-                    ("Tool", tool_name),
-                    ("Operation", "read"),
-                    ("Path", _rg_path),
-                    ("Reason", exc.error.get("reason", "")),
-                ],
-                ctx=context.ctx,
-                decision_key=f"read:{_rg_path}",
-            ),
-            on_interrupt=False,
+        confirmed = yield confirmation_step(
+            local_request=request_confirm,
+            title="Защита чтения",
+            question=f"Разрешить чтение вне периметра проекта: {_rg_path}?",
+            fields=[
+                ("Tool", tool_name),
+                ("Operation", "read"),
+                ("Path", _rg_path),
+                ("Reason", exc.error.get("reason", "")),
+            ],
+            ctx=context.ctx,
+            decision_key=f"read:{_rg_path}",
         )
         if confirmed:
             audit_policy_decision(
@@ -488,7 +501,7 @@ def _read_guard_flow(
     # operational .gc reads are denied even when read_guard is off.
     # skills/instructions/none fall through to the normal flow.
     if protection_enabled(config_dict):
-        blocked = _operational_read_block(
+        blocked = yield from _operational_read_block(
             func,
             args,
             kwargs,
@@ -509,29 +522,40 @@ def _read_guard_flow(
         )
         return (yield)
 
-    try:
-        candidate_path = _extract_named_value(
-            func,
-            args,
-            kwargs,
-            path_arg,
-            path_extractor,
-            "path",
-        )
-    except ValueError:
-        # Аргумент path отсутствует/некорректен — пусть сам тул вернёт
-        # его validation error.
+    extracted, candidate_path = _guard_path_argument(
+        func, args, kwargs, path_arg, path_extractor
+    )
+    if not extracted:
+        # Missing paths are validated by the tool itself.
         return (yield)
 
-    skills_root = _resolve_skills_root(config_dict)
-    extra_allowed = [skills_root] if skills_root else None
     try:
-        check_read_path_allowed(
-            candidate_path,
-            launch_root=context.launch_root,
-            cfg=cfg,
-            extra_allowed_paths=extra_allowed,
-        )
+        if callable(getattr(context.ctx, "guard_probe", None)):
+            facts = yield probe_step(
+                context.ctx,
+                GuardProbeRequest(
+                    "read_path",
+                    _tool_name(func, args),
+                    candidate_path,
+                    context.launch_root,
+                ),
+            )
+            if facts.violation is not None:
+                error = facts.violation
+                raise ReadGuardViolation(
+                    path=error["path"],
+                    reason=error["reason"],
+                    matched_rule=error.get("matched_rule"),
+                    mode=error["mode"],
+                )
+        else:
+            skills_root = _resolve_skills_root(config_dict)
+            check_read_path_allowed(
+                candidate_path,
+                launch_root=context.launch_root,
+                cfg=cfg,
+                extra_allowed_paths=[skills_root] if skills_root else None,
+            )
     except ReadGuardViolation as exc:
         allowed, blocked = yield from _resolve_read_violation(
             exc,

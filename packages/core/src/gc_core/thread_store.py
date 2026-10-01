@@ -1,4 +1,5 @@
 import glob
+import hashlib
 import json
 import logging
 import os
@@ -7,21 +8,20 @@ import threading
 from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from gc_core.execution.message_keys import make_message_key
+from gc_core.execution.projection import ThreadProjection
+
 logger = logging.getLogger(__name__)
 
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
-from gc_core.message_policy.tool_usage_notice.state import (
-    merge_tool_usage_notice_meta_to_base,
-)
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
 from gc_core.persistence.live_volume import (
-    bump_live_volume_for_messages,
     live_volume_from_messages,
     merge_tui_into_meta,
 )
@@ -52,14 +52,6 @@ def _utc_now_iso() -> str:
 
 def _utc_now_suffix() -> str:
     return datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-
-
-def make_message_key(message: Dict[str, Any]) -> str:
-    msg_id = message.get("id")
-    if isinstance(msg_id, str) and len(msg_id) > 0:
-        return f"id:{msg_id}"
-    payload = json.dumps(message, ensure_ascii=False, sort_keys=True)
-    return f"payload:{payload}"
 
 
 def ensure_message_id(
@@ -428,7 +420,14 @@ def load_thread_messages(
             payload = record.get("payload")
             if not isinstance(payload, dict):
                 continue
-            payload = ensure_message_id(payload)
+            if not isinstance(payload.get("id"), str) or not payload["id"]:
+                # Legacy records need the same identity on every snapshot,
+                # including after a process restart and unrelated deletions.
+                identity = f"{sanitize_system_id(system_id)}:{thread_id}:{row}"
+                payload = dict(payload)
+                payload["id"] = (
+                    "m_" + hashlib.sha256(identity.encode()).hexdigest()[:32]
+                )
             messages.append(payload)
             message_keys.add(make_message_key(payload))
 
@@ -479,7 +478,10 @@ def update_tui_meta(
 ) -> None:
     """Слить patch в meta.tui (read-merge-write). Только TUI-owned ключи."""
     sys_norm = sanitize_system_id(system_id)
-    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {}
+    meta = load_thread_meta(threads_dir, sys_norm, thread_id) or {
+        "thread_id": thread_id,
+        "system_id": sys_norm,
+    }
     tui_meta = dict(meta.get("tui") or {})
     tui_meta.update(patch)
     meta["tui"] = tui_meta
@@ -537,6 +539,38 @@ def patch_runtime_flag(
             disk.pop("tui", None)
 
     save_thread_meta(threads_dir, sys_norm, thread_id, disk)
+
+
+def reset_run_flags(
+    threads_dir: str,
+    system_id: str,
+    thread_id: str,
+    *,
+    stale_summarizing: bool = False,
+    session_meta: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Atomically clear startup flags against current disk meta, preserving TUI."""
+    from gc_core.persistence.meta_ownership import clear_run_flags
+
+    disk = load_thread_meta(threads_dir, system_id, thread_id) or {}
+    runtime = (session_meta or {}).get("runtime")
+    runtime = runtime if isinstance(runtime, dict) else {}
+    clear_run_flags(
+        disk,
+        stale_summarizing=stale_summarizing
+        or bool(runtime.get("summarizing")),
+    )
+    if session_meta is not None:
+        if disk.get("runtime"):
+            session_meta["runtime"] = dict(disk["runtime"])
+        else:
+            session_meta.pop("runtime", None)
+        if isinstance(disk.get("tui"), dict):
+            session_meta["tui"] = dict(disk["tui"])
+        elif "tui" in session_meta:
+            session_meta.pop("tui", None)
+            disk.pop("tui", None)
+    save_thread_meta(threads_dir, system_id, thread_id, disk)
 
 
 def _carry_meta_string(
@@ -686,6 +720,8 @@ def archive_and_replace_thread_files(
     system_id: str,
     thread_id: str,
     messages: List[Dict[str, Any]],
+    *,
+    archive_suffix: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Отложить файлы треда в архив и записать вместо них ``messages``.
 
@@ -700,7 +736,9 @@ def archive_and_replace_thread_files(
     место, иначе тред остался бы без метаданных при целой истории.
     """
     data_path, meta_path = _thread_paths(threads_dir, system_id, thread_id)
-    ts_suffix = _utc_now_suffix()
+    ts_suffix = archive_suffix or _utc_now_suffix()
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", ts_suffix):
+        raise ValueError("Invalid archive suffix")
     archive_data_path = data_path.replace(
         ".jsonl", f"__pre_summary__{ts_suffix}.jsonl"
     )
@@ -747,7 +785,34 @@ def archive_and_replace_thread_files(
     }
 
 
-class ThreadSession:
+# All public file readers/writers share the durable lock and recovery barrier.
+# Lazy dispatch keeps journal/OS facilities outside workflow imports. Nested
+# codec calls during a transaction use the original functions, not a second
+# transaction, so the on-disk format still has a single implementation.
+from gc_core.thread_store_durable import durable_file_helper as _durable_helper
+
+for _helper_name in (
+    "load_thread_messages",
+    "load_thread_meta",
+    "read_subagent_trace",
+    "save_thread_meta",
+    "update_tui_meta",
+    "update_runtime_meta",
+    "patch_runtime_flag",
+    "reset_run_flags",
+    "append_new_thread_messages",
+    "append_subagent_trace_record",
+    "restore_subagent_trace_records",
+    "archive_and_replace_thread_files",
+    "discard_message_by_id",
+    "reset_thread_files",
+    "delete_thread",
+):
+    globals()[_helper_name] = _durable_helper(globals()[_helper_name])
+del _helper_name
+
+
+class ThreadSession(ThreadProjection):
     def __init__(
         self,
         *,
@@ -788,6 +853,9 @@ class ThreadSession:
             frozenset[str]
         ] = None
         self._port: Any = None
+        # Optional durable capability uses the same session policy. This is
+        # the last acknowledged storage snapshot, never staged session data.
+        self._store_snapshot: Any = None
 
     @property
     def port(self) -> Any:
@@ -833,8 +901,21 @@ class ThreadSession:
         store, threads_dir = cls._resolve_store(config_dict, store)
 
         port = athread_store(store)
-        meta = await port.aload_meta(sys_norm, normalized_thread_id)
-        state = await port.aload_thread_state(sys_norm, normalized_thread_id)
+        from copy import deepcopy
+
+        from gc_core.thread_store_durable import durable_store_capability
+
+        capability = durable_store_capability(port)
+        snapshot = None
+        if capability is None:
+            meta = await port.aload_meta(sys_norm, normalized_thread_id)
+            state = await port.aload_thread_state(
+                sys_norm, normalized_thread_id
+            )
+        else:
+            snapshot = await capability[0](sys_norm, normalized_thread_id)
+            meta, state = deepcopy(snapshot.meta), snapshot.state
+        cls._check_store_owner(port, meta, snapshot)
         session = cls._build(
             config_dict=config_dict,
             threads_dir=threads_dir,
@@ -845,7 +926,30 @@ class ThreadSession:
             state=state,
         )
         session._port = port  # порт уже разрешён — не резолвить второй раз
+        session._store_snapshot = snapshot
         return session
+
+    @staticmethod
+    def _check_store_owner(port, meta, snapshot=None) -> None:
+        from gc_core.thread_store_durable import ThreadStoreOwnershipError
+
+        owner = getattr(port, "owner_id", None)
+        epoch = getattr(port, "owner_epoch", None)
+        if (
+            snapshot is not None
+            and snapshot.owner_id is not None
+            and (owner, epoch) != (snapshot.owner_id, snapshot.owner_epoch)
+        ):
+            raise ThreadStoreOwnershipError(
+                "Thread belongs to another execution owner"
+            )
+        marker = meta.get("execution_owner") or {}
+        if marker.get("backend") == "temporal" and (
+            not owner or marker.get("owner_id") != owner
+        ):
+            raise ThreadStoreOwnershipError(
+                "Temporal owns this thread; local execution is forbidden"
+            )
 
     @staticmethod
     def _resolve_store(
@@ -922,121 +1026,6 @@ class ThreadSession:
             combined.append(item)
         return combined
 
-    def _persist_batch_begin(
-        self, step_messages: List[Dict[str, Any]]
-    ) -> Set[str]:
-        """Снимок ключей ДО записи. Чистая часть — общая для sync и async."""
-        known_before = set(self.known_message_keys)
-        self.known_keys_snapshot_before_last_batch = frozenset(known_before)
-        return known_before
-
-    def _persist_batch_apply(
-        self,
-        step_messages: List[Dict[str, Any]],
-        known_before: Set[str],
-        written: int,
-        previous_response_id: Optional[str],
-    ) -> None:
-        """Обновить состояние сессии по итогам записи. Чистая часть."""
-        self.persisted_messages_count += written
-        known_seen = set(known_before)
-        for message in step_messages:
-            key = make_message_key(message)
-            if key in known_seen:
-                continue
-            self.history_messages.append(message)
-            known_seen.add(key)
-        self.previous_response_id = previous_response_id
-
-    def _persist_batch_meta(
-        self,
-        base_meta: Dict[str, Any],
-        step_messages: Optional[List[Dict[str, Any]]] = None,
-        known_before: Optional[Set[str]] = None,
-    ) -> Dict[str, Any]:
-        """Собрать meta для записи. Чистая часть.
-
-        Вынесено, чтобы синхронный и асинхронный пути не могли разойтись: у них
-        различается ТОЛЬКО последовательность обращений к хранилищу, а вся
-        логика — здесь, в одном экземпляре.
-
-        Счётчики живого объёма (``live_history_chars`` / ``live_msg_count``)
-        считаются ЗДЕСЬ, а не в файловом слое. Раньше их бампал
-        ``append_new_thread_messages``, то есть только файловая реализация:
-        у хранилища в базе этих ключей не появлялось вовсе, а TUI их читает
-        (индикатор объёма контекста). Это производная от сообщений, а не
-        деталь хранения, и место ей в сессии.
-        """
-        base_meta = dict(base_meta or {})
-        if step_messages is not None and known_before is not None:
-            fresh = [
-                m
-                for m in step_messages
-                if make_message_key(m) not in known_before
-            ]
-            if fresh:
-                # Параметры проекции — с develop: без них счётчик считал бы
-                # служебные теги и рассуждения, которых модель не видит.
-                bump_live_volume_for_messages(
-                    base_meta,
-                    fresh,
-                    tags=self._proj_tags,
-                    strip_think=self._proj_strip_think,
-                )
-        base_meta["created_at"] = self.meta.get("created_at") or base_meta.get(
-            "created_at"
-        )
-        base_meta["previous_response_id"] = self.previous_response_id
-        base_meta["backend_api_mode"] = self.backend_api_mode
-        base_meta["messages_count"] = self.persisted_messages_count
-        self._copy_session_meta_fields(base_meta)
-        # Persist rendered chat/completions system prompt for transparency/debugging.
-        # Must stay identical to актуальным данным: when we are in `responses`
-        # mode, there is no system prompt in messages, so it must not be present in meta.
-        if self.backend_api_mode == "chat_completions":
-            prompt = self.meta.get("chat_completions_system_prompt_rendered")
-            if isinstance(prompt, str) and prompt.strip():
-                base_meta["chat_completions_system_prompt_rendered"] = prompt
-        else:
-            base_meta.pop("chat_completions_system_prompt_rendered", None)
-        merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
-        return base_meta
-
-    def _copy_session_meta_fields(self, base_meta: Dict[str, Any]) -> None:
-        """Перенести в base_meta поля сессии, которые есть в self.meta в валидной форме."""
-        if isinstance(self.meta.get("shared"), dict):
-            base_meta["shared"] = self.meta["shared"]
-        if isinstance(self.meta.get("last_backend_response_id"), str):
-            base_meta["last_backend_response_id"] = self.meta.get(
-                "last_backend_response_id"
-            )
-        if isinstance(self.meta.get("user_intent_log"), list):
-            base_meta["user_intent_log"] = serialize_for_meta(
-                deserialize_list(self.meta.get("user_intent_log"))
-            )
-        if isinstance(self.meta.get("current_user_intent"), list):
-            base_meta["current_user_intent"] = serialize_for_meta(
-                deserialize_list(self.meta.get("current_user_intent"))
-            )
-        if "user_turn_seq" in self.meta:
-            base_meta["user_turn_seq"] = int(
-                self.meta.get("user_turn_seq") or 0
-            )
-        if "dialog_steps_offset" in self.meta:
-            base_meta["dialog_steps_offset"] = int(
-                self.meta.get("dialog_steps_offset") or 0
-            )
-        for prompt_key in (
-            "last_main_prompt_tokens",
-            "last_main_prompt_message_count",
-        ):
-            if prompt_key in self.meta:
-                base_meta[prompt_key] = read_optional_nonneg_int(
-                    self.meta.get(prompt_key)
-                )
-        if isinstance(self.meta.get("token_usage"), dict):
-            base_meta["token_usage"] = self.meta["token_usage"]
-
     async def apersist_batch(
         self,
         step_messages: List[Dict[str, Any]],
@@ -1050,6 +1039,14 @@ class ThreadSession:
         не было, а порядок обращений к хранилищу у обоих был один и тот же
         (сторож этого порядка — в тестах базы хранилища).
         """
+        from gc_core.thread_store_durable import durable_store_capability
+
+        capability = durable_store_capability(self.port)
+        if capability is not None:
+            await self._apersist_durable(
+                capability, step_messages, previous_response_id
+            )
+            return
         known_before = self._persist_batch_begin(step_messages)
         written = await self.port.aappend_messages(
             self.system_id,
@@ -1069,6 +1066,178 @@ class ThreadSession:
             self.thread_id,
             self._persist_batch_meta(base_meta, step_messages, known_before),
         )
+
+    async def _areload_store_snapshot(self, read_snapshot) -> None:
+        from gc_core.thread_store_durable import (
+            ThreadStoreConflict,
+            ThreadStoreOwnershipError,
+        )
+
+        snapshot = await read_snapshot(self.system_id, self.thread_id)
+        self._check_store_owner(self.port, snapshot.meta, snapshot)
+        previous = self._store_snapshot
+        if previous is not None and (
+            snapshot.generation != previous.generation
+            or snapshot.owner_epoch != previous.owner_epoch
+        ):
+            raise ThreadStoreOwnershipError(
+                "Thread generation or ownership changed during this run"
+            )
+        state = snapshot.state
+        if state is None or (
+            state.known_keys != self.known_message_keys
+            or state.max_seq != self.persisted_messages_count
+        ):
+            raise ThreadStoreConflict(
+                "Thread history changed during this run; reload the agent"
+            )
+        self._store_snapshot = snapshot
+
+    def _store_operation(self, kind: str, payload: dict):
+        from gc_core.thread_store_durable import ThreadStoreOperation
+
+        snapshot = self._store_snapshot
+        return ThreadStoreOperation(
+            operation_id=generate_message_id_func("store"),
+            kind=kind,
+            payload=payload,
+            expected_revision=snapshot.revision,
+            generation=snapshot.generation,
+            owner_id=getattr(self.port, "owner_id", None),
+            owner_epoch=getattr(self.port, "owner_epoch", None),
+        )
+
+    def _remember_store_receipt(self, receipt) -> None:
+        from copy import deepcopy
+
+        from gc_core.thread_store_durable import ThreadStoreSnapshot
+
+        self._store_snapshot = ThreadStoreSnapshot(
+            meta=deepcopy(receipt.meta),
+            state=None,
+            revision=receipt.revision,
+            generation=receipt.generation,
+            max_seq=receipt.max_seq,
+            owner_id=receipt.owner_id,
+            owner_epoch=receipt.owner_epoch,
+        )
+
+    def _accept_metadata_ack(self) -> None:
+        """Advance the storage baseline from a proven own metadata-only span.
+
+        Pending session meta and history remain untouched. External writers
+        still go through the ordinary conflict/reload path.
+        """
+        snapshot = self._store_snapshot
+        acknowledged = getattr(self.port, "metadata_ack_since", None)
+        if snapshot is None or not callable(acknowledged):
+            return
+        receipt = acknowledged(
+            self.system_id, self.thread_id, snapshot.revision
+        )
+        if receipt is None or (
+            receipt.revision <= snapshot.revision
+            or receipt.generation != snapshot.generation
+            or receipt.owner_id != snapshot.owner_id
+            or receipt.owner_epoch != snapshot.owner_epoch
+            or receipt.max_seq != snapshot.max_seq
+            or receipt.max_seq != self.persisted_messages_count
+            or receipt.written != 0
+            or receipt.added_known_keys
+            or receipt.kind
+            not in (
+                "save_meta",
+                "patch_runtime_flag",
+                "reset_run_flags",
+                "update_runtime_meta",
+            )
+        ):
+            return
+        self._remember_store_receipt(receipt)
+
+    def _prepare_durable_persist(self, messages, previous_response_id):
+        from copy import copy, deepcopy
+
+        # Stage the real session's existing pure policy; no live state is
+        # advanced before the store has acknowledged the entire batch.
+        staged = copy(self)
+        staged.meta = deepcopy(self.meta)
+        staged.history_messages = list(self.history_messages)
+        staged.known_message_keys = set(self.known_message_keys)
+        known = staged._persist_batch_begin(messages)
+        fresh_keys = {make_message_key(m) for m in messages} - known
+        staged._persist_batch_apply(
+            messages, known, len(fresh_keys), previous_response_id
+        )
+        staged.known_message_keys.update(fresh_keys)
+        meta = staged._persist_batch_meta(
+            deepcopy(self._store_snapshot.meta), messages, known
+        )
+        operation = self._store_operation(
+            "persist",
+            {
+                "messages": deepcopy(messages),
+                "meta": meta,
+                "start_seq": self.persisted_messages_count,
+                "known_keys": sorted(known),
+                "expected_written": len(fresh_keys),
+            },
+        )
+        return staged, operation
+
+    def _apply_durable_persist(self, staged, operation, receipt) -> None:
+        from copy import deepcopy
+
+        from gc_core.execution.contracts import ExecutionFailure
+
+        expected = operation.payload
+        if (
+            receipt.operation_id != operation.operation_id
+            or receipt.kind != operation.kind
+            or receipt.written != expected["expected_written"]
+            or receipt.max_seq != staged.persisted_messages_count
+            or set(receipt.added_known_keys)
+            != (staged.known_message_keys - self.known_message_keys)
+        ):
+            raise ExecutionFailure("Thread store receipt does not match batch")
+        self.history_messages = staged.history_messages
+        self.known_message_keys.update(receipt.added_known_keys)
+        self.known_keys_snapshot_before_last_batch = (
+            staged.known_keys_snapshot_before_last_batch
+        )
+        self.persisted_messages_count = receipt.max_seq
+        self.previous_response_id = staged.previous_response_id
+        self.meta = deepcopy(receipt.meta)
+        self._remember_store_receipt(receipt)
+
+    async def _apersist_durable(
+        self, capability, messages, previous_response_id
+    ) -> None:
+        from gc_core.thread_store_durable import (
+            ThreadStoreConflict,
+            ThreadStoreOwnershipError,
+        )
+
+        read_snapshot, commit = capability
+        if self._store_snapshot is None:
+            await self._areload_store_snapshot(read_snapshot)
+        for _attempt in range(8):
+            self._accept_metadata_ack()
+            staged, operation = self._prepare_durable_persist(
+                messages, previous_response_id
+            )
+            try:
+                receipt = await commit(
+                    self.system_id, self.thread_id, operation
+                )
+            except ThreadStoreOwnershipError:
+                raise
+            except ThreadStoreConflict:
+                await self._areload_store_snapshot(read_snapshot)
+                continue
+            self._apply_durable_persist(staged, operation, receipt)
+            return
+        raise ThreadStoreConflict("Thread metadata kept changing during save")
 
     def _compact_summary_message(
         self, summary_payload: Dict[str, Any]
@@ -1100,7 +1269,9 @@ class ThreadSession:
         disk_tui = dict(disk_meta.get("tui") or {})
         disk_runtime = dict(disk_meta.get("runtime") or {})
         shared_data = summary_payload.get("shared")
-        now_iso = _utc_now_iso()
+        from gc_core.execution.environment import utc_now
+
+        now_iso = utc_now().isoformat()
         # created_at — birth of the thread; never reset on summary.
         # Prefer in-memory, then disk snapshot taken before archive move
         # (self.meta can lag when save_thread_meta minted created_at on disk only).
@@ -1302,6 +1473,11 @@ class ThreadSession:
         искал ТОЛЬКО синхронное ``archive_and_replace`` и звал его прямо на
         loop.
         """
+        from gc_core.thread_store_durable import durable_store_capability
+
+        capability = durable_store_capability(self.port)
+        if capability is not None:
+            return await self._acompact_durable(capability, summary_payload)
         disk_meta = (
             await self.port.aload_meta(self.system_id, self.thread_id) or {}
         )
@@ -1338,4 +1514,81 @@ class ThreadSession:
         self._compact_apply(compact_messages, known_message_keys, new_meta)
         return self._compact_result(
             archived, compact_messages, summary_message
+        )
+
+    async def _acompact_durable(self, capability, summary_payload) -> dict:
+        from copy import deepcopy
+
+        from gc_core.execution.environment import utc_now
+        from gc_core.thread_store_durable import (
+            ThreadStoreConflict,
+            ThreadStoreOwnershipError,
+        )
+
+        read_snapshot, commit = capability
+        if self._store_snapshot is None:
+            await self._areload_store_snapshot(read_snapshot)
+        summary_message = self._compact_summary_message(summary_payload)
+        messages = [summary_message]
+        # Distinct compactions must not overwrite an archive from the same
+        # second. This suffix is fixed for every retry of this compaction.
+        suffix = (
+            utc_now().strftime("%Y%m%d_%H%M%S")
+            + "_"
+            + generate_message_id_func("archive").rsplit("_", 1)[-1]
+        )
+        for _attempt in range(8):
+            self._accept_metadata_ack()
+            operation = self._store_operation(
+                "compact",
+                {
+                    "messages": deepcopy(messages),
+                    "meta": self._compact_meta(
+                        summary_payload,
+                        messages,
+                        self._store_snapshot.meta,
+                        suffix,
+                    ),
+                    "archive_suffix": suffix,
+                },
+            )
+            try:
+                receipt = await commit(
+                    self.system_id, self.thread_id, operation
+                )
+            except ThreadStoreOwnershipError:
+                raise
+            except ThreadStoreConflict:
+                await self._areload_store_snapshot(read_snapshot)
+                continue
+            return self._apply_durable_compaction(
+                operation, receipt, messages, summary_message
+            )
+        raise ThreadStoreConflict(
+            "Thread metadata kept changing during compaction"
+        )
+
+    def _apply_durable_compaction(
+        self, operation, receipt, messages, summary_message
+    ) -> dict:
+        from copy import deepcopy
+
+        from gc_core.execution.contracts import ExecutionFailure
+
+        if (
+            receipt.operation_id != operation.operation_id
+            or receipt.kind != "compact"
+            or receipt.max_seq != len(messages)
+        ):
+            raise ExecutionFailure(
+                "Thread store receipt does not match compaction"
+            )
+        self._compact_apply(
+            messages,
+            {make_message_key(m) for m in messages},
+            deepcopy(receipt.meta),
+        )
+        self._remember_store_receipt(receipt)
+        return self._compact_result(
+            receipt.archive or {}, messages, summary_message
         )

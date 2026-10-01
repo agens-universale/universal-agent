@@ -3,6 +3,10 @@ import os
 from typing import Any, Dict, List
 
 from gc_core.bundled_assets import bundled_root
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
+)
 from gc_core.intent_guard.trace_digest import (
     FinishGateTraceDigest,
     build_finish_gate_trace_digest,
@@ -19,13 +23,19 @@ from gc_core.summarize.llm import (
 )
 from gc_core.utils.user_text import read_user_text
 
-# bundled_root() — единый резолвер ассетов (editable → repo, wheel → site-packages).
-_PROJECT_ROOT = str(bundled_root())
-DEFAULT_INTENT_GUARD_PROMPT_PATH = os.path.abspath(
-    os.path.join(
-        _PROJECT_ROOT, "prompts", "chat_completions_intent_guard_prompt.md"
+
+def default_guard_prompt_path() -> str:
+    return str(
+        bundled_root() / "prompts" / "chat_completions_intent_guard_prompt.md"
     )
-)
+
+
+def __getattr__(name: str):
+    # Keep the public legacy constant lazy: resolving assets is worker I/O.
+    if name == "DEFAULT_INTENT_GUARD_PROMPT_PATH":
+        return default_guard_prompt_path()
+    raise AttributeError(name)
+
 
 _FINISH_GATE_RETRY_DRAFT_MAX_CHARS = 6000
 
@@ -82,7 +92,7 @@ def _normalize_handoff_in_finish_args(args: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _load_guard_prompt(prompt_path: str | None = None) -> str:
-    path = prompt_path or DEFAULT_INTENT_GUARD_PROMPT_PATH
+    path = prompt_path or default_guard_prompt_path()
     if not os.path.exists(path):
         raise FileNotFoundError(f"Intent guard prompt file not found: {path}")
     # Путь задаёт конфиг (`chat_completions_intent_guard_prompt_path`).
@@ -213,7 +223,11 @@ async def avalidate_final_report_vs_user_intent(
         if isinstance(ctx_cfg, dict)
         else None
     )
-    system_prompt = _load_guard_prompt(guard_prompt_path)
+    system_prompt = await aload_prompt_resource(
+        ctx,
+        PromptResourceRequest("finish_gate", path=guard_prompt_path),
+        local=lambda: _load_guard_prompt(guard_prompt_path),
+    )
     is_subagent = getattr(state, "parent_state_id", None) is not None
     payload = {
         "user_context": user_context,

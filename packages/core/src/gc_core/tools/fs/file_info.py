@@ -64,6 +64,8 @@ class _FileProbe:
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class FileInfo(AbstractSimpleTool):
+    # A retry can observe newer files, but never repeats an external mutation.
+    effect_is_read_only = True
     max_hash_bytes = DEFAULT_MAX_HASH_BYTES
 
     @classmethod

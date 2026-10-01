@@ -6,7 +6,7 @@ import re
 from copy import deepcopy
 from typing import Callable, Dict, List, Optional
 
-from gc_core.utils.backend_errors import (
+from gc_core.execution.finish_reason import (
     FINISH_KIND_LENGTH,
     nonempty_reasoning_text,
     normalize_finish_reason,

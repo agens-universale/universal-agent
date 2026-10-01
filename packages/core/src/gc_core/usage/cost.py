@@ -149,6 +149,8 @@ def compute_cost(
     pricing: object,
     model_name: str | None,
     endpoint_url: str | None = None,
+    *,
+    provider_currency: str | None = None,
 ) -> CostReport:
     """Построить ``CostReport`` по аккаунту и тарифам.
 
@@ -166,7 +168,9 @@ def compute_cost(
     tariff = resolve_model_tariff(pricing_cfg, model_name)
     # Валюта для сумм без записанной валюты (старые meta) — по текущему конфигу,
     # то есть ровно как вела себя предыдущая версия. Разбор один на отчёт.
-    legacy_currency = provider_currency_for_url(endpoint_url)
+    legacy_currency = provider_currency or provider_currency_for_url(
+        endpoint_url
+    )
     report = CostReport()
 
     # Порядок категорий стабильный: по убыванию суммарных токенов, потом по имени.

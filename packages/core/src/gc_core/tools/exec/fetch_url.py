@@ -1,13 +1,11 @@
+from __future__ import annotations
+
 import asyncio
 import functools
 import html as html_lib
 import os
 import re
 from typing import Any, Dict, Optional
-
-import httpx
-import trafilatura
-from readability import Document
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import resolve_tool_context
@@ -125,6 +123,8 @@ Usage:
 
     def _parse_primary(self, text: str, url: str) -> tuple:
         """Метаданные + основной текст. Синхронно и дорого — звать через to_thread."""
+        trafilatura = _extractor("trafilatura")
+
         return self._extract_meta(text), trafilatura.extract(
             text,
             url=url,
@@ -135,6 +135,9 @@ Usage:
 
     def _parse_readability(self, text: str, url: str) -> tuple:
         """Запасной разбор через readability. Синхронно и дорого — через to_thread."""
+        Document = _extractor("Document")
+        trafilatura = _extractor("trafilatura")
+
         sanitized_text = self._sanitize_for_xml(text)
         readable_doc = Document(sanitized_text, url=url)
         summary_html = readable_doc.summary(html_partial=True) or ""
@@ -157,6 +160,8 @@ Usage:
         """(response, None) либо (None, kwargs ошибки для _result)."""
         # Контекст политики нужен на КАЖДОМ переходе редиректа, а не только
         # на стартовом адресе (его проверил гвард `enforce_url_policy`).
+        import httpx
+
         policy_context = resolve_tool_context(
             self, ctx=self._ctx, state=self._state
         )
@@ -378,3 +383,20 @@ Usage:
                 meta=page_meta,
             )
         )
+
+
+def _extractor(name):
+    # Preserve module-local overrides used by embedders and test transports.
+    return globals()[name] if name in globals() else __getattr__(name)
+
+
+def __getattr__(name):
+    if name == "trafilatura":
+        import trafilatura
+
+        return trafilatura
+    if name == "Document":
+        from readability import Document
+
+        return Document
+    raise AttributeError(name)

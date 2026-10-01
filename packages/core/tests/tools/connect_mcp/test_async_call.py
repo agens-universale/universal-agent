@@ -50,7 +50,7 @@ async def test_sdk_transport_runs_without_spawning_a_thread(monkeypatch):
             spawned.append(self.name)
             return super().start()
 
-    async def _fake_call(**kwargs):
+    async def _fake_call(**_kwargs):
         return {"content": [{"type": "text", "text": "ответ тула"}]}
 
     # Диспетчер теперь один — порт клиента (`McpClientPort.acall_tool`), а не
@@ -88,7 +88,7 @@ async def test_legacy_http_runs_natively_without_a_thread(monkeypatch):
     async def _fake_session(*_a, **_k):
         return "sid-1"
 
-    async def _fake_call(**kwargs):
+    async def _fake_call(**_kwargs):
         return {"content": [{"type": "text", "text": "ответ легаси"}]}
 
     monkeypatch.setattr(client_port, "_aget_or_init_session_id", _fake_session)
@@ -123,7 +123,7 @@ async def test_persistent_stdio_still_goes_to_an_abandonable_thread(
         }
     }
 
-    def _fake_sync(self, tool_name, arguments, *, timeout):
+    def _fake_sync(self, tool_name, arguments, *, timeout):  # noqa: ARG001 - client contract
         seen["thread"] = threading.current_thread().name
         return {"tool": "mcp_srv_echo", "ok": True}
 
@@ -141,7 +141,7 @@ async def test_persistent_stdio_still_goes_to_an_abandonable_thread(
     )
 
 
-async def test_validation_errors_come_from_the_shared_preparation(monkeypatch):
+async def test_validation_errors_come_from_the_shared_preparation():
     """Разбор аргументов вынесен в `_prepare_mcp_call` и общий для всех путей.
 
     Раньше тест сверял ОБА входа между собой; синхронного больше нет, но
@@ -208,3 +208,21 @@ async def test_dispatcher_refuses_a_tool_without_acall():
     data = {"t": {"tool_fabric": lambda **kw: _Legacy()}}
     with pytest.raises(TypeError, match="acall"):
         await aapply_tool("t", {}, data, ctx=None, config_dict={})
+
+
+async def test_durable_scope_disables_outer_retry_even_when_config_enabled(
+    monkeypatch,
+):
+    from gc_core.tools.connect_mcp.durable_scope import durable_mcp_calls
+
+    calls = []
+
+    async def fail(**_kwargs):
+        calls.append(1)
+        raise ConnectionError("reply lost after mutation")
+
+    monkeypatch.setattr(client_port, "acall_tool_stream_http", fail)
+    cfg = {"srv": {**_SDK_CFG["srv"], "use_retry": True}}
+    with durable_mcp_calls(), pytest.raises(ConnectionError):
+        await api.acall_mcp_tool("mcp_srv_echo", {}, cfg, _REGISTRY)
+    assert calls == [1]

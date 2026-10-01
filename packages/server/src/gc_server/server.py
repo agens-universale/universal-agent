@@ -38,6 +38,7 @@ from gc_server.server_cleanup_threads import (
 )
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
+_JSON_SUFFIX = ".json"
 _ERR_SYSTEM_AND_TASK_ID = "system and task_id are required"
 
 
@@ -93,6 +94,10 @@ _SWARM_RUN_LOCK = threading.Lock()
 
 
 app = FastAPI()
+
+from gc_server.rest_api.temporal_backend import configure_temporal
+
+temporal_registry = configure_temporal(app, SERVER_CONFIG)
 
 
 register_cleanup_threads_on_startup(
@@ -289,6 +294,13 @@ async def get_run_status(system: str, task_id: str):
             detail={"status": "error", "payload": _ERR_SYSTEM_AND_TASK_ID},
         )
 
+    if temporal_registry is not None:
+        from gc_ua_temporalio.http_api import api_call
+
+        return await api_call(
+            temporal_registry.legacy_status(sys_norm, task_norm)
+        )
+
     # Бронь и прогон — одним снимком реестра, бронь первой: пока строится
     # контекст, нового прогона ещё нет, а под тем же ключом лежит прошлый
     # завершённый с TTL 15 минут. Клиент, которому только что ответили
@@ -431,6 +443,26 @@ def _request_task_identifiers(payload: dict) -> tuple[str, str | None]:
     return task_id, trace_id
 
 
+def _log_ignored_trace_id(trace_id, system, task_id):
+    if trace_id:
+        # Единственное место в дизайне, где trace может быть легитимно
+        # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
+        # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
+        # потери есть именованное событие, а не молчание.
+        logger.warning(
+            "trace_id_ignored: trace_id=%s system=%s task_id=%s",
+            trace_id,
+            system,
+            task_id,
+            extra={
+                "event": "trace_id_ignored",
+                "system": system,
+                "task_id": task_id,
+                "trace_id": trace_id,
+            },
+        )
+
+
 @app.post("/events/webhook")
 async def events_webhook(request: Request):
     payload = await _read_request_payload(request)
@@ -443,6 +475,13 @@ async def events_webhook(request: Request):
     default_system = str(defaults.get("system", "generic"))
     system = normalize_system(source_value, default_system=default_system)
     payload["system"] = system
+
+    if temporal_registry is not None:
+        from gc_ua_temporalio.http_api import api_call
+
+        return await api_call(
+            temporal_registry.webhook(system, task_id, payload)
+        )
 
     message_str = json.dumps(payload, ensure_ascii=False)
 
@@ -471,23 +510,7 @@ async def events_webhook(request: Request):
             make_message=_make_user_message,
             content=message_str,
         ):
-            if trace_id:
-                # Единственное место в дизайне, где trace может быть легитимно
-                # потерян: запрос подмешан в живой ран, чьи ctx, логгер, имя
-                # лог-файла и конфиг MCP-серверов уже зафиксированы. Поэтому у
-                # потери есть именованное событие, а не молчание.
-                logger.warning(
-                    "trace_id_ignored: trace_id=%s system=%s task_id=%s",
-                    trace_id,
-                    system,
-                    task_id,
-                    extra={
-                        "event": "trace_id_ignored",
-                        "system": system,
-                        "task_id": task_id,
-                        "trace_id": trace_id,
-                    },
-                )
+            _log_ignored_trace_id(trace_id, system, task_id)
             return {
                 "status": "queued",
                 "payload": payload,
@@ -621,6 +644,13 @@ async def get_thread_logs(system: str, task_id: str):
             detail={"status": "error", "payload": "system is required"},
         )
 
+    if temporal_registry is not None:
+        from gc_ua_temporalio.http_api import api_call
+
+        return await api_call(
+            temporal_registry.legacy_logs(sys_norm, task_norm)
+        )
+
     try:
         threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
     except Exception as e:
@@ -632,8 +662,11 @@ async def get_thread_logs(system: str, task_id: str):
             },
         )
 
-    meta = load_thread_meta(threads_dir, sys_norm, task_norm)
-    messages, _, _ = load_thread_messages(threads_dir, sys_norm, task_norm)
+    from gc_core.thread_store_journal import thread_read_scope
+
+    with thread_read_scope(threads_dir, sys_norm, task_norm):
+        meta = load_thread_meta(threads_dir, sys_norm, task_norm)
+        messages, _, _ = load_thread_messages(threads_dir, sys_norm, task_norm)
 
     if not meta and not messages:
         raise HTTPException(status_code=404, detail={"status": "not_found"})
@@ -655,7 +688,7 @@ def _thread_log_entry(meta: dict, name: str) -> dict:
     task_id = meta.get("thread_id")
     if not isinstance(task_id, str) or not task_id.strip():
         # legacy fallback: meta_<thread_id>.json
-        task_id = name.removeprefix("meta_").removesuffix(".json")
+        task_id = name.removeprefix("meta_").removesuffix(_JSON_SUFFIX)
 
     updated_at = meta.get("updated_at") or meta.get("created_at")
     messages_count = meta.get("messages_count")
@@ -688,12 +721,20 @@ async def get_all_thread_logs():
             },
         )
 
+    from gc_core.thread_store_journal import (
+        recover_pending_threads,
+        thread_file_read_scope,
+    )
+
+    recover_pending_threads(threads_dir)
     out: list[dict[str, Any]] = []
     try:
         names = [
             n
             for n in os.listdir(threads_dir)
-            if n.startswith("meta_") and n.endswith(".json")
+            if n.startswith("meta_")
+            and n.endswith(_JSON_SUFFIX)
+            and "__pre_summary__" not in n
         ]
     except FileNotFoundError:
         return {"status": "ok", "logs": []}
@@ -701,8 +742,10 @@ async def get_all_thread_logs():
     for name in names:
         meta_path = os.path.join(threads_dir, name)
         try:
-            with open(meta_path, encoding="utf-8") as f:
-                meta = json.load(f)
+            stem = name.removeprefix("meta_").removesuffix(_JSON_SUFFIX)
+            with thread_file_read_scope(threads_dir, stem):
+                with open(meta_path, encoding="utf-8") as f:
+                    meta = json.load(f)
         except Exception:
             continue
 

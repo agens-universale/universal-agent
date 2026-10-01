@@ -409,6 +409,16 @@ Important Usage Rules:
                 env=plan["env"],
             )
         except Exception as exc:
+            from gc_core.execution.resource_scope import (
+                resource_capture_active,
+            )
+
+            if resource_capture_active():
+                from gc_core.execution.contracts import OutcomeUnknown
+
+                raise OutcomeUnknown(
+                    "Background start did not return a reliable receipt"
+                ) from exc
             return self._exec_failed(plan, exc)
 
         # Команда могла не прожить и мгновения (бэкенд, который это проверяет,
@@ -432,6 +442,14 @@ Important Usage Rules:
                         "run it in the foreground with a short `timeout` to see the error."
                     ),
                 },
+            )
+        if exit_code is None and isinstance(started.get("pid"), int):
+            from gc_core.execution.resource_scope import (
+                record_background_process,
+            )
+
+            record_background_process(
+                started["pid"], type(self._backend).__name__
             )
         background = {"pid": started.get("pid"), "output": "not captured"}
         if exit_code == 0:

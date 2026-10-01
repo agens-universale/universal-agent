@@ -17,3 +17,7 @@ time_info
 # Заглушка readability.Document.summary(html_partial=...) в gc_testkit: повторяет
 # сигнатуру настоящей библиотеки, чтобы вызовы с этим аргументом не падали.
 html_partial
+
+# Native sandbox eagerly loads the pure finish-gate module before replay starts;
+# the common guard later accesses it through its ordinary lazy import.
+_final_report_consistency

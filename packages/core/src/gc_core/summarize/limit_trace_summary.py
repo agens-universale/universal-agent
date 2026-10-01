@@ -11,13 +11,12 @@ import logging
 import os
 from typing import Any
 
-from gc_core.bundled_assets import bundled_root
-from gc_core.summarize.llm import arequest_auxiliary_completion_text
-from gc_core.usage.account import UsageAccount
-
-_PROMPT_PATH = os.path.join(
-    str(bundled_root()), "prompts", "limit_trace_summary.md"
+from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.resources import (
+    PromptResourceRequest,
+    aload_prompt_resource,
 )
+from gc_core.usage.account import UsageAccount
 
 _REASON_LABELS = {
     "step_limit": "step limit",
@@ -31,6 +30,11 @@ _prompt_cache: str | None = None
 
 
 def _load_limit_summary_prompt() -> str:
+    from gc_core.bundled_assets import bundled_root
+
+    _PROMPT_PATH = os.path.join(
+        str(bundled_root()), "prompts", "limit_trace_summary.md"
+    )
     global _prompt_cache
     if _prompt_cache is not None:
         return _prompt_cache
@@ -152,7 +156,11 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
             max_tokens = 24576
 
         try:
-            prompt_template = _load_limit_summary_prompt()
+            prompt_template = await aload_prompt_resource(
+                ctx,
+                PromptResourceRequest("limit_summary"),
+                local=_load_limit_summary_prompt,
+            )
             trace_text = _serialize_trace(state.messages)
             user_content = (
                 prompt_template + "\n\n---\n## Agent trace\n\n" + trace_text
@@ -172,6 +180,8 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
             )
             if raw_summary is None:
                 raw_summary = ""
+        except ExecutionFailure:
+            raise
         except Exception:
             logger.warning(
                 "limit_trace_summary LLM call failed for reason=%s; returning envelope with empty summary",
@@ -187,3 +197,11 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
         "raw_trace_summary": raw_summary,
     }
     return json.dumps(envelope, ensure_ascii=False)
+
+
+async def arequest_auxiliary_completion_text(**kwargs):
+    from gc_core.summarize.llm import (
+        arequest_auxiliary_completion_text as request,
+    )
+
+    return await request(**kwargs)

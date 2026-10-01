@@ -3,12 +3,32 @@
 и реально существовать — иначе в method-2 фича упадёт «prompt not found»."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 from gc_core.bundled_assets import bundled_root
 
 
 def _bp(*parts: str) -> Path:
     return bundled_root().joinpath(*parts)
+
+
+@pytest.fixture
+def foreign_prompt_workspace(tmp_path, monkeypatch):
+    for relative in (
+        "security/command_judge_system.md",
+        "security/command_judge_user.md",
+        "intent_scope_tool_summary_prompt.md",
+        "chat_completions_memory_patch_replace.md",
+        "project_memory_compaction_prompt.md",
+    ):
+        shadow = tmp_path / "prompts" / relative
+        shadow.parent.mkdir(parents=True, exist_ok=True)
+        shadow.write_text(
+            "Foreign workspace prompt must not be loaded", encoding="utf-8"
+        )
+    monkeypatch.chdir(tmp_path)
+    return SimpleNamespace(config_dict={})
 
 
 def test_intent_guard_prompt_under_bundled_root():
@@ -22,35 +42,78 @@ def test_intent_guard_prompt_under_bundled_root():
     assert Path(DEFAULT_INTENT_GUARD_PROMPT_PATH).is_file()
 
 
-def test_command_judge_prompts_under_bundled_root():
-    from gc_core.security import command_moderation as cm
+def test_command_judge_prompts_under_bundled_root(
+    foreign_prompt_workspace, tmp_path
+):
+    from gc_core.execution.guard_contracts import GuardProbeRequest
+    from gc_core.security.command_moderation import load_command_judge_prompt
+    from gc_core.security.guard_probe import evaluate_guard_probe
 
-    for p in (
-        cm._COMMAND_JUDGE_SYSTEM_PROMPT_PATH,
-        cm._COMMAND_JUDGE_USER_PROMPT_PATH,
-    ):
-        assert Path(p).parent == _bp("prompts", "security")
-        assert Path(p).is_file()
-
-
-def test_intent_scope_prompt_under_bundled_root():
-    from gc_core.intent_scope.summarizer import _DEFAULT_PROMPT_PATH
-
-    assert Path(_DEFAULT_PROMPT_PATH) == _bp(
-        "prompts", "intent_scope_tool_summary_prompt.md"
+    facts = evaluate_guard_probe(
+        GuardProbeRequest(
+            "command_prompts", "exec_command", "", cwd=str(tmp_path)
+        ),
+        config_dict=foreign_prompt_workspace.config_dict,
     )
-    assert Path(_DEFAULT_PROMPT_PATH).is_file()
+    for kind in ("system", "user"):
+        path = _bp("prompts", "security", f"command_judge_{kind}.md")
+        assert path.is_file()
+        expected = path.read_text(encoding="utf-8").strip()
+        assert load_command_judge_prompt(kind) == expected
+        assert facts.data[kind] == expected
 
 
-def test_memory_patch_prompts_under_bundled_root():
+def test_intent_scope_prompt_under_bundled_root(foreign_prompt_workspace):
+    from gc_core.execution.resources import PromptResourceRequest
+    from gc_core.intent_scope.summarizer import (
+        _load_system_prompt,
+        _resolve_prompt_path,
+    )
+    from gc_core.resource_loading import load_prompt_resource
+
+    path = _bp("prompts", "intent_scope_tool_summary_prompt.md")
+    assert path.is_file()
+    assert Path(_resolve_prompt_path(foreign_prompt_workspace)) == path
+    expected = path.read_text(encoding="utf-8").strip()
+    assert _load_system_prompt(foreign_prompt_workspace) == expected
+    assert (
+        load_prompt_resource(
+            PromptResourceRequest("intent_tool"), ctx=foreign_prompt_workspace
+        )
+        == expected
+    )
+
+
+def test_memory_patch_prompts_under_bundled_root(foreign_prompt_workspace):
+    from gc_core.execution.resources import PromptResourceRequest
+    from gc_core.resource_loading import load_prompt_resource
     from gc_core.summarize.memory_suggestions import (
-        DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH,
+        _resolve_prompt_path,
+        default_memory_patch_path,
+    )
+    from gc_core.summarize.prompt_loading import (
+        load_memory_patch_replace_prompt,
     )
 
-    assert Path(DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH) == _bp(
-        "prompts", "chat_completions_memory_patch_replace.md"
+    path = _bp("prompts", "chat_completions_memory_patch_replace.md")
+    assert path.is_file()
+    assert Path(default_memory_patch_path()) == path
+    resolved = _resolve_prompt_path(
+        foreign_prompt_workspace,
+        "chat_completions_memory_patch_replace_prompt_path",
+        default_memory_patch_path(),
     )
-    assert Path(DEFAULT_MEMORY_PATCH_REPLACE_PROMPT_PATH).is_file()
+    assert Path(resolved) == path
+    # The production reader expands memory tags and subagent placeholders.
+    expected = load_memory_patch_replace_prompt(str(path))
+    assert expected
+    assert "Foreign workspace prompt" not in expected
+    assert (
+        load_prompt_resource(
+            PromptResourceRequest("memory_patch"), ctx=foreign_prompt_workspace
+        )
+        == expected
+    )
 
 
 def test_summary_prompt_under_bundled_root():
@@ -62,13 +125,24 @@ def test_summary_prompt_under_bundled_root():
     assert Path(default_prompt_path()).is_file()
 
 
-def test_project_memory_compaction_prompt_under_bundled_root():
-    from gc_core.project_memory.compaction import _COMPACTION_PROMPT_PATH
+def test_project_memory_compaction_prompt_under_bundled_root(
+    foreign_prompt_workspace,
+):
+    from gc_core.execution.resources import PromptResourceRequest
+    from gc_core.project_memory.compaction import _load_prompt
+    from gc_core.resource_loading import load_prompt_resource
 
-    assert Path(_COMPACTION_PROMPT_PATH) == _bp(
-        "prompts", "project_memory_compaction_prompt.md"
+    path = _bp("prompts", "project_memory_compaction_prompt.md")
+    assert path.is_file()
+    expected = path.read_text(encoding="utf-8")
+    assert _load_prompt() == expected
+    assert (
+        load_prompt_resource(
+            PromptResourceRequest("project_memory"),
+            ctx=foreign_prompt_workspace,
+        )
+        == expected
     )
-    assert Path(_COMPACTION_PROMPT_PATH).is_file()
 
 
 def test_subagent_system_prompt_asset_present():

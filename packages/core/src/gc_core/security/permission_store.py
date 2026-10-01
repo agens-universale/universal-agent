@@ -32,6 +32,15 @@ class PermissionStore:
         if session:
             self._session_rules[key] = allow
 
+    def export_run_rules(self) -> dict[str, bool]:
+        """Copy transient decisions for an execution-boundary snapshot."""
+        return dict(self._run_rules)
+
+    def replace_run_rules(self, rules: dict[str, bool]) -> None:
+        """Apply a previously merged snapshot without rebinding session rules."""
+        self._run_rules.clear()
+        self._run_rules.update(rules)
+
     def session_rules(self) -> dict:
         return self._session_rules
 

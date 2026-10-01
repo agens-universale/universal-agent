@@ -1,16 +1,23 @@
-from gc_core.persistence.schema import STATE_SCHEMA_VERSION, StateSchemaError
-from gc_core.persistence.state_repository import StateRepository
-from gc_core.persistence.state_serializer import (
-    StateSerializer,
-    load_state_from_snapshot,
-)
-from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
+"""Persistence exports, loaded on demand so pure projections do not import I/O."""
 
-__all__ = [
-    "STATE_SCHEMA_VERSION",
-    "StateRepository",
-    "StateSchemaError",
-    "StateSerializer",
-    "ThreadMetaMapper",
-    "load_state_from_snapshot",
-]
+from importlib import import_module
+
+_EXPORTS = {
+    "STATE_SCHEMA_VERSION": "schema",
+    "StateSchemaError": "schema",
+    "StateRepository": "state_repository",
+    "StateSerializer": "state_serializer",
+    "load_state_from_snapshot": "state_serializer",
+    "ThreadMetaMapper": "thread_meta_mapper",
+}
+__all__ = list(_EXPORTS)
+
+
+def __getattr__(name):
+    if name not in _EXPORTS:
+        raise AttributeError(name)
+    value = getattr(
+        import_module(f"gc_core.persistence.{_EXPORTS[name]}"), name
+    )
+    globals()[name] = value
+    return value

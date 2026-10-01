@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import fnmatch
-import functools
 import inspect
 import json
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.confirm_port import confirmation_step
+from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.path_policy import (
     audit_policy_decision,
     resolve_tool_context,
@@ -165,21 +165,18 @@ def enforce_url_policy(
 
                 # В поток, а не на event loop: режим `ask` здесь — умолчание, то
                 # есть обычный путь, а не край.
-                confirmed = yield OffLoop(
-                    functools.partial(
-                        request_confirm,
-                        title="Политика URL",
-                        question=f"Разрешить запрос вне политики URL: {decision.url}?",
-                        fields=[
-                            ("Tool", _tool_name(func, args)),
-                            ("URL", decision.url),
-                            ("Reason", decision.reason or ""),
-                            ("Matched rule", decision.matched_rule or "-"),
-                        ],
-                        ctx=context.ctx,
-                        decision_key=f"url:{decision.url}",
-                    ),
-                    on_interrupt=False,
+                confirmed = yield confirmation_step(
+                    local_request=request_confirm,
+                    title="Политика URL",
+                    question=f"Разрешить запрос вне политики URL: {decision.url}?",
+                    fields=[
+                        ("Tool", _tool_name(func, args)),
+                        ("URL", decision.url),
+                        ("Reason", decision.reason or ""),
+                        ("Matched rule", decision.matched_rule or "-"),
+                    ],
+                    ctx=context.ctx,
+                    decision_key=f"url:{decision.url}",
                 )
                 if confirmed:
                     audit_policy_decision(

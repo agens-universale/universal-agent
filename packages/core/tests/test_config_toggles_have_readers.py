@@ -48,7 +48,6 @@ KNOWN_UNREAD: dict = {
     # Выглядят подключёнными: config.py кладёт их в config_dict рядом с
     # рабочими ключами. Описаны в demo-конфигах, то есть обещаны пользователю.
     "agent.client_name": "",
-    "agent.model_steering": "",
     "agent.stored_tool_outputs_max_entries": "",
     "project_memory.enable_project_memory_notice": "",
     # --- не спроецированы и не читаются ---
@@ -79,7 +78,10 @@ def _source_text() -> str:
     for path in (REPO / "packages").glob("*/src/**/*.py"):
         text = path.as_posix()
         if "gc_core/config_modules/" in text or text.endswith(
-            "gc_core/config.py"
+            (
+                "gc_core/config.py",
+                "gc_ua_temporalio/public_config.py",
+            )
         ):
             continue
         try:

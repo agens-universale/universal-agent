@@ -8,56 +8,17 @@ import logging
 from typing import Any, Dict, Optional
 
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
-from gc_core.tools.connect_mcp.api import acall_mcp_tool
+from gc_core.tools.connect_mcp.api import (
+    acall_mcp_tool,  # transport injection compatibility
+)
 from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_core.tools.connect_mcp.tool_wrapper import MCPToolWrapper
 from gc_core.tools.schema_optional import apply_openai_strict_object
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 
 logger = logging.getLogger(__name__)
 
 _DEFS_KEY = "$defs"
-
-
-class MCPToolWrapper:
-    """
-    Обёртка над MCP-инструментом с интерфейсом как у локальных тулов:
-    __call__(**arguments) -> str | dict | list.
-    """
-
-    def __init__(
-        self,
-        full_tool_name: str,
-        servers_cfg: Dict[str, Dict[str, Any]],
-        tools_registry: Dict[str, Dict[str, Any]],
-        timeout: float,
-        default_use_retry: bool,
-        *,
-        os_backend: Any = None,
-    ) -> None:
-        self._full_tool_name = full_tool_name
-        self._servers_cfg = servers_cfg
-        self._tools_registry = tools_registry
-        self._timeout = timeout
-        self._default_use_retry = default_use_retry
-        self._os_backend = os_backend
-
-    async def acall(self, **arguments: Any) -> Any:
-        """Быстрый путь для цикла агента: диспетчер зовёт его без потока.
-
-        Форма из docs/async.md — тул с парой ``acall``/``__call__``.
-        Для SDK-транспортов вызов идёт прямо на loop вызывающего; легаси
-        (свои http/stdio на requests и subprocess) уходят в поток внутри
-        ``acall_mcp_tool``, потому что прервать их всё равно нечем.
-        """
-        return await acall_mcp_tool(
-            full_tool_name=self._full_tool_name,
-            arguments=arguments,
-            servers_cfg=self._servers_cfg,
-            tools_registry=self._tools_registry,
-            timeout=self._timeout,
-            default_use_retry=self._default_use_retry,
-            os_backend=self._os_backend,
-        )
 
 
 def _collect_schema_refs(node: Any) -> set[str]:
@@ -632,6 +593,7 @@ def _assemble_mcp_tools_data(
                 timeout,
                 default_use_retry=default_use_retry,
                 os_backend=os_backend,
+                caller=acall_mcp_tool,
             )
 
         return fabric
@@ -660,6 +622,7 @@ def _assemble_mcp_tools_data(
 
         tool_data: Dict[str, Any] = {
             "tool_fabric": make_fabric(full_name),
+            "execution_kind": "mcp",
             "spec": normalized_spec,
             "description": normalized_spec.get("description", ""),
         }

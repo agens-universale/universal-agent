@@ -30,6 +30,7 @@ from gc_core.thread_store import (
     load_thread_meta,
     patch_runtime_flag,
     read_subagent_trace,
+    reset_run_flags,
     reset_thread_files,
     save_thread_meta,
     update_runtime_meta,
@@ -55,6 +56,39 @@ class FileThreadStore(ThreadStoreBase):
 
     def ensure_ready(self) -> None:
         ensure_threads_dir(self._dir)
+
+    def read_snapshot(self, system_id, thread_id, *, include_state=True):
+        from gc_core.thread_store_journal import read_snapshot
+
+        return read_snapshot(
+            self._dir, system_id, thread_id, include_state=include_state
+        )
+
+    def commit_operation(self, system_id, thread_id, operation):
+        from gc_core.thread_store_journal import commit_operation
+
+        return commit_operation(self._dir, system_id, thread_id, operation)
+
+    def replace_messages(self, system_id, thread_id, messages):
+        import uuid
+
+        from gc_core.thread_store_durable import ThreadStoreOperation
+        from gc_core.thread_store_journal import thread_read_scope
+
+        with thread_read_scope(self._dir, system_id, thread_id):
+            snapshot = self.read_snapshot(
+                system_id, thread_id, include_state=False
+            )
+            self.commit_operation(
+                system_id,
+                thread_id,
+                ThreadStoreOperation(
+                    uuid.uuid4().hex,
+                    "replace_messages",
+                    {"messages": list(messages)},
+                    generation=snapshot.generation,
+                ),
+            )
 
     # --- чтение ------------------------------------------------------------
 
@@ -112,19 +146,22 @@ class FileThreadStore(ThreadStoreBase):
         # НЕ копируем: append_new_thread_messages дописывает в этот же набор,
         # и вызывающий (ThreadSession.known_message_keys) рассчитывает увидеть
         # обновление у себя. Копия молча сломала бы дедупликацию на след. батче.
-        keys = (
-            known_keys
-            if known_keys is not None
-            else self._known_keys(system_id, thread_id)
-        )
-        return append_new_thread_messages(
-            self._dir,
-            system_id,
-            thread_id,
-            list(messages),
-            keys,
-            start_seq=start_seq,
-        )
+        from gc_core.thread_store_journal import thread_read_scope
+
+        with thread_read_scope(self._dir, system_id, thread_id):
+            keys = (
+                known_keys
+                if known_keys is not None
+                else self._known_keys(system_id, thread_id)
+            )
+            return append_new_thread_messages(
+                self._dir,
+                system_id,
+                thread_id,
+                list(messages),
+                keys,
+                start_seq=start_seq,
+            )
 
     def save_meta(
         self, system_id: str, thread_id: str, meta: Dict[str, Any]
@@ -147,6 +184,11 @@ class FileThreadStore(ThreadStoreBase):
             flag,
             active=active,
             session_meta=session_meta,
+        )
+
+    def reset_run_flags(self, system_id, thread_id, *, session_meta=None):
+        reset_run_flags(
+            self._dir, system_id, thread_id, session_meta=session_meta
         )
 
     def update_runtime_meta(

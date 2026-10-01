@@ -74,6 +74,39 @@ def append_summary_trace_record(
 
 
 @dataclass(frozen=True)
+class SummaryTraceRecord:
+    trigger_reason: str
+    trace_data: dict[str, Any]
+    newly_summarized_message_id: str
+    schema_version: int = 1
+
+
+async def aappend_summary_trace_record(
+    ctx: Any,
+    *,
+    trigger_reason: str,
+    trace_data: Mapping[str, Any] | None,
+    newly_summarized_message_id: str,
+) -> None:
+    sink = getattr(ctx, "summary_trace_sink", None)
+    if sink is not None:
+        await sink(
+            SummaryTraceRecord(
+                trigger_reason=trigger_reason,
+                trace_data=dict(trace_data or {}),
+                newly_summarized_message_id=newly_summarized_message_id,
+            )
+        )
+        return
+    append_summary_trace_record(
+        ctx,
+        trigger_reason=trigger_reason,
+        trace_data=trace_data,
+        newly_summarized_message_id=newly_summarized_message_id,
+    )
+
+
+@dataclass(frozen=True)
 class SummaryCompactionLog:
     """Контекст одного прохода compaction для единообразных логов."""
 
