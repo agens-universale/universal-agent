@@ -232,5 +232,7 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
         "GET " + origin + "/v1/dialogs/{thread_id}",
         "GET " + origin + "/v1/dialogs/{thread_id}/artifacts",
         "GET " + origin + "/v1/dialogs/{thread_id}/artifacts/download",
+        "GET " + origin + "/v1/workspace/artifacts",
+        "GET " + origin + "/v1/workspace/artifacts/download",
     ):
         assert "gc-chat: " + line in out.err

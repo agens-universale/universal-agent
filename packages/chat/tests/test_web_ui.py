@@ -16,7 +16,7 @@ def _rid(n: int) -> str:
     return f"resp_{n:08x}-0000-4000-8000-000000000000"
 
 
-def _joint(tmp_path, *, token: str = ""):
+def _joint(tmp_path, *, token: str = "", launch_root: str | None = None):
     threads = tmp_path / "threads"
     threads.mkdir(exist_ok=True)
     config = {
@@ -24,6 +24,8 @@ def _joint(tmp_path, *, token: str = ""):
         "chat_api_auth_token": token,
         "threads_data_path": str(threads),
     }
+    if launch_root is not None:
+        config["chat_api_launch_root"] = launch_root
 
     async def factory(config, **kwargs):
         del config, kwargs
@@ -101,6 +103,7 @@ def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     assert "/v1/responses" in html
     assert "/v1/chat/completions" in html
     assert "/v1/dialogs" in html
+    assert "/v1/workspace/artifacts" in html
     assert 'id="f-token"' in html
     assert 'id="f-api"' in html
     assert 'id="f-host"' not in html
@@ -121,7 +124,11 @@ def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     assert "Скачать" in html
     assert "Скопировать путь" in html
     assert "Открыть" in html
+    assert "Новая папка" in html
+    assert "Удалить" in html
     assert 'class="prose trace"' in html
+    assert 'class="copy-md"' in html
+    assert ">Скопировать</span>" in html
     assert 'class="table-wrap"' in html
     assert "<summary>Рассуждение</summary><pre>" not in html
 
@@ -473,6 +480,194 @@ def test_download_returns_any_file_inside_cwd(tmp_path, capsys):
     assert gone.status_code == 404
 
 
+def test_mkdir_and_delete_stay_inside_cwd(tmp_path):
+    app, index, _threads = _joint(tmp_path)
+    cwd = tmp_path / "work"
+    nested = cwd / "sub"
+    nested.mkdir(parents=True)
+    (cwd / "note.txt").write_bytes(b"keep")
+    (nested / "inner.txt").write_bytes(b"in")
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"SECRET-FILE")
+    outside_dir = tmp_path / "outside-dir"
+    outside_dir.mkdir()
+    (outside_dir / "secret.txt").write_bytes(b"SECRET-DIR")
+    (cwd / "link.txt").symlink_to(cwd / "note.txt")
+    (cwd / "out-link").symlink_to(outside)
+    (nested / "escape").symlink_to(outside_dir)
+    _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
+    client = TestClient(app)
+
+    created = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "", "name": "qwen"},
+    )
+    assert created.status_code == 200
+    assert created.json() == {"path": "qwen", "kind": "dir"}
+    assert (cwd / "qwen").is_dir()
+    nested_dir = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "sub", "name": " leaf "},
+    )
+    assert nested_dir.status_code == 200
+    assert nested_dir.json()["path"] == "sub/leaf"
+    assert (nested / "leaf").is_dir()
+    again = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "", "name": "qwen"},
+    )
+    assert again.status_code == 409
+    assert again.json()["error"]["message"] == "already exists"
+    bad_name = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "", "name": "../outside-dir"},
+    )
+    assert bad_name.status_code == 400
+    hidden = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "", "name": ".secret"},
+    )
+    assert hidden.status_code == 400
+    missing_parent = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "nope", "name": "qwen"},
+    )
+    assert missing_parent.status_code == 404
+    assert outside_dir.is_dir()
+
+    removed_link = client.delete(
+        "/v1/dialogs/files/artifacts",
+        params={"path": "link.txt"},
+    )
+    assert removed_link.status_code == 200
+    assert not (cwd / "link.txt").exists()
+    assert (cwd / "note.txt").read_bytes() == b"keep"
+    removed_file = client.delete(
+        "/v1/dialogs/files/artifacts",
+        params={"path": "note.txt"},
+    )
+    assert removed_file.status_code == 200
+    assert not (cwd / "note.txt").exists()
+    removed_tree = client.delete(
+        "/v1/dialogs/files/artifacts",
+        params={"path": "sub"},
+    )
+    assert removed_tree.status_code == 200
+    assert not nested.exists()
+    assert outside.read_bytes() == b"SECRET-FILE"
+    assert (outside_dir / "secret.txt").read_bytes() == b"SECRET-DIR"
+    root = client.delete("/v1/dialogs/files/artifacts", params={"path": ""})
+    assert root.status_code == 404
+    dot = client.delete("/v1/dialogs/files/artifacts", params={"path": "."})
+    assert dot.status_code == 404
+    climb = client.delete(
+        "/v1/dialogs/files/artifacts",
+        params={"path": "../outside.txt"},
+    )
+    assert climb.status_code == 404
+    escaped = client.delete(
+        "/v1/dialogs/files/artifacts",
+        params={"path": "out-link"},
+    )
+    assert escaped.status_code == 404
+    assert outside.read_bytes() == b"SECRET-FILE"
+    assert cwd.is_dir()
+    assert (cwd / "qwen").is_dir()
+
+    app.state.responses_facade._busy.add("files")
+    while_busy = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "", "name": "later"},
+    )
+    assert while_busy.status_code == 409
+    assert while_busy.json()["error"]["message"] == "turn already running"
+    assert not (cwd / "later").exists()
+    delete_busy = client.delete(
+        "/v1/dialogs/files/artifacts",
+        params={"path": "qwen"},
+    )
+    assert delete_busy.status_code == 409
+    assert (cwd / "qwen").is_dir()
+
+
+def test_workspace_lists_new_dialog_root(tmp_path, monkeypatch):
+    root = tmp_path / "proj"
+    nested = root / "src"
+    nested.mkdir(parents=True)
+    (root / "readme.txt").write_bytes(b"a")
+    (root / ".env").write_bytes(b"k")
+    (nested / "main.py").write_bytes(b"p")
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"no")
+    (root / "link.txt").symlink_to(outside)
+    app, _index, _threads = _joint(tmp_path, launch_root=str(root))
+    client = TestClient(app)
+    listed = client.get("/v1/workspace/artifacts")
+    assert listed.status_code == 200
+    assert listed.json() == {
+        "cwd": os.path.normpath(str(root)),
+        "path": "",
+        "entries": [
+            {"name": "src", "path": "src", "kind": "dir"},
+            {"name": "readme.txt", "path": "readme.txt", "kind": "file"},
+        ],
+    }
+    inside = client.get("/v1/workspace/artifacts", params={"path": "src"})
+    assert inside.json() == {
+        "cwd": os.path.normpath(str(root)),
+        "path": "src",
+        "entries": [
+            {"name": "main.py", "path": "src/main.py", "kind": "file"},
+        ],
+    }
+    assert (
+        client.get(
+            "/v1/workspace/artifacts", params={"path": "../outside.txt"}
+        ).status_code
+        == 404
+    )
+    hidden = client.get("/v1/workspace/artifacts", params={"path": ".env"})
+    assert hidden.status_code == 404
+    assert (
+        client.get(
+            "/v1/workspace/artifacts", params={"path": "link.txt"}
+        ).status_code
+        == 404
+    )
+    missing = _joint(tmp_path, launch_root=str(tmp_path / "absent"))
+    absent = TestClient(missing[0]).get("/v1/workspace/artifacts")
+    assert absent.status_code == 404
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "here.txt").write_bytes(b"h")
+    process = TestClient(_joint(tmp_path)[0]).get("/v1/workspace/artifacts")
+    assert process.json()["cwd"] == os.path.normpath(str(tmp_path))
+    assert {
+        "name": "here.txt",
+        "path": "here.txt",
+        "kind": "file",
+    } in process.json()["entries"]
+    relative = TestClient(
+        _joint(tmp_path, launch_root="relative/path")[0]
+    ).get("/v1/workspace/artifacts")
+    assert relative.json()["cwd"] == os.path.normpath(str(tmp_path))
+    created = client.post(
+        "/v1/workspace/artifacts", json={"path": "", "name": "notes"}
+    )
+    assert created.status_code == 200
+    assert created.json() == {"path": "notes", "kind": "dir"}
+    assert (root / "notes").is_dir()
+    downloaded = client.get(
+        "/v1/workspace/artifacts/download", params={"path": "readme.txt"}
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.content == b"a"
+    removed = client.delete(
+        "/v1/workspace/artifacts", params={"path": "notes"}
+    )
+    assert removed.status_code == 200
+    assert not (root / "notes").exists()
+
+
 def test_v1_dialogs_require_bearer_and_root_stays_open(tmp_path):
     app, index, _threads = _joint(tmp_path, token=_TOKEN)
     cwd = tmp_path / "work"
@@ -486,11 +681,33 @@ def test_v1_dialogs_require_bearer_and_root_stays_open(tmp_path):
         "/v1/dialogs/files",
         "/v1/dialogs/files/artifacts",
         "/v1/dialogs/files/artifacts/download?path=note.txt",
+        "/v1/workspace/artifacts",
+        "/v1/workspace/artifacts/download?path=note.txt",
     ]
     for path in paths:
         denied = client.get(path)
         assert denied.status_code == 401
         assert denied.json()["error"]["code"] == "invalid_api_key"
+    created = client.post(
+        "/v1/dialogs/files/artifacts",
+        json={"path": "", "name": "qwen"},
+    )
+    assert created.status_code == 401
+    removed = client.delete(
+        "/v1/dialogs/files/artifacts",
+        params={"path": "note.txt"},
+    )
+    assert removed.status_code == 401
+    workspace_created = client.post(
+        "/v1/workspace/artifacts",
+        json={"path": "", "name": "qwen"},
+    )
+    assert workspace_created.status_code == 401
+    workspace_removed = client.delete(
+        "/v1/workspace/artifacts",
+        params={"path": "note.txt"},
+    )
+    assert workspace_removed.status_code == 401
     headers = {"Authorization": "Bearer " + _TOKEN}
     assert client.get("/v1/dialogs", headers=headers).status_code == 200
     root = client.get("/")

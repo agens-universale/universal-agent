@@ -101,6 +101,11 @@
   .dialog-btn .m { display: block; color: var(--mut2); font-size: 11px; }
   .file-link { color: var(--acc); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .file-link.dir { color: var(--tx); }
+  .file-link.action { color: var(--mut); }
+  .file-link.danger { color: var(--bad); }
+  .file-link:disabled { opacity: .45; cursor: default; }
+  .mkdir-row { display: flex; gap: 4px; align-items: center; margin: 0 0 4px; }
+  .mkdir-row input { min-width: 0; padding: 6px 8px; }
   .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 4px 4px; }
   .crumb, .crumb-sep { border: 0; background: transparent; color: var(--mut); font-size: 12px; padding: 2px; }
   .crumb { border-radius: 6px; }
@@ -134,6 +139,7 @@
     padding: 8px;
   }
   .file-menu button:hover { background: var(--panel2); }
+  .file-menu button.danger { color: var(--bad); }
   .maincol {
     flex: 1;
     width: 100%;
@@ -291,6 +297,20 @@
   .prose pre code { background: none; padding: 0; }
   .flag { margin-top: 6px; font-size: 12px; color: var(--mut); }
   .flag.bad { color: var(--bad); }
+  .copy-md {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 2px 0 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: var(--mut);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .copy-md svg { display: block; }
+  .copy-md:hover { color: var(--acc); }
   .working {
     display: flex;
     align-items: center;
@@ -502,6 +522,9 @@
   var busy = false;
   var activeThread = loadThread();
   var artifactDir = "";
+  var artifactBody = null;
+  var artifactGen = 0;
+  var workspaceCwd = "";
   var dialogs = [];
   var turnGen = 0;
   var abortCtl = null;
@@ -520,6 +543,7 @@
   var settingsEl = document.getElementById("settings");
   var formAlert = document.getElementById("formAlert");
 
+  logEl.addEventListener("click", onCopyAnswer);
   document.getElementById("composer").addEventListener("submit", function (e) {
     e.preventDefault();
     send();
@@ -1003,7 +1027,7 @@
     return note;
   }
 
-  function renderAssistant(m) {
+  function renderAssistant(m, index) {
     var html = '<article class="msg assistant">';
     for (var n = 0; n < m.parts.length; n++) {
       var p = m.parts[n];
@@ -1014,6 +1038,7 @@
         html += '<div class="tool ' + escapeHtml(p.status || "") + (p.parent ? " nested" : "") + '"><span class="dot"></span><span>' + escapeHtml(p.title || p.name || "tool") + '</span><span class="st">' + escapeHtml(toolLabel(p.status)) + "</span></div>";
       } else if (p.kind === "answer" && p.text) {
         html += '<div class="prose">' + renderMarkdown(p.text) + "</div>";
+        if (!m.streaming) html += copyAnswerButton(index, n);
       }
     }
     if (m.error) html += '<div class="flag bad">' + escapeHtml(m.error) + "</div>";
@@ -1026,11 +1051,11 @@
   function render() {
     var stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
     if (!messages.length) {
-      logEl.innerHTML = '<div class="empty"><h2>Чат с агентом</h2><p>Страница открыта на порту gc-chat. В настройках — токен, если сервер его требует, и модель.</p><p>Responses продолжает диалог на сервере. Слева — прошлые диалоги, справа — файлы, которые ход записал. Chat Completions каждый раз отправляет историю сообщений, сервер её не хранит.</p></div>';
+      logEl.innerHTML = '<div class="empty"><h2>Чат с агентом</h2><p>Задайте вопрос или поставьте задачу</p></div>';
     } else {
-      logEl.innerHTML = messages.map(function (m) {
+      logEl.innerHTML = messages.map(function (m, i) {
         if (m.role === "user") return '<article class="msg user"><div class="user-text">' + escapeHtml(m.content) + "</div></article>";
-        return renderAssistant(m);
+        return renderAssistant(m, i);
       }).join("");
     }
     if (stick) logEl.scrollTop = logEl.scrollHeight;
@@ -1042,6 +1067,63 @@
     stopBtn.hidden = !busy;
     workingEl.hidden = !busy;
     sendBtn.disabled = busy;
+    syncFileActions();
+  }
+
+  function copyAnswerButton(msgIndex, partIndex) {
+    return '<button type="button" class="copy-md" data-msg="' + msgIndex + '" data-part="' + partIndex + '">' +
+      '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5.2" y="3.2" width="8" height="10" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.8 11.2H3.2A1.2 1.2 0 0 1 2 10V3.2A1.2 1.2 0 0 1 3.2 2H9a1.2 1.2 0 0 1 1.2 1.2V3" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>' +
+      "<span>Скопировать</span></button>";
+  }
+
+  function onCopyAnswer(e) {
+    var node = e.target;
+    var btn = null;
+    while (node && node !== logEl) {
+      if (node.classList && node.classList.contains("copy-md")) {
+        btn = node;
+        break;
+      }
+      node = node.parentNode;
+    }
+    if (!btn) return;
+    var msg = messages[Number(btn.getAttribute("data-msg"))];
+    var part = msg && msg.parts && msg.parts[Number(btn.getAttribute("data-part"))];
+    if (!part || part.kind !== "answer") return;
+    var label = btn.querySelector("span");
+    copyPlain(part.text).then(function (ok) {
+      if (!label || !btn.isConnected) return;
+      label.textContent = ok ? "Скопировано" : "Не скопировано";
+      setTimeout(function () {
+        if (label && btn.isConnected) label.textContent = "Скопировать";
+      }, 1200);
+    });
+  }
+
+  function copyPlain(text) {
+    var value = String(text == null ? "" : text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(value).then(function () {
+        return true;
+      }, function () {
+        return copyPlainFallback(value);
+      });
+    }
+    return Promise.resolve(copyPlainFallback(value));
+  }
+
+  function copyPlainFallback(value) {
+    var area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    area.remove();
+    return ok;
   }
 
   function touch() {
@@ -1251,6 +1333,9 @@
     var body = null;
     try { body = await res.json(); } catch (e) { body = null; }
     if (res.status === 401) return "Неверный токен";
+    if (res.status === 409 && body && body.error && body.error.message === "turn already running") return "Ход ещё идёт";
+    if (res.status === 409 && body && body.error && body.error.message === "already exists") return "Уже есть такое имя";
+    if (res.status === 400 && body && body.error && body.error.message === "invalid name") return "Недопустимое имя";
     if (res.status === 409) return (body && body.error && body.error.message) || "Ход ещё идёт";
     if (body && body.error && body.error.message) return body.error.message;
     return "Ошибка " + res.status;
@@ -1658,15 +1743,24 @@
     input.focus();
   }
 
+  function artifactsBase() {
+    if (activeThread) {
+      return "/v1/dialogs/" + encodeURIComponent(activeThread) + "/artifacts";
+    }
+    return "/v1/workspace/artifacts";
+  }
+
   async function loadArtifacts(fallback) {
     var box = document.getElementById("artifactList");
-    if (!activeThread || settings.api !== "responses") {
+    var gen = ++artifactGen;
+    if (settings.api !== "responses") {
       box.innerHTML = "";
       return;
     }
-    var url = "/v1/dialogs/" + encodeURIComponent(activeThread) + "/artifacts";
+    var url = artifactsBase();
     if (artifactDir) url += "?path=" + encodeURIComponent(artifactDir);
     var res = await fetch(url, { headers: authHeaders(settings, false) });
+    if (gen !== artifactGen) return;
     if (!res.ok) {
       if (artifactDir && !fallback) {
         artifactDir = "";
@@ -1676,16 +1770,32 @@
       return;
     }
     var body = await res.json();
+    if (gen !== artifactGen) return;
     if (!body || !Array.isArray(body.entries)) {
       box.innerHTML = "";
       return;
     }
     artifactDir = typeof body.path === "string" ? body.path : "";
+    if (!activeThread && typeof body.cwd === "string") workspaceCwd = body.cwd;
     renderFolder(body);
+  }
+
+  function filesLocked() {
+    return busy || turnStillRunning();
+  }
+
+  function syncFileActions() {
+    var locked = filesLocked();
+    var mkdirBtn = document.getElementById("mkdirBtn");
+    if (mkdirBtn) mkdirBtn.disabled = locked;
+    var mkdirName = document.getElementById("mkdirName");
+    if (mkdirName) mkdirName.disabled = locked;
+    if (locked) closeFileMenu();
   }
 
   function renderFolder(body) {
     closeFileMenu();
+    artifactBody = body;
     var box = document.getElementById("artifactList");
     box.innerHTML = "";
     if (artifactDir) {
@@ -1702,6 +1812,7 @@
       }
       box.appendChild(crumbs);
     }
+    box.appendChild(mkdirRow());
     var entries = body.entries;
     if (!entries.length) {
       var note = document.createElement("p");
@@ -1721,6 +1832,82 @@
       btn.addEventListener("click", openFileMenu.bind(null, btn, item));
       box.appendChild(btn);
     }
+  }
+
+  function mkdirRow() {
+    var row = document.createElement("div");
+    row.className = "mkdir-row";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "file-link action";
+    btn.id = "mkdirBtn";
+    btn.textContent = "Новая папка";
+    btn.disabled = filesLocked();
+    btn.addEventListener("click", showMkdirInput);
+    row.appendChild(btn);
+    return row;
+  }
+
+  function showMkdirInput() {
+    if (filesLocked()) return;
+    var row = document.querySelector(".mkdir-row");
+    if (!row) return;
+    row.innerHTML = "";
+    var field = document.createElement("input");
+    field.id = "mkdirName";
+    field.type = "text";
+    field.autocomplete = "off";
+    field.placeholder = "имя папки";
+    field.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (artifactBody) renderFolder(artifactBody);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        createFolder(field.value);
+      }
+    });
+    row.appendChild(field);
+    field.focus();
+  }
+
+  function folderNameOk(name) {
+    if (!name || name === "." || name === ".." || name.charAt(0) === ".") return false;
+    return name.indexOf("/") < 0 && name.indexOf("\\") < 0 && name.indexOf("\x00") < 0;
+  }
+
+  async function createFolder(raw) {
+    var name = String(raw || "").trim();
+    if (filesLocked()) return;
+    if (!folderNameOk(name)) {
+      setAlert("Недопустимое имя");
+      return;
+    }
+    var res = await fetch(artifactsBase(), {
+      method: "POST",
+      headers: authHeaders(settings, true),
+      body: JSON.stringify({ path: artifactDir, name: name })
+    });
+    if (!res.ok) {
+      setAlert(await errorText(res));
+      return;
+    }
+    setAlert("");
+    await loadArtifacts();
+  }
+
+  async function deleteEntry(path) {
+    if (filesLocked() || !path) return;
+    var res = await fetch(
+      artifactsBase() + "?path=" + encodeURIComponent(path),
+      { method: "DELETE", headers: authHeaders(settings, false) }
+    );
+    if (!res.ok) {
+      setAlert(await errorText(res));
+      return;
+    }
+    setAlert("");
+    await loadArtifacts();
   }
 
   function crumbButton(path, label) {
@@ -1761,12 +1948,35 @@
       copyEntryPath(item.path || "", copy);
     });
     menu.appendChild(copy);
+    if (!filesLocked() && item.path) {
+      menu.appendChild(menuAction("Удалить", function () {
+        askDelete(menu, anchor, item);
+      }));
+    }
     document.body.appendChild(menu);
     placeFileMenu(menu, anchor);
     setTimeout(function () {
       document.addEventListener("mousedown", onFileMenuOutside);
       document.addEventListener("keydown", onFileMenuKey);
     }, 0);
+  }
+
+  function askDelete(menu, anchor, item) {
+    var kept = menu.querySelector(".file-menu-name");
+    menu.innerHTML = "";
+    if (kept) menu.appendChild(kept);
+    var ask = document.createElement("div");
+    ask.className = "file-menu-name";
+    ask.textContent = item.kind === "dir" ? "Удалить папку и всё внутри?" : "Удалить файл?";
+    menu.appendChild(ask);
+    var remove = menuAction("Удалить", function () {
+      closeFileMenu();
+      deleteEntry(item.path || "");
+    });
+    remove.className = "danger";
+    menu.appendChild(remove);
+    menu.appendChild(menuAction("Отмена", closeFileMenu));
+    placeFileMenu(menu, anchor);
   }
 
   function menuAction(label, action) {
@@ -1815,11 +2025,13 @@
   }
 
   function entryPath(relative) {
-    var cwd = "";
-    for (var i = 0; i < dialogs.length; i++) {
-      if (dialogs[i].thread_id === activeThread && dialogs[i].cwd) {
-        cwd = dialogs[i].cwd;
-        break;
+    var cwd = activeThread ? "" : workspaceCwd;
+    if (activeThread) {
+      for (var i = 0; i < dialogs.length; i++) {
+        if (dialogs[i].thread_id === activeThread && dialogs[i].cwd) {
+          cwd = dialogs[i].cwd;
+          break;
+        }
       }
     }
     if (!cwd) return relative;
@@ -1850,8 +2062,8 @@
   }
 
   async function downloadFile(path) {
-    if (!activeThread || !path) return;
-    var url = "/v1/dialogs/" + encodeURIComponent(activeThread) + "/artifacts/download?path=" + encodeURIComponent(path);
+    if (!path) return;
+    var url = artifactsBase() + "/download?path=" + encodeURIComponent(path);
     var res = await fetch(url, { headers: authHeaders(settings, false) });
     if (!res.ok) {
       setAlert(await errorText(res));

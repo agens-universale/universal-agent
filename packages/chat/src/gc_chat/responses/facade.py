@@ -75,6 +75,10 @@ class ResponsesFacade:
             raise
         return self._begin(incoming, thread_id, cwd, agent)
 
+    def new_dialog_cwd(self, sent: str | None = None) -> str:
+        """Корень нового хода: абсолютный путь или launch_root."""
+        return cwd_for_new(sent, self._config.get("chat_api_launch_root"))
+
     def get(self, response_id: str) -> dict:
         record = self._index.load(response_id)
         if record is None:
@@ -92,6 +96,9 @@ class ResponsesFacade:
         await live.done.wait()
         return live.result()
 
+    def turn_busy(self, thread_id: str) -> bool:
+        return thread_id in self._busy
+
     async def shutdown(self) -> None:
         runs = list(self._live.values())
         for run in runs:
@@ -106,10 +113,7 @@ class ResponsesFacade:
         async with self._gate:
             if incoming.previous_response_id is None:
                 thread_id = validate_thread_id(str(uuid.uuid4()))
-                cwd = cwd_for_new(
-                    incoming.cwd_sent,
-                    self._config.get("chat_api_launch_root"),
-                )
+                cwd = self.new_dialog_cwd(incoming.cwd_sent)
             else:
                 record = self._index.load(incoming.previous_response_id)
                 if record is None:

@@ -1,6 +1,9 @@
 """Список диалогов Responses и каталог хода.
 
 Файлы — один уровень ``cwd`` последнего хода, не разбор тулов.
+Новая папка и удаление пишут только внутрь этого ``cwd``.
+Корень каталога хода удалить нельзя.
+Тот же разбор каталога принимает корень нового хода без треда.
 
 Читает уже лежащие индекс и jsonl. Новый архив не заводит.
 Треды субагентов не обходит.
@@ -16,6 +19,7 @@ from gc_core.message_policy.user_message_policy import (
 )
 from gc_core.thread_store import validate_thread_id
 
+from gc_chat.responses.errors import ApiError
 from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
 
 _TITLE_LIMIT = 80
@@ -74,6 +78,11 @@ def dialog_folder(
     cwd = _cwd(index, thread_id)
     if cwd is None:
         return None
+    return list_folder(cwd, relative)
+
+
+def list_folder(cwd: str, relative: str) -> dict | None:
+    """Один уровень каталога. Нет пути — ``None``."""
     located = _locate(cwd, relative, directory=True)
     if located is None:
         return None
@@ -84,6 +93,67 @@ def dialog_folder(
     return {"path": folder, "entries": entries}
 
 
+def make_directory(
+    index: ResponseIndex, thread_id: str, parent: str, name: str
+) -> str | None:
+    """Каталог ``parent/name`` внутри ``cwd``. Нет треда или места — ``None``."""
+    cwd = _cwd(index, thread_id)
+    if cwd is None:
+        return None
+    return make_folder(cwd, parent, name)
+
+
+def make_folder(cwd: str, parent: str, name: str) -> str | None:
+    """Каталог ``parent/name`` внутри ``cwd``. Нет места — ``None``."""
+    if not isinstance(name, str):
+        raise ApiError(400, "invalid_request", "invalid name")
+    cleaned = name.strip()
+    if not _valid_name(cleaned):
+        raise ApiError(400, "invalid_request", "invalid name")
+    located = _locate(cwd, parent, directory=True)
+    if located is None:
+        return None
+    folder, resolved = located
+    dest_rel = cleaned if folder == "" else folder + "/" + cleaned
+    dest = os.path.join(resolved, cleaned)
+    if os.path.lexists(dest):
+        raise ApiError(409, "conflict", "already exists")
+    try:
+        os.mkdir(dest)
+    except FileExistsError:
+        raise ApiError(409, "conflict", "already exists") from None
+    except OSError:
+        return None
+    return dest_rel
+
+
+def remove_entry(index: ResponseIndex, thread_id: str, relative: str) -> bool:
+    """Удаляет файл или каталог внутри ``cwd``. Корень и чужой путь — ``False``."""
+    cwd = _cwd(index, thread_id)
+    if cwd is None:
+        return False
+    return delete_path(cwd, relative)
+
+
+def delete_path(cwd: str, relative: str) -> bool:
+    """Удаляет путь внутри ``cwd``. Корень и чужой путь — ``False``."""
+    placed = _place(cwd, relative)
+    if placed is None:
+        return False
+    _relative, lexical, resolved = placed
+    cwd_real = os.path.realpath(os.path.abspath(cwd))
+    try:
+        if os.path.islink(lexical) or os.path.isfile(lexical):
+            os.unlink(lexical)
+        elif os.path.isdir(lexical) and resolved != cwd_real:
+            _remove_tree(lexical)
+        else:
+            return False
+    except OSError:
+        return False
+    return True
+
+
 def file_bytes(
     index: ResponseIndex, thread_id: str, relative: str
 ) -> tuple[str, bytes] | None:
@@ -91,6 +161,11 @@ def file_bytes(
     cwd = _cwd(index, thread_id)
     if cwd is None:
         return None
+    return read_file(cwd, relative)
+
+
+def read_file(cwd: str, relative: str) -> tuple[str, bytes] | None:
+    """Байты обычного файла внутри ``cwd``. Иначе ``None``."""
     located = _locate(cwd, relative, directory=False)
     if located is None:
         return None
@@ -240,6 +315,53 @@ def _cwd(index: ResponseIndex, thread_id: str) -> str | None:
     if records is None:
         return None
     return _chain(records)[-1].cwd
+
+
+def _valid_name(name: str) -> bool:
+    if name == "" or name in {".", ".."} or name.startswith("."):
+        return False
+    return "/" not in name and "\\" not in name and "\x00" not in name
+
+
+def _place(cwd: str, raw: str) -> tuple[str, str, str] | None:
+    """Относительный путь, запись в каталоге и её реальный путь.
+
+    Пустая строка — корень ``cwd``, его здесь нет.
+    """
+    if not isinstance(raw, str) or raw in {"", "."}:
+        return None
+    if "\x00" in raw or "\\" in raw or _has_dotdot(raw) or os.path.isabs(raw):
+        return None
+    cwd_abs = os.path.abspath(cwd)
+    joined = os.path.abspath(os.path.join(cwd_abs, raw))
+    relative = os.path.relpath(joined, cwd_abs).replace(os.sep, "/")
+    if relative in {"", ".", ".."} or relative.startswith("../"):
+        return None
+    if any(part.startswith(".") for part in relative.split("/")):
+        return None
+    lexical = os.path.join(cwd_abs, *relative.split("/"))
+    if not os.path.lexists(lexical):
+        return None
+    cwd_real = os.path.realpath(cwd_abs)
+    resolved = os.path.realpath(lexical)
+    if not _is_inside(cwd_real, resolved):
+        return None
+    return relative, lexical, resolved
+
+
+def _remove_tree(path: str) -> None:
+    for dirpath, dirnames, filenames in os.walk(
+        path, topdown=False, followlinks=False
+    ):
+        for filename in filenames:
+            os.unlink(os.path.join(dirpath, filename))
+        for dirname in dirnames:
+            child = os.path.join(dirpath, dirname)
+            if os.path.islink(child):
+                os.unlink(child)
+            else:
+                os.rmdir(child)
+    os.rmdir(path)
 
 
 def _locate(cwd: str, raw: str, *, directory: bool) -> tuple[str, str] | None:
