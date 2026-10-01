@@ -455,6 +455,70 @@ def test_artifacts_keep_successful_writes_inside_cwd(tmp_path):
     assert missing.status_code == 404
 
 
+def test_artifacts_include_existing_handoff_files(tmp_path):
+    app, index, _threads = _joint(tmp_path)
+    cwd = tmp_path / "work"
+    (cwd / "sub").mkdir(parents=True)
+    (cwd / "report.md").write_bytes(b"report")
+    (cwd / "sub" / "note.txt").write_bytes(b"note")
+    (cwd / "written.txt").write_bytes(b"written")
+    (cwd / "folder").mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_bytes(b"secret")
+    handoff = json.dumps(
+        {
+            "artifacts": [
+                "report.md",
+                "sub/note.txt",
+                "written.txt",
+                "missing.md",
+                "../outside.txt",
+                str(outside),
+                "folder",
+            ]
+        }
+    )
+    _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
+    _jsonl(
+        index,
+        "files",
+        [
+            _call("fs_write_file", "w", {"path": "written.txt"}),
+            _out("w"),
+            _call(
+                "turn_finish",
+                "f",
+                {"handoff": handoff, "task_report": "готово"},
+            ),
+            _out("f"),
+            _call("turn_finish", "bad", {"handoff": "{not json"}),
+            _out("bad"),
+            _call("turn_finish", "empty", {"handoff": "{}"}),
+            _out("empty"),
+            _call(
+                "turn_finish",
+                "dict",
+                {"handoff": {"artifacts": ["report.md", 1, ""]}},
+            ),
+            _out("dict"),
+        ],
+    )
+    client = TestClient(app)
+    listed = client.get("/v1/dialogs/files/artifacts")
+    assert listed.status_code == 200
+    assert listed.json() == [
+        {"path": "written.txt", "name": "written.txt"},
+        {"path": "report.md", "name": "report.md"},
+        {"path": "sub/note.txt", "name": "note.txt"},
+    ]
+    got = client.get(
+        "/v1/dialogs/files/artifacts/download",
+        params={"path": "report.md"},
+    )
+    assert got.status_code == 200
+    assert got.content == b"report"
+
+
 def test_download_returns_bytes_and_rejects_unlisted(tmp_path, capsys):
     app, index, _threads = _joint(tmp_path)
     cwd = tmp_path / "work"

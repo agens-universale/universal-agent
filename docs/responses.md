@@ -116,7 +116,7 @@ gc-chat --config ./config.yml --profile <имя>
 
 `GET /v1/dialogs/{thread_id}` — ходы по цепочке `previous_response_id`, от первого к последнему. У хода: `response_id`, `previous_response_id`, `created_at`, `status`, `text` пользователя из jsonl, `output` сохранённого ответа. Нет треда — 404.
 
-`GET /v1/dialogs/{thread_id}/artifacts` — файлы, которые тулы записи этого треда успешно создали или изменили внутри `cwd`: `fs_write_file`, `fs_append_file`, `fs_apply_file_edits`, `fs_search_and_replace`, `fs_save_base64_file`. Элемент — `path` и `name`. `path` относительный, разделитель `/`. `dry_run`, проза, `exec_command`, `exec_python`, каталог, отсутствующий файл, симлинк наружу и `..` в список не входят. Повтор пути схлопывается, порядок — первое появление.
+`GET /v1/dialogs/{thread_id}/artifacts` — файлы внутри `cwd` хода. Источники: успешные вызовы `fs_write_file`, `fs_append_file`, `fs_apply_file_edits`, `fs_search_and_replace`, `fs_save_base64_file` и строки `handoff.artifacts` у `turn_finish`. Относительный путь из handoff считается от каталога хода. Элемент — `path` и `name`. `path` относительный, разделитель `/`. В список попадает только существующий обычный файл. `dry_run`, проза, `exec_command`, `exec_python`, каталог, отсутствующий файл, симлинк наружу и `..` не входят. Повтор пути схлопывается, порядок — первое появление.
 
 `GET /v1/dialogs/{thread_id}/artifacts/download?path=` отдаёт байты файла из этого списка. `Content-Type: application/octet-stream`, `Content-Disposition: attachment`. Чужой путь, каталог или файл не из списка — 404. Тело файла в stderr не пишется.
 

@@ -1,4 +1,6 @@
-"""Список диалогов Responses и файлы, записанные тулами хода.
+"""Список диалогов Responses и файлы хода.
+
+Файлы — успешные тулы записи и существующие пути из ``handoff.artifacts``.
 
 Читает уже лежащие индекс и jsonl. Новый архив не заводит.
 Треды субагентов не обходит.
@@ -10,6 +12,7 @@ import json
 import os
 from typing import Any
 
+from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.message_policy.user_message_policy import (
     is_technical_user_message_text,
 )
@@ -294,6 +297,7 @@ def _artifacts(records: list[dict], cwd: str) -> list[dict]:
             call_id = _call_id(message)
             if call_id is not None:
                 pending[call_id] = message
+            _collect_handoff(message, cwd, found, seen)
             continue
         if kind != _CALL_OUTPUT:
             continue
@@ -311,6 +315,36 @@ def _artifacts(records: list[dict], cwd: str) -> list[dict]:
     return found
 
 
+def _collect_handoff(
+    call: dict, cwd: str, found: list[dict], seen: set[str]
+) -> None:
+    """Файлы из ``handoff.artifacts`` у ``turn_finish``, если они есть."""
+    for raw in _handoff_paths(call):
+        item = _artifact_item(cwd, raw)
+        if item is None or item["path"] in seen:
+            continue
+        seen.add(item["path"])
+        found.append(item)
+
+
+def _handoff_paths(call: dict) -> list[str]:
+    if call.get("name") != FINISH_TOOL_NAME:
+        return []
+    arguments = _arguments(call.get("arguments"))
+    handoff = _arguments(arguments.get("handoff"))
+    artifacts = handoff.get("artifacts")
+    if not isinstance(artifacts, list):
+        return []
+    return [item for item in artifacts if isinstance(item, str) and item != ""]
+
+
+def _artifact_item(cwd: str, raw: str) -> dict | None:
+    relative = relative_artifact(cwd, raw)
+    if relative is None:
+        return None
+    return {"path": relative, "name": relative.rsplit("/", 1)[-1]}
+
+
 def _accepted(call: dict, output: Any, cwd: str) -> dict | None:
     name = call.get("name")
     if not isinstance(name, str) or name not in _WRITE_TOOLS:
@@ -323,11 +357,7 @@ def _accepted(call: dict, output: Any, cwd: str) -> dict | None:
     raw = arguments.get("path")
     if not isinstance(raw, str):
         return None
-    relative = relative_artifact(cwd, raw)
-    if relative is None:
-        return None
-    leaf = relative.rsplit("/", 1)[-1]
-    return {"path": relative, "name": leaf}
+    return _artifact_item(cwd, raw)
 
 
 def _arguments(raw: Any) -> dict:
