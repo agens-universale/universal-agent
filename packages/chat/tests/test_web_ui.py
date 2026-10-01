@@ -209,7 +209,7 @@ def test_dialogs_group_by_thread_head_and_updated_order(tmp_path):
     assert older["created_at"] == 100
     assert older["updated_at"] == 200
     assert older["status"] == "incomplete"
-    assert older["title"] == "х" * 80
+    assert older["title"] == "х" * 120
 
 
 def test_dialogs_skip_foreign_threads_and_broken_index(tmp_path):
@@ -265,6 +265,53 @@ def test_dialogs_skip_foreign_threads_and_broken_index(tmp_path):
     assert by_id["bad-jsonl"]["title"] == ""
     assert "чужой" not in json.dumps(body)
     assert "эфемерный" not in json.dumps(body)
+
+
+def _call(name: str, arguments: dict) -> dict:
+    return {
+        "type": "function_call",
+        "name": name,
+        "call_id": name,
+        "arguments": json.dumps(arguments),
+    }
+
+
+def test_dialog_title_follows_tui_prompt_and_task(tmp_path):
+    app, index, _threads = _joint(tmp_path)
+    cwd = tmp_path / "work"
+    cwd.mkdir()
+    long_prompt = "переписать разбор заголовка диалога целиком"
+    later = "ещё более длинная формулировка следующей задачи"
+    _save(index, n=1, thread_id="short-then-long", cwd=str(cwd), created=10)
+    _jsonl(
+        index,
+        "short-then-long",
+        [_user("ок"), _user(long_prompt), _user("спасибо")],
+    )
+    _save(index, n=2, thread_id="task-wins", cwd=str(cwd), created=20)
+    _jsonl(
+        index,
+        "task-wins",
+        [
+            _user(long_prompt),
+            _call("session_think", {"thought": "думаю"}),
+            _call("turn_finish", {"task": "  сжать\nлог  "}),
+            _user("пока"),
+            _call("turn_finish", {"task": "не должно сменить"}),
+            _user(later),
+            _call("fs_read_file", {"path": "a"}),
+            _call("turn_finish", {"task": "прочитать файл"}),
+        ],
+    )
+    _save(index, n=3, thread_id="only-short", cwd=str(cwd), created=5)
+    _jsonl(index, "only-short", [_user("ты тут?")])
+    client = TestClient(app)
+    by_id = {
+        item["thread_id"]: item for item in client.get("/v1/dialogs").json()
+    }
+    assert by_id["short-then-long"]["title"] == long_prompt
+    assert by_id["only-short"]["title"] == "ты тут?"
+    assert by_id["task-wins"]["title"] == "прочитать файл"
 
 
 def test_dialog_feed_is_chain_order_with_text_and_output(tmp_path):

@@ -14,6 +14,16 @@ from __future__ import annotations
 import json
 import os
 
+from gc_core.constants.tool_names import (
+    ASK_HUMAN_TOOL_NAME,
+    FINISH_TOOL_NAME,
+    INTERMEDIATE_REPLY_TOOL_NAME,
+    PROJECT_MEMORY_TOOL_NAME,
+    READ_STORED_TOOL_OUTPUT_NAME,
+    READ_USER_INTENT_LOG_NAME,
+    SESSION_MEMORY_TOOL_NAME,
+    SESSION_THINK_TOOL_NAME,
+)
 from gc_core.message_policy.user_message_policy import (
     is_technical_user_message_text,
 )
@@ -22,9 +32,25 @@ from gc_core.thread_store import validate_thread_id
 from gc_chat.responses.errors import ApiError
 from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
 
-_TITLE_LIMIT = 80
+# Те же пороги, что у авто-имени TUI (session_title.py): первый промпт сеет
+# любое имя, следующий заменяет его только если длиннее минимума.
+_PROMPT_MIN = 30
+_NAME_MAX = 200
 _ENVELOPE = "message"
 _RESPONSES = "responses"
+_CALL = "function_call"
+# Не «работа хода»: финализатор обрабатывается отдельно, эти вызовы имя не двигают.
+_NOT_WORK = frozenset(
+    {
+        ASK_HUMAN_TOOL_NAME,
+        INTERMEDIATE_REPLY_TOOL_NAME,
+        SESSION_THINK_TOOL_NAME,
+        SESSION_MEMORY_TOOL_NAME,
+        PROJECT_MEMORY_TOOL_NAME,
+        READ_USER_INTENT_LOG_NAME,
+        READ_STORED_TOOL_OUTPUT_NAME,
+    }
+)
 
 
 def dialog_list(index: ResponseIndex) -> list[dict]:
@@ -38,11 +64,7 @@ def dialog_list(index: ResponseIndex) -> list[dict]:
         if scan.foreign:
             continue
         chain = _chain(records)
-        title = ""
-        if scan.intact:
-            texts = _user_texts(scan.records)
-            if texts:
-                title = _title(texts[0])
+        title = _dialog_title(scan.records) if scan.intact else ""
         items.append(_summary(thread_id, chain, title))
     items.sort(key=lambda item: (-item["updated_at"], item["thread_id"]))
     return items
@@ -298,9 +320,84 @@ def _user_text(message: dict) -> str | None:
     return text
 
 
-def _title(text: str) -> str:
-    flat = " ".join(text.split())
-    return flat[:_TITLE_LIMIT]
+class _Name:
+    """Черновик имени: ``task`` важнее авто-имени из промптов."""
+
+    def __init__(self) -> None:
+        self.last_actual = ""
+        self.task = ""
+        self.tools = 0
+
+
+def _dialog_title(records: list[dict]) -> str:
+    """Имя как в TUI: ``task`` хода, иначе авто-имя из промптов."""
+    name = _Name()
+    for record in records:
+        _fold_name(name, _message(record))
+    if name.task:
+        return name.task
+    return name.last_actual
+
+
+def _fold_name(name: _Name, message: dict) -> None:
+    user = _user_text(message)
+    if user is not None:
+        name.tools = 0
+        name.last_actual = _next_prompt(name.last_actual, user)
+        return
+    tool = _call_name(message)
+    if tool is None:
+        return
+    if tool == FINISH_TOOL_NAME:
+        _fold_task(name, message)
+        return
+    if tool not in _NOT_WORK:
+        name.tools += 1
+
+
+def _next_prompt(current: str, text: str) -> str:
+    norm = _clip(text)
+    if norm == "":
+        return current
+    if current == "" or len(norm) > _PROMPT_MIN:
+        return norm
+    return current
+
+
+def _fold_task(name: _Name, message: dict) -> None:
+    task = _finish_task(message)
+    if task == "":
+        return
+    if name.task == "" or name.tools > 0:
+        name.task = task
+
+
+def _finish_task(message: dict) -> str:
+    raw = message.get("arguments")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return ""
+    if not isinstance(raw, dict):
+        return ""
+    task = raw.get("task")
+    if not isinstance(task, str):
+        return ""
+    return _clip(task)
+
+
+def _call_name(message: dict) -> str | None:
+    if message.get("type") != _CALL:
+        return None
+    name = message.get("name")
+    if not isinstance(name, str) or name == "":
+        return None
+    return name
+
+
+def _clip(text: str) -> str:
+    return " ".join(text.split())[:_NAME_MAX]
 
 
 def _message(record: dict) -> dict:

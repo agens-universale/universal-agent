@@ -1681,6 +1681,7 @@
       var title = document.createElement("span");
       title.className = "t";
       title.textContent = item.title || "Без названия";
+      title.title = title.textContent;
       var meta = document.createElement("span");
       meta.className = "m";
       meta.textContent = item.status || "";
