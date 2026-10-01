@@ -32,128 +32,56 @@ def _resolved(url, model) -> ResolvedModel:
     )
 
 
-def test_mark_is_new_only_once():
-    rejects = ImageRejects()
+from gc_core.vision.route import VisionRouteKey
+from gc_core.vision.registry import process_vision_probes
+from gc_core.vision.probe import ProbeStatus
 
-    assert rejects.mark(_URL, "qwen3.6") is True
-    assert rejects.mark(_URL, "qwen3.6") is False
-    assert rejects.contains(_URL, "qwen3.6") is True
+KEY = VisionRouteKey(_URL, "qwen3.6", "access-one")
+OTHER = VisionRouteKey(_URL, "qwen3.6", "access-two")
 
 
-def test_key_is_the_address_and_the_model_together():
-    """Одна и та же модель за разными адресами видит по-разному (свой vLLM без
-    зрения, OpenRouter со зрением) — пометка одной пары другую не задевает."""
-    rejects = ImageRejects()
-    rejects.mark(_URL, "qwen3.6")
-
-    assert (
-        rejects.contains(
-            "https://openrouter.ai/api/v1/chat/completions", "qwen3.6"
-        )
-        is False
-    )
-    assert rejects.contains(_URL, "deepseek-v4-flash") is False
+def test_marks_are_route_specific_and_new_once():
+    assert mark_blind(KEY)
+    assert not mark_blind(KEY)
+    assert process_vision_probes().peek(KEY).status is ProbeStatus.UNSUPPORTED
+    assert process_vision_probes().peek(OTHER) is None
+    assert process_image_rejects().cap(KEY) is None
 
 
 def test_concurrent_marks_report_exactly_one_new():
-    """Пометку ставят основной путь и тул «глаз» — в том числе из потоков
-    субагентов: новой её называет ровно один, иначе уведомление ушло бы дважды."""
-    rejects = ImageRejects()
     barrier = threading.Barrier(16)
-    results: list = []
+    results = []
 
-    def _mark():
+    def mark():
         barrier.wait()
-        results.append(rejects.mark(_URL, "qwen3.6"))
+        results.append(mark_blind(KEY))
 
-    threads = [threading.Thread(target=_mark) for _ in range(16)]
+    threads = [threading.Thread(target=mark) for _ in range(16)]
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join()
-
+        thread.join(2)
     assert sorted(results) == [False] * 15 + [True]
 
 
-def test_process_registry_is_one_object_and_resets_in_place():
+def test_caps_only_decrease_and_separate_access_and_support():
+    rejects = ImageRejects()
+    assert rejects.cap(KEY) is None
+    assert rejects.limit(KEY, 5)
+    assert not rejects.limit(KEY, 6)
+    assert rejects.limit(KEY, 3)
+    assert rejects.cap(KEY) == 3
+    assert rejects.cap(OTHER) is None
+    trial = rejects.with_limit(KEY, 0)
+    assert trial.cap(KEY) == 0 and rejects.cap(KEY) == 3
+    assert process_vision_probes().peek(KEY) is None
+
+
+def test_process_registry_resets_in_place():
     registry = process_image_rejects()
-    registry.mark(_URL, "qwen3.6")
-
+    registry.limit(KEY, 1)
     reset_image_rejects_for_tests()
-
-    assert process_image_rejects() is registry
-    assert registry.contains(_URL, "qwen3.6") is False
-
-
-def test_process_registry_leak_probe_marks():
-    """Первая половина пробы изоляции: пометка на процесс..."""
-    process_image_rejects().mark(_URL, "leak-probe")
-    assert process_image_rejects().contains(_URL, "leak-probe") is True
-
-
-def test_process_registry_starts_empty_in_every_test():
-    """...вторая: следующий тест её не видит — сбрасывает autouse-фикстура
-    набора (`packages/core/tests/conftest.py`)."""
-    assert process_image_rejects().contains(_URL, "leak-probe") is False
-
-
-def test_mark_blind_keys_by_the_model_address_or_the_fallback():
-    """Ключ — фактический адрес запроса: у модели реестра свой, иначе запасной."""
-    assert (
-        mark_blind(_resolved(_URL, "qwen3.6"), fallback_url=_FALLBACK) is True
-    )
-    assert (
-        mark_blind(_resolved(None, "legacy"), fallback_url=_FALLBACK) is True
-    )
-
-    assert process_image_rejects().contains(_URL, "qwen3.6") is True
-    assert process_image_rejects().contains(_FALLBACK, "legacy") is True
-
-
-def test_mark_blind_is_new_only_once():
-    resolved = _resolved(_URL, "qwen3.6")
-    assert mark_blind(resolved, fallback_url=_FALLBACK) is True
-    assert mark_blind(resolved, fallback_url=_FALLBACK) is False
-
-
-# --- Потолок картинок -------------------------------------------------------
-
-
-def test_no_cap_until_the_backend_refuses():
-    assert ImageRejects().cap(_URL, "qwen3.6") is None
-
-
-def test_a_cap_only_goes_down():
-    rejects = ImageRejects()
-
-    assert rejects.limit(_URL, "qwen3.6", 5) is True
-    assert rejects.limit(_URL, "qwen3.6", 8) is False
-    assert rejects.cap(_URL, "qwen3.6") == 5
-    assert rejects.limit(_URL, "qwen3.6", 3) is True
-    assert rejects.cap(_URL, "qwen3.6") == 3
-    assert rejects.contains(_URL, "qwen3.6") is False  # потолок — не слепота
-
-
-def test_blind_is_a_cap_of_zero():
-    rejects = ImageRejects()
-    rejects.limit(_URL, "qwen3.6", 2)
-
-    assert rejects.mark(_URL, "qwen3.6") is True  # стала слепой только сейчас
-    assert rejects.cap(_URL, "qwen3.6") == 0
-    assert rejects.contains(_URL, "qwen3.6") is True
-    assert rejects.mark(_URL, "qwen3.6") is False
-
-
-def test_a_trial_view_does_not_touch_the_registry():
-    """Пробный потолок шага — копия реестра с ещё одним потолком; реестр не меняется,
-    пока успешный запрос его не подтвердит."""
-    rejects = ImageRejects()
-    rejects.limit(_URL, "qwen3.6", 4)
-
-    trial = rejects.with_limit(_URL, "qwen3.6", 0)
-
-    assert trial.contains(_URL, "qwen3.6") is True
-    assert rejects.cap(_URL, "qwen3.6") == 4
+    assert registry is process_image_rejects() and registry.cap(KEY) is None
 
 
 def _http_error(status: int, message: str) -> httpx.HTTPStatusError:
@@ -168,27 +96,24 @@ def _http_error(status: int, message: str) -> httpx.HTTPStatusError:
 
 def test_explicit_facts_are_learned_for_the_process():
     """Отказ от зрения и названный предел — факт о модели: запоминается сразу."""
-    resolved = _resolved(_URL, "qwen3.6")
+    key = KEY
 
     assert (
         learn_image_cap(
-            resolved,
+            key,
             _http_error(
                 400, "At most 3 image(s) may be provided in one prompt."
             ),
-            fallback_url=_FALLBACK,
         )
         is False
     )
-    assert process_image_rejects().cap(_URL, "qwen3.6") == 3
+    assert process_image_rejects().cap(KEY) == 3
     blind = _http_error(
         400,
         "Model only supports text input; received unsupported content type 'image_url'",
     )
-    assert (
-        learn_image_cap(resolved, blind, fallback_url=_FALLBACK) is True
-    )  # стала слепой
-    assert learn_image_cap(resolved, blind, fallback_url=_FALLBACK) is False
+    assert learn_image_cap(key, blind) is True  # стала слепой
+    assert learn_image_cap(key, blind) is False
 
 
 @pytest.mark.parametrize(
@@ -201,15 +126,10 @@ def test_explicit_facts_are_learned_for_the_process():
 def test_inferred_limits_are_not_learned(status, message):
     """413 зависит от объёма истории, «слишком много» без числа — лишь догадка о пределе:
     деление пополам действует только на свой запрос."""
-    resolved = _resolved(_URL, "qwen3.6")
+    key = KEY
 
-    assert (
-        learn_image_cap(
-            resolved, _http_error(status, message), fallback_url=_FALLBACK
-        )
-        is False
-    )
-    assert process_image_rejects().cap(_URL, "qwen3.6") is None
+    assert learn_image_cap(key, _http_error(status, message)) is False
+    assert process_image_rejects().cap(KEY) is None
 
 
 @pytest.mark.parametrize(

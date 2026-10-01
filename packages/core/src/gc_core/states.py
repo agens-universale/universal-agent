@@ -201,6 +201,9 @@ class State:
         # Успешный потолок повторов с картинками для текущего хода и контекста;
         # это не способность модели видеть. После смены области не применяется.
         self.vision_request_limit: Optional[ImageRequestLimit] = None
+        self.vision_probe_turn: str | None = None
+        self.vision_routes: dict = {}
+        self.vision_probe_notices: set = set()
 
     @classmethod
     async def acreate(

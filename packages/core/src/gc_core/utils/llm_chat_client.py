@@ -3,7 +3,7 @@
 import copy
 import functools
 import json
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
@@ -347,6 +347,8 @@ async def _asend_chat_completion_text(
     request_label: str,
     payload_overrides: Optional[Dict[str, Any]],
     resolved: Optional[ResolvedModel],
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
 ) -> ChatCompletionText:
     cfg = getattr(ctx, "config_dict", {}) or {}
     log_params = cfg.get("logging_params")
@@ -375,7 +377,28 @@ async def _asend_chat_completion_text(
         else _min_response_tokens_override,
         default=1024,
     )
-    headers = await acreate_call_headers(state, ctx, resolved=resolved)
+    headers = await acreate_call_headers(
+        state,
+        ctx,
+        resolved=resolved,
+        **({"api_mode": "chat_completions"} if before_send else {}),
+    )
+    prepared = None
+    if before_send is not None:
+        if resolved is None:
+            resolved = ResolvedModel(
+                alias=None,
+                model=cfg["model"],
+                url=cfg["completions_url"],
+                authorization=None,
+                backend_overrides={},
+                tariff=None,
+                source="legacy",
+            )
+        prepared = snapshot_chat_completion(
+            ctx, state, resolved=resolved, headers=headers
+        )
+        await before_send(prepared)
     url = resolved.url if resolved is not None else cfg["completions_url"]
     (
         verify,
@@ -386,11 +409,28 @@ async def _asend_chat_completion_text(
         retry_embedded_choice_errors,
     ) = resolve_network_params(cfg, resolved)
 
+    if prepared is not None:
+
+        def _payload_factory(requested_max_tokens):
+            payload = copy.deepcopy(dict(prepared.payload_kwargs))
+            token_key = (
+                "max_tokens"
+                if "max_tokens" in payload
+                else "max_completion_tokens"
+            )
+            payload.update(model=prepared.resolved.model, messages=messages)
+            payload[token_key] = requested_max_tokens
+            apply_payload_overrides(payload, payload_overrides)
+            return payload
+
     usage_category = category_for_request_label(request_label)
     with usage_scope(
         getattr(state, "usage", None), usage_category, "chat_completions"
     ):
-        res, _call_data = await arequest_chat_completions_with_policy(
+        res, _call_data = await _arequest_admitted_chat_completion(
+            ctx=ctx,
+            state=state,
+            prepared=prepared,
             payload_factory=_payload_factory,
             initial_max_tokens=max_tokens,
             min_response_tokens=min_response_tokens,
@@ -414,6 +454,30 @@ async def _asend_chat_completion_text(
             logger=logger, label=request_label, res=res
         )
     return _completion_text_and_finish(res)
+
+
+async def _arequest_admitted_chat_completion(
+    *, ctx, state, prepared, **kwargs
+):
+    try:
+        return await arequest_chat_completions_with_policy(**kwargs)
+    except Exception as exc:
+        if prepared is not None:
+            from gc_core.vision.notes import note_probe
+            from gc_core.vision.registry import process_vision_probes
+            from gc_core.vision.rejects import learn_image_cap
+            from gc_core.vision.route import vision_route_key
+
+            key = vision_route_key(prepared)
+            if learn_image_cap(key, exc):
+                note_probe(
+                    ctx,
+                    state,
+                    key,
+                    prepared.resolved,
+                    process_vision_probes().peek(key),
+                )
+        raise
 
 
 def _require_text_only(messages: List[Dict[str, Any]]) -> None:
@@ -441,6 +505,8 @@ async def arequest_chat_completion_outcome(
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
     allow_images: bool = False,
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
 ) -> ChatCompletionText:
     """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
     ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
@@ -470,6 +536,7 @@ async def arequest_chat_completion_outcome(
         max_tokens=max_tokens,
         request_label=request_label,
         payload_overrides=payload_overrides,
+        before_send=before_send,
     )
     if router is None:
         return await send(resolved=None)
@@ -538,6 +605,8 @@ async def arequest_chat_completion_text(
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
     allow_images: bool = False,
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
 ) -> str:
     """Текст choice. Причина остановки — в ``arequest_chat_completion_outcome``."""
     outcome = await arequest_chat_completion_outcome(
@@ -549,6 +618,7 @@ async def arequest_chat_completion_text(
         request_label=request_label,
         payload_overrides=payload_overrides,
         allow_images=allow_images,
+        before_send=before_send,
     )
     return outcome.text
 

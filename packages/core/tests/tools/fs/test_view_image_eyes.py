@@ -21,6 +21,11 @@ from gc_core.tools.fs.view_image import ViewImage
 from gc_core.utils.stream_assembler import BackendStreamError
 from gc_core.vision.audience import Audience
 from gc_core.vision.notes import NOTE_EYES_BLIND
+from gc_core.vision.probe import ProbeStatus
+from gc_core.vision.registry import process_vision_probes
+from gc_core.vision.route import VisionRouteKey
+from gc_core.vision.rejects import mark_blind
+from gc_core.utils.backend_errors import is_image_request_error
 from gc_core.vision.rejects import (
     process_image_rejects,
     reset_image_rejects_for_tests,
@@ -85,6 +90,13 @@ def _patch_eyes(monkeypatch, outcome):
     async def fake(ctx, state, att, *, question, task_context):
         seen.update(att=att, question=question, task_context=task_context)
         if isinstance(outcome, BaseException):
+            if is_image_request_error(outcome):
+                if mark_blind(
+                    VisionRouteKey(EYES_URL, "qwen-vl", "test-access")
+                ):
+                    from gc_core.vision.notes import note_blind
+
+                    note_blind(ctx, EYES.eyes, eyes=True)
             raise outcome
         return outcome
 
@@ -192,7 +204,12 @@ async def test_eyes_rejecting_images_are_marked_once_and_nobody_is_left(
         "message": TOOL_NO_VISION,
     }
     assert notes == [NOTE_EYES_BLIND.format(alias="qwen")]
-    assert process_image_rejects().contains(EYES_URL, "qwen-vl") is True
+    assert (
+        process_vision_probes()
+        .peek(VisionRouteKey(EYES_URL, "qwen-vl", "test-access"))
+        .status
+        is ProbeStatus.UNSUPPORTED
+    )
 
 
 @pytest.mark.parametrize(
@@ -219,4 +236,9 @@ async def test_eyes_failure_is_reported_without_marking(
         "reason": reason,
     }
     assert notes == []
-    assert process_image_rejects().contains(EYES_URL, "qwen-vl") is False
+    assert (
+        process_vision_probes().peek(
+            VisionRouteKey(EYES_URL, "qwen-vl", "test-access")
+        )
+        is None
+    )

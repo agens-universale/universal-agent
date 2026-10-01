@@ -24,7 +24,9 @@ from gc_core.attachments.texts import (
     STUB_MODEL_BLIND,
     STUB_NOBODY,
     STUB_OUT_OF_CONTEXT,
+    STUB_PROBE_FAILED,
     STUB_SHOWN_ELSEWHERE,
+    STUB_UNCHECKED,
 )
 from gc_core.message_policy.user_message_policy import (
     extract_real_user_message_text,
@@ -368,10 +370,16 @@ def _note(att: Attachment, audience: Audience, *, file_missing: bool) -> str:
     без смотрящего (``not audience.tool_visible``) уходит «видеть некому»."""
     if file_missing:
         template = STUB_FILE_MISSING
+    elif audience.probe_reason and not audience.tool_visible:
+        return STUB_PROBE_FAILED.format(
+            label=att.label, wh=wh_text(att), reason=audience.probe_reason
+        )
     elif not audience.tool_visible:
         template = STUB_NOBODY
     elif audience.native is None:
-        template = STUB_MODEL_BLIND
+        template = (
+            STUB_MODEL_BLIND if audience.eyes is not None else STUB_UNCHECKED
+        )
     else:
         template = STUB_OUT_OF_CONTEXT
     return template.format(label=att.label, wh=wh_text(att), path=att.path)

@@ -80,6 +80,7 @@ from gc_core.utils.backend_errors import (
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     acreate_call_headers,
+    acreate_main_and_vision_headers,
     aresolve_auth_token,
     backend_override_value,
     resolve_network_params,
@@ -145,9 +146,13 @@ from gc_core.utils.format_messages import format_message_responses
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
 )
+from gc_core.utils.llm_chat_client import snapshot_chat_completion
 from gc_core.vision.audience import (
     Audience,
+    _declared_blind,
+    _resolve_eyes,
     compute_audience,
+    route_id,
     tools_for_request,
     view_tool_in_set,
 )
@@ -158,8 +163,9 @@ from gc_core.vision.rejects import (
     learn_image_cap,
     next_image_cap,
     process_image_rejects,
-    request_url,
 )
+from gc_core.vision.route import vision_route_key
+from gc_core.vision.service import aensure_route
 
 _fallback_logger = logging.getLogger(__name__)
 
@@ -435,27 +441,23 @@ def _request_audience(
     ctx: Any,
     *,
     resolved: Optional[Any],
-    fallback_url: str,
     api_mode: str,
-    rejects: Optional[ImageRejects] = None,
 ) -> Audience:
     """«Кто смотрит» на картинки этого запроса (спека §9.1). Считается на каждый
     запрос и кладётся в ``state.vision_audience`` — оттуда его читает тул
     ``fs_view_image`` (тулы в контроллер не ходят). Без ``ctx.model_router``
-    (``resolved is None``: легаси-двойники тестов) видеть некому. ``rejects`` —
-    потолки картинок; по умолчанию реестр процесса, в повторе после картиночной
-    ошибки — он же с пробным потолком шага."""
+    (``resolved is None``: легаси-двойники тестов) видеть некому. Допуск зависит только от результатов проверки эффективных маршрутов."""
     if resolved is None:
         audience = Audience(native=None, eyes=None, tool_visible=False)
     else:
         audience = compute_audience(
             ctx.model_router,
-            rejects if rejects is not None else process_image_rejects(),
             request_resolved=resolved,
-            fallback_url=fallback_url,
             api_mode=api_mode,
             tool_in_set=view_tool_in_set(getattr(state, "tools", None) or []),
             config=getattr(ctx, "config_dict", None) or {},
+            routes=getattr(state, "vision_routes", {}),
+            turn_key=getattr(state, "vision_probe_turn", None),
         )
     state.vision_audience = audience
     return audience
@@ -484,13 +486,6 @@ def _read_once(
         return cache[attachment.id]
 
     return read
-
-
-def _vision_fallback_url(cfg: Dict[str, Any]) -> str:
-    """Запасной адрес в ключе пометок зрения (`vision.rejects.request_url`) — адрес
-    воронки chat_completions в обоих режимах API: через неё ходят «глаза», а у
-    модели реестра адрес свой. Один для модели запроса и для «глаз»."""
-    return str(cfg.get("completions_url") or "")
 
 
 async def _arequest_backend_canonical(
@@ -569,7 +564,6 @@ async def _arequest_responses_once(
         state,
         ctx,
         resolved=resolved,
-        fallback_url=_vision_fallback_url(cfg),
         api_mode="responses",
     )
     state.vision_live_ids = frozenset()
@@ -707,28 +701,23 @@ def _request_live_ids(
     rejects: ImageRejects,
     *,
     resolved: Any,
-    fallback_url: str,
+    route_key=None,
 ) -> frozenset[str]:
     """Живые картинки запроса; потолок модели — из реестра (или пробный, в повторе
     после картиночной ошибки)."""
-    cap = (
-        rejects.cap(request_url(resolved, fallback_url), resolved.model)
-        if resolved is not None
-        else None
-    )
+    cap = rejects.cap(route_key) if resolved is not None else None
     return compute_live_ids(
         merged_messages, images=images_config, max_images=cap
     )
 
 
-def _image_request_rejects(state, resolved, fallback_url, live_ids):
+def _image_request_rejects(state, resolved, live_ids, route_key):
     """Постоянные отказы плюс успешный потолок своего хода и контекста."""
     if resolved is None:
         return None, process_image_rejects()
-    url = request_url(resolved, fallback_url)
     scope = (
-        url,
-        resolved.model,
+        route_key,
+        getattr(state, "vision_probe_turn", None),
         getattr(state, "user_turn_seq", 0),
         getattr(state, "dialog_steps_offset", 0),
         live_ids,
@@ -736,7 +725,7 @@ def _image_request_rejects(state, resolved, fallback_url, live_ids):
     rejects = process_image_rejects()
     limit = getattr(state, "vision_request_limit", None)
     if limit is not None and limit.scope == scope:
-        rejects = rejects.with_limit(url, resolved.model, limit.cap)
+        rejects = rejects.with_limit(route_key, limit.cap)
     return scope, rejects
 
 
@@ -746,9 +735,9 @@ async def _asend_with_image_fallback(
     *,
     send: Callable[..., Any],
     resolved: Any,
-    fallback_url: str,
     merged_messages: List[Dict],
     images_config: Any,
+    route_key=None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Спека §10: запрос нёс живые картинки, а бэкенд ответил картиночной ошибкой
     (модель не видит, предел числа картинок, тело больше предела прокси) → повтор в
@@ -764,19 +753,17 @@ async def _asend_with_image_fallback(
         merged_messages,
         images_config,
         resolved=resolved,
-        fallback_url=fallback_url,
+        route_key=route_key,
     )
     live_ids = live_ids_for(process_image_rejects())
     scope, rejects = _image_request_rejects(
-        state, resolved, fallback_url, live_ids
+        state, resolved, live_ids, route_key
     )
     audience = _request_audience(
         state,
         ctx,
         resolved=resolved,
-        fallback_url=fallback_url,
         api_mode="chat_completions",
-        rejects=rejects,
     )
     live_ids = live_ids_for(rejects)
     reject_log = getattr(ctx, "logger", None) or _fallback_logger
@@ -796,22 +783,17 @@ async def _asend_with_image_fallback(
             ):
                 raise
             sent = count_live_images(merged_messages, live_ids)
-            newly_blind = learn_image_cap(
-                resolved, exc, fallback_url=fallback_url
-            )
+            newly_blind = learn_image_cap(route_key, exc)
             trial_cap = next_image_cap(exc, sent)
             trial = process_image_rejects().with_limit(
-                request_url(resolved, fallback_url),
-                resolved.model,
+                route_key,
                 trial_cap,
             )
             audience = _request_audience(
                 state,
                 ctx,
                 resolved=resolved,
-                fallback_url=fallback_url,
                 api_mode="chat_completions",
-                rejects=trial,
             )
             live_ids = live_ids_for(trial)
             reject_log.warning(
@@ -826,6 +808,55 @@ async def _asend_with_image_fallback(
             # глаза» — тишина.
             if newly_blind and audience.nobody:
                 note_blind(ctx, resolved, eyes=False, logger=reject_log)
+
+
+async def _acreate_vision_call_headers(state, ctx, resolved):
+    """Refresh the eyes' effective key without probing or fetching auth twice."""
+    cfg = getattr(ctx, "config_dict", {}) or {}
+    router = getattr(ctx, "model_router", None)
+    eyes = _resolve_eyes(router) if router is not None else None
+    if (
+        eyes is None
+        or _declared_blind(eyes, cfg)
+        or (
+            cfg.get("backend_api_mode") == "chat_completions"
+            and resolved is not None
+            and route_id(eyes) == route_id(resolved)
+        )
+    ):
+        return await acreate_call_headers(state, ctx, resolved=resolved)
+    headers, eyes_headers = await acreate_main_and_vision_headers(
+        state, ctx, resolved, eyes
+    )
+    prepared = snapshot_chat_completion(
+        ctx, state, resolved=eyes, headers=eyes_headers
+    )
+    if not hasattr(state, "vision_routes"):
+        state.vision_routes = {}
+    state.vision_routes[route_id(eyes)] = vision_route_key(prepared)
+    return headers
+
+
+async def _aprepare_native_vision(
+    state, ctx, resolved, call_headers, messages, cfg
+):
+    """Register the authenticated route and probe only live image candidates."""
+    if resolved is None:
+        return None
+    prepared = snapshot_chat_completion(
+        ctx, state, resolved=resolved, headers=call_headers
+    )
+    key = vision_route_key(prepared)
+    if not hasattr(state, "vision_routes"):
+        state.vision_routes = {}
+    state.vision_routes[route_id(resolved)] = key
+    candidates = compute_live_ids(
+        [*(getattr(state, "messages", []) or []), *messages],
+        images=read_images_config(cfg),
+    )
+    if candidates and not _declared_blind(resolved, cfg):
+        await aensure_route(ctx, state, prepared)
+    return key
 
 
 async def _arequest_backend_canonical_once(
@@ -849,7 +880,7 @@ async def _arequest_backend_canonical_once(
     # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
     # (легаси/тестовые двойники) — resolved=None, воронки читают cfg напрямую как раньше.
     resolved = _resolve_main_for_turn(state, ctx)
-    call_headers = await acreate_call_headers(state, ctx, resolved=resolved)
+    call_headers = await _acreate_vision_call_headers(state, ctx, resolved)
     cfg = getattr(ctx, "config_dict", {}) or {}
     backend_mode = _get_backend_api_mode(ctx)
     # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
@@ -883,6 +914,10 @@ async def _arequest_backend_canonical_once(
                 config_proxy,
             ),
         )
+
+    route_key = await _aprepare_native_vision(
+        state, ctx, resolved, call_headers, messages, cfg
+    )
 
     url = resolved.url if resolved is not None else cfg["completions_url"]
     sanitized_messages = sanitize_messages_for_chat_completions(
@@ -937,13 +972,13 @@ async def _arequest_backend_canonical_once(
         ctx,
         send=send,
         resolved=resolved,
-        fallback_url=_vision_fallback_url(cfg),
         # Вложения (спека §5): запрос собирается из ВСЕЙ истории плюс батч с
         # дедупликацией по id (`create_call_data_completions`). Живость считается по
         # слитой последовательности (повтор по id считается один раз), проекция
         # ложится на оба списка и сохраняет id — дедупликация видит те же ключи.
         merged_messages=[*sanitized_state_messages, *sanitized_messages],
         images_config=read_images_config(cfg),
+        route_key=route_key,
     )
     if not isinstance(res, dict):
         raise ValueError("chat/completions backend response must be an object")

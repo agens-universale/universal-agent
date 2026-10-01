@@ -1077,6 +1077,12 @@ class SubagentRunner:
         child_state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(child_config)
         )
+        child_state.vision_probe_turn = getattr(
+            parent, "vision_probe_turn", None
+        )
+        child_state.vision_probe_notices = getattr(
+            parent, "vision_probe_notices", set()
+        )
         child_state.backend_api_mode = "chat_completions"
         child_state.discard_writes_after_stop = (
             parent.discard_writes_after_stop

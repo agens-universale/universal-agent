@@ -51,8 +51,8 @@ class BackendConfig(BaseModel):
     claude_prompt_cache: bool | None = None
     # Модель не принимает картинки, а отказа не даёт (прокси молча выбрасывает
     # картинку и отвечает «не вижу»): false — картинки ей не слать, смотрят
-    # «глаза» (assign.vision). Не задано или true — зрение узнаётся по факту
-    # отказа. Обычно на одну модель: models.<alias>.backend.
+    # «глаза» (assign.vision). Не задано или true разрешают отдельную
+    # автоматическую пробу; пользовательские пиксели только после её успеха.
     vision: bool | None = None
     use_ssl: bool | str = True
     cert_path: str | None = None

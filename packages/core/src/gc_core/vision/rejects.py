@@ -1,19 +1,4 @@
-"""Потолки картинок — знание процесса о бэкенде (спека §10): сколько картинок модель по
-этому адресу принимает за один запрос. Потолок 0 — модель не видит изображений.
-
-Потолок узнаётся по факту: запрос с картинками получил картиночную ошибку
-(`utils.backend_errors.is_image_request_error`). Запоминается только явное — отказ от
-зрения и названный предел. Выведенное (413, «слишком много» без числа) после
-успешного повтора сохраняется отдельно в State для текущего хода и контекста.
-Проб и фоновых проверок нет.
-Ключ — фактический адрес запроса и id модели: одна и та же модель за разными адресами
-(свой vLLM без зрения, OpenRouter со зрением) видит по-разному.
-
-Вне `State` сознательно: это знание процесса о бэкенде, а не состояние запуска —
-общее для субагентов и переживает смену треда, как предохранитель модели. Не
-персистится: модель, переподнятую со зрением или с другим пределом, узнают
-перезапуском агента.
-"""
+"""Numeric image limits for effective routes; support lives in registry."""
 
 from __future__ import annotations
 
@@ -25,11 +10,13 @@ from gc_core.utils.backend_errors import (
     image_limit_from_error,
     is_image_rejection_error,
 )
+from gc_core.vision.registry import process_vision_probes
+from gc_core.vision.route import VisionRouteKey
 
 if TYPE_CHECKING:
     from gc_core.model_router import ResolvedModel
 
-_Key = tuple[str, str]
+_Key = VisionRouteKey
 
 
 @dataclass(frozen=True)
@@ -39,7 +26,7 @@ class ImageRequestLimit:
     Не означает слепоту и не разделяется между запусками или субагентами.
     """
 
-    scope: tuple[str, str, int, int, frozenset[str]]
+    scope: tuple[VisionRouteKey, str, int, int, frozenset[str]]
     cap: int
 
 
@@ -54,18 +41,11 @@ class ImageRejects:
         self._lock = threading.Lock()
         self._caps: Mapping[_Key, int] = dict(caps or {})
 
-    def cap(self, url: str, model: str) -> Optional[int]:
-        """Потолок картинок за запрос; None — бэкенд картинки не ограничивал."""
-        return self._caps.get((url, model))
+    def cap(self, key: VisionRouteKey) -> Optional[int]:
+        """Numeric limit; zero is not proof that a route is blind."""
+        return self._caps.get(key)
 
-    def contains(self, url: str, model: str) -> bool:
-        """Модель не видит изображений (потолок 0)."""
-        return self.cap(url, model) == 0
-
-    def limit(self, url: str, model: str, cap: int) -> bool:
-        """Опустить потолок до `cap`; поднять нельзя. True — потолок стал ниже (или
-        появился)."""
-        key = (url, model)
+    def limit(self, key: VisionRouteKey, cap: int) -> bool:
         with self._lock:
             current = self._caps.get(key)
             if current is not None and current <= cap:
@@ -73,16 +53,9 @@ class ImageRejects:
             self._caps = {**self._caps, key: cap}
             return True
 
-    def mark(self, url: str, model: str) -> bool:
-        """Пометить модель слепой. True — слепой она стала только сейчас (её владелец и
-        показывает уведомление); повторная пометка ничего не меняет."""
-        return self.limit(url, model, 0)
-
-    def with_limit(self, url: str, model: str, cap: int) -> ImageRejects:
-        """Копия реестра с ещё одним потолком — пробный потолок шага, пока успешный
-        запрос его не подтвердил. Сам реестр не меняется."""
+    def with_limit(self, key: VisionRouteKey, cap: int) -> ImageRejects:
         view = ImageRejects(self._caps)
-        view.limit(url, model, cap)
+        view.limit(key, cap)
         return view
 
     def _clear(self) -> None:
@@ -105,33 +78,22 @@ def request_url(resolved: ResolvedModel, fallback_url: str) -> str:
     return resolved.url or fallback_url
 
 
-def mark_blind(resolved: ResolvedModel, *, fallback_url: str) -> bool:
-    """Пометить модель слепой на процесс — после отказа от зрения
-    (`is_image_rejection_error`). Ключ — `request_url` и id модели. True — пометка
-    новая: строку «изображение не просмотрено» показывает только её владелец
-    (`vision.notes.note_blind`), параллельный повтор молчит."""
-    return process_image_rejects().mark(
-        request_url(resolved, fallback_url), resolved.model
+def mark_blind(key: VisionRouteKey) -> bool:
+    return process_vision_probes().mark_unsupported(
+        key, reason="image_unsupported"
     )
 
 
-def learn_image_cap(
-    resolved: ResolvedModel, exc: BaseException, *, fallback_url: str
-) -> bool:
-    """Запомнить на процесс то, что бэкенд сказал о картинках явно: отказ от зрения —
-    потолок 0, названный предел («At most N image(s)») — N. Выведенное делением пополам
-    (413 — он зависит от объёма истории, «слишком много» без числа) в этот реестр
-    не попадает: успешный потолок своего контекста хранит State. True — модель
-    только что стала слепой: строку в ленте показывает только этот вызов."""
+def learn_image_cap(key: VisionRouteKey, exc: BaseException) -> bool:
+    """Explicit support refusals and numeric limits have separate registries."""
     if is_image_rejection_error(exc):
-        return mark_blind(resolved, fallback_url=fallback_url)
+        return mark_blind(key)
     stated = image_limit_from_error(exc)
-    if stated is None:
-        return False
-    lowered = process_image_rejects().limit(
-        request_url(resolved, fallback_url), resolved.model, stated
-    )
-    return lowered and stated == 0
+    if stated is not None:
+        process_image_rejects().limit(key, stated)
+        if stated == 0:
+            return mark_blind(key)
+    return False
 
 
 def next_image_cap(exc: BaseException, sent: int) -> int:

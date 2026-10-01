@@ -44,6 +44,9 @@ def load_state_from_snapshot(payload: Mapping[str, Any]) -> State:
     snapshot.setdefault("vision_audience", None)
     snapshot.setdefault("vision_live_ids", frozenset())
     snapshot.setdefault("vision_request_limit", None)
+    snapshot["vision_probe_turn"] = None
+    snapshot["vision_routes"] = {}
+    snapshot["vision_probe_notices"] = set()
     state.__dict__ = snapshot
 
     shared_raw = state.__dict__.get("shared")
@@ -131,6 +134,9 @@ class StateSerializer:
         raw.pop("vision_audience", None)
         raw.pop("vision_live_ids", None)
         raw.pop("vision_request_limit", None)
+        raw.pop("vision_probe_turn", None)
+        raw.pop("vision_routes", None)
+        raw.pop("vision_probe_notices", None)
 
         shared = raw.get("shared")
         if isinstance(shared, SharedStateData) or (

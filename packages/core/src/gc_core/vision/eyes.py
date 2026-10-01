@@ -9,6 +9,7 @@ user-сообщении. Исключения бэкенда пробрасыв�
 
 from __future__ import annotations
 
+from functools import partial
 from typing import Any
 
 from gc_core.attachments.model import Attachment
@@ -16,6 +17,7 @@ from gc_core.attachments.texts import EYES_SYSTEM_PROMPT
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.utils.data_urls import data_url
 from gc_core.utils.llm_chat_client import arequest_chat_completion_text
+from gc_core.vision.service import arequire_confirmed_route
 
 EYES_MAX_TOKENS = 1500
 EYES_TEMPERATURE = 0.1
@@ -80,4 +82,5 @@ async def adescribe_image(
         request_label="vision",
         payload_overrides={"temperature": EYES_TEMPERATURE},
         allow_images=True,
+        before_send=partial(arequire_confirmed_route, ctx, state),
     )

@@ -1,13 +1,4 @@
-"""«Кто смотрит» изображения одного запроса (спека изображений §9.1).
-
-Одно решение на запрос — из него читают все: проекция (живые картинки или
-записки), фильтр тулов (`tools_for_request`: виден ли `fs_view_image`) и сам
-тул (кандидаты).
-Считает контроллер (`processing_responses`) перед каждым запросом, передаёт
-значением и кладёт в `state.vision_audience` для тула. Состояния здесь нет:
-пометки слепоты — в `vision.rejects`, модели — у Router'а, заявленная слепота
-(`backend.vision: false`) — в конфиге.
-"""
+"""Pure image admission and lazy tool availability for a prepared route."""
 
 from __future__ import annotations
 
@@ -24,7 +15,8 @@ from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     backend_override_value,
 )
-from gc_core.vision.rejects import ImageRejects, request_url
+from gc_core.vision.probe import ProbeStatus
+from gc_core.vision.registry import process_vision_probes
 
 
 @dataclass(frozen=True)
@@ -36,6 +28,7 @@ class Audience:
     native: ResolvedModel | None
     eyes: ResolvedModel | None
     tool_visible: bool
+    probe_reason: str | None = None
 
     @property
     def nobody(self) -> bool:
@@ -47,8 +40,7 @@ def _declared_blind(
 ) -> bool:
     """Модель заявлена слепой в конфиге: `backend.vision: false` у неё
     (`models.<alias>.backend`) или, без своего значения, в общей секции
-    (плоский `backend_vision`). Для прокси, что молча выбрасывают картинку: отказа
-    нет — узнать по факту нечем. Смысл имеет только `false`."""
+    (плоский `backend_vision`). True и None допускают автоматическую пробу."""
     value = backend_override_value(resolved, "vision")
     if value is NO_BACKEND_OVERRIDE:
         value = config.get("backend_vision")
@@ -67,41 +59,74 @@ def _resolve_eyes(router: ModelRouter) -> ResolvedModel | None:
 
 def compute_audience(
     router: ModelRouter,
-    rejects: ImageRejects,
     *,
     request_resolved: ResolvedModel,
-    fallback_url: str,
     api_mode: str,
     tool_in_set: bool,
     config: Mapping[str, Any],
+    routes: Mapping | None = None,
+    turn_key: str | None = None,
 ) -> Audience:
-    """`native` — модель запроса, только в `chat_completions` (в `responses`
-    картинка осталась бы в цепочке `previous_response_id`, §20.5) и только если
-    она видит: не помечена после отказа и не заявлена слепой в конфиге
-    (`config` — плоский `config_dict`). `eyes` — `router.resolve("vision")` при
-    том же условии: неназначенные «глаза» — та же активная модель, и её
-    слепота снимает их вместе с ней.
+    """Only confirmed routes admit pixels; unknown eligible routes offer the tool.
 
-    Зовётся на КАЖДЫЙ запрос и потому не бросает: резолв «глаз» отказал (алиас
-    открыт в предохранителе, уровень не резолвится) — на «глаза» не
-    рассчитываем, запрос уходит как обычно. Контекст без Router'а сюда не
-    доходит: смотреть там некому, это решает контроллер."""
+    Numeric limits do not establish blindness. Network operations happen in
+    vision.service; this function only reads route keys and cached results.
+    """
+    routes = routes or {}
 
-    def sees(resolved: ResolvedModel) -> bool:
-        return not _declared_blind(resolved, config) and not rejects.contains(
-            request_url(resolved, fallback_url), resolved.model
+    def result_for(resolved):
+        key = routes.get(route_id(resolved))
+        return process_vision_probes().peek(key) if key is not None else None
+
+    def sees(resolved):
+        result = result_for(resolved)
+        return (
+            not _declared_blind(resolved, config)
+            and result is not None
+            and result.status is ProbeStatus.CONFIRMED
         )
 
-    native = None
-    if api_mode == "chat_completions" and sees(request_resolved):
-        native = request_resolved
+    def eligible(resolved):
+        if resolved is None or _declared_blind(resolved, config):
+            return False
+        result = result_for(resolved)
+        return (
+            result is None
+            or result.status is ProbeStatus.CONFIRMED
+            or (
+                result.status is ProbeStatus.TRANSIENT
+                and process_vision_probes().can_probe(
+                    routes[route_id(resolved)], turn_key=turn_key
+                )
+            )
+        )
+
+    native = (
+        request_resolved
+        if api_mode == "chat_completions" and sees(request_resolved)
+        else None
+    )
     candidate = _resolve_eyes(router)
     eyes = candidate if candidate is not None and sees(candidate) else None
+    result = result_for(request_resolved)
+    if result is None and candidate is not None:
+        result = result_for(candidate)
     return Audience(
         native=native,
         eyes=eyes,
-        tool_visible=tool_in_set and (native is not None or eyes is not None),
+        tool_visible=tool_in_set
+        and (
+            eligible(candidate)
+            or (api_mode == "chat_completions" and eligible(request_resolved))
+        ),
+        probe_reason=result.reason
+        if result is not None and result.status is not ProbeStatus.CONFIRMED
+        else None,
     )
+
+
+def route_id(resolved):
+    return resolved.alias, resolved.model, resolved.url
 
 
 def view_tool_in_set(tools: Sequence[Mapping[str, Any]]) -> bool:

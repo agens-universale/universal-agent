@@ -17,6 +17,8 @@ STUB_MODEL_BLIND = (
     "[{label} · {wh} · you cannot see this image yourself · call fs_view_image"
     " path={path} — another model will describe it for you]"
 )
+STUB_UNCHECKED = "[{label} · {wh} · vision not checked · file {path} · fs_view_image can check an available model before viewing; do not use OCR or shell workarounds]"
+STUB_PROBE_FAILED = "[{label} · {wh} · image not viewed: vision check {reason} · do not retry viewing or use OCR or shell workarounds in this turn; ask the user to describe it in words]"
 STUB_NOBODY = "[{label} · {wh} · not viewed: no available model can work with images — ask the user to describe it in words]"
 STUB_FILE_MISSING = "[{label} · file unavailable: {path}]"
 # Тот же файл приложен пикселями в другом месте истории — здесь только записка.

@@ -645,6 +645,24 @@ async def acreate_call_headers(
     )
 
 
+async def acreate_main_and_vision_headers(
+    state, ctx, resolved, vision_resolved
+):
+    """One auth acquisition, with each recipient's own header overlays."""
+    auth = getattr(ctx, "auth_connector", None)
+    token = await aresolve_auth_token(auth) if auth is not None else None
+    return (
+        build_call_headers(state, ctx, resolved, token=token),
+        build_call_headers(
+            state,
+            ctx,
+            vision_resolved,
+            token=token,
+            api_mode="chat_completions",
+        ),
+    )
+
+
 def _authorization_header(
     authorization_override, auth_connector, token: Optional[str]
 ) -> Optional[str]:

@@ -12,6 +12,7 @@ from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
 from gc_core.model_router import ModelRouter
 from gc_testkit import run_coro
+from vision_fakes import warm_routes
 from transport_fakes import install_transport
 
 URL = "http://llm.test/v1/chat/completions"
@@ -73,6 +74,7 @@ def test_a_live_image_is_read_once_per_request(tmp_path, monkeypatch):
         image_store=store,
         on_trace_note=lambda _note: None,
     )
+    warm_routes(ctx)
     message = {
         "role": "user",
         "id": "m1",
@@ -80,6 +82,7 @@ def test_a_live_image_is_read_once_per_request(tmp_path, monkeypatch):
         "attachments": [att.to_dict()],
     }
     state = SimpleNamespace(
+        vision_probe_turn="test-root",
         state_id="reads-state",
         x_target=None,
         messages=[message],

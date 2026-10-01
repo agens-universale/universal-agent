@@ -19,6 +19,7 @@ from gc_core.tools.fs.view_image import ViewImage
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.tools.subagents.sidecar import bind_thread_identity
 from gc_core.vision.audience import Audience
+from vision_fakes import warm_routes
 
 SEEING = Audience(
     native=ResolvedModel(
@@ -51,6 +52,7 @@ async def test_child_view_image_snapshot_lands_in_the_parent_store(tmp_path):
         "backend_api_mode": "chat_completions",
         "completions_url": "http://localhost:1/v1/chat/completions",
         "model": "test-model",
+        "backend_request_timeout_sec": 600,
         "launch_root": str(proj),
         "threads_data_path": str(threads),
         "use_local_subagents": True,
@@ -73,6 +75,10 @@ async def test_child_view_image_snapshot_lands_in_the_parent_store(tmp_path):
         pending_tool_attachments=[],
         current_user_intent=[],
     )
+    state.vision_probe_turn = "root-test"
+    state.state_id = "child-test"
+    state.x_target = None
+    warm_routes(child)
     out = json.loads(
         await ViewImage(
             ctx=child, state=state, config_dict=child.config_dict

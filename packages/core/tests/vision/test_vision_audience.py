@@ -7,8 +7,12 @@
 """
 
 from gc_core.model_router import ModelRouter, ResolvedModel
-from gc_core.vision.audience import Audience, compute_audience, request_url
-from gc_core.vision.rejects import ImageRejects
+from gc_core.vision.audience import Audience, compute_audience
+from gc_core.vision.rejects import request_url
+from gc_core.vision.rejects import ImageRejects, mark_blind
+from gc_core.vision.audience import route_id
+from gc_core.vision.route import VisionRouteKey
+from vision_fakes import confirm
 
 _GLM_URL = "http://ecs3:6003/v1/chat/completions"
 _QWEN_URL = "https://openrouter.ai/api/v1/chat/completions"
@@ -40,6 +44,10 @@ def _router(
     return ModelRouter(snapshot, level_provider=lambda: "default")
 
 
+def _key(url, model):
+    return VisionRouteKey(url, model, "test")
+
+
 def _audience(
     router,
     rejects,
@@ -49,14 +57,24 @@ def _audience(
     request_resolved=None,
     config=None,
 ) -> Audience:
+    request = request_resolved or router.resolve("main")
+    resolved_models = [request]
+    try:
+        resolved_models.append(router.resolve("vision"))
+    except (ValueError, RuntimeError):
+        pass
+    routes = {}
+    for resolved in resolved_models:
+        key = _key(resolved.url or _FALLBACK_URL, resolved.model)
+        confirm(key)
+        routes[route_id(resolved)] = key
     return compute_audience(
         router,
-        rejects,
         request_resolved=request_resolved or router.resolve("main"),
-        fallback_url=_FALLBACK_URL,
         api_mode=api_mode,
         tool_in_set=tool_in_set,
         config=config or {},
+        routes=routes,
     )
 
 
@@ -76,18 +94,23 @@ def test_a_marked_request_model_without_eyes_leaves_nobody():
     помеченная модель, и смотреть некому."""
     router = _router()
     rejects = ImageRejects()
-    rejects.mark(_GLM_URL, "glm-5.1")
+    mark_blind(_key(_GLM_URL, "glm-5.1"))
 
     audience = _audience(router, rejects)
 
-    assert audience == Audience(native=None, eyes=None, tool_visible=False)
+    assert audience == Audience(
+        native=None,
+        eyes=None,
+        tool_visible=False,
+        probe_reason="image_unsupported",
+    )
     assert audience.nobody is True
 
 
 def test_a_marked_request_model_hands_over_to_the_assigned_eyes():
     router = _router({"vision": "qwen"})
     rejects = ImageRejects()
-    rejects.mark(_GLM_URL, "glm-5.1")
+    mark_blind(_key(_GLM_URL, "glm-5.1"))
 
     audience = _audience(router, rejects)
 
@@ -99,7 +122,7 @@ def test_a_marked_request_model_hands_over_to_the_assigned_eyes():
 def test_marked_eyes_do_not_hide_a_seeing_request_model():
     router = _router({"vision": "qwen"})
     rejects = ImageRejects()
-    rejects.mark(_QWEN_URL, "qwen/qwen3.6-35b-a3b")
+    mark_blind(_key(_QWEN_URL, "qwen/qwen3.6-35b-a3b"))
 
     audience = _audience(router, rejects)
 
@@ -135,7 +158,7 @@ def test_eyes_whose_alias_is_open_in_the_breaker_are_absent():
     router = _router({"vision": "qwen"})
     router.breaker.trip("qwen", "503")
     rejects = ImageRejects()
-    rejects.mark(_GLM_URL, "glm-5.1")
+    mark_blind(_key(_GLM_URL, "glm-5.1"))
 
     audience = _audience(router, rejects)
 
@@ -176,7 +199,7 @@ def test_the_key_uses_the_fallback_url_when_the_model_has_none():
     )
     resolved = router.resolve("main")
     rejects = ImageRejects()
-    rejects.mark(_FALLBACK_URL, "bare")
+    mark_blind(_key(_FALLBACK_URL, "bare"))
 
     assert resolved.url is None
     assert request_url(resolved, _FALLBACK_URL) == _FALLBACK_URL
@@ -203,7 +226,7 @@ def test_legacy_request_model_is_keyed_by_its_model_id():
         level_provider=lambda: "default",
     )
     rejects = ImageRejects()
-    rejects.mark(_GLM_URL, "legacy-model")
+    mark_blind(_key(_GLM_URL, "legacy-model"))
 
     audience = _audience(router, rejects)
 
@@ -276,5 +299,30 @@ def test_vision_true_changes_nothing():
 
     assert _audience(router, rejects).native.alias == "glm"
 
-    rejects.mark(_GLM_URL, "glm-5.1")
+    mark_blind(_key(_GLM_URL, "glm-5.1"))
     assert _audience(router, rejects).nobody is True
+
+
+def test_unknown_candidate_offers_tool_without_admitting_pixels():
+    router = _router()
+    audience = compute_audience(
+        router,
+        request_resolved=router.resolve("main"),
+        api_mode="chat_completions",
+        tool_in_set=True,
+        config={},
+    )
+    assert audience.native is None and audience.eyes is None
+    assert audience.tool_visible
+
+
+def test_explicit_true_still_requires_confirmation():
+    router = _router(backend={"glm": {"vision": True}})
+    audience = compute_audience(
+        router,
+        request_resolved=router.resolve("main"),
+        api_mode="chat_completions",
+        tool_in_set=True,
+        config={},
+    )
+    assert audience.native is None and audience.tool_visible

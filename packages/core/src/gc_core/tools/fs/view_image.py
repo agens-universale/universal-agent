@@ -68,8 +68,7 @@ from gc_core.vision.errors import (
     REASON_HTTP,
 )
 from gc_core.vision.eyes import adescribe_image, task_context_of
-from gc_core.vision.notes import note_blind
-from gc_core.vision.rejects import mark_blind
+from gc_core.vision.service import VisionNotConfirmed, aensure_view_audience
 
 _TOOL_DESCRIPTION = (
     "View an image file (PNG, JPEG, GIF, WEBP, BMP, TIFF). "
@@ -167,7 +166,9 @@ class ViewImage(AbstractSimpleTool):
         self, path: str, question: Optional[str] = None, **kwargs
     ) -> str:
         audience = getattr(self._state, "vision_audience", None)
-        if audience is None or audience.nobody:
+        if getattr(self._ctx, "model_router", None) is None and (
+            audience is None or audience.nobody
+        ):
             # Скрытый тул диспетчер всё равно исполняет (ищет его в полном
             # ctx.tools_data): честный отказ, а не unknown_tool (спека §9.2).
             return self._no_vision(path)
@@ -179,6 +180,9 @@ class ViewImage(AbstractSimpleTool):
             image = await asyncio.to_thread(_normalized, data)
         except _InputError as exc:
             return self._error(path, exc.error_type, str(exc))
+        audience = await aensure_view_audience(self._ctx, self._state)
+        if audience is None or audience.nobody:
+            return self._no_vision(path)
         if audience.native is not None:
             return await self._aattach(path, image)
         att = await asyncio.to_thread(
@@ -331,6 +335,11 @@ class ViewImage(AbstractSimpleTool):
         )
 
     def _no_vision(self, path: str) -> str:
+        reason = getattr(
+            getattr(self._state, "vision_audience", None), "probe_reason", None
+        )
+        if reason is not None:
+            return self._vision_failed(path, reason)
         return self._error(path, ERR_NO_VISION_MODEL, TOOL_NO_VISION)
 
     async def _adescribe(
@@ -347,19 +356,9 @@ class ViewImage(AbstractSimpleTool):
                 task_context=task_context_of(self._state),
             )
         except Exception as exc:
+            if isinstance(exc, VisionNotConfirmed):
+                return self._vision_failed(path, exc.result.reason)
             if is_image_rejection_error(exc):
-                # Модель запроса картинку не видит, а «глаза» теперь помечены —
-                # смотреть некому, пересчитывать «кто смотрит» не нужно (§10).
-                cfg = getattr(self._ctx, "config_dict", None) or {}
-                if mark_blind(
-                    eyes, fallback_url=str(cfg.get("completions_url") or "")
-                ):
-                    note_blind(
-                        self._ctx,
-                        eyes,
-                        eyes=True,
-                        logger=getattr(self._ctx, "logger", None),
-                    )
                 return self._no_vision(path)
             return self._vision_failed(path, _failure_reason(exc))
         if not description:

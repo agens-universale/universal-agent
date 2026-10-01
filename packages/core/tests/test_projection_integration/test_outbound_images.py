@@ -18,6 +18,7 @@ from gc_core.attachments.store import ImageStore
 from gc_core.attachments.texts import (
     STUB_MODEL_BLIND,
     STUB_NOBODY,
+    STUB_PROBE_FAILED,
     STUB_OUT_OF_CONTEXT,
 )
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
@@ -27,6 +28,9 @@ from gc_core.vision.rejects import (
     reset_image_rejects_for_tests,
 )
 from gc_testkit import run_coro
+
+from vision_fakes import route_key, warm_routes, unsupported
+from gc_core.vision.rejects import mark_blind
 
 URL = "http://test-host/v1/chat/completions"
 MODEL = "vis-model"
@@ -162,6 +166,8 @@ def test_live_user_image_reaches_the_wire_once(tmp_path, capture_outbound):
     ctx = _ctx(tmp_path, _cfg())
     _att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -195,6 +201,8 @@ def test_state_history_and_new_batch_are_projected_together(
             },
         ]
     )
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([new], state, ctx))
 
@@ -239,6 +247,8 @@ def test_images_section_of_the_config_reaches_the_wire(
         ],
         tools=[VIEW_TOOL],
     )
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([new], state, ctx))
 
@@ -263,6 +273,8 @@ def test_canon_is_untouched_and_audience_is_stored_for_the_tool(
     ctx = _ctx(tmp_path, _cfg())
     _att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
     before = copy.deepcopy(state.messages)
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
@@ -280,14 +292,20 @@ def test_blind_request_model_gets_notes_and_no_view_tool(
     ctx = _ctx(tmp_path, _cfg())
     att, message = _user_with_image(ctx.image_store)
     state = _state([message], tools=[READ_TOOL, VIEW_TOOL])
-    process_image_rejects().mark(URL, MODEL)
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
+    mark_blind(route_key(ctx, url=URL, model=MODEL))
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
     assert _user_wire(capture_outbound["messages"]) == [
         {
             "role": "user",
-            "content": _note(STUB_NOBODY, att) + "\n" + message["content"],
+            "content": STUB_PROBE_FAILED.format(
+                label=att.label, wh=wh_text(att), reason="image_unsupported"
+            )
+            + "\n"
+            + message["content"],
         }
     ]
     assert _tool_names(capture_outbound["payload"]) == ["fs_read_file"]
@@ -305,6 +323,8 @@ def test_a_model_declared_text_only_gets_notes_without_a_rejection(
     ctx = _ctx(tmp_path, cfg)
     att, message = _user_with_image(ctx.image_store)
     state = _state([message], tools=[READ_TOOL, VIEW_TOOL])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -315,7 +335,7 @@ def test_a_model_declared_text_only_gets_notes_without_a_rejection(
         }
     ]
     assert _tool_names(capture_outbound["payload"]) == ["fs_read_file"]
-    assert process_image_rejects().contains(URL, MODEL) is False
+    assert unsupported(route_key(ctx, url=URL, model=MODEL)) is False
 
 
 def test_view_tool_stays_when_the_request_model_sees(
@@ -326,6 +346,8 @@ def test_view_tool_stays_when_the_request_model_sees(
         [{"role": "user", "id": "m1", "content": "привет"}],
         tools=[READ_TOOL, VIEW_TOOL],
     )
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical(state.messages, state, ctx))
 
@@ -339,6 +361,8 @@ def test_context_without_router_means_nobody_sees(tmp_path, capture_outbound):
     ctx = _ctx(tmp_path, _cfg(), with_router=False)
     att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -358,6 +382,8 @@ def test_responses_mode_sends_notes_without_attachments(
     ctx = _ctx(tmp_path, _cfg("responses"))
     att, message = _user_with_image(ctx.image_store)
     state = _state([], tools=[VIEW_TOOL])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -382,7 +408,9 @@ def test_responses_mode_hides_the_only_tool_when_nobody_sees(
     """Явный пустой набор тулов не подменяется набором state."""
     ctx = _ctx(tmp_path, _cfg("responses"))
     state = _state([], tools=[VIEW_TOOL])
-    process_image_rejects().mark(URL, MODEL)
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
+    mark_blind(route_key(ctx, url=URL, model=MODEL))
 
     run_coro(
         pr._arequest_backend_canonical(

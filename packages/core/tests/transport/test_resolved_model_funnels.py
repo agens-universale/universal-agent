@@ -721,10 +721,11 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
         processing_module, [{"role": "user", "content": "hi"}], state, ctx
     )
 
-    # Модель хода — ровно один резолв "main"; второй — «глаза» решения «кто
-    # смотрит» (compute_audience зовётся на каждый запрос, спека изображений §9.1).
+    # main фиксируется один раз; vision резолвится для свежего ключа доступа
+    # и затем чистого решения compute_audience (без сетевой пробы).
     assert [c.args for c in router.resolve.call_args_list] == [
         ("main",),
+        ("vision",),
         ("vision",),
     ]
 

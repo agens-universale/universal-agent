@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from gc_core.model_router import ResolvedModel
@@ -26,6 +27,7 @@ NOTE_EYES_BLIND = (
 )
 
 _logger = logging.getLogger(__name__)
+_probe_notice_lock = threading.Lock()
 
 
 def note_alias(resolved: ResolvedModel) -> str:
@@ -53,3 +55,31 @@ def emit_trace_note(ctx: Any, text: str, *, logger: Any = None) -> None:
         hook(text)
         return
     (logger or getattr(ctx, "logger", None) or _logger).warning(text)
+
+
+PROBE_REASON_RU = {
+    "code_mismatch": "модель не прочитала проверочную картинку",
+    "output_limit": "ответ на проверку усечён по лимиту 512 токенов",
+    "image_unsupported": "маршрут отказал в поддержке изображений",
+    "network": "временный сетевой сбой проверки; повтор возможен в новом ходе после паузы",
+    "probe_payload_rejected": "маршрут отклонил даже маленькую проверочную картинку (413)",
+    "access_denied": "ошибка доступа при проверке зрения",
+    "route_configuration": "ошибка настроек маршрута при проверке зрения",
+    "probe_cancelled": "проверка зрения отменена",
+}
+
+
+def note_probe(ctx, state, key, resolved, result):
+    notices = getattr(state, "vision_probe_notices", None)
+    if notices is None:
+        notices = state.vision_probe_notices = set()
+    identity = (getattr(state, "vision_probe_turn", None), key, result.reason)
+    with _probe_notice_lock:
+        if identity in notices:
+            return
+        notices.add(identity)
+    reason = PROBE_REASON_RU.get(result.reason, "зрение не подтверждено")
+    emit_trace_note(
+        ctx,
+        f"{note_alias(resolved)}: {reason}. Пользовательское изображение не отправлено.",
+    )

@@ -14,6 +14,7 @@ import httpx
 import pytest
 from PIL import Image
 from gc_testkit import as_coro
+from vision_fakes import warm_routes
 
 from gc_core.attachments.model import ORIGIN_TOOL, TOOL_LABEL
 from gc_core.attachments.normalize import normalize_image
@@ -46,7 +47,7 @@ def _router() -> ModelRouter:
 
 
 def _ctx(tmp_path, router):
-    return SimpleNamespace(
+    ctx = SimpleNamespace(
         config_dict={
             "completions_url": "http://backend.local/v1/chat/completions",
             "backend_request_timeout_sec": 600,
@@ -59,6 +60,9 @@ def _ctx(tmp_path, router):
         image_store=ImageStore(str(tmp_path / "images")),
     )
 
+    warm_routes(ctx)
+    return ctx
+
 
 def _state(*asks):
     intent = []
@@ -66,6 +70,7 @@ def _state(*asks):
         intent = append_user_ask(intent, ask, user_turn_seq=0)
     return SimpleNamespace(
         state_id="state-1",
+        vision_probe_turn="test-root",
         x_target=None,
         default_model="legacy-model",
         usage=None,

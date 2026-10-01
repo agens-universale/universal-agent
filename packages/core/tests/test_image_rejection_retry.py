@@ -22,7 +22,11 @@ from gc_core import request_backend_policy as policy
 from gc_core.attachments.model import ORIGIN_USER, user_label, wh_text
 from gc_core.attachments.normalize import NormalizedImage
 from gc_core.attachments.store import ImageStore
-from gc_core.attachments.texts import STUB_MODEL_BLIND, STUB_NOBODY
+from gc_core.attachments.texts import (
+    STUB_MODEL_BLIND,
+    STUB_NOBODY,
+    STUB_PROBE_FAILED,
+)
 from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.model_router import ModelRouter
 from gc_core.vision.notes import NOTE_MAIN_BLIND
@@ -32,6 +36,9 @@ from gc_core.vision.rejects import (
 )
 from transport_fakes import install_transport
 from gc_testkit import run_coro
+
+from vision_fakes import route_key, warm_routes, unsupported
+from gc_core.vision.rejects import mark_blind
 
 URL = "http://llm.test/v1/chat/completions"
 #: Тело отказа vLLM у зрячей модели, поднятой без зрения (спека §10, `--language-model-only`).
@@ -153,6 +160,8 @@ def test_image_rejection_marks_the_model_and_retries_once_without_images(
     ctx = _ctx(tmp_path, _cfg(), notes)
     att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -161,13 +170,16 @@ def test_image_rejection_marks_the_model_and_retries_once_without_images(
     assert _users(spy.requests[1]) == [
         {
             "role": "user",
-            "content": STUB_NOBODY.format(
-                label=att.label, wh=wh_text(att), path=att.path
+            "content": STUB_PROBE_FAILED.format(
+                label=att.label,
+                wh=wh_text(att),
+                reason="image_unsupported",
+                path=att.path,
             )
             + "\n[Изображение #1] что тут?",
         }
     ]
-    assert process_image_rejects().contains(URL, "blind-model") is True
+    assert unsupported(route_key(ctx, url=URL, model="blind-model")) is True
     assert notes == [NOTE_MAIN_BLIND.format(alias="blind-model")]
     assert state.vision_audience.nobody is True
 
@@ -190,6 +202,8 @@ def test_with_assigned_eyes_the_retry_points_to_the_view_tool_and_stays_silent(
     ctx = _ctx(tmp_path, cfg, notes)
     att, message = _user_with_image(ctx.image_store)
     state = _state([message], tools=[VIEW_TOOL])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -218,12 +232,14 @@ def test_request_without_images_keeps_the_old_path(tmp_path, monkeypatch):
     notes: list = []
     ctx = _ctx(tmp_path, _cfg(), notes)
     state = _state([{"role": "user", "id": "m1", "content": "просто текст"}])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     with pytest.raises(httpx.HTTPStatusError):
         run_coro(pr._arequest_backend_canonical(state.messages, state, ctx))
 
     assert len(spy.requests) == 1
-    assert process_image_rejects().contains(URL, "blind-model") is False
+    assert unsupported(route_key(ctx, url=URL, model="blind-model")) is False
     assert notes == []
 
 
@@ -284,6 +300,8 @@ def test_unrelated_400_with_live_images_goes_up_without_mark_or_retry(
     ctx = _ctx(tmp_path, _cfg(), notes)
     _att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     with pytest.raises(httpx.HTTPStatusError) as caught:
         run_coro(pr._arequest_backend_canonical([message], state, ctx))
@@ -295,7 +313,7 @@ def test_unrelated_400_with_live_images_goes_up_without_mark_or_retry(
     )
     assert all(b"image_url" in request.content for request in spy.requests)
     assert all("·" not in _user_texts(request) for request in spy.requests)
-    assert process_image_rejects().contains(URL, "blind-model") is False
+    assert unsupported(route_key(ctx, url=URL, model="blind-model")) is False
     assert notes == []
 
 
@@ -311,14 +329,18 @@ def test_model_with_its_own_url_is_marked_by_that_url(tmp_path, monkeypatch):
     ctx = _ctx(tmp_path, cfg, notes)
     _att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
     assert [str(request.url) for request in spy.requests] == [OWN_URL, OWN_URL]
     assert b"image_url" in spy.requests[0].content
     assert b"image_url" not in spy.requests[1].content
-    assert process_image_rejects().contains(OWN_URL, "blind-model") is True
-    assert process_image_rejects().contains(URL, "blind-model") is False
+    assert (
+        unsupported(route_key(ctx, url=OWN_URL, model="blind-model")) is True
+    )
+    assert unsupported(route_key(ctx, url=URL, model="blind-model")) is False
 
 
 def test_failed_retry_goes_up_and_is_not_retried_again(tmp_path, monkeypatch):
@@ -339,6 +361,8 @@ def test_failed_retry_goes_up_and_is_not_retried_again(tmp_path, monkeypatch):
     ctx = _ctx(tmp_path, _cfg(), notes)
     _att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     with pytest.raises(httpx.HTTPStatusError) as caught:
         run_coro(pr._arequest_backend_canonical([message], state, ctx))
@@ -349,7 +373,7 @@ def test_failed_retry_goes_up_and_is_not_retried_again(tmp_path, monkeypatch):
         True
     ] + [False] * retry_attempts
     # Отказ от зрения — факт о модели: запомнен, хотя повтор упал по другой причине.
-    assert process_image_rejects().contains(URL, "blind-model") is True
+    assert unsupported(route_key(ctx, url=URL, model="blind-model")) is True
 
 
 def test_no_trace_note_when_a_parallel_request_marked_the_model_first(
@@ -360,7 +384,7 @@ def test_no_trace_note_when_a_parallel_request_marked_the_model_first(
 
     def _marked_meanwhile(request: httpx.Request) -> httpx.Response:
         if b"image_url" in request.content:
-            process_image_rejects().mark(URL, "blind-model")
+            mark_blind(route_key(ctx, url=URL, model="blind-model"))
             return httpx.Response(400, json=VLLM_NO_IMAGES)
         return httpx.Response(200, json=OK)
 
@@ -369,6 +393,8 @@ def test_no_trace_note_when_a_parallel_request_marked_the_model_first(
     ctx = _ctx(tmp_path, _cfg(), notes)
     _att, message = _user_with_image(ctx.image_store)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -454,6 +480,8 @@ def test_a_stated_limit_keeps_the_newest_images_and_is_remembered(
     ctx = _ctx(tmp_path, _cfg(), notes)
     atts, message = _user_with_images(ctx.image_store, 3)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -464,7 +492,12 @@ def test_a_stated_limit_keeps_the_newest_images_and_is_remembered(
     assert f"{atts[2].label} · " not in _user_texts(
         spy.requests[1]
     )  # новая — картинкой
-    assert process_image_rejects().cap(URL, "blind-model") == 1
+    assert (
+        process_image_rejects().cap(
+            route_key(ctx, url=URL, model="blind-model")
+        )
+        == 1
+    )
     assert notes == []
 
     run_coro(
@@ -485,12 +518,17 @@ def test_a_limit_without_a_number_halves_until_the_request_fits(
     ctx = _ctx(tmp_path, _cfg(), notes)
     _atts, message = _user_with_images(ctx.image_store, 4)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
     assert [_image_parts(request) for request in spy.requests] == [4, 2, 1]
     assert (
-        process_image_rejects().cap(URL, "blind-model") is None
+        process_image_rejects().cap(
+            route_key(ctx, url=URL, model="blind-model")
+        )
+        is None
     )  # 413 — про объём, не про модель
     assert notes == []
 
@@ -511,6 +549,8 @@ def test_an_inferred_limit_is_rechecked_after_its_scope_changes(
     ctx = _ctx(tmp_path, _cfg(), [])
     _atts, message = _user_with_images(ctx.image_store, 4)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
     assert [_image_parts(request) for request in spy.requests[3:]] == [1]
@@ -531,6 +571,7 @@ def test_an_inferred_limit_is_rechecked_after_its_scope_changes(
             _cfg(completions_url=URL + "/other"),
             level_provider=lambda: "default",
         )
+    state.vision_routes.update(warm_routes(ctx))
     start = len(spy.requests)
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
@@ -554,17 +595,24 @@ def test_a_proxy_that_takes_no_image_goes_with_notes_without_blaming_the_model(
     ctx = _ctx(tmp_path, _cfg(), notes)
     _atts, message = _user_with_images(ctx.image_store, 2)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
     assert [_image_parts(request) for request in spy.requests] == [2, 1, 0]
-    assert process_image_rejects().cap(URL, "blind-model") is None
+    assert (
+        process_image_rejects().cap(
+            route_key(ctx, url=URL, model="blind-model")
+        )
+        is None
+    )
     assert notes == []
 
     run_coro(pr._arequest_backend_canonical([message], state, ctx))
 
     assert [_image_parts(request) for request in spy.requests[3:]] == [0]
-    assert process_image_rejects().contains(URL, "blind-model") is False
+    assert unsupported(route_key(ctx, url=URL, model="blind-model")) is False
 
 
 def test_a_request_that_fails_even_without_images_raises_its_error(
@@ -581,6 +629,8 @@ def test_a_request_that_fails_even_without_images_raises_its_error(
     ctx = _ctx(tmp_path, _cfg(), notes)
     _atts, message = _user_with_images(ctx.image_store, 2)
     state = _state([message])
+    state.vision_routes = warm_routes(ctx)
+    state.vision_probe_turn = "test-root"
 
     with pytest.raises(httpx.HTTPStatusError) as caught:
         run_coro(pr._arequest_backend_canonical([message], state, ctx))
@@ -590,6 +640,11 @@ def test_a_request_that_fails_even_without_images_raises_its_error(
     assert [_image_parts(request) for request in spy.requests] == [2, 1] + [
         0
     ] * retry_attempts
-    assert process_image_rejects().cap(URL, "blind-model") is None
+    assert (
+        process_image_rejects().cap(
+            route_key(ctx, url=URL, model="blind-model")
+        )
+        is None
+    )
     assert notes == []
     assert getattr(state, "vision_request_limit", None) is None
