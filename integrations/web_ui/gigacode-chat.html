@@ -171,25 +171,35 @@
   .prose pre code { background: none; padding: 0; }
   .flag { margin-top: 6px; font-size: 12px; color: var(--mut); }
   .flag.bad { color: var(--bad); }
-  .caret {
-    display: inline-block;
-    width: 7px;
-    height: 1em;
-    margin-left: 2px;
-    vertical-align: text-bottom;
-    background: var(--acc);
-    animation: blink 1s steps(1) infinite;
-  }
-  @keyframes blink { 50% { opacity: 0; } }
-  #composer {
+  .working {
     display: flex;
+    align-items: center;
     gap: 8px;
-    align-items: flex-end;
+    color: var(--mut);
+    font-size: 13px;
+    grid-column: 1;
+    align-self: center;
+  }
+  .spin {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--bd2);
+    border-top-color: var(--acc);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    flex: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    align-items: end;
     padding: 10px 0 16px;
     border-top: 1px solid var(--bd);
   }
   textarea {
-    flex: 1;
+    grid-column: 1;
     resize: none;
     overflow: hidden;
     min-height: 46px;
@@ -201,7 +211,8 @@
     outline: none;
   }
   textarea:focus { border-color: var(--acc); }
-  .sendbox { display: flex; flex-direction: column; gap: 6px; }
+  #stop { grid-column: 2; }
+  #send { grid-column: 2; }
   .overlay {
     position: fixed;
     inset: 0;
@@ -211,7 +222,7 @@
     justify-content: center;
     padding: 16px;
   }
-  .overlay[hidden], .warn[hidden], .alert[hidden], #stop[hidden] { display: none; }
+  .overlay[hidden], .warn[hidden], .alert[hidden], #stop[hidden], .working[hidden] { display: none; }
   .panel {
     width: min(480px, 100%);
     background: var(--panel);
@@ -241,7 +252,6 @@
     .sub { white-space: normal; }
     h1 { font-size: 16px; }
     #composer { align-items: stretch; }
-    .sendbox { flex-direction: row; }
   }
 </style>
 </head>
@@ -276,11 +286,10 @@
   <main id="log"></main>
   <div class="alert" id="alert" hidden></div>
   <form id="composer">
+    <div class="working" id="working" hidden><span class="spin"></span>работаю…</div>
+    <button type="button" class="btn" id="stop" hidden>Стоп</button>
     <textarea id="input" rows="1" placeholder="Сообщение. Enter — отправить, Shift+Enter — новая строка"></textarea>
-    <div class="sendbox">
-      <button type="button" class="btn" id="stop" hidden>Стоп</button>
-      <button type="submit" class="primary" id="send">Отправить</button>
-    </div>
+    <button type="submit" class="primary" id="send">Отправить</button>
   </form>
 </div>
 
@@ -306,10 +315,12 @@
     <input id="f-token" type="password" autocomplete="off" placeholder="пусто, если сервер без авторизации">
     <label for="f-model">Модель</label>
     <div class="row">
-      <input id="f-model" autocomplete="off" placeholder="имя из конфига агента" required>
-      <button type="button" class="btn" id="pullModel" style="flex:0 0 auto">С сервера</button>
+      <select id="f-model" required>
+        <option value="">список не загружен</option>
+      </select>
+      <button type="button" class="btn" id="pullModel" style="flex:0 0 auto">Обновить</button>
     </div>
-    <p class="hint">Поле обязательно в запросе и копируется в ответ. Ход идёт на модели из конфига gc-chat.</p>
+    <p class="hint">Список с сервера. После смены адреса или токена нажмите «Обновить».</p>
     <div class="form-alert" id="formAlert"></div>
     <div class="panel-actions">
       <button type="button" class="btn" id="settingsCancel">Отмена</button>
@@ -340,6 +351,7 @@
   var statsEl = document.getElementById("stats");
   var connEl = document.getElementById("conn");
   var stopBtn = document.getElementById("stop");
+  var workingEl = document.getElementById("working");
   var sendBtn = document.getElementById("send");
   var settingsEl = document.getElementById("settings");
   var formAlert = document.getElementById("formAlert");
@@ -698,28 +710,17 @@
 
   function renderAssistant(m) {
     var html = '<article class="msg assistant">';
-    var lastAnswer = null;
-    for (var i = m.parts.length - 1; i >= 0; i--) {
-      if (m.parts[i].kind === "answer") { lastAnswer = m.parts[i]; break; }
-    }
-    var any = false;
     for (var n = 0; n < m.parts.length; n++) {
       var p = m.parts[n];
       if (p.kind === "reasoning") {
         if (!p.text) continue;
-        any = true;
         html += "<details" + (m.streaming ? " open" : "") + "><summary>Рассуждение</summary><pre>" + escapeHtml(p.text) + "</pre></details>";
       } else if (p.kind === "tool") {
-        any = true;
         html += '<div class="tool ' + escapeHtml(p.status || "") + (p.parent ? " nested" : "") + '"><span class="dot"></span><span>' + escapeHtml(p.title || p.name || "tool") + '</span><span class="st">' + escapeHtml(toolLabel(p.status)) + "</span></div>";
-      } else if (p.kind === "answer") {
-        if (!p.text && p !== lastAnswer) continue;
-        if (!p.text && !m.streaming) continue;
-        any = true;
-        html += '<div class="prose">' + (p.text ? renderMarkdown(p.text) : "") + (m.streaming && p === lastAnswer ? '<span class="caret"></span>' : "") + "</div>";
+      } else if (p.kind === "answer" && p.text) {
+        html += '<div class="prose">' + renderMarkdown(p.text) + "</div>";
       }
     }
-    if (m.streaming && !any) html += '<div class="prose"><span class="caret"></span></div>';
     if (m.error) html += '<div class="flag bad">' + escapeHtml(m.error) + "</div>";
     else if (m.status === "cancelled") html += '<div class="flag">Остановлено</div>';
     else if (m.note) html += '<div class="flag">' + escapeHtml(noteLabel(m.note)) + "</div>";
@@ -746,6 +747,7 @@
     connEl.textContent = apiName + " · " + origin + (settings.model ? " · " + settings.model : " · модель не задана");
     warnEl.hidden = !orphan();
     stopBtn.hidden = !busy;
+    workingEl.hidden = !busy;
     sendBtn.disabled = busy;
   }
 
@@ -834,8 +836,28 @@
     document.getElementById("f-host").value = settings.host;
     document.getElementById("f-port").value = settings.port;
     document.getElementById("f-token").value = settings.token;
-    document.getElementById("f-model").value = settings.model;
+    fillModels(settings.model ? [settings.model] : [], settings.model);
     formAlert.textContent = "";
+  }
+
+  function fillModels(ids, preferred) {
+    var sel = document.getElementById("f-model");
+    var current = preferred != null ? preferred : sel.value;
+    sel.textContent = "";
+    if (!ids.length) {
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "сервер не вернул модели";
+      sel.appendChild(empty);
+      return;
+    }
+    for (var i = 0; i < ids.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = ids[i];
+      opt.textContent = ids[i];
+      sel.appendChild(opt);
+    }
+    sel.value = ids.indexOf(current) >= 0 ? current : ids[0];
   }
 
   function readForm() {
@@ -853,6 +875,7 @@
     fillForm();
     settingsEl.hidden = false;
     document.getElementById("f-host").focus();
+    pullModel();
   }
 
   function closeSettings() {
@@ -894,9 +917,15 @@
       var res = await fetch(origin + "/v1/models", { headers: authHeaders(draft, false) });
       if (!res.ok) throw new Error(await errorText(res));
       var data = await res.json();
-      var id = data && data.data && data.data[0] && data.data[0].id;
-      if (!id) throw new Error("Сервер не вернул модель");
-      document.getElementById("f-model").value = id;
+      var list = data && data.data;
+      var ids = [];
+      if (Array.isArray(list)) {
+        for (var i = 0; i < list.length; i++) {
+          if (list[i] && typeof list[i].id === "string" && list[i].id) ids.push(list[i].id);
+        }
+      }
+      if (!ids.length) throw new Error("Сервер не вернул модели");
+      fillModels(ids, document.getElementById("f-model").value || settings.model);
     } catch (e) {
       formAlert.textContent = e.name === "TypeError" ? netMessage(origin) : (e.message || "Не удалось получить модель");
     } finally {
