@@ -9,9 +9,6 @@ import json
 import re
 from typing import TYPE_CHECKING, Optional
 
-if TYPE_CHECKING:
-    from rich.text import Text
-
 from gc_tui.services.duration_format import format_compact_int
 from gc_tui.services.trace_retention import (
     apply_payload_retention,
@@ -19,6 +16,11 @@ from gc_tui.services.trace_retention import (
     message_ids_in_retention_window,
     retention_window_start_index,
 )
+
+if TYPE_CHECKING:
+    from rich.text import Text
+
+    from gc_tui.services.trace_mapper import RenderContext
 
 # Парсер `[tag] rest` для default meta-кейса (трейс и read-only превью).
 TAG_RE = re.compile(r"^\[(?P<tag>[^\]]+)\]\s*(?P<rest>.*)$")
@@ -240,7 +242,11 @@ def _dispatch_readonly(mount_target, ev, calls: dict) -> None:
     from gc_tui.widgets.user_reply import UserReplyContainer
 
     if ev.kind == "user":
-        mount_target.mount(UserReplyContainer(ev.summary, event_no=ev.no))
+        mount_target.mount(
+            UserReplyContainer(
+                ev.summary, event_no=ev.no, images=ev.attachments
+            )
+        )
     elif ev.kind == "agent":
         if ev.tool_name == "intermediate_reply":
             for w in build_intermediate_widgets(ev.summary, event_no=ev.no):
@@ -380,7 +386,7 @@ def _render_record_readonly(
     rec: dict,
     no: int,
     calls: dict,
-    skipped_call_ids: set | None = None,
+    context: RenderContext | None = None,
     *,
     in_window: bool = True,
 ) -> int:
@@ -392,9 +398,7 @@ def _render_record_readonly(
     payload = rec.get("payload")
     if not isinstance(payload, dict):
         return no
-    ev = map_message(
-        payload, no=no, ts=rec.get("ts", ""), skipped_call_ids=skipped_call_ids
-    )
+    ev = map_message(payload, no=no, ts=rec.get("ts", ""), context=context)
     if ev is not None:
         apply_payload_retention(ev, seg_in_window=in_window)
     # skill_loaded извлекаем ДО early-return: mid-run доставка (display_content="")
@@ -419,15 +423,15 @@ def render_thread_readonly(mount_target, records: list) -> None:
     """Построить и смонтировать виджеты трейса из плоских записей в mount_target —
     read-only (без pending/баннеров/submit-collapse/индикатора/tool-preview).
     submit_solution-output отфильтрован уже в map_message (→ None)."""
-    from gc_tui.services.trace_mapper import collect_skipped_call_ids
+    from gc_tui.services.trace_mapper import collect_render_context
 
     no = 1
     calls: dict = {}
-    skipped = collect_skipped_call_ids(
+    context = collect_render_context(
         rec.get("payload") for rec in records if isinstance(rec, dict)
     )
     for rec in records:
-        no = _render_record_readonly(mount_target, rec, no, calls, skipped)
+        no = _render_record_readonly(mount_target, rec, no, calls, context)
 
 
 def render_segments_readonly(mount_target, segments: list) -> dict:
@@ -436,11 +440,11 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
     трейсом (hidden/policy скрыто, summary/error_msg/intermediate как там).
     Возвращает `calls` (`{call_id: ToolCallRow}`) — нужен вызывающему для
     домонтирования вложенного трейса субагентов (см. `merge_nested_readonly`)."""
-    from gc_tui.services.trace_mapper import collect_skipped_call_ids
+    from gc_tui.services.trace_mapper import collect_render_context
 
     no = 1
     calls: dict = {}
-    skipped = collect_skipped_call_ids(
+    context = collect_render_context(
         rec.get("payload")
         for seg in segments
         for rec in seg.get("messages", [])
@@ -469,7 +473,7 @@ def render_segments_readonly(mount_target, segments: list) -> dict:
                 rec,
                 no,
                 calls,
-                skipped,
+                context,
                 in_window=in_window,
             )
         comp = seg.get("compacted_by")
@@ -506,6 +510,7 @@ def merge_nested_readonly(
     from gc_tui.services.todo_render import build_todo_block
     from gc_tui.widgets.tool_call_row import ToolCallRow
     from gc_tui.widgets.trace_row import TraceRow
+    from gc_tui.widgets.user_reply import NestedUserReply
 
     anchors: dict = {}  # parent_call_id -> последний смонтированный nested
     nested_rows: dict = {}  # tool_call_id -> ToolCallRow (для finish)
@@ -562,20 +567,11 @@ def merge_nested_readonly(
             ),
         )
 
-    def _user(*, parent_call_id, prose, **_kw):
+    def _user(*, parent_call_id, prose, images=(), **_kw):
         text = (prose or "").strip()
         if not text:
             return
-        _mount_after(
-            parent_call_id,
-            TraceRow(
-                prefix=NESTED_USER_PREFIX,
-                content=text,
-                kind_class=LINE_USER_CLASS,
-                event_no=0,
-                focusable=False,
-            ),
-        )
+        _mount_after(parent_call_id, NestedUserReply(text, images=images))
 
     def _child_summary(*, parent_call_id, prose="", **_kw):
         _prose(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import threading
 import uuid
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, List, Optional
 if TYPE_CHECKING:
     from gc_core.model_router import ModelRouter
 
+from gc_core.attachments.store import ImageStore
 from gc_core.runtime_notices import (
     collect_runtime_notices,
     collect_unread_runtime_notices,
@@ -27,6 +29,7 @@ from gc_tui import branding, palette
 from gc_tui.screens.main import TraceScreen
 from gc_tui.services.clipboard_ops import copy_out, with_source_cite
 from gc_tui.services.stream_sink import StreamSink
+from gc_tui.services.trace_note_sink import TraceNoteSink
 from gc_tui.services.voice_notices import voice_notices
 
 _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
@@ -227,6 +230,9 @@ class TuiApp(App):
             None  # callable returning an executor; for tests
         )
         self._stream_sink = StreamSink()
+        # Пометки ленты «изображение не просмотрено» (дизайн картинок §10): ядро
+        # зовёт on_trace_note из рабочего потока, экран снимает очередь на тике опроса.
+        self._trace_note_sink = TraceNoteSink()
         self._subagent_progress_sink = (
             None  # QueueSubagentProgressSink; set in executor build
         )
@@ -326,11 +332,33 @@ class TuiApp(App):
         )
 
         set_terminal_title(format_terminal_title())
+        self._start_image_staging_sweep()
+        # Аварийный выход (смерть терминала, `terminal_guard`) идёт мимо on_unmount,
+        # но хуки atexit выполняет: карман этого процесса снимает и он.
+        atexit.register(self._clear_image_pocket)
         if self._voice_autostart_pending:
             self._start_voice_autostart()
         self._start_auto_update_check()
         if not self._needs_onboarding():
             self._show_post_update_if_needed()
+
+    def _start_image_staging_sweep(self) -> None:
+        """Карманы картинок мёртвых процессов (спека §3) — убрать на старте. Обход диска,
+        поэтому daemon-потоком: сетевой диск может висеть, а выход приложения ждать его
+        не должен (см. _start_voice_autostart). Уборка best-effort — сбой повторит
+        следующий старт."""
+        store = self.image_store
+
+        def _work() -> None:
+            try:
+                store.sweep_dead_staging()
+            except OSError:
+                pass
+
+        self._image_sweep = threading.Thread(
+            target=_work, daemon=True, name="image-staging-sweep"
+        )
+        self._image_sweep.start()
 
     def _start_voice_autostart(self) -> None:
         """Довести подъём voice-сервиса до вердикта — ФОНОМ, отдельным daemon-потоком,
@@ -719,6 +747,13 @@ class TuiApp(App):
         НЕ для рендера — effective_config() (база + сессионные переопределения)
         зовётся на каждый кадр; здесь — только выдача базы при открытии экрана."""
         return self._config or {}
+
+    @property
+    def image_store(self) -> ImageStore:
+        """Хранилище картинок сессии: корень — по правилу ядра (`ImageStore.for_config`),
+        тот же, что у контекста запуска и охраны путей. На диске объект ничего не
+        создаёт, поэтому собирается на каждое обращение."""
+        return ImageStore.for_config(self._config or {})
 
     def effective_config(self) -> dict:
         """Конфиг, который видят и UI, и агент: база + сессионные переопределения.
@@ -1224,6 +1259,29 @@ class TuiApp(App):
                 pass
         _release_runner(runner)
         unregister_runtime_notices_listener(self._on_runtime_notice)
+        self._clear_image_pocket()
+        atexit.unregister(self._clear_image_pocket)
+
+    def watch_app_focus(self, focused: bool) -> None:
+        """Окно терминала потеряло фокус — погасить подсветку картинок в репликах
+        всех экранов стека (лента под модальным окном, превью): «указатель ушёл»
+        терминал уже не пришлёт. Одна подписка на приложение, а не на каждую
+        реплику; пустой стек (выход) — нечего гасить."""
+        if focused:
+            return
+        for screen in self.screen_stack:
+            for reply in screen.query("UserReplyContainer, NestedUserReply"):
+                reply.clear_image_hover()
+
+    def _clear_image_pocket(self) -> None:
+        """Карман картинок этого процесса (спека §3) — только на выходе: штатном
+        (on_unmount) и аварийном (хук atexit). Не на отправке и не на двойном Esc:
+        сообщение, отправленное посреди запуска, ядро коммитит в тред позже, на
+        границе шага, и берёт файл из кармана."""
+        try:
+            self.image_store.clear_own_staging()
+        except OSError:
+            pass
 
     def _finish_onboarding(self) -> None:
         """Финал онбординга (auto и review одинаково): reload_config + переход
@@ -1383,6 +1441,9 @@ class TuiApp(App):
                 await aclose_clients()
 
         ctx = asyncio.run(_abuild_ctx())
+        # Пометки ленты «изображение не просмотрено» (дизайн картинок §10) — с тредом
+        # прогона: хук нужен уже собранному контексту, поэтому ставится здесь.
+        ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
         # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
         from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
 

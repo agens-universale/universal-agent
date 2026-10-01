@@ -82,7 +82,7 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
         nested_user = [
             r
             for r in scr.query(TraceRow)
-            if getattr(r, "_content", "") == "копни глубже"
+            if str(getattr(r, "_content", "")) == "копни глубже"
             and "line-user" in r.classes
         ]
         assert nested_user, "ответ child HITL должен быть nested user-строкой"
@@ -132,3 +132,93 @@ async def test_parent_ask_human_answer_still_tracks_pending(tmp_path):
         assert runner.submitted == ["да"]
         replies = list(scr.query(UserReplyContainer))
         assert replies and replies[-1]._state == "pending"
+
+
+@pytest.mark.asyncio
+async def test_child_ask_human_answer_with_images_renders_like_a_reply(
+    tmp_path,
+):
+    """Ответ с картинками на вопрос субагента: HumanAnswer уходит ребёнку, а вложенная
+    строка ответа рисует плашки и подстроки картинок, как реплика (контракт §3), и
+    Ctrl+клик по ним открывает файл."""
+    pytest.importorskip("textual")
+    from rich.style import Style
+    from textual import events
+    from textual.containers import VerticalScroll
+
+    from gc_core.attachments.model import chip_text
+    from gc_core.tools.turn.ask_human import HumanAnswer
+    from gc_tui.app import TuiApp
+    from gc_tui.messages import OpenImageRequest
+    from gc_tui.services.stores.file_store import FileTaskStore
+    from gc_tui.widgets.command_input import CommandTextArea
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+    from gc_tui.widgets.user_reply import NestedUserReply
+    from image_helpers import make_attachment_file
+
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    app = TuiApp(threads_dir=str(threads), system="cli", config={"model": "M"})
+    att = make_attachment_file(3, tmp_path)
+    text = f"{chip_text(3)} вот ошибка"
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        tid = uuid.uuid4().hex
+        scr._active_task_id = tid
+        app.tui_state.active_task_id = tid
+        scr._store = FileTaskStore(threads_dir=str(threads), system="cli")
+        runner = _FakeRunner()
+        app.active_runner = runner
+        parent = ToolCallRow(
+            call_id="call_sub_1",
+            tool_name="subagent_worker",
+            args_summary="task",
+        )
+        scr._active_calls["call_sub_1"] = parent
+        scr._subagent_parent_rows["call_sub_1"] = parent
+        scr.query_one("#trace", VerticalScroll).mount(parent)
+        scr._show_child_ask_human(
+            parent_call_id="call_sub_1",
+            prose="Покажите ошибку?",
+            tool_call_id="call_ah_1",
+        )
+        await pilot.pause()
+
+        await scr.on_command_text_area_submitted(
+            CommandTextArea.Submitted(value=text, attachments=(att,))
+        )
+        await pilot.pause()
+
+        assert runner.submitted == [HumanAnswer(text=text, attachments=(att,))]
+        (row,) = scr.query(NestedUserReply)
+        content = row._content
+        assert content.plain == f"{text}\n└ {chip_text(3)} · скрин.png"
+        chip = content.plain.index(chip_text(3))
+        assert any(
+            span.start == chip
+            and span.style.meta.get("image_id") == att.id
+            and span.style.color is None
+            for span in content.spans
+        )  # цвет текста до наведения
+
+        posted: list = []
+        row.post_message = posted.append
+        row.on_click(
+            events.Click(
+                widget=row,
+                x=1,
+                y=0,
+                delta_x=0,
+                delta_y=0,
+                button=1,
+                shift=False,
+                meta=False,
+                ctrl=True,
+                style=Style(meta={"image_id": att.id}),
+                chain=1,
+            )
+        )
+        del row.post_message
+        assert [m.path for m in posted if isinstance(m, OpenImageRequest)] == [
+            att.path
+        ]

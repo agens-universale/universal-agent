@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, List, Literal, Optional, Sequence
 
+from gc_core.attachments.model import attachments_of
 from gc_core.constants.tool_names import SESSION_TODO_TOOL_NAME
 from gc_core.tools.subagents.progress import SubagentProgressEvent
 
@@ -272,6 +273,9 @@ class SubagentProgressConsumer:
                         prose=ev.prose or "",
                         step=ev.step,
                         max_steps=ev.max_steps,
+                        images=tuple(
+                            attachments_of({"attachments": ev.attachments})
+                        ),
                     )
                 else:
                     mount_nested_prose(

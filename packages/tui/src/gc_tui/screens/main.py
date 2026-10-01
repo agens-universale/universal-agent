@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import json
 import logging
 import os
@@ -13,11 +15,15 @@ from collections import namedtuple
 from datetime import UTC, datetime
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 
 if TYPE_CHECKING:
     from gc_tui.widgets.user_reply import UserReplyContainer
 
+from gc_core.attachments.model import Attachment, attachments_of
+from gc_core.attachments.normalize import REASON_NOT_AN_IMAGE, REASON_TOO_LARGE
+from gc_core.attachments.numbering import read_image_seq
+from gc_core.config_modules.images import read_images_config
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
 from gc_core.runtime_notices import collect_unread_runtime_notices
@@ -33,7 +39,7 @@ from textual.widgets import Static, TextArea
 
 from gc_tui import branding
 from gc_tui.commands import build_default_registry, closest_command
-from gc_tui.messages import CopyBlockRequest
+from gc_tui.messages import CopyBlockRequest, OpenImageRequest
 from gc_tui.models import TaskCursor
 from gc_tui.palette import ACCENT as _ACCENT
 from gc_tui.palette import DEEP_DIM as _DEEP_DIM
@@ -41,10 +47,13 @@ from gc_tui.palette import DIM as _DIM
 from gc_tui.palette import ERR as _ERR_RED
 from gc_tui.palette import INK as _INK
 from gc_tui.screens.tool_call_detail import ToolCallDetailScreen
+from gc_tui.services import image_hints, image_paste, os_ops
 from gc_tui.services.clipboard_ops import copy_out
 from gc_tui.services.context_meter import render_context_meter
 from gc_tui.services.export import export_thread
 from gc_tui.services.git_info import current_branch
+from gc_tui.services.image_chips import strip_image_chips
+from gc_tui.services.image_open import open_image
 from gc_tui.services.notices_ui import (
     footer_left_rows,
     footer_left_with_badge,
@@ -83,16 +92,15 @@ from gc_tui.services.terminal_title import (
     set_terminal_title,
 )
 from gc_tui.services.trace_mapper import (
+    RenderContext,
     coerce_args,
-    collect_skipped_call_ids,
+    collect_render_context,
     map_message,
 )
 from gc_tui.services.trace_render import (
     LINE_INTERMEDIATE_CLASS,
-    LINE_USER_CLASS,
     NESTED_PREFIX,
     NESTED_PROSE_PREFIX,
-    NESTED_USER_PREFIX,
     build_compaction_label,
 )
 from gc_tui.services.trace_retention import (
@@ -263,8 +271,42 @@ _PLACEHOLDER_READY = "опишите задачу или /команда"
 _HINT_TEXT = {
     "clear": "Esc ещё раз, чтобы очистить",
     "stop": "Esc ещё раз, чтобы остановить",
+    "paste": "Esc ещё раз, чтобы отменить вставку",
 }
 _PASTE_HINT_TEXT = "вставьте ещё раз, чтобы развернуть"
+# Отказы картинок, которые ставит отправка и Ctrl+клик (визуальный контракт
+# картинок §2–§3); отказы вставки — рядом, у источников вставки.
+_IMAGES_WITH_COMMAND_REFUSAL = (
+    "✗ изображения нельзя отправить вместе с командой"
+)
+# Серая строка «изображение не просмотрено» — идиома маркера [skill] (дизайн §10).
+_IMAGE_NOTE_PREFIX = "[изображение] "
+# Вставка изображения (спека §12, визуальный контракт §2). «Вставка…» держится до
+# результата: погасшая поверх неё подсказка и её собственный таймер возвращают её же
+# (`_clear_footer_hint`), снимает её конец вставки; саму вставку ограничивает
+# `image_paste.PASTE_TIMEOUT_SECONDS`.
+_IMAGE_PASTE_BUSY_HINT = "Вставка…"
+_IMAGE_PASTE_WAIT_HINT = "дождитесь окончания вставки"
+_IMAGE_PASTE_HINT_SECONDS = 30.0
+_IMAGE_REFUSAL_EMPTY_CLIPBOARD = "✗ в буфере обмена нет изображения"
+# Подсказки самой вставки: их (и только их) снимает конец вставки.
+_IMAGE_PASTE_OWN_HINTS = (
+    _IMAGE_PASTE_BUSY_HINT,
+    _IMAGE_PASTE_WAIT_HINT,
+    _HINT_TEXT["paste"],
+)
+# «Изображения нет» у вставки: текст вместо картинки (путь, текст ОС) или свой буфер
+# приложения; Alt+V читает текст ОС вне UI-потока — корутиной.
+_OnMiss = Callable[[], Optional[Awaitable[None]]]
+# Отказы вставки по причине `image_paste.PasteRefusal`; `{n}` — `images.max_per_message`.
+_IMAGE_PASTE_REFUSALS = {
+    image_paste.REFUSE_LIMIT: "✗ не больше {n} изображений в одном сообщении",
+    REASON_NOT_AN_IMAGE: "✗ это не изображение",
+    REASON_TOO_LARGE: "✗ изображение слишком большое",
+    image_paste.REFUSE_NO_TOOL: "✗ для вставки изображений нужен wl-paste или xclip",
+    image_paste.REFUSE_SAVE_FAILED: "✗ не удалось сохранить изображение",
+    image_paste.REFUSE_TIMEOUT: "✗ вставка не удалась: истекло время ожидания",
+}
 # Модель и backend-режим показываются в шапке экрана (_compose_header_segments).
 
 # Лесенка усечения имени профиля в футере (Task 9, docs
@@ -324,12 +366,28 @@ class TraceScreen(Screen):
     # Ctrl+A — select-all в #cmdinput (CommandTextArea); approve-all только на /diff.
     # Ctrl+V: priority — иначе при фокусе в трейсе (клик по строке во время run)
     # хоткей никуда не доходит: у TraceRow/ToolCallRow нет action_paste.
+    # Alt+V — изображение из буфера (на Windows Ctrl+V забирает сам терминал); та же
+    # priority-причина и дубль под русскую раскладку.
     BINDINGS = [
         Binding(
             "ctrl+v", "paste_to_input", "вставить", show=False, priority=True
         ),
         Binding(
             "ctrl+м", "paste_to_input", "вставить", show=False, priority=True
+        ),
+        Binding(
+            "alt+v",
+            "paste_image_to_input",
+            "вставить изображение",
+            show=False,
+            priority=True,
+        ),
+        Binding(
+            "alt+м",
+            "paste_image_to_input",
+            "вставить изображение",
+            show=False,
+            priority=True,
         ),
     ]
 
@@ -458,6 +516,7 @@ class TraceScreen(Screen):
         # Если == 0 при Esc-stop → агент ещё ничего не сгенерировал → rollback.
         self._events_since_last_user_send: int = 0
         self._last_user_send_text: str = ""
+        self._last_user_send_images: tuple[Attachment, ...] = ()
         # Bang-shell (`!cmd`): один concurrent job; эфемерно в трейсе, не в thread.
         self._bang = None  # type: Optional["BangShellController"]
         self._bang_timeout_sec: Optional[float] = None
@@ -491,11 +550,17 @@ class TraceScreen(Screen):
         # стёр уже смонтированную CTA, её возвращают независимо от итога хода.
         self._diff_pending_cta_pending: str | None = None
         # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
-        self._esc_confirm_kind: Optional[str] = None  # "clear" | "stop" | None
+        self._esc_confirm_kind: Optional[str] = (
+            None  # "clear" | "stop" | "paste" | None
+        )
         self._footer_hint_timer = None  # textual.Timer
         self._footer_hint_active: bool = False
+        self._footer_hint_text: Optional[str] = (
+            None  # текст активной подсказки
+        )
         self._footer_refusal_active: bool = False
         self._refusal_run_id = None  # прогон, ШЕДШИЙ при постановке отказа
+        self._refusal_input_text = ""  # текст поля ввода при постановке отказа
         # Input history: per-project ↑/↓ навигация.
         # _history создаётся в on_mount (project_dir = threads_dir.parent).
         self._history = None  # type: Optional["InputHistory"]
@@ -521,6 +586,24 @@ class TraceScreen(Screen):
         # Идёт проверка живости батарейки или её подъём (воркеры Ctrl+T): второй такой
         # же по повторному нажатию не заводим.
         self._voice_service_pending: bool = False
+        # Вставка изображения (спека §12): чтение буфера/файла и нормализация — воркером
+        # вне UI-потока, по одной; пути и Ctrl+V с текстом, пришедшие во время чтения,
+        # ждут в очереди (_image_paste_queue: путь или None — буфер, что сделать, если
+        # это не картинка, и «только скопированные файлы»). Пока идёт
+        # вставка с очередью, Enter не отправляет. _image_seq_issued —
+        # тред → последний номер image-плашки, выданный в этом процессе (None — ещё не
+        # созданный тред): сообщение с картинкой могло ещё не дойти до meta треда
+        # (runtime.image_seq), а номер уже занят — и вернуться в тред посреди хода.
+        self._image_paste_busy: bool = False
+        self._image_paste_worker = None  # textual.worker.Worker | None
+        self._image_paste_queue: list[tuple[Optional[str], _OnMiss, bool]] = []
+        self._image_seq_issued: dict[Optional[str], int] = {}
+        # Подсказки картинок (контракт картинок §2). Метки буфера обмена: последний
+        # проверенный буфер с картинкой и тот, о котором уже подсказали или из которого
+        # уже вставили, — о нём совет больше не звучит. Совет про Ctrl+клик — раз за запуск.
+        self._clipboard_stamp: Optional[str] = None
+        self._clipboard_tip_stamp: Optional[str] = None
+        self._image_open_tip_shown: bool = False
 
     def compose(self) -> ComposeResult:
         with Vertical(id="root"):
@@ -605,6 +688,23 @@ class TraceScreen(Screen):
         if not inp.has_focus:
             inp.focus()
         inp.action_paste()
+
+    def action_paste_image_to_input(self) -> None:
+        """Alt+V: изображение из буфера обмена; нет — текст; нет ничего — отказ
+        (контракт §2). Как Ctrl+V — всегда в #cmdinput, даже если фокус в трейсе."""
+        try:
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+        except Exception:
+            return
+        if inp.disabled:
+            return
+        if not inp.has_focus:
+            inp.focus()
+        self._start_image_paste(
+            path=None,
+            strict=True,
+            on_miss=partial(self._apaste_os_text_or_refuse, inp),
+        )
 
     async def _on_paste(self, event: events.Paste) -> None:
         """Bracketed-paste при фокусе не в инпуте (трейс) → вставить в #cmdinput.
@@ -1211,7 +1311,8 @@ class TraceScreen(Screen):
         2026-09-04) — отказ держится 5с, как paste-hint. Но не ценой
         актуальности: следующее действие человека (клавиша, печать, запуск
         прогона) гасит его раньше — `_footer_refusal_active` сужает это правило
-        до отказов, esc-confirm и paste-hint живут по своим канонам."""
+        до отказов (и советов картинок, `_show_footer_tip`), esc-confirm и paste-hint
+        живут по своим канонам."""
         self._show_footer_hint(text, seconds=5.0)
         self._footer_refusal_active = True
         # Снимок прогона НА МОМЕНТ постановки: «прогон вытесняет отказ» — только
@@ -1224,6 +1325,32 @@ class TraceScreen(Screen):
             if self._run_in_progress()
             else None
         )
+        # Снимок поля ввода — то же правило для печати: отказ гасит правка ПОСЛЕ него.
+        # Changed от правки, сделанной до отказа (запасная вставка при полном лимите
+        # картинок), доставляется позже и текст не меняет — отказ живёт.
+        try:
+            self._refusal_input_text = self.query_one(
+                _SEL_CMDINPUT, CommandTextArea
+            ).text
+        except Exception:
+            self._refusal_input_text = ""
+
+    def _show_footer_tip(self, text: str) -> None:
+        """Совет в footer-left (подсказки картинок) — по канону отказа: 5 с, следующее
+        действие человека гасит его раньше."""
+        self._show_footer_refusal(text)
+
+    def _footer_tip_fits(self) -> bool:
+        """Совету есть где прозвучать: перед человеком поле ввода, оно принимает ввод, и
+        футер не занят другой подсказкой, отказом или голосом."""
+        if self.app.screen is not self or self._footer_hint_active:
+            return False
+        if self._voice is not None and self._voice.state != "idle":
+            return False
+        try:
+            return not self.query_one(_SEL_CMDINPUT, CommandTextArea).disabled
+        except Exception:
+            return False
 
     def _show_footer_hint(self, text: str, seconds: float = 2.0) -> None:
         """Короткая подсказка в footer-left (esc-confirm — 2с, paste-hint — 5с,
@@ -1233,6 +1360,7 @@ class TraceScreen(Screen):
         # (`_show_footer_refusal` ставит флаг заново, после этого вызова).
         self._footer_refusal_active = False
         self._footer_hint_active = True
+        self._footer_hint_text = text
         self.query_one(_SEL_FOOTER_LEFT).update(text)
         if self._footer_hint_timer is not None:
             self._footer_hint_timer.stop()
@@ -1250,6 +1378,7 @@ class TraceScreen(Screen):
         (полный `_clear_footer_hint` зовёт его сам и зациклился бы)."""
         self._esc_confirm_kind = None
         self._footer_hint_active = False
+        self._footer_hint_text = None
         self._footer_refusal_active = False
         self._refusal_run_id = None
         if self._footer_hint_timer is not None:
@@ -1257,8 +1386,16 @@ class TraceScreen(Screen):
             self._footer_hint_timer = None
 
     def _clear_footer_hint(self) -> None:
-        """Сбросить hint-state (esc + paste) + восстановить footer-left (команды)."""
+        """Сбросить hint-state (esc + paste) + восстановить footer-left (команды).
+
+        Пока идёт вставка изображения, покой футера — «Вставка…» (контракт картинок §2):
+        отказ, «дождитесь…» и Esc-подсказка гаснут обратно в неё, а не в команды."""
         self._reset_footer_hint_state()
+        if self._image_paste_busy:
+            self._show_footer_hint(
+                _IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
+            )
+            return
         self._refresh_footer()
 
     def _run_in_progress(self) -> bool:
@@ -1535,6 +1672,11 @@ class TraceScreen(Screen):
         if callable(warm):
             warm()
         self._sync_indicator_reserve()  # пустой старт → резерв бара 2 (без лишней строки)
+        # Совет вставить картинку из буфера: на старте и при возвращении в окно
+        # терминала — буфер меняется только снаружи; переходы внутри приложения его не
+        # проверяют. Без сообщений терминала о фокусе окна — только на старте.
+        self.watch(self.app, "app_focus", self._on_terminal_focus, init=False)
+        self._check_clipboard_tip()
 
     def _reset_render_state(self) -> None:
         """Clear all per-task rendering state. Called on task switch and stream_reset."""
@@ -1717,6 +1859,11 @@ class TraceScreen(Screen):
         self._update_terminal_title()  # статус + последний промпт сессии в таб
         self._sync_indicator_reserve()  # активная задача → резерв бара 3 (отступ снизу)
         self._mount_failed_from_meta(task_id)
+        # Смена сессии: плашки буфера ввода — в последовательность этого треда.
+        # Автосоздание треда под отправку (prev == task_id) номера не трогает:
+        # только что отправленные картинки уже несут номера этого треда.
+        if prev != task_id:
+            self._renumber_input_images()
 
         # Свести ask_human-баннер с реальностью: replay/компакция могли оставить
         # баннер для уже отвеченного вопроса (его output суммаризован) — см. helper.
@@ -1806,7 +1953,9 @@ class TraceScreen(Screen):
         for r in truly_orphaned:
             content = r.get("content") or ""
             if content:
-                self._mount_user_reply(content, state="failed")
+                self._mount_user_reply(
+                    content, state="failed", images=attachments_of(r)
+                )
         if len(kept_records) != len(records) or any(
             r.get("status") == "pending" for r in records
         ):
@@ -1825,7 +1974,7 @@ class TraceScreen(Screen):
         segments[-2:]."""
         from gc_tui.models import TraceEvent
 
-        skipped = collect_skipped_call_ids(
+        context = collect_render_context(
             rec.get("payload")
             for seg in segments
             for rec in seg["messages"]
@@ -1846,9 +1995,7 @@ class TraceScreen(Screen):
                 in_window = seg_in_window or (
                     mid is not None and mid in window_ids
                 )
-                self._render_record(
-                    rec, skipped_call_ids=skipped, in_window=in_window
-                )
+                self._render_record(rec, context=context, in_window=in_window)
             comp = seg["compacted_by"]
             if comp is not None:
                 ev = TraceEvent(
@@ -1867,18 +2014,18 @@ class TraceScreen(Screen):
     def _render_records(
         self, records: list[dict], *, live: bool = False
     ) -> None:
-        skipped = collect_skipped_call_ids(
+        context = collect_render_context(
             rec.get("payload") for rec in records if isinstance(rec, dict)
         )
         for rec in records:
-            self._render_record(rec, live=live, skipped_call_ids=skipped)
+            self._render_record(rec, live=live, context=context)
 
     def _render_record(
         self,
         rec: dict,
         *,
         live: bool = False,
-        skipped_call_ids: set | None = None,
+        context: RenderContext | None = None,
         in_window: bool = True,
     ) -> None:
         payload = rec.get("payload")
@@ -1888,7 +2035,7 @@ class TraceScreen(Screen):
             payload,
             no=self._next_no,
             ts=rec.get("ts", ""),
-            skipped_call_ids=skipped_call_ids,
+            context=context,
         )
         if ev is not None:
             apply_payload_retention(ev, seg_in_window=in_window)
@@ -2236,7 +2383,9 @@ class TraceScreen(Screen):
         if scroll and self._stick_bottom:
             self._scroll_trace_end()
 
-    def _on_user_text_submitted(self, text: str) -> None:
+    def _on_user_text_submitted(
+        self, text: str, images: tuple[Attachment, ...] = ()
+    ) -> None:
         """Обработка отправки user query: обнулить счётчик событий с последнего
         user-send и запомнить текст для cancel-with-undo (Tasks 9-10).
         Дополнительно: append текста в input-history и выход из history-навигации.
@@ -2246,14 +2395,20 @@ class TraceScreen(Screen):
         промпт сеет безусловно; далее — только если ``len(norm) > LAST_ACTUAL_MIN``.
         **Порядок:** запись meta → затем ``_update_terminal_title`` (OSC видит
         свежее имя). best-effort (try/except). ``_resumed_prompt`` остаётся сырым
-        для attach/cancel — это НЕ имя сессии (R5: OSC/пикер читают display_name)."""
+        для attach/cancel — это НЕ имя сессии (R5: OSC/пикер читают display_name).
+
+        Картинки (дизайн картинок §12): подписи `[Изображение #N]` в историю ↑ и
+        имя сессии не идут — вспомненная подпись без записи в сторе была бы мёртвой
+        плашкой; для отката отправки картинки запоминаются рядом с текстом."""
+        plain = strip_image_chips(text, images)
         self._last_user_send_text = text
+        self._last_user_send_images = images
         self._resumed_prompt = text  # send = новое последнее сообщение активной сессии (сырой текст)
-        self._seed_or_update_last_actual(text)
+        self._seed_or_update_last_actual(plain)
         self._update_terminal_title()
         self._events_since_last_user_send = 0
         if self._history is not None:
-            self._history.append(text)
+            self._history.append(plain)
         self._reset_history_navigation()
 
     def _seed_or_update_last_actual(self, text: str) -> None:
@@ -2470,11 +2625,18 @@ class TraceScreen(Screen):
             for cid, widget in list(self._pending_user_widgets.items()):
                 if self._pending_wire_match(cid, polled_wire):
                     widget.set_state("normal")
+                    widget.set_event_no(ev.no)
+                    # Картинки из треда — копии, закоммиченные ядром; у pending-реплики
+                    # пути кармана процесса, который чистится на выходе (дизайн картинок §3).
+                    if ev.attachments:
+                        widget.set_images(ev.attachments)
                     self._pending_user_widgets.pop(cid, None)
                     self._remove_pending_record(cid)
                     return
             # Без pending-матча — обычный mount (используем display_content = ev.summary).
-            self._mount_user_reply(ev.summary, event_no=ev.no)
+            self._mount_user_reply(
+                ev.summary, event_no=ev.no, images=ev.attachments
+            )
             return
 
         if ev.kind == "agent":
@@ -2895,24 +3057,23 @@ class TraceScreen(Screen):
         *,
         parent_call_id: str,
         prose: str,
+        images: tuple[Attachment, ...] = (),
         **_kw,
     ) -> None:
-        """Mid-run user steer under active subagent_* (active-scope input).
+        """Mid-run user steer under active subagent_* (active-scope input) и ответ на
+        вопрос субагента — с картинками ответа (визуальный контракт картинок §3).
 
         Read-only счёт-в-счёт с merge_nested_readonly._user (trace_render.py)."""
+        from gc_tui.widgets.user_reply import NestedUserReply
+
         if self._nested_parent_row(parent_call_id) is None:
             return
         text = (prose or "").strip()
         if not text:
             return
-        row = TraceRow(
-            prefix=NESTED_USER_PREFIX,
-            content=text,
-            kind_class=LINE_USER_CLASS,
-            event_no=0,
-            focusable=False,
+        self._nested_mount_after(
+            parent_call_id, NestedUserReply(text, images=images)
         )
-        self._nested_mount_after(parent_call_id, row)
 
     def _mount_nested_child_summary(
         self,
@@ -3251,10 +3412,13 @@ class TraceScreen(Screen):
         event_no: int = 0,
         state: str = "normal",
         client_id: str | None = None,
+        images: tuple[Attachment, ...] = (),
     ):
         from gc_tui.widgets.user_reply import UserReplyContainer
 
-        widget = UserReplyContainer(text, event_no=event_no, state=state)
+        widget = UserReplyContainer(
+            text, event_no=event_no, state=state, images=images
+        )
         # pending = свежая отправка юзера → форсим скролл вниз (re-engage);
         # normal/failed = воспроизведение из истории → обычное прилипание.
         self._trace_mount(widget, force_scroll=(state == "pending"))
@@ -3276,6 +3440,21 @@ class TraceScreen(Screen):
         )
         row.add_class("skill-marker")
 
+    def _drain_trace_notes(self) -> None:
+        """Серые строки `[изображение] …` из очереди пометок (дизайн картинок §10).
+
+        Ядро кормит очередь из рабочего потока через on_trace_note; строка
+        монтируется здесь, на UI-потоке. Только вживую и только своего треда: в тред
+        пометка не пишется, при открытии сессии заново не рисуется, пометка хода
+        другой сессии сюда не попадает."""
+        sink = getattr(self.app, "_trace_note_sink", None)
+        if sink is None:
+            return
+        for text in sink.drain(self._active_task_id):
+            self._mount_trace_row(
+                prefix=_IMAGE_NOTE_PREFIX, content=text, kind_class="line-meta"
+            )
+
     def _flush_skill_marker(self) -> None:
         """Смонтировать отложенный маркер скилла (выставлен в
         _consume_pending_prefix), если есть. Вызывается после реплики юзера."""
@@ -3288,7 +3467,12 @@ class TraceScreen(Screen):
 
     _PENDING_CAP = 20
 
-    def _track_pending(self, display_text: str, wire_content: str) -> str:
+    def _track_pending(
+        self,
+        display_text: str,
+        wire_content: str,
+        images: tuple[Attachment, ...] = (),
+    ) -> str:
         """Записать pending-реплику в meta.tui + положить в `_pending_user_widgets`.
 
         display_text — то, что показывает виджет (как ввёл юзер).
@@ -3311,6 +3495,10 @@ class TraceScreen(Screen):
             "ts_utc_iso": datetime.now(UTC).isoformat(),
             "status": "pending",
         }
+        # Картинки реплики — чтобы упавшая после рестарта реплика перемонтировалась
+        # с подстроками (визуальный контракт §3); ключ только при картинках.
+        if images:
+            record["attachments"] = [att.to_dict() for att in images]
         existing = (self._store.get_task_meta(tid).get("tui") or {}).get(
             "pending_user_messages", []
         )
@@ -3372,6 +3560,9 @@ class TraceScreen(Screen):
         tid = uuid.uuid4().hex
         self.app.tui_state.active_task_id = tid
         self._active_task_id = tid
+        # Номера картинок, выданные до появления треда, — уже его номера.
+        if None in self._image_seq_issued:
+            self._image_seq_issued[tid] = self._image_seq_issued.pop(None)
         # Открываем store сейчас, чтобы _track_pending мог писать meta.
         self._store = FileTaskStore(
             threads_dir=self.app._threads_dir or "",
@@ -3860,6 +4051,10 @@ class TraceScreen(Screen):
         # /stop появлялся/исчезал без отдельных вызовов из start/stop путей.
         self._refresh_footer()
         self._update_terminal_title()  # статус живой в табе: [running]→[completed] и т.д.
+        # Пометки «изображение не просмотрено» — раньше хвоста записей тика: пометка
+        # случилась до ответа модели на повтор. При заморозке выделения ждут в очереди.
+        if not _frozen:
+            self._drain_trace_notes()
         if (
             self._store is None
             or self._active_task_id is None
@@ -4269,8 +4464,9 @@ class TraceScreen(Screen):
                 pass
 
         # Esc — единая лестница приоритетов: оверлей (Esc-блоки пикеров ниже) →
-        # bang-shell cancel → 2-й-Esc-confirm → текст в инпуте (двухшаговая
-        # очистка) → ask_human → running (undo-cancel / stop-hint) → выход.
+        # bang-shell cancel → 2-й-Esc-confirm → идёт вставка изображения
+        # (двухшаговая отмена) → текст в инпуте (двухшаговая очистка) → ask_human →
+        # running (undo-cancel / stop-hint) → выход.
         # Esc всегда разбирает самый локальный контекст; безусловный стоп —
         # /stop или Ctrl+C.
         if (
@@ -4317,6 +4513,16 @@ class TraceScreen(Screen):
                         pass
                 elif kind == "stop":
                     self._cmd_stop()
+                elif kind == "paste":
+                    self._cancel_image_paste()
+                event.stop()
+                event.prevent_default()
+                return
+
+            # Идёт вставка изображения — самый локальный контекст: двойной Esc отменяет
+            # её (чтение буфера или сетевого диска могло повиснуть), текст поля не трогает.
+            if self._image_paste_busy:
+                self._show_esc_hint("paste")
                 event.stop()
                 event.prevent_default()
                 return
@@ -4509,7 +4715,9 @@ class TraceScreen(Screen):
         # него доставляется ПОСЛЕ — когда отказ уже показан, и пустое изменение
         # гасило его в момент появления (живой смок владельца 2026-09-04).
         if self._esc_confirm_kind is not None or (
-            self._footer_refusal_active and event.text_area.text
+            self._footer_refusal_active
+            and event.text_area.text
+            and event.text_area.text != self._refusal_input_text
         ):
             self._clear_footer_hint()
         # Сброс history-navigation state при user-правке input.
@@ -4989,6 +5197,20 @@ class TraceScreen(Screen):
             self._voice.stop_and_transcribe()
             return
 
+        # Идёт вставка изображения: Enter не отправляет — сообщение ушло бы без
+        # картинки; текст остаётся в поле (контракт §2).
+        if self._image_paste_busy:
+            self._show_footer_hint(_IMAGE_PASTE_WAIT_HINT)
+            return
+
+        # Картинки с командой не отправляются (визуальный контракт картинок §2):
+        # отказ раньше пикеров и палитры — они очищают ввод, а набранное с
+        # плашками должно остаться в поле.
+        images = event.attachments
+        if images and event.value.strip().startswith(("/", "!")):
+            self._show_footer_refusal(_IMAGES_WITH_COMMAND_REFUSAL)
+            return
+
         # Skill picker открыт → выполнить выбранный skill (или ввод как есть)
         if self._skill_picker is not None:
             skill = self._skill_picker.selected_skill()
@@ -5105,26 +5327,38 @@ class TraceScreen(Screen):
                     # Child HITL: ответ только в stdin субагента. Parent pending /
                     # user-строка в data_* — нет (иначе orphan в meta + «уехало к агенту»).
                     self._mount_nested_user(
-                        parent_call_id=child_pid, prose=text
+                        parent_call_id=child_pid, prose=text, images=images
                     )
                     parent_row = self._active_calls.get(child_pid)
                     if parent_row is not None:
                         parent_row.resume()
                 else:
                     client_id = self._track_pending(
-                        display_text=text, wire_content=text
+                        display_text=text, wire_content=text, images=images
                     )
                     self._mount_user_reply(
-                        text, state="pending", client_id=client_id
+                        text,
+                        state="pending",
+                        client_id=client_id,
+                        images=images,
                     )
-                target.submit_ask_human_reply(text)
+                # Ответ с картинками — объектом HumanAnswer (дизайн картинок §20.3);
+                # текст — строкой, как раньше: чужие порты SDK ждут str.
+                if images:
+                    from gc_core.tools.turn.ask_human import HumanAnswer
+
+                    target.submit_ask_human_reply(
+                        HumanAnswer(text=text, attachments=images)
+                    )
+                else:
+                    target.submit_ask_human_reply(text)
                 # Optimistic: снимаем баннер сразу после ответа, не ждём
                 # function_call_output в полле (иначе 5–10с «висящего» вопроса
                 # и hide индикатора, пока агент уже работает). Cleanup B-2
                 # в _render_event остаётся страховкой для replay/cancel.
                 self._unmount_ask_human_banner()
                 self._reset_thinking_timer()
-                self._on_user_text_submitted(text)
+                self._on_user_text_submitted(text, images)
                 self._show_thinking_indicator(state="thinking")
                 return
             # Владельца нет / сменился / завис → отвечаем новым ходом.
@@ -5161,7 +5395,7 @@ class TraceScreen(Screen):
             technical = self._build_attachment_technical(text)
             self._prepare_for_new_run()
             self._reset_thinking_timer()
-            self._on_user_text_submitted(text)
+            self._on_user_text_submitted(text, images)
             runner.start(
                 query=full_query,
                 thread_id=tid,
@@ -5170,6 +5404,7 @@ class TraceScreen(Screen):
                 technical=technical,
                 display_query=display_query,
                 skill_loaded=skill_loaded,
+                attachments=images,
             )
             self.attach_active_task(tid)
             if patch:
@@ -5189,24 +5424,30 @@ class TraceScreen(Screen):
             # _pending_user_widgets через _reset_render_state) и после
             # потенциальной первой записи meta исполнителем.
             client_id = self._track_pending(
-                display_text=text, wire_content=full_query
+                display_text=text, wire_content=full_query, images=images
             )
-            self._mount_user_reply(text, state="pending", client_id=client_id)
+            self._mount_user_reply(
+                text, state="pending", client_id=client_id, images=images
+            )
             return
 
         if runner.is_running():
             self._reset_thinking_timer()
-            self._on_user_text_submitted(text)
+            self._on_user_text_submitted(text, images)
             # Active subagent → nested under subagent_* (progress/sidecar); иначе
             # parent pending + обычная user-строка в трейсе.
             if not runner.is_child_input_active():
                 client_id = self._track_pending(
-                    display_text=text, wire_content=text
+                    display_text=text, wire_content=text, images=images
                 )
                 self._mount_user_reply(
-                    text, state="pending", client_id=client_id
+                    text, state="pending", client_id=client_id, images=images
                 )
-            runner.add_message({"role": "user", "content": text, "id": msg_id})
+            message = {"role": "user", "content": text, "id": msg_id}
+            if images:
+                # В тред картинки копирует ядро при приёме реплики (дизайн картинок §3).
+                message["attachments"] = [att.to_dict() for att in images]
+            runner.add_message(message)
             technical = self._build_attachment_technical(text)
             if technical is not None:
                 runner.add_message({"role": "user", "content": technical})
@@ -5221,12 +5462,14 @@ class TraceScreen(Screen):
                 self.app.tui_state.active_task_id, patch
             )
         client_id = self._track_pending(
-            display_text=text, wire_content=full_query
+            display_text=text, wire_content=full_query, images=images
         )
-        self._mount_user_reply(text, state="pending", client_id=client_id)
+        self._mount_user_reply(
+            text, state="pending", client_id=client_id, images=images
+        )
         self._prepare_for_new_run()
         self._reset_thinking_timer()
-        self._on_user_text_submitted(text)
+        self._on_user_text_submitted(text, images)
         technical = self._build_attachment_technical(text)
         runner.start(
             query=full_query,
@@ -5236,12 +5479,231 @@ class TraceScreen(Screen):
             technical=technical,
             display_query=display_query,
             skill_loaded=skill_loaded,
+            attachments=images,
         )
 
     def on_command_text_area_paste_collapsed(
         self, event: CommandTextArea.PasteCollapsed
     ) -> None:
         self._show_footer_hint(_PASTE_HINT_TEXT, seconds=5.0)
+
+    def on_command_text_area_image_paste_requested(
+        self, event: CommandTextArea.ImagePasteRequested
+    ) -> None:
+        # Без on_miss вставка просила именно изображение (пустая вставка) — отказы.
+        self._start_image_paste(
+            path=event.path,
+            on_miss=event.on_miss,
+            strict=event.on_miss is None,
+            files_only=event.files_only,
+        )
+
+    def _start_image_paste(
+        self,
+        *,
+        path: Optional[str],
+        on_miss: Optional[_OnMiss],
+        strict: bool,
+        files_only: bool = False,
+    ) -> None:
+        """Запустить вставку изображения (спека §12): воркером, «Вставка…» до результата.
+        Путь, вставленный во время чтения, ждёт своей очереди: терминал присылает каждый
+        файл отдельной вставкой (Cmd+V после копирования в Finder, перетаскивание
+        нескольких файлов). `strict` — жест просил изображение (Alt+V, пустая вставка):
+        полный лимит и нечем читать буфер — отказы, у прочих — «изображения нет»."""
+        if self._image_paste_busy:
+            if (path is not None or files_only) and on_miss is not None:
+                # Путь или Ctrl+V с текстом — в очередь, по порядку: не теряется
+                # (жест «вставьте ещё раз — развернуть»), не обгоняет идущую вставку и
+                # проходит свою проверку файлов (имена файлов Finder текстом не
+                # проскочат).
+                self._image_paste_queue.append((path, on_miss, files_only))
+            else:
+                self._show_footer_hint(_IMAGE_PASTE_WAIT_HINT)
+            return
+        self._image_paste_busy = True
+        self._show_footer_hint(
+            _IMAGE_PASTE_BUSY_HINT, seconds=_IMAGE_PASTE_HINT_SECONDS
+        )
+        self._image_paste_worker = self.run_worker(
+            self._image_paste(
+                path=path,
+                on_miss=on_miss,
+                strict=strict,
+                files_only=files_only,
+            ),
+            name="image-paste",
+            group="image-paste",
+            exit_on_error=False,
+        )
+
+    async def _image_paste(
+        self,
+        *,
+        path: Optional[str],
+        on_miss: Optional[_OnMiss],
+        strict: bool,
+        files_only: bool,
+    ) -> None:
+        """Воркер вставки: эта вставка, затем очередь путей по порядку. Флаг «идёт
+        вставка», очередь и своя подсказка снимаются при любом исходе, включая отмену
+        двойным Esc (она отменяет и очередь)."""
+        try:
+            inserted = await self._image_paste_one(
+                path=path,
+                on_miss=on_miss,
+                strict=strict,
+                files_only=files_only,
+            )
+            while self._image_paste_queue:
+                queued_path, queued_on_miss, queued_files_only = (
+                    self._image_paste_queue.pop(0)
+                )
+                inserted |= await self._image_paste_one(
+                    path=queued_path,
+                    on_miss=queued_on_miss,
+                    strict=False,
+                    files_only=queued_files_only,
+                )
+        finally:
+            self._image_paste_busy = False
+            self._image_paste_queue.clear()
+            self._end_image_paste_hint()
+        if inserted:
+            self._after_image_inserted()
+
+    async def _image_paste_one(
+        self,
+        *,
+        path: Optional[str],
+        on_miss: Optional[_OnMiss],
+        strict: bool,
+        files_only: bool = False,
+    ) -> bool:
+        """Одна вставка: источник, лимит и карман — `image_paste.astage_paste`, здесь —
+        отказ текстом, плашки или «изображения нет». Сбой — в лог, приложение не падает.
+        True — в поле встали плашки."""
+        try:
+            inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+            limit = read_images_config(
+                self.app.effective_config()
+            ).max_per_message
+            outcome = await image_paste.astage_paste(
+                path,
+                self.app.image_store,
+                room=limit - len(inp.images_in_buffer()),
+                strict=strict,
+                files_only=files_only,
+            )
+            if isinstance(outcome, image_paste.PasteRefusal):
+                # Жест без заказа картинки (путь, Ctrl+V): не влезла — ещё и запасная
+                # вставка, как при «картинки нет»; отказ объясняет, почему не плашка.
+                # Отказ — после вставки: правка поля гасит отказ.
+                if (
+                    outcome.reason == image_paste.REFUSE_LIMIT
+                    and not strict
+                    and on_miss
+                ):
+                    missed = on_miss()
+                    if inspect.isawaitable(missed):
+                        await missed
+                self._show_footer_refusal(
+                    _IMAGE_PASTE_REFUSALS[outcome.reason].format(n=limit)
+                )
+            elif outcome:
+                # Номер — после чтения: пока оно шло, могла смениться сессия.
+                first = self._next_image_number()
+                used = inp.insert_image_chips(outcome, first)
+                if used:
+                    self._image_seq_issued[self._active_task_id] = (
+                        first + used - 1
+                    )
+                return True
+            elif on_miss is None:
+                self._show_footer_refusal(_IMAGE_REFUSAL_EMPTY_CLIPBOARD)
+            else:
+                missed = on_miss()
+                if inspect.isawaitable(missed):
+                    await missed
+        except Exception:
+            _log.warning("image paste failed", exc_info=True)
+        return False
+
+    def _after_image_inserted(self) -> None:
+        """Вставка поставила плашки: о буфере, из которого они могли прийти, совет больше
+        не звучит; раз за запуск — как открыть вставленное. Звучит после всей очереди
+        путей: плашка следующего пути погасила бы его сразу."""
+        self._clipboard_tip_stamp = self._clipboard_stamp
+        if not self._image_open_tip_shown and self._footer_tip_fits():
+            self._image_open_tip_shown = True
+            self._show_footer_tip(image_hints.IMAGE_OPEN_TIP)
+
+    def _on_terminal_focus(self, focused: bool) -> None:
+        if focused:
+            self._check_clipboard_tip()
+
+    def _check_clipboard_tip(self) -> None:
+        """Проверить буфер обмена вне UI-потока (на macOS — процесс osascript)."""
+        self.run_worker(
+            self._aclipboard_tip(),
+            name="clipboard-tip",
+            group="clipboard-tip",
+            exclusive=True,
+            exit_on_error=False,
+        )
+
+    async def _aclipboard_tip(self) -> None:
+        """Совет «в буфере изображение · клавиша — вставить» — один раз на содержимое
+        буфера. Не прозвучал (футер занят, сверху диалог) — прозвучит при следующем
+        возвращении в окно."""
+        found = await asyncio.to_thread(image_hints.read_clipboard_tip)
+        if found is None:
+            return
+        stamp, tip = found
+        self._clipboard_stamp = stamp
+        if stamp == self._clipboard_tip_stamp or not self._footer_tip_fits():
+            return
+        self._clipboard_tip_stamp = stamp
+        self._show_footer_tip(tip)
+
+    def _cancel_image_paste(self) -> None:
+        """Двойной Esc во время вставки: воркер отменяется вместе с очередью путей (флаг,
+        очередь и подсказку снимает его finally); чтение ОС в потоке дорабатывает впустую."""
+        if self._image_paste_worker is not None:
+            self._image_paste_worker.cancel()
+
+    def _next_image_number(self) -> int:
+        """Номер следующей image-плашки (спека §4): сквозной по треду — после
+        `runtime.image_seq` из meta активного треда и после последнего номера, выданного в
+        этом процессе (сообщение с картинкой могло ещё не дойти до meta)."""
+        tid = self._active_task_id
+        meta = (
+            self._store.get_task_meta(tid)
+            if tid and self._store is not None
+            else None
+        )
+        return (
+            max(read_image_seq(meta), self._image_seq_issued.get(tid, 0)) + 1
+        )
+
+    def _end_image_paste_hint(self) -> None:
+        """Конец вставки: снять только свою подсказку («Вставка…», «дождитесь…», «Esc ещё
+        раз — отменить вставку»); отказ, «вставьте ещё раз…» и прочие чужие живут по
+        своему канону."""
+        if (
+            self._footer_hint_active
+            and self._footer_hint_text in _IMAGE_PASTE_OWN_HINTS
+        ):
+            self._clear_footer_hint()
+
+    async def _apaste_os_text_or_refuse(self, inp: CommandTextArea) -> None:
+        """Alt+V без картинки: текст из буфера ОС (вне UI-потока — на Linux это до трёх
+        процессов); нет и его — отказ (контракт §2)."""
+        text = await asyncio.to_thread(os_ops.read_clipboard)
+        if text:
+            inp._handle_paste(text)
+        else:
+            self._show_footer_refusal(_IMAGE_REFUSAL_EMPTY_CLIPBOARD)
 
     async def _consume_pending_prefix(self, text: str) -> tuple[str, dict]:
         """Встроить отложенный skill в сообщение; вернуть (query, meta-patch).
@@ -5724,6 +6186,9 @@ class TraceScreen(Screen):
         try:
             input_field = self.query_one(_SEL_CMDINPUT)
             input_field.text = self._last_user_send_text
+            # Плашки картинок возвращаются вместе с текстом: подписи уже в нём,
+            # записи стора сброшены отправкой (дизайн картинок §12).
+            input_field.restore_images(self._last_user_send_images)
             input_field.cursor_location = input_field.document.end
         except Exception:
             pass
@@ -6006,6 +6471,19 @@ class TraceScreen(Screen):
         self._refresh_header()
         self._refresh_footer()
         self._sync_indicator_reserve()
+        # Новая сессия — номера картинок с 1: выданное прежней несозданной — не её.
+        self._image_seq_issued.pop(None, None)
+        self._renumber_input_images()
+
+    def _renumber_input_images(self) -> None:
+        """Смена сессии: image-плашки буфера ввода — в последовательность активного треда
+        (дизайн картинок §4, §12), следом за его номерами из meta и выданными в
+        процессе."""
+        inp = self.query_one(_SEL_CMDINPUT, CommandTextArea)
+        first = self._next_image_number()
+        count = inp.renumber_image_chips(first)
+        if count:
+            self._image_seq_issued[self._active_task_id] = first + count - 1
 
     def _sync_indicator_reserve(self) -> None:
         """Высота #indicator-bar: 3 при активной задаче (отступ-строка снизу под
@@ -6397,6 +6875,13 @@ class TraceScreen(Screen):
     def on_open_event_request(self, message) -> None:
         """Двойной клик по строке tool-вызова/реплики → открыть payload."""
         self._open_event_by_no(message.event_no)
+
+    def on_open_image_request(self, message: OpenImageRequest) -> None:
+        """Клик по плашке или строке картинки в ленте, Ctrl+клик по плашке в поле ввода —
+        открыть файл просмотрщиком ОС (`services/image_open`); отказ — в футер."""
+        refusal = open_image(message.path)
+        if refusal:
+            self._show_footer_refusal(refusal)
 
     def on_summary_toggle_request(self, message) -> None:
         """Клик/Enter по маркеру или телу → раскрыть/свернуть summary-body."""

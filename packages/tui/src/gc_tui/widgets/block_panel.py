@@ -27,6 +27,7 @@ from textual.message import Message
 from textual.widgets import Static
 
 from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.no_select import NoSelectStatic
 
 # Глиф кнопки копирования — оба варианта «наложенные квадраты», шириной в одну
 # колонку. `⧉` (Misc Mathematical Symbols-B) читается лучше, но его нет в шрифтах
@@ -43,15 +44,6 @@ def copy_glyph() -> str:
     from gc_tui.services.terminal_caps import supports_font_fallback
 
     return COPY_GLYPH_RICH if supports_font_fallback() else COPY_GLYPH_SAFE
-
-
-class _NoSelect(Static):
-    """Служебная часть блока: в выделение не попадает никогда."""
-
-    ALLOW_SELECT = False
-
-    def get_selection(self, selection):
-        return None
 
 
 class BlockPanel(ClickModelMixin, Vertical):
@@ -152,8 +144,12 @@ class BlockPanel(ClickModelMixin, Vertical):
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="block-header"):
-            yield _NoSelect(self._label, classes="block-label", markup=False)
-            yield _NoSelect(copy_glyph(), classes="block-copy", markup=False)
+            yield NoSelectStatic(
+                self._label, classes="block-label", markup=False
+            )
+            yield NoSelectStatic(
+                copy_glyph(), classes="block-copy", markup=False
+            )
         yield Static("", classes="block-body", markup=False)
 
     def on_mount(self) -> None:
