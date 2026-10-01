@@ -1,6 +1,6 @@
-"""Список диалогов Responses и файлы хода.
+"""Список диалогов Responses и каталог хода.
 
-Файлы — успешные тулы записи и существующие пути из ``handoff.artifacts``.
+Файлы — один уровень ``cwd`` последнего хода, не разбор тулов.
 
 Читает уже лежащие индекс и jsonl. Новый архив не заводит.
 Треды субагентов не обходит.
@@ -10,9 +10,7 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any
 
-from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.message_policy.user_message_policy import (
     is_technical_user_message_text,
 )
@@ -21,19 +19,7 @@ from gc_core.thread_store import validate_thread_id
 from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
 
 _TITLE_LIMIT = 80
-_WRITE_TOOLS = frozenset(
-    {
-        "fs_write_file",
-        "fs_append_file",
-        "fs_apply_file_edits",
-        "fs_search_and_replace",
-        "fs_save_base64_file",
-    }
-)
-_DRY_RUN_TOOL = "fs_search_and_replace"
 _ENVELOPE = "message"
-_CALL = "function_call"
-_CALL_OUTPUT = "function_call_output"
 _RESPONSES = "responses"
 
 
@@ -81,77 +67,40 @@ def dialog_turns(index: ResponseIndex, thread_id: str) -> list[dict] | None:
     return turns
 
 
-def dialog_artifacts(
-    index: ResponseIndex, thread_id: str
-) -> list[dict] | None:
-    """Успешные файлы записи внутри ``cwd`` последнего хода."""
-    records = _thread_records(index, thread_id)
-    if records is None:
+def dialog_folder(
+    index: ResponseIndex, thread_id: str, relative: str
+) -> dict | None:
+    """Один уровень каталога хода. Нет треда или пути — ``None``."""
+    cwd = _cwd(index, thread_id)
+    if cwd is None:
         return None
-    scan = _scan(index.thread_path(thread_id))
-    if not scan.intact:
-        return []
-    cwd = _chain(records)[-1].cwd
-    return _artifacts(scan.records, cwd)
+    located = _locate(cwd, relative, directory=True)
+    if located is None:
+        return None
+    folder, resolved = located
+    entries = _entries(cwd, folder, resolved)
+    if entries is None:
+        return None
+    return {"path": folder, "entries": entries}
 
 
-def artifact_bytes(
+def file_bytes(
     index: ResponseIndex, thread_id: str, relative: str
 ) -> tuple[str, bytes] | None:
-    """Байты файла из списка артефактов. Иначе ``None``."""
-    if not isinstance(relative, str) or relative == "":
+    """Байты обычного файла внутри ``cwd``. Иначе ``None``."""
+    cwd = _cwd(index, thread_id)
+    if cwd is None:
         return None
-    artifacts = dialog_artifacts(index, thread_id)
-    if artifacts is None:
+    located = _locate(cwd, relative, directory=False)
+    if located is None:
         return None
-    match = next(
-        (item for item in artifacts if item["path"] == relative), None
-    )
-    if match is None:
-        return None
-    records = _thread_records(index, thread_id)
-    if records is None:
-        return None
-    cwd = _chain(records)[-1].cwd
-    if relative_artifact(cwd, relative) != relative:
-        return None
-    full = os.path.realpath(
-        os.path.join(os.path.abspath(cwd), *relative.split("/"))
-    )
-    if not os.path.isfile(full):
-        return None
+    rel, resolved = located
     try:
-        with open(full, "rb") as handle:
+        with open(resolved, "rb") as handle:
             data = handle.read()
     except OSError:
         return None
-    return match["name"], data
-
-
-def relative_artifact(cwd: str, raw: str) -> str | None:
-    """Относительный путь внутри ``cwd`` или ``None``.
-
-    ``..``, каталог, отсутствующий файл и симлинк наружу отбрасываются.
-    """
-    if not isinstance(raw, str) or raw.strip() == "":
-        return None
-    if "\x00" in raw or _has_dotdot(raw):
-        return None
-    cwd_abs = os.path.abspath(cwd)
-    if os.path.isabs(raw):
-        joined = os.path.abspath(raw)
-    else:
-        joined = os.path.abspath(os.path.join(cwd_abs, raw))
-    relative = os.path.relpath(joined, cwd_abs)
-    if relative == ".." or relative.startswith(".." + os.sep):
-        return None
-    cwd_real = os.path.realpath(cwd_abs)
-    resolved = os.path.realpath(joined)
-    if not _is_inside(cwd_real, resolved):
-        return None
-    if not os.path.isfile(resolved):
-        return None
-    return relative.replace(os.sep, "/")
+    return rel.rsplit("/", 1)[-1], data
 
 
 class _Scan:
@@ -286,111 +235,85 @@ def _message(record: dict) -> dict:
     return record
 
 
-def _artifacts(records: list[dict], cwd: str) -> list[dict]:
-    pending: dict[str, dict] = {}
-    found: list[dict] = []
-    seen: set[str] = set()
-    for record in records:
-        message = _message(record)
-        kind = message.get("type")
-        if kind == _CALL:
-            call_id = _call_id(message)
-            if call_id is not None:
-                pending[call_id] = message
-            _collect_handoff(message, cwd, found, seen)
-            continue
-        if kind != _CALL_OUTPUT:
-            continue
-        call_id = _call_id(message)
-        if call_id is None:
-            continue
-        call = pending.pop(call_id, None)
-        if call is None:
-            continue
-        item = _accepted(call, message.get("output"), cwd)
-        if item is None or item["path"] in seen:
-            continue
-        seen.add(item["path"])
-        found.append(item)
-    return found
-
-
-def _collect_handoff(
-    call: dict, cwd: str, found: list[dict], seen: set[str]
-) -> None:
-    """Файлы из ``handoff.artifacts`` у ``turn_finish``, если они есть."""
-    for raw in _handoff_paths(call):
-        item = _artifact_item(cwd, raw)
-        if item is None or item["path"] in seen:
-            continue
-        seen.add(item["path"])
-        found.append(item)
-
-
-def _handoff_paths(call: dict) -> list[str]:
-    if call.get("name") != FINISH_TOOL_NAME:
-        return []
-    arguments = _arguments(call.get("arguments"))
-    handoff = _arguments(arguments.get("handoff"))
-    artifacts = handoff.get("artifacts")
-    if not isinstance(artifacts, list):
-        return []
-    return [item for item in artifacts if isinstance(item, str) and item != ""]
-
-
-def _artifact_item(cwd: str, raw: str) -> dict | None:
-    relative = relative_artifact(cwd, raw)
-    if relative is None:
+def _cwd(index: ResponseIndex, thread_id: str) -> str | None:
+    records = _thread_records(index, thread_id)
+    if records is None:
         return None
-    return {"path": relative, "name": relative.rsplit("/", 1)[-1]}
+    return _chain(records)[-1].cwd
 
 
-def _accepted(call: dict, output: Any, cwd: str) -> dict | None:
-    name = call.get("name")
-    if not isinstance(name, str) or name not in _WRITE_TOOLS:
-        return None
-    arguments = _arguments(call.get("arguments"))
-    if name == _DRY_RUN_TOOL and arguments.get("dry_run") is True:
-        return None
-    if _marked_error(output):
-        return None
-    raw = arguments.get("path")
+def _locate(cwd: str, raw: str, *, directory: bool) -> tuple[str, str] | None:
+    """Относительный путь и реальный файл или каталог внутри ``cwd``."""
     if not isinstance(raw, str):
         return None
-    return _artifact_item(cwd, raw)
+    if "\x00" in raw or "\\" in raw or _has_dotdot(raw) or os.path.isabs(raw):
+        return None
+    cwd_abs = os.path.abspath(cwd)
+    if raw in ["", "."]:
+        if not directory:
+            return None
+        return _checked(cwd_abs, "", directory=True)
+    joined = os.path.abspath(os.path.join(cwd_abs, raw))
+    relative = os.path.relpath(joined, cwd_abs)
+    if relative == ".":
+        relative = ""
+    if relative == ".." or relative.startswith(".." + os.sep):
+        return None
+    relative = relative.replace(os.sep, "/")
+    if any(part.startswith(".") for part in relative.split("/")):
+        return None
+    return _checked(cwd_abs, relative, directory=directory)
 
 
-def _arguments(raw: Any) -> dict:
-    if isinstance(raw, dict):
-        return raw
-    if not isinstance(raw, str):
-        return {}
+def _checked(
+    cwd_abs: str, relative: str, *, directory: bool
+) -> tuple[str, str] | None:
+    if relative == "":
+        joined = cwd_abs
+    else:
+        joined = os.path.join(cwd_abs, *relative.split("/"))
+    cwd_real = os.path.realpath(cwd_abs)
+    resolved = os.path.realpath(joined)
+    if not _is_inside(cwd_real, resolved):
+        return None
+    if directory:
+        if not os.path.isdir(resolved):
+            return None
+    elif not os.path.isfile(resolved):
+        return None
+    return relative, resolved
+
+
+def _entries(cwd: str, relative: str, resolved: str) -> list[dict] | None:
     try:
-        data = json.loads(raw)
-    except json.JSONDecodeError:
-        return {}
-    if isinstance(data, dict):
-        return data
-    return {}
-
-
-def _marked_error(output: Any) -> bool:
-    data: Any = output
-    if isinstance(output, str):
-        try:
-            data = json.loads(output)
-        except json.JSONDecodeError:
-            return False
-    if not isinstance(data, dict):
-        return False
-    return data.get("ok") is False
-
-
-def _call_id(message: dict) -> str | None:
-    call_id = message.get("call_id")
-    if isinstance(call_id, str) and call_id != "":
-        return call_id
-    return None
+        names = os.listdir(resolved)
+    except OSError:
+        return None
+    cwd_abs = os.path.abspath(cwd)
+    found: list[dict] = []
+    for name in names:
+        if (
+            name == ""
+            or name.startswith(".")
+            or "/" in name
+            or "\\" in name
+            or "\x00" in name
+        ):
+            continue
+        child = name if relative == "" else relative + "/" + name
+        if _checked(cwd_abs, child, directory=True) is not None:
+            found.append({"name": name, "path": child, "kind": "dir"})
+            continue
+        if _checked(cwd_abs, child, directory=False) is not None:
+            found.append({"name": name, "path": child, "kind": "file"})
+    found.sort(
+        key=lambda item: (
+            item["kind"] != "dir",
+            item["name"].casefold(),
+            item["name"],
+        )
+    )
+    return found
 
 
 def _has_dotdot(raw: str) -> bool:

@@ -89,23 +89,6 @@ def _user(text: str) -> dict:
     return {"role": "user", "content": text}
 
 
-def _call(name: str, call_id: str, arguments: dict) -> dict:
-    return {
-        "type": "function_call",
-        "name": name,
-        "call_id": call_id,
-        "arguments": json.dumps(arguments),
-    }
-
-
-def _out(call_id: str, *, ok: bool = True) -> dict:
-    return {
-        "type": "function_call_output",
-        "call_id": call_id,
-        "output": json.dumps({"ok": ok}),
-    }
-
-
 def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     app, _index, _threads = _joint(tmp_path, token=_TOKEN)
     client = TestClient(app)
@@ -125,6 +108,22 @@ def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     assert 'id="f-scheme"' not in html
     assert 'id="dialogList"' in html
     assert 'id="artifactList"' in html
+    assert html.index('id="sidebar"') < html.index('id="dialogList"')
+    assert html.index('id="log"') < html.index('id="filesbar"')
+    assert html.index('id="filesbar"') < html.index('id="artifactList"')
+    assert 'id="dialogsToggle"' in html
+    assert 'id="chatToggle"' in html
+    assert 'id="filesToggle"' in html
+    assert "gc-ua-chat-panes" in html
+    assert "Папка пуста." in html
+    assert "gc-ua-chat-thread" in html
+    assert "showFilesForCurrent" in html
+    assert "Скачать" in html
+    assert "Скопировать путь" in html
+    assert "Открыть" in html
+    assert 'class="prose trace"' in html
+    assert 'class="table-wrap"' in html
+    assert "<summary>Рассуждение</summary><pre>" not in html
 
 
 def test_root_does_not_serve_the_workdir(tmp_path, monkeypatch):
@@ -317,226 +316,104 @@ def test_dialog_feed_is_chain_order_with_text_and_output(tmp_path):
     assert invalid.status_code == 404
 
 
-def test_artifacts_keep_successful_writes_inside_cwd(tmp_path):
+def test_folder_lists_one_level_without_tool_calls(tmp_path):
     app, index, _threads = _joint(tmp_path)
     cwd = tmp_path / "work"
     nested = cwd / "sub"
     nested.mkdir(parents=True)
     outside = tmp_path / "outside.txt"
     outside.write_bytes(b"secret")
-    names = {
-        "written.txt": b"w",
-        "appended.txt": b"a",
-        "edited.txt": b"e",
-        "replaced.txt": b"r",
-        "saved.txt": b"s",
-        "dry.txt": b"d",
-        "failed.txt": b"f",
-        "pending.txt": b"p",
-        "via.txt": b"v",
-        "dup.txt": b"1",
-        "later.txt": b"2",
-    }
-    for name, data in names.items():
-        (cwd / name).write_bytes(data)
+    (cwd / "Later.txt").write_bytes(b"2")
+    (cwd / ".env").write_bytes(b"k")
+    (cwd / ".gc").mkdir()
+    (cwd / ".gc" / "config.yml").write_bytes(b"c")
+    (cwd / "via.txt").write_bytes(b"v")
     (nested / "nested.txt").write_bytes(b"n")
-    (cwd / "dir").mkdir()
-    link = cwd / "link.txt"
-    link.symlink_to(outside)
-    inner = cwd / "inner.txt"
-    inner.symlink_to(cwd / "via.txt")
+    (nested / ".hidden").write_bytes(b"h")
+    (cwd / "Docs").mkdir()
+    (cwd / "link.txt").symlink_to(outside)
+    (cwd / "inner.txt").symlink_to(cwd / "via.txt")
+    (cwd / "inside").symlink_to(nested)
     _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
-    abs_written = str(cwd / "written.txt")
     _jsonl(
         index,
         "files",
         [
-            _user(f"запиши {abs_written}"),
-            _call("fs_write_file", "w", {"path": abs_written}),
-            _out("w"),
-            _call(
-                "fs_append_file",
-                "a",
-                {"path": str(nested / "nested.txt")},
-            ),
-            _out("a"),
-            _call(
-                "fs_apply_file_edits",
-                "e",
-                {"path": str(cwd / "edited.txt")},
-            ),
-            _out("e"),
-            _call(
-                "fs_search_and_replace",
-                "r",
-                {"path": str(cwd / "replaced.txt"), "dry_run": False},
-            ),
-            _out("r"),
-            _call(
-                "fs_save_base64_file",
-                "s",
-                {"path": "saved.txt"},
-            ),
-            _out("s"),
-            _call("fs_write_file", "dup", {"path": abs_written}),
-            _out("dup"),
-            _call("fs_append_file", "later", {"path": str(cwd / "later.txt")}),
-            _out("later"),
-            _call(
-                "fs_search_and_replace",
-                "dry",
-                {"path": str(cwd / "dry.txt"), "dry_run": True},
-            ),
-            _out("dry"),
-            _call("fs_write_file", "bad", {"path": str(cwd / "failed.txt")}),
-            _out("bad", ok=False),
-            _call(
-                "fs_write_file",
-                "pend",
-                {"path": str(cwd / "pending.txt")},
-            ),
-            _call(
-                "exec_command",
-                "sh",
-                {"command": "touch " + str(cwd / "via.txt")},
-            ),
-            _out("sh"),
-            _call(
-                "exec_python",
-                "py",
-                {"code": "open('via.txt','w')"},
-            ),
-            _out("py"),
-            _call(
-                "fs_write_file",
-                "up",
-                {"path": str(cwd / "sub" / ".." / "via.txt")},
-            ),
-            _out("up"),
-            _call("fs_write_file", "out", {"path": str(link)}),
-            _out("out"),
-            _call("fs_write_file", "dir", {"path": str(cwd / "dir")}),
-            _out("dir"),
-            _call("fs_write_file", "miss", {"path": str(cwd / "missing.txt")}),
-            _out("miss"),
-            _call("fs_write_file", "in", {"path": str(inner)}),
-            _out("in"),
+            _user(
+                '<technical type="dialog_summary">сводка без тулов</technical>'
+            )
         ],
-    )
-    sidecar = tmp_path / "threads" / "data_subagents_responses_files.jsonl"
-    sidecar.write_text(
-        json.dumps(
-            {
-                "type": "message",
-                "system": "responses",
-                "payload": _call(
-                    "fs_write_file",
-                    "side",
-                    {"path": str(cwd / "appended.txt")},
-                ),
-            }
-        )
-        + "\n",
-        encoding="utf-8",
     )
     client = TestClient(app)
     response = client.get("/v1/dialogs/files/artifacts")
     assert response.status_code == 200
-    assert response.json() == [
-        {"path": "written.txt", "name": "written.txt"},
-        {"path": "sub/nested.txt", "name": "nested.txt"},
-        {"path": "edited.txt", "name": "edited.txt"},
-        {"path": "replaced.txt", "name": "replaced.txt"},
-        {"path": "saved.txt", "name": "saved.txt"},
-        {"path": "later.txt", "name": "later.txt"},
-        {"path": "inner.txt", "name": "inner.txt"},
+    assert response.json() == {
+        "path": "",
+        "entries": [
+            {"name": "Docs", "path": "Docs", "kind": "dir"},
+            {"name": "inside", "path": "inside", "kind": "dir"},
+            {"name": "sub", "path": "sub", "kind": "dir"},
+            {"name": "inner.txt", "path": "inner.txt", "kind": "file"},
+            {"name": "Later.txt", "path": "Later.txt", "kind": "file"},
+            {"name": "via.txt", "path": "via.txt", "kind": "file"},
+        ],
+    }
+    nested_list = client.get(
+        "/v1/dialogs/files/artifacts", params={"path": "sub"}
+    )
+    assert nested_list.status_code == 200
+    assert nested_list.json() == {
+        "path": "sub",
+        "entries": [
+            {"name": "nested.txt", "path": "sub/nested.txt", "kind": "file"},
+        ],
+    }
+    via_link = client.get(
+        "/v1/dialogs/files/artifacts", params={"path": "inside"}
+    )
+    assert via_link.json()["entries"] == [
+        {"name": "nested.txt", "path": "inside/nested.txt", "kind": "file"},
     ]
     missing = client.get("/v1/dialogs/no-such/artifacts")
     assert missing.status_code == 404
+    climb = client.get(
+        "/v1/dialogs/files/artifacts", params={"path": "../outside.txt"}
+    )
+    assert climb.status_code == 404
+    absolute = client.get(
+        "/v1/dialogs/files/artifacts", params={"path": str(outside)}
+    )
+    assert absolute.status_code == 404
+    as_file = client.get(
+        "/v1/dialogs/files/artifacts", params={"path": "via.txt"}
+    )
+    assert as_file.status_code == 404
+    escaped = client.get(
+        "/v1/dialogs/files/artifacts", params={"path": "link.txt"}
+    )
+    assert escaped.status_code == 404
+    hidden = client.get("/v1/dialogs/files/artifacts", params={"path": ".gc"})
+    assert hidden.status_code == 404
+    nested_hidden = client.get(
+        "/v1/dialogs/files/artifacts", params={"path": "sub/.hidden"}
+    )
+    assert nested_hidden.status_code == 404
 
 
-def test_artifacts_include_existing_handoff_files(tmp_path):
+def test_download_returns_any_file_inside_cwd(tmp_path, capsys):
     app, index, _threads = _joint(tmp_path)
     cwd = tmp_path / "work"
-    (cwd / "sub").mkdir(parents=True)
-    (cwd / "report.md").write_bytes(b"report")
-    (cwd / "sub" / "note.txt").write_bytes(b"note")
-    (cwd / "written.txt").write_bytes(b"written")
-    (cwd / "folder").mkdir()
-    outside = tmp_path / "outside.txt"
-    outside.write_bytes(b"secret")
-    handoff = json.dumps(
-        {
-            "artifacts": [
-                "report.md",
-                "sub/note.txt",
-                "written.txt",
-                "missing.md",
-                "../outside.txt",
-                str(outside),
-                "folder",
-            ]
-        }
-    )
-    _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
-    _jsonl(
-        index,
-        "files",
-        [
-            _call("fs_write_file", "w", {"path": "written.txt"}),
-            _out("w"),
-            _call(
-                "turn_finish",
-                "f",
-                {"handoff": handoff, "task_report": "готово"},
-            ),
-            _out("f"),
-            _call("turn_finish", "bad", {"handoff": "{not json"}),
-            _out("bad"),
-            _call("turn_finish", "empty", {"handoff": "{}"}),
-            _out("empty"),
-            _call(
-                "turn_finish",
-                "dict",
-                {"handoff": {"artifacts": ["report.md", 1, ""]}},
-            ),
-            _out("dict"),
-        ],
-    )
-    client = TestClient(app)
-    listed = client.get("/v1/dialogs/files/artifacts")
-    assert listed.status_code == 200
-    assert listed.json() == [
-        {"path": "written.txt", "name": "written.txt"},
-        {"path": "report.md", "name": "report.md"},
-        {"path": "sub/note.txt", "name": "note.txt"},
-    ]
-    got = client.get(
-        "/v1/dialogs/files/artifacts/download",
-        params={"path": "report.md"},
-    )
-    assert got.status_code == 200
-    assert got.content == b"report"
-
-
-def test_download_returns_bytes_and_rejects_unlisted(tmp_path, capsys):
-    app, index, _threads = _joint(tmp_path)
-    cwd = tmp_path / "work"
-    cwd.mkdir()
+    nested = cwd / "sub"
+    nested.mkdir(parents=True)
     payload = b"\x00\xff<html>no</html>"
     (cwd / "note.txt").write_bytes(payload)
+    (cwd / ".env").write_bytes(b"secret-env")
     (cwd / "other.txt").write_bytes(b"other")
+    (nested / "nested.txt").write_bytes(b"nested")
     outside = tmp_path / "secret.txt"
     outside.write_bytes(b"SECRET-FILE")
+    (cwd / "link.txt").symlink_to(outside)
     _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
-    _jsonl(
-        index,
-        "files",
-        [
-            _call("fs_write_file", "w", {"path": str(cwd / "note.txt")}),
-            _out("w"),
-        ],
-    )
     client = TestClient(app)
     got = client.get(
         "/v1/dialogs/files/artifacts/download",
@@ -555,14 +432,39 @@ def test_download_returns_bytes_and_rejects_unlisted(tmp_path, capsys):
         "/v1/dialogs/files/artifacts/download",
         params={"path": "other.txt"},
     )
-    assert other.status_code == 404
-    assert other.content != b"other"
+    assert other.status_code == 200
+    assert other.content == b"other"
+    nested_file = client.get(
+        "/v1/dialogs/files/artifacts/download",
+        params={"path": "sub/nested.txt"},
+    )
+    assert nested_file.status_code == 200
+    assert nested_file.content == b"nested"
+    dot = client.get(
+        "/v1/dialogs/files/artifacts/download",
+        params={"path": ".env"},
+    )
+    assert dot.status_code == 404
+    assert b"secret-env" not in dot.content
     climb = client.get(
         "/v1/dialogs/files/artifacts/download",
         params={"path": "../secret.txt"},
     )
     assert climb.status_code == 404
     assert b"SECRET-FILE" not in climb.content
+    linked = client.get(
+        "/v1/dialogs/files/artifacts/download",
+        params={"path": "link.txt"},
+    )
+    assert linked.status_code == 404
+    assert b"SECRET-FILE" not in linked.content
+    folder = client.get(
+        "/v1/dialogs/files/artifacts/download",
+        params={"path": "sub"},
+    )
+    assert folder.status_code == 404
+    empty = client.get("/v1/dialogs/files/artifacts/download")
+    assert empty.status_code == 404
     (cwd / "note.txt").unlink()
     gone = client.get(
         "/v1/dialogs/files/artifacts/download",
@@ -577,15 +479,7 @@ def test_v1_dialogs_require_bearer_and_root_stays_open(tmp_path):
     cwd.mkdir()
     (cwd / "note.txt").write_bytes(b"x")
     _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
-    _jsonl(
-        index,
-        "files",
-        [
-            _user("есть"),
-            _call("fs_write_file", "w", {"path": str(cwd / "note.txt")}),
-            _out("w"),
-        ],
-    )
+    _jsonl(index, "files", [_user("есть")])
     client = TestClient(app)
     paths = [
         "/v1/dialogs",

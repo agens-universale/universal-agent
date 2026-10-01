@@ -1,4 +1,4 @@
-"""Ручки списка диалогов и скачивания файлов хода."""
+"""Ручки списка диалогов, каталога хода и скачивания файла."""
 
 from __future__ import annotations
 
@@ -8,10 +8,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import Response
 
 from gc_chat.dialogs import (
-    artifact_bytes,
-    dialog_artifacts,
+    dialog_folder,
     dialog_list,
     dialog_turns,
+    file_bytes,
 )
 from gc_chat.responses.errors import ApiError, error_payload
 from gc_chat.responses.http_api import _unauthorized
@@ -62,14 +62,16 @@ async def read_dialog(thread_id: str, request: Request) -> Response:
     return _body(turns)
 
 
-async def read_artifacts(thread_id: str, request: Request) -> Response:
+async def read_artifacts(
+    thread_id: str, request: Request, path: str = ""
+) -> Response:
     denied = _guard(request)
     if denied is not None:
         return denied
-    artifacts = dialog_artifacts(_index(request), thread_id)
-    if artifacts is None:
+    folder = dialog_folder(_index(request), thread_id, path)
+    if folder is None:
         return _missing()
-    return _body(artifacts)
+    return _body(folder)
 
 
 async def download_artifact(
@@ -78,7 +80,7 @@ async def download_artifact(
     denied = _guard(request)
     if denied is not None:
         return denied
-    found = artifact_bytes(_index(request), thread_id, path)
+    found = file_bytes(_index(request), thread_id, path)
     if found is None:
         return _missing()
     name, data = found

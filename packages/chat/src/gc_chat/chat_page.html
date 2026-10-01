@@ -43,11 +43,42 @@
   aside {
     width: 260px;
     flex: none;
-    border-right: 1px solid var(--bd);
-    overflow: auto;
-    padding: 10px 10px 16px;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    padding: 10px 10px 8px;
   }
-  .side-title { color: var(--mut); font-size: 12px; margin: 8px 0 6px; }
+  #sidebar { border-right: 1px solid var(--bd); }
+  #filesbar { border-left: 1px solid var(--bd); }
+  #dialogList, #artifactList { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  .center {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+  }
+  .side-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    margin: 4px 0 6px;
+    padding: 4px 4px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--mut);
+    font-size: 12px;
+    text-align: left;
+  }
+  .side-toggle::after { content: none; }
+  @media (min-width: 721px) {
+    .side-toggle { pointer-events: none; }
+    #chatToggle { display: none; }
+  }
   .side-note { color: var(--mut); font-size: 12px; margin: 4px 8px; }
   .dialog-btn, .file-link {
     display: block;
@@ -69,13 +100,49 @@
   }
   .dialog-btn .m { display: block; color: var(--mut2); font-size: 11px; }
   .file-link { color: var(--acc); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-link.dir { color: var(--tx); }
+  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 4px 4px; }
+  .crumb, .crumb-sep { border: 0; background: transparent; color: var(--mut); font-size: 12px; padding: 2px; }
+  .crumb { border-radius: 6px; }
+  .crumb:hover { background: var(--panel); color: var(--tx); }
+  .file-menu {
+    position: fixed;
+    z-index: 40;
+    min-width: 180px;
+    max-width: 240px;
+    background: var(--panel);
+    border: 1px solid var(--bd2);
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  }
+  .file-menu-name {
+    padding: 4px 8px 6px;
+    color: var(--mut);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .file-menu button:hover { background: var(--panel2); }
   .maincol {
     flex: 1;
+    width: 100%;
+    max-width: 920px;
     min-width: 0;
+    min-height: 0;
     display: flex;
     flex-direction: column;
     padding: 0 16px;
-    max-width: 920px;
   }
   header {
     display: flex;
@@ -182,10 +249,28 @@
   .tool.failed .dot { background: var(--bad); }
   .prose { overflow-wrap: anywhere; }
   .prose p { margin: 0 0 8px; }
-  .prose h1, .prose h2, .prose h3 { margin: 12px 0 6px; line-height: 1.3; }
-  .prose h1 { font-size: 1.25rem; }
-  .prose h2 { font-size: 1.1rem; }
-  .prose h3 { font-size: 1rem; }
+  .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+    margin: 12px 0 6px;
+    line-height: 1.3;
+    background: none;
+    color: var(--tx);
+    -webkit-text-fill-color: var(--tx);
+  }
+  .prose h1 { font-size: 1.35rem; }
+  .prose h2 { font-size: 1.15rem; }
+  .prose h3, .prose h4, .prose h5, .prose h6 { font-size: 1rem; }
+  .prose hr { border: 0; border-top: 1px solid var(--bd2); margin: 14px 0; }
+  .prose .table-wrap { overflow-x: auto; margin: 0 0 12px; }
+  .prose table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .prose th, .prose td {
+    border: 1px solid var(--bd2);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .prose th { color: var(--tx); font-weight: 650; background: var(--panel2); }
+  details .trace { padding: 0 12px 8px; color: var(--mut); font-size: 13.5px; }
+  details .trace :is(h1, h2, h3, h4, h5, h6, strong) { color: var(--tx); }
   .prose ul, .prose ol { margin: 0 0 8px; padding-left: 1.3em; }
   .prose a { color: var(--acc); }
   .prose code {
@@ -283,7 +368,38 @@
   .form-alert { min-height: 1.2em; margin: 8px 0 0; color: var(--bad); font-size: 13px; }
   @media (max-width: 720px) {
     .shell { flex-direction: column; }
-    aside { width: auto; max-height: 180px; border-right: 0; border-bottom: 1px solid var(--bd); }
+    aside {
+      width: auto;
+      border-right: 0;
+      border-left: 0;
+      border-bottom: 1px solid var(--bd);
+    }
+    #filesbar { order: 3; border-bottom: 0; border-top: 1px solid var(--bd); }
+    .center { order: 2; flex-direction: column; align-items: stretch; }
+    .side-toggle { pointer-events: auto; margin: 0; padding: 10px 6px; cursor: pointer; }
+    .side-toggle:hover { background: var(--panel); }
+    #chatToggle { display: flex; }
+    .side-toggle::after {
+      content: "";
+      width: 0;
+      height: 0;
+      border-left: 4px solid transparent;
+      border-right: 4px solid transparent;
+      border-top: 5px solid var(--mut2);
+    }
+    .collapsed > .side-toggle::after {
+      border-top: 4px solid transparent;
+      border-bottom: 4px solid transparent;
+      border-left: 5px solid var(--mut2);
+      border-right: 0;
+    }
+    aside.collapsed,
+    #chatpane.collapsed { flex: none; }
+    aside:not(.collapsed),
+    #chatpane:not(.collapsed) { flex: 1 1 auto; min-height: 0; }
+    aside.collapsed #dialogList,
+    aside.collapsed #artifactList,
+    #chatpane.collapsed .maincol { display: none; }
     header { align-items: flex-start; }
     .actions { flex: 1 1 100%; justify-content: flex-start; }
     .sub { white-space: normal; }
@@ -319,13 +435,13 @@
     </div>
   </header>
   <div class="shell">
-  <aside id="sidebar">
-    <div class="side-title">Диалоги</div>
+  <aside id="sidebar" class="collapsed">
+    <button type="button" class="side-toggle" id="dialogsToggle" data-pane="sidebar" aria-expanded="false" aria-controls="dialogList">Диалоги</button>
     <div id="dialogList"></div>
-    <div class="side-title">Файлы</div>
-    <div id="artifactList"></div>
   </aside>
-  <div class="maincol">
+  <div class="center" id="chatpane">
+  <button type="button" class="side-toggle" id="chatToggle" data-pane="chatpane" aria-expanded="true" aria-controls="maincol">Чат</button>
+  <div class="maincol" id="maincol">
   <div class="stats" id="stats" title="Оценка без токенизатора: gc-chat не возвращает usage. У Chat Completions вход считается заново на каждом ходе — уходит вся история."></div>
   <div class="warn" id="warn" hidden>Этот диалог сервер не продолжит: нет id прошлого ответа. Следующее сообщение откроет новый ход.</div>
   <main id="log"></main>
@@ -337,6 +453,11 @@
     <button type="submit" class="primary" id="send">Отправить</button>
   </form>
   </div>
+  </div>
+  <aside id="filesbar" class="collapsed">
+    <button type="button" class="side-toggle" id="filesToggle" data-pane="filesbar" aria-expanded="false" aria-controls="artifactList">Файлы</button>
+    <div id="artifactList"></div>
+  </aside>
   </div>
 </div>
 
@@ -371,12 +492,16 @@
 (function () {
   var SETTINGS_KEY = "gc-ua-chat-settings";
   var MESSAGES_KEY = "gc-ua-chat-messages";
+  var THREAD_KEY = "gc-ua-chat-thread";
+  var PANE_KEY = "gc-ua-chat-panes";
+  var narrowMedia = window.matchMedia("(max-width: 720px)");
   var DEFAULTS = { api: "responses", token: "", model: "" };
 
   var settings = loadSettings();
   var messages = loadMessages();
   var busy = false;
-  var activeThread = null;
+  var activeThread = loadThread();
+  var artifactDir = "";
   var dialogs = [];
   var turnGen = 0;
   var abortCtl = null;
@@ -426,10 +551,61 @@
   document.addEventListener("keydown", function (e) {
     if (e.key === "Escape" && !settingsEl.hidden) closeSettings();
   });
+  loadPanes();
+  syncPaneToggles();
+  narrowMedia.addEventListener("change", syncPaneToggles);
+  document.querySelectorAll(".side-toggle").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (!narrowMedia.matches) return;
+      var pane = document.getElementById(btn.getAttribute("data-pane"));
+      var closing = !pane.classList.contains("collapsed");
+      if (closing && openPaneCount() < 2) return;
+      pane.classList.toggle("collapsed");
+      closeFileMenu();
+      syncPaneToggles();
+      savePanes();
+    });
+  });
 
   render();
-  loadDialogs();
+  loadDialogs().then(showFilesForCurrent);
   input.focus();
+
+  function paneOpen(id) {
+    return !document.getElementById(id).classList.contains("collapsed");
+  }
+
+  function openPaneCount() {
+    return ["sidebar", "chatpane", "filesbar"].filter(paneOpen).length;
+  }
+
+  function loadPanes() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(PANE_KEY) || "null");
+      if (!raw || typeof raw !== "object") return;
+      if (typeof raw.dialogs === "boolean") document.getElementById("sidebar").classList.toggle("collapsed", !raw.dialogs);
+      if (typeof raw.files === "boolean") document.getElementById("filesbar").classList.toggle("collapsed", !raw.files);
+      if (typeof raw.chat === "boolean") document.getElementById("chatpane").classList.toggle("collapsed", !raw.chat);
+    } catch (e) {}
+  }
+
+  function savePanes() {
+    localStorage.setItem(PANE_KEY, JSON.stringify({
+      dialogs: paneOpen("sidebar"),
+      files: paneOpen("filesbar"),
+      chat: paneOpen("chatpane"),
+    }));
+  }
+
+  function syncPaneToggles() {
+    var wide = !narrowMedia.matches;
+    document.querySelectorAll(".side-toggle").forEach(function (btn) {
+      var pane = document.getElementById(btn.getAttribute("data-pane"));
+      var open = wide || !pane.classList.contains("collapsed");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.tabIndex = wide ? -1 : 0;
+    });
+  }
 
   function loadSettings() {
     var s = { api: DEFAULTS.api, token: DEFAULTS.token, model: DEFAULTS.model };
@@ -512,6 +688,49 @@
       }];
     }
     return [];
+  }
+
+  function loadThread() {
+    try {
+      var id = localStorage.getItem(THREAD_KEY);
+      return typeof id === "string" && id ? id : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveThread() {
+    try {
+      if (activeThread) localStorage.setItem(THREAD_KEY, activeThread);
+      else localStorage.removeItem(THREAD_KEY);
+    } catch (e) {}
+  }
+
+  function knownThread(id) {
+    if (!id) return null;
+    for (var i = 0; i < dialogs.length; i++) {
+      if (dialogs[i].thread_id === id) return id;
+    }
+    return null;
+  }
+
+  function threadForMessages() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var responseId = messages[i].responseId;
+      if (!responseId) continue;
+      for (var j = 0; j < dialogs.length; j++) {
+        if (dialogs[j].latest_response_id === responseId) return dialogs[j].thread_id;
+      }
+    }
+    return null;
+  }
+
+  function showFilesForCurrent() {
+    if (settings.api !== "responses") return;
+    activeThread = knownThread(activeThread) || threadForMessages();
+    saveThread();
+    renderDialogs();
+    loadArtifacts();
   }
 
   function saveSettings() {
@@ -658,6 +877,54 @@
     return t;
   }
 
+  function splitRow(line) {
+    var s = String(line).trim();
+    if (s.charAt(0) === "|") s = s.slice(1);
+    if (s.charAt(s.length - 1) === "|") s = s.slice(0, -1);
+    return s.split("|");
+  }
+
+  function isTableSep(line) {
+    if (line.indexOf("|") < 0) return false;
+    var cells = splitRow(line);
+    if (cells.length < 2) return false;
+    for (var n = 0; n < cells.length; n++) {
+      if (!/^:?-+:?$/.test(cells[n].trim())) return false;
+    }
+    return true;
+  }
+
+  function isHr(line) {
+    return /^\s*([-*_])\1{2,}\s*$/.test(line);
+  }
+
+  function isTableStart(lines, i) {
+    if (i + 1 >= lines.length || lines[i].indexOf("|") < 0 || !isTableSep(lines[i + 1])) return false;
+    return splitRow(lines[i]).length >= 2;
+  }
+
+  function isBlockStart(lines, i) {
+    if (i >= lines.length || !lines[i].trim()) return false;
+    var line = lines[i];
+    return isHr(line) || /^\s*(#{1,6})\s+/.test(line) || /^\s*[-*]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line) || isTableStart(lines, i);
+  }
+
+  function renderTable(lines, i) {
+    var headers = splitRow(lines[i]).map(function (c) { return c.trim(); });
+    i += 2;
+    var html = '<div class="table-wrap"><table><thead><tr>';
+    for (var h = 0; h < headers.length; h++) html += "<th>" + renderInline(headers[h]) + "</th>";
+    html += "</tr></thead><tbody>";
+    while (i < lines.length && lines[i].indexOf("|") >= 0 && lines[i].trim() && !isTableSep(lines[i])) {
+      var cells = splitRow(lines[i]);
+      html += "<tr>";
+      for (var c = 0; c < headers.length; c++) html += "<td>" + renderInline((cells[c] || "").trim()) + "</td>";
+      html += "</tr>";
+      i++;
+    }
+    return { html: html + "</tbody></table></div>", i: i };
+  }
+
   function renderMd(text) {
     var lines = String(text).replace(/\r\n/g, "\n").split("\n");
     var html = "";
@@ -665,10 +932,22 @@
     while (i < lines.length) {
       var line = lines[i];
       if (!line.trim()) { i++; continue; }
-      var h = /^(#{1,3})\s+(.*)$/.exec(line);
-      if (h) {
-        html += "<h" + h[1].length + ">" + renderInline(h[2]) + "</h" + h[1].length + ">";
+      if (isHr(line)) {
+        html += "<hr>";
         i++;
+        continue;
+      }
+      var h = /^\s*(#{1,6})\s+(.*)$/.exec(line);
+      if (h) {
+        var level = h[1].length;
+        html += "<h" + level + ">" + renderInline(h[2]) + "</h" + level + ">";
+        i++;
+        continue;
+      }
+      if (isTableStart(lines, i)) {
+        var table = renderTable(lines, i);
+        html += table.html;
+        i = table.i;
         continue;
       }
       if (/^\s*[-*]\s+/.test(line)) {
@@ -690,7 +969,11 @@
         continue;
       }
       var buf = [];
-      while (i < lines.length && lines[i].trim() && !/^(#{1,3})\s+/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\d+[.)]\s+/.test(lines[i])) {
+      while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i)) {
+        buf.push(lines[i]);
+        i++;
+      }
+      if (!buf.length) {
         buf.push(lines[i]);
         i++;
       }
@@ -726,7 +1009,7 @@
       var p = m.parts[n];
       if (p.kind === "reasoning") {
         if (!p.text) continue;
-        html += "<details" + (m.streaming ? " open" : "") + "><summary>Рассуждение</summary><pre>" + escapeHtml(p.text) + "</pre></details>";
+        html += "<details" + (m.streaming ? " open" : "") + '><summary>Рассуждение</summary><div class="prose trace">' + renderMarkdown(p.text) + "</div></details>";
       } else if (p.kind === "tool") {
         html += '<div class="tool ' + escapeHtml(p.status || "") + (p.parent ? " nested" : "") + '"><span class="dot"></span><span>' + escapeHtml(p.title || p.name || "tool") + '</span><span class="st">' + escapeHtml(toolLabel(p.status)) + "</span></div>";
       } else if (p.kind === "answer" && p.text) {
@@ -743,7 +1026,7 @@
   function render() {
     var stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
     if (!messages.length) {
-      logEl.innerHTML = '<div class="empty"><h2>Чат с агентом</h2><p>Страница открыта на порту gc-chat. В настройках — токен, если сервер его требует, и модель.</p><p>Responses продолжает диалог на сервере. Слева — прошлые диалоги и файлы, которые ход записал. Chat Completions каждый раз отправляет историю сообщений, сервер её не хранит.</p></div>';
+      logEl.innerHTML = '<div class="empty"><h2>Чат с агентом</h2><p>Страница открыта на порту gc-chat. В настройках — токен, если сервер его требует, и модель.</p><p>Responses продолжает диалог на сервере. Слева — прошлые диалоги, справа — файлы, которые ход записал. Chat Completions каждый раз отправляет историю сообщений, сервер её не хранит.</p></div>';
     } else {
       logEl.innerHTML = messages.map(function (m) {
         if (m.role === "user") return '<article class="msg user"><div class="user-text">' + escapeHtml(m.content) + "</div></article>";
@@ -777,6 +1060,8 @@
     stop();
     messages = [];
     activeThread = null;
+    artifactDir = "";
+    saveThread();
     busy = false;
     setAlert("");
     saveMessages();
@@ -897,7 +1182,10 @@
       return;
     }
     settings = next;
-    if (settings.api !== "responses") activeThread = null;
+    if (settings.api !== "responses") {
+      activeThread = null;
+      saveThread();
+    }
     saveSettings();
     closeSettings();
     setAlert("");
@@ -1353,42 +1641,212 @@
     }
     messages = next;
     activeThread = threadId;
+    artifactDir = "";
+    saveThread();
     settings.api = "responses";
     saveSettings();
     saveMessages();
     setAlert(status === "in_progress" ? "Последний ход ещё идёт" : "");
+    if (narrowMedia.matches) {
+      document.getElementById("chatpane").classList.remove("collapsed");
+      syncPaneToggles();
+      savePanes();
+    }
     render();
     renderDialogs();
     loadArtifacts();
     input.focus();
   }
 
-  async function loadArtifacts() {
+  async function loadArtifacts(fallback) {
     var box = document.getElementById("artifactList");
     if (!activeThread || settings.api !== "responses") {
       box.innerHTML = "";
       return;
     }
-    var res = await fetch("/v1/dialogs/" + encodeURIComponent(activeThread) + "/artifacts", { headers: authHeaders(settings, false) });
+    var url = "/v1/dialogs/" + encodeURIComponent(activeThread) + "/artifacts";
+    if (artifactDir) url += "?path=" + encodeURIComponent(artifactDir);
+    var res = await fetch(url, { headers: authHeaders(settings, false) });
     if (!res.ok) {
+      if (artifactDir && !fallback) {
+        artifactDir = "";
+        return loadArtifacts(true);
+      }
       box.innerHTML = "";
       return;
     }
-    var list = await res.json();
-    box.innerHTML = "";
-    if (!Array.isArray(list) || !list.length) {
-      box.innerHTML = '<p class="side-note">Нет файлов.</p>';
+    var body = await res.json();
+    if (!body || !Array.isArray(body.entries)) {
+      box.innerHTML = "";
       return;
     }
-    for (var i = 0; i < list.length; i++) {
-      var item = list[i] || {};
+    artifactDir = typeof body.path === "string" ? body.path : "";
+    renderFolder(body);
+  }
+
+  function renderFolder(body) {
+    closeFileMenu();
+    var box = document.getElementById("artifactList");
+    box.innerHTML = "";
+    if (artifactDir) {
+      var crumbs = document.createElement("div");
+      crumbs.className = "crumbs";
+      crumbs.appendChild(crumbButton("", "папка"));
+      var parts = artifactDir.split("/");
+      for (var i = 0; i < parts.length; i++) {
+        var sep = document.createElement("span");
+        sep.className = "crumb-sep";
+        sep.textContent = "/";
+        crumbs.appendChild(sep);
+        crumbs.appendChild(crumbButton(parts.slice(0, i + 1).join("/"), parts[i]));
+      }
+      box.appendChild(crumbs);
+    }
+    var entries = body.entries;
+    if (!entries.length) {
+      var note = document.createElement("p");
+      note.className = "side-note";
+      note.textContent = "Папка пуста.";
+      box.appendChild(note);
+      return;
+    }
+    for (var n = 0; n < entries.length; n++) {
+      var item = entries[n] || {};
       var btn = document.createElement("button");
       btn.type = "button";
-      btn.className = "file-link";
-      btn.textContent = item.path || item.name || "file";
-      btn.addEventListener("click", downloadFile.bind(null, item.path || ""));
+      var dir = item.kind === "dir";
+      btn.className = "file-link" + (dir ? " dir" : "");
+      btn.textContent = dir ? (item.name || "dir") + "/" : (item.name || item.path || "file");
+      btn.title = item.path || "";
+      btn.addEventListener("click", openFileMenu.bind(null, btn, item));
       box.appendChild(btn);
     }
+  }
+
+  function crumbButton(path, label) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "crumb";
+    btn.textContent = label;
+    btn.addEventListener("click", openFolder.bind(null, path));
+    return btn;
+  }
+
+  function openFolder(path) {
+    artifactDir = path || "";
+    loadArtifacts();
+  }
+
+  function openFileMenu(anchor, item) {
+    closeFileMenu();
+    var menu = document.createElement("div");
+    menu.id = "fileMenu";
+    menu.className = "file-menu";
+    var title = document.createElement("div");
+    title.className = "file-menu-name";
+    title.textContent = item.name || item.path || "";
+    menu.appendChild(title);
+    if (item.kind === "dir") {
+      menu.appendChild(menuAction("Открыть", function () {
+        closeFileMenu();
+        openFolder(item.path || "");
+      }));
+    } else {
+      menu.appendChild(menuAction("Скачать", function () {
+        closeFileMenu();
+        downloadFile(item.path || "");
+      }));
+    }
+    var copy = menuAction("Скопировать путь", function () {
+      copyEntryPath(item.path || "", copy);
+    });
+    menu.appendChild(copy);
+    document.body.appendChild(menu);
+    placeFileMenu(menu, anchor);
+    setTimeout(function () {
+      document.addEventListener("mousedown", onFileMenuOutside);
+      document.addEventListener("keydown", onFileMenuKey);
+    }, 0);
+  }
+
+  function menuAction(label, action) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.addEventListener("click", action);
+    return btn;
+  }
+
+  function placeFileMenu(menu, anchor) {
+    var rect = anchor.getBoundingClientRect();
+    var width = menu.offsetWidth;
+    var left = rect.left;
+    if (left + width > window.innerWidth - 8) left = rect.right - width;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    menu.style.left = left + "px";
+    menu.style.top = (rect.bottom + 4) + "px";
+    var box = menu.getBoundingClientRect();
+    if (box.bottom > window.innerHeight - 8) {
+      menu.style.top = Math.max(8, rect.top - box.height - 4) + "px";
+    }
+  }
+
+  function onFileMenuOutside(ev) {
+    var menu = document.getElementById("fileMenu");
+    if (!menu || menu.contains(ev.target)) return;
+    closeFileMenu();
+  }
+
+  function onFileMenuKey(ev) {
+    if (ev.key === "Escape") closeFileMenu();
+  }
+
+  var fileMenuTimer = 0;
+
+  function closeFileMenu() {
+    if (fileMenuTimer) {
+      clearTimeout(fileMenuTimer);
+      fileMenuTimer = 0;
+    }
+    var menu = document.getElementById("fileMenu");
+    if (menu) menu.remove();
+    document.removeEventListener("mousedown", onFileMenuOutside);
+    document.removeEventListener("keydown", onFileMenuKey);
+  }
+
+  function entryPath(relative) {
+    var cwd = "";
+    for (var i = 0; i < dialogs.length; i++) {
+      if (dialogs[i].thread_id === activeThread && dialogs[i].cwd) {
+        cwd = dialogs[i].cwd;
+        break;
+      }
+    }
+    if (!cwd) return relative;
+    if (cwd.charAt(cwd.length - 1) === "/") return cwd + relative;
+    return cwd + "/" + relative;
+  }
+
+  async function copyEntryPath(relative, button) {
+    var menu = document.getElementById("fileMenu");
+    var text = entryPath(relative);
+    var copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (e) {
+        copied = false;
+      }
+    }
+    if (!menu || !menu.isConnected) return;
+    if (!copied) {
+      input.value = input.value ? input.value.replace(/\s+$/, "") + " " + text : text;
+      input.dispatchEvent(new Event("input"));
+      input.focus();
+    }
+    if (button) button.textContent = copied ? "Скопировано" : "Вставлено в сообщение";
+    fileMenuTimer = setTimeout(closeFileMenu, 700);
   }
 
   async function downloadFile(path) {
@@ -1414,6 +1872,7 @@
     for (var i = 0; i < dialogs.length; i++) {
       if (dialogs[i].latest_response_id === responseId) {
         activeThread = dialogs[i].thread_id;
+        saveThread();
         renderDialogs();
         await loadArtifacts();
         return;
