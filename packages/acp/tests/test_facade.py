@@ -45,6 +45,7 @@ class FakeAgent:
         self.started = asyncio.Event()
         self.release = asyncio.Event()
         self.hold = False
+        self.release_on_stop = True
         self.stopped = False
         self.stop_calls = 0
         self.closed = False
@@ -80,7 +81,8 @@ class FakeAgent:
     def stop(self):
         self.stop_calls += 1
         self.stopped = True
-        self.release.set()
+        if self.release_on_stop:
+            self.release.set()
 
     async def aclose(self):
         self.closed = True
@@ -876,15 +878,16 @@ async def test_delete_removes_acp_thread_and_repeat_is_not_found(tmp_path):
     await facade.handle_line(
         _line("session/delete", {"sessionId": session_id}, 4)
     )
-    assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
     assert _by_id(writer, 4)["result"] == {}
+    await _drain(facade)
+    assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
     prompt_at = next(
         index for index, item in enumerate(writer.sent) if item.get("id") == 3
     )
     delete_at = next(
         index for index, item in enumerate(writer.sent) if item.get("id") == 4
     )
-    assert prompt_at < delete_at
+    assert delete_at < prompt_at
     assert agents[0].closed is True
     assert not (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
     assert not (tmp_path / f"data_acp_{session_id}.jsonl").exists()
@@ -932,12 +935,104 @@ async def test_unknown_method_and_parse_error(tmp_path, capsys):
     await facade.shutdown()
 
 
-async def test_shutdown_cancels_a_running_prompt(tmp_path):
+async def test_close_during_a_hung_turn_answers_and_serves_the_next_line(
+    tmp_path,
+):
     facade, writer, agents = _open(tmp_path)
     await _init(facade)
     await _new(facade, "/work")
     session_id = _by_id(writer, 2)["result"]["sessionId"]
     agents[0].hold = True
+    agents[0].release_on_stop = False
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agents[0].started.wait()
+    await facade.handle_line(
+        _line("session/close", {"sessionId": session_id}, 4)
+    )
+    assert _by_id(writer, 4)["result"] == {}
+    assert not any(item.get("id") == 3 for item in writer.sent)
+    assert agents[0].closed is False
+    assert agents[0].stop_calls == 1
+    await facade.handle_line(_line("session/list", {}, 5))
+    assert "sessions" in _by_id(writer, 5)["result"]
+    agents[0].release.set()
+    await _drain(facade)
+    assert agents[0].closed is True
+    assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
+    assert (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
+    await facade.shutdown()
+
+
+async def test_delete_during_a_hung_turn_answers_and_serves_the_next_line(
+    tmp_path,
+):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    append_new_thread_messages(
+        str(tmp_path),
+        "acp",
+        session_id,
+        [{"role": "user", "content": "hi"}],
+        set(),
+    )
+    agents[0].hold = True
+    agents[0].release_on_stop = False
+    await facade.handle_line(
+        _line(
+            "session/prompt",
+            {
+                "sessionId": session_id,
+                "prompt": [{"type": "text", "text": "a"}],
+            },
+            3,
+        )
+    )
+    await agents[0].started.wait()
+    await facade.handle_line(
+        _line("session/delete", {"sessionId": session_id}, 4)
+    )
+    assert _by_id(writer, 4)["result"] == {}
+    assert not any(item.get("id") == 3 for item in writer.sent)
+    assert agents[0].closed is False
+    assert not (tmp_path / "acp-sessions" / f"{session_id}.json").exists()
+    assert (tmp_path / f"data_acp_{session_id}.jsonl").exists()
+    await facade.handle_line(
+        _line("session/delete", {"sessionId": session_id}, 5)
+    )
+    assert _by_id(writer, 5)["error"]["code"] == -32002
+    agents[0].release.set()
+    await _drain(facade)
+    assert agents[0].closed is True
+    assert not (tmp_path / f"data_acp_{session_id}.jsonl").exists()
+    assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
+    delete_at = next(
+        index for index, item in enumerate(writer.sent) if item.get("id") == 4
+    )
+    prompt_at = next(
+        index for index, item in enumerate(writer.sent) if item.get("id") == 3
+    )
+    assert delete_at < prompt_at
+    await facade.shutdown()
+
+
+async def test_shutdown_does_not_wait_for_a_hung_turn(tmp_path):
+    facade, writer, agents = _open(tmp_path)
+    await _init(facade)
+    await _new(facade, "/work")
+    session_id = _by_id(writer, 2)["result"]["sessionId"]
+    agents[0].hold = True
+    agents[0].release_on_stop = False
     await facade.handle_line(
         _line(
             "session/prompt",
@@ -950,5 +1045,19 @@ async def test_shutdown_cancels_a_running_prompt(tmp_path):
     )
     await agents[0].started.wait()
     await facade.shutdown()
-    assert agents[0].closed is True
+    assert agents[0].stop_calls == 1
+    assert agents[0].closed is False
+    assert not any(item.get("id") == 3 for item in writer.sent)
+    agents[0].release.set()
+    for _ in range(5):
+        if any(item.get("id") == 3 for item in writer.sent):
+            break
+        await asyncio.sleep(0)
     assert _by_id(writer, 3)["result"]["stopReason"] == "cancelled"
+    assert agents[0].closed is False
+
+
+async def _drain(facade):
+    pending = list(facade._releasing)
+    if pending:
+        await asyncio.gather(*pending)

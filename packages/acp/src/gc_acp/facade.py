@@ -52,6 +52,7 @@ _RUN_FAILED = "agent run failed"
 _NO_SESSION = "Session not found"
 _CWD_MISMATCH = "cwd mismatch"
 _METHOD_NEW = "session/new"
+_METHOD_DELETE = "session/delete"
 _TOOL_POLL_S = 0.05
 
 
@@ -90,6 +91,7 @@ class AcpFacade:
             resolve_threads_dir(config)
         )
         self._sessions: dict[str, LiveSession] = {}
+        self._releasing: set[asyncio.Task] = set()
         self._initialized = False
         self._create_lock = asyncio.Lock()
 
@@ -114,10 +116,18 @@ class AcpFacade:
                 )
 
     async def shutdown(self) -> None:
-        for live in list(self._sessions.values()):
-            await self._cancel_and_wait(live)
-            await _safe_aclose(live.agent)
+        """Отменить живые ходы и закрыть простаивающих агентов.
+
+        Идущий ход не ждём: stop() кооперативный, команда может занять
+        весь таймаут, а stdin после выхода уже закрыт.
+        """
+        leftover = list(self._sessions.values())
         self._sessions.clear()
+        for live in leftover:
+            if _prompt_running(live):
+                _mark_cancel(live)
+                continue
+            await _safe_aclose(live.agent)
 
     async def _dispatch(self, incoming: Incoming) -> None:
         if incoming.method in _SILENT:
@@ -217,9 +227,12 @@ class AcpFacade:
         if live is None:
             await self._invalid_params(request_id)
             return
-        await self._cancel_and_wait(live)
-        await _safe_aclose(live.agent)
         self._sessions.pop(live.session_id, None)
+        if _prompt_running(live):
+            self._release_later(live, drop_thread=False)
+            await self._send(result_message(request_id, {}))
+            return
+        await self._release(live, drop_thread=False)
         await self._send(result_message(request_id, {}))
 
     async def _session_list(self, request_id: Any, params: Any) -> None:
@@ -270,13 +283,24 @@ class AcpFacade:
             await self._missing(request_id)
             return
         live = self._sessions.pop(session_id, None)
+        if live is not None and _prompt_running(live):
+            # Запись индекса снимаем сразу, чтобы load не поднял второй
+            # агент на тот же тред. jsonl — после хода, он ещё пишется.
+            try:
+                self._index.drop_record(session_id)
+            except Exception:
+                logger.exception(_METHOD_DELETE)
+                await self._fail(request_id)
+                return
+            self._release_later(live, drop_thread=True)
+            await self._send(result_message(request_id, {}))
+            return
         if live is not None:
-            await self._cancel_and_wait(live)
-            await _safe_aclose(live.agent)
+            await self._release(live, drop_thread=False)
         try:
             self._index.remove(session_id)
         except Exception:
-            logger.exception("session/delete")
+            logger.exception(_METHOD_DELETE)
             await self._fail(request_id)
             return
         await self._send(result_message(request_id, {}))
@@ -460,11 +484,34 @@ class AcpFacade:
             return None
         return self._sessions.get(session_id)
 
-    async def _cancel_and_wait(self, live: LiveSession) -> None:
+    def _release_later(self, live: LiveSession, *, drop_thread: bool) -> None:
+        """Ответ клиенту уже можно слать: ход досматривается отдельно."""
         _mark_cancel(live)
+        task = asyncio.create_task(
+            self._release(live, drop_thread=drop_thread)
+        )
+        self._releasing.add(task)
+        task.add_done_callback(self._forget_release)
+
+    def _forget_release(self, task: asyncio.Task) -> None:
+        self._releasing.discard(task)
+        if task.cancelled():
+            return
+        exc = task.exception()
+        if exc is not None:
+            logger.error("acp session release", exc_info=exc)
+
+    async def _release(self, live: LiveSession, *, drop_thread: bool) -> None:
         task = live.prompt_task
         if task is not None and not task.done():
             await task
+        await _safe_aclose(live.agent)
+        if not drop_thread:
+            return
+        try:
+            self._index.drop_thread(live.session_id)
+        except Exception:
+            logger.exception(_METHOD_DELETE)
 
     async def _notify(self, session_id: str, update: dict) -> None:
         await self._send(
@@ -502,7 +549,7 @@ def _request_handlers(facade: AcpFacade) -> dict:
         "session/list": facade._session_list,
         "session/resume": facade._session_resume,
         "session/load": facade._session_load,
-        "session/delete": facade._session_delete,
+        _METHOD_DELETE: facade._session_delete,
     }
 
 

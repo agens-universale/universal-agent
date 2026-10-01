@@ -95,10 +95,17 @@ class SessionIndex:
         )
 
     def remove(self, session_id: str) -> None:
-        delete_thread(self._threads_dir, ACP_SYSTEM, session_id)
+        self.drop_thread(session_id)
+        self.drop_record(session_id)
+
+    def drop_record(self, session_id: str) -> None:
+        """Убрать сессию из list/load. Файл треда не трогать: ход ещё пишет."""
         path = self._path(session_id)
         if os.path.isfile(path):
             os.remove(path)
+
+    def drop_thread(self, session_id: str) -> None:
+        delete_thread(self._threads_dir, ACP_SYSTEM, session_id)
 
     def list_sessions(self, cwd: str | None) -> list[dict]:
         directory = self._directory()
