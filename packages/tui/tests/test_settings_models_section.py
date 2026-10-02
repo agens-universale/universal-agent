@@ -3132,7 +3132,10 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
     фокус в поле и на id ещё и раскрывал список поверх живого пикера — то же
     двоевластие, что чинил фикс отказа записи, только мышью."""
     body = 'models:\n  flash:\n    model: "google/gemini-2.5-flash"\n'
-    async with _section(tmp_path, body, size=(100, 80)) as (
+    # Подсказка main/auxiliary больше не в своём скролле на 8 строк — блок
+    # полный, форма выше экрана. Высота 80 оставляла #mef-model вне viewport
+    # после submit/пикера; клик падал OutOfBounds.
+    async with _section(tmp_path, body, size=(100, 200)) as (
         pilot,
         scr,
         cfg_file,
@@ -3143,7 +3146,8 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
 
         form = scr.query(ModelEntryForm).last()
         form.query_one("#mef-alias", Input).value = "opus"
-        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        model_input = form.query_one("#mef-model", Input)
+        model_input.value = "anthropic/claude-opus"
         form._presets_ctrl.close()
         await pilot.pause()
         await pilot.press("enter")  # submit → пикер default
@@ -3151,6 +3155,8 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
         ed = _editor(scr)
         assert ed.picker_open
         idx_before = form._idx
+        model_input.scroll_visible(animate=False)
+        await pilot.pause()
         await pilot.click("#mef-model")
         await pilot.pause()
         assert ed.picker_open, "клик убил пикер вопроса"

@@ -446,10 +446,7 @@ async def test_command_judge_declares_own_consumer(monkeypatch):
     )
     result = await judge_client({"tool_name": "execute_command"})
     assert result["verdict"] == "safe"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "command_judge",
-        "command_judge",
-    ]
+    router.resolve.assert_called_once_with("command_judge")
 
 
 def test_memory_compaction_declares_own_consumer(monkeypatch):
@@ -483,10 +480,7 @@ def test_finish_gate_declares_own_consumer(monkeypatch):
         )
     )
     assert result.action == "accept"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "finish_gate",
-        "finish_gate",
-    ]
+    router.resolve.assert_called_once_with("finish_gate")
 
 
 def test_text_answer_judge_declares_own_consumer_not_finish_gate(monkeypatch):
@@ -502,10 +496,7 @@ def test_text_answer_judge_declares_own_consumer_not_finish_gate(monkeypatch):
     result = run_coro(ajudge_text_answer(ctx, state, "the final answer text"))
     assert result is not None
     assert result.action == "accept"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "text_answer_judge",
-        "text_answer_judge",
-    ]
+    router.resolve.assert_called_once_with("text_answer_judge")
 
 
 def test_intent_scope_tool_summary_declares_own_consumer(monkeypatch):
@@ -523,10 +514,7 @@ def test_intent_scope_tool_summary_declares_own_consumer(monkeypatch):
         )
     )
     assert line == "a summary line"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "intent_scope",
-        "intent_scope",
-    ]
+    router.resolve.assert_called_once_with("intent_scope")
 
 
 def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
@@ -542,10 +530,7 @@ def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
         )
     )
     assert line == "final answer summary"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "intent_scope",
-        "intent_scope",
-    ]
+    router.resolve.assert_called_once_with("intent_scope")
 
 
 def test_summary_compress_declares_own_consumer(monkeypatch):
@@ -563,10 +548,7 @@ def test_summary_compress_declares_own_consumer(monkeypatch):
         )
     )
     assert out == "short"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "summary",
-        "summary",
-    ]
+    router.resolve.assert_called_once_with("summary")
 
 
 def test_summary_repair_declares_own_consumer(monkeypatch):
@@ -586,10 +568,7 @@ def test_summary_repair_declares_own_consumer(monkeypatch):
         )
     )
     assert out == "<summary>fixed</summary>"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "summary",
-        "summary",
-    ]
+    router.resolve.assert_called_once_with("summary")
 
 
 def test_memory_patch_replace_declares_own_consumer(monkeypatch):
@@ -603,10 +582,7 @@ def test_memory_patch_replace_declares_own_consumer(monkeypatch):
         )
     )
     assert result.raw_response == "<goal>x</goal>"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "summary",
-        "summary",
-    ]
+    router.resolve.assert_called_once_with("summary")
 
 
 def test_memory_deltas_format_repair_declares_own_consumer(monkeypatch):
@@ -622,10 +598,7 @@ def test_memory_deltas_format_repair_declares_own_consumer(monkeypatch):
         )
     )
     assert out == "<goal>repaired</goal>"
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "summary",
-        "summary",
-    ]
+    router.resolve.assert_called_once_with("summary")
 
 
 def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
