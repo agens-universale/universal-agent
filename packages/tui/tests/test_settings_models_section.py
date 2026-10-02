@@ -3132,7 +3132,11 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
     фокус в поле и на id ещё и раскрывал список поверх живого пикера — то же
     двоевластие, что чинил фикс отказа записи, только мышью."""
     body = 'models:\n  flash:\n    model: "google/gemini-2.5-flash"\n'
-    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+    async with _section(tmp_path, body, size=(100, 80)) as (
+        pilot,
+        scr,
+        cfg_file,
+    ):
         await pilot.press("n")
         await pilot.pause()
         from gc_tui.editors.model_entry_form import ModelEntryForm
@@ -3161,3 +3165,41 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
         assert form.query_one("#mef-model", Input).value == model_before, (
             "печать после клика изменила поле под вопросом"
         )
+
+
+async def test_slot_picker_lists_the_whole_registry(tmp_path):
+    """Селектор слота показывает весь models, не три слота. Два алиаса с одним
+    id — две строки. /level по-прежнему light/default/max."""
+    from gc_tui.toggles import TOGGLES
+
+    body = (
+        "models:\n"
+        "  flash:\n"
+        '    model: "shared-id"\n'
+        "  twin:\n"
+        '    model: "shared-id"\n'
+        "  extra:\n"
+        '    model: "other-id"\n'
+        "slots:\n"
+        '  light: "flash"\n'
+        '  default: "flash"\n'
+        '  max: "flash"\n'
+    )
+    async with _section(tmp_path, body) as (pilot, scr, _cfg):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        labels = [r["label"] for r in ed._picker["rows"]]
+        assert labels[0] == "не задан"
+        assert labels[1:] == ["flash", "twin", "extra"]
+        assert [ed._entry_model(a) for a in ("flash", "twin")] == [
+            "shared-id",
+            "shared-id",
+        ]
+    assert tuple(v.value for v in TOGGLES["level"].values) == (
+        "light",
+        "default",
+        "max",
+    )

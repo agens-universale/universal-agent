@@ -6,15 +6,14 @@ from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
 
 
-def test_auxiliary_llm_completion_kwargs_matches_auxiliary_llm():
+def test_auxiliary_llm_completion_kwargs_ignores_completion_kwargs_overlay():
     ctx = SimpleNamespace(
         auxiliary_llm=SimpleNamespace(
             completion_kwargs={"reasoning_effort": "none"},
-        )
+        ),
+        config_dict={"chat_completion_kwargs": {"temperature": 0.2}},
     )
-    assert summary_llm.auxiliary_llm_completion_kwargs(ctx) == {
-        "reasoning_effort": "none"
-    }
+    assert summary_llm.auxiliary_llm_completion_kwargs(ctx) == {}
 
 
 def test_auxiliary_llm_judge_max_tokens_from_auxiliary_llm():
@@ -70,7 +69,7 @@ def test_request_summary_text_uses_ctx_auxiliary_llm(monkeypatch):
 
     assert out == "summary ok"
     assert captured["max_tokens"] == 7777
-    assert captured["payload_overrides"] == {"reasoning_effort": "none"}
+    assert captured["payload_overrides"] == {}
 
 
 def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
@@ -101,10 +100,7 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
             payload_overrides={"temperature": 0.2},
         )
     )
-    assert captured["payload_overrides"] == {
-        "reasoning_effort": "none",
-        "temperature": 0.2,
-    }
+    assert captured["payload_overrides"] == {"temperature": 0.2}
 
 
 def test_request_summary_text_requires_auxiliary_llm_on_ctx():

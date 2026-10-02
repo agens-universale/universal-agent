@@ -29,6 +29,7 @@ from types import SimpleNamespace
 from gc_core import onboarding
 from gc_core.config_modules.model_registry import (
     connection_parts,
+    parse_completion_kwargs_text,
     resolve_entry_address,
     validate_model_alias,
 )
@@ -49,9 +50,10 @@ from gc_core.onboarding_fields import (
 )
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.css.query import NoMatches
-from textual.widgets import Input, Static
+from textual.widget import Widget
+from textual.widgets import Input, Static, TextArea
 
 from gc_tui.editors.connection import PRESET_NO_MATCH_CLOSED
 from gc_tui.editors.field_list import (
@@ -69,6 +71,7 @@ from gc_tui.services.probe_presentation import (
     connection_line_text,
     plural_models,
 )
+from gc_tui.services.yaml_view import safe_yaml_dump
 from gc_tui.widgets.paste_input import PasteInput
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -122,6 +125,158 @@ _ALIAS_OR_MODEL_EMPTY = "укажите id модели или алиас"
 # одной транзакцией (см. `_submit_form` секции).
 _ALIAS_RENAME_HINT = "переименование обновит уровни и привязки записи"
 _MODEL_LABEL = "Провайдерский id модели"
+_MAIN_LABEL = "main"
+_AUX_LABEL = "auxiliary"
+
+# Канон спеки, секция «Текст подсказки». Один статический блок: в поля ничего
+# не подставляет.
+KWARGS_HINT = """\
+Поля `main` и `auxiliary` — обычный YAML, как в config.yml. Пишется то, что уходит
+в запрос, без обёртки `chat_completion_kwargs:` / `completion_kwargs:`. `main` —
+диалог и субагенты. `auxiliary` — summary, судьи, finish_gate, intent_scope.
+Секции не смешиваются: пустой `auxiliary` не забирает ключи из `main`. Одна и та
+же температура и `tool_choice` обычно стоят в обеих секциях. В одно поле не
+складывать ключи разных семей: строгий прокси отвечает 400 на чужой ключ.
+
+Ключи `model`, `messages`, `tools`, `max_tokens`, `max_completion_tokens` сюда не
+писать — их выставляет рантайм. Лимиты служебных ответов
+(`max_tokens`, `judge_max_tokens`) — в `chat_completions.auxiliary_llm`, не здесь.
+Пустое поле значит «не слать vendor-ключей».
+
+Сэмплинг, общий для семей. У части моделей OpenAI (например gpt-5.5) `temperature`
+принимает только 1. `top_k`, `min_p`, `repetition_penalty` — vLLM и похожие, не
+каждый прокси.
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+# top_k: 20
+# min_p: 0.0
+# repetition_penalty: 1.2
+```
+
+Qwen / vLLM. Выключить рассуждение:
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+separate_reasoning: false
+chat_template_kwargs:
+  enable_thinking: false
+```
+
+Включить:
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+separate_reasoning: true
+chat_template_kwargs:
+  enable_thinking: true
+```
+
+GLM / DeepSeek-style. Выключить:
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+chat_template_kwargs:
+  thinking: false
+  reasoning_effort: none
+```
+
+Слабее и сильнее:
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+chat_template_kwargs:
+  thinking: true
+  reasoning_effort: low
+```
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+chat_template_kwargs:
+  thinking: true
+  reasoning_effort: high
+```
+
+Если прокси ждёт `reasoning_effort` рядом с `temperature`, а не внутри
+`chat_template_kwargs`:
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+reasoning_effort: high
+chat_template_kwargs:
+  thinking: true
+```
+
+OpenAI-like. Выключить и уровни усилия — ключ на том же уровне, что `temperature`:
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+reasoning_effort: none
+```
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+reasoning_effort: low
+```
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+reasoning_effort: medium
+```
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+reasoning_effort: high
+```
+
+Модель без thinking API — только сэмплинг, без флагов рассуждения:
+
+```yaml
+temperature: 1.0
+top_p: 1.0
+tool_choice: auto
+```
+
+`auxiliary` той же модели повторяет сэмплинг и гасит рассуждение тем диалектом,
+который понимает этот бэкенд. Для Qwen это `enable_thinking: false`, для GLM —
+`thinking: false` и `reasoning_effort: none`, для OpenAI — `reasoning_effort: none`.
+
+В корабельных примерах та же форма файла: у модели с thinking в `main` секция
+`auxiliary` — off.
+"""
+
+
+def _completion_field_text(value) -> str:
+    """Текст YAML-поля: пустой mapping и отсутствие секции — пустая строка.
+
+    Непустой mapping — раскрытый YAML (`safe_yaml_dump`), не `{a: b}`."""
+    if value is None or value == {}:
+        return ""
+    return safe_yaml_dump(value).rstrip("\n")
+
+
 _MODEL_PLACEHOLDER = "если не указать — id модели равен алиасу"
 # Тёзка — своя запись профиля под именем записи основного конфига: пустое поле id у
 # неё значит не «равен алиасу», а `model` ЗАСЛОНЁННОЙ записи (так сливает запись
@@ -307,6 +462,18 @@ def _env_missing_line(*raw_values: str | None) -> str:
 
 
 class ModelEntryForm(Vertical):
+    DEFAULT_CSS = """
+    ModelEntryForm TextArea.mef-yaml {
+        height: 5;
+    }
+    ModelEntryForm #mef-kwargs-hint-scroll {
+        height: 8;
+    }
+    ModelEntryForm #mef-kwargs-hint {
+        height: auto;
+    }
+    """
+
     def __init__(
         self,
         *,
@@ -355,6 +522,8 @@ class ModelEntryForm(Vertical):
         self._alias0 = self._own_alias or ""
         self._model0 = initial.get("model") or ""
         self._url0 = initial.get("url") or ""
+        self._main_text = _completion_field_text(initial.get("main"))
+        self._aux_text = _completion_field_text(initial.get("auxiliary"))
         # Второе написание пары (`backend.completions_url` / `proxy` /
         # `chat_completion_headers.Authorization`) форма не правит, но обязана ВИДЕТЬ:
         # правило §2 считает его таким же своим подключением, и запись, задавшую пару
@@ -406,6 +575,8 @@ class ModelEntryForm(Vertical):
             None,
             "mef-model",
             "mef-alias",
+            "mef-main",
+            "mef-auxiliary",
         )
         self._idx = 0
         self._models: list = []
@@ -504,6 +675,8 @@ class ModelEntryForm(Vertical):
             "url": self._url0,
             "token": "",
             "model": self._model0,
+            "main": self._main_text,
+            "auxiliary": self._aux_text,
         }
 
     # --- рендер ---
@@ -926,6 +1099,31 @@ class ModelEntryForm(Vertical):
             classes=icls,
         )
         yield Static(self._alias_hint(), classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(_MAIN_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
+        yield TextArea(
+            self._main_text,
+            soft_wrap=True,
+            show_line_numbers=False,
+            tab_behavior="focus",
+            id="mef-main",
+            classes="mef-yaml",
+        )
+        yield Static(_AUX_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
+        yield TextArea(
+            self._aux_text,
+            soft_wrap=True,
+            show_line_numbers=False,
+            tab_behavior="focus",
+            id="mef-auxiliary",
+            classes="mef-yaml",
+        )
+        with VerticalScroll(id="mef-kwargs-hint-scroll"):
+            yield Static(
+                KWARGS_HINT,
+                id="mef-kwargs-hint",
+                classes=_CLS_ONB_HINT_ONB_DYN,
+                markup=False,
+            )
         yield Static(
             connection_line_text(None),
             id="mef-probe-line",
@@ -1129,7 +1327,7 @@ class ModelEntryForm(Vertical):
             # «съедал» бы Space и печать.
             self.screen.set_focus(None)
         else:
-            self.query_one(f"#{target}", Input).focus()
+            self.query_one(f"#{target}", Widget).focus()
 
     def refocus(self) -> None:
         """Вернуть ввод в поле под курсором — и только это.
@@ -1141,7 +1339,26 @@ class ModelEntryForm(Vertical):
         if target is None:
             self.screen.set_focus(None)  # позиция галки: у неё поля нет
         else:
-            self.query_one(f"#{target}", Input).focus()
+            self.query_one(f"#{target}", Widget).focus()
+
+    def keeps_key(self, key: str) -> bool:
+        """Enter и стрелки внутри YAML остаются у TextArea.
+
+        У первой строки ↑ и у последней ↓ уходят форме. Раскрытый список модели
+        или пресетов клавишу не держит."""
+        target = self._positions[self._idx]
+        if target not in ("mef-main", "mef-auxiliary"):
+            return False
+        if self._list.is_open or self._presets_ctrl.is_open:
+            return False
+        if key == "enter":
+            return True
+        area = self.query_one(f"#{target}", TextArea)
+        if key == "up":
+            return not area.cursor_at_first_line
+        if key == "down":
+            return not area.cursor_at_last_line
+        return False
 
     def toggle_no_auth(self) -> bool:
         """Space на позиции галки: переключить «без авторизации». True — курсор был
@@ -1625,6 +1842,9 @@ class ModelEntryForm(Vertical):
     def _field_value(self, field_id: str) -> str:
         return self.query_one(f"#{field_id}", Input).value.strip()
 
+    def _yaml_text(self, field_id: str) -> str:
+        return self.query_one(f"#{field_id}", TextArea).text.rstrip()
+
     def _model_value(self) -> str:
         try:
             return self._field_value("mef-model")
@@ -1659,6 +1879,8 @@ class ModelEntryForm(Vertical):
             "url": self._field_value("mef-url"),
             "token": self._field_value("mef-token"),
             "model": self._field_value("mef-model"),
+            "main": self._yaml_text("mef-main"),
+            "auxiliary": self._yaml_text("mef-auxiliary"),
         }
 
     def is_dirty(self) -> bool:
@@ -1766,7 +1988,17 @@ class ModelEntryForm(Vertical):
             return self._fail(
                 _PAIR_NEEDS_TOKEN if has_address else _PAIR_NEEDS_URL
             )
+        try:
+            main = parse_completion_kwargs_text(values["main"])
+        except ValueError as exc:
+            return self._fail(f"main: {exc}")
+        try:
+            auxiliary = parse_completion_kwargs_text(values["auxiliary"])
+        except ValueError as exc:
+            return self._fail(f"auxiliary: {exc}")
         self._clear_error()
+        self._write_yaml("mef-main", main)
+        self._write_yaml("mef-auxiliary", auxiliary)
         fields: dict = {}
         if values["model"]:
             fields["model"] = values["model"]
@@ -1798,4 +2030,12 @@ class ModelEntryForm(Vertical):
             # ключ УДАЛЯЕТСЯ. Промолчать здесь значило бы оставить `token: ""` в файле
             # (пустое поле = «не трогаем») — переключатель работал бы в одну сторону.
             fields["token"] = None
+        fields["main"] = main
+        fields["auxiliary"] = auxiliary
         return True, alias, fields
+
+    def _write_yaml(self, field_id: str, value: dict) -> None:
+        """Поле после разбора — раскрытый YAML. Пустой mapping остаётся пустым."""
+        self.query_one(f"#{field_id}", TextArea).load_text(
+            _completion_field_text(value)
+        )

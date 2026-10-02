@@ -5,7 +5,7 @@ from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
 from gc_testkit import run_coro
 
 
-def test_auxiliary_llm_completion_kwargs_from_auxiliary_llm():
+def test_auxiliary_llm_completion_kwargs_ignores_completion_kwargs_overlay():
     ctx = SimpleNamespace(
         auxiliary_llm=SimpleNamespace(
             completion_kwargs={
@@ -15,11 +15,7 @@ def test_auxiliary_llm_completion_kwargs_from_auxiliary_llm():
             }
         )
     )
-    assert auxiliary_llm_completion_kwargs(ctx) == {
-        "reasoning_effort": "none",
-        "separate_reasoning": False,
-        "chat_template_kwargs": {"enable_thinking": False},
-    }
+    assert auxiliary_llm_completion_kwargs(ctx) == {}
 
 
 def test_summarize_tool_intent_line_uses_auxiliary_llm_completion_kwargs(

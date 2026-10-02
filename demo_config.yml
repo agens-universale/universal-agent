@@ -53,6 +53,16 @@ level: default
 #   flash:                                  # алиас — язык slots/assign
 #     model: qwen/qwen-2.5-flash            # провайдерский id; опущен → id = алиас
 #     url: https://openrouter.ai/api/v1/chat/completions
+#     main:
+#       temperature: 1.0
+#       tool_choice: auto
+#       chat_template_kwargs:
+#         enable_thinking: true
+#     auxiliary:
+#       temperature: 1.0
+#       tool_choice: auto
+#       chat_template_kwargs:
+#         enable_thinking: false
 #     token: sk-or-...                      # адрес и токен — ПАРА: задан один →
 #                                            # задавайте и второй; "" = «без
 #                                            # авторизации»; нет обоих → пара

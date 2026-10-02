@@ -11,15 +11,29 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+import yaml
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.config_modules.pricing import ModelTariff
 
 RESERVED_WORDS = ("light", "default", "max", "auto")
 LEVELS = ("light", "default", "max")
+
+# Рантайм ставит их сам (модель, история, тулы, лимит ответа). В main/auxiliary
+# они не пишутся: воронка их режет, форма отказывает до записи.
+PROTECTED_COMPLETION_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "tools",
+        "max_tokens",
+        "max_completion_tokens",
+    }
+)
 
 # Матрица фоллбэков уровня (спека §4): порядок обхода слотов, если слот
 # запрошенного уровня не задан. Живёт рядом с LEVELS — потребитель (ModelRouter,
@@ -29,6 +43,53 @@ LEVEL_FALLBACK: dict[str, tuple[str, str, str]] = {
     "default": ("default", "max", "light"),
     "max": ("max", "default", "light"),
 }
+
+
+def parse_completion_kwargs_text(text: str) -> dict[str, Any]:
+    """Текст поля ``main``/``auxiliary`` → mapping.
+
+    Пустое поле — ``{}``. JSON object — валидный YAML, разбирается тем же
+    путём. Список и скаляр — ошибка. Protected-ключи — ошибка: в файл их
+    не кладут, рантайм всё равно вырежет."""
+    raw = text.strip()
+    if not raw:
+        return {}
+    loaded = yaml.safe_load(raw)
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ValueError("нужен YAML-mapping, не список и не скаляр")
+    forbidden = [
+        str(key) for key in loaded if key in PROTECTED_COMPLETION_KEYS
+    ]
+    if forbidden:
+        raise ValueError(
+            f"ключи {', '.join(forbidden)} задаёт рантайм — уберите их из поля"
+        )
+    return loaded
+
+
+def effective_completion_kwargs(
+    resolved: Any, config_dict: dict | None, *, section: str
+) -> dict[str, Any]:
+    """Kwargs секции резолвленного алиаса.
+
+    ``main`` задан (в том числе пустой ``{}``) — целиком заменяет глобальный
+    ``backend.chat_completion_kwargs``. Не задан — глобальный dict.
+    ``auxiliary`` не мержится с ``main`` и не читает глобальный dict: пустая
+    или отсутствующая секция не копирует thinking-ключи ``main``.
+    ``models.<alias>.backend.chat_completion_kwargs`` не читается.
+    """
+    chosen = getattr(resolved, section, None) if resolved is not None else None
+    if isinstance(chosen, dict):
+        return copy.deepcopy(chosen)
+    if section != "main":
+        return {}
+    cfg = config_dict if isinstance(config_dict, dict) else {}
+    global_kw = cfg.get("chat_completion_kwargs")
+    if isinstance(global_kw, dict):
+        return copy.deepcopy(global_kw)
+    return {}
 
 
 def validate_model_alias(alias: str) -> None:
@@ -224,6 +285,19 @@ class ModelEntry(BaseModel):
     token: str | None = None
     pricing: ModelTariff | None = None
     backend: BackendConfig | None = None
+    # None — секция не задана (main наследует глобальный dict, auxiliary пуст).
+    # {} — задана и пуста: replace, без ключей main и без глобального dict.
+    main: dict[str, Any] | None = None
+    auxiliary: dict[str, Any] | None = None
+
+    @field_validator("main", "auxiliary", mode="before")
+    @classmethod
+    def _kwargs_section(cls, value: Any) -> dict[str, Any] | None:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            return value
+        raise ValueError("секция kwargs должна быть mapping")
 
     @model_validator(mode="after")
     def _validate_no_duplicate_settings(self) -> ModelEntry:

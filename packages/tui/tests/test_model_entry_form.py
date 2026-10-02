@@ -34,6 +34,16 @@ def _harness(editor):
     return _App()
 
 
+def _land(form, position: str) -> None:
+    """Курсор на позицию кольца. Новые поля стоят после алиаса, и два шага
+    «адрес → алиас → id» больше не попадают в id модели."""
+    for _ in range(len(form._positions) + 1):
+        if form._positions[form._idx] == position:
+            return
+        form.move(-1)
+    raise AssertionError(f"позиции {position} в кольце нет")
+
+
 def _form(**kwargs):
     """Форма с инъекцией сети-заглушки: тесты, которым сеть не нужна, всё равно не
     должны иметь ни малейшего шанса в неё сходить."""
@@ -124,8 +134,7 @@ async def test_escape_collapses_the_list_and_then_gives_the_key_back(tmp_path):
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()  # автоподгрузка раскрыла список
         assert _rows(form), "список не раскрылся"
@@ -706,8 +715,7 @@ async def test_the_model_list_does_not_send_the_inherited_token_to_a_typed_addre
         ).value = "https://foreign/v1/chat/completions"
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert calls == [("https://foreign/v1/chat/completions", None)], calls
@@ -1174,7 +1182,7 @@ async def test_ctrl_u_is_not_ours_off_the_pair_fields_or_over_a_shared_pair():
     )
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
-        form.move(-1)  # адрес → алиас (по кольцу)
+        _land(form, "mef-alias")
         await pilot.pause()
         assert form.clear_token() is False  # поле алиаса — не поле пары
         assert form.token_cleared is False
@@ -1641,8 +1649,7 @@ async def test_the_probe_and_the_model_list_of_a_namesake_go_to_the_shadowed_pai
             "BASE-TOKEN",
         ], seen
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert calls == [
@@ -1713,7 +1720,8 @@ async def test_empty_model_id_means_the_alias_is_the_id():
         await pilot.pause()
         form.query_one("#mef-alias", Input).value = "gigacode"
         ok, alias, fields = form.submit()
-        assert (ok, alias, fields) == (True, "gigacode", {})
+        assert (ok, alias) == (True, "gigacode")
+        assert fields == {"main": {}, "auxiliary": {}}
 
 
 async def test_malformed_url_is_rejected():
@@ -1802,8 +1810,7 @@ async def test_the_model_list_loads_itself_on_field_entry():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert calls == [("http://hub/v1/chat/completions", "Bearer sk-HUB")]
@@ -1893,8 +1900,7 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
         ).value = "http://hub/v1/chat/completions"
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         from gc_tui.editors.field_list import LIST_FAILED
@@ -1903,8 +1909,7 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
             form.query_one("#mef-model-status", Static).render()
         )
         assert len(calls) == 1 and calls[0][1] is None
-        form.move(1)
-        form.move(1)  # id → алиас → адрес
+        _land(form, "mef-url")
         await pilot.pause()
         form.escape()  # вход на адрес раскрыл пресеты
         form.move(1)  # адрес → токен
@@ -1940,8 +1945,7 @@ async def test_the_autoload_answer_respects_can_open_over_a_typed_id():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()  # ответ автоподгрузки приехал
         assert form.list_open is False, "ответ раскрылся поверх набранного id"
@@ -1971,8 +1975,7 @@ async def test_the_forced_list_highlights_the_row_equal_to_the_field():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()  # автоподгрузка (список свёрнут)
         assert form.reload_models() is True  # явная просьба показать
@@ -2011,8 +2014,7 @@ async def test_the_forced_list_highlights_nothing_when_the_typed_id_has_no_exact
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()  # автоподгрузка (список свёрнут)
         assert form.reload_models() is True  # явная просьба показать
@@ -2052,21 +2054,18 @@ async def test_a_changed_address_invalidates_the_fetched_model_list():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert calls == [("http://host-a/v1/chat/completions", None)]
         form.escape()  # свернуть раскрытый список
-        form.move(1)
-        form.move(1)  # id → алиас → адрес
+        _land(form, "mef-url")
         await pilot.pause()
         form.query_one(
             "#mef-url", Input
         ).value = "http://host-b/v1/chat/completions"
         await pilot.pause()  # пресеты закрылись сами (нет совпадений)
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert len(calls) == 2, "смена адреса не перечитала список"
@@ -2083,8 +2082,7 @@ async def test_alt_down_reports_a_dead_endpoint_instead_of_staying_silent():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()  # автоподгрузка при входе
         from gc_tui.editors.field_list import LIST_FAILED
@@ -2135,8 +2133,7 @@ async def test_ctrl_space_probes_and_alt_down_fetches_and_they_never_swap():
 
         probes.clear()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()  # автоподгрузка при входе
         assert probes == [], "подбор списка постучался пробой"
@@ -2261,8 +2258,7 @@ async def test_the_model_list_resolves_env_references_before_the_request(
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         assert calls == [
@@ -2301,8 +2297,7 @@ async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(
         line = str(form.query_one("#mef-probe-line", Static).render())
         assert "MEF_ABSENT" in line and "переменной нет" in line, line
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         status = str(form.query_one("#mef-model-status", Static).render())
@@ -2372,8 +2367,7 @@ async def test_a_missing_env_variable_in_the_token_stops_the_model_list(
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         status = str(form.query_one("#mef-model-status", Static).render())
@@ -2427,8 +2421,7 @@ async def test_form_tells_the_host_where_the_cursor_is_and_what_is_open():
         )
         assert form.escape() is True  # свернуть — двигаться дальше
         await pilot.pause()
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
         # Автоподгрузка на входе (fetch-стаб): список раскрылся сам, строка выделена.
@@ -2464,8 +2457,7 @@ async def test_both_lists_live_inside_their_field_frames():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()  # автоподгрузка раскрыла список
         model_group = form.query_one("#mef-model-group")
@@ -2483,8 +2475,7 @@ async def test_both_lists_live_inside_their_field_frames():
         # уйти с поля можно только свернув его (канон §4.2.2).
         assert form.escape() is True
         await pilot.pause()
-        form.move(1)
-        form.move(1)  # id → алиас → адрес: пресеты раскрылись
+        _land(form, "mef-url")  # пресеты раскрылись
         await pilot.pause()
         url_group = form.query_one("#mef-url-group")
         assert form.query_one("#mef-url", Input).parent is url_group
@@ -2579,8 +2570,7 @@ async def test_a_failure_while_the_cursor_was_away_is_reported_on_return():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()  # свернуть пресеты входа
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         form.move(1)  # уйти с поля, не дождавшись
         for _ in range(3):
             await pilot.pause()  # ответ приходит под чужим полем
@@ -2674,8 +2664,7 @@ async def test_empty_server_answer_is_not_reported_as_a_failure():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         form.escape()
-        form.move(-1)
-        form.move(-1)  # адрес → алиас → id модели
+        _land(form, "mef-model")
         for _ in range(4):
             await pilot.pause()
         assert (
@@ -2829,3 +2818,93 @@ async def test_typing_in_the_id_field_reopens_the_fetched_list_with_a_filter():
         assert form._list.is_open, "печать не вернула свёрнутый список"
         shown = " ".join(str(w.render()) for w in _rows(form))
         assert "glm" in shown and "gemini" not in shown  # фильтр по набранному
+
+
+def _paired_form(**extra):
+    initial = {
+        "alias": "flash",
+        "model": "google/gemini-2.5-flash",
+        "url": "https://openrouter.ai/api/v1/chat/completions",
+        "token": "sk-secret",
+    }
+    initial.update(extra.pop("initial", {}))
+    return _form(initial=initial, existing_aliases={"flash"}, **extra)
+
+
+@pytest.mark.asyncio
+async def test_yaml_fields_round_trip_and_reject_bad_input():
+    """main/auxiliary — mapping без обёртки. JSON становится раскрытым YAML.
+    Список, скаляр и protected-ключи — ошибка, в fields их нет."""
+    from textual.widgets import TextArea
+
+    from gc_tui.editors.model_entry_form import KWARGS_HINT
+    from gc_tui.services.yaml_view import safe_yaml_dump
+
+    saved = {
+        "temperature": 0.2,
+        "tool_choice": "auto",
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
+    form = _paired_form(initial={"main": saved, "auxiliary": {}})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        main = form.query_one("#mef-main", TextArea)
+        aux = form.query_one("#mef-auxiliary", TextArea)
+        assert main.text.rstrip() == safe_yaml_dump(saved).rstrip("\n")
+        assert "{" not in main.text
+        assert aux.text.strip() == ""
+        hint = str(form.query_one("#mef-kwargs-hint", Static).render())
+        assert "Поля `main` и `auxiliary`" in hint
+        assert "enable_thinking: false" in hint
+        assert main.text == safe_yaml_dump(saved).rstrip(
+            "\n"
+        ) or main.text.rstrip("\n") == safe_yaml_dump(saved).rstrip("\n")
+        assert "Поля `main`" not in main.text
+
+        main.load_text('{"temperature": 0.4, "top_p": 0.8}')
+        ok, alias, fields = form.submit()
+        assert ok is True and alias == "flash"
+        assert fields["main"] == {"temperature": 0.4, "top_p": 0.8}
+        assert fields["auxiliary"] == {}
+        shown = form.query_one("#mef-main", TextArea).text
+        assert "temperature:" in shown
+        assert "{" not in shown
+
+        main.load_text("- a\n- b\n")
+        ok, _, fields = form.submit()
+        assert ok is False and fields is None
+        assert "список" in str(form.query_one("#mef-error", Static).render())
+
+        main.load_text("temperature: 1\n")
+        aux.load_text("just-a-scalar\n")
+        ok, _, fields = form.submit()
+        assert ok is False and fields is None
+
+        main.load_text("model: hidden\nmax_tokens: 9\n")
+        aux.load_text("")
+        ok, _, fields = form.submit()
+        assert ok is False and fields is None
+        assert "max_tokens" in str(
+            form.query_one("#mef-error", Static).render()
+        )
+        assert KWARGS_HINT.splitlines()[0] in hint
+
+
+@pytest.mark.asyncio
+async def test_yaml_field_keeps_enter_and_arrows_inside_the_text():
+    from textual.widgets import TextArea
+
+    form = _paired_form()
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        _land(form, "mef-main")
+        area = form.query_one("#mef-main", TextArea)
+        area.load_text("temperature: 1.0\ntop_p: 1.0")
+        area.cursor_location = (0, 0)
+        assert form.keeps_key("enter") is True
+        assert form.keeps_key("up") is False
+        area.cursor_location = (1, 0)
+        assert area.cursor_at_last_line
+        assert form.keeps_key("up") is True
+        assert form.keeps_key("down") is False
+        assert form.keeps_key("enter") is True

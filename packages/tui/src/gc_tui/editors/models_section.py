@@ -1897,6 +1897,19 @@ class ModelsSectionEditor(Vertical):
         return _FOOTER_FORM_FIELD
 
     # --- клавиши --------------------------------------------------------------
+    def form_keeps_key(self, key: str) -> bool:
+        """YAML-поля формы держат Enter и стрелки внутри текста.
+
+        Пикер и баннер перезаписи ссылки клавишу не отдают: там стрелки водят
+        по списку, а Enter подтверждает."""
+        if (
+            self._form is None
+            or self._picker is not None
+            or self._env_pending is not None
+        ):
+            return False
+        return self._form.keeps_key(key)
+
     def move(self, delta: int) -> None:
         if self._pending is not None or self._env_pending is not None:
             return

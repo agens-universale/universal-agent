@@ -303,7 +303,8 @@ def test_create_call_data_completions_backend_overrides_apply_on_top():
     )
     assert data["max_tokens"] == 55
     assert "max_completion_tokens" not in data
-    assert data["temperature"] == 0.9
+    # Kwargs живут в main, не в backend алиаса: оверрайд backend их не подменяет.
+    assert data["temperature"] == 0.1
 
 
 def test_create_call_headers_backend_overrides_chat_completion_headers():
@@ -445,7 +446,10 @@ async def test_command_judge_declares_own_consumer(monkeypatch):
     )
     result = await judge_client({"tool_name": "execute_command"})
     assert result["verdict"] == "safe"
-    router.resolve.assert_called_once_with("command_judge")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "command_judge",
+        "command_judge",
+    ]
 
 
 def test_memory_compaction_declares_own_consumer(monkeypatch):
@@ -479,7 +483,10 @@ def test_finish_gate_declares_own_consumer(monkeypatch):
         )
     )
     assert result.action == "accept"
-    router.resolve.assert_called_once_with("finish_gate")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "finish_gate",
+        "finish_gate",
+    ]
 
 
 def test_text_answer_judge_declares_own_consumer_not_finish_gate(monkeypatch):
@@ -495,7 +502,10 @@ def test_text_answer_judge_declares_own_consumer_not_finish_gate(monkeypatch):
     result = run_coro(ajudge_text_answer(ctx, state, "the final answer text"))
     assert result is not None
     assert result.action == "accept"
-    router.resolve.assert_called_once_with("text_answer_judge")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "text_answer_judge",
+        "text_answer_judge",
+    ]
 
 
 def test_intent_scope_tool_summary_declares_own_consumer(monkeypatch):
@@ -513,7 +523,10 @@ def test_intent_scope_tool_summary_declares_own_consumer(monkeypatch):
         )
     )
     assert line == "a summary line"
-    router.resolve.assert_called_once_with("intent_scope")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "intent_scope",
+        "intent_scope",
+    ]
 
 
 def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
@@ -529,7 +542,10 @@ def test_intent_scope_final_answer_declares_own_consumer(monkeypatch):
         )
     )
     assert line == "final answer summary"
-    router.resolve.assert_called_once_with("intent_scope")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "intent_scope",
+        "intent_scope",
+    ]
 
 
 def test_summary_compress_declares_own_consumer(monkeypatch):
@@ -547,7 +563,10 @@ def test_summary_compress_declares_own_consumer(monkeypatch):
         )
     )
     assert out == "short"
-    router.resolve.assert_called_once_with("summary")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "summary",
+        "summary",
+    ]
 
 
 def test_summary_repair_declares_own_consumer(monkeypatch):
@@ -567,7 +586,10 @@ def test_summary_repair_declares_own_consumer(monkeypatch):
         )
     )
     assert out == "<summary>fixed</summary>"
-    router.resolve.assert_called_once_with("summary")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "summary",
+        "summary",
+    ]
 
 
 def test_memory_patch_replace_declares_own_consumer(monkeypatch):
@@ -581,7 +603,10 @@ def test_memory_patch_replace_declares_own_consumer(monkeypatch):
         )
     )
     assert result.raw_response == "<goal>x</goal>"
-    router.resolve.assert_called_once_with("summary")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "summary",
+        "summary",
+    ]
 
 
 def test_memory_deltas_format_repair_declares_own_consumer(monkeypatch):
@@ -597,7 +622,10 @@ def test_memory_deltas_format_repair_declares_own_consumer(monkeypatch):
         )
     )
     assert out == "<goal>repaired</goal>"
-    router.resolve.assert_called_once_with("summary")
+    assert [c.args[0] for c in router.resolve.call_args_list] == [
+        "summary",
+        "summary",
+    ]
 
 
 def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
@@ -1136,7 +1164,6 @@ _HONORED_PER_MODEL = {
     "cert_path",
     "key_path",  # utils/connect_backend.effective_cert_config
     "chat_completion_headers",  # create_call_headers
-    "chat_completion_kwargs",  # сборка payload обеих воронок
     "chat_completions_max_tokens",  # потолок адаптивного цикла
     "chat_completions_min_response_tokens",  # пол адаптивного цикла
     "completions_url",  # model_router: адрес модели
@@ -1151,6 +1178,10 @@ _HONORED_PER_MODEL = {
 
 # Остаются глобальными ОСОЗНАННО — с причиной у каждого.
 _GLOBAL_ONLY = {
+    "chat_completion_kwargs": (
+        "глобальный dict для main без своей секции; kwargs алиаса — "
+        "models.<alias>.main и auxiliary, backend алиаса их не несёт"
+    ),
     "api_mode": "режим прогона: responses/chat_completions выбирается один раз на ран",
     "stream": "флаг TUI-стрима, к модели отношения не имеет",
     "openai_strict_tools_schema": "спека тулов собирается один раз на RunContext",

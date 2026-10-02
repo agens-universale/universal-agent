@@ -1,0 +1,285 @@
+"""Per-alias main/auxiliary: replace, не deep-merge и не чужой диалект."""
+
+from types import SimpleNamespace
+
+from gc_core.config import flatten_app_config
+from gc_core.config_modules.root import AppConfig
+from gc_core.model_router import ModelRouter
+from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
+from gc_core.utils.connect_backend import create_call_data_completions
+from gc_core.utils.llm_chat_client import _build_chat_completion_payload
+
+
+def _cfg(raw: dict) -> dict:
+    return flatten_app_config(AppConfig.model_validate(raw))
+
+
+def _router(cfg: dict, level: str = "default") -> ModelRouter:
+    return ModelRouter(cfg, level_provider=lambda: level)
+
+
+def _main_payload(cfg: dict, resolved) -> dict:
+    return create_call_data_completions(
+        [{"role": "user", "content": "hi"}],
+        SimpleNamespace(messages=[], tools=[], default_model="legacy"),
+        config_dict=cfg,
+        resolved=resolved,
+    )
+
+
+def _aux_payload(cfg: dict, consumer: str, *, level: str = "default") -> dict:
+    router = _router(cfg, level)
+    return _build_chat_completion_payload(
+        ctx=SimpleNamespace(config_dict=cfg),
+        state=SimpleNamespace(default_model="legacy"),
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=32,
+        resolved=router.resolve(consumer),
+        consumer=consumer,
+    )
+
+
+_PROFILE = {
+    "backend": {
+        "chat_completion_kwargs": {
+            "temperature": 0.1,
+            "top_p": 0.9,
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+    },
+    "models": {
+        "glm-5.3-flash-ctx262k": {
+            "model": "glm-5.3-flash-ctx262k",
+            "url": "http://glm/v1/chat/completions",
+            "token": "",
+            "main": {
+                "temperature": 1.0,
+                "chat_template_kwargs": {
+                    "thinking": True,
+                    "reasoning_effort": "high",
+                },
+            },
+            "auxiliary": {
+                "temperature": 0.2,
+                "chat_template_kwargs": {
+                    "thinking": False,
+                    "reasoning_effort": "none",
+                },
+            },
+        },
+        "gc_v2": {
+            "model": "gc_v2",
+            "url": "http://gc/v1/chat/completions",
+            "token": "",
+            "main": {"temperature": 0.5, "tool_choice": "auto"},
+            "auxiliary": {"temperature": 0.3, "tool_choice": "auto"},
+        },
+        "qwen_38_mlsp": {
+            "model": "qwen_38_mlsp",
+            "url": "http://qwen/v1/chat/completions",
+            "token": "",
+            "main": {
+                "temperature": 0.4,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+            "auxiliary": {
+                "temperature": 0.4,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+        },
+        "quiet": {
+            "model": "quiet",
+            "url": "http://quiet/v1/chat/completions",
+            "token": "",
+            "main": {
+                "temperature": 0.8,
+                "chat_template_kwargs": {"enable_thinking": True},
+            },
+            "auxiliary": {},
+        },
+        "same-id-a": {
+            "model": "shared-id",
+            "url": "http://a/v1/chat/completions",
+            "token": "",
+            "main": {"temperature": 0.11},
+        },
+        "same-id-b": {
+            "model": "shared-id",
+            "url": "http://b/v1/chat/completions",
+            "token": "",
+            "main": {"temperature": 0.22},
+        },
+    },
+    "slots": {
+        "light": "qwen_38_mlsp",
+        "default": "gc_v2",
+        "max": "glm-5.3-flash-ctx262k",
+    },
+    "assign": {
+        "summary": "gc_v2",
+        "finish_gate": "max",
+        "intent_scope": "quiet",
+        "subagents": {"subagent_code_planner": "glm-5.3-flash-ctx262k"},
+    },
+}
+
+
+def test_level_switch_uses_that_alias_main_and_drops_the_other_dialect():
+    held = {"level": "light"}
+    cfg = _cfg(_PROFILE)
+    router = ModelRouter(cfg, level_provider=lambda: held["level"])
+    light = _main_payload(cfg, router.resolve("main"))
+    held["level"] = "max"
+    hot = _main_payload(cfg, router.resolve("main"))
+    assert light["chat_template_kwargs"] == {"enable_thinking": False}
+    assert light["temperature"] == 0.4
+    assert hot["chat_template_kwargs"] == {
+        "thinking": True,
+        "reasoning_effort": "high",
+    }
+    assert "enable_thinking" not in hot["chat_template_kwargs"]
+    assert hot["temperature"] == 1.0
+    assert "top_p" not in hot
+
+
+def test_partial_main_replaces_global_temperature():
+    cfg = _cfg(
+        {
+            "backend": {
+                "chat_completion_kwargs": {"temperature": 0.7, "top_p": 0.9}
+            },
+            "models": {
+                "only": {
+                    "url": "http://only/v1/chat/completions",
+                    "token": "",
+                    "main": {"top_p": 0.2},
+                }
+            },
+            "slots": {"default": "only"},
+        }
+    )
+    data = _main_payload(cfg, _router(cfg).resolve("main"))
+    assert data["top_p"] == 0.2
+    assert "temperature" not in data
+
+
+def test_alias_backend_chat_completion_kwargs_are_not_read():
+    cfg = _cfg(
+        {
+            "backend": {"chat_completion_kwargs": {"temperature": 0.1}},
+            "models": {
+                "only": {
+                    "url": "http://only/v1/chat/completions",
+                    "token": "",
+                    "backend": {
+                        "chat_completion_kwargs": {"temperature": 0.9}
+                    },
+                }
+            },
+            "slots": {"default": "only"},
+        }
+    )
+    data = _main_payload(cfg, _router(cfg).resolve("main"))
+    assert data["temperature"] == 0.1
+
+
+def test_unset_main_keeps_the_global_dict():
+    cfg = _cfg(
+        {
+            "backend": {"chat_completion_kwargs": {"temperature": 0.15}},
+            "models": {
+                "only": {
+                    "url": "http://only/v1/chat/completions",
+                    "token": "",
+                }
+            },
+            "slots": {"default": "only"},
+        }
+    )
+    data = _main_payload(cfg, _router(cfg).resolve("main"))
+    assert data["temperature"] == 0.15
+
+
+def test_summary_finish_gate_and_subagent_read_different_sections():
+    cfg = _cfg(_PROFILE)
+    summary = _aux_payload(cfg, "summary")
+    assert summary["temperature"] == 0.3
+    assert summary["tool_choice"] == "auto"
+    assert "chat_template_kwargs" not in summary
+    assert "enable_thinking" not in summary
+
+    gate = _aux_payload(cfg, "finish_gate")
+    assert gate["chat_template_kwargs"] == {
+        "thinking": False,
+        "reasoning_effort": "none",
+    }
+    assert gate["temperature"] == 0.2
+
+    router = _router(cfg)
+    planner = _main_payload(
+        cfg, router.resolve("subagent:subagent_code_planner")
+    )
+    assert planner["chat_template_kwargs"]["thinking"] is True
+    assert planner["chat_template_kwargs"]["reasoning_effort"] == "high"
+
+    role = _build_chat_completion_payload(
+        ctx=SimpleNamespace(config_dict=cfg),
+        state=SimpleNamespace(default_model="legacy"),
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=32,
+        resolved=router.resolve("subagent:subagent_code_planner"),
+        consumer="subagent:subagent_code_planner",
+    )
+    assert role["chat_template_kwargs"]["thinking"] is True
+
+
+def test_empty_auxiliary_does_not_copy_main_or_global_thinking():
+    cfg = _cfg(_PROFILE)
+    payload = _aux_payload(cfg, "intent_scope")
+    assert "chat_template_kwargs" not in payload
+    assert "enable_thinking" not in payload
+    assert "temperature" not in payload
+    assert "top_p" not in payload
+
+
+def test_auxiliary_llm_completion_kwargs_follows_the_resolved_alias():
+    cfg = _cfg(_PROFILE)
+    router = _router(cfg)
+    ctx = SimpleNamespace(
+        config_dict=cfg,
+        model_router=router,
+        auxiliary_llm=SimpleNamespace(
+            completion_kwargs={
+                "reasoning_effort": "high",
+                "chat_template_kwargs": {"enable_thinking": True},
+            }
+        ),
+    )
+    summary = auxiliary_llm_completion_kwargs(ctx)
+    assert summary == {"temperature": 0.3, "tool_choice": "auto"}
+    gate = auxiliary_llm_completion_kwargs(ctx, "finish_gate")
+    assert gate["chat_template_kwargs"]["thinking"] is False
+    assert "enable_thinking" not in gate.get("chat_template_kwargs", {})
+
+
+def test_two_aliases_with_one_model_id_do_not_collapse():
+    cfg = _cfg(_PROFILE)
+    router = _router(cfg)
+    first = router.resolve("summary")
+    assert first.alias == "gc_v2"
+    held = {"level": "default"}
+    direct = ModelRouter(
+        cfg,
+        level_provider=lambda: held["level"],
+    )
+    # Оба алиаса с одним id остаются разными записями снимка.
+    models = cfg["models"]
+    assert models["same-id-a"]["model"] == models["same-id-b"]["model"]
+    assert models["same-id-a"]["main"] != models["same-id-b"]["main"]
+    assert set(models) >= {"same-id-a", "same-id-b", "quiet"}
+    assert "quiet" not in {
+        cfg["slots"]["light"],
+        cfg["slots"]["default"],
+        cfg["slots"]["max"],
+    }
+    assert direct.resolve("main").alias == "gc_v2"

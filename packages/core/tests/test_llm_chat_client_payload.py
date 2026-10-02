@@ -121,7 +121,8 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
     assert captured["payload"]["model"] == "test-model"
     assert captured["payload"]["max_completion_tokens"] == 321
     assert "max_tokens" not in captured["payload"]
-    assert captured["payload"]["temperature"] == 0.3
+    # summary без резолвленного алиаса не копирует глобальный dict.
+    assert "temperature" not in captured["payload"]
 
 
 def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(

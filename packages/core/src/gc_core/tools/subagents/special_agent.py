@@ -210,7 +210,9 @@ class SpecialAgent(AbstractSubagent):
             "request_label": "subagent_special_agent",
             # Профиль aux-вызовов — с develop: без него роль шла бы мимо
             # `auxiliary_llm` kwargs, которыми правятся все служебные вызовы.
-            "payload_overrides": auxiliary_llm_completion_kwargs(ctx),
+            "payload_overrides": auxiliary_llm_completion_kwargs(
+                ctx, f"{SUBAGENT_CONSUMER_PREFIX}{self.agent_name}"
+            ),
         }
 
     async def _agenerate_role(self, ctx: Any, state: Any) -> str:

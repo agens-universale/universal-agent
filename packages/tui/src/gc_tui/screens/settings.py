@@ -15,7 +15,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import Screen
-from textual.widgets import Input, Rule, Static
+from textual.widgets import Input, Rule, Static, TextArea
 
 from gc_tui.editors.field_list import LIST_CLOSED_HINT
 from gc_tui.editors.models_section import FOOTER_PROFILE_BACK
@@ -2054,6 +2054,12 @@ class SettingsScreen(Screen):
                 ed.confirm_pending()  # escape снят выше, глобальным гейтом
                 self._refresh_footer()
             return True
+        if event.key in ("up", "down", "enter") and ed.form_keeps_key(
+            event.key
+        ):
+            # YAML-поле main/auxiliary: Enter — перевод строки, ↑/↓ ходят по
+            # тексту, пока курсор не у края. Клавишу виджету, не форме.
+            return False
         if event.key in ("up", "down"):
             event.stop()
             ed.move(-1 if event.key == "up" else 1)
@@ -2094,7 +2100,9 @@ class SettingsScreen(Screen):
             ed.enter()
             self._refresh_footer()
             return True
-        if event.key == "delete" and not isinstance(self.focused, Input):
+        if event.key == "delete" and not isinstance(
+            self.focused, (Input, TextArea)
+        ):
             event.stop()
             ed.request_remove()
             self._refresh_footer()
@@ -2105,7 +2113,7 @@ class SettingsScreen(Screen):
             return True
         if event.key in ("alt+n", "alt+т", "alt+N", "alt+Т") or (
             event.key in ("n", "т", "N", "Т")
-            and not isinstance(self.focused, Input)
+            and not isinstance(self.focused, (Input, TextArea))
         ):
             event.stop()
             ed.new_entry()

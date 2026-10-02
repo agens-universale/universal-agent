@@ -433,8 +433,18 @@ models:                                  # реестр: алиас → пров
     url: https://openrouter.ai/api/v1/chat/completions
     token: "${ENV:OPENROUTER_API_KEY}"
     pricing: {input: 12, output: 48}     # тариф этой модели (формат секции pricing)
-    backend:                             # частичный backend поверх эффективного
-      chat_completion_kwargs: {temperature: 0.2}
+    main:                                # kwargs диалога и субагентов
+      temperature: 1.0
+      top_p: 1.0
+      tool_choice: auto
+      chat_template_kwargs:
+        enable_thinking: true
+    auxiliary:                           # summary, судьи, finish_gate, intent_scope
+      temperature: 1.0
+      top_p: 1.0
+      tool_choice: auto
+      chat_template_kwargs:
+        enable_thinking: false
 
 slots:                                   # уровни — указатели на алиасы, не копии
   light: flash

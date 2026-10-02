@@ -1,3 +1,4 @@
+import copy
 import os
 import shutil
 import sys
@@ -277,7 +278,7 @@ def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
     (``exclude_unset``), чтобы Router накладывал поверх эффективного backend лишь то,
     что модель реально переопределяет, а не дефолты ``BackendConfig``.
     """
-    return {
+    projected: Dict[str, Any] = {
         "model": entry.model,
         "url": entry.url,
         "authorization_header": entry.authorization_header,
@@ -290,6 +291,13 @@ def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
             else {}
         ),
     }
+    # Пустой dict тоже пишем: он заменяет глобальные kwargs, а отсутствие ключа —
+    # наследование. None (секция не задана) в снимок не кладём.
+    if isinstance(entry.main, dict):
+        projected["main"] = copy.deepcopy(entry.main)
+    if isinstance(entry.auxiliary, dict):
+        projected["auxiliary"] = copy.deepcopy(entry.auxiliary)
+    return projected
 
 
 def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:

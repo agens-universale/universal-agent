@@ -37,6 +37,16 @@ CONSUMERS = (
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
 
+
+def completion_section(consumer: str) -> str:
+    """Какую секцию kwargs читает вызов: основной и субагент — ``main``,
+    служебный (summary, судьи, finish_gate, intent_scope и прочие assign) —
+    ``auxiliary``."""
+    if consumer == "main" or consumer.startswith(SUBAGENT_CONSUMER_PREFIX):
+        return "main"
+    return "auxiliary"
+
+
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
 # кроме subagents-словаря и запрещённого main).
 _SCALAR_ASSIGN_FIELDS = (
@@ -63,6 +73,9 @@ class ResolvedModel:
     backend_overrides: dict  # плоские ключи backend поверх эффективных
     tariff: object | None
     source: str  # человекочитаемое «почему» — питает витрины/футер/notices
+    # None — секция в записи не задана. {} — задана пустой (replace без ключей).
+    main: dict | None = None
+    auxiliary: dict | None = None
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -306,6 +319,14 @@ class ModelRouter:
             )
         backend_overrides = entry.get("backend_overrides") or {}
         model_id = entry.get("model") or alias
+        main = (
+            entry.get("main") if isinstance(entry.get("main"), dict) else None
+        )
+        auxiliary = (
+            entry.get("auxiliary")
+            if isinstance(entry.get("auxiliary"), dict)
+            else None
+        )
         url = (
             entry.get("url")
             or backend_overrides.get("completions_url")
@@ -319,6 +340,8 @@ class ModelRouter:
             backend_overrides=backend_overrides,
             tariff=entry.get("pricing"),
             source=source,
+            main=main,
+            auxiliary=auxiliary,
         )
         # Сессионный предохранитель (спека §8): открытый алиас — мгновенный отказ
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).

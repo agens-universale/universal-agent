@@ -736,7 +736,9 @@ def _default_judge_client(
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
-            payload_overrides=auxiliary_llm_completion_kwargs(ctx),
+            payload_overrides=auxiliary_llm_completion_kwargs(
+                ctx, "command_judge"
+            ),
         )
         tags = projection_tags_from_config(cfg)
         return _parse_judge_json(

@@ -10,6 +10,7 @@ from uuid import uuid4
 import httpx
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
+from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.message_policy.chat_completions import (
     prepare_chat_completion_messages_for_api,
 )
@@ -941,7 +942,7 @@ def create_call_data_completions(
 
     _apply_chat_completion_kwargs(
         data,
-        _config_value(resolved, cfg, "chat_completion_kwargs"),
+        effective_completion_kwargs(resolved, cfg, section="main"),
         prompt_cache_on=prompt_cache_on,
     )
 

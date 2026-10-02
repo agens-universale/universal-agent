@@ -3,10 +3,12 @@
 from typing import Any, Dict, List, Optional
 
 from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
 from gc_core.message_projection import project_text_for_model
+from gc_core.model_router import AliasCircuitOpenError, completion_section
 from gc_core.utils.llm_chat_client import (
     arequest_chat_completion_text,
     log_llm_prompt_and_result,
@@ -22,19 +24,30 @@ def _require_auxiliary_llm(ctx: Any) -> Any:
     return auxiliary_llm
 
 
-def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
+def auxiliary_llm_completion_kwargs(
+    ctx: Any, consumer: str | None = None
+) -> Dict[str, Any]:
+    """Kwargs служебного вызова: ``auxiliary`` алиаса, куда резолвится consumer.
+
+    Сигнатура ``(ctx)`` сохранена: без consumer это ``summary`` (так зовёт CLI).
+    ``auxiliary_llm.completion_kwargs`` не читается. Субагент получает ``main``.
     """
-    Единый профиль chat/completions для вспомогательных LLM-вызовов:
-    thread summary, finish gate, intent scope (flat: ``auxiliary_llm_params``;
-    YAML: ``chat_completions.auxiliary_llm``).
-    """
-    auxiliary_llm = _require_auxiliary_llm(ctx)
-    completion_kwargs = getattr(auxiliary_llm, "completion_kwargs", None)
-    if not isinstance(completion_kwargs, dict):
-        raise RuntimeError(
-            "RunContext.auxiliary_llm.completion_kwargs must be a dict"
-        )
-    return dict(completion_kwargs)
+    consumer = consumer or "summary"
+    cfg = getattr(ctx, "config_dict", None)
+    resolved = None
+    router = getattr(ctx, "model_router", None)
+    if router is not None:
+        try:
+            resolved = router.resolve(consumer, check_breaker=False)
+        except AliasCircuitOpenError as exc:
+            resolved = exc.resolved
+        except ValueError:
+            resolved = None
+    return effective_completion_kwargs(
+        resolved,
+        cfg if isinstance(cfg, dict) else {},
+        section=completion_section(consumer),
+    )
 
 
 def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
@@ -112,7 +125,7 @@ async def arequest_summary_text(
     logger: Any | None = None,
 ) -> str:
     """Summary/intent-scope aux call: dirty logged, projected text returned."""
-    completion_kwargs = auxiliary_llm_completion_kwargs(ctx)
+    completion_kwargs = auxiliary_llm_completion_kwargs(ctx, consumer)
     effective_overrides = completion_kwargs
     if isinstance(payload_overrides, dict) and payload_overrides:
         effective_overrides = deep_merge(completion_kwargs, payload_overrides)

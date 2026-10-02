@@ -4,7 +4,12 @@ import functools
 import json
 from typing import Any, Dict, List, NamedTuple, Optional
 
-from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
+from gc_core.config_modules.model_registry import effective_completion_kwargs
+from gc_core.model_router import (
+    AliasCircuitOpenError,
+    ResolvedModel,
+    completion_section,
+)
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
@@ -41,7 +46,6 @@ _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(
         "model",
         "messages",
         "tools",
-        "tool_choice",
         "max_tokens",
         "max_completion_tokens",
     }
@@ -172,6 +176,7 @@ def _build_chat_completion_payload(
     max_tokens: int,
     payload_overrides: Optional[Dict[str, Any]] = None,
     resolved: Optional[ResolvedModel] = None,
+    consumer: str = "summary",
 ) -> Dict[str, Any]:
     cfg = getattr(ctx, "config_dict", {}) or {}
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
@@ -196,9 +201,9 @@ def _build_chat_completion_payload(
     else:
         payload["max_completion_tokens"] = max_tokens
 
-    extra = backend_override_value(resolved, "chat_completion_kwargs")
-    if extra is NO_BACKEND_OVERRIDE:
-        extra = cfg.get("chat_completion_kwargs")
+    extra = effective_completion_kwargs(
+        resolved, cfg, section=completion_section(consumer)
+    )
     if isinstance(extra, dict) and extra:
         for key, value in extra.items():
             if key in _PROTECTED_CHAT_COMPLETION_KEYS:
@@ -240,6 +245,7 @@ async def _asend_chat_completion_text(
     request_label: str,
     payload_overrides: Optional[Dict[str, Any]],
     resolved: Optional[ResolvedModel],
+    consumer: str,
 ) -> ChatCompletionText:
     cfg = getattr(ctx, "config_dict", {}) or {}
     log_params = cfg.get("logging_params")
@@ -257,6 +263,7 @@ async def _asend_chat_completion_text(
             max_tokens=requested_max_tokens,
             payload_overrides=payload_overrides,
             resolved=resolved,
+            consumer=consumer,
         )
 
     _min_response_tokens_override = backend_override_value(
@@ -342,6 +349,7 @@ async def arequest_chat_completion_outcome(
         max_tokens=max_tokens,
         request_label=request_label,
         payload_overrides=payload_overrides,
+        consumer=consumer,
     )
     if router is None:
         return await send(resolved=None)

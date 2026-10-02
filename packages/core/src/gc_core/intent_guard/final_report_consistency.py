@@ -165,7 +165,7 @@ async def _arequest_finish_gate_once(
         max_tokens=auxiliary_llm_judge_max_tokens(ctx),
         request_label=request_label,
         consumer=consumer,
-        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
+        payload_overrides=auxiliary_llm_completion_kwargs(ctx, consumer),
     )
 
 

@@ -186,10 +186,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
                 trace_digest=self.digest,
             )
         )
-        self.assertEqual(
-            mock_llm.call_args.kwargs["payload_overrides"],
-            {"reasoning_effort": "none"},
-        )
+        self.assertEqual(mock_llm.call_args.kwargs["payload_overrides"], {})
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_request_label_finish_gate(self, mock_llm) -> None:
