@@ -5,7 +5,7 @@ from copy import deepcopy
 import pytest
 from gc_core.run_summary_coordinator import areset_run_flags
 from gc_core.thread_store import ThreadSession
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
 from gc_ua_temporalio.thread_store_contracts import (
@@ -23,7 +23,7 @@ async def test_remote_batch_reads_latest_meta_and_acknowledges_one_commit(
     tmp_path, backend
 ):
     store = (
-        FileThreadStore(str(tmp_path / "files"))
+        DurableFileThreadStore(str(tmp_path / "files"))
         if backend == "file"
         else SQLiteThreadStore(str(tmp_path / "db"))
     )

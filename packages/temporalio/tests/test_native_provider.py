@@ -8,14 +8,14 @@ import pytest
 from gc_core.config_modules import AppConfig
 from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.execution.resource_host import WorkerResourceHost
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_contracts import NativeCall
 from gc_ua_temporalio.native_provider import (
     NativeContextProvider,
     NativeProfile,
 )
-from gc_ua_temporalio.storage.effects import EffectLedger
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_ua_temporalio.storage.technical import TechnicalStore
 
 
 def profile(tmp_path, **overrides):
@@ -31,15 +31,13 @@ def profile(tmp_path, **overrides):
 
 
 def make_provider(tmp_path, profiles=None, store=None):
-    receipts = SQLiteThreadStore(str(tmp_path / "receipts.sqlite"))
-    store = store or FileThreadStore(str(tmp_path / "threads"))
+    receipts = TechnicalStore(str(tmp_path / "receipts.sqlite"))
+    store = store or DurableFileThreadStore(str(tmp_path / "threads"))
     return NativeContextProvider(
         profiles=profiles or {"test": profile(tmp_path)},
         stores={"files": store},
         receipts=receipts,
-        resource_host=WorkerResourceHost(
-            "test", ledger=EffectLedger(receipts)
-        ),
+        resource_host=WorkerResourceHost("test"),
     ), store
 
 
@@ -56,7 +54,7 @@ async def test_actual_context_store_and_stateless_restart(
 ):
     monkeypatch.chdir(tmp_path)
     store = (
-        FileThreadStore(str(tmp_path / "threads"))
+        DurableFileThreadStore(str(tmp_path / "threads"))
         if backend == "file"
         else SQLiteThreadStore(str(tmp_path / "threads.sqlite"))
     )
@@ -86,7 +84,7 @@ async def test_actual_context_store_and_stateless_restart(
         await provider.aclose()
 
 
-async def test_background_owner_is_lazy_and_cannot_be_recreated(
+async def test_background_owner_is_lazy_and_fresh_after_restart(
     tmp_path, monkeypatch
 ):
     monkeypatch.chdir(tmp_path)
@@ -101,8 +99,10 @@ async def test_background_owner_is_lazy_and_cannot_be_recreated(
         assert await provider(call()) is ctx
         restarted, _ = make_provider(tmp_path)
         assert await restarted(call()) is not ctx  # stateless work survives
-        with pytest.raises(ResourceOwnerLost):
-            await restarted.ensure_resource_owner(call())
+        # После перезапуска процесса — новый владелец: ресурсы не переживают
+        # процесс, и модель узнаёт о потере из ошибки инструмента.
+        fresh = await restarted.ensure_resource_owner(call())
+        assert fresh.process_epoch != ref.process_epoch
         await provider.close(call())
         await provider.close(call())
         assert await provider(call()) is ctx
@@ -279,7 +279,6 @@ async def test_cleanup_retry_after_handler_before_receipt_never_rebuilds_context
             context_provider=context_provider,
             stores={"files": store},
             receipts=context_provider.receipts,
-            effect_ledger=EffectLedger(context_provider.receipts),
             public_config=public_config_snapshot,
         )
 

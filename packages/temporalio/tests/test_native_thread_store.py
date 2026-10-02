@@ -6,7 +6,7 @@ import pytest
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.thread_store import ThreadSession
 from gc_core.thread_store_durable import ThreadStoreConflict
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_testkit.memory_thread_store import MemoryThreadStore
 from gc_testkit.thread_store_conformance import assert_conforms_async
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
@@ -59,14 +59,16 @@ def test_native_proxy_keeps_existing_async_store_contract(tmp_path):
     def factory():
         nonlocal counter
         counter += 1
-        return proxy_for(FileThreadStore(str(tmp_path / str(counter))))[0]
+        return proxy_for(DurableFileThreadStore(str(tmp_path / str(counter))))[
+            0
+        ]
 
     assert_conforms_async(factory)
 
 
 @pytest.mark.asyncio
 async def test_real_session_commits_history_and_meta_in_one_call(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
@@ -90,12 +92,14 @@ async def test_session_recomputes_after_ui_patch_without_losing_fields(
 ):
     from gc_core.thread_store import update_tui_meta
 
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
     )
-    update_tui_meta(str(tmp_path), "cli", "native", {"title": "Название"})
+    store._call(
+        update_tui_meta, str(tmp_path), "cli", "native", {"title": "Название"}
+    )
     session.meta["shared"] = {"working_memory": {"knowledge": "Факт"}}
     await session.apersist_batch(
         [{"id": "u1", "role": "user", "content": "Задача"}],
@@ -111,7 +115,7 @@ async def test_session_recomputes_after_ui_patch_without_losing_fields(
 
 @pytest.mark.asyncio
 async def test_failed_commit_does_not_advance_session(tmp_path, monkeypatch):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, _ = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
@@ -141,7 +145,7 @@ async def test_failed_commit_does_not_advance_session(tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_concurrent_history_writer_is_not_silently_adopted(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, _ = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
@@ -160,7 +164,7 @@ async def test_concurrent_history_writer_is_not_silently_adopted(tmp_path):
 
 @pytest.mark.asyncio
 async def test_compaction_uses_native_session_and_one_commit(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
@@ -197,7 +201,7 @@ def test_proxy_does_not_invent_optional_backend_capabilities():
 async def test_own_metadata_ack_avoids_conflict_and_keeps_pending_meta(
     tmp_path, compact
 ):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
@@ -234,16 +238,28 @@ async def test_external_metadata_is_not_covered_by_own_ack(
 ):
     from gc_core.thread_store import update_tui_meta
 
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
     )
     if external_first:
-        update_tui_meta(str(tmp_path), "cli", "native", {"title": "external"})
+        store._call(
+            update_tui_meta,
+            str(tmp_path),
+            "cli",
+            "native",
+            {"title": "external"},
+        )
     await proxy.apatch_runtime_flag("cli", "native", "finalizing", active=True)
     if not external_first:
-        update_tui_meta(str(tmp_path), "cli", "native", {"title": "external"})
+        store._call(
+            update_tui_meta,
+            str(tmp_path),
+            "cli",
+            "native",
+            {"title": "external"},
+        )
     if external_first:
         assert (
             proxy.metadata_ack_since(
@@ -268,7 +284,7 @@ async def test_external_metadata_is_not_covered_by_own_ack(
 async def test_history_change_with_same_max_seq_cannot_be_acknowledged(
     tmp_path, observe_read
 ):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
@@ -314,7 +330,7 @@ async def test_session_rejects_ack_with_changed_fence(
 ):
     from gc_core.thread_store_durable import ThreadStoreReceipt
 
-    proxy, _ = proxy_for(FileThreadStore(str(tmp_path)))
+    proxy, _ = proxy_for(DurableFileThreadStore(str(tmp_path)))
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="cli", thread_id="native", store=proxy
     )

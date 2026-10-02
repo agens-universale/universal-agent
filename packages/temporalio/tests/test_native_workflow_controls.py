@@ -12,11 +12,11 @@ from gc_ua_temporalio.native_contracts import NativeRunRequest
 from gc_ua_temporalio.native_provider import NativeWorkerConfig
 from gc_ua_temporalio.native_worker import build_native_runtime, worker_options
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
-from gc_ua_temporalio.session_contracts import UserMessage
+from gc_ua_temporalio.native_contracts import UserMessage
 from temporalio.client import WorkflowUpdateFailedError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from test_live_workflow import call
+from live_support import call
 
 
 def finish(report="done"):
@@ -180,7 +180,7 @@ async def test_two_turns_continue_as_new_and_delivery_dedup(
     async with runtime(tmp_path, url) as (env, contexts, _):
         handle = await env.client.start_workflow(
             NativeAgentWorkflow.run,
-            request(keep_alive=True, continue_after_turns=1),
+            request(keep_alive=True),
             id="controls",
             task_queue="native-controls",
         )
@@ -280,7 +280,7 @@ async def test_human_reply_receipt_survives_continue_as_new(
     async with runtime(tmp_path, url) as (env, _, _):
         handle = await env.client.start_workflow(
             NativeAgentWorkflow.run,
-            request(keep_alive=True, continue_after_turns=1),
+            request(keep_alive=True),
             id="human-receipt",
             task_queue="native-controls",
         )

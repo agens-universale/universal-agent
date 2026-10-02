@@ -1,5 +1,8 @@
 """Activities delegate to the injected native ThreadStore, without session policy."""
 
+import asyncio
+import inspect
+
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_durable import durable_store_capability
@@ -12,8 +15,21 @@ from gc_ua_temporalio.thread_store_contracts import (
 )
 
 
+async def _invoke(store, name, *args, **kwargs):
+    """Асинхронное хранилище — напрямую; синхронное (файлы, SQLite) — в потоке.
+
+    Иначе блокирующий I/O держит event loop worker'а и задерживает heartbeat
+    соседних activities.
+    """
+    native = getattr(store, "a" + name, None)
+    if inspect.iscoroutinefunction(native):
+        return await native(*args, **kwargs)
+    return await asyncio.to_thread(getattr(store, name), *args, **kwargs)
+
+
 class ThreadStoreActivities:
     def __init__(self, stores):
+        self.raw = dict(stores)
         self.stores = {
             name: athread_store(store) for name, store in stores.items()
         }
@@ -25,7 +41,7 @@ class ThreadStoreActivities:
 
     def _port(self, request):
         try:
-            return self.stores[request.store_id]
+            return self.raw[request.store_id]
         except KeyError:
             raise ApplicationError(
                 "Unknown configured ThreadStore",
@@ -35,9 +51,11 @@ class ThreadStoreActivities:
 
     @activity.defn(name="agent.thread.load")
     async def load(self, request: ThreadStoreCall) -> ThreadStoreReply:
-        capability = durable_store_capability(self._port(request))
+        store = self._port(request)
         try:
-            snapshot = await capability[0](
+            snapshot = await _invoke(
+                store,
+                "read_snapshot",
                 request.system_id,
                 request.thread_id,
                 include_state=request.include_state,
@@ -54,10 +72,14 @@ class ThreadStoreActivities:
                 type="ExecutionFailure",
                 non_retryable=True,
             )
-        capability = durable_store_capability(self._port(request))
+        store = self._port(request)
         try:
-            receipt = await capability[1](
-                request.system_id, request.thread_id, request.operation
+            receipt = await _invoke(
+                store,
+                "commit_operation",
+                request.system_id,
+                request.thread_id,
+                request.operation,
             )
             return ThreadStoreReply(receipt=receipt)
         except ExecutionFailure as exc:
@@ -66,8 +88,11 @@ class ThreadStoreActivities:
     @activity.defn(name="agent.thread.read_trace")
     async def read_trace(self, request: ThreadStoreCall) -> ThreadStoreReply:
         try:
-            records = await self._port(request).aread_subagent_trace(
-                request.system_id, request.thread_id
+            records = await _invoke(
+                self._port(request),
+                "read_subagent_trace",
+                request.system_id,
+                request.thread_id,
             )
             return ThreadStoreReply(trace=records)
         except ExecutionFailure as exc:

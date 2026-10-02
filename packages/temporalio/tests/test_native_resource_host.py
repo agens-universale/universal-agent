@@ -1,17 +1,18 @@
-"""Native resource owner lifecycle using the real persisted effect ledger."""
+"""Native resource owner lifecycle: one task owns live MCP/background resources."""
 
 import asyncio
-from dataclasses import asdict
 from types import SimpleNamespace
 
 import pytest
-from gc_core.execution.contracts import OutcomeUnknown, ToolEffectRequest
+from gc_core.execution.contracts import (
+    ExecutionFailure,
+    ToolEffectRequest,
+    ToolOutcomeUnknown,
+)
 from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.execution.tool_effects import arguments_digest
 from gc_core.mcp_session_owner import current_owner
-from gc_ua_temporalio.storage.effects import EffectLedger
-from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
 
 
 async def no_close():
@@ -59,8 +60,7 @@ def context(callback):
 async def test_cancelled_waiter_does_not_repeat_and_close_stays_in_owner_task(
     tmp_path,
 ):
-    ledger = EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    host = WorkerResourceHost("worker", ledger=ledger)
+    host = WorkerResourceHost("worker")
     entered, release = asyncio.Event(), asyncio.Event()
     events = []
 
@@ -87,60 +87,51 @@ async def test_cancelled_waiter_does_not_repeat_and_close_stays_in_owner_task(
     release.set()
     assert (await retry).result.output == "done"
     assert (await host.execute(ref, request())).result.output == "done"
-    assert ledger.get("session", "one")["status"] == "SUCCEEDED"
     await host.close(ref)
     assert [event[0] for event in events] == ["open", "call", "close"]
     assert all(event[1:] == events[0][1:] for event in events)
 
 
 @pytest.mark.asyncio
-async def test_failed_effect_is_persisted_unknown_and_not_retried(tmp_path):
-    ledger = EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    host = WorkerResourceHost("worker", ledger=ledger)
+async def test_failed_call_is_tool_feedback_and_owner_stays_alive(tmp_path):
+    host = WorkerResourceHost("worker")
     calls = []
 
     async def call(_arguments):
         calls.append(1)
-        raise ConnectionError("response lost after mutation")
+        if len(calls) == 1:
+            raise ConnectionError("server rejected the request")
+        return "ok"
 
     async def bootstrap():
         return context(call)
 
     ref = await host.open("session", str(tmp_path), bootstrap, close=no_close)
-    with pytest.raises(OutcomeUnknown):
-        await host.execute(ref, request())
-    with pytest.raises(OutcomeUnknown):
-        await host.execute(ref, request())
+    with pytest.raises(ConnectionError):
+        await host.execute(ref, request("bad"))
+    assert (await host.execute(ref, request("good"))).result.output == "ok"
     await host.close(ref)
-    assert calls == [1]
-    assert host.operation(ref, "one")["status"] == "UNKNOWN"
+    assert calls == [1, 1]
 
 
 @pytest.mark.asyncio
-async def test_restart_refuses_owner_recreation_and_persists_unknown(tmp_path):
-    ledger = EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    host = WorkerResourceHost("worker", ledger=ledger)
+async def test_restart_loses_owner_as_recoverable_tool_feedback(tmp_path):
+    host = WorkerResourceHost("worker")
 
     async def bootstrap():
         return context(None)
 
     ref = await host.open("session", str(tmp_path), bootstrap, close=no_close)
-    ledger.begin(
-        "session",
-        "interrupted",
-        str(tmp_path),
-        "digest",
-        {"resource_owner": asdict(ref)},
-    )
-    restarted = WorkerResourceHost("worker", ledger=ledger)
-    with pytest.raises(ResourceOwnerLost):
-        await restarted.open(
-            "session", str(tmp_path), bootstrap, close=no_close
-        )
-    with pytest.raises(ResourceOwnerLost):
+    restarted = WorkerResourceHost("worker")
+    with pytest.raises(ResourceOwnerLost) as lost:
         await restarted.execute(ref, request())
-    assert restarted.operation(ref, "interrupted")["status"] == "UNKNOWN"
-    assert ledger.get("session", "interrupted")["status"] == "UNKNOWN"
+    assert isinstance(lost.value, ToolOutcomeUnknown)
+    assert not isinstance(lost.value, ExecutionFailure)
+    fresh = await restarted.open(
+        "session", str(tmp_path), bootstrap, close=no_close
+    )
+    assert fresh.process_epoch != ref.process_epoch
+    await restarted.close(fresh)
     await host.close(ref)
 
 
@@ -198,8 +189,7 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
             "url": f"http://127.0.0.1:{port}",
         }
     config = {"launch_root": str(tmp_path), "mcp-servers": {"counter": server}}
-    ledger = EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    host = WorkerResourceHost("worker", ledger=ledger)
+    host = WorkerResourceHost("worker")
     registry = {}
 
     async def bootstrap():
@@ -260,8 +250,7 @@ async def test_background_receipt_has_owner_or_unknown_without_repeat(
     from gc_core.tools.exec.execute_command import ExecuteCommand
     from gc_testkit.helpers.tool_ctx import local_ctx
 
-    ledger = EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    host = WorkerResourceHost("worker", ledger=ledger)
+    host = WorkerResourceHost("worker")
     ctx = local_ctx({"launch_root": str(tmp_path)})
     ctx.tools_data = {
         "exec_command": {
@@ -297,9 +286,8 @@ async def test_background_receipt_has_owner_or_unknown_without_repeat(
     )
     try:
         if lost_reply:
-            with pytest.raises(OutcomeUnknown):
+            with pytest.raises(ToolOutcomeUnknown):
                 await host.execute(ref, effect)
-            assert host.operation(ref, "background")["status"] == "UNKNOWN"
         else:
             result = await host.execute(ref, effect)
             process = result.background_processes[0]
@@ -314,9 +302,7 @@ async def test_background_receipt_has_owner_or_unknown_without_repeat(
 async def test_child_preparation_and_effect_share_owner_task_without_reconnect(
     tmp_path,
 ):
-    host = WorkerResourceHost(
-        "worker", ledger=EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    )
+    host = WorkerResourceHost("worker")
     tasks = []
     parent = context(lambda _args: None)
 
@@ -340,7 +326,7 @@ async def test_child_preparation_and_effect_share_owner_task_without_reconnect(
         ref, request("child/effect"), context_id="child"
     )
     assert result.result.output == "child registry"
-    with pytest.raises(OutcomeUnknown, match="different effect"):
+    with pytest.raises(ValueError, match="different effect"):
         await host.execute(ref, request("child/effect"))
     assert len(tasks) == 3
     assert all(task is tasks[0] for task in tasks)
@@ -350,11 +336,10 @@ async def test_child_preparation_and_effect_share_owner_task_without_reconnect(
 
 
 @pytest.mark.asyncio
-async def test_forget_releases_closed_actor_but_retains_owner_tombstone(
+async def test_forget_releases_closed_actor_and_its_results(
     tmp_path,
 ):
-    ledger = EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    host = WorkerResourceHost("worker", ledger=ledger)
+    host = WorkerResourceHost("worker")
 
     async def bootstrap():
         return context(None)
@@ -372,15 +357,11 @@ async def test_forget_releases_closed_actor_but_retains_owner_tombstone(
     host.forget(ref)
     host.forget(ref)
     assert not host._owners
-    assert ledger.get("session", "__resource_owner__")["status"] == "CLOSED"
-    with pytest.raises(ResourceOwnerLost):
-        await host.open("session", str(tmp_path), bootstrap, close=no_close)
 
 
 @pytest.mark.asyncio
-async def test_failed_bootstrap_releases_actor_and_fences_restart(tmp_path):
-    ledger = EffectLedger(SQLiteThreadStore(tmp_path / "db"))
-    host = WorkerResourceHost("worker", ledger=ledger)
+async def test_failed_bootstrap_releases_actor(tmp_path):
+    host = WorkerResourceHost("worker")
 
     async def bootstrap():
         raise ValueError("discovery failed")
@@ -388,8 +369,3 @@ async def test_failed_bootstrap_releases_actor_and_fences_restart(tmp_path):
     with pytest.raises(ValueError, match="discovery failed"):
         await host.open("session", str(tmp_path), bootstrap, close=no_close)
     assert not host._owners
-    assert (
-        ledger.get("session", "__resource_owner__")["status"] == "OWNER_LOST"
-    )
-    with pytest.raises(ResourceOwnerLost):
-        await host.open("session", str(tmp_path), bootstrap, close=no_close)

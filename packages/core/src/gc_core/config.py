@@ -406,6 +406,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "chat_completions_custom_subagent_system_prompt_path": app_cfg.paths.chat_completions_custom_subagent_system_prompt_path,
         "chat_completions_special_instructions_path": app_cfg.paths.chat_completions_special_instructions_path,
         "threads_data_path": app_cfg.paths.threads_data_path,
+        "thread_store_persist": app_cfg.thread_store.persist,
         "skills_data_path": app_cfg.paths.skills_data_path,
         "logs_dump_dir": app_cfg.paths.logs_dump_dir,
         "agentsmd_override": app_cfg.tui.agentsmd_override,

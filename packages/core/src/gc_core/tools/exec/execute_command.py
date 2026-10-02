@@ -414,9 +414,9 @@ Important Usage Rules:
             )
 
             if resource_capture_active():
-                from gc_core.execution.contracts import OutcomeUnknown
+                from gc_core.execution.contracts import ToolOutcomeUnknown
 
-                raise OutcomeUnknown(
+                raise ToolOutcomeUnknown(
                     "Background start did not return a reliable receipt"
                 ) from exc
             return self._exec_failed(plan, exc)

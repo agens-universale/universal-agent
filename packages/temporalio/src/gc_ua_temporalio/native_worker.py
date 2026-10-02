@@ -1,4 +1,4 @@
-"""Opt-in native worker: the real AgentExecutor, separate from legacy sessions.
+"""Opt-in native worker: the real AgentExecutor behind Temporal activities.
 
 All three queues belong to this process and one declared workspace. Resource
 queues must be unique to this host when MCP or background commands are enabled.
@@ -9,50 +9,46 @@ import asyncio
 import logging
 from contextlib import AsyncExitStack
 
-from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.resource_host import WorkerResourceHost
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from temporalio.client import Client
 from temporalio.worker import Worker
 
 from gc_ua_temporalio.native_activities import NativeActivities
-from gc_ua_temporalio.native_checkpoint import NativeCheckpointActivities
 from gc_ua_temporalio.native_child_preparation import NativeChildActivities
 from gc_ua_temporalio.native_child_workflow import NativeSubagentWorkflow
-from gc_ua_temporalio.native_operator import NativeOperatorActivities
 from gc_ua_temporalio.native_provider import (
     NativeContextProvider,
     NativeWorkerConfig,
 )
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
+from gc_ua_temporalio.payload_storage import data_converter
 from gc_ua_temporalio.public_config import public_config_snapshot
-from gc_ua_temporalio.storage.effects import EffectLedger
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_ua_temporalio.storage.technical import TechnicalStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
 
 
 def build_native_runtime(config):
     stores = {
         name: (
-            FileThreadStore(spec.path)
+            DurableFileThreadStore(spec.path)
             if spec.kind == "file"
             else SQLiteThreadStore(spec.path)
         )
         for name, spec in config.thread_stores.items()
     }
-    receipts = SQLiteThreadStore(config.receipts_database)
-    effects = EffectLedger(receipts)
+    receipts = TechnicalStore(config.receipts_database)
     provider = NativeContextProvider(
         profiles=config.profiles,
         stores=stores,
         receipts=receipts,
-        resource_host=WorkerResourceHost(config.worker_id, ledger=effects),
+        resource_host=WorkerResourceHost(config.worker_id),
     )
     native = NativeActivities(
         context_provider=provider,
         stores=stores,
         receipts=receipts,
-        effect_ledger=effects,
         public_config=public_config_snapshot,
         preview_profiles={
             name
@@ -67,8 +63,6 @@ def worker_options(config, native, threads):
     """Coalesce equal queues while preserving a single resource context owner."""
     queues = {}
     children = NativeChildActivities(native)
-    operator = NativeOperatorActivities(native)
-    checkpoints = NativeCheckpointActivities(native.receipts)
     for queue, workflows, activities in (
         (
             config.workflow_queue,
@@ -80,12 +74,6 @@ def worker_options(config, native, threads):
             config.resource_queue,
             [],
             [
-                checkpoints.put,
-                checkpoints.seal,
-                checkpoints.get,
-                operator.inspect,
-                operator.resolve,
-                operator.result,
                 children.prepare,
                 native.prepare,
                 native.prepare_state,
@@ -117,7 +105,9 @@ async def serve(config):
     provider, native, threads = build_native_runtime(config)
     try:
         client = await Client.connect(
-            config.address, namespace=config.namespace
+            config.address,
+            namespace=config.namespace,
+            data_converter=data_converter(config.payload_storage),
         )
         async with AsyncExitStack() as stack:
             for options in worker_options(config, native, threads):
@@ -125,10 +115,7 @@ async def serve(config):
                     Worker(
                         client,
                         **options,
-                        workflow_failure_exception_types=[
-                            ExecutionFailure,
-                            ValueError,
-                        ],
+                        workflow_failure_exception_types=[Exception],
                     )
                 )
             await asyncio.Event().wait()

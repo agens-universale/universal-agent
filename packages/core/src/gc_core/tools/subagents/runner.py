@@ -298,7 +298,7 @@ class SubagentRunner:
             event: Dict[str, Any],
         ) -> None:
             # `on_summary_applied` — корутина. Без `await` она молча не
-            # исполнялась: терялись `append_summary_trace_record` и
+            # исполнялась: терялись `aappend_summary_trace_record` и
             # `archive_suffix`. Прогон это ВИДЕЛ — `RuntimeWarning:
             # coroutine ... was never awaited`, — но предупреждение не
             # роняет набор, и тест был зелёным, потому что проверяет

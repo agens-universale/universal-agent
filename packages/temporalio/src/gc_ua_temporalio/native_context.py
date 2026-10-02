@@ -96,6 +96,8 @@ def assemble_native_context(
     )
 
     operations.router_provider = lambda: ctx.model_router
+    # Шаги хода защищены историей workflow: допустим persist: turn.
+    ctx.durable_execution = True
     ctx.model_transport_configured = prepared.model_transport_configured
     ctx.provider_currency = prepared.provider_currency
     return ctx

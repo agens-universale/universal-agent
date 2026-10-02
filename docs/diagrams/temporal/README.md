@@ -1,7 +1,7 @@
-# Изображения целевой архитектуры агента и Temporal
+# Изображения архитектуры агента и Temporal
 
-Версия от 01.10.2026: раздел 0 показывает локальный путь рабочей ветки,
-схемы 01–07 — проект после нативного переезда. Переезд ещё не реализован.
+Версия от 02.10.2026: раздел 0 показывает штатного агента без Temporal,
+схемы 01–07 — фактическую нативную интеграцию.
 
 Исходники — девять блоков Mermaid в [карте архитектуры](../../temporal-architecture.md):
 два в разделе 0 об агенте без Temporal, затем по одному в разделах 1–7.
@@ -23,13 +23,13 @@ CLI использует headless Chromium/Puppeteer. Системный Chrome 
 |---|---|---|
 | `diagram-1` | `00-agent-components` | Компоненты агента без Temporal |
 | `diagram-2` | `00-agent-turn` | Один ход агента без Temporal |
-| `diagram-3` | `01-architecture` | Local по умолчанию и опциональный Temporal backend с общим AgentExecutor |
-| `diagram-4` | `02-dispatch` | Общие порты операций |
-| `diagram-5` | `03-turn` | Штатный lifecycle через workflow |
-| `diagram-6` | `04-guards` | Общий guard flow, модель и подтверждение |
-| `diagram-7` | `05-mcp` | Persistent MCP |
-| `diagram-8` | `06-child` | Штатная child-логика SubagentRunner |
-| `diagram-9` | `07-persistence` | ThreadSession, FileThreadStore / SQLite и replay |
+| `diagram-3` | `01-architecture` | Процессы, очереди и хранилища |
+| `diagram-4` | `02-dispatch` | Порты операций: local и Temporal |
+| `diagram-5` | `03-turn` | Один ход в Temporal |
+| `diagram-6` | `04-guards` | Guards, подтверждение и эффект |
+| `diagram-7` | `05-mcp` | MCP и фоновые процессы |
+| `diagram-8` | `06-child` | Субагент в child workflow |
+| `diagram-9` | `07-persistence` | Тред, история Temporal и payload |
 
 При обновлении нужно заменить обе версии каждой изменившейся схемы и визуально
 проверить переносы текста и стрелки. Существующие имена `01`–`07` сохранены,

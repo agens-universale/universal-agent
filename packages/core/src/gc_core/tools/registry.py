@@ -1,7 +1,6 @@
 import copy
 from typing import Any, Dict, Optional
 
-from gc_core.execution.tool_policy import execution_policy
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, copy_loop_warn
 from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.exec.download_file import DownloadFile
@@ -52,7 +51,6 @@ def _tool_entry(
         "tool_fabric": tool_cls,
         "spec": copy.deepcopy(spec),
         "description": description,
-        "execution": execution_policy(spec["name"]),
     }
     warn = copy_loop_warn(tool_cls)
     if warn is not None:

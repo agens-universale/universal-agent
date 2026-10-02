@@ -725,11 +725,6 @@ def main() -> int:
     """
     import asyncio
 
-    if any(arg.split("=", 1)[0] == "--temporal-url" for arg in sys.argv[1:]):
-        from gc_ua_temporalio.remote_cli import main as remote_main
-
-        return remote_main()
-
     return asyncio.run(arun_cli())
 
 

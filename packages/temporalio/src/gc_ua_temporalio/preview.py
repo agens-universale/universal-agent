@@ -5,7 +5,7 @@ import sqlite3
 
 from temporalio import activity
 
-from gc_ua_temporalio.storage.views import SessionViews
+from gc_ua_temporalio.storage.views import ViewEvents
 
 
 def _emit(views, owner, operation, attempt, sequence, kind, payload):
@@ -17,10 +17,10 @@ def _emit(views, owner, operation, attempt, sequence, kind, payload):
         )
 
 
-def commit_preview(runtime, owner, operation, attempt=1):
+def commit_preview(store, owner, operation, attempt=1):
     # Sequence zero is reserved for an idempotent receipt acknowledgement.
     _emit(
-        SessionViews(runtime.store),
+        ViewEvents(store),
         owner,
         operation,
         attempt,
@@ -31,8 +31,8 @@ def commit_preview(runtime, owner, operation, attempt=1):
 
 
 class PreviewSink:
-    def __init__(self, runtime, owner, operation, *, attempt=None):
-        self.views = SessionViews(runtime.store)
+    def __init__(self, store, owner, operation, *, attempt=None):
+        self.views = ViewEvents(store)
         self.owner, self.operation = owner, operation
         self.attempt = activity.info().attempt if attempt is None else attempt
         self.sequence = 0

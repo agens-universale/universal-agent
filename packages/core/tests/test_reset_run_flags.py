@@ -14,6 +14,7 @@ from gc_core.thread_store import ThreadSession
 from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_durable import ThreadStoreOperation
 from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_testkit.memory_thread_store import MemoryThreadStore
 
 
@@ -23,7 +24,8 @@ async def test_batch_matches_original_flags_and_tui(
     tmp_path, disk_flag, cached_flag
 ):
     stores = [
-        FileThreadStore(str(tmp_path / name)) for name in ("batch", "legacy")
+        DurableFileThreadStore(str(tmp_path / "batch")),
+        FileThreadStore(str(tmp_path / "legacy")),
     ]
     meta = {
         "runtime": {
@@ -61,7 +63,7 @@ async def test_batch_matches_original_flags_and_tui(
 
 
 async def test_external_write_between_open_and_batch_is_preserved(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     session = await ThreadSession.afrom_config(
         config_dict={}, system_id="s", thread_id="t", store=store
     )
@@ -84,7 +86,7 @@ async def test_external_write_between_open_and_batch_is_preserved(tmp_path):
 
 
 def test_reset_batch_retry_returns_original_receipt(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     store.save_meta("s", "t", {"runtime": {"summarizing": True}})
     operation = ThreadStoreOperation("reset-flags", "reset_run_flags", {})
     original = store.commit_operation("s", "t", operation)

@@ -246,16 +246,29 @@ class DownloadFile(AbstractSimpleTool):
             return byte == ord("<")
         return False
 
-    def _check_write_guard(self, dest: str) -> Optional[Dict[str, Any]]:
-        from gc_core.security.dual_wrapper import _drive_sync
-
-        _, result = _drive_sync(self._write_guard_flow(dest))
-        return result
-
     async def _acheck_write_guard(self, dest: str) -> Optional[Dict[str, Any]]:
-        from gc_core.security.dual_wrapper import _drive_async
+        """Гард записи загрузчика; одна точка входа, драйвер — по рантайму.
 
-        _, result = await _drive_async(self._write_guard_flow(dest))
+        С портами рантайма (Temporal native: ``human_request`` / ``guard_probe``)
+        тело крутится на loop вызывающего, а его запросы обслуживает
+        ``_drive_async``. Локально — как в develop: гард целиком, вместе с
+        ожиданием человека в режиме `ask` (в TUI до 600 с), уезжает в поток
+        маршрутом гвардов (`dual_wrapper.off_loop`) — только там вызову
+        ставится метка «брошен» (см. test_guard_confirm_off_loop).
+        """
+        from gc_core.security.dual_wrapper import (
+            _drive_async,
+            _drive_sync,
+            off_loop,
+        )
+
+        flow = self._write_guard_flow(dest)
+        if callable(getattr(self._ctx, "human_request", None)) or callable(
+            getattr(self._ctx, "guard_probe", None)
+        ):
+            _, result = await _drive_async(flow)
+        else:
+            _, result = await off_loop(_drive_sync, flow)
         return result
 
     def _write_guard_flow(self, dest: str):
@@ -558,14 +571,7 @@ class DownloadFile(AbstractSimpleTool):
                 return self._result(error=download_settings)
             download_root, max_bytes = download_settings
             dest = os.path.join(download_root, validated_filename)
-        if callable(getattr(self._ctx, "human_request", None)) or callable(
-            getattr(self._ctx, "guard_probe", None)
-        ):
-            write_guard_error = await self._acheck_write_guard(dest)
-        else:
-            from gc_core.security.dual_wrapper import off_loop
-
-            write_guard_error = await off_loop(self._check_write_guard, dest)
+        write_guard_error = await self._acheck_write_guard(dest)
         if write_guard_error is not None:
             return self._result(
                 path=dest, filename=validated_filename, error=write_guard_error

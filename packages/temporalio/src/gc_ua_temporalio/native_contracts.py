@@ -1,14 +1,38 @@
-"""Values for the native executor workflow, separate from legacy histories."""
+"""Values for the native executor workflow and its message handlers."""
 
 from dataclasses import dataclass, field
 from typing import Any
 
 from gc_core.context_preparation import PreparedRunContext
 from gc_core.execution.contracts import ModelResult
+from gc_core.execution.guard_contracts import GuardProbeResult
 from gc_core.execution.resource_contracts import ResourceOwnerRef
+from gc_core.run_preparation import PreparedPrompts, PromptPreparationRequest
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
 
-from gc_ua_temporalio.native_checkpoint_contracts import NativeCheckpointRef
+
+@dataclass
+class UserMessage:
+    message_id: str
+    text: str
+
+    def validate(self):
+        if (
+            not self.message_id
+            or len(self.message_id) > 128
+            or not self.text.strip()
+            or len(self.text) > 16000
+        ):
+            raise ValueError(
+                "Message requires an ID <= 128 chars and text <= 16000 chars"
+            )
+
+
+@dataclass
+class HumanReply:
+    request_id: str
+    reply_id: str
+    answer: str
 
 
 @dataclass
@@ -27,8 +51,9 @@ class NativeResume:
     answer: Any = None
     terminal_outcome: str | None = None
     schema_version: int = 1
-    reconciliation_receipts: dict[str, list[Any]] = field(default_factory=dict)
-    stop_requested: bool = False
+    #: Владение тредом уже подтверждено прошлым run: перечитывать не нужно.
+    store_owner_epoch: int | None = None
+    store_generation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -45,9 +70,7 @@ class NativeRunRequest:
     schema_version: int = 1
     format_text: str | None = None
     keep_alive: bool = False
-    continue_after_turns: int = 100
     resume: NativeResume | None = None
-    resume_ref: NativeCheckpointRef | None = None
 
 
 @dataclass(frozen=True)
@@ -76,6 +99,19 @@ class NativePreparedContext:
     subagent_definitions: dict[str, SubagentDefinition] = field(
         default_factory=dict
     )
+    #: Предвычислено на worker'е той же activity: экономит две activity на ход.
+    #: Используется, только если запрос ядра совпал с предвычисленным.
+    skills: list[dict] | None = None
+    prompts_request: PromptPreparationRequest | None = None
+    prompts: PreparedPrompts | None = None
+
+
+@dataclass
+class NativeGuardProbes:
+    """Факты guard-проверки и попутно вычисленные факты следующей проверки."""
+
+    primary: GuardProbeResult
+    companions: list[GuardProbeResult] = field(default_factory=list)
 
 
 @dataclass

@@ -236,24 +236,19 @@ def apply_confirm_choice(
     return allow
 
 
-async def arequest_confirm(request: HumanRequest, *, ctx: Any) -> bool:
-    """Wait through an async port; cancellation never records permission."""
+async def aconfirm_via_human_port(request: HumanRequest, *, ctx: Any) -> bool:
+    """Ответ человека через async-порт рантайма (``ctx.human_request``).
+
+    Это не async-двойник `request_confirm`: тот ждёт локальный UI (TUI-баннер
+    или ``input()``) блокирующе в рабочем потоке, а здесь ожидание — durable
+    порт Temporal. Общий у них только редьюсер `apply_confirm_choice`.
+    Отмена / ``HumanRequestInterrupted`` разрешения не записывают.
+    """
     if request.kind != "confirm" or request.schema_version != 1:
         raise ValueError("Unsupported confirmation request")
     port = getattr(ctx, "human_request", None)
     if not callable(port):
-        from gc_core.security.dual_wrapper import off_loop
-
-        return await off_loop(
-            partial(
-                request_confirm,
-                title=request.title,
-                question=request.question,
-                fields=[tuple(field) for field in request.fields],
-                ctx=ctx,
-                decision_key=request.decision_key,
-            )
-        )
+        raise ValueError("ctx.human_request port is required")
     store = getattr(ctx, "permission_store", None)
     if store is not None and request.decision_key is not None:
         cached = store.decision_for(request.decision_key)
@@ -291,7 +286,7 @@ def confirmation_step(
         decision_key=decision_key,
     )
     if callable(getattr(ctx, "human_request", None)):
-        return AwaitOnCaller(lambda: arequest_confirm(request, ctx=ctx))
+        return AwaitOnCaller(lambda: aconfirm_via_human_port(request, ctx=ctx))
     wait = local_wait or partial(
         local_request or request_confirm,
         title=title,

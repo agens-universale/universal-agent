@@ -3,18 +3,18 @@
 Опциональный Temporal runtime для Universal Agent. Native entrypoints запускают
 настоящие `AgentExecutor` и `ThreadSession` из `gc-core`; локальный режим остаётся
 по умолчанию. Native поддерживает Chat Completions и Responses через общий
-модельный порт, FileThreadStore по умолчанию и явно выбранный SQLiteThreadStore.
-Общая приёмка рабочей ветки продолжается.
+модельный порт, `DurableFileThreadStore` по умолчанию и явно выбранный
+`SQLiteThreadStore`; своё хранилище проверяется durable-конформансом
+(`gc_testkit.durable_thread_store_conformance`).
 
 - [Native quickstart, конфигурация и управление](../../docs/temporal-configuration.md#native-quickstart)
 - [Пример native-worker.json](examples/native-worker.json) — `${ENV:...}`, без секретов.
-- [Архитектура, проверки и ограничения](../../docs/temporal-architecture.md#14-реализация-в-рабочей-ветке)
-- [Совместимый legacy runtime](../../docs/temporal.md)
+- [Архитектура, проверки и ограничения](../../docs/temporal-architecture.md)
+- [Размещение worker и восстановление](../../docs/temporal-native.md)
 
 `gc-temporal-native-worker` / `gc-temporal-native` используют native workflow.
-`gc-temporal-worker` / `gc-temporal` сохраняют отдельный legacy protocol и его
-истории; автоматического переключения или миграции нет. Server выбирает их
-явно: `temporal-native` либо `temporal`.
+Server включает Temporal явно: `execution_backend: temporal-native`; TUI и
+`gc-cli` работают только локально.
 
 Сейчас native worker обслуживает workflow/model/resource queues одним процессом
 для одного workspace. Его cwd должен совпадать с `profiles.<name>.workspace`;

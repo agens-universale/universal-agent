@@ -21,7 +21,7 @@ from gc_ua_temporalio.native_worker import build_native_runtime, worker_options
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from test_live_workflow import call
+from live_support import call
 from test_native_parity_live import normalize, snapshot
 from test_native_workflow_controls import finish
 

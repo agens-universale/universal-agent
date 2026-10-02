@@ -10,7 +10,6 @@ from temporalio import workflow
 with workflow.unsafe.imports_passed_through():
     import pydantic  # noqa: F401
 
-from gc_core.execution.contracts import ExecutionFailure, ModelProviderError
 from gc_core.execution.environment import execution_environment
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.model_router import CircuitBreaker, ModelRouter
@@ -34,17 +33,13 @@ from gc_ua_temporalio.native_child_contracts import (
 from gc_ua_temporalio.native_child_preparation import PreparedNativeChild
 from gc_ua_temporalio.native_context import assemble_native_context
 from gc_ua_temporalio.native_operations import NativeOperations
-from gc_ua_temporalio.native_operator_contracts import (
-    NativePendingOperation,
-    operation_digest,
-)
 from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_ua_temporalio.thread_store_transport import ThreadStoreTransport
 
 
 @workflow.defn(
     name="NativeSubagentWorkflow",
-    failure_exception_types=[ExecutionFailure, ModelProviderError, ValueError],
+    failure_exception_types=[Exception],
 )
 class NativeSubagentWorkflow:
     def __init__(self):
@@ -56,8 +51,6 @@ class NativeSubagentWorkflow:
         self.stopped = False
         self.replies = {}
         self.signal_tasks = []
-        self.pending_operation = None
-        self.operator_result = None
 
     def new_id(self, prefix):
         self.sequence += 1
@@ -86,49 +79,6 @@ class NativeSubagentWorkflow:
     @workflow.signal
     def answer_human(self, request_id: str, answer: str):
         self.replies.setdefault(request_id, answer)
-
-    @workflow.signal
-    def resolve_operation(self, operation_id: str, digest: str, result: dict):
-
-        pending = self.pending_operation
-        if (
-            pending is not None
-            and operation_id == pending.call.operation_id
-            and digest == operation_digest(pending.call)
-        ):
-            self.operator_result = result
-
-    async def wait_reconciliation(self, name, call, request):
-        from gc_core.execution.contracts import OutcomeUnknown
-
-        self.pending_operation = NativePendingOperation(
-            name,
-            call,
-            request.start.store_id,
-            request.start.system_id,
-            request.start.thread_id,
-            request.store_owner_id,
-            request.store_owner_epoch,
-            request.store_generation,
-        )
-        self.operator_result = None
-        try:
-            await self.parent.signal(
-                "child_reconciliation",
-                {
-                    "child_id": workflow.info().workflow_id,
-                    "pending": asdict(self.pending_operation),
-                },
-            )
-            await workflow.wait_condition(
-                lambda: self.operator_result is not None or self.stopped
-            )
-            if self.stopped:
-                raise OutcomeUnknown("Uncertain child operation aborted")
-            return self.operator_result
-        finally:
-            self.pending_operation = None
-            self.operator_result = None
 
     async def human_request(self, request):
         request_id = self.new_id("human")
@@ -187,11 +137,9 @@ class NativeSubagentWorkflow:
             operations = NativeOperations(
                 request.start, workflow.info().workflow_id, self.new_id
             )
-            operations.reconciliation_wait = lambda name, call: (
-                self.wait_reconciliation(name, call, request)
-            )
             operations.child_context = request.child_context
             operations.resource_owner = request.parent_context.resource_owner
+            operations.tool_metadata = request.parent_context.tool_metadata
             try:
                 prepared = await operations.call(
                     "agent.subagent.prepare",
@@ -275,9 +223,12 @@ class NativeSubagentWorkflow:
                         parent_call_id=request.parent_call_id,
                     )
                 finally:
+                    # Цикл ребёнка закончился: дальнейший ввод — родителю.
+                    self.parent_ctx = None
                     checkpoint = self.checkpoint(parent_state, parent_ctx)
                     if self.signal_tasks:
                         await asyncio.gather(*self.signal_tasks)
-                return NativeChildResult(output, checkpoint)
+                undelivered, self.pending_messages = self.pending_messages, []
+                return NativeChildResult(output, checkpoint, undelivered)
             finally:
                 await operations.release_context()

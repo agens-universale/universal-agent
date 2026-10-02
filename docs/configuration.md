@@ -931,5 +931,5 @@ CLI-флаги (`--max_steps 999` и т.п.) перебивают и global, и 
 ## Temporal runtime
 
 Opt-in интеграция настраивается отдельно от локального `config.yml`: см.
-[профили, MCP host, server и remote API](temporal-configuration.md) и
-[запуск и восстановление](temporal.md).
+[профили, server и remote API](temporal-configuration.md) и
+[размещение worker и восстановление](temporal-native.md).

@@ -662,11 +662,8 @@ async def get_thread_logs(system: str, task_id: str):
             },
         )
 
-    from gc_core.thread_store_journal import thread_read_scope
-
-    with thread_read_scope(threads_dir, sys_norm, task_norm):
-        meta = load_thread_meta(threads_dir, sys_norm, task_norm)
-        messages, _, _ = load_thread_messages(threads_dir, sys_norm, task_norm)
+    meta = load_thread_meta(threads_dir, sys_norm, task_norm)
+    messages, _, _ = load_thread_messages(threads_dir, sys_norm, task_norm)
 
     if not meta and not messages:
         raise HTTPException(status_code=404, detail={"status": "not_found"})
@@ -721,12 +718,6 @@ async def get_all_thread_logs():
             },
         )
 
-    from gc_core.thread_store_journal import (
-        recover_pending_threads,
-        thread_file_read_scope,
-    )
-
-    recover_pending_threads(threads_dir)
     out: list[dict[str, Any]] = []
     try:
         names = [
@@ -742,10 +733,8 @@ async def get_all_thread_logs():
     for name in names:
         meta_path = os.path.join(threads_dir, name)
         try:
-            stem = name.removeprefix("meta_").removesuffix(_JSON_SUFFIX)
-            with thread_file_read_scope(threads_dir, stem):
-                with open(meta_path, encoding="utf-8") as f:
-                    meta = json.load(f)
+            with open(meta_path, encoding="utf-8") as f:
+                meta = json.load(f)
         except Exception:
             continue
 

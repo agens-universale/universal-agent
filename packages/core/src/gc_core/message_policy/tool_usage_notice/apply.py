@@ -111,7 +111,7 @@ def _emitted_tools(
     }
 
 
-def apply_tool_usage_notice_before_llm(
+async def aapply_tool_usage_notice_before_llm(
     messages: list[dict[str, Any]],
     state: Any,
     ctx: Any,
@@ -119,12 +119,21 @@ def apply_tool_usage_notice_before_llm(
     *,
     step_messages: list[dict[str, Any]],
     logger: Any | None = None,
-    project_memory_hash_fn=None,
 ) -> list[dict[str, Any]]:
     """
     После persist-batch, перед LLM: независимые контуры project_memory K-тик и tool_usage_notice.
     Счётчики не сбрасывают друг друга; снимок — только в текстовый log.
+
+    Если рантайм дал ``ctx.project_memory_hash`` (Temporal native), хэш
+    project memory берётся у него и только на том шаге, где политика его
+    действительно спросит; иначе — прежнее локальное чтение в ``get_hash``.
     """
+    project_memory_hash_fn = None
+    loader = getattr(ctx, "project_memory_hash", None)
+    if loader is not None and _needs_project_hash(state, ctx, meta):
+        value = await loader()
+        project_memory_hash_fn = lambda _ctx: value
+
     cfg = getattr(ctx, "config_dict", None) or {}
     if not isinstance(meta, dict):
         meta = {}
@@ -222,32 +231,6 @@ def apply_tool_usage_notice_before_llm(
         long_emit=bool(emitted_project_hints),
     )
     return out
-
-
-async def aapply_tool_usage_notice_before_llm(
-    messages,
-    state,
-    ctx,
-    meta,
-    *,
-    step_messages,
-    logger=None,
-):
-    """Fetch a project hash only when this step's existing policy needs it."""
-    loader = getattr(ctx, "project_memory_hash", None)
-    get_hash_fn = None
-    if loader is not None and _needs_project_hash(state, ctx, meta):
-        value = await loader()
-        get_hash_fn = lambda _ctx: value
-    return apply_tool_usage_notice_before_llm(
-        messages,
-        state,
-        ctx,
-        meta,
-        step_messages=step_messages,
-        logger=logger,
-        project_memory_hash_fn=get_hash_fn,
-    )
 
 
 def _needs_project_hash(state, ctx, meta) -> bool:

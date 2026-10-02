@@ -12,10 +12,6 @@ dependencies = ["gc-core==0.3.1", "temporalio==1.33.0"]
 [project.scripts]
 gc-temporal-native-worker = "gc_ua_temporalio.native_worker:main"
 gc-temporal-native = "gc_ua_temporalio.native_client:main"
-gc-temporal-worker = "gc_ua_temporalio.worker:main"
-gc-temporal = "gc_ua_temporalio.client:main"
-gc-temporal-mcp-host = "gc_ua_temporalio.mcp_host:main"
-gc-temporal-remote = "gc_ua_temporalio.remote_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/gc_ua_temporalio"]

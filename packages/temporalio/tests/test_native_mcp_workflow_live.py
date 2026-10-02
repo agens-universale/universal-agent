@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from temporalio.worker import Replayer
-from test_live_workflow import call
+from live_support import call
 from test_native_workflow_controls import (  # noqa: F401
     finish,
     request,

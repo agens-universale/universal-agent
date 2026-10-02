@@ -9,7 +9,6 @@ from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from gc_core.execution.message_keys import make_message_key
-from gc_core.execution.projection import ThreadProjection
 
 logger = logging.getLogger(__name__)
 
@@ -17,11 +16,15 @@ from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
 from gc_core.intent_log.serialize import deserialize_list, serialize_for_meta
+from gc_core.message_policy.tool_usage_notice.state import (
+    merge_tool_usage_notice_meta_to_base,
+)
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
 from gc_core.persistence.live_volume import (
+    bump_live_volume_for_messages,
     live_volume_from_messages,
     merge_tui_into_meta,
 )
@@ -785,34 +788,7 @@ def archive_and_replace_thread_files(
     }
 
 
-# All public file readers/writers share the durable lock and recovery barrier.
-# Lazy dispatch keeps journal/OS facilities outside workflow imports. Nested
-# codec calls during a transaction use the original functions, not a second
-# transaction, so the on-disk format still has a single implementation.
-from gc_core.thread_store_durable import durable_file_helper as _durable_helper
-
-for _helper_name in (
-    "load_thread_messages",
-    "load_thread_meta",
-    "read_subagent_trace",
-    "save_thread_meta",
-    "update_tui_meta",
-    "update_runtime_meta",
-    "patch_runtime_flag",
-    "reset_run_flags",
-    "append_new_thread_messages",
-    "append_subagent_trace_record",
-    "restore_subagent_trace_records",
-    "archive_and_replace_thread_files",
-    "discard_message_by_id",
-    "reset_thread_files",
-    "delete_thread",
-):
-    globals()[_helper_name] = _durable_helper(globals()[_helper_name])
-del _helper_name
-
-
-class ThreadSession(ThreadProjection):
+class ThreadSession:
     def __init__(
         self,
         *,
@@ -856,6 +832,11 @@ class ThreadSession(ThreadProjection):
         # Optional durable capability uses the same session policy. This is
         # the last acknowledged storage snapshot, never staged session data.
         self._store_snapshot: Any = None
+        # persist: turn — шаги хода копятся здесь до точки сброса.
+        self._defer_persist = False
+        self._deferred_messages: List[Dict[str, Any]] = []
+        self._deferred_response_id: Optional[str] = None
+        self._deferred_pending = False
 
     @property
     def port(self) -> Any:
@@ -908,6 +889,9 @@ class ThreadSession(ThreadProjection):
         capability = durable_store_capability(port)
         snapshot = None
         if capability is None:
+            cls._check_file_owner(
+                store, threads_dir, sys_norm, normalized_thread_id
+            )
             meta = await port.aload_meta(sys_norm, normalized_thread_id)
             state = await port.aload_thread_state(
                 sys_norm, normalized_thread_id
@@ -915,7 +899,7 @@ class ThreadSession(ThreadProjection):
         else:
             snapshot = await capability[0](sys_norm, normalized_thread_id)
             meta, state = deepcopy(snapshot.meta), snapshot.state
-        cls._check_store_owner(port, meta, snapshot)
+        cls._check_store_owner(port, snapshot)
         session = cls._build(
             config_dict=config_dict,
             threads_dir=threads_dir,
@@ -927,10 +911,30 @@ class ThreadSession(ThreadProjection):
         )
         session._port = port  # порт уже разрешён — не резолвить второй раз
         session._store_snapshot = snapshot
+        session._defer_persist = (
+            capability is not None
+            and config_dict.get("thread_store_persist") == "turn"
+        )
         return session
 
     @staticmethod
-    def _check_store_owner(port, meta, snapshot=None) -> None:
+    def _check_file_owner(store, threads_dir, system_id, thread_id) -> None:
+        """Обычный файловый писатель не пишет в тред, занятый durable-владельцем."""
+        from gc_core.thread_store_file import FileThreadStore
+
+        if type(store) is not FileThreadStore or not threads_dir:
+            return
+        from gc_core.thread_store_durable import ThreadStoreOwnershipError
+        from gc_core.thread_store_journal import durable_owner_id
+
+        if durable_owner_id(threads_dir, system_id, thread_id):
+            raise ThreadStoreOwnershipError(
+                "Thread is owned by a durable executor (Temporal); "
+                "local writes are forbidden"
+            )
+
+    @staticmethod
+    def _check_store_owner(port, snapshot=None) -> None:
         from gc_core.thread_store_durable import ThreadStoreOwnershipError
 
         owner = getattr(port, "owner_id", None)
@@ -942,13 +946,6 @@ class ThreadSession(ThreadProjection):
         ):
             raise ThreadStoreOwnershipError(
                 "Thread belongs to another execution owner"
-            )
-        marker = meta.get("execution_owner") or {}
-        if marker.get("backend") == "temporal" and (
-            not owner or marker.get("owner_id") != owner
-        ):
-            raise ThreadStoreOwnershipError(
-                "Temporal owns this thread; local execution is forbidden"
             )
 
     @staticmethod
@@ -1018,13 +1015,132 @@ class ThreadSession(ThreadProjection):
     def get_full_history_messages(self) -> List[Dict[str, Any]]:
         combined: List[Dict[str, Any]] = []
         seen_keys: Set[str] = set()
-        for item in [*self.history_messages, *self.runtime_messages]:
+        for item in [
+            *self.history_messages,
+            *self._deferred_messages,
+            *self.runtime_messages,
+        ]:
             key = make_message_key(item)
             if key in seen_keys:
                 continue
             seen_keys.add(key)
             combined.append(item)
         return combined
+
+    def _persist_batch_begin(
+        self, step_messages: List[Dict[str, Any]]
+    ) -> Set[str]:
+        """Снимок ключей ДО записи. Чистая часть — общая для sync и async."""
+        known_before = set(self.known_message_keys)
+        self.known_keys_snapshot_before_last_batch = frozenset(known_before)
+        return known_before
+
+    def _persist_batch_apply(
+        self,
+        step_messages: List[Dict[str, Any]],
+        known_before: Set[str],
+        written: int,
+        previous_response_id: Optional[str],
+    ) -> None:
+        """Обновить состояние сессии по итогам записи. Чистая часть."""
+        self.persisted_messages_count += written
+        known_seen = set(known_before)
+        for message in step_messages:
+            key = make_message_key(message)
+            if key in known_seen:
+                continue
+            self.history_messages.append(message)
+            known_seen.add(key)
+        self.previous_response_id = previous_response_id
+
+    def _persist_batch_meta(
+        self,
+        base_meta: Dict[str, Any],
+        step_messages: Optional[List[Dict[str, Any]]] = None,
+        known_before: Optional[Set[str]] = None,
+    ) -> Dict[str, Any]:
+        """Собрать meta для записи. Чистая часть.
+
+        Вынесено, чтобы синхронный и асинхронный пути не могли разойтись: у них
+        различается ТОЛЬКО последовательность обращений к хранилищу, а вся
+        логика — здесь, в одном экземпляре.
+
+        Счётчики живого объёма (``live_history_chars`` / ``live_msg_count``)
+        считаются ЗДЕСЬ, а не в файловом слое. Раньше их бампал
+        ``append_new_thread_messages``, то есть только файловая реализация:
+        у хранилища в базе этих ключей не появлялось вовсе, а TUI их читает
+        (индикатор объёма контекста). Это производная от сообщений, а не
+        деталь хранения, и место ей в сессии.
+        """
+        base_meta = dict(base_meta or {})
+        if step_messages is not None and known_before is not None:
+            fresh = [
+                m
+                for m in step_messages
+                if make_message_key(m) not in known_before
+            ]
+            if fresh:
+                # Параметры проекции — с develop: без них счётчик считал бы
+                # служебные теги и рассуждения, которых модель не видит.
+                bump_live_volume_for_messages(
+                    base_meta,
+                    fresh,
+                    tags=self._proj_tags,
+                    strip_think=self._proj_strip_think,
+                )
+        base_meta["created_at"] = self.meta.get("created_at") or base_meta.get(
+            "created_at"
+        )
+        base_meta["previous_response_id"] = self.previous_response_id
+        base_meta["backend_api_mode"] = self.backend_api_mode
+        base_meta["messages_count"] = self.persisted_messages_count
+        self._copy_session_meta_fields(base_meta)
+        # Persist rendered chat/completions system prompt for transparency/debugging.
+        # Must stay identical to актуальным данным: when we are in `responses`
+        # mode, there is no system prompt in messages, so it must not be present in meta.
+        if self.backend_api_mode == "chat_completions":
+            prompt = self.meta.get("chat_completions_system_prompt_rendered")
+            if isinstance(prompt, str) and prompt.strip():
+                base_meta["chat_completions_system_prompt_rendered"] = prompt
+        else:
+            base_meta.pop("chat_completions_system_prompt_rendered", None)
+        merge_tool_usage_notice_meta_to_base(base_meta, self.meta)
+        return base_meta
+
+    def _copy_session_meta_fields(self, base_meta: Dict[str, Any]) -> None:
+        """Перенести в base_meta поля сессии, которые есть в self.meta в валидной форме."""
+        if isinstance(self.meta.get("shared"), dict):
+            base_meta["shared"] = self.meta["shared"]
+        if isinstance(self.meta.get("last_backend_response_id"), str):
+            base_meta["last_backend_response_id"] = self.meta.get(
+                "last_backend_response_id"
+            )
+        if isinstance(self.meta.get("user_intent_log"), list):
+            base_meta["user_intent_log"] = serialize_for_meta(
+                deserialize_list(self.meta.get("user_intent_log"))
+            )
+        if isinstance(self.meta.get("current_user_intent"), list):
+            base_meta["current_user_intent"] = serialize_for_meta(
+                deserialize_list(self.meta.get("current_user_intent"))
+            )
+        if "user_turn_seq" in self.meta:
+            base_meta["user_turn_seq"] = int(
+                self.meta.get("user_turn_seq") or 0
+            )
+        if "dialog_steps_offset" in self.meta:
+            base_meta["dialog_steps_offset"] = int(
+                self.meta.get("dialog_steps_offset") or 0
+            )
+        for prompt_key in (
+            "last_main_prompt_tokens",
+            "last_main_prompt_message_count",
+        ):
+            if prompt_key in self.meta:
+                base_meta[prompt_key] = read_optional_nonneg_int(
+                    self.meta.get(prompt_key)
+                )
+        if isinstance(self.meta.get("token_usage"), dict):
+            base_meta["token_usage"] = self.meta["token_usage"]
 
     async def apersist_batch(
         self,
@@ -1039,6 +1155,35 @@ class ThreadSession(ThreadProjection):
         не было, а порядок обращений к хранилищу у обоих был один и тот же
         (сторож этого порядка — в тестах базы хранилища).
         """
+        if self._defer_persist:
+            # Шаг остаётся в памяти до точки сброса (aflush_deferred): его
+            # защищает история durable-исполнителя, а не хранилище.
+            from copy import deepcopy
+
+            self._deferred_messages.extend(deepcopy(list(step_messages)))
+            self._deferred_response_id = previous_response_id
+            self._deferred_pending = True
+            return
+        await self._apersist_now(
+            step_messages, previous_response_id=previous_response_id
+        )
+
+    async def aflush_deferred(self) -> None:
+        """Записать накопленные шаги одной операцией (persist: turn)."""
+        if not self._deferred_pending:
+            return
+        messages, self._deferred_messages = self._deferred_messages, []
+        self._deferred_pending = False
+        await self._apersist_now(
+            messages, previous_response_id=self._deferred_response_id
+        )
+
+    async def _apersist_now(
+        self,
+        step_messages: List[Dict[str, Any]],
+        *,
+        previous_response_id: Optional[str],
+    ) -> None:
         from gc_core.thread_store_durable import durable_store_capability
 
         capability = durable_store_capability(self.port)
@@ -1074,7 +1219,7 @@ class ThreadSession(ThreadProjection):
         )
 
         snapshot = await read_snapshot(self.system_id, self.thread_id)
-        self._check_store_owner(self.port, snapshot.meta, snapshot)
+        self._check_store_owner(self.port, snapshot)
         previous = self._store_snapshot
         if previous is not None and (
             snapshot.generation != previous.generation
@@ -1179,7 +1324,9 @@ class ThreadSession(ThreadProjection):
                 "messages": deepcopy(messages),
                 "meta": meta,
                 "start_seq": self.persisted_messages_count,
-                "known_keys": sorted(known),
+                # Без списка ключей: store дедуплицирует по своим данным, а
+                # expected_revision гарантирует, что они совпадают с сессией.
+                # Иначе каждый commit нёс бы ключи всего треда (O(N²) истории).
                 "expected_written": len(fresh_keys),
             },
         )
@@ -1475,6 +1622,8 @@ class ThreadSession(ThreadProjection):
         """
         from gc_core.thread_store_durable import durable_store_capability
 
+        # Компакция переписывает сохранённый тред: несохранённые шаги — сначала.
+        await self.aflush_deferred()
         capability = durable_store_capability(self.port)
         if capability is not None:
             return await self._acompact_durable(capability, summary_payload)

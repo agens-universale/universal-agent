@@ -65,6 +65,7 @@ from gc_core.config_modules.summary import (
     SUMMARY_CHARS_PER_TOKEN,
     SummaryConfig,
 )
+from gc_core.config_modules.thread_persist import ThreadStoreSettings
 from gc_core.config_modules.todo import TodoConfig, normalize_todo_config
 from gc_core.config_modules.tui import TuiConfig
 from gc_core.config_modules.update import UpdateConfig
@@ -103,6 +104,9 @@ class AppConfig(BaseModel):
         default_factory=ProjectMemoryConfig
     )
     paths: PathsConfig = Field(default_factory=PathsConfig)
+    thread_store: ThreadStoreSettings = Field(
+        default_factory=ThreadStoreSettings
+    )
     agent: AgentConfig = Field(default_factory=AgentConfig)
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)

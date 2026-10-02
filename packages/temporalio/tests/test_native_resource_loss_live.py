@@ -8,18 +8,19 @@ import sys
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_ua_temporalio.native_activities import _digest
 from gc_ua_temporalio.native_client import NativeAgentClient
-from gc_ua_temporalio.native_contracts import NativeRunRequest
+from gc_ua_temporalio.native_contracts import NativeCall, NativeRunRequest
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
-from gc_ua_temporalio.storage.effects import EffectLedger
-from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_ua_temporalio.storage.technical import TechnicalStore
+from live_support import call, wait_marker
 from native_restart_interceptor import RestartInterceptor
 from temporalio.client import WorkflowFailureError
+from temporalio.converter import value_to_type
 from temporalio.exceptions import CancelledError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
-from test_live_workflow import call, wait_marker
 from test_native_workflow_controls import scripted_http  # noqa: F401
 
 
@@ -29,6 +30,10 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
     scripted_http,  # noqa: F811
     resource,
 ):
+    def effects(text):
+        # Новая сессия после потери процесса допустима; повтор эффекта — нет.
+        return [line for line in text.splitlines() if '"open"' not in line]
+
     binary = shutil.which("temporal")
     if binary is None:
         pytest.skip("Temporal CLI is required")
@@ -166,23 +171,36 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             first.wait(timeout=10)
             assert len(requests) == (1 if resource == "mcp" else 2)
             start("none")
-            with pytest.raises(WorkflowFailureError) as failed:
-                await asyncio.wait_for(handle.result(), 45)
-            assert "ResourceOwnerLost" in str(failed.value.cause)
-            assert audit.read_text() == before
-            assert len(requests) == (1 if resource == "mcp" else 4)
-            ledger = EffectLedger(
-                SQLiteThreadStore(config["receipts_database"])
-            )
+            # Ход не падает: первый эффект возвращается из квитанции, второй
+            # не исполняется — потерю ресурса модель видит ошибкой инструмента.
+            await asyncio.wait_for(handle.result(), 45)
+            # Первый эффект не повторяется. Второй — новая операция модели:
+            # MCP-владелец этого хода потерян (ошибка инструмента), а фоновый
+            # владелец ленивый и создаётся заново в новом процессе.
+            expected = effects(before) * (1 if resource == "mcp" else 2)
+            assert effects(audit.read_text()) == expected
             original = marker["call"]
-            receipt = ledger.get(
-                original["owner_id"], original["operation_id"]
+            receipt = TechnicalStore(config["receipts_database"])
+            assert (
+                receipt.operation_result(
+                    original["owner_id"],
+                    original["operation_id"],
+                    _digest(value_to_type(NativeCall, original)),
+                )
+                == marker["result"]
             )
-            assert receipt["status"] == "SUCCEEDED"
-            messages = FileThreadStore(tmp_path / "threads").load_messages(
-                "test", "lost"
-            )
+            messages = DurableFileThreadStore(
+                tmp_path / "threads"
+            ).load_messages("test", "lost")
             assert len({m["id"] for m in messages}) == len(messages)
+            outputs = [
+                str(m.get("output") or m.get("content"))
+                for m in messages
+                if m.get("role") == "tool"
+                or m.get("type") == "function_call_output"
+            ]
+            if resource == "mcp":
+                assert any("ResourceOwnerLost" in o for o in outputs), outputs
             history = await handle.fetch_history()
         finally:
             for process in processes:
@@ -200,7 +218,7 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             interceptors=[RestartInterceptor()],
             workflow_failure_exception_types=[Exception],
         ).replay_workflow(history)
-        assert audit.read_text() == before
+        assert effects(audit.read_text()) == expected
 
 
 async def test_native_cancellation_during_actual_mcp_teardown(
@@ -273,12 +291,7 @@ async def test_native_cancellation_during_actual_mcp_teardown(
             assert isinstance(cancelled.value.cause, CancelledError)
             assert (await handle.describe()).status.name == "CANCELED"
             assert owner._task.done()
-            assert (
-                host.ledger.get(owner.ref.owner_id, "__resource_owner__")[
-                    "status"
-                ]
-                == "CLOSED"
-            )
+            assert not owner.lost
             assert len(tasks) == 1
             assert [
                 json.loads(line)["event"]

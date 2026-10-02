@@ -1,19 +1,20 @@
-"""Native operation redelivery and independent failure fences."""
+"""Native operation redelivery and error transport across the activity boundary."""
 
 import asyncio
 from types import SimpleNamespace
 
 import pytest
 from gc_core.execution.contracts import (
+    ExecutionFailure,
     GuardPreconditionChanged,
-    OutcomeUnknown,
+    InfrastructureFailure,
+    ToolOutcomeUnknown,
 )
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_activities import NativeActivities
 from gc_ua_temporalio.native_contracts import NativeCall
 from gc_ua_temporalio.public_config import public_config_snapshot
-from gc_ua_temporalio.storage.effects import EffectLedger
-from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_ua_temporalio.storage.technical import TechnicalStore
 
 
 def activities(tmp_path):
@@ -22,12 +23,11 @@ def activities(tmp_path):
     async def provider(_call):
         return ctx
 
-    receipts = SQLiteThreadStore(str(tmp_path / "receipts.sqlite"))
+    receipts = TechnicalStore(str(tmp_path / "receipts.sqlite"))
     native = NativeActivities(
         context_provider=provider,
-        stores={"files": FileThreadStore(str(tmp_path / "threads"))},
+        stores={"files": DurableFileThreadStore(str(tmp_path / "threads"))},
         receipts=receipts,
-        effect_ledger=EffectLedger(receipts),
         public_config=public_config_snapshot,
     )
     return native, ctx
@@ -58,44 +58,65 @@ async def test_concurrent_redelivery_has_one_handler_and_bounded_lock_cache(
     assert calls == [1] and not native._operation_locks
 
 
-async def test_unknown_model_does_not_block_another_workspace_operation(
-    tmp_path,
-):
-    native, ctx = activities(tmp_path)
-    model = NativeCall("test", "v1", "owner", "model")
+async def test_domain_error_crosses_the_boundary_as_the_same_type(tmp_path):
+    from gc_ua_temporalio.native_operations import restore_domain_error
+    from temporalio.exceptions import ApplicationError
 
-    async def lose_response():
-        raise OSError("connection lost after request")
+    native, _ = activities(tmp_path)
 
-    with pytest.raises(OSError):
-        await native._effect(
-            model, ctx, lose_response, fence="model:owner:model"
-        )
-    with pytest.raises(OutcomeUnknown):
-        await native._effect(
-            model, ctx, lose_response, fence="model:owner:model"
-        )
+    async def empty_path(_call, _ctx):
+        raise ValueError("path must not be empty")
 
-    async def other_effect():
-        return "other completed"
-
-    other = NativeCall("test", "v1", "other-owner", "tool")
-    assert await native._effect(other, ctx, other_effect) == "other completed"
+    request = NativeCall("test", "v1", "owner", "probe")
+    with pytest.raises(ApplicationError) as caught:
+        await native._recorded(request, str, empty_path)
+    assert caught.value.type == "DomainError"
+    assert caught.value.non_retryable
+    restored = restore_domain_error(caught.value)
+    assert type(restored) is ValueError
+    assert str(restored) == "path must not be empty"
 
 
-async def test_rejected_guard_is_replayed_as_rejected_without_mutation(
-    tmp_path,
-):
-    native, ctx = activities(tmp_path)
-    request = NativeCall("test", "v1", "owner", "guarded")
-    calls = []
+@pytest.mark.parametrize(
+    ("effect", "expected"),
+    [(True, ToolOutcomeUnknown), (False, InfrastructureFailure)],
+)
+def test_worker_loss_is_tool_feedback_only_for_effects(effect, expected):
+    from gc_ua_temporalio.native_operations import NativeOperations
+    from temporalio.exceptions import ActivityError, RetryState, TimeoutError
 
-    async def rejected():
-        calls.append(1)
+    error = ActivityError(
+        "timed out",
+        scheduled_event_id=1,
+        started_event_id=2,
+        identity="worker",
+        activity_type="agent.tool.execute",
+        activity_id="tool-1",
+        retry_state=RetryState.MAXIMUM_ATTEMPTS_REACHED,
+    )
+    error.__cause__ = TimeoutError(
+        "heartbeat", type=None, last_heartbeat_details=[]
+    )
+    assert isinstance(
+        NativeOperations._activity_error(
+            error, "agent.tool.execute", effect=effect
+        ),
+        expected,
+    )
+
+
+async def test_precondition_change_is_recoverable_tool_feedback(tmp_path):
+    from gc_ua_temporalio.native_operations import restore_domain_error
+
+    native, _ = activities(tmp_path)
+
+    async def changed(_call, _ctx):
         raise GuardPreconditionChanged("file changed")
 
-    for _ in range(2):
-        with pytest.raises(GuardPreconditionChanged):
-            await native._effect(request, ctx, rejected)
-    assert calls == [1]
-    assert native.effects.get("owner", "guarded")["status"] == "REJECTED"
+    with pytest.raises(Exception) as caught:
+        await native._recorded(
+            NativeCall("test", "v1", "owner", "guarded"), str, changed
+        )
+    restored = restore_domain_error(caught.value)
+    assert isinstance(restored, GuardPreconditionChanged)
+    assert not isinstance(restored, ExecutionFailure)

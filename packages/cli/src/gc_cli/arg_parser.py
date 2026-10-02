@@ -304,16 +304,9 @@ parser.add_argument(
 )
 
 
-parser.add_argument(
-    "--temporal-url",
-    default=None,
-    help="Удалённая Temporal-сессия: --thread ID --message TEXT [--watch]",
-)
-
 parsed_args, unknown_args = parser.parse_known_args()
 if (
     not parsed_args.init_config
-    and not parsed_args.temporal_url
     and not getattr(parsed_args, "init", False)
     and not parsed_args.sync_config
     and not getattr(parsed_args, "reset_config", False)

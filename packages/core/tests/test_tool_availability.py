@@ -14,7 +14,7 @@ from gc_core.message_policy.tool_availability import (
     tool_is_available,
 )
 from gc_core.message_policy.tool_usage_notice.apply import (
-    apply_tool_usage_notice_before_llm,
+    aapply_tool_usage_notice_before_llm,
 )
 from gc_core.states import SharedStateData, State
 
@@ -90,10 +90,10 @@ class TestResolver:
 
 
 class TestToolUsageNoticeGate:
-    def _apply(self, ctx):
+    async def _apply(self, ctx):
         state = _state()
         state.tool_usage_notice_cnt = {"session_memory": 10}
-        return apply_tool_usage_notice_before_llm(
+        return await aapply_tool_usage_notice_before_llm(
             [{"role": "user", "content": "hi", "id": "u1"}],
             state,
             ctx,
@@ -101,31 +101,32 @@ class TestToolUsageNoticeGate:
             step_messages=[{"role": "assistant", "content": "ok", "id": "a1"}],
         )
 
-    def test_notice_suppressed_when_tool_absent(self):
+    async def test_notice_suppressed_when_tool_absent(self):
         ctx = SimpleNamespace(
             config_dict=_notice_cfg(),
             tools_data={"fs_read_file": {}, "turn_finish": {}},
         )
-        assert len(self._apply(ctx)) == 1
+        assert len(await self._apply(ctx)) == 1
 
-    def test_notice_kept_when_tool_present(self):
+    async def test_notice_kept_when_tool_present(self):
         ctx = SimpleNamespace(
             config_dict=_notice_cfg(),
             tools_data={"fs_read_file": {}, "session_memory": {}},
         )
-        out = self._apply(ctx)
+        out = await self._apply(ctx)
         assert len(out) == 2
         assert "not used session_memory" in out[1]["content"]
 
-    def test_unknown_tool_set_keeps_old_behaviour(self):
+    async def test_unknown_tool_set_keeps_old_behaviour(self):
         # ctx без тулов (синтетический/тестовый) — гейт не применяется.
         assert (
-            len(self._apply(SimpleNamespace(config_dict=_notice_cfg()))) == 2
+            len(await self._apply(SimpleNamespace(config_dict=_notice_cfg())))
+            == 2
         )
 
 
 class TestProjectMemoryGate:
-    def test_hint_suppressed_when_tool_absent(self, monkeypatch):
+    async def test_hint_suppressed_when_tool_absent(self, monkeypatch):
         from gc_core import project_memory
 
         monkeypatch.setattr(project_memory, "get_hash", lambda _ctx: "hash-1")
@@ -143,10 +144,10 @@ class TestProjectMemoryGate:
         )
         base = [{"role": "user", "content": "hi", "id": "u1"}]
 
-        out_absent = apply_tool_usage_notice_before_llm(
+        out_absent = await aapply_tool_usage_notice_before_llm(
             base, _state(), absent, {}, step_messages=[]
         )
-        out_present = apply_tool_usage_notice_before_llm(
+        out_present = await aapply_tool_usage_notice_before_llm(
             base, _state(), present, {}, step_messages=[]
         )
         assert len(out_absent) == 1

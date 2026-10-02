@@ -12,7 +12,7 @@ from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from temporalio.client import WorkflowFailureError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from test_live_workflow import provider  # noqa: F401
+from live_support import provider  # noqa: F401
 
 
 @pytest.mark.parametrize("provider_unavailable", [False, True])

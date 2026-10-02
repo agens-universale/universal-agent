@@ -16,6 +16,8 @@ from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
 from pydantic import BaseModel, ConfigDict, Field
 
+from gc_ua_temporalio.payload_storage import PayloadStorageConfig
+
 
 class NativeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -45,6 +47,8 @@ class NativeWorkerConfig(BaseModel):
     )
     receipts_database: str
     profiles: dict[str, NativeProfile]
+    #: Крупные payload истории Temporal — во внешнее хранилище (см. payload_storage).
+    payload_storage: PayloadStorageConfig | None = None
 
     @classmethod
     def load(cls, path):
@@ -92,6 +96,10 @@ class NativeContextProvider:
                     f"Profile {name}: unknown store {profile.store_id}"
                 )
             config = flatten_app_config(profile.core.model_copy(deep=True))
+            if "thread_store" not in profile.core.model_fields_set:
+                # В Temporal по умолчанию тред пишется по ходам: шаги хода
+                # защищает история workflow. Явная настройка профиля главнее.
+                config["thread_store_persist"] = "turn"
             config["launch_root"] = str(workspace.resolve())
             self._profiles[name] = (profile.revision, profile.store_id, config)
             identity = _digest([name, profile.revision])

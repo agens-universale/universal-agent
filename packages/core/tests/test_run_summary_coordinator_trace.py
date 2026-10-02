@@ -9,7 +9,6 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from gc_core import run_summary_coordinator as rsc
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
-from gc_core.summarize import summary_logging as summary_logging
 from gc_testkit import run_coro
 
 
@@ -114,9 +113,7 @@ async def test_archive_called_on_summary_applied(monkeypatch, coordinator_ctx):
         is_cli_mode=False,
         pre_backend_trigger_reason="pre_backend",
     )
-    monkeypatch.setattr(
-        summary_logging, "append_summary_trace_record", lambda *a, **k: None
-    )
+    monkeypatch.setattr(rsc, "aappend_summary_trace_record", AsyncMock())
 
     await coord.on_summary_applied(
         {

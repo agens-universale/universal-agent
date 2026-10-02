@@ -17,7 +17,7 @@ from gc_ua_temporalio.native_provider import (
 )
 from gc_ua_temporalio.native_worker import build_native_runtime, worker_options
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
-from gc_ua_temporalio.session_contracts import UserMessage
+from gc_ua_temporalio.native_contracts import UserMessage
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
 

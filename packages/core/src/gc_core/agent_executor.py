@@ -363,38 +363,27 @@ class AgentExecutor:
         except Exception:
             pass
 
-    def _load_chat_completions_prompts(
+    async def _aload_chat_completions_prompts(
         self, *, effective_verbose: bool, logger
     ) -> tuple:
-        """(system prompt, special instructions) для chat/completions из файлов конфига."""
+        """(system prompt, special instructions) для chat/completions из файлов конфига.
+
+        Без `prompt_loader` в контексте файлы читаются здесь же, как в develop;
+        с ним (Temporal native) чтение уходит в загрузчик рантайма.
+        """
         from gc_core.run_preparation import (
             PromptPreparationRequest,
             load_run_prompts,
         )
 
-        prepared = load_run_prompts(
-            PromptPreparationRequest.from_config(
-                self._ctx.config_dict, verbose=effective_verbose
-            ),
-            logger=logger,
+        request = PromptPreparationRequest.from_config(
+            self._ctx.config_dict, verbose=effective_verbose
         )
-        return prepared.system_prompt, prepared.special_instructions
-
-    async def _aload_chat_completions_prompts(
-        self, *, effective_verbose: bool, logger
-    ) -> tuple:
         loader = getattr(self._ctx, "prompt_loader", None)
         if loader is None:
-            return self._load_chat_completions_prompts(
-                effective_verbose=effective_verbose, logger=logger
-            )
-        from gc_core.run_preparation import PromptPreparationRequest
-
-        prepared = await loader(
-            PromptPreparationRequest.from_config(
-                self._ctx.config_dict, verbose=effective_verbose
-            )
-        )
+            prepared = load_run_prompts(request, logger=logger)
+        else:
+            prepared = await loader(request)
         return prepared.system_prompt, prepared.special_instructions
 
     async def _abuild_run_state(
@@ -681,6 +670,10 @@ class AgentExecutor:
         await thread_session.apersist_batch(
             [], previous_response_id=state.previous_response_id
         )
+        # persist: turn — конец хода и есть точка сброса.
+        flush = getattr(thread_session, "aflush_deferred", None)
+        if flush is not None:
+            await flush()
         _run_trace_id = trace_id_from_config(config_dict)
         if _run_trace_id:
             # После persist_batch: он пересобирает мету с диска, поэтому
@@ -859,6 +852,15 @@ class AgentExecutor:
             self._state = None
             self._accounting_closed = False
         config_dict = self._ctx.config_dict
+        if config_dict.get("thread_store_persist") == "turn" and not getattr(
+            self._ctx, "durable_execution", False
+        ):
+            # Без истории durable-исполнителя несохранённые шаги пропали бы
+            # при падении процесса, а UI не видел бы хода.
+            raise ValueError(
+                "thread_store.persist: turn is supported only by a durable "
+                "executor (Temporal); local runs use persist: step"
+            )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
             verbose
@@ -1089,6 +1091,12 @@ class AgentExecutor:
     def active_parent_call_id(self) -> str | None:
         """``call_id`` вызова субагента, который сейчас принимает ввод."""
         return active_parent_call_id(self._ctx)
+
+    async def aflush_thread(self) -> None:
+        """Записать отложенные шаги хода (persist: turn); иначе — ничего."""
+        flush = getattr(self._thread_session, "aflush_deferred", None)
+        if flush is not None:
+            await flush()
 
     def get_state(self) -> State | None:
         """

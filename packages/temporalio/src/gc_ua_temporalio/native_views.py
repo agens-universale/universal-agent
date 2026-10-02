@@ -6,7 +6,7 @@ import uuid
 
 from gc_core.thread_store_durable import ThreadStoreOperation
 
-from gc_ua_temporalio.storage.views import SessionViews
+from gc_ua_temporalio.storage.views import ViewEvents
 
 
 def _prefix(messages):
@@ -19,7 +19,7 @@ class NativeViews:
     def __init__(self, store, receipts, *, workflow_id=None):
         self.workflow_id = workflow_id
         self.store = store
-        self.technical = SessionViews(receipts)
+        self.technical = ViewEvents(receipts)
 
     def owner(self, system, thread):
         return self.store.read_snapshot(

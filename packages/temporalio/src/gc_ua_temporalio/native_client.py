@@ -6,12 +6,11 @@ import json
 import uuid
 
 from gc_core.structured_output import read_format_description
-from temporalio.client import Client
-from temporalio.common import WorkflowIDReusePolicy
+from temporalio.client import Client, WithStartWorkflowOperation
+from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 
-from gc_ua_temporalio.native_contracts import NativeRunRequest
+from gc_ua_temporalio.native_contracts import NativeRunRequest, UserMessage
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
-from gc_ua_temporalio.session_contracts import UserMessage
 
 
 class NativeAgentClient:
@@ -51,26 +50,31 @@ class NativeAgentClient:
             workflow_id
         ).execute_update(NativeAgentWorkflow.stop_turn, turn_id)
 
-    async def inspect_operation(self, workflow_id):
-        return await self.client.get_workflow_handle(
-            workflow_id
-        ).execute_update(NativeAgentWorkflow.inspect_operation)
-
-    async def resume_operation(self, workflow_id, operation_id, digest):
-        return await self.client.get_workflow_handle(
-            workflow_id
-        ).execute_update(
-            NativeAgentWorkflow.resume_operation, args=[operation_id, digest]
-        )
-
-    async def resolve_operation(self, workflow_id, resolution):
-        return await self.client.get_workflow_handle(
-            workflow_id
-        ).execute_update(NativeAgentWorkflow.reconcile_operation, resolution)
-
     async def close_session(self, workflow_id):
         await self.client.get_workflow_handle(workflow_id).signal(
             NativeAgentWorkflow.close_session
+        )
+
+    async def submit_with_start(
+        self, workflow_id, request: NativeRunRequest, message: UserMessage
+    ):
+        """Отправить сообщение, открыв сессию при необходимости, — атомарно.
+
+        Закрытая или упавшая сессия с тем же ID начинается заново новым run.
+        """
+        message.validate()
+        operation = WithStartWorkflowOperation(
+            NativeAgentWorkflow.run,
+            request,
+            id=workflow_id,
+            id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
+            id_reuse_policy=WorkflowIDReusePolicy.ALLOW_DUPLICATE,
+            task_queue=self.workflow_queue,
+        )
+        return await self.client.execute_update_with_start_workflow(
+            NativeAgentWorkflow.submit_message,
+            message,
+            start_workflow_operation=operation,
         )
 
     async def submit_message(self, workflow_id, message: UserMessage):
@@ -94,8 +98,19 @@ class NativeAgentClient:
 
 
 async def _run(args):
+    from gc_ua_temporalio.payload_storage import data_converter
+
+    storage = None
+    if args.config:
+        from gc_ua_temporalio.native_provider import NativeWorkerConfig
+
+        storage = NativeWorkerConfig.load(args.config).payload_storage
     client = NativeAgentClient(
-        await Client.connect(args.address, namespace=args.namespace),
+        await Client.connect(
+            args.address,
+            namespace=args.namespace,
+            data_converter=data_converter(storage),
+        ),
         workflow_queue=args.workflow_queue,
     )
     if args.command == "start":
@@ -119,31 +134,6 @@ async def _run(args):
             workflow_id=args.workflow_id,
         )
         print(handle.id)
-    elif args.command == "inspect":
-        print(
-            json.dumps(
-                await client.inspect_operation(args.workflow_id),
-                ensure_ascii=False,
-                indent=2,
-            )
-        )
-    elif args.command == "resume":
-        print(
-            await client.resume_operation(
-                args.workflow_id, args.operation_id, args.digest
-            )
-        )
-    elif args.command == "resolve":
-        from pathlib import Path
-
-        from gc_ua_temporalio.native_operator_contracts import (
-            NativeOperatorResolution,
-        )
-
-        resolution = NativeOperatorResolution(
-            **json.loads(Path(args.receipt).read_text(encoding="utf-8"))
-        )
-        print(await client.resolve_operation(args.workflow_id, resolution))
     elif args.command == "send":
         print(
             await client.submit_message(
@@ -169,6 +159,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--address", default="localhost:7233")
     parser.add_argument("--namespace", default="default")
+    parser.add_argument(
+        "--config",
+        help="native-worker.json: нужен, если включён payload_storage",
+    )
     parser.add_argument("--workflow-queue", default="ua-native-workflow")
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser("start")
@@ -188,17 +182,9 @@ def main():
         "answer",
         "close",
         "send",
-        "inspect",
-        "resolve",
-        "resume",
     ):
         sub = commands.add_parser(name)
         sub.add_argument("workflow_id")
-        if name == "resume":
-            sub.add_argument("--operation-id", required=True)
-            sub.add_argument("--digest", required=True)
-        if name == "resolve":
-            sub.add_argument("--receipt", required=True)
         if name == "send":
             sub.add_argument("--message-id", required=True)
             sub.add_argument("--text", required=True)

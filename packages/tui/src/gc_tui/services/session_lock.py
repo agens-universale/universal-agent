@@ -9,15 +9,9 @@ import json
 import os
 import time
 from datetime import UTC, datetime
-from functools import wraps
-from pathlib import Path
 from typing import Any, Optional
 
 from gc_core.thread_store import sanitize_system_id, validate_thread_id
-from gc_core.thread_store_journal import (
-    thread_file_read_scope,
-    thread_read_scope,
-)
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.user_text import read_user_text_or_none
 
@@ -42,7 +36,7 @@ def _now_iso(now: Optional[datetime] = None) -> str:
     return (now or _utc_now()).astimezone(UTC).isoformat()
 
 
-def _read_lock(path: str) -> Optional[dict[str, Any]]:
+def read_lock(path: str) -> Optional[dict[str, Any]]:
     """Прочитать lock. None = отсутствует / битый / пустой JSON (как stale)."""
     raw = read_user_text_or_none(path)
     if raw is None:
@@ -65,20 +59,6 @@ def _read_lock(path: str) -> Optional[dict[str, Any]]:
     ):
         return None
     return {"tui_id": tui_id.strip(), "heartbeat_at": heartbeat_at}
-
-
-def read_lock(path: str) -> Optional[dict[str, Any]]:
-    """Read a lease after recovery under its physical thread-file lock."""
-    target = Path(path)
-    if (
-        target.parent.name == "locks"
-        and target.name.startswith("lock_")
-        and target.suffix == ".json"
-    ):
-        stem = target.name.removeprefix("lock_").removesuffix(".json")
-        with thread_file_read_scope(str(target.parent.parent), stem):
-            return _read_lock(path)
-    return _read_lock(path)
 
 
 def is_fresh(
@@ -107,7 +87,7 @@ def is_held_by_other(
 ) -> bool:
     """Чужой свежий lock → занято (для UX /sessions и deny до выбора)."""
     path = lock_path(threads_dir, system, thread_id)
-    lock = _read_lock(path)
+    lock = read_lock(path)
     if lock is None:
         return False
     if lock["tui_id"] == tui_id:
@@ -136,7 +116,7 @@ def try_acquire(
 ) -> bool:
     """Попытаться стать holder: write → re-read. False при свежем чужом или lost race."""
     path = lock_path(threads_dir, system, thread_id)
-    existing = _read_lock(path)
+    existing = read_lock(path)
     if (
         existing is not None
         and existing["tui_id"] != tui_id
@@ -144,7 +124,7 @@ def try_acquire(
     ):
         return False
     _write_lock(path, tui_id, now=now)
-    after = _read_lock(path)
+    after = read_lock(path)
     return after is not None and after["tui_id"] == tui_id
 
 
@@ -163,7 +143,7 @@ def heartbeat(
     if current_mono - last_mono < HEARTBEAT_MIN_INTERVAL_S:
         return last_mono
     path = lock_path(threads_dir, system, thread_id)
-    existing = _read_lock(path)
+    existing = read_lock(path)
     if existing is None or existing["tui_id"] != tui_id:
         return last_mono
     _write_lock(path, tui_id, now=now)
@@ -179,27 +159,10 @@ def release(
     """Best-effort удалить lock. При tui_id — только свой."""
     path = lock_path(threads_dir, system, thread_id)
     if tui_id is not None:
-        existing = _read_lock(path)
+        existing = read_lock(path)
         if existing is not None and existing["tui_id"] != tui_id:
             return
     try:
         os.remove(path)
     except OSError:
         pass
-
-
-def _with_thread_scope(function):
-    @wraps(function)
-    def guarded(threads_dir, system, thread_id, *args, **kwargs):
-        with thread_read_scope(threads_dir, system, thread_id):
-            return function(threads_dir, system, thread_id, *args, **kwargs)
-
-    return guarded
-
-
-# A reset and a heartbeat cannot interleave between holder check and write.
-# Private reads inside these operations already hold the exact thread scope.
-is_held_by_other = _with_thread_scope(is_held_by_other)
-try_acquire = _with_thread_scope(try_acquire)
-heartbeat = _with_thread_scope(heartbeat)
-release = _with_thread_scope(release)

@@ -32,11 +32,10 @@ from gc_core.execution.constants import (
     _SESSION_COMPACT_RESUME_USER_TEXT,
     _TRUNCATED_ARGUMENTS_HINT,
 )
-from gc_core.execution.contracts import ExecutionFailure, ToolInvocation
+from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.loop import AgentLoop
 from gc_core.execution.model import arequest_model
 from gc_core.execution.policy import ExecutionPolicy
-from gc_core.execution.reducers import apply_state_delta, tool_state_view
 from gc_core.intent_guard.guard import FinishGateGuard
 from gc_core.intent_guard.text_answer_judge import ashould_return_text_answer
 from gc_core.intent_guard.turn_finish_emit import (
@@ -904,7 +903,6 @@ def loop_bindings():
         TECHNICAL_TYPE_ERROR_MESSAGE=TECHNICAL_TYPE_ERROR_MESSAGE,
         TECHNICAL_TYPE_TECHNICAL=TECHNICAL_TYPE_TECHNICAL,
         TURN_FINALIZING_TOOLS=TURN_FINALIZING_TOOLS,
-        ToolInvocation=ToolInvocation,
         UsageAccount=UsageAccount,
         WrongFunctionArgumentsException=WrongFunctionArgumentsException,
         _MAX_CONTEXT_OVERFLOW_RETRIES=_MAX_CONTEXT_OVERFLOW_RETRIES,
@@ -945,7 +943,6 @@ def loop_bindings():
         amaybe_update_intent_scope_from_tool=amaybe_update_intent_scope_from_tool,
         apersist_subagent_trace=apersist_subagent_trace,
         apply_finish_gate_to_turn_finish_output_in_state=apply_finish_gate_to_turn_finish_output_in_state,
-        apply_state_delta=apply_state_delta,
         apply_tool_usage_notice_before_llm=apply_tool_usage_notice_before_llm,
         aprocess_tool_calls=aprocess_tool_calls,
         aprocess_tool_outputs=aprocess_tool_outputs,
@@ -991,7 +988,6 @@ def loop_bindings():
         sanitize_messages_for_chat_completions=sanitize_messages_for_chat_completions,
         time=time,
         todo_items_from_arguments=todo_items_from_arguments,
-        tool_state_view=tool_state_view,
         wrap_technical_user_content=wrap_technical_user_content,
     )
 

@@ -43,14 +43,36 @@ def resolve_summary_trace_path(ctx: Any) -> str:
     return os.path.join(base_dir, "summary_trace.jsonl")
 
 
-def append_summary_trace_record(
+@dataclass(frozen=True)
+class SummaryTraceRecord:
+    trigger_reason: str
+    trace_data: dict[str, Any]
+    newly_summarized_message_id: str
+    schema_version: int = 1
+
+
+async def aappend_summary_trace_record(
     ctx: Any,
     *,
     trigger_reason: str,
     trace_data: Mapping[str, Any] | None,
     newly_summarized_message_id: str,
 ) -> None:
-    """Дописать одну строку в ``summary_trace*.jsonl`` (структурированный trace пайплайна)."""
+    """Дописать одну строку в ``summary_trace*.jsonl`` (структурированный trace пайплайна).
+
+    Если рантайм дал ``ctx.summary_trace_sink`` (Temporal native), запись уходит
+    в него и локальный путь не резолвится; иначе строка пишется в файл здесь же.
+    """
+    sink = getattr(ctx, "summary_trace_sink", None)
+    if sink is not None:
+        await sink(
+            SummaryTraceRecord(
+                trigger_reason=trigger_reason,
+                trace_data=dict(trace_data or {}),
+                newly_summarized_message_id=newly_summarized_message_id,
+            )
+        )
+        return
     trace_path = resolve_summary_trace_path(ctx)
     if not trace_path:
         return
@@ -71,39 +93,6 @@ def append_summary_trace_record(
     with open(trace_path, "a", encoding="utf-8") as fd:
         fd.write(json.dumps(payload, ensure_ascii=False))
         fd.write("\n")
-
-
-@dataclass(frozen=True)
-class SummaryTraceRecord:
-    trigger_reason: str
-    trace_data: dict[str, Any]
-    newly_summarized_message_id: str
-    schema_version: int = 1
-
-
-async def aappend_summary_trace_record(
-    ctx: Any,
-    *,
-    trigger_reason: str,
-    trace_data: Mapping[str, Any] | None,
-    newly_summarized_message_id: str,
-) -> None:
-    sink = getattr(ctx, "summary_trace_sink", None)
-    if sink is not None:
-        await sink(
-            SummaryTraceRecord(
-                trigger_reason=trigger_reason,
-                trace_data=dict(trace_data or {}),
-                newly_summarized_message_id=newly_summarized_message_id,
-            )
-        )
-        return
-    append_summary_trace_record(
-        ctx,
-        trigger_reason=trigger_reason,
-        trace_data=trace_data,
-        newly_summarized_message_id=newly_summarized_message_id,
-    )
 
 
 @dataclass(frozen=True)

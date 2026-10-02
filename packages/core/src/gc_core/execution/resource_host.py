@@ -1,8 +1,8 @@
-"""Worker resource actors using an injected durable effect ledger.
+"""Worker resource actors: one task owns MCP sessions and background processes.
 
-The ledger protocol is implemented by gc_ua_temporalio.storage.effects.EffectLedger.
-Live futures provide singleflight only; receipts and uncertain outcomes live in
-that ledger. Resource handles never migrate or reconnect after process loss.
+Повторная доставка той же операции в этом процессе ждёт тот же результат.
+Ресурсы не переживают процесс: после перезапуска worker'а владелец потерян, и
+модель получает это как ошибку инструмента; следующий ход откроет нового.
 """
 
 from __future__ import annotations
@@ -13,16 +13,9 @@ import json
 import uuid
 from copy import deepcopy
 from dataclasses import asdict, dataclass
-from typing import Any, Awaitable, Callable, Protocol
+from typing import Any, Awaitable, Callable
 
-from gc_core.execution.contracts import (
-    ArtifactRef,
-    GuardPreconditionChanged,
-    OutcomeUnknown,
-    StateDelta,
-    ToolEffectRequest,
-    ToolResult,
-)
+from gc_core.execution.contracts import ToolEffectRequest
 from gc_core.execution.resource_contracts import (
     BackgroundProcessRef,
     ResourceEffectResult,
@@ -31,40 +24,11 @@ from gc_core.execution.resource_contracts import (
 )
 from gc_core.execution.resource_scope import capture_background_processes
 
-_OWNER_OPERATION = "__resource_owner__"
-
-
-class ResourceEffectLedger(Protocol):
-    def get(self, owner, operation): ...
-    def begin(self, owner, operation, workspace, digest, plan): ...
-    def finish(self, owner, operation, status, result=None): ...
-    def result(self, row): ...
-
 
 def _fingerprint(value) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True).encode()
     ).hexdigest()
-
-
-def _restore_result(data: dict) -> ResourceEffectResult:
-    value = dict(data["result"])
-    value["delta"] = StateDelta(**value.get("delta", {}))
-    value["artifacts"] = [
-        ArtifactRef(**artifact) for artifact in value.get("artifacts", [])
-    ]
-    return ResourceEffectResult(
-        result=ToolResult(**value),
-        background_processes=[
-            BackgroundProcessRef(
-                owner=ResourceOwnerRef(**process["owner"]),
-                operation_id=process["operation_id"],
-                pid=process["pid"],
-                backend=process["backend"],
-            )
-            for process in data.get("background_processes", [])
-        ],
-    )
 
 
 async def _close_mcp_owner() -> None:
@@ -89,14 +53,16 @@ class _PrepareContext:
 class LiveResourceOwner:
     """One task owns discovery, calls and teardown of MCP context managers."""
 
-    def __init__(self, ref, workspace, ledger, bootstrap, close):
-        self.ref, self.workspace, self.ledger = ref, workspace, ledger
+    def __init__(self, ref, workspace, bootstrap, close):
+        self.ref, self.workspace = ref, workspace
         self._queue = asyncio.Queue()
         self._pending: dict[str, tuple[str, asyncio.Future]] = {}
+        self._done: dict[str, tuple[str, ResourceEffectResult]] = {}
         self._contexts = {}
         self._context_futures = {}
         self._ready = asyncio.get_running_loop().create_future()
         self._accepting = True
+        self.lost = False
         self._close = close
         self._task = asyncio.create_task(
             self._run(bootstrap), name=f"resources:{ref.owner_id}"
@@ -106,23 +72,10 @@ class LiveResourceOwner:
         await asyncio.shield(self._ready)
         return self.ref
 
-    def receipt(self, row) -> ResourceEffectResult:
-        status = row["status"]
-        if status == "SUCCEEDED":
-            return _restore_result(self.ledger.result(row))
-        if status == "REJECTED":
-            raise GuardPreconditionChanged(
-                "Resource effect precondition was rejected"
-            )
-        raise OutcomeUnknown(f"Resource effect has unresolved status {status}")
-
     async def execute(
         self, request: ToolEffectRequest, *, context_id: str | None = None
     ) -> ResourceEffectResult:
-        if (
-            not request.operation_id
-            or request.operation_id == _OWNER_OPERATION
-        ):
+        if not request.operation_id:
             raise ValueError(
                 "Resource effects require a distinct operation_id"
             )
@@ -132,20 +85,19 @@ class LiveResourceOwner:
             else {"effect": asdict(request), "context_id": context_id}
         )
         # No await before registration: simultaneous activity retries share one future.
+        for known in (
+            self._pending.get(request.operation_id),
+            self._done.get(request.operation_id),
+        ):
+            if known is not None and known[0] != digest:
+                raise ValueError(
+                    "Operation identity reused for a different effect"
+                )
         existing = self._pending.get(request.operation_id)
         if existing is not None:
-            if existing[0] != digest:
-                raise OutcomeUnknown(
-                    "Operation identity reused for a different effect"
-                )
             return deepcopy(await asyncio.shield(existing[1]))
-        row = self.ledger.get(self.ref.owner_id, request.operation_id)
-        if row is not None:
-            if row["digest"] != digest:
-                raise OutcomeUnknown(
-                    "Operation identity reused for a different effect"
-                )
-            return self.receipt(row)
+        if request.operation_id in self._done:
+            return deepcopy(self._done[request.operation_id][1])
         if not self._accepting or self._task.done():
             raise ResourceOwnerLost("Resource owner is closed or unavailable")
         future = asyncio.get_running_loop().create_future()
@@ -182,24 +134,10 @@ class LiveResourceOwner:
 
     async def _invoke(self, ctx, request, digest, future):
         from gc_core.execution.tool_effects import execute_native_tool_effect
+        from gc_core.tools.connect_mcp.durable_scope import McpSessionLostError
 
-        owner, operation = self.ref.owner_id, request.operation_id
-        began = False
+        operation = request.operation_id
         try:
-            old = self.ledger.begin(
-                owner,
-                operation,
-                self.workspace,
-                digest,
-                {
-                    "resource_owner": asdict(self.ref),
-                    "effect": asdict(request),
-                },
-            )
-            if old is not None:
-                future.set_result(self.receipt(old))
-                return
-            began = True
             processes = []
 
             def capture(pid, backend):
@@ -210,23 +148,18 @@ class LiveResourceOwner:
             with capture_background_processes(capture):
                 result = await execute_native_tool_effect(request, ctx=ctx)
             receipt = ResourceEffectResult(result, processes)
-            self.ledger.finish(owner, operation, "SUCCEEDED", asdict(receipt))
+            self._done[operation] = (digest, receipt)
             future.set_result(receipt)
-        except GuardPreconditionChanged as exc:
-            if began:
-                self.ledger.finish(owner, operation, "REJECTED")
+        except McpSessionLostError as exc:
+            # Сессия MCP умерла: дальнейшие вызовы этого владельца бессмысленны.
             future.set_exception(exc)
-        except BaseException as exc:
-            if began:
-                self.ledger.finish(owner, operation, "UNKNOWN")
-            error = OutcomeUnknown(
-                f"Resource effect has no committed receipt: {type(exc).__name__}"
-            )
-            error.__cause__ = exc
-            future.set_exception(error)
-            # A failed MCP exchange may have invalidated its live session.
             self._accepting = False
+        except asyncio.CancelledError:
+            future.cancel()
             raise
+        except Exception as exc:
+            # Ошибка вызова — ошибка инструмента; сессия остаётся живой.
+            future.set_exception(exc)
         finally:
             self._pending.pop(operation, None)
 
@@ -245,12 +178,6 @@ class LiveResourceOwner:
                 bootstrap_owner_reset = set_owner(
                     getattr(ctx, "mcp_session_owner", None) or owner_key
                 )
-                self.ledger.finish(
-                    self.ref.owner_id,
-                    _OWNER_OPERATION,
-                    "READY",
-                    asdict(self.ref),
-                )
                 self._ready.set_result(None)
                 await self._serve(ctx)
             except BaseException as exc:
@@ -263,12 +190,7 @@ class LiveResourceOwner:
                 try:
                     await self._close()
                 finally:
-                    self.ledger.finish(
-                        self.ref.owner_id,
-                        _OWNER_OPERATION,
-                        "OWNER_LOST" if failed else "CLOSED",
-                        asdict(self.ref),
-                    )
+                    self.lost = failed
                     for _, future in self._pending.values():
                         if not future.done():
                             future.set_exception(
@@ -299,9 +221,13 @@ class LiveResourceOwner:
                     child = await item.callback(ctx)
                     self._contexts[item.context_id] = child
                     item.future.set_result(child)
-                except BaseException as exc:
-                    item.future.set_exception(exc)
+                except asyncio.CancelledError:
+                    item.future.cancel()
                     raise
+                except Exception as exc:
+                    # Ошибка подготовки ребёнка не убивает ресурсы родителя.
+                    item.future.set_exception(exc)
+                    self._context_futures.pop(item.context_id, None)
             else:
                 context_id, *effect = item
                 effect_ctx = (
@@ -323,12 +249,11 @@ class LiveResourceOwner:
 class WorkerResourceHost:
     """Route explicit owner identities; never recreate an old logical session."""
 
-    def __init__(self, worker_id: str, *, ledger: ResourceEffectLedger):
+    def __init__(self, worker_id: str):
         if not worker_id:
             raise ValueError("worker_id must not be empty")
         self.worker_id = worker_id
         self.process_epoch = uuid.uuid4().hex
-        self.ledger = ledger
         self._owners: dict[str, LiveResourceOwner] = {}
 
     async def open(
@@ -343,23 +268,10 @@ class WorkerResourceHost:
             raise ValueError("owner_id and workspace must not be empty")
         owner = self._owners.get(owner_id)
         if owner is None:
-            if self.ledger.get(owner_id, _OWNER_OPERATION) is not None:
-                raise ResourceOwnerLost(
-                    "The original resource owner cannot be recreated"
-                )
             ref = ResourceOwnerRef(
                 self.worker_id, self.process_epoch, owner_id
             )
-            self.ledger.begin(
-                owner_id,
-                _OWNER_OPERATION,
-                f"resource-owner:{owner_id}",
-                _fingerprint(asdict(ref)),
-                {"resource_owner": asdict(ref)},
-            )
-            owner = LiveResourceOwner(
-                ref, workspace, self.ledger, bootstrap, close
-            )
+            owner = LiveResourceOwner(ref, workspace, bootstrap, close)
             self._owners[owner_id] = owner
         elif owner.workspace != workspace:
             raise ValueError(
@@ -411,37 +323,11 @@ class WorkerResourceHost:
         """
         return await self._resolve(ref).prepare_context(context_id, callback)
 
-    def operation(self, ref: ResourceOwnerRef, operation_id: str) -> dict:
-        """Read durable status after activity cancellation or resource host restart."""
-        row = self.ledger.get(ref.owner_id, operation_id)
-        if row is None:
-            return {"status": "NOT_STARTED"}
-        plan = (
-            json.loads(row["plan"])
-            if isinstance(row["plan"], str)
-            else row["plan"]
-        )
-        if plan.get("resource_owner") != asdict(ref):
-            raise ResourceOwnerLost(
-                "Operation belongs to a different resource owner"
-            )
-        if row["status"] == "STARTED":
-            owner = self._owners.get(ref.owner_id)
-            alive = (
-                ref.process_epoch == self.process_epoch
-                and owner is not None
-                and not owner._task.done()
-            )
-            if not alive:
-                self.ledger.finish(ref.owner_id, operation_id, "UNKNOWN")
-                row = self.ledger.get(ref.owner_id, operation_id)
-        return {"status": row["status"], "result": self.ledger.result(row)}
-
     async def close(self, ref: ResourceOwnerRef) -> None:
         await self._resolve(ref).close()
 
     def forget(self, ref: ResourceOwnerRef) -> None:
-        """Drop a completed actor; its durable owner tombstone is retained."""
+        """Drop a completed actor and its in-memory results."""
         if (
             ref.schema_version != 1
             or ref.worker_id != self.worker_id
@@ -453,12 +339,7 @@ class WorkerResourceHost:
         owner = self._owners.get(ref.owner_id)
         if owner is None:
             return
-        row = self.ledger.get(ref.owner_id, _OWNER_OPERATION)
-        if (
-            not owner._task.done()
-            or not row
-            or row["status"] not in {"CLOSED", "OWNER_LOST"}
-        ):
+        if not owner._task.done():
             raise RuntimeError(
                 "Resource owner must finish before it can be forgotten"
             )

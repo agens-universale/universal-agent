@@ -50,11 +50,6 @@ def _force_truecolor_if_supported() -> None:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Entrypoint для `gc-ua = "tui:main"`."""
     _force_truecolor_if_supported()
-    arguments = list(argv) if argv is not None else sys.argv[1:]
-    if any(arg.split("=", 1)[0] == "--temporal-url" for arg in arguments):
-        from gc_tui.temporal_app import main as remote_main
-
-        return remote_main(arguments)
     try:
         # importlib.import_module goes through sys.modules, not the package
         # attribute cache, so evicting tui.app in tests forces a real re-import.

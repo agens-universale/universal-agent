@@ -9,31 +9,32 @@ from dataclasses import asdict
 from pathlib import Path
 
 import pytest
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_client import NativeAgentClient
 from gc_ua_temporalio.native_contracts import NativeRunRequest
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
-from gc_ua_temporalio.storage.effects import EffectLedger
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_ua_temporalio.thread_store_contracts import ThreadStoreCall
+from live_support import provider, wait_marker  # noqa: F401
 from native_restart_interceptor import RestartInterceptor
-from temporalio.client import WorkflowFailureError
 from temporalio.converter import value_to_type
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer
-from test_live_workflow import provider, wait_marker  # noqa: F401
 
 
 @pytest.mark.parametrize("backend", ["file", "sqlite"])
 @pytest.mark.parametrize(
-    "checkpoint",
+    ("checkpoint", "persist"),
     [
-        "before_store_commit",
-        "after_store_receipt",
-        "after_model_receipt",
-        "before_model_recorded",
-        "before_model_request",
-        "after_model_response",
+        ("before_store_commit", "step"),
+        ("after_store_receipt", "step"),
+        ("after_model_receipt", "step"),
+        ("before_model_recorded", "step"),
+        ("before_model_request", "step"),
+        ("after_model_response", "step"),
+        # persist: turn — первая запись треда в конце хода, после модели.
+        ("before_store_commit", "turn"),
+        ("after_store_receipt", "turn"),
     ],
 )
 async def test_native_sigkill_durable_boundaries(
@@ -41,6 +42,7 @@ async def test_native_sigkill_durable_boundaries(
     provider,  # noqa: F811
     backend,
     checkpoint,
+    persist,
 ):
     binary = shutil.which("temporal")
     if not binary:
@@ -77,6 +79,7 @@ async def test_native_sigkill_durable_boundaries(
                             "strict_turn_finish_validation": False,
                         },
                         "tui": {"text_answer_mode": "deny"},
+                        "thread_store": {"persist": persist},
                         "logging": {
                             "save_logs": False,
                             "console_trace": False,
@@ -128,76 +131,53 @@ async def test_native_sigkill_durable_boundaries(
             first.wait(timeout=10)
             count_at_crash = len(requests)
             assert count_at_crash == (
-                1
+                2
+                if persist == "turn"
+                else 1
                 if checkpoint
                 in {"after_model_receipt", "after_model_response"}
                 else 0
             )
             start("none")
-            unknown = checkpoint in {
-                "before_model_request",
-                "after_model_response",
-            }
-            if unknown:
-                async with asyncio.timeout(45):
-                    while not (status := await client.status(handle.id)).get(
-                        "pending_operation"
-                    ):
-                        await asyncio.sleep(0.05)
-                assert status["phase"] == "needs_reconciliation"
-                assert len(requests) == count_at_crash
-                await client.stop_turn(handle.id, status["turn_id"])
-                with pytest.raises(WorkflowFailureError) as failed:
-                    await asyncio.wait_for(handle.result(), 45)
-                assert "OutcomeUnknown" in str(failed.value.cause)
-                assert len(requests) == count_at_crash
+            # Как в pydantic-ai: запрос к модели повторяется после падения.
+            # Повторная оплата — только если ответ пришёл, а квитанция нет.
+            expected_requests = (
+                3 if checkpoint == "after_model_response" else 2
+            )
+            result = await asyncio.wait_for(handle.result(), 45)
+            assert "Recovered successfully" in str(result["answer"])
+            assert len(requests) == expected_requests
+            store = (
+                DurableFileThreadStore(str(store_path))
+                if backend == "file"
+                else SQLiteThreadStore(str(store_path))
+            )
+            messages = store.load_messages("test", "restart-thread")
+            assert len({message["id"] for message in messages}) == len(
+                messages
+            )
+            assert any(
+                "native durable restart" in str(message)
+                for message in messages
+            )
+            assert (
+                store.load_meta("test", "restart-thread")["shared"][
+                    "working_memory"
+                ]["knowledge"]
+                == "durable fact"
+            )
+            if checkpoint == "after_store_receipt":
                 marker = json.loads(
                     (tmp_path / "checkpoint.json").read_text()
                 )["value"]
-                ledger = EffectLedger(
-                    SQLiteThreadStore(config["receipts_database"])
+                original = value_to_type(ThreadStoreCall, marker["request"])
+                retried = store.commit_operation(
+                    original.system_id,
+                    original.thread_id,
+                    original.operation,
                 )
-                assert ledger.get(marker["owner_id"], marker["operation_id"])[
-                    "status"
-                ] in {"STARTED", "UNKNOWN"}
-                history = await handle.fetch_history()
-            else:
-                result = await asyncio.wait_for(handle.result(), 45)
-                assert "Recovered successfully" in str(result["answer"])
-                assert len(requests) == 2
-                store = (
-                    FileThreadStore(str(store_path))
-                    if backend == "file"
-                    else SQLiteThreadStore(str(store_path))
-                )
-                messages = store.load_messages("test", "restart-thread")
-                assert len({message["id"] for message in messages}) == len(
-                    messages
-                )
-                assert any(
-                    "native durable restart" in str(message)
-                    for message in messages
-                )
-                assert (
-                    store.load_meta("test", "restart-thread")["shared"][
-                        "working_memory"
-                    ]["knowledge"]
-                    == "durable fact"
-                )
-                if checkpoint == "after_store_receipt":
-                    marker = json.loads(
-                        (tmp_path / "checkpoint.json").read_text()
-                    )["value"]
-                    original = value_to_type(
-                        ThreadStoreCall, marker["request"]
-                    )
-                    retried = store.commit_operation(
-                        original.system_id,
-                        original.thread_id,
-                        original.operation,
-                    )
-                    assert asdict(retried) == marker["receipt"]["receipt"]
-                history = await handle.fetch_history()
+                assert asdict(retried) == marker["receipt"]["receipt"]
+            history = await handle.fetch_history()
         finally:
             for process in processes:
                 if process.poll() is None:
@@ -214,4 +194,4 @@ async def test_native_sigkill_durable_boundaries(
             interceptors=[RestartInterceptor()],
             workflow_failure_exception_types=[Exception],
         ).replay_workflow(history)
-        assert len(requests) == (count_at_crash if unknown else 2)
+        assert len(requests) == expected_requests

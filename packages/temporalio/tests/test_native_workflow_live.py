@@ -9,29 +9,32 @@ import pytest
 from gc_core.config import flatten_app_config
 from gc_core.config_modules import AppConfig
 from gc_core.run_context import acreate_run_context
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_activities import NativeActivities
 from gc_ua_temporalio.native_contracts import NativeRunRequest
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from gc_ua_temporalio.public_config import public_config_snapshot
-from gc_ua_temporalio.storage.effects import EffectLedger
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_ua_temporalio.storage.technical import TechnicalStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
-from test_live_workflow import (
+from live_support import (
     provider,  # noqa: F401  # shared HTTP provider fixture
 )
 
 
 @pytest.mark.parametrize(
-    "batch_flags", [False, True], ids=["legacy-flags", "batched-flags"]
+    ("batch_flags", "persist"),
+    [(False, "step"), (True, "step"), (True, "turn")],
+    ids=["legacy-flags", "batched-flags", "turn-persist"],
 )
 async def test_native_executor_uses_real_file_session_and_replays(
     tmp_path,
     provider,  # noqa: F811
     monkeypatch,
     batch_flags,
+    persist,
 ):
     binary = shutil.which("temporal")
     if binary is None:
@@ -54,6 +57,7 @@ async def test_native_executor_uses_real_file_session_and_replays(
         "strict_turn_finish_validation": False,
         "tui_text_answer_mode": "deny",
         "gc": {"force_collect": False},
+        "thread_store_persist": persist,
     }
     contexts = {}
 
@@ -64,15 +68,14 @@ async def test_native_executor_uses_real_file_session_and_replays(
             )
         return contexts[call.owner_id]
 
-    files = FileThreadStore(str(tmp_path / "threads"))
-    # SQLite below is only the technical operation receipt ledger. Agent
+    files = DurableFileThreadStore(str(tmp_path / "threads"))
+    # SQLite below is only the technical operation receipt store. Agent
     # history/meta is asserted to live in the supplied FileThreadStore.
-    receipts = SQLiteThreadStore(str(tmp_path / "operations.sqlite"))
+    receipts = TechnicalStore(str(tmp_path / "operations.sqlite"))
     activities = NativeActivities(
         context_provider=context_provider,
         stores={"files": files},
         receipts=receipts,
-        effect_ledger=EffectLedger(receipts),
         public_config=public_config_snapshot,
     )
     if not batch_flags:
@@ -151,14 +154,17 @@ async def test_native_executor_uses_real_file_session_and_replays(
         # Before own metadata acknowledgements: 13 commits and 4 loads, one
         # failed commit and its recovery load caused solely by our own flag.
         # Optional startup batching removes one metadata read and one commit.
-        assert activity_counts["agent.thread.commit"] == (
-            11 if batch_flags else 12
+        # persist: turn — шаги хода одним commit'ом в конце хода.
+        assert (
+            activity_counts["agent.thread.commit"]
+            == ({"step": 11 if batch_flags else 12, "turn": 4}[persist])
         )
         assert activity_counts["agent.thread.load"] == (
             2 if batch_flags else 3
         )
         measurement = {
             "batch_flags": batch_flags,
+            "persist": persist,
             "activities": dict(sorted(activity_counts.items())),
             "activity_total": sum(activity_counts.values()),
             "history_events": len(history.events),

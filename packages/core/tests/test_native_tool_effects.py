@@ -4,7 +4,6 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from gc_core.execution.contracts import GuardPreconditionChanged
 from gc_core.execution.tool_effects import execute_native_tool_effect
 from gc_core.security.guard_probe import evaluate_guard_probe
 from gc_core.security.permission_store import PermissionStore
@@ -87,10 +86,12 @@ async def test_changed_guard_facts_prevent_effect(tmp_path):
         return await execute_native_tool_effect(request, ctx=worker)
 
     ctx.tool_effect = effect
-    with pytest.raises(GuardPreconditionChanged):
-        await aapply_tool(
-            "fs_write_file", {"path": str(dest), "content": "hello"}, ctx=ctx
-        )
+    # Как в pydantic-ai: изменившиеся факты — ошибка инструмента для модели,
+    # а не сбой хода; эффект при этом не выполняется.
+    output = await aapply_tool(
+        "fs_write_file", {"path": str(dest), "content": "hello"}, ctx=ctx
+    )
+    assert "Tool arguments changed after guard evaluation" in output
     assert not dest.exists()
 
 

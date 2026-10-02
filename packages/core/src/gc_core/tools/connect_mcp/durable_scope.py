@@ -3,13 +3,13 @@
 from contextlib import contextmanager
 from contextvars import ContextVar
 
-from gc_core.execution.contracts import OutcomeUnknown
+from gc_core.execution.contracts import ToolOutcomeUnknown
 
 _DURABLE = ContextVar("durable_mcp_retry_owner", default=False)
 _PROGRESS = ContextVar("durable_mcp_progress", default=None)
 
 
-class McpSessionLostError(OutcomeUnknown):
+class McpSessionLostError(ToolOutcomeUnknown):
     """A durable caller must decide recovery instead of getting an empty session."""
 
 

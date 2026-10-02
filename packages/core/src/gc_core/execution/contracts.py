@@ -21,6 +21,14 @@ class OutcomeUnknown(ExecutionFailure):
     """An external operation may have completed; do not blindly repeat it."""
 
 
+class ToolOutcomeUnknown(Exception):
+    """Исход внешнего эффекта инструмента неизвестен.
+
+    Это ошибка инструмента, а не сбой хода: модель получает её как обычный
+    вывод инструмента и сама проверяет состояние, прежде чем повторять.
+    """
+
+
 @dataclass
 class StateDelta:
     working_memory: dict[str, str] | None = None
@@ -58,17 +66,6 @@ class ToolStateView:
 
 
 @dataclass
-class ToolInvocation:
-    operation_id: str
-    name: str
-    arguments: str | dict[str, Any]
-    call_id: str | None
-    state: ToolStateView = field(default_factory=ToolStateView)
-    finish_reason: str | None = None
-    schema_version: int = 1
-
-
-@dataclass
 class ToolEffectRequest:
     operation_id: str
     name: str
@@ -85,8 +82,11 @@ class ToolEffectRequest:
 ToolEffectExecutor = Callable[[ToolEffectRequest], Awaitable[ToolResult]]
 
 
-class GuardPreconditionChanged(ExecutionFailure):
-    """Guard facts changed between approval and effect; no effect was run."""
+class GuardPreconditionChanged(Exception):
+    """Guard facts changed between approval and effect; no effect was run.
+
+    Ошибка инструмента: модель видит её и может повторить вызов.
+    """
 
 
 @dataclass
@@ -168,25 +168,3 @@ class ModelOperationCancelled(asyncio.CancelledError):
         super().__init__(*cause.args)
         self.cause = cause
         self.result = result
-
-
-@dataclass
-class ProjectionBatch:
-    system_id: str
-    thread_id: str
-    owner: str
-    epoch: int
-    event_id: str
-    sequence: int
-    messages: list[dict[str, Any]]
-    meta: dict[str, Any]
-    schema_version: int = 1
-
-
-@dataclass
-class ProjectionAck:
-    event_id: str
-    sequence: int
-    max_seq: int
-    written: int
-    schema_version: int = 1

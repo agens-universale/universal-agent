@@ -1,21 +1,21 @@
 """Native remote pages use real core storage, including replacement history."""
 
 import pytest
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_views import NativeViews
-from gc_ua_temporalio.remote import RemoteCursor
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_ua_temporalio.storage.technical import TechnicalStore
 
 
 @pytest.fixture(params=["file", "sqlite"])
 def views(tmp_path, request):
     store = (
-        FileThreadStore(str(tmp_path / "threads"))
+        DurableFileThreadStore(str(tmp_path / "threads"))
         if request.param == "file"
         else SQLiteThreadStore(str(tmp_path / "threads.sqlite"))
     )
     return NativeViews(
-        store, SQLiteThreadStore(str(tmp_path / "receipts.sqlite"))
+        store, TechnicalStore(str(tmp_path / "receipts.sqlite"))
     )
 
 
@@ -40,11 +40,7 @@ def test_native_history_replacement_resets_prefix_without_meta_reset(views):
         "s", "t", after=first["after"], token=first["token"]
     )
     assert changed["reset"]
-    cursor = RemoteCursor()
-    cursor.apply_history(first)
-    assert (
-        cursor.apply_history(changed)[0]["message"]["content"] == "replacement"
-    )
+    assert changed["messages"][0]["message"]["content"] == "replacement"
 
 
 def test_native_empty_history_and_input_validation(views):
@@ -53,6 +49,62 @@ def test_native_empty_history_and_input_validation(views):
         views.history("s", "t", after=-1)
     with pytest.raises(ValueError):
         views.patch_ui("s", "t", {"runtime": {}})
+
+
+class _ApiClient:
+    """Minimal HTTP client for the server's /temporal API."""
+
+    def __init__(self, transport, system, thread):
+        import httpx
+
+        self.http = httpx.AsyncClient(
+            base_url="http://test", transport=transport, timeout=30
+        )
+        self.path = f"/temporal/{system}/{thread}"
+        self._token = {}
+
+    async def request(self, method, endpoint, **kwargs):
+        response = await self.http.request(
+            method, f"{self.path}/{endpoint}", **kwargs
+        )
+        response.raise_for_status()
+        return response.json()
+
+    async def status(self):
+        return await self.request("GET", "status")
+
+    async def history(self):
+        page = await self.request("GET", "history", params=self._token)
+        self._token = {"token": page["token"]} if page.get("token") else {}
+        return page
+
+    async def events(self):
+        return await self.request("GET", "events")
+
+    async def send(self, message_id, text):
+        return await self.request(
+            "POST", "messages", json={"message_id": message_id, "text": text}
+        )
+
+    async def answer(self, request_id, reply_id, answer):
+        return await self.request(
+            "POST",
+            "answer",
+            json={
+                "request_id": request_id,
+                "reply_id": reply_id,
+                "answer": answer,
+            },
+        )
+
+    async def stop(self, turn_id):
+        return await self.request("POST", "stop", json={"turn_id": turn_id})
+
+    async def close_session(self):
+        return await self.request("POST", "close")
+
+    async def aclose(self):
+        await self.http.aclose()
 
 
 @pytest.mark.parametrize("human", [False, True])
@@ -79,7 +131,6 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
         build_native_runtime,
         worker_options,
     )
-    from gc_ua_temporalio.remote import RemoteSessionProvider
     from provider_fixture import calls, finish, scripted_provider
     from temporalio.testing import WorkflowEnvironment
     from temporalio.worker import Worker
@@ -150,11 +201,8 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
                     )
                     app = FastAPI()
                     app.include_router(router(registry))
-                    return registry, RemoteSessionProvider(
-                        "http://test",
-                        "test",
-                        "remote",
-                        transport=httpx.ASGITransport(app=app),
+                    return registry, _ApiClient(
+                        httpx.ASGITransport(app=app), "test", "remote"
                     )
 
                 async with Worker(
@@ -218,9 +266,9 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
 
 
 def test_native_events_cover_all_runs_without_history_projection(tmp_path):
-    receipts = SQLiteThreadStore(str(tmp_path / "receipts.sqlite"))
+    receipts = TechnicalStore(str(tmp_path / "receipts.sqlite"))
     views = NativeViews(
-        FileThreadStore(str(tmp_path / "threads")),
+        DurableFileThreadStore(str(tmp_path / "threads")),
         receipts,
         workflow_id=lambda *_: "native-session",
     )

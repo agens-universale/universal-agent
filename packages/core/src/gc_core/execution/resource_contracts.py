@@ -2,10 +2,10 @@
 
 from dataclasses import dataclass, field
 
-from gc_core.execution.contracts import InfrastructureFailure, ToolResult
+from gc_core.execution.contracts import ToolOutcomeUnknown, ToolResult
 
 
-class ResourceOwnerLost(InfrastructureFailure):
+class ResourceOwnerLost(ToolOutcomeUnknown):
     """The live owner is gone; reconnecting cannot restore its resource state."""
 
 

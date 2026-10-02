@@ -1,6 +1,6 @@
 """Serializable inputs and acknowledged outputs of the ordinary child runner."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from gc_core.tools.subagents.runner_preparation import PreparedChildState
@@ -45,3 +45,5 @@ class NativeChildCheckpoint:
 class NativeChildResult:
     output: str
     checkpoint: NativeChildCheckpoint
+    #: Сообщения, пришедшие ребёнку после конца его цикла: их получает родитель.
+    undelivered: list[dict] = field(default_factory=list)

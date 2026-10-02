@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
-    append_summary_trace_record,
+    aappend_summary_trace_record,
     log_compaction_started,
     log_memory_patch_skipped_multi_batch,
     log_memory_patch_wm_unchanged,
@@ -115,13 +115,13 @@ def test_resolve_summary_trace_path_prefers_ctx(tmp_path):
     assert resolve_summary_trace_path(ctx) == str(custom)
 
 
-def test_append_summary_trace_record_writes_jsonl(tmp_path):
+async def test_append_summary_trace_record_writes_jsonl(tmp_path):
     trace_file = tmp_path / "trace.jsonl"
     ctx = SimpleNamespace(
         summary_trace_path=str(trace_file),
         config_dict={},
     )
-    append_summary_trace_record(
+    await aappend_summary_trace_record(
         ctx,
         trigger_reason="turn_end",
         trace_data={"step": 1},
@@ -133,11 +133,11 @@ def test_append_summary_trace_record_writes_jsonl(tmp_path):
     assert parsed["newly_summarized_message_id"] == "m_sum"
 
 
-def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
+async def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
     trace_file = tmp_path / "summary_trace_main_abc.jsonl"
     ctx = SimpleNamespace(summary_trace_path=str(trace_file), config_dict={})
 
-    append_summary_trace_record(
+    await aappend_summary_trace_record(
         ctx,
         trigger_reason="chars",
         trace_data={"a": 1},
@@ -148,14 +148,14 @@ def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
     assert "trace_id" not in record
 
 
-def test_append_summary_trace_record_writes_trace_id(tmp_path):
+async def test_append_summary_trace_record_writes_trace_id(tmp_path):
     trace_file = tmp_path / "summary_trace_main_abc.jsonl"
     ctx = SimpleNamespace(
         summary_trace_path=str(trace_file),
         config_dict={"trace_id": "wf-42"},
     )
 
-    append_summary_trace_record(
+    await aappend_summary_trace_record(
         ctx,
         trigger_reason="chars",
         trace_data={"a": 1},

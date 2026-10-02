@@ -10,16 +10,13 @@ from types import SimpleNamespace
 from gc_core.context_preparation import PreparedRunContext
 from gc_core.execution.contracts import (
     ExecutionFailure,
-    GuardPreconditionChanged,
     ModelOperationError,
     ModelRequest,
-    OutcomeUnknown,
     ToolEffectRequest,
     ToolResult,
 )
 from gc_core.execution.guard_contracts import (
     GuardProbeRequest,
-    GuardProbeResult,
 )
 from gc_core.execution.local import LocalOperations
 from gc_core.execution.resources import PromptResourceRequest
@@ -37,9 +34,11 @@ from temporalio.exceptions import ApplicationError
 
 from gc_ua_temporalio.native_contracts import (
     NativeCall,
+    NativeGuardProbes,
     NativeModelReply,
     NativePreparedContext,
 )
+from gc_ua_temporalio.native_operations import INTERRUPTED_EFFECT
 
 
 def _digest(call):
@@ -62,7 +61,6 @@ class NativeActivities:
         context_provider,
         stores,
         receipts,
-        effect_ledger,
         public_config,
         preview_profiles=(),
     ):
@@ -72,7 +70,6 @@ class NativeActivities:
             name: athread_store(store) for name, store in stores.items()
         }
         self.receipts = receipts
-        self.effects = effect_ledger
         self.public_config = public_config
         self.preview_profiles = frozenset(preview_profiles)
         for store in self.stores.values():
@@ -84,7 +81,6 @@ class NativeActivities:
     @asynccontextmanager
     async def _operation_scope(self, call):
         # Concurrent redelivery in this worker waits for the original attempt.
-        # The durable ledger, not this lock, detects an orphan after process loss.
         key = (call.owner_id, call.operation_id)
         entry = self._operation_locks.setdefault(key, [asyncio.Lock(), 0])
         entry[1] += 1
@@ -112,54 +108,82 @@ class NativeActivities:
                     await heartbeat_task
 
     async def _recorded(
-        self, call, result_type, handler, *, resolve_context=True
+        self, call, result_type, handler, *, resolve_context=True, effect=False
     ):
         async with self._operation_scope(call):
             return await self._recorded_once(
-                call, result_type, handler, resolve_context=resolve_context
+                call,
+                result_type,
+                handler,
+                resolve_context=resolve_context,
+                effect=effect,
             )
 
     async def _recorded_once(
-        self, call, result_type, handler, *, resolve_context=True
+        self, call, result_type, handler, *, resolve_context=True, effect=False
     ):
         if call.schema_version != 1:
             raise ApplicationError(
                 "Unsupported native call", non_retryable=True
             )
         digest = _digest(call)
-        cached = self.receipts.operation_result(
-            call.owner_id, call.operation_id, digest
+        cached = await asyncio.to_thread(
+            self.receipts.operation_result,
+            call.owner_id,
+            call.operation_id,
+            digest,
         )
         if cached is not None:
             return value_to_type(result_type, cached)
+        if effect and activity.in_activity() and activity.info().attempt > 1:
+            # Повтор внешнего эффекта только читает квитанцию: квитанции нет —
+            # исход неизвестен, и эффект второй раз не исполняется.
+            raise ApplicationError(
+                INTERRUPTED_EFFECT,
+                "ToolOutcomeUnknown",
+                type="DomainError",
+                non_retryable=True,
+            )
         try:
             ctx = (
                 await self.context_provider(call) if resolve_context else None
             )
             result = await handler(call, ctx)
-            encoded = (
-                asdict(result)
-                if hasattr(result, "__dataclass_fields__")
-                else result
-            )
-            saved = self.receipts.save_operation_result(
-                call.owner_id, call.operation_id, digest, encoded
-            )
-            return value_to_type(result_type, saved)
-        except (ValueError, KeyError) as exc:
-            raise ApplicationError(
-                str(exc), type="InvalidExecutionRequest", non_retryable=True
-            ) from exc
         except ExecutionFailure as exc:
             raise ApplicationError(
                 str(exc), type=type(exc).__name__, non_retryable=True
             ) from exc
+        except ApplicationError:
+            raise
+        except Exception as exc:
+            # Доменная ошибка (как в local): переносим тип и текст значением,
+            # workflow поднимет то же исключение, и ядро обработает его штатно.
+            raise ApplicationError(
+                str(exc),
+                type(exc).__name__,
+                type="DomainError",
+                non_retryable=True,
+            ) from exc
+        encoded = (
+            asdict(result)
+            if hasattr(result, "__dataclass_fields__")
+            else result
+        )
+        saved = await asyncio.to_thread(
+            self.receipts.save_operation_result,
+            call.owner_id,
+            call.operation_id,
+            digest,
+            encoded,
+        )
+        return value_to_type(result_type, saved)
 
     @activity.defn(name="agent.context.prepare")
     async def prepare(self, call: NativeCall) -> NativePreparedContext:
         return await self._recorded(call, NativePreparedContext, self._prepare)
 
     async def _prepare(self, call, ctx):
+        from gc_core.run_preparation import load_run_prompts
         from gc_core.tools.subagents.registry import (
             resolve_subagent_definitions,
         )
@@ -167,14 +191,29 @@ class NativeActivities:
         store = self.stores[call.data["store_id"]]
         public = self.public_config(ctx.config_dict)
         config = getattr(public, "config_dict", public)
+        prompts_request = PromptPreparationRequest.from_config(
+            config, verbose=bool(config.get("verbose", False))
+        )
+        prompts = await asyncio.to_thread(
+            load_run_prompts, prompts_request, logger=ctx.logger
+        )
         return NativePreparedContext(
             context=PreparedRunContext.from_context(ctx, config_dict=config),
             subagent_definitions=resolve_subagent_definitions(ctx.config_dict),
             tool_metadata={
                 name: {
-                    key: value
-                    for key, value in entry.items()
-                    if key != "tool_fabric"
+                    **{
+                        key: value
+                        for key, value in entry.items()
+                        if key != "tool_fabric"
+                    },
+                    "effect_is_read_only": bool(
+                        getattr(
+                            entry.get("tool_fabric"),
+                            "effect_is_read_only",
+                            False,
+                        )
+                    ),
                 }
                 for name, entry in ctx.tools_data.items()
             },
@@ -194,6 +233,9 @@ class NativeActivities:
             model_transport_configured=public.model_transport_configured,
             provider_currency=public.provider_currency,
             model_provider_currencies=public.model_provider_currencies,
+            skills=await ctx.skills_registry.list_skills(),
+            prompts_request=prompts_request,
+            prompts=prompts,
         )
 
     @activity.defn(name="agent.state.prepare")
@@ -221,7 +263,8 @@ class NativeActivities:
     async def _prepare_prompts(self, call, ctx):
         from gc_core.run_preparation import load_run_prompts
 
-        return load_run_prompts(
+        return await asyncio.to_thread(
+            load_run_prompts,
             value_to_type(PromptPreparationRequest, call.data),
             logger=ctx.logger,
         )
@@ -233,8 +276,10 @@ class NativeActivities:
     async def _prompt(self, call, ctx):
         from gc_core.resource_loading import load_prompt_resource
 
-        return load_prompt_resource(
-            value_to_type(PromptResourceRequest, call.data), ctx=ctx
+        return await asyncio.to_thread(
+            load_prompt_resource,
+            value_to_type(PromptResourceRequest, call.data),
+            ctx=ctx,
         )
 
     @activity.defn(name="agent.skills.list")
@@ -246,27 +291,13 @@ class NativeActivities:
 
     @activity.defn(name="agent.model.request")
     async def model(self, call: NativeCall) -> NativeModelReply:
-        from types import SimpleNamespace
-
         from gc_ua_temporalio.preview import commit_preview
 
-        result = await self._recorded(
-            call, NativeModelReply, self._model_effect
-        )
-        commit_preview(
-            SimpleNamespace(store=self.receipts),
-            call.owner_id,
-            call.operation_id,
+        result = await self._recorded(call, NativeModelReply, self._model)
+        await asyncio.to_thread(
+            commit_preview, self.receipts, call.owner_id, call.operation_id
         )
         return result
-
-    async def _model_effect(self, call, ctx):
-        return await self._effect(
-            call,
-            ctx,
-            lambda: self._model(call, ctx),
-            fence=f"model:{call.owner_id}:{call.operation_id}",
-        )
 
     async def _model(self, call, ctx):
         from copy import copy
@@ -278,13 +309,11 @@ class NativeActivities:
 
         request = value_to_type(ModelRequest, call.data["request"])
         model_ctx = copy(ctx)
-        from types import SimpleNamespace
-
         from gc_ua_temporalio.preview import PreviewSink
 
         if call.profile in self.preview_profiles:
             sink = PreviewSink(
-                SimpleNamespace(store=self.receipts),
+                self.receipts,
                 call.owner_id,
                 call.operation_id,
                 attempt=activity.info().attempt
@@ -304,12 +333,17 @@ class NativeActivities:
 
     @activity.defn(name="agent.tool.execute")
     async def tool(self, call: NativeCall) -> ToolResult:
-        return await self._recorded(call, ToolResult, self._tool)
+        return await self._recorded(
+            call, ToolResult, self._tool, effect=call.data.get("effect", False)
+        )
 
     async def _tool(self, call, ctx):
         from gc_core.execution.tool_effects import execute_native_tool_effect
 
-        request = value_to_type(ToolEffectRequest, call.data)
+        request = value_to_type(
+            ToolEffectRequest,
+            {k: v for k, v in call.data.items() if k != "effect"},
+        )
         metadata = ctx.tools_data.get(request.name, {})
         live = metadata.get("execution_kind") == "mcp" or (
             request.name == "exec_command"
@@ -333,64 +367,22 @@ class NativeActivities:
                     context_id=call.owner_id if call.child_context else None,
                 )
             ).result
-        if getattr(metadata.get("tool_fabric"), "effect_is_read_only", False):
-            return await execute_native_tool_effect(request, ctx=ctx)
-        return await self._effect(
-            call, ctx, lambda: execute_native_tool_effect(request, ctx=ctx)
-        )
-
-    async def _effect(self, call, ctx, execute, *, fence=None):
-        old = self.effects.begin(
-            call.owner_id,
-            call.operation_id,
-            fence or ctx.workspace.root,
-            _digest(call),
-            asdict(call),
-        )
-        if old is not None:
-            if old["status"] == "SUCCEEDED":
-                return self.effects.result(old)
-            if old["status"] == "REJECTED":
-                raise GuardPreconditionChanged(
-                    "External operation precondition was rejected"
-                )
-            if old["status"] == "STARTED":
-                self.effects.finish(
-                    call.owner_id, call.operation_id, "UNKNOWN"
-                )
-            raise OutcomeUnknown("External operation has no committed receipt")
-        try:
-            result = await execute()
-            encoded = (
-                asdict(result)
-                if hasattr(result, "__dataclass_fields__")
-                else result
-            )
-            self.effects.finish(
-                call.owner_id, call.operation_id, "SUCCEEDED", encoded
-            )
-            return result
-        except GuardPreconditionChanged:
-            self.effects.finish(call.owner_id, call.operation_id, "REJECTED")
-            raise
-        except BaseException:
-            self.effects.finish(call.owner_id, call.operation_id, "UNKNOWN")
-            raise
+        return await execute_native_tool_effect(request, ctx=ctx)
 
     @activity.defn(name="agent.memory.execute")
     async def memory(self, call: NativeCall) -> ProjectMemoryReply:
-        return await self._recorded(call, ProjectMemoryReply, self._memory)
+        return await self._recorded(
+            call, ProjectMemoryReply, self._memory, effect=True
+        )
 
     async def _memory(self, call, ctx):
         from gc_core.tools.project.project_memory import ProjectMemory
 
-        async def execute():
-            state = SimpleNamespace(project_memory_content_hash=None)
-            return ProjectMemory(ctx=ctx, state=state).execute_io(
-                value_to_type(ProjectMemoryRequest, call.data)
-            )
-
-        return await self._effect(call, ctx, execute)
+        state = SimpleNamespace(project_memory_content_hash=None)
+        return await asyncio.to_thread(
+            ProjectMemory(ctx=ctx, state=state).execute_io,
+            value_to_type(ProjectMemoryRequest, call.data),
+        )
 
     @activity.defn(name="agent.memory.hash")
     async def memory_hash(self, call: NativeCall) -> str | None:
@@ -399,19 +391,31 @@ class NativeActivities:
     async def _memory_hash(self, _call, ctx):
         from gc_core.project_memory import get_hash
 
-        return get_hash(ctx)
+        return await asyncio.to_thread(get_hash, ctx)
 
     @activity.defn(name="agent.guard.probe")
-    async def guard(self, call: NativeCall) -> GuardProbeResult:
-        return await self._recorded(call, GuardProbeResult, self._guard)
+    async def guard(self, call: NativeCall) -> NativeGuardProbes:
+        return await self._recorded(call, NativeGuardProbes, self._guard)
 
     async def _guard(self, call, ctx):
         from gc_core.security.guard_probe import evaluate_guard_probe
 
-        return evaluate_guard_probe(
-            value_to_type(GuardProbeRequest, call.data),
-            config_dict=ctx.config_dict,
-        )
+        requests = [
+            value_to_type(GuardProbeRequest, value)
+            for value in (
+                call.data["request"],
+                *call.data.get("companions", []),
+            )
+        ]
+
+        def evaluate():
+            return [
+                evaluate_guard_probe(request, config_dict=ctx.config_dict)
+                for request in requests
+            ]
+
+        primary, *companions = await asyncio.to_thread(evaluate)
+        return NativeGuardProbes(primary, companions)
 
     @activity.defn(name="agent.summary.trace")
     async def summary_trace(self, call: NativeCall) -> bool:
@@ -420,21 +424,19 @@ class NativeActivities:
     async def _summary_trace(self, call, ctx):
         from gc_core.summarize.summary_logging import (
             SummaryTraceRecord,
-            append_summary_trace_record,
+            aappend_summary_trace_record,
         )
 
         record = value_to_type(SummaryTraceRecord, call.data)
-
-        async def execute():
-            append_summary_trace_record(
-                ctx,
-                trigger_reason=record.trigger_reason,
-                trace_data=record.trace_data,
-                newly_summarized_message_id=record.newly_summarized_message_id,
-            )
-            return True
-
-        return await self._effect(call, ctx, execute)
+        # Контекст воркера собран без `summary_trace_sink`, так что запись
+        # идёт в локальный summary_trace*.jsonl, а не обратно в activity.
+        await aappend_summary_trace_record(
+            ctx,
+            trigger_reason=record.trigger_reason,
+            trace_data=record.trace_data,
+            newly_summarized_message_id=record.newly_summarized_message_id,
+        )
+        return True
 
     @activity.defn(name="agent.context.close")
     async def close(self, call: NativeCall) -> bool:

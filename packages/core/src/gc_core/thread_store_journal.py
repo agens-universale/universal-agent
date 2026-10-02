@@ -96,6 +96,19 @@ def _control(base):
     )
 
 
+def durable_owner_id(directory, system_id, thread_id):
+    """Владелец durable-треда без блокировки и без создания ``.store/``.
+
+    Нужен обычному ``FileThreadStore``: локальный писатель не должен писать
+    в тред, которым сейчас владеет исполнитель с журналом (Temporal).
+    """
+    path = _control_path(directory, system_id, thread_id) / "control.json"
+    try:
+        return json.loads(path.read_bytes()).get("owner_id")
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+
+
 def _versions(control):
     return {
         key: control[key]
@@ -523,6 +536,15 @@ class _FileTransaction:
             for path in selected
             if path.exists()
         }
+        data_path = Path(
+            raw._thread_paths(
+                str(self.directory), self.system_id, self.thread_id
+            )[0]
+        )
+        if self.control.get("max_seq") and not data_path.exists():
+            # История удалена в обход журнала (очистка тредов, ручной rm):
+            # кэш счётчика устарел, верим диску.
+            self.control["max_seq"] = 0
         if (
             self.metadata_only or self.sidecar_only or self.append_history
         ) and "max_seq" not in self.control:

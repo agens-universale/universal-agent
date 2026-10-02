@@ -321,7 +321,7 @@ class SQLiteDurableOperations:
 
     def _durable_reset(self, db, key, operation, row, out):
         out.result = []
-        for table in ("messages", "traces", "events", "imports", "ui_meta"):
+        for table in ("messages", "traces"):
             if db.execute(
                 f"DELETE FROM {table} WHERE system=? AND thread=?", key
             ).rowcount:

@@ -620,6 +620,10 @@ SINGLE += [
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # Локально допустимо только step (как develop); turn — только в durable-
+    # исполнителе и отклоняется локальным прогоном. Покрыто
+    # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
+    "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
     "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
     # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
     # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв

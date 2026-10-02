@@ -8,7 +8,7 @@ from gc_core.thread_store_durable import (
     ThreadStoreOperationMismatch,
     ThreadStoreOwnershipError,
 )
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 
 
 def operation(identity="first", operation_kind="append_messages", **kwargs):
@@ -16,7 +16,7 @@ def operation(identity="first", operation_kind="append_messages", **kwargs):
 
 
 def test_original_receipt_and_distinct_duplicate(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     request = operation(
         messages=[{"id": "m1", "role": "user", "content": "hello"}],
         known_keys=None,
@@ -35,7 +35,7 @@ def test_original_receipt_and_distinct_duplicate(tmp_path):
 
 
 def test_conflicts_and_receipt_before_fencing(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     request = operation(messages=[{"id": "m1"}])
     first = store.commit_operation("s", "t", request)
     owner = store.commit_operation(
@@ -58,7 +58,7 @@ def test_conflicts_and_receipt_before_fencing(tmp_path):
 
 
 def test_reset_retry_cannot_delete_new_thread(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     store.append_messages("s", "t", [{"id": "before"}])
     request = operation("reset", "reset")
     first = store.commit_operation("s", "t", request)
@@ -69,7 +69,7 @@ def test_reset_retry_cannot_delete_new_thread(tmp_path):
 
 @pytest.mark.parametrize("failure", ["prepared", "data", "control", "receipt"])
 def test_reader_rolls_forward_after_lost_ack(tmp_path, monkeypatch, failure):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     original = journal._write
     original_sync = journal._sync_dir
     triggered = False
@@ -107,7 +107,7 @@ def test_reader_rolls_forward_after_lost_ack(tmp_path, monkeypatch, failure):
         store.commit_operation("s", "t", request)
     monkeypatch.setattr(journal, "_write", original)
     monkeypatch.setattr(journal, "_sync_dir", original_sync)
-    snapshot = FileThreadStore(str(tmp_path)).read_snapshot("s", "t")
+    snapshot = DurableFileThreadStore(str(tmp_path)).read_snapshot("s", "t")
     assert snapshot.state.messages == [{"id": "m1"}]
     assert snapshot.meta["custom"] == {"answer": 42}
     assert store.commit_operation("s", "t", request).written == 1
@@ -115,7 +115,7 @@ def test_reader_rolls_forward_after_lost_ack(tmp_path, monkeypatch, failure):
 
 
 def test_sidecar_retry_and_compact_receipt(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     trace = operation(
         "trace",
         "append_subagent_trace",
@@ -144,7 +144,7 @@ def test_legacy_record_id_is_stable(tmp_path):
     (tmp_path / "data_s_t.jsonl").write_text(
         '{"type":"message","seq":1,"payload":{"role":"user","content":"legacy"}}\n'
     )
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     assert (
         store.read_snapshot("s", "t").state
         == store.read_snapshot("s", "t").state
@@ -158,7 +158,7 @@ def test_process_exit_after_data_write_recovers(tmp_path):
     script = """
 import os, sys
 from gc_core import thread_store_journal as journal
-from gc_core.thread_store_file import FileThreadStore
+from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_core.thread_store_durable import ThreadStoreOperation
 original = journal._sync_dir
 def crash(path):
@@ -166,14 +166,14 @@ def crash(path):
     if str(path) == sys.argv[1]:
         os._exit(73)
 journal._sync_dir = crash
-FileThreadStore(sys.argv[1]).commit_operation("s", "t", ThreadStoreOperation(
+DurableFileThreadStore(sys.argv[1]).commit_operation("s", "t", ThreadStoreOperation(
     "crash", "persist", {"messages": [{"id": "m1"}], "meta": {"saved": True}}))
 """
     result = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path)], check=False
     )
     assert result.returncode == 73
-    snapshot = FileThreadStore(str(tmp_path)).read_snapshot("s", "t")
+    snapshot = DurableFileThreadStore(str(tmp_path)).read_snapshot("s", "t")
     assert snapshot.meta["saved"] is True
     assert snapshot.state.messages == [{"id": "m1"}]
 
@@ -184,8 +184,8 @@ def test_processes_share_sidecar_sequence(tmp_path):
 
     script = """
 import sys
-from gc_core.thread_store_file import FileThreadStore
-store = FileThreadStore(sys.argv[1])
+from gc_core.thread_store_file_durable import DurableFileThreadStore
+store = DurableFileThreadStore(sys.argv[1])
 for index in range(6):
     store.append_subagent_trace("s", "t", parent_call_id="p", child_run_id=sys.argv[2], kind="event", payload={"i": index})
 """
@@ -197,7 +197,9 @@ for index in range(6):
     ]
     for process in processes:
         assert process.wait(timeout=30) == 0
-    records = FileThreadStore(str(tmp_path)).read_subagent_trace("s", "t")
+    records = DurableFileThreadStore(str(tmp_path)).read_subagent_trace(
+        "s", "t"
+    )
     assert [record["seq"] for record in records] == list(range(1, 13))
 
 
@@ -205,7 +207,7 @@ def test_partial_append_rolls_forward_without_duplicate(tmp_path, monkeypatch):
     import base64
     import json
 
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     store.append_messages("s", "t", [{"id": "existing"}])
     original = journal._recover
 
@@ -244,7 +246,7 @@ def test_meta_and_append_do_not_read_old_history_or_archives(
 ):
     from pathlib import Path
 
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     store.append_messages("s", "t", [{"id": "existing"}])
     (tmp_path / "data_s_t__pre_summary__old.jsonl").write_bytes(b"old archive")
     original = Path.read_bytes
@@ -267,7 +269,7 @@ def test_meta_and_append_do_not_read_old_history_or_archives(
 
 
 def test_filename_collision_rejects_different_logical_thread(tmp_path):
-    store = FileThreadStore(str(tmp_path))
+    store = DurableFileThreadStore(str(tmp_path))
     store.save_meta("a_b", "c", {"value": "first"})
     with pytest.raises(ThreadStoreOwnershipError):
         store.save_meta("a", "b_c", {"value": "second"})
@@ -281,7 +283,7 @@ def test_first_bind_cannot_adopt_other_identity_metadata(tmp_path):
         json.dumps({"system": "a_b", "thread_id": "c"})
     )
     with pytest.raises(ThreadStoreOwnershipError):
-        FileThreadStore(str(tmp_path)).read_snapshot("a", "b_c")
+        DurableFileThreadStore(str(tmp_path)).read_snapshot("a", "b_c")
 
 
 def test_path_scope_recovers_without_guessing_identity(tmp_path, monkeypatch):
@@ -296,7 +298,9 @@ def test_path_scope_recovers_without_guessing_identity(tmp_path, monkeypatch):
 
     monkeypatch.setattr(journal, "_recover", leave_pending)
     with pytest.raises(OSError):
-        FileThreadStore(str(tmp_path)).save_meta("a_b", "c_d", {"ready": True})
+        DurableFileThreadStore(str(tmp_path)).save_meta(
+            "a_b", "c_d", {"ready": True}
+        )
     monkeypatch.setattr(journal, "_recover", original)
     with journal.thread_file_read_scope(str(tmp_path), "a_b_c_d"):
         assert json.loads((tmp_path / "meta_a_b_c_d.json").read_text())[
@@ -304,9 +308,9 @@ def test_path_scope_recovers_without_guessing_identity(tmp_path, monkeypatch):
         ]
     with journal.thread_read_scope(str(tmp_path), "a_b", "c_d"):
         with journal.thread_file_read_scope(str(tmp_path), "a_b_c_d"):
-            assert FileThreadStore(str(tmp_path)).load_meta("a_b", "c_d")[
-                "ready"
-            ]
+            assert DurableFileThreadStore(str(tmp_path)).load_meta(
+                "a_b", "c_d"
+            )["ready"]
 
 
 def test_pending_new_metadata_is_recovered_before_listing(
@@ -321,7 +325,9 @@ def test_pending_new_metadata_is_recovered_before_listing(
 
     monkeypatch.setattr(journal, "_recover", leave_pending)
     with pytest.raises(OSError):
-        FileThreadStore(str(tmp_path)).save_meta("s", "t", {"ready": True})
+        DurableFileThreadStore(str(tmp_path)).save_meta(
+            "s", "t", {"ready": True}
+        )
     assert not (tmp_path / "meta_s_t.json").exists()
     monkeypatch.setattr(journal, "_recover", original)
     journal.recover_pending_threads(str(tmp_path))
@@ -350,3 +356,31 @@ def test_legacy_path_reader_and_exact_reset_share_barrier(tmp_path):
             assert legacy.exists()
         assert str(legacy) in future.result(timeout=2)
         assert not legacy.exists()
+
+
+async def test_history_deleted_outside_journal_restarts_counter(tmp_path):
+    """Очистка тредов в обход журнала не ломает следующую запись."""
+    import glob
+    import os
+
+    from gc_core.thread_store import ThreadSession
+
+    store = DurableFileThreadStore(str(tmp_path))
+    session = await ThreadSession.afrom_config(
+        config_dict={}, system_id="sys", thread_id="t1", store=store
+    )
+    await session.apersist_batch(
+        [{"id": f"m{i}", "role": "user", "content": "x"} for i in range(5)],
+        previous_response_id=None,
+    )
+    for path in glob.glob(os.path.join(str(tmp_path), "*_sys_t1*")):
+        os.remove(path)
+    fresh = await ThreadSession.afrom_config(
+        config_dict={}, system_id="sys", thread_id="t1", store=store
+    )
+    await fresh.apersist_batch(
+        [{"id": "n1", "role": "user", "content": "y"}],
+        previous_response_id=None,
+    )
+    assert fresh.persisted_messages_count == 1
+    assert [m["id"] for m in store.load_messages("sys", "t1")] == ["n1"]

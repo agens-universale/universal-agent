@@ -2,12 +2,7 @@
 
 from typing import Protocol
 
-from gc_core.execution.contracts import (
-    ModelRequest,
-    ModelResult,
-    ToolInvocation,
-    ToolResult,
-)
+from gc_core.execution.contracts import ModelRequest, ModelResult
 
 
 class AgentOperations(Protocol):
@@ -16,5 +11,3 @@ class AgentOperations(Protocol):
     def monotonic(self) -> float: ...
 
     async def model(self, request: ModelRequest) -> ModelResult: ...
-
-    async def tool(self, invocation: ToolInvocation) -> ToolResult: ...

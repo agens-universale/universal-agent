@@ -1,7 +1,8 @@
 """Temporal transport for native core resource ports."""
 
 import asyncio
-from dataclasses import asdict
+from copy import deepcopy
+from dataclasses import asdict, replace
 from datetime import timedelta
 
 from gc_core.execution.contracts import (
@@ -9,9 +10,9 @@ from gc_core.execution.contracts import (
     GuardPreconditionChanged,
     InfrastructureFailure,
     OutcomeUnknown,
+    ToolOutcomeUnknown,
     ToolResult,
 )
-from gc_core.execution.guard_contracts import GuardProbeResult
 from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.project_memory.operations import ProjectMemoryReply
 from gc_core.run_preparation import PreparedPrompts
@@ -24,8 +25,57 @@ from temporalio.exceptions import (
     CancelledError,
 )
 
-from gc_ua_temporalio.native_contracts import NativeCall, NativeModelReply
+from gc_ua_temporalio.native_contracts import (
+    NativeCall,
+    NativeGuardProbes,
+    NativeModelReply,
+)
 from gc_ua_temporalio.native_model_routing import public_router_identity
+
+#: Доменные исключения, которые activity переносит значением (``DomainError``)
+#: и которые workflow поднимает тем же типом — ядро обрабатывает их, как в local.
+_DOMAIN_ERRORS = {
+    cls.__name__: cls
+    for cls in (
+        ValueError,
+        TypeError,
+        KeyError,
+        LookupError,
+        IndexError,
+        RuntimeError,
+        NotImplementedError,
+        OSError,
+        FileNotFoundError,
+        FileExistsError,
+        PermissionError,
+        IsADirectoryError,
+        NotADirectoryError,
+        TimeoutError,
+        GuardPreconditionChanged,
+        ToolOutcomeUnknown,
+        ResourceOwnerLost,
+    )
+}
+_DOMAIN_ERRORS.update(
+    {
+        "McpSessionLostError": ToolOutcomeUnknown,
+        "UnicodeDecodeError": ValueError,
+        "JSONDecodeError": ValueError,
+    }
+)
+
+#: Ход продолжается без этих activities только для эффекта инструмента:
+#: сбой исполнителя после единственной попытки становится ошибкой инструмента.
+INTERRUPTED_EFFECT = (
+    "Исполнение прервано сбоем исполнителя; неизвестно, успела ли операция "
+    "выполниться. Проверьте состояние, прежде чем повторять."
+)
+
+
+def restore_domain_error(cause):
+    """Rebuild a domain exception transported as ``DomainError``."""
+    name = cause.details[0] if cause.details else "RuntimeError"
+    return _DOMAIN_ERRORS.get(name, RuntimeError)(cause.message)
 
 
 def activity_summary(name, data):
@@ -38,7 +88,7 @@ def activity_summary(name, data):
     if name == "agent.memory.execute":
         return f"Project memory: {data['action']} / {data['phase']}"
     if name == "agent.guard.probe":
-        return f"Guard: {data['kind']}"
+        return f"Guard: {data['request']['kind']}"
     return name.removeprefix("agent.").replace(".", " / ")
 
 
@@ -49,6 +99,10 @@ class NativeOperations:
         self.resource_owner = None
         self.child_context = None
         self._prompts = {}
+        self.tool_metadata = {}
+        #: Снимок подготовки хода (NativePreparedContext), см. prompt/skills.
+        self.prepared = None
+        self._probe_cache = {}
         self.closed = False
         self.released = False
 
@@ -59,8 +113,21 @@ class NativeOperations:
         return workflow.time()
 
     async def call(
-        self, name, data, result_type, *, operation_id=None, model=False
+        self,
+        name,
+        data,
+        result_type,
+        *,
+        operation_id=None,
+        model=False,
+        effect=False,
     ):
+        """Execute one activity.
+
+        ``effect=True`` — внешний эффект без идемпотентности. Вторая попытка
+        только читает квитанцию первой и никогда не исполняет эффект заново;
+        без квитанции модель получает ошибку «исход неизвестен».
+        """
         request = NativeCall(
             self.start.profile,
             self.start.revision,
@@ -82,39 +149,33 @@ class NativeOperations:
                 else self.start.resource_queue,
                 start_to_close_timeout=timedelta(minutes=15),
                 heartbeat_timeout=timedelta(seconds=30),
-                retry_policy=RetryPolicy(maximum_attempts=5),
+                retry_policy=RetryPolicy(maximum_attempts=2 if effect else 5),
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
             )
         except ActivityError as exc:
-            return await self._activity_error(exc, name, request, result_type)
+            raise self._activity_error(exc, name, effect=effect) from exc
 
-    async def _activity_error(self, exc, name, request, result_type):
-        if isinstance(exc.cause, CancelledError):
-            raise asyncio.CancelledError(str(exc.cause)) from exc
-        errors = {
-            cls.__name__: cls
-            for cls in (
-                ExecutionFailure,
-                GuardPreconditionChanged,
-                InfrastructureFailure,
-                OutcomeUnknown,
-                ResourceOwnerLost,
-            )
-        }
-        if (
-            isinstance(exc.cause, ApplicationError)
-            and exc.cause.type in errors
-        ):
-            if exc.cause.type == "OutcomeUnknown":
-                waiter = getattr(self, "reconciliation_wait", None)
-                if waiter is not None:
-                    from temporalio.converter import value_to_type
-
-                    return value_to_type(
-                        result_type, await waiter(name, request)
-                    )
-            raise errors[exc.cause.type](exc.cause.message) from exc
-        raise InfrastructureFailure(f"Native activity failed: {name}") from exc
+    @staticmethod
+    def _activity_error(exc, name, *, effect):
+        cause = exc.cause
+        if isinstance(cause, CancelledError):
+            return asyncio.CancelledError(str(cause))
+        if isinstance(cause, ApplicationError):
+            if cause.type == "DomainError":
+                return restore_domain_error(cause)
+            failures = {
+                cls.__name__: cls
+                for cls in (
+                    ExecutionFailure,
+                    InfrastructureFailure,
+                    OutcomeUnknown,
+                )
+            }
+            if cause.type in failures:
+                return failures[cause.type](cause.message)
+        if effect:
+            return ToolOutcomeUnknown(INTERRUPTED_EFFECT)
+        return InfrastructureFailure(f"Native activity failed: {name}")
 
     async def model(self, request):
         provider = getattr(self, "router_provider", None)
@@ -134,23 +195,55 @@ class NativeOperations:
         router.breaker.replace_from(reply.circuit_breaker)
         return reply.result
 
-    async def tool(self, _invocation):
-        raise ExecutionFailure(
-            "Native tools must use the shared guard and leaf-effect path"
-        )
-
     async def tool_effect(self, request):
+        metadata = self.tool_metadata.get(request.name, {})
+        effect = not metadata.get("effect_is_read_only", False)
         return await self.call(
             "agent.tool.execute",
-            asdict(request),
+            {**asdict(request), "effect": effect},
             ToolResult,
             operation_id=request.operation_id,
+            effect=effect,
         )
 
+    def _probe_companions(self, request):
+        """Проверки, которые guard сделает сразу после этой: одним походом.
+
+        Защищённый путь проверяется до write/read guard того же пути. Если
+        запрос ядра не совпадёт с предсказанным, кэш просто не сработает.
+        """
+        config = (
+            self.prepared.context.config_dict if self.prepared else {}
+        ) or {}
+
+        def enabled(key):
+            block = config.get(key) or {}
+            return isinstance(block, dict) and bool(block.get("enabled"))
+
+        if request.kind == "protected_write" and enabled("write_guard"):
+            return [
+                replace(request, kind="write_path", operation=operation)
+                for operation in ("write", "append", "search_and_replace")
+            ]
+        if request.kind == "protected_read" and enabled("read_guard"):
+            return [replace(request, kind="read_path", operation="")]
+        return []
+
     async def guard_probe(self, request):
-        return await self.call(
-            "agent.guard.probe", asdict(request), GuardProbeResult
+        cached = self._probe_cache.pop(request, None)
+        if cached is not None:
+            return cached
+        companions = self._probe_companions(request)
+        reply = await self.call(
+            "agent.guard.probe",
+            {
+                "request": asdict(request),
+                "companions": [asdict(item) for item in companions],
+            },
+            NativeGuardProbes,
         )
+        self._probe_cache = dict(zip(companions, reply.companions))
+        return reply.primary
 
     async def state_preparer(self, request):
         return await self.call(
@@ -158,6 +251,9 @@ class NativeOperations:
         )
 
     async def prompt_loader(self, request):
+        prepared = self.prepared
+        if prepared is not None and prepared.prompts_request == request:
+            return deepcopy(prepared.prompts)
         return await self.call(
             "agent.prompts.prepare", asdict(request), PreparedPrompts
         )
@@ -170,11 +266,17 @@ class NativeOperations:
         return self._prompts[request]
 
     async def skills_loader(self):
+        prepared = self.prepared
+        if prepared is not None and prepared.skills is not None:
+            return deepcopy(prepared.skills)
         return await self.call("agent.skills.list", {}, list[dict])
 
     async def project_memory_io(self, request):
         return await self.call(
-            "agent.memory.execute", asdict(request), ProjectMemoryReply
+            "agent.memory.execute",
+            asdict(request),
+            ProjectMemoryReply,
+            effect=True,
         )
 
     async def project_memory_hash(self):

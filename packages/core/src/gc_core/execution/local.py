@@ -1,17 +1,13 @@
-"""Local implementation of the same model/tool port used by durable runners."""
+"""Local implementation of the same model port used by durable runners."""
 
 import asyncio
 import time
-from copy import deepcopy
-from types import SimpleNamespace
 
 from gc_core.execution.contracts import (
     ModelOperationCancelled,
     ModelOperationError,
     ModelRequest,
     ModelResult,
-    ToolInvocation,
-    ToolResult,
 )
 from gc_core.execution.model import model_state
 
@@ -83,30 +79,3 @@ class LocalOperations:
                     state.last_main_prompt_message_count
                 )
         return result
-
-    async def tool(self, invocation: ToolInvocation) -> ToolResult:
-        from gc_core.execution.contracts import ExecutionFailure
-        from gc_core.execution.tool_policy import execution_policy
-        from gc_core.tools import aapply_tool_result
-
-        if (
-            execution_policy(invocation.name)["kind"]
-            in ("legacy", "guarded_effect", "human_wait")
-            and invocation.name in self.ctx.tools_data
-        ):
-            raise ExecutionFailure(
-                "This tool still requires the local legacy runtime"
-            )
-        state = SimpleNamespace(
-            shared=SimpleNamespace(
-                working_memory=deepcopy(invocation.state.working_memory)
-            ),
-            session_todo=deepcopy(invocation.state.session_todo),
-        )
-        return await aapply_tool_result(
-            invocation.name,
-            invocation.arguments,
-            ctx=self.ctx,
-            state=state,
-            call_id=invocation.call_id,
-        )

@@ -8,10 +8,8 @@ from gc_core.context_preparation import PreparedRunContext
 from gc_core.execution.contracts import (
     ExecutionFailure,
     InfrastructureFailure,
-    OutcomeUnknown,
 )
 from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
-from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.tools.subagents.runner_transfer import (
     apply_subagent_transfer,
     capture_subagent_transfer,
@@ -25,10 +23,7 @@ from gc_ua_temporalio.native_child_contracts import (
     NativeChildRequest,
     NativeChildResult,
 )
-from gc_ua_temporalio.native_operator_contracts import (
-    NativePendingOperation,
-    operation_digest,
-)
+from gc_ua_temporalio.native_operations import restore_domain_error
 
 
 class RemoteChildInput:
@@ -54,7 +49,8 @@ class RemoteChildInput:
 
     async def drain_deliveries(self):
         if self.tasks:
-            await asyncio.gather(*self.tasks)
+            # Ребёнок мог завершиться раньше доставки: такой сигнал не ошибка хода.
+            await asyncio.gather(*self.tasks, return_exceptions=True)
 
 
 class NativeChildTransport:
@@ -70,6 +66,8 @@ class NativeChildTransport:
         self._state = None
         self._last = None
         self._sequence = 0
+        #: Доставка сообщения в цикл родителя (``AgentExecutor.add_message``).
+        self.redeliver = None
 
     def apply_checkpoint(self, payload):
         checkpoint = (
@@ -87,10 +85,15 @@ class NativeChildTransport:
         self._last, self._sequence = checkpoint.state, checkpoint.sequence
 
     async def answer_child_human(self, payload):
-        if payload["child_id"] != self.active_child or self._handle is None:
-            raise ExecutionFailure(
-                "Human request belongs to an inactive child"
-            )
+        child_id = payload["child_id"]
+        # Сигнал ребёнка может прийти в одной активации со стартом child
+        # workflow, раньше, чем родитель получил handle.
+        await workflow.wait_condition(
+            lambda: self.active_child != child_id or self._handle is not None
+        )
+        if self.active_child != child_id:
+            workflow.logger.warning("Human request from an inactive child")
+            return
         try:
             answer = await self.human_request(
                 value_to_type(HumanRequest, payload["request"])
@@ -102,47 +105,6 @@ class NativeChildTransport:
         await self._handle.signal(
             "answer_human", args=[payload["request_id"], answer]
         )
-
-    async def reconcile_child(self, payload, wait_pending):
-        from gc_core.execution.contracts import OutcomeUnknown
-
-        if payload["child_id"] != self.active_child or self._handle is None:
-            return
-        pending = value_to_type(NativePendingOperation, payload["pending"])
-        if (
-            pending.call.owner_id != self.active_child
-            or pending.call.child_context is None
-            or pending.call.child_context["parent_owner_id"]
-            != self.operations.owner_id
-            or pending.thread_owner != self.store.owner_id
-            or pending.thread_epoch != self.store.owner_epoch
-            or pending.generation != self.store._generation
-            or (pending.store_id, pending.system_id, pending.thread_id)
-            != (
-                self.start.store_id,
-                self.start.system_id,
-                self.start.thread_id,
-            )
-        ):
-            await self.stop_child()
-            return
-        try:
-            result = await wait_pending(pending)
-        except OutcomeUnknown:
-            await self.stop_child()
-            return
-        if (
-            self._handle is not None
-            and self.active_child == payload["child_id"]
-        ):
-            await self._handle.signal(
-                "resolve_operation",
-                args=[
-                    pending.call.operation_id,
-                    operation_digest(pending.call),
-                    result,
-                ],
-            )
 
     async def stop_child(self):
         if self._handle is not None:
@@ -205,6 +167,7 @@ class NativeChildTransport:
         )
         self.active_child = child_id
         scope = RemoteChildInput(parent_call_id)
+        undelivered = []
         previous_scope = getattr(self.ctx, "child_input_scope", None)
         self.ctx.child_input_scope = scope
         try:
@@ -222,24 +185,11 @@ class NativeChildTransport:
             try:
                 result = await self._handle
             except ChildWorkflowError as exc:
-                cause = exc.cause
-                errors = {
-                    error.__name__: error
-                    for error in (
-                        ExecutionFailure,
-                        OutcomeUnknown,
-                        InfrastructureFailure,
-                        ResourceOwnerLost,
-                    )
-                }
-                if (
-                    isinstance(cause, ApplicationError)
-                    and cause.type in errors
-                ):
-                    raise errors[cause.type](cause.message) from exc
-                raise InfrastructureFailure(
-                    "Native child workflow failed"
-                ) from exc
+                raise _child_error(exc) from exc
+            finally:
+                # Дальнейший ввод больше не уходит ребёнку.
+                scope.handle = None
+            undelivered = result.undelivered
             self.apply_checkpoint(result.checkpoint)
             return result.output
         finally:
@@ -247,10 +197,25 @@ class NativeChildTransport:
                 self.ctx.child_input_scope = previous_scope
             try:
                 await scope.drain_deliveries()
+                late = [*undelivered, *scope.pending]
+                scope.pending = []
+                if late and self.redeliver is not None:
+                    for message in late:
+                        self.redeliver(message)
             finally:
                 self.active_child = self._handle = self._state = self._last = (
                     None
                 )
+
+
+def _child_error(exc):
+    cause = exc.cause
+    if isinstance(cause, ApplicationError):
+        if cause.type == "DomainError":
+            return restore_domain_error(cause)
+        if cause.type in ("ExecutionFailure", "InfrastructureFailure"):
+            return ExecutionFailure(cause.message)
+    return InfrastructureFailure("Native child workflow failed")
 
 
 def install_native_subagents(

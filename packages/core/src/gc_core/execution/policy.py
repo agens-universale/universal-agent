@@ -488,7 +488,6 @@ class ExecutionPolicy:
                 ctx,
                 run_agent_func,
                 tool_call_id,
-                call_id_str,
             )
         except self.bindings.WrongFunctionArgumentsException as exc:
             # Отказ одного вызова — не отказ хода: невалидные аргументы становятся
@@ -552,36 +551,22 @@ class ExecutionPolicy:
         ctx,
         run_agent_func,
         tool_call_id,
-        call_id_str,
     ):
         operations = getattr(ctx, "operations", None)
-        if operations is None or callable(getattr(ctx, "tool_effect", None)):
-            output = await self.bindings.aapply_tool(
-                tool_name=tool_name,
-                arguments=tool_arguments,
-                ctx=ctx,
-                state=state,
-                run_agent_func=run_agent_func,
-                call_id=tool_call_id,
-                **(
-                    {"tool_operation_id": operations.next_operation_id("tool")}
-                    if operations is not None
-                    else {}
-                ),
-            )
-            return output, False
-        result = await operations.tool(
-            self.bindings.ToolInvocation(
-                operation_id=operations.next_operation_id("tool"),
-                name=tool_name,
-                arguments=tool_arguments,
-                call_id=call_id_str,
-                state=self.bindings.tool_state_view(state),
-                finish_reason=getattr(state, "last_finish_reason", None),
-            )
+        output = await self.bindings.aapply_tool(
+            tool_name=tool_name,
+            arguments=tool_arguments,
+            ctx=ctx,
+            state=state,
+            run_agent_func=run_agent_func,
+            call_id=tool_call_id,
+            **(
+                {"tool_operation_id": operations.next_operation_id("tool")}
+                if operations is not None
+                else {}
+            ),
         )
-        self.bindings.apply_state_delta(state, result.delta)
-        return result.output, result.invalid_arguments
+        return output, False
 
     async def _aemit_intermediate_reply(
         self,
@@ -726,7 +711,10 @@ class ExecutionPolicy:
             is_tui=bool(getattr(ctx, "is_tui", False)),
             is_cli_mode=bool(getattr(ctx, "is_cli_mode", False)),
         ):
-            self.bindings.gc.collect()
+            # Рантайм может заменить сборку (Temporal: общий worker не
+            # останавливается ради одного workflow); локально — gc.collect.
+            collect = getattr(ctx, "collect_garbage", None)
+            (collect or self.bindings.gc.collect)()
 
         return tools_outputs
 

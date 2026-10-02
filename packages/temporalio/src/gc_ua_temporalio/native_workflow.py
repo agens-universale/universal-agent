@@ -11,7 +11,6 @@ with workflow.unsafe.imports_passed_through():
     import pydantic  # noqa: F401
 
 from gc_core.agent_executor import AgentExecutor
-from gc_core.execution.contracts import ExecutionFailure, ModelProviderError
 from gc_core.execution.environment import execution_environment
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.security.confirm_port import (
@@ -26,33 +25,36 @@ from gc_core.structured_output import (
 )
 from gc_core.thread_store_durable import ThreadStoreOperation
 
-from gc_ua_temporalio.native_checkpoint_transport import (
-    INLINE_BYTES,
-    encode_resume,
-    load_checkpoint,
-    save_checkpoint,
-)
 from gc_ua_temporalio.native_child_transport import install_native_subagents
 from gc_ua_temporalio.native_context import assemble_native_context
 from gc_ua_temporalio.native_contracts import (
     NativePreparedContext,
     NativeResume,
     NativeRunRequest,
+    UserMessage,
 )
 from gc_ua_temporalio.native_operations import NativeOperations
-from gc_ua_temporalio.native_operator_contracts import NativeOperatorResolution
-from gc_ua_temporalio.session_contracts import UserMessage
 from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_ua_temporalio.thread_store_transport import ThreadStoreTransport
+
+#: Сколько последних ID сообщений и ответов помнить для дедупликации.
+DEDUP_WINDOW = 1000
 
 
 def _message_digest(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def _recent(values):
+    """Последние ``DEDUP_WINDOW`` записей: состояние доставки не растёт вечно."""
+    if isinstance(values, dict):
+        return dict(list(values.items())[-DEDUP_WINDOW:])
+    return list(values)[-DEDUP_WINDOW:]
+
+
 @workflow.defn(
     name="NativeAgentWorkflow",
-    failure_exception_types=[ExecutionFailure, ModelProviderError, ValueError],
+    failure_exception_types=[Exception],
 )
 class NativeAgentWorkflow:
     def __init__(self):
@@ -64,9 +66,6 @@ class NativeAgentWorkflow:
         self.phase = "starting"
         self.sequence = 0
         self.run_identity = ""
-        self.pending_operation = None
-        self.reconciliation_result = None
-        self.reconciliation_receipts = {}
         self.pending_human = None
         self.human_replies = {}
         self.reply_receipts = {}
@@ -77,12 +76,12 @@ class NativeAgentWorkflow:
         self.accepting_inputs = False
         self.closed = False
         self.ready = False
-        self.delivery_epoch = 0
         self.turns = 0
         self.answer = None
         self.formatted_answer = None
         self.post_error = None
         self.terminal_outcome = None
+        self.resumed_store = None
 
     def new_id(self, prefix):
         self.sequence += 1
@@ -90,9 +89,6 @@ class NativeAgentWorkflow:
             f"{self.run_identity}/{prefix}/{self.sequence}".encode()
         ).hexdigest()
         return f"{prefix}_{digest}"
-
-    def _delivery_changed(self):
-        self.delivery_epoch += 1
 
     @workflow.query
     def status(self) -> dict:
@@ -108,9 +104,6 @@ class NativeAgentWorkflow:
             if self.children
             else None,
             "pending_human": self.pending_human,
-            "pending_operation": self.pending_operation.public()
-            if self.pending_operation
-            else None,
             "child": {
                 "workflow_id": self.children.active_child,
                 "pending_human": self.pending_human,
@@ -128,166 +121,6 @@ class NativeAgentWorkflow:
             "undelivered": self.undelivered,
         }
 
-    async def operator_activity(self, name, request):
-        from datetime import timedelta
-
-        from temporalio.common import RetryPolicy
-
-        return await workflow.execute_activity(
-            name,
-            request,
-            result_type=dict,
-            task_queue=self.start.resource_queue,
-            start_to_close_timeout=timedelta(seconds=30),
-            retry_policy=RetryPolicy(maximum_attempts=1),
-        )
-
-    async def wait_reconciliation(self, name, call, store):
-        from gc_ua_temporalio.native_operator_contracts import (
-            NativePendingOperation,
-        )
-
-        pending = NativePendingOperation(
-            name,
-            call,
-            self.start.store_id,
-            self.start.system_id,
-            self.start.thread_id,
-            store.owner_id,
-            store.owner_epoch,
-            store._generation,
-        )
-        return await self.wait_pending_operation(pending)
-
-    async def wait_pending_operation(self, pending):
-        from gc_core.execution.contracts import OutcomeUnknown
-
-        if self.pending_operation is not None:
-            raise OutcomeUnknown(
-                "Another operation already requires reconciliation"
-            )
-        previous_phase = self.phase
-        self.pending_operation = pending
-        self.reconciliation_result = None
-        self.phase = "needs_reconciliation"
-        try:
-            await workflow.wait_condition(
-                lambda: (
-                    self.reconciliation_result is not None
-                    or self.stop_requested
-                    or self.closed
-                )
-            )
-            if self.stop_requested or self.closed:
-                raise OutcomeUnknown(
-                    "Uncertain operation aborted; its ledger remains unresolved"
-                )
-            return self.reconciliation_result
-        finally:
-            self.pending_operation = None
-            self.reconciliation_result = None
-            self.phase = previous_phase
-
-    @workflow.update
-    async def inspect_operation(self) -> dict:
-        await workflow.wait_condition(lambda: self.ready)
-        from gc_ua_temporalio.native_operator_contracts import (
-            NativeOperatorCall,
-        )
-
-        if self.pending_operation is None:
-            raise ApplicationError(
-                "No suspended operation", non_retryable=True
-            )
-        return await self.operator_activity(
-            "agent.operator.inspect",
-            NativeOperatorCall(self.pending_operation),
-        )
-
-    @workflow.update
-    async def resume_operation(self, operation_id: str, digest: str) -> dict:
-        await workflow.wait_condition(lambda: self.ready)
-        from gc_ua_temporalio.native_operator_contracts import (
-            NativeOperatorCall,
-            operation_digest,
-        )
-
-        pending = self.pending_operation
-        if pending is None or self.stop_requested or self.closed:
-            raise ApplicationError(
-                "No active suspended operation", non_retryable=True
-            )
-        if (
-            operation_id != pending.call.operation_id
-            or digest != operation_digest(pending.call)
-        ):
-            raise ApplicationError(
-                "Stale operation identity", non_retryable=True
-            )
-        result = await self.operator_activity(
-            "agent.operator.result", NativeOperatorCall(pending)
-        )
-        if (
-            self.pending_operation is pending
-            and not self.stop_requested
-            and not self.closed
-        ):
-            self.reconciliation_result = result
-        return {"operation_id": operation_id, "resumed": True}
-
-    @workflow.update
-    async def reconcile_operation(
-        self, resolution: NativeOperatorResolution
-    ) -> dict:
-        await workflow.wait_condition(lambda: self.ready)
-        from dataclasses import asdict
-
-        from gc_ua_temporalio.native_operator_contracts import (
-            NativeOperatorCall,
-        )
-
-        previous = self.reconciliation_receipts.get(resolution.request_id)
-        if previous is not None:
-            if previous[0] != asdict(resolution):
-                raise ApplicationError(
-                    "Resolution request ID reused", non_retryable=True
-                )
-            return {**previous[1], "duplicate": True}
-        if (
-            self.pending_operation is None
-            or self.stop_requested
-            or self.closed
-        ):
-            raise ApplicationError(
-                "No active suspended operation", non_retryable=True
-            )
-        pending = self.pending_operation
-        receipt = await self.operator_activity(
-            "agent.operator.resolve", NativeOperatorCall(pending, resolution)
-        )
-        result = await self.operator_activity(
-            "agent.operator.result", NativeOperatorCall(pending)
-        )
-        self.reconciliation_receipts[resolution.request_id] = [
-            asdict(resolution),
-            receipt,
-        ]
-        self._delivery_changed()
-        if (
-            self.pending_operation is pending
-            and not self.stop_requested
-            and not self.closed
-        ):
-            self.reconciliation_result = result
-        return receipt
-
-    @workflow.signal
-    async def child_reconciliation(self, payload: dict):
-        if self.children is not None:
-            await self.children.reconcile_child(
-                payload, self.wait_pending_operation
-            )
-
     @workflow.signal
     async def child_human(self, payload: dict):
         if self.children is not None:
@@ -303,7 +136,6 @@ class NativeAgentWorkflow:
         if self.phase in {"idle", "stopped"} and not self.accepting_inputs:
             return
         self.stop_requested = True
-        self._delivery_changed()
         if self.executor is not None:
             self.executor.stop_run()
         stop_child = getattr(self.operations, "stop_child", None)
@@ -322,7 +154,6 @@ class NativeAgentWorkflow:
     def close_session(self):
         """Finish accepted work, then close; this does not abort a tool."""
         self.closed = True
-        self._delivery_changed()
 
     @workflow.update
     async def submit_message(self, message: UserMessage) -> dict:
@@ -337,7 +168,6 @@ class NativeAgentWorkflow:
         if self.closed:
             raise ApplicationError("Session is closing", non_retryable=True)
         self.accepted[message.message_id] = digest
-        self._delivery_changed()
         value = {
             "role": "user",
             "content": message.text,
@@ -361,7 +191,6 @@ class NativeAgentWorkflow:
             self._answer_human(request_id, answer)
             if reply_id is not None:
                 self.reply_receipts[reply_id] = [request_id, answer]
-                self._delivery_changed()
         return True
 
     def _answer_human(self, request_id, answer) -> None:
@@ -390,9 +219,13 @@ class NativeAgentWorkflow:
                 "Unknown confirmation choice", non_retryable=True
             )
         self.human_replies[request_id] = answer
-        self._delivery_changed()
 
-    async def human_request(self, request):
+    async def human_request(self, request, *, flush=True):
+        # Ожидание может длиться часами: шаги и сам вопрос — в тред до него.
+        # Вопрос ребёнка приходит сигналом, параллельно с основным циклом:
+        # там тред родителя не трогаем, он запишется в конце его хода.
+        if flush and self.executor is not None:
+            await self.executor.aflush_thread()
         request_id = self.new_id("human")
         self.pending_human = {**asdict(request), "request_id": request_id}
         self.phase = "waiting_human"
@@ -413,7 +246,7 @@ class NativeAgentWorkflow:
         self.start = start
         if start.format_text is not None and not start.format_text.strip():
             raise ValueError("Structured output format must be nonempty")
-        if start.schema_version != 1 or start.continue_after_turns < 1:
+        if start.schema_version != 1:
             raise ValueError("Invalid native run request")
         if start.resume is not None:
             self._restore_delivery(start.resume)
@@ -426,10 +259,13 @@ class NativeAgentWorkflow:
         if resume.schema_version != 1:
             raise ValueError("Unsupported native resume")
         self.closed = self.closed or resume.closed
-        self.stop_requested = self.stop_requested or resume.stop_requested
+        if resume.store_owner_epoch is not None:
+            self.resumed_store = (
+                resume.store_owner_epoch,
+                resume.store_generation or 0,
+            )
         self.human_replies = dict(resume.human_replies)
         self.reply_receipts = dict(resume.reply_receipts)
-        self.reconciliation_receipts = dict(resume.reconciliation_receipts)
         self.undelivered = list(resume.undelivered)
         self.accepted = dict(resume.accepted)
         self.pending_messages = list(resume.pending)
@@ -441,6 +277,9 @@ class NativeAgentWorkflow:
 
     def _initial_messages(self, start):
         if not start.messages:
+            if start.keep_alive:
+                # Сессия, открытая Update-With-Start: ввод придёт update'ом.
+                return
             raise ValueError("Native run requires messages")
         ids = start.message_ids or [self.new_id("m") for _ in start.messages]
         if len(ids) != len(start.messages) or len(set(ids)) != len(ids):
@@ -467,6 +306,19 @@ class NativeAgentWorkflow:
             NativePreparedContext,
         )
         self.operations.resource_owner = prepared.resource_owner
+        self.operations.tool_metadata = prepared.tool_metadata
+        self.operations.prepared = prepared
+        if store is None and self.resumed_store is not None:
+            epoch, generation = self.resumed_store
+            store = TemporalThreadStore(
+                start.store_id,
+                ThreadStoreTransport(task_queue=start.resource_queue),
+                owner_id=owner,
+                owner_epoch=epoch,
+                generation=generation,
+                capabilities=prepared.store_capabilities,
+                threads_dir=prepared.threads_dir,
+            )
         if store is None:
             store = TemporalThreadStore(
                 start.store_id,
@@ -477,18 +329,21 @@ class NativeAgentWorkflow:
             snapshot = await store.aread_snapshot(
                 start.system_id, start.thread_id, include_state=False
             )
-            receipt = await store.acommit_operation(
-                start.system_id,
-                start.thread_id,
-                ThreadStoreOperation(
-                    self.new_id("claim"),
-                    "claim_owner",
-                    {"owner_id": owner},
-                    expected_revision=snapshot.revision,
-                    generation=snapshot.generation,
-                ),
-            )
-            store.owner_id, store.owner_epoch = owner, receipt.owner_epoch
+            epoch = snapshot.owner_epoch
+            if snapshot.owner_id != owner:
+                receipt = await store.acommit_operation(
+                    start.system_id,
+                    start.thread_id,
+                    ThreadStoreOperation(
+                        self.new_id("claim"),
+                        "claim_owner",
+                        {"owner_id": owner},
+                        expected_revision=snapshot.revision,
+                        generation=snapshot.generation,
+                    ),
+                )
+                epoch = receipt.owner_epoch
+            store.owner_id, store.owner_epoch = owner, epoch
         ctx = assemble_native_context(
             prepared,
             operations=self.operations,
@@ -502,13 +357,13 @@ class NativeAgentWorkflow:
             prepared,
             store,
             self.operations,
-            human_request=self.human_request,
-        )
-        self.operations.reconciliation_wait = lambda name, call: (
-            self.wait_reconciliation(name, call, store)
+            human_request=lambda request: self.human_request(
+                request, flush=False
+            ),
         )
         self.ctx = ctx
         self.executor = AgentExecutor(ctx)
+        self.children.redeliver = self.executor.add_message
         return store
 
     async def _run_turn(self, start):
@@ -542,6 +397,9 @@ class NativeAgentWorkflow:
                     self.post_error = str(exc)
         finally:
             try:
+                # stop/ошибка: отложенные шаги не должны остаться только в
+                # истории workflow.
+                await self.executor.aflush_thread()
                 if ran and start.format_text is not None:
                     self.phase = "accounting"
                     await self.executor.aclose_run_accounting()
@@ -562,13 +420,6 @@ class NativeAgentWorkflow:
     async def run(self, start: NativeRunRequest) -> dict:
         self.run_identity = workflow.info().run_id
         self.start = start
-        if start.resume_ref is not None:
-            if start.resume is not None:
-                raise ValueError("Native resume must be inline or referenced")
-            self.phase = "restoring_delivery"
-            start = replace(
-                start, resume=await load_checkpoint(start), resume_ref=None
-            )
         self._initialize(start)
         with execution_environment(new_id=self.new_id, now=workflow.now):
             try:
@@ -592,22 +443,22 @@ class NativeAgentWorkflow:
                 raise
 
     async def _run_session(self, start):
-        owner = f"{workflow.info().workflow_id}/{workflow.info().run_id}"
+        # Владелец треда — сессия целиком: Continue-As-New его не меняет.
+        owner = workflow.info().workflow_id
         store = None
-        started_turns = self.turns
         while True:
+            ran = False
             if self.pending_messages:
                 store = await self._prepare_turn(start, owner, store)
                 await self._run_turn(start)
+                ran = True
             if not start.keep_alive or (
                 self.closed and not self.pending_messages
             ):
                 break
             self.stop_requested = False
-            if (
-                not self.closed
-                and self.turns - started_turns >= start.continue_after_turns
-            ):
+            if ran and not self.closed and not self.pending_messages:
+                # Ход закончен: новый run начинается с почти пустой историей.
                 await self._continue(start, store)
             await workflow.wait_condition(
                 lambda: bool(self.pending_messages) or self.closed
@@ -630,48 +481,28 @@ class NativeAgentWorkflow:
         }
 
     async def _continue(self, start, store):
-        self.phase = "checkpointing_delivery"
+        self.phase = "continuing"
         await workflow.wait_condition(workflow.all_handlers_finished)
-        if store is not None:
-            await store._mutate(
-                start.system_id, start.thread_id, "release_owner", {}
-            )
-        while True:
-            await workflow.wait_condition(workflow.all_handlers_finished)
-            epoch = self.delivery_epoch
-            resume = NativeResume(
-                reconciliation_receipts=self.reconciliation_receipts,
-                human_replies=self.human_replies,
-                reply_receipts=self.reply_receipts,
-                formatted_answer=self.formatted_answer,
-                post_error=self.post_error,
-                closed=self.closed,
-                undelivered=self.undelivered,
-                accepted=self.accepted,
-                pending=self.pending_messages,
-                turns=self.turns,
-                answer=self.answer,
-                terminal_outcome=self.terminal_outcome,
-                stop_requested=self.stop_requested,
-            )
-            raw = encode_resume(resume)
-            ref = (
-                await save_checkpoint(start, raw)
-                if len(raw) > INLINE_BYTES
-                else None
-            )
-            if ref is not None:
-                await workflow.wait_condition(workflow.all_handlers_finished)
-                if epoch != self.delivery_epoch:
-                    continue
-            # No await between the final epoch check and CAN: all accepted
-            # deliveries are represented, including stop/close during upload.
-            workflow.continue_as_new(
-                replace(
-                    start,
-                    messages=[],
-                    message_ids=None,
-                    resume=None if ref is not None else resume,
-                    resume_ref=ref,
-                )
-            )
+        if self.pending_messages or self.closed:
+            # Пока ждали обработчики, пришёл ввод: сначала обслужить его.
+            self.phase = "idle"
+            return
+        resume = NativeResume(
+            human_replies=_recent(self.human_replies),
+            reply_receipts=_recent(self.reply_receipts),
+            formatted_answer=self.formatted_answer,
+            post_error=self.post_error,
+            closed=self.closed,
+            undelivered=_recent(self.undelivered),
+            accepted=_recent(self.accepted),
+            pending=self.pending_messages,
+            turns=self.turns,
+            answer=self.answer,
+            terminal_outcome=self.terminal_outcome,
+            store_owner_epoch=store.owner_epoch if store else None,
+            store_generation=store._generation if store else None,
+        )
+        # Без await между проверкой и CAN: весь принятый ввод уже в resume.
+        workflow.continue_as_new(
+            replace(start, messages=[], message_ids=None, resume=resume)
+        )

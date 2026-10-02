@@ -67,6 +67,9 @@ EXPERT_ONLY_KEYS: set = {
     "endpoint_presets",
     # Голосовой каталог — тот же класс и то же правило.
     "voice_endpoint_presets",
+    # --- thread_store: только для durable-исполнителя (Temporal) ---
+    # Локально допустимо лишь значение по умолчанию (step), turn отклоняется.
+    "thread_store.persist",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",

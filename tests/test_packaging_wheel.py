@@ -316,10 +316,6 @@ OWN_COMMANDS = {
     "gc_ua_temporalio": {
         "gc-temporal-native",
         "gc-temporal-native-worker",
-        "gc-temporal",
-        "gc-temporal-worker",
-        "gc-temporal-mcp-host",
-        "gc-temporal-remote",
     },
 }
 

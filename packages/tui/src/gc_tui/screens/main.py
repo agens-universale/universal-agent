@@ -5507,18 +5507,34 @@ class TraceScreen(Screen):
         system = getattr(self.app, "_system", "cli")
         if not threads_dir:
             return
-        from gc_core.thread_store_maintenance import (
-            append_file_session_messages,
+        from gc_core.thread_store import (
+            append_new_thread_messages,
+            load_thread_messages,
+            load_thread_meta,
+            save_thread_meta,
         )
 
-        tags, _strip_think = self._projection_from_app_config()
-        append_file_session_messages(
+        tags, strip_think = self._projection_from_app_config()
+        _msgs, keys, max_seq = load_thread_messages(threads_dir, system, tid)
+        written = append_new_thread_messages(
             threads_dir,
             system,
             tid,
             [msg],
-            config_dict={"strip_tags_projection": {"tags": list(tags)}},
+            keys,
+            start_seq=max_seq,
+            tags=tags,
+            strip_think=strip_think,
         )
+        if written and self._store is not None:
+            meta = load_thread_meta(threads_dir, system, tid) or {}
+            try:
+                meta["messages_count"] = (
+                    int(meta.get("messages_count", 0)) + written
+                )
+            except (TypeError, ValueError):
+                meta["messages_count"] = written
+            save_thread_meta(threads_dir, system, tid, meta)
 
     def _cmd_new(self) -> None:
         self._resumed_prompt = None  # новая сессия — без resume-промпта
