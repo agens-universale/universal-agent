@@ -442,7 +442,6 @@ models:                                  # реестр: алиас → пров
     auxiliary:                           # summary, судьи, finish_gate, intent_scope
       temperature: 1.0
       top_p: 1.0
-      tool_choice: auto
       chat_template_kwargs:
         enable_thinking: false
 

@@ -60,7 +60,6 @@ level: default
 #         enable_thinking: true
 #     auxiliary:
 #       temperature: 1.0
-#       tool_choice: auto
 #       chat_template_kwargs:
 #         enable_thinking: false
 #     token: sk-or-...                      # адрес и токен — ПАРА: задан один →

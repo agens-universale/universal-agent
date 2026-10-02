@@ -6,9 +6,10 @@ from gc_core.config import flatten_app_config
 from gc_core.config_modules.model_registry import parse_completion_kwargs_text
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
-from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
+from gc_core.utils import llm_chat_client
 from gc_core.utils.connect_backend import create_call_data_completions
 from gc_core.utils.llm_chat_client import _build_chat_completion_payload
+from gc_testkit import as_coro, run_coro
 
 
 def _cfg(raw: dict) -> dict:
@@ -314,24 +315,50 @@ def test_empty_auxiliary_does_not_copy_main_or_global_thinking():
     assert "top_p" not in payload
 
 
-def test_auxiliary_llm_completion_kwargs_follows_the_resolved_alias():
+def test_open_alias_fallback_sends_active_model_kwargs(monkeypatch):
+    """Алиас в предохранителе не оставляет свои kwargs поверх запасной модели."""
     cfg = _cfg(_PROFILE)
-    router = _router(cfg)
-    ctx = SimpleNamespace(
-        config_dict=cfg,
-        model_router=router,
-        auxiliary_llm=SimpleNamespace(
-            completion_kwargs={
-                "reasoning_effort": "high",
-                "chat_template_kwargs": {"enable_thinking": True},
-            }
-        ),
+    router = _router(cfg, level="light")
+    router.breaker.trip("gc_v2", "down")
+    captured = {}
+
+    def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+        captured["payload"] = payload_factory(initial_max_tokens)
+        captured["url"] = kwargs["url"]
+        return {"choices": [{"message": {"content": "ok"}}]}, {}
+
+    monkeypatch.setattr(
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
     )
-    summary = auxiliary_llm_completion_kwargs(ctx)
-    assert summary == {"temperature": 0.3, "tool_choice": "auto"}
-    gate = auxiliary_llm_completion_kwargs(ctx, "finish_gate")
-    assert gate["chat_template_kwargs"]["thinking"] is False
-    assert "enable_thinking" not in gate.get("chat_template_kwargs", {})
+    monkeypatch.setattr(
+        llm_chat_client,
+        "acreate_call_headers",
+        as_coro(lambda _s, _c, resolved=None: {}),
+    )
+
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=SimpleNamespace(
+                config_dict=cfg,
+                model_router=router,
+                logger=None,
+                is_tui=False,
+            ),
+            state=SimpleNamespace(default_model="legacy", usage=None),
+            messages=[{"role": "user", "content": "hi"}],
+            max_tokens=32,
+            consumer="summary",
+        )
+    )
+
+    payload = captured["payload"]
+    assert payload["model"] == "qwen_38_mlsp"
+    assert captured["url"] == "http://qwen/v1/chat/completions"
+    assert payload["temperature"] == 0.4
+    assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "tool_choice" not in payload
 
 
 def test_two_aliases_with_one_model_id_do_not_collapse():

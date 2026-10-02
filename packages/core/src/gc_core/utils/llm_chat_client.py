@@ -201,6 +201,8 @@ def _build_chat_completion_payload(
     else:
         payload["max_completion_tokens"] = max_tokens
 
+    # Секция той модели, которой уходит этот запрос. При откате на запасную
+    # ``resolved`` уже активная: словарь мёртвого алиаса сюда не подмешивается.
     extra = effective_completion_kwargs(
         resolved, cfg, section=completion_section(consumer)
     )

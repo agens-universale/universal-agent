@@ -2,13 +2,10 @@
 
 from typing import Any, Dict, List, Optional
 
-from gc_core.config_modules.merge import deep_merge
-from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
 from gc_core.message_projection import project_text_for_model
-from gc_core.model_router import AliasCircuitOpenError, completion_section
 from gc_core.utils.llm_chat_client import (
     arequest_chat_completion_text,
     log_llm_prompt_and_result,
@@ -22,34 +19,6 @@ def _require_auxiliary_llm(ctx: Any) -> Any:
             "RunContext.auxiliary_llm обязателен; создавайте контекст через create_run_context."
         )
     return auxiliary_llm
-
-
-def auxiliary_llm_completion_kwargs(
-    ctx: Any, consumer: str | None = None
-) -> Dict[str, Any]:
-    """Kwargs служебного вызова: ``auxiliary`` алиаса, куда резолвится consumer.
-
-    Сигнатура ``(ctx)`` сохранена: без consumer это ``summary`` (так зовёт CLI).
-    Секции ``auxiliary`` нет — ``chat_completions.auxiliary_llm.completion_kwargs``
-    из снимка конфига. Объект ``auxiliary_llm.completion_kwargs`` сам по себе
-    не читается. Субагент получает ``main``.
-    """
-    consumer = consumer or "summary"
-    cfg = getattr(ctx, "config_dict", None)
-    resolved = None
-    router = getattr(ctx, "model_router", None)
-    if router is not None:
-        try:
-            resolved = router.resolve(consumer, check_breaker=False)
-        except AliasCircuitOpenError as exc:
-            resolved = exc.resolved
-        except ValueError:
-            resolved = None
-    return effective_completion_kwargs(
-        resolved,
-        cfg if isinstance(cfg, dict) else {},
-        section=completion_section(consumer),
-    )
 
 
 def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
@@ -126,11 +95,12 @@ async def arequest_summary_text(
     payload_overrides: Optional[Dict[str, Any]] = None,
     logger: Any | None = None,
 ) -> str:
-    """Summary/intent-scope aux call: dirty logged, projected text returned."""
-    completion_kwargs = auxiliary_llm_completion_kwargs(ctx, consumer)
-    effective_overrides = completion_kwargs
-    if isinstance(payload_overrides, dict) and payload_overrides:
-        effective_overrides = deep_merge(completion_kwargs, payload_overrides)
+    """Summary/intent-scope aux call: dirty logged, projected text returned.
+
+    Kwargs профиля берёт сборка payload у той ``ResolvedModel``, которой
+    запрос реально уходит — в том числе у запасной, если алиас уже в
+    предохранителе. ``payload_overrides`` — только добавка этого вызова.
+    """
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     default_max_tokens = getattr(auxiliary_llm, "max_tokens", None)
     if not isinstance(default_max_tokens, int) or default_max_tokens < 1:
@@ -146,7 +116,7 @@ async def arequest_summary_text(
         else default_max_tokens,
         request_label=request_label,
         consumer=consumer,
-        payload_overrides=effective_overrides,
+        payload_overrides=payload_overrides,
         logger=logger,
     )
 

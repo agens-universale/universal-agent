@@ -155,7 +155,7 @@ async def test_rephrase_sends_format_and_fields(monkeypatch):
     assert captured["consumer"] == "summary"
     assert captured["request_label"] == REQUEST_LABEL
     assert captured["max_tokens"] == 128
-    assert captured["payload_overrides"] == {}
+    assert captured.get("payload_overrides") is None
     system, user = captured["messages"]
     assert system["role"] == "system"
     assert "Language:" in system["content"]

@@ -138,7 +138,8 @@ KWARGS_HINT = """\
 в запрос, без обёртки `chat_completion_kwargs:` / `completion_kwargs:`. `main` —
 диалог и субагенты. `auxiliary` — summary, судьи, finish_gate, intent_scope.
 Секции не смешиваются: пустой `auxiliary` не забирает ключи из `main`. Одна и та
-же температура и `tool_choice` обычно стоят в обеих секциях. В одно поле не
+же температура обычно стоит в обеих секциях. `tool_choice` — только в `main`:
+служебный запрос идёт без `tools`, и строгий прокси отвечает 400. В одно поле не
 складывать ключи разных семей: строгий прокси отвечает 400 на чужой ключ.
 
 Ключи `model`, `messages`, `tools`, `max_tokens`, `max_completion_tokens` сюда не

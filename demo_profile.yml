@@ -47,7 +47,6 @@ models:
     auxiliary:
       temperature: 1.0
       top_p: 1.0
-      tool_choice: auto
       separate_reasoning: false
       chat_template_kwargs:
         enable_thinking: false
@@ -67,7 +66,6 @@ models:
     auxiliary:
       temperature: 1.0
       top_p: 1.0
-      tool_choice: auto
       chat_template_kwargs:
         thinking: false
         reasoning_effort: none
@@ -88,7 +86,6 @@ models:
     auxiliary:
       temperature: 1.0
       top_p: 1.0
-      tool_choice: auto
       chat_template_kwargs:
         thinking: false
         reasoning_effort: none
