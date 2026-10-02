@@ -157,7 +157,10 @@ class ImageStore:
         return data if image_id(data) == att.id else None
 
     def delete_thread_images(self, system_id: str, thread_id: str) -> None:
-        """Удалить файлы треда. Имя сверяется целиком: тред ``a`` не заденет ``a_b``."""
+        """Удалить файлы треда; отказ по одному файлу не срывает сброс.
+
+        Имя сверяется целиком: тред ``a`` не заденет ``a_b``.
+        """
         name = re.compile(
             re.escape(_thread_prefix(system_id, thread_id))
             + r"[0-9a-f]{16}\.(?:png|jpg)"
@@ -166,10 +169,26 @@ class ImageStore:
             entries = os.listdir(self.root)
         except FileNotFoundError:
             return
+        except OSError:
+            logger.warning(
+                "image_list_failed: каталог картинок недоступен: %s",
+                self.root,
+                exc_info=True,
+            )
+            return
         for entry in entries:
             if name.fullmatch(entry):
-                with contextlib.suppress(FileNotFoundError):
-                    os.remove(os.path.join(self.root, entry))
+                path = os.path.join(self.root, entry)
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+                except OSError:
+                    logger.warning(
+                        "image_delete_failed: картинка не удалена: %s",
+                        path,
+                        exc_info=True,
+                    )
 
     def clear_own_staging(self) -> None:
         """Очистить карман своего процесса — только на выходе процесса: сообщение,

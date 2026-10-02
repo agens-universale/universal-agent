@@ -224,6 +224,48 @@ def test_turn_finish_rejects_invalid_handoff_json():
     assert bad["error"]["field"] == "handoff"
 
 
+def _finish_arguments(**extra):
+    payload = {
+        "solution_type": "direct_answer",
+        "task": "прочитать README",
+        "task_report": "В README одна фраза.",
+        "handoff": '{"artifacts":["README.md"]}',
+    }
+    payload.update(extra)
+    return payload
+
+
+def test_present_result_is_report_and_note():
+    raw = json.dumps(
+        _finish_arguments(
+            comment="файл короткий",
+            message="Finish gate: accept.",
+            finish_gate={"action": "accept"},
+        ),
+        ensure_ascii=False,
+    )
+    text = SubmitSolution.present_result(raw)
+    assert text == "В README одна фраза.\n\n* заметка: файл короткий"
+    assert "solution_type" not in text
+    assert "handoff" not in text
+    assert "Finish gate" not in text
+    assert "finish_gate" not in text
+
+
+def test_present_result_leaves_prose_and_hides_empty_report():
+    assert SubmitSolution.present_result("готово") == "готово"
+    assert SubmitSolution.present_result(None) is None
+    empty = _finish_arguments(task_report="   ")
+    assert SubmitSolution.present_result(empty) == ""
+
+
+def test_present_result_does_not_repeat_a_shown_report():
+    raw = _finish_arguments(comment="файл короткий")
+    assert SubmitSolution.present_result(
+        raw, shown="В README одна фраза."
+    ) == ("В README одна фраза.")
+
+
 def test_turn_finish_rejects_non_object_handoff_json():
     tool = CallableTool(SubmitSolution())
     bad = json.loads(

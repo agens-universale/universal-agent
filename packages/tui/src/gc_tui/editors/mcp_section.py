@@ -13,20 +13,8 @@ from textual.widgets import Static
 
 from gc_tui.form_frame import KEEP_IN_VIEW, reveal_focus
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
+from gc_tui.services.plural import plural_form
 from gc_tui.widgets.loading_wave import wave_glyph
-
-
-def _ru_plural(n: int, one: str, few: str, many: str) -> str:
-    """Русское склонение по числу (1 обновление / 2 обновления / 5 обновлений)."""
-    n100 = abs(n) % 100
-    if 11 <= n100 <= 14:
-        return many
-    n10 = n100 % 10
-    if n10 == 1:
-        return one
-    if 2 <= n10 <= 4:
-        return few
-    return many
 
 
 class McpSectionEditor(Vertical):
@@ -264,7 +252,7 @@ class McpSectionEditor(Vertical):
             t.append("Обновить все подключённые", style=INK)
             detail = f"    {len(names)} шт: {', '.join(names)}"
             if upd:
-                word = _ru_plural(
+                word = plural_form(
                     len(upd), "обновление", "обновления", "обновлений"
                 )
                 detail += f" · {len(upd)} {word}"

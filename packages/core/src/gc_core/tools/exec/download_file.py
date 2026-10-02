@@ -580,6 +580,26 @@ class DownloadFile(AbstractSimpleTool):
                 path=dest, filename=validated_filename, error=write_error
             )
 
+        # Журнал правок: скачанный файл — правка агента в проекте, и без записи
+        # его не было бы ни на экране изменений, ни в сводке хода, ни в откате
+        # (пятый раунд ревью, находка 7). Импорт вложенный — цикл с thread_store,
+        # как у остальных тулов.
+        #
+        # Вид правки всегда `create`: существующий путь тул отверг выше
+        # (`file_exists`), перезаписи тут не бывает по построению. Поэтому и
+        # `old_bytes=None` — «до» у пути не было, снимать нечего, а откату
+        # созданного хватает собственного существования.
+        from gc_core.agent_edits.recorder import record_edit
+
+        await record_edit(
+            self._ctx,
+            abs_path=dest,
+            old_bytes=None,
+            new_bytes=body,
+            op="create",
+            call_id=self._call_id,
+        )
+
         return self._result(
             ok=True,
             path=dest,

@@ -168,3 +168,39 @@ def test_table_block_to_markdown_empty():
     assert lines[0] == "|  |"  # "| " + "" + " |"
     assert lines[1] == "|  |"
     assert len(lines) == 2
+
+
+# ---- Е2: вложенные ограды (CommonMark), пустой блок без сегмента ----
+
+
+def test_nested_fence_with_info_string_does_not_close_outer_block():
+    text = (
+        "Итог:\n```markdown\n# T\n\n```bash\npip install -e .\n```\n```\nхвост"
+    )
+    segs = segment_answer(text)
+    kinds = [s.kind for s in segs]
+    assert kinds == ["prose", "code-block", "code-block"]
+    assert segs[1].lang == "markdown"
+    # строка ```bash — содержимое, а не закрывающая ограда; закрыл блок первый голый ```
+    assert segs[1].content == "# T\n\n```bash\npip install -e ."
+    # второй голый ``` открывает блок без закрывающей ограды → тянется до конца текста
+    assert segs[2].content == "хвост"
+    assert segs[2].lang is None
+
+
+def test_four_backtick_fence_closes_only_on_four():
+    text = "````md\n```py\nx = 1\n```\n````\n"
+    segs = segment_answer(text)
+    assert [s.kind for s in segs] == ["code-block"]
+    assert segs[0].content == "```py\nx = 1\n```"
+
+
+def test_unclosed_fence_runs_to_the_end():
+    segs = segment_answer("```\nabc\ndef")
+    assert [s.kind for s in segs] == ["code-block"]
+    assert segs[0].content == "abc\ndef"
+
+
+def test_empty_fenced_block_yields_no_segment():
+    segs = segment_answer("до\n```\n\n```\nпосле")
+    assert [s.kind for s in segs] == ["prose", "prose"]

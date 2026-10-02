@@ -183,7 +183,7 @@ async def test_tracking_fs_backend_exec_argv_is_shell_less_and_delegates(
     (они были обёртками ``run_coro_blocking``, то есть заводили второй loop).
     Синхронное имя осталось на ``FsBackend`` входом для ЧУЖИХ реализаций.
     """
-    from gc_tui.diff_tui.tracking import TrackingFsBackend
+    from gc_core.agent_edits.tracking import TrackingFsBackend
 
     script = tmp_path / "echo_argv.py"
     script.write_text(

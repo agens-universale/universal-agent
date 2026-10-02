@@ -8,6 +8,7 @@
 import io
 import os
 
+import pytest
 from PIL import Image
 
 from gc_core.attachments.model import ORIGIN_USER, user_label
@@ -77,6 +78,56 @@ def test_deleting_a_thread_without_images_creates_no_images_dir(tmp_path):
     reset_thread_files(d, "cli", "t1")
 
     assert not os.path.exists(os.path.join(d, IMAGES_DIRNAME))
+
+
+@pytest.mark.parametrize("cleanup", [delete_thread, reset_thread_files])
+def test_thread_cleanup_continues_after_one_image_cannot_be_deleted(
+    tmp_path, monkeypatch, caplog, cleanup
+):
+    d = str(tmp_path)
+    blocked = _snap(d, "t1", "red")
+    removable = _snap(d, "t1", "blue")
+    other = _snap(d, "t2", "green")
+    history = tmp_path / "data_cli_t1.jsonl"
+    history.write_text('{"role":"user","content":"что тут?"}\n')
+    remove = os.remove
+
+    def remove_unless_blocked(path):
+        if path == blocked.path:
+            raise PermissionError("изображение занято другим процессом")
+        remove(path)
+
+    monkeypatch.setattr(os, "remove", remove_unless_blocked)
+
+    cleanup(d, "cli", "t1")
+
+    assert not history.exists()
+    assert os.path.exists(blocked.path)
+    assert not os.path.exists(removable.path)
+    assert os.path.exists(other.path)
+    assert blocked.path in caplog.text
+
+
+@pytest.mark.parametrize("cleanup", [delete_thread, reset_thread_files])
+def test_thread_cleanup_logs_an_unreadable_images_directory(
+    tmp_path, monkeypatch, caplog, cleanup
+):
+    d = str(tmp_path)
+    own = _snap(d, "t1", "red")
+    images_dir = os.path.join(d, IMAGES_DIRNAME)
+    listdir = os.listdir
+
+    def list_unless_images(path):
+        if path == images_dir:
+            raise PermissionError("каталог изображений недоступен")
+        return listdir(path)
+
+    monkeypatch.setattr(os, "listdir", list_unless_images)
+
+    cleanup(d, "cli", "t1")
+
+    assert os.path.exists(own.path)
+    assert images_dir in caplog.text
 
 
 async def test_compaction_keeps_the_images(tmp_path):

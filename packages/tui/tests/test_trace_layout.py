@@ -158,6 +158,34 @@ async def test_long_tool_args_wrap_inside_content_column():
 
 
 @pytest.mark.asyncio
+async def test_call_row_shows_wire_tool_name_not_canonical_id():
+    """Д11/R3: живая строка тула в ленте показывает wire-имя (как в реестре),
+    не канонический id маппера — fs_append_file, не append_to_file."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+    from gc_tui.models import TraceEvent
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    async with TuiApp().run_test() as pilot:
+        scr = pilot.app.screen
+        ev = TraceEvent(
+            no=1,
+            event_ts_utc_iso="2026-05-28T00:00:00Z",
+            kind="call",
+            title="append_to_file",
+            summary="append_to_file(path='x.py')",
+            tool_name="append_to_file",
+            wire_name="fs_append_file",
+            call_id="c1",
+            full_payload={},
+        )
+        scr._render_event(ev)
+        await pilot.pause()
+        row = scr.query_one(ToolCallRow)
+        assert row._tool_name == "fs_append_file"
+
+
+@pytest.mark.asyncio
 async def test_meta_lines_have_top_margin_class():
     """Все framework-события имеют CSS-класс .line-meta (margin-top: 1 из styles.tcss)."""
     pytest.importorskip("textual")

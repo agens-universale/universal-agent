@@ -12,6 +12,8 @@ from dataclasses import replace
 
 from gc_core.attachments.model import Attachment, chip_text, user_label
 
+from gc_tui.services.plural import lines_word
+
 COLLAPSE_MIN_LINES = 5
 COLLAPSE_MIN_CHARS = 500
 
@@ -28,23 +30,12 @@ def should_collapse(text: str) -> bool:
     return lines >= COLLAPSE_MIN_LINES or len(text) >= COLLAPSE_MIN_CHARS
 
 
-def _plural_lines(n: int) -> str:
-    if 11 <= (n % 100) <= 14:
-        return "строк"
-    d = n % 10
-    if d == 1:
-        return "строка"
-    if 2 <= d <= 4:
-        return "строки"
-    return "строк"
-
-
 def chip_label(n: int, text: str) -> str:
     """Подпись плашки: многострочная → `[Вставка #N · K строк]`,
     одна длинная строка → `[Вставка #N · K симв.]`."""
     lines = text.count("\n") + 1
     if lines >= 2:
-        return f"[Вставка #{n} · {lines} {_plural_lines(lines)}]"
+        return f"[Вставка #{n} · {lines} {lines_word(lines)}]"
     return f"[Вставка #{n} · {len(text)} симв.]"
 
 

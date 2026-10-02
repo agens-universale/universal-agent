@@ -1444,10 +1444,6 @@ class TuiApp(App):
         # Пометки ленты «изображение не просмотрено» (дизайн картинок §10) — с тредом
         # прогона: хук нужен уже собранному контексту, поэтому ставится здесь.
         ctx.on_trace_note = self._trace_note_sink.hook_for(ctx)
-        # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
-        from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
-
-        _attach_diff(ctx, cfg)
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
         from gc_core.tools.subagents.progress import QueueSubagentProgressSink

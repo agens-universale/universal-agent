@@ -10,20 +10,15 @@ import sys
 from gc_tui.services import os_ops
 from gc_tui.services.image_paste import is_image_file
 from gc_tui.services.os_ops import ClipboardProbe
+from gc_tui.services.plural import plural_form
 
 IMAGE_OPEN_TIP = "Ctrl+клик по плашке — открыть изображение"
 
 
 def _images(n: int) -> str:
     """1 изображение · 2–4 изображения · 5+ изображений (11–14 — «изображений»)."""
-    if 11 <= n % 100 <= 14:
-        return f"{n} изображений"
-    d = n % 10
-    if d == 1:
-        return f"{n} изображение"
-    if 2 <= d <= 4:
-        return f"{n} изображения"
-    return f"{n} изображений"
+    word = plural_form(n, "изображение", "изображения", "изображений")
+    return f"{n} {word}"
 
 
 def _paste_key(probe: ClipboardProbe, platform: str) -> str:

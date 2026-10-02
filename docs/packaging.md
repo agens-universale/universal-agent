@@ -214,7 +214,7 @@ provided by dependencies of tool packages are not installed»). Поэтому �
 | `gc-tui` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc-serve` |
 | `gc-mcp` | `gc-mcp`, `gc-mcp-install` |
-| `gc-ua` (мета) | все шесть |
+| `gc-ua` (мета) | все шесть и `gc-acp` |
 | `gc-core` | ничего, это библиотека |
 
 ### Почему имена не должны пересекаться

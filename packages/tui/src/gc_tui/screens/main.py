@@ -20,9 +20,15 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Optional
 if TYPE_CHECKING:
     from gc_tui.widgets.user_reply import UserReplyContainer
 
+from gc_core.agent_edits.ctx import section_limit
 from gc_core.attachments.model import Attachment, attachments_of
 from gc_core.attachments.normalize import REASON_NOT_AN_IMAGE, REASON_TOO_LARGE
 from gc_core.attachments.numbering import read_image_seq
+from gc_core.config_modules.agent_edits import (
+    DEFAULT_REPLAY_EXPANDED_TURNS,
+    DEFAULT_TRACE_INLINE_MAX_LINES,
+    DEFAULT_TURN_SUMMARY_IN_STATUS,
+)
 from gc_core.config_modules.images import read_images_config
 from gc_core.intent_log.record import ACTION_USER_ASK
 from gc_core.intent_log.serialize import deserialize_list
@@ -130,6 +136,7 @@ from gc_tui.toggles import (
     preset_track_extra,
     toggle_state,
 )
+from gc_tui.widgets.click_model import focus_target_at
 from gc_tui.widgets.command_input import CommandTextArea
 from gc_tui.widgets.command_palette import CommandPalette
 from gc_tui.widgets.thinking_indicator import (
@@ -252,7 +259,7 @@ def select_active_substate(
 # Футер с функциональными клавишами; /stop добавляется только при активном run.
 # (/skills, /export доступны через палитру — в футере лишние. /mcp не дублируем —
 # подсказка «/mcp» уже в бренд-карточке.)
-# Diff: F3 в базовом хроме футера; CTA в трейсе — пути pending + F3/diff.
+# Diff: F3 в базовом хроме футера; в ленте о правках говорят блоки диффов.
 # Отступ колонки статусов от логотипа — тот же, что в CSS (#brand-mcp padding-left):
 # порог узости считается по нему, и разъехаться они не должны.
 _MCP_COL_PAD = 6
@@ -363,7 +370,7 @@ def _truncate_profile_name(name: str, max_cols: int) -> str:
 class TraceScreen(Screen):
     """Главный экран: трейс, ввод пользователя, команды и сопровождение run'а."""
 
-    # Ctrl+A — select-all в #cmdinput (CommandTextArea); approve-all только на /diff.
+    # Ctrl+A — select-all в #cmdinput (CommandTextArea); git add всего — только на /diff.
     # Ctrl+V: priority — иначе при фокусе в трейсе (клик по строке во время run)
     # хоткей никуда не доходит: у TraceRow/ToolCallRow нет action_paste.
     # Alt+V — изображение из буфера (на Windows Ctrl+V забирает сам терминал); та же
@@ -433,11 +440,15 @@ class TraceScreen(Screen):
             str, list
         ] = {}  # parent_call_id → widgets
         self._nested_anchor: dict[
-            str, ToolCallRow
+            str, Widget
         ] = {}  # parent_call_id → last mounted nested
         # Durable parent rows for subagent_* (survive pop from _active_calls on result).
         self._subagent_parent_rows: dict[str, ToolCallRow] = {}
         self._reasoning_clock = ReasoningClock()
+        # Журнал правок текущего треда для инлайн-диффов: один EditsLookup на
+        # тред (внутри — кэш индекса), пересоздаётся при смене идентичности.
+        self._edits_lookup = None  # Optional[EditsLookup]
+        self._edits_lookup_key: Optional[tuple] = None
         self._submit_solution_call_ids: set[str] = set()
         # Track submit_solution agent-line widgets, чтобы при повторе свернуть предыдущие.
         # list of (event_no, main_static, note_widget_or_None)
@@ -544,11 +555,12 @@ class TraceScreen(Screen):
         self._was_summarizing: bool = (
             False  # для baseline last_compact_msg_count
         )
-        # Post-turn CTA «Изменено N · /diff». Причина взвода — ровно два случая,
-        # правило B (не показывать после хода без событий) применимо только к
-        # первому: "turn_end" — обычный итог хода; "wipe_restore" — wipe трейса
-        # стёр уже смонтированную CTA, её возвращают независимо от итога хода.
-        self._diff_pending_cta_pending: str | None = None
+        # Последний ход журнала правок на старте прогона — база для сводки хода.
+        self._edits_baseline_turn_id: Optional[str] = None
+        # Граница хода снята для ТЕКУЩЕГО прогона: отметку старта ставят
+        # дважды (подготовка и страховочная сетка), и вторая не вправе её
+        # двигать. Снимается на спадающем фронте.
+        self._edits_baseline_taken = False
         # Транзиентная подсказка в footer-left (esc-confirm и paste-hint делят слот).
         self._esc_confirm_kind: Optional[str] = (
             None  # "clear" | "stop" | "paste" | None
@@ -675,6 +687,17 @@ class TraceScreen(Screen):
             event.screen_x, event.screen_y
         ):
             trace.focus()
+
+    def get_focusable_widget_at(self, x: int, y: int) -> Optional[Widget]:
+        """Кого фокусировать нажатием мыши — с оглядкой на `FOCUS_ON_CLICK`.
+
+        Обход предков в реализации Textual сквозь нефокусируемый блок проходит
+        насквозь и приводит к контейнеру #trace: клик по инлайн-диффу утаскивал
+        фокус туда и сбивал позицию Tab. Правило — в `click_model`, здесь только
+        подключение."""
+        return focus_target_at(
+            self, x, y, super().get_focusable_widget_at(x, y)
+        )
 
     def action_paste_to_input(self) -> None:
         """Ctrl+V → всегда в #cmdinput, даже если фокус ушёл в трейс (клик/Tab
@@ -2119,12 +2142,14 @@ class TraceScreen(Screen):
             return
         tui = self._store.get_task_meta(self._active_task_id).get("tui") or {}
         last = tui.get("last_indicator")
+        edits = None
         if (
             isinstance(last, dict)
             and last.get("kind") in TERMINAL_INDICATOR_STATES
         ):
             kind = last["kind"]
             elapsed = last.get("elapsed")
+            edits = last.get("edits")
         else:
             # Фолбэк: kind из единого источника статуса (того же, что заголовок).
             # None (исход не записан) → строку-итог НЕ рисуем — не выдумываем исход.
@@ -2139,6 +2164,7 @@ class TraceScreen(Screen):
         ind = ThinkingIndicator(
             state=kind,
             frozen_elapsed=elapsed if isinstance(elapsed, int) else None,
+            turn_summary=self._restored_turn_summary(edits),
         )
         self._thinking = ind
         self.query_one(_SEL_INDICATOR_BAR, Vertical).mount(ind)
@@ -2768,7 +2794,9 @@ class TraceScreen(Screen):
 
             row = ToolCallRow(
                 call_id=ev.call_id or f"_anon_{ev.no}",
-                tool_name=ev.tool_name or "<tool>",
+                # Показ — wire-имя реестра (Д11/R3); tool_name(канонический id) —
+                # только фолбэк на случай, если wire_name не заполнен.
+                tool_name=ev.wire_name or ev.tool_name or "<tool>",
                 args_summary=args_portion(ev.summary),
                 event_no=ev.no,
                 waiting=True,  # batch: · пока очередь execute не дошла
@@ -2799,6 +2827,7 @@ class TraceScreen(Screen):
                     summary=ev.summary,
                     error=(ev.kind == "error"),
                 )
+                self._mount_inline_diff(ev, row)
                 # Nested под subagent_* оставляем в живой сессии (иерархия под ✓/✗).
                 self._active_calls.pop(ev.call_id, None)
                 self._reconcile_active_tool_phases()
@@ -2947,20 +2976,29 @@ class TraceScreen(Screen):
             mount_nested_todo=self._mount_nested_todo,
         )
 
-    def _nested_mount_after(self, parent_call_id: str, widget) -> None:
-        """Смонтировать nested-виджет сразу после parent или последнего nested."""
+    def _nested_mount_after(
+        self, parent_call_id: str, widget, after=None
+    ) -> None:
+        """Смонтировать nested-виджет сразу после parent или последнего nested.
+
+        `after` — явный якорь (строка своего тула): дифф правки встаёт под ней,
+        даже если в незавершённом batch за строкой уже стоят соседние вызовы.
+        Хвостовой якорь при этом не двигаем — иначе следующий nested-виджет
+        встал бы в середину."""
         from textual.containers import VerticalScroll
 
         parent = self._nested_parent_row(parent_call_id)
         if parent is None:
             return
         trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        anchor = self._nested_anchor.get(parent_call_id, parent)
+        tail = self._nested_anchor.get(parent_call_id, parent)
+        anchor = tail if after is None else after
         try:
             trace.mount(widget, after=anchor)
         except Exception:
             trace.mount(widget)
-        self._nested_anchor[parent_call_id] = widget
+        if anchor is tail:
+            self._nested_anchor[parent_call_id] = widget
         self._nested_widgets_by_parent.setdefault(parent_call_id, []).append(
             widget
         )
@@ -2978,6 +3016,13 @@ class TraceScreen(Screen):
     ) -> None:
         if self._nested_parent_row(parent_call_id) is None:
             return
+        # tool_name здесь уже wire-имя как есть: и subagent_progress.py
+        # (live-polling, tools/subagents/progress.py::emit_progress), и
+        # subagent_sidecar_mapper.py (payload.get("name")) отдают его сюда
+        # МИНУЯ tool_id() — в отличие от верхнеуровневой ленты (trace_mapper.py).
+        # Поэтому третьего wire/canonical-разделения (TraceEvent.wire_name,
+        # Д11/R3) здесь не нужно. Если один из этих путей начнёт канонизировать
+        # имя — этот сайт молча воспроизведёт тот же баг несогласованных имён.
         row = ToolCallRow(
             call_id=tool_call_id or f"_nested_{tool_name}_{step}",
             tool_name=tool_name,
@@ -3005,6 +3050,27 @@ class TraceScreen(Screen):
             return
         summary = "" if ok else (error_brief or "error")
         row.set_result(summary=summary, error=not ok)
+        self._mount_nested_inline_diff(parent_call_id, tool_call_id, row)
+
+    def _mount_nested_inline_diff(
+        self, parent_call_id: str, tool_call_id: str, row: ToolCallRow
+    ) -> None:
+        """Дифф правки субагента под строкой её вложенного тула.
+
+        Правки субагента журнал треда пишет ходом родителя, но со СВОИМ call_id
+        (`SubagentRunner._build_child_ctx`), поэтому запись ищется тем же
+        `by_call_id`, а блок собирается общим хелпером — отличается только
+        монтирование: в иерархию под своей nested-строкой."""
+        try:
+            block = self._inline_diff_block(tool_call_id, event_no=0)
+            if block is None:
+                return
+            block.add_class("diff-nested")
+            self._nested_mount_after(parent_call_id, block, after=row)
+            if self._stick_bottom:
+                self._scroll_trace_end()
+        except Exception as exc:
+            self.log.warning(f"инлайн-дифф субагента не построен: {exc!r}")
 
     def _mount_nested_prose(
         self,
@@ -3160,7 +3226,7 @@ class TraceScreen(Screen):
     def _diff_thread_identity(
         self,
     ) -> tuple[Optional[str], Optional[str], Optional[str]]:
-        """(threads_dir, system_id, thread_id) текущей сессии для DiffService."""
+        """(threads_dir, system_id, thread_id) текущей сессии — для журнала правок."""
         threads_dir = getattr(self.app, "_threads_dir", None)
         system_id = getattr(self.app, "_system", None)
         thread_id = self._active_task_id or getattr(
@@ -3174,21 +3240,192 @@ class TraceScreen(Screen):
             thread_id = None
         return threads_dir, system_id, thread_id
 
-    def _diff_service_for_preview(self):
+    def _edits_lookup_for_thread(self):
+        """EditsLookup активного треда; None — идентичность неполна.
+
+        Один экземпляр на тред: внутри него кэш индекса журнала и кэш сводки
+        хода, которые на каждом событии пересоздавать нельзя. `launch_root`
+        нужен сводке — по нему находятся снапшоты и сами файлы на диске.
+
+        Лимиты секции `agent_edits` входят в ключ кэша: без них правка порогов в
+        настройках не доехала бы до расчёта до самой смены треда."""
+        identity = self._diff_thread_identity()
+        if not all(identity):
+            return None
+        from gc_tui.services.edits_view import diff_limits
+
         cfg = getattr(self.app, "_config", None) or {}
         launch_root = cfg.get("launch_root")
-        if not launch_root:
-            return None
-        from gc_tui.screens.diff import _service_from_config
+        launch_root = str(launch_root) if launch_root else None
+        max_source_bytes, hunk_context_lines = diff_limits(cfg)
+        key = (*identity, launch_root, max_source_bytes, hunk_context_lines)
+        if self._edits_lookup_key != key:
+            from gc_tui.services.edits_lookup import EditsLookup
 
-        threads_dir, system_id, thread_id = self._diff_thread_identity()
-        return _service_from_config(
-            str(launch_root),
-            cfg,
-            threads_dir=threads_dir,
-            system_id=system_id,
-            thread_id=thread_id,
+            self._edits_lookup = EditsLookup(
+                *identity,
+                launch_root=launch_root,
+                max_diff_source_bytes=max_source_bytes,
+                hunk_context_lines=hunk_context_lines,
+            )
+            self._edits_lookup_key = key
+        return self._edits_lookup
+
+    def _agent_edits_limit(self, key: str, default: int) -> int:
+        """Числовой порог секции `agent_edits` — общим правилом ядра.
+
+        Мусор (0, отрицательное, `true`) даёт дефолт, а не пустое тело с
+        хвостом «… ещё N строк» — сломанный вид вместо диффа."""
+        cfg = getattr(self.app, "_config", None) or {}
+        return section_limit(cfg.get("agent_edits") or {}, key, default)
+
+    def _trace_inline_max_lines(self) -> int:
+        """Порог свёртки инлайн-диффа — `agent_edits.trace_inline_max_lines`."""
+        return self._agent_edits_limit(
+            "trace_inline_max_lines", DEFAULT_TRACE_INLINE_MAX_LINES
         )
+
+    def _replay_expanded_turns(self) -> int:
+        """Сколько последних ходов показывают дифф телом — `agent_edits.replay_expanded_turns`.
+
+        Ровно `0` — «без ограничения»: разворачиваются все ходы (вернём -1 как
+        признак «окно не режем», см. `_is_stale_edit_turn`). Прочий мусор
+        (отрицательное, `true`, строка) даёт дефолт — общим правилом."""
+        cfg = getattr(self.app, "_config", None) or {}
+        section = cfg.get("agent_edits") or {}
+        raw = section.get(
+            "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
+        )
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw == 0:
+            return -1
+        return self._agent_edits_limit(
+            "replay_expanded_turns", DEFAULT_REPLAY_EXPANDED_TURNS
+        )
+
+    def _turn_summary_in_status(self) -> bool:
+        """Показывать ли сводку правок в строке-итоге — `agent_edits.turn_summary_in_status`."""
+        cfg = getattr(self.app, "_config", None) or {}
+        section = cfg.get("agent_edits") or {}
+        return bool(
+            section.get(
+                "turn_summary_in_status", DEFAULT_TURN_SUMMARY_IN_STATUS
+            )
+        )
+
+    def _capture_edits_baseline(self) -> None:
+        """Запомнить последний ход журнала правок ПЕРЕД началом нового.
+
+        Ход без правок журнал не дописывает, поэтому одного `last_turn_id`
+        на финише мало: без этой отметки сводка прошлого хода прилипла бы к
+        следующему.
+
+        Снимается РОВНО ОДИН раз за прогон. Отметку старта ставят дважды —
+        из подготовки прогона и из страховочной проверки на восходящем фронте,
+        а та приходит с тиком интерфейса. Успела первая правка записаться
+        раньше тика — и вторая отметка переносила границу НА НЕЁ: ход, который
+        правил файлы, оставался без сводки «изменено N файлов», а в meta треда
+        не попадал last_indicator (пятый раунд ревью, находка 6). Проявлялось
+        на быстрой модели и при занятом интерфейсе, то есть случайно.
+        """
+        if self._edits_baseline_taken:
+            return
+        lookup = self._edits_lookup_for_thread()
+        self._edits_baseline_turn_id = (
+            lookup.last_turn_id() if lookup is not None else None
+        )
+        self._edits_baseline_taken = True
+
+    def _finished_turn_summary(self) -> Optional[tuple]:
+        """(файлов, +, −) правок завершившегося хода; None — показывать нечего.
+
+        None — сегмент выключен ключом, журнал недоступен или ход не дописал в
+        журнал ни одной записи (последний ход в нём — тот же, что на старте).
+
+        None и при отказе чтения: база хода для счётчиков читается из индекса
+        снимков под замком, и занятый другим писателем замок отвечает таймаутом —
+        прямо в колбэке таймера (`_poll_active`), где исключение завершило бы
+        приложение. Сводка — украшение строки-итога: не прочиталась — её нет."""
+        if not self._turn_summary_in_status():
+            return None
+        lookup = self._edits_lookup_for_thread()
+        if lookup is None:
+            return None
+        turn_id = lookup.last_turn_id()
+        if not turn_id or turn_id == self._edits_baseline_turn_id:
+            return None
+        try:
+            files, add, del_ = lookup.turn_summary(turn_id)
+        except OSError:  # TimeoutError замка — подкласс OSError
+            _log.warning("сводка правок хода не прочитана", exc_info=True)
+            return None
+        return (files, add, del_) if files > 0 else None
+
+    def _restored_turn_summary(self, edits) -> Optional[tuple]:
+        """Сводка правок для строки-итога, восстановленной из meta.
+
+        Цифры берём ТОЛЬКО из записи того же хода (`last_indicator.edits`):
+        журнал по последнему ходу дал бы правки предыдущего хода, если ход
+        перед закрытием сессии ничего не правил. Записи нет (сессия старше
+        фичи) — сегмента нет."""
+        if not self._turn_summary_in_status():
+            return None
+        if not isinstance(edits, (list, tuple)) or len(edits) != 3:
+            return None
+        try:
+            files, add, del_ = (int(v) for v in edits)
+        except (TypeError, ValueError):
+            return None
+        return (files, add, del_) if files > 0 else None
+
+    def _is_stale_edit_turn(self, lookup, turn_id: str) -> bool:
+        """Ход вне окна последних `replay_expanded_turns` — блок стартует компактным.
+
+        Окно считается по журналу, поэтому правило одно для реплея и живой
+        сессии: свежий ход всегда последний в журнале и в окно попадает.
+        Правки без записи в журнале сюда не доходят — блока у них нет."""
+        window = self._replay_expanded_turns()
+        if window < 0:  # `replay_expanded_turns: 0` — окно не режем
+            return False
+        recent = lookup.turn_ids()[-window:]
+        return turn_id not in recent
+
+    def _inline_diff_block(self, call_id: str, *, event_no: int):
+        """Готовый `DiffBlock` по call_id или None — общее тело обеих точек.
+
+        None — монтировать нечего: нет call_id, журнала или записи по нему (не
+        файловый тул). Исключения не гасит: их ловят вызывающие."""
+        if not call_id:
+            return None
+        lookup = self._edits_lookup_for_thread()
+        if lookup is None:
+            return None
+        record = lookup.by_call_id(call_id)
+        if record is None:
+            return None
+        from gc_tui.widgets.diff_block import DiffBlock
+
+        return DiffBlock.for_record(
+            record,
+            event_no=event_no,
+            collapsed_max_lines=self._trace_inline_max_lines(),
+            compact=self._is_stale_edit_turn(lookup, record.turn_id),
+        )
+
+    def _mount_inline_diff(self, ev, row: ToolCallRow) -> None:
+        """Дифф правки под строкой её тула — если по call_id есть запись журнала.
+
+        Монтируем `after=row`, а не в конец ленты: в незавершённом batch за
+        строкой уже стоят соседние вызовы. Записи нет (не файловый тул, журнала
+        нет) — молча ничего не монтируем; любой сбой гасим: лента важнее диффа."""
+        try:
+            block = self._inline_diff_block(ev.call_id, event_no=ev.no)
+            if block is None:
+                return
+            self.query_one(_SEL_TRACE, VerticalScroll).mount(block, after=row)
+            if self._stick_bottom:
+                self._scroll_trace_end()
+        except Exception as exc:
+            self.log.warning(f"инлайн-дифф не построен: {exc!r}")
 
     def _on_ask_human_event(self, ev, *, live: bool = False) -> None:
         from gc_tui.widgets.ask_human_banner import AskHumanBanner
@@ -3588,7 +3825,9 @@ class TraceScreen(Screen):
         self._stamp_tui_running()
 
     def _stamp_tui_running(self) -> None:
-        """meta.tui.status=running + сброс last_indicator (новый ход, не итог прошлого)."""
+        """meta.tui.status=running + сброс last_indicator (новый ход, не итог
+        прошлого) + отметка журнала правок для сводки этого хода."""
+        self._capture_edits_baseline()
         if self._store is None or self._active_task_id is None:
             return
         self._store.update_tui_meta(
@@ -3773,16 +4012,17 @@ class TraceScreen(Screen):
         # Спадающий фронт: агент мог создать скилл в прогоне → инвалидируем
         # TUI-кэш скиллов (/skill picker/inline); ленивый релоад при следующем
         # /skill. Открытие пикера/набор по клавишам диск не трогают.
+        _turn_edits = None
         if self._was_running and not is_running:
             self._skills_cache = None
-            # CTA про pending-диффы — после turn (не compact). Монтаж отложен
-            # до конца poll / после stream_reset: иначе compaction стирает строку.
-            # Правило B здесь НЕ проверяем: _events_since_last_user_send для
-            # этого тика ещё может быть нулевым — хвост событий рендерится
-            # позже в этом же _poll_active (_render_records ниже по методу).
-            # Решение — в _flush_diff_pending_cta, там счётчик уже актуален.
+            # Прогон кончился — следующий снимет свою границу хода заново.
+            self._edits_baseline_taken = False
+            # Сводка правок хода — тихий правый сегмент строки-итога (compact
+            # ходом не считается: правок в нём нет по определению).
             if _kind != "compact":
-                self._diff_pending_cta_pending = "turn_end"
+                _turn_edits = self._finished_turn_summary()
+                if self._thinking is not None:
+                    self._thinking.set_turn_summary(_turn_edits)
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
         # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
         if (
@@ -3835,6 +4075,7 @@ class TraceScreen(Screen):
                     "last_indicator": {
                         "kind": _KIND[outcome],
                         "elapsed": _elapsed,
+                        "edits": list(_turn_edits) if _turn_edits else None,
                     },
                 },
             )
@@ -4060,7 +4301,6 @@ class TraceScreen(Screen):
             or self._active_task_id is None
             or self._cursor is None
         ):
-            self._flush_diff_pending_cta()
             return
         tail = self._store.tail_events(self._active_task_id, self._cursor)
         # F3: при freeze НЕ перерисовываем трейс (wipe/clear_trace/render_records
@@ -4088,18 +4328,10 @@ class TraceScreen(Screen):
             self._mount_failed_from_meta(self._active_task_id)
             self._refresh_header()
             self._refresh_footer()
-            # Wipe стёр CTA: если idle и есть pending — показать снова. Правило B
-            # тут ни при чём (не про итог хода, а про физическую потерю строки
-            # при перерисовке трейса) — reason="wipe_restore" явно исключает
-            # его в _flush_diff_pending_cta.
-            if not is_running:
-                self._diff_pending_cta_pending = "wipe_restore"
-            self._flush_diff_pending_cta()
             return
         self._cursor = tail.next_cursor
         self._render_records(tail.new_records, live=True)
         self._refresh_header()
-        self._flush_diff_pending_cta()
 
     # Ширина хрома вокруг колонки статусов. Порог узости считается по факту
     # (`_brand_fits_beside`), а не константой: длина строк статусов зависит от MCP и
@@ -5835,8 +6067,10 @@ class TraceScreen(Screen):
             )
         )
 
-    def _cmd_diff(self) -> None:
+    def _cmd_diff(self, *, source: Optional[str] = None) -> None:
+        """Экран изменений. `source` задан — открыть сразу в нём (клик по сводке)."""
         from gc_tui.screens.diff import DiffScreen
+        from gc_tui.services.edits_view import SOURCE_SESSION
 
         cfg = self.app.screen_config()
         launch_root = cfg.get("launch_root")
@@ -5857,11 +6091,24 @@ class TraceScreen(Screen):
                 threads_dir=threads_dir,
                 system_id=system_id,
                 thread_id=thread_id,
+                source=source or SOURCE_SESSION,
             )
         )
 
+    def on_open_edits_screen_request(self, message) -> None:
+        """Клик по сводке правок в строке-итоге → экран в источнике сводки.
+
+        Запрос исполняется, только пока трейс на вершине стека. Сообщение
+        всплывает несколько тактов, и за это время поверх него мог встать
+        экран — в том числе открытый этим же запросом: без проверки быстрая
+        серия жестов клала бы экраны стопкой, и первый Esc «не закрывал» их.
+        """
+        if self.app.screen is not self:
+            return
+        self._cmd_diff(source=message.source)
+
     def _on_diff_ui_ack(self, text: str) -> None:
-        """TUI-only строка в трейсе после принять/откатить (не в thread модели)."""
+        """TUI-only строка в трейсе после отката / git add (не в thread модели)."""
         if not text:
             return
         self._mount_trace_row(
@@ -5873,7 +6120,7 @@ class TraceScreen(Screen):
 
     def _on_diff_undo_feedback(self, restored_keys, deleted_keys=()) -> None:
         """T15: после undo — technical user message агенту (визуал — через on_ui_ack)."""
-        from gc_tui.diff_tui.feedback import build_undo_feedback_message
+        from gc_core.agent_edits.feedback import build_undo_feedback_message
 
         msg = build_undo_feedback_message(
             restored_keys=restored_keys,
@@ -5882,65 +6129,6 @@ class TraceScreen(Screen):
         if msg is None:
             return
         self._append_technical_to_thread(msg)
-
-    def _should_arm_diff_cta(self) -> bool:
-        """Стоит ли напоминать про диффы по итогам хода.
-
-        Ноль событий от агента = ход ничего не сделал (отмена по Esc до первого
-        ответа — тот же счётчик, на котором держится _cancel_with_undo). Диффы
-        измениться не могли, а откат уже убрал реплику из трейса: концовка
-        «небывшего» хода читается как мусор (смок 2026-08-02)."""
-        return self._events_since_last_user_send > 0
-
-    def _flush_diff_pending_cta(self) -> None:
-        """Смонтировать post-turn CTA, если флаг выставлен и runner idle.
-
-        Правило B проверяем здесь, а не в момент взвода: _events_since_last_user_send
-        для текущего тика обновляется в _render_records/_render_event, которые
-        внутри _poll_active выполняются ПОСЛЕ падающего фронта is_running. На
-        момент взвода счётчик мог быть ещё нулевым, хотя хвост событий этого
-        же тика вот-вот отрендерится (напр. ошибка провайдера прилетает
-        быстрее одного polling-интервала) — решение по счётчику раньше
-        времени отсекло бы законный CTA.
-        reason="wipe_restore" правилу B не подчиняется: это не про итог хода,
-        а про возврат строки, физически стёртой перерисовкой трейса."""
-        reason = self._diff_pending_cta_pending
-        if not reason:
-            return
-        runner = getattr(self.app, "active_runner", None)
-        if runner is not None and runner.is_running():
-            return
-        self._diff_pending_cta_pending = None
-        if reason == "turn_end" and not self._should_arm_diff_cta():
-            return
-        self._maybe_mount_diff_pending_cta()
-
-    def _maybe_mount_diff_pending_cta(self) -> None:
-        """После turn: если есть незаапрувленные диффы — пути + ``F3/diff``."""
-        from gc_tui.diff_tui.feedback import format_pending_cta
-
-        svc = self._diff_service_for_preview()
-        if svc is None:
-            return
-        try:
-            keys = [e.key for e in svc.list_entries(pending_only=True)]
-        except Exception:
-            return
-        text = format_pending_cta(keys)
-        if not text:
-            return
-        # Отменённый ход — тоже ход: спадающий фронт is_running зовёт нас снова.
-        # Если состав диффов не менялся и CTA уже стоит последним — повтор ничего
-        # не сообщает, а копит одинаковые блоки (смок 2026-08-02). Дальше первой
-        # строки не смотрим: вывод между ходами делает напоминание снова уместным.
-        if self._last_trace_row_content() == text:
-            return
-        self._mount_trace_row(
-            prefix="",
-            content=text,
-            kind_class="line-meta",
-            focusable=False,
-        )
 
     def _projection_from_app_config(self):
         """``(tags, strip_think)`` из живого конфига сессии (профиль + overrides)."""
@@ -6946,8 +7134,25 @@ class TraceScreen(Screen):
             ToolCallDetailScreen(
                 call_event=call_ev,
                 result_event=result_ev,
+                edit_record=self._edit_record_for_call(message.call_id),
             )
         )
+
+    def _edit_record_for_call(self, call_id: str):
+        """Запись журнала правок по call_id — карточке для рендера диффа.
+
+        Нет журнала/записи или сбой чтения — None: карточка покажет сырой
+        payload, как до волны 2."""
+        if not call_id:
+            return None
+        try:
+            lookup = self._edits_lookup_for_thread()
+            return None if lookup is None else lookup.by_call_id(call_id)
+        except Exception as exc:
+            self.log.warning(
+                f"запись правки для карточки не прочитана: {exc!r}"
+            )
+            return None
 
     def _resolve_nested_detail_events(self, call_id: str):
         """TraceEvent pair для nested tool; нет данных → (None, None)."""
@@ -7251,24 +7456,6 @@ class TraceScreen(Screen):
         if suggestion:
             line.append(f" (вы имели в виду /{suggestion}?)", style=_DEEP_DIM)
         self._trace_mount(Static(line, classes="line-error", markup=False))
-
-    def _last_trace_row_content(self) -> str | None:
-        """Содержимое последней строки трейса или None (трейс пуст / не смонтирован)."""
-        from gc_tui.widgets.trace_row import TraceRow
-
-        try:
-            trace = self.query_one(_SEL_TRACE, VerticalScroll)
-        except Exception:
-            return None
-        # Смотрим ровно ПОСЛЕДНЕГО ребёнка (дедуп CTA сравнивает с ним): цикл «иду с
-        # конца» обещал бы поиск, которого нет — оба его пути выходили на первом шаге.
-        kids = trace.children
-        last = kids[-1] if kids else None
-        return (
-            getattr(last, "_content", None)
-            if isinstance(last, TraceRow)
-            else None
-        )
 
     def _mount_trace_row(
         self,

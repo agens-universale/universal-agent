@@ -7,14 +7,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
+from gc_core.config_modules.acp import AcpConfig
 from gc_core.config_modules.agent import (
     DEFAULT_FINISH_GATE_MAX_ITERATIONS,
     DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
     AgentConfig,
 )
+from gc_core.config_modules.agent_edits import AgentEditsConfig
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
-from gc_core.config_modules.diff_tui import DiffTuiConfig
 from gc_core.config_modules.endpoint_presets import (
     EndpointPreset,
     default_endpoint_presets,
@@ -108,6 +109,7 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
+    acp: AcpConfig = Field(default_factory=AcpConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     endpoint_presets: list[EndpointPreset] = Field(
         default_factory=default_endpoint_presets
@@ -116,7 +118,7 @@ class AppConfig(BaseModel):
         default_factory=default_voice_endpoint_presets
     )
     update: UpdateConfig = Field(default_factory=UpdateConfig)
-    diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
+    agent_edits: AgentEditsConfig = Field(default_factory=AgentEditsConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(

@@ -331,26 +331,27 @@ async def test_backend_and_fs_agree_on_truncation_markers(
 
 async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     """
-    Acceptance §6: project root listing must show both ``tui/`` and ``diff_tui/``
-    as children of ``src/`` when src has ~53 packages (cut_second=120).
+    Acceptance §6: project root listing must show both ``tui/`` and
+    ``agent_edits/`` as children of ``src/`` when src has ~53 packages
+    (cut_second=120).
 
     Names are created in intentionally bad order; sort + raised limit must keep
     both packages visible. With legacy cut_second=30, ``tui/`` would be truncated.
     """
     from gc_core.utils import project_data
 
-    # Intentionally bad creation order: tui/diff_tui last, modules reverse.
-    # 50 modules + core + tui + diff_tui = 53 (matches typical src/).
+    # Intentionally bad creation order: tui/agent_edits last, modules reverse.
+    # 50 modules + core + tui + agent_edits = 53 (matches typical src/).
     child_names = [f"module{i}" for i in range(49, -1, -1)] + [
         "tui",
-        "diff_tui",
+        "agent_edits",
         "core",
     ]
     src_dir = tmp_path / "src"
     src_dir.mkdir()
     for name in child_names:
         (src_dir / name).mkdir()
-        if name in ("tui", "diff_tui"):
+        if name in ("tui", "agent_edits"):
             (src_dir / name / "module.py").touch()
     (tmp_path / "README.md").touch()
 
@@ -358,8 +359,8 @@ async def test_src_like_children_both_tui_dirs_visible(tmp_path, monkeypatch):
     src_children = _children_of(listing, "src/")
 
     assert "tui/" in src_children, f"tui/ missing under src/:\n{listing}"
-    assert "diff_tui/" in src_children, (
-        f"diff_tui/ missing under src/:\n{listing}"
+    assert "agent_edits/" in src_children, (
+        f"agent_edits/ missing under src/:\n{listing}"
     )
     assert not any("(truncated" in c for c in src_children), (
         f"src/ children must not be truncated at cut_second={cut_second}:\n{listing}"

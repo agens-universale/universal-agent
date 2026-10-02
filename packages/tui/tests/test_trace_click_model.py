@@ -32,15 +32,25 @@ def _click(widget, *, ctrl=False, chain=1):
     )
 
 
-def test_focus_on_click_not_disabled():
-    """Контракт: FOCUS_ON_CLICK не переопределён (True) — Textual фокусирует
-    строку уже на MouseDown, выделение видно в момент нажатия (в т.ч. при
-    Ctrl+клике до открытия экрана события). Явный focus() в on_click — лишь
-    идемпотентная страховка, а не носитель поведения."""
-    from gc_tui.widgets.block_panel import BlockPanel
-
-    for cls in (TraceRow, ToolCallRow, UserReplyContainer, BlockPanel):
+def test_focus_on_click_not_disabled_for_rows():
+    """Контракт СТРОК: FOCUS_ON_CLICK не переопределён (True) — Textual
+    фокусирует строку уже на MouseDown, выделение видно в момент нажатия (в
+    т.ч. при Ctrl+клике до открытия экрана события). Явный focus() в on_click —
+    лишь идемпотентная страховка, а не носитель поведения."""
+    for cls in (TraceRow, ToolCallRow, UserReplyContainer):
         assert cls.FOCUS_ON_CLICK is True, cls.__name__
+
+
+def test_focus_on_click_disabled_for_blocks():
+    """Контракт БЛОКОВ: FOCUS_ON_CLICK = False — иначе экран фокусировал бы блок
+    на MouseDown по КНОПКЕ ❐ и по хвосту разворота, и блок подсвечивался бы
+    выделенным там, где выделять нечего. Носитель выделения — focus() в
+    on_click, только за клик по телу."""
+    from gc_tui.widgets.block_panel import BlockPanel
+    from gc_tui.widgets.diff_block import DiffBlock
+
+    for cls in (BlockPanel, DiffBlock):
+        assert cls.FOCUS_ON_CLICK is False, cls.__name__
 
 
 # ---- TraceRow ----

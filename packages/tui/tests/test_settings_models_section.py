@@ -93,7 +93,13 @@ async def _wait_legacy_list(pilot, scr) -> None:
 def _footer(scr) -> str:
     """Текст ВИДЖЕТА футера, а не пересчитанный `_footer_text()` — только так видно,
     что экран его действительно обновил (канон `test_footer_contract`)."""
-    return str(scr.query_one("#set-footer", Static).render())
+    # Хвост подсказки прокрутки снимаем: он зависит от того, влезло ли
+    # содержимое в окно теста, и к предмету этих сверок не относится.
+    from gc_tui.form_frame import FOOTER_SCROLL
+
+    return str(scr.query_one("#set-footer", Static).render()).replace(
+        FOOTER_SCROLL, ""
+    )
 
 
 def _notice(scr) -> str:
@@ -3171,3 +3177,31 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
         assert form.query_one("#mef-model", Input).value == model_before, (
             "печать после клика изменила поле под вопросом"
         )
+
+
+async def test_ctrl_down_on_a_registry_entry_scrolls_the_section(tmp_path):
+    """`Ctrl+↓` на строке записи реестра прокручивает тело секции.
+
+    Раскрывать на записи нечего (пикер значения есть только у слотов и
+    назначений), а ветка редактора съедала клавишу безусловно — футер обещал
+    «Ctrl+↑/↓ — прокрутка», и вниз кадр не ехал ничем. Сперва `Ctrl+↑`: он
+    раскрытием не занят и освобождает место внизу."""
+    registry = "models:\n" + "".join(
+        f'  m{i}:\n    model: "vendor/model-{i}"\n' for i in range(15)
+    )
+    async with _section(tmp_path, registry, size=(100, 12)) as (
+        pilot,
+        scr,
+        _cfg,
+    ):
+        await pilot.pause()
+        scroll = scr.query_one("#set-scroll")
+        for _ in range(4):
+            await pilot.press("ctrl+up")
+            await pilot.pause()
+        top = scroll.scroll_offset.y
+        assert top < scroll.max_scroll_y, "предусловие: внизу есть куда ехать"
+        await pilot.press("ctrl+down")
+        await pilot.pause()
+        await pilot.pause()
+        assert scroll.scroll_offset.y > top

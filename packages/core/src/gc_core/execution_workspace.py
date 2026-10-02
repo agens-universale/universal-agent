@@ -215,6 +215,30 @@ def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
     return text or None
 
 
+def launch_root_from_config(config: Optional[Dict[str, Any]]) -> str:
+    """Корень проекта НА ХОСТЕ по одному конфигу, без бэкенда.
+
+    Для вызывающих, которым корень нужен ДО сборки контекста запуска —
+    например сбросу треда (``agent_edits.snapshots.purge_thread_snapshots``),
+    который чистит снимки в ``<корень>/.gc``. Цепочка та же, что у невиртуального
+    ветвления ``resolve_execution_root``: ключ конфига, затем текущий каталог.
+
+    Песочный бэкенд отдаёт корень в координатах КОНТЕЙНЕРА, и здесь его знать
+    неоткуда: у вызывающих до контекста бэкенда ещё нет. На хосте такой путь
+    всё равно не существует, так что уборка по нему ничего не найдёт и
+    ничего не сломает.
+
+    Нормализация — та же, что у невиртуального ветвления: снимки пишет корень,
+    прошедший ``expanduser`` и ``abspath``, и уборка обязана искать их там же.
+    Сырой ``~`` из конфига вёл её в каталог с именем «~» — снимки переживали
+    сброс.
+    """
+    raw = _config_root_raw(config)
+    if not raw:
+        return os.getcwd()
+    return os.path.abspath(os.path.expanduser(os.path.normpath(raw)))
+
+
 def resolve_execution_root(
     backend: FsBackend,
     config: Optional[Dict[str, Any]] = None,
@@ -296,6 +320,7 @@ __all__ = [
     "build_execution_workspace",
     "discover_backend_cwd",
     "host_os_label",
+    "launch_root_from_config",
     "resolve_execution_os",
     "resolve_execution_root",
     "resolve_execution_shell",

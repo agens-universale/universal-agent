@@ -3,6 +3,7 @@ import sys
 from typing import Any, NamedTuple
 
 from gc_core import config_sync, onboarding
+from gc_core.agent_edits.ctx import RUN_MODE_CLI, RUN_MODE_KEY
 from gc_core.agent_executor import AgentExecutor
 from gc_core.attachments.model import (
     ORIGIN_USER,
@@ -554,6 +555,9 @@ async def _run_init_agents_md() -> int:
     from gc_core.security.confirm_port import confirm_available
 
     config_dict = load_config(arg_parser.run_args.config)
+    # Тот же режим запуска, что у основного входа: правило одно для всех
+    # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
+    config_dict[RUN_MODE_KEY] = RUN_MODE_CLI
     auth_connector = build_auth_connector(config_dict)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
     # create_run_context морозил бы его на всё MCP-дискавери — замер на
@@ -739,6 +743,9 @@ async def arun_cli() -> int:
         ),
         trace_id=getattr(arg_parser.run_args, "trace_id", None),
     )
+    # Режим запуска для ядра: от него зависит запись журнала правок
+    # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
+    config_dict[RUN_MODE_KEY] = RUN_MODE_CLI
     # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
     # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
     force_legacy = cli_forces_legacy_model(config_dict)

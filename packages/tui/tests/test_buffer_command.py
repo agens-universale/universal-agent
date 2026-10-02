@@ -122,14 +122,15 @@ async def test_dispatch_command_buffer(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_push_session_buffer_from_diff_screen(tmp_path):
-    """B2: Ctrl+C с выделением на DiffViewerScreen дописывает в буфер сессии.
+async def test_push_session_buffer_from_readonly_screen(tmp_path):
+    """B2: Ctrl+C с выделением на read-only экране дописывает в буфер сессии.
 
     Store/task_id берутся из базового TraceScreen (как action_buffer),
     а не из self.screen — у diff/view экранов их нет.
     """
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffViewerScreen
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.viewer import ViewerScreen
 
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", config={"model": "M"}
@@ -138,16 +139,8 @@ async def test_push_session_buffer_from_diff_screen(tmp_path):
         store = _MockStore(existing_buffer="старый")
         pilot.app.screen._store = store
         pilot.app.screen._active_task_id = "T1"
-        # поверх TraceScreen — DiffViewerScreen (без _store/_active_task_id)
-        viewer = DiffViewerScreen(
-            title="дифф · M · src/x.py",
-            content="+hello\n",
-            path="src/x.py",
-            on_approve=lambda: None,
-            on_undo=lambda: None,
-            on_approve_all=lambda: None,
-            on_undo_all=lambda: None,
-        )
+        # поверх TraceScreen — просмотрщик (без _store/_active_task_id)
+        viewer = ViewerScreen(title="дифф · M · src/x.py", content="+hello\n")
         await pilot.app.push_screen(viewer)
         await pilot.pause()
         # сверху теперь diff-экран, у него нет _store/_active_task_id

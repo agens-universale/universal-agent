@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 from gc_core.utils.file_text import sha256_hex_of_bytes
+from gc_core.utils.fs_size_limits import fs_mutate_max_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
@@ -134,6 +135,26 @@ class SaveBase64File(AbstractSimpleTool):
                 ok=False, path=path, error={"type": "parent_not_found"}
             )
 
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            is_recording,
+            record_edit,
+        )
+
+        # Контент до перезаписи — для журнала правок: без него baseline-снапшот
+        # не снимается и старое содержимое теряется навсегда. Читаем только
+        # когда запись правок реально ведётся и файл в пределах капа мутирующих
+        # тулов (тот же паттерн, что в WriteToFile).
+        exists = await self._backend.exists(path)
+        old_bytes = None
+        if exists and is_recording(self._ctx):
+            try:
+                if await self._backend.getsize(path) <= fs_mutate_max_bytes(
+                    self._config_dict
+                ):
+                    old_bytes = await self._backend.read_bytes(path)
+            except Exception:
+                old_bytes = None
+
         try:
             await self._backend.write_bytes(path, raw)
         except Exception as e:
@@ -142,6 +163,18 @@ class SaveBase64File(AbstractSimpleTool):
                 path=path,
                 error={"type": "write_failed", "message": str(e)},
             )
+
+        # op — по факту существования файла: бинарность контента классифицирует
+        # сам рекордер (иначе текстовый payload получил бы op="binary" с хэнками,
+        # но без флага no_diff — контракт «binary ⇒ hunks пуст + no_diff» сломан).
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=old_bytes,
+            new_bytes=raw,
+            op="write" if exists else "create",
+            call_id=self._call_id,
+        )
 
         return self._result(
             ok=True,

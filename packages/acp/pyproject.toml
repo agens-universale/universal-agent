@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gc-acp"
+version = "0.3.1"
+description = "GigaCode Universal Agent — ACP-фасад (gc-acp)"
+requires-python = ">=3.11"
+dependencies = [
+    "gc-core==0.3.1",
+]
+
+[project.scripts]
+gc-acp = "gc_acp.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/gc_acp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

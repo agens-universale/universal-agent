@@ -30,8 +30,9 @@ def truncate_path(path: str, max_cols: int) -> str:
     tail = nonempty[-1]
     minimal = f"{leading}…{sep}{tail}"
     if len(minimal) > max_cols:
-        # даже хвост не влезает — показать конец хвоста с ведущим …
-        return ("…" + tail)[-max_cols:]
+        # даже хвост не влезает — показать конец хвоста с ведущим … (слайс
+        # справа от "…"+tail терял сам символ …, когда tail длиннее max_cols)
+        return "…" + tail[-(max_cols - 1) :] if max_cols > 1 else "…"
     # жадно наращиваем голову от корня, пока `<head><sep>…<sep><tail>` влезает
     best = minimal
     head_parts = nonempty[:-1]
