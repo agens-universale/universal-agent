@@ -213,3 +213,13 @@ def test_resolve_sandbox_fails_closed_without_tool(monkeypatch):
     monkeypatch.setattr(shutil, "which", lambda name: None)
     with pytest.raises(ValueError, match="sandbox"):
         resolve_os_backend({"os_backend": "sandbox"})
+
+
+def test_resolve_ssh_joins_argv_docker_does_not():
+    ssh = resolve_os_backend(
+        {"os_backend": {"kind": "ssh", "ssh": {"host": "h"}}}
+    )
+    docker = resolve_os_backend(
+        {"os_backend": {"kind": "docker", "docker": {"name": "b"}}}
+    )
+    assert ssh.joins_argv is True and docker.joins_argv is False

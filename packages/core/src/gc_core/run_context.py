@@ -341,11 +341,12 @@ def _prepare_run_context(
     )
     # sandbox.workdir=auto: каталог рана обязан стать launch_root — его читают
     # write_guard (`launch_root_from_config`) и workspace, а бэкенда у них нет.
+    # Побеждает безусловно: TUI/ACP ставят launch_root=cwd ещё до сборки, и
+    # без перезаписи guards пускали бы файловые тулы в реальный проект.
     auto_workdir = getattr(backend, "auto_workdir", None)
-    if auto_workdir and not (
-        config_dict.get("launch_root") or config_dict.get("project_root")
-    ):
+    if auto_workdir:
         config_dict["launch_root"] = auto_workdir
+        config_dict["project_root"] = auto_workdir
     skills_registry = get_skills_registry(config_dict, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в

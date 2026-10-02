@@ -28,6 +28,10 @@ from gc_core.backends.protocol import (
 )
 from gc_core.backends.walk_util import FlatWalkMixin
 
+#: Потолок на одну файловую операцию (stat, upload, download): зависший
+#: транспорт — пауза контейнера, мёртвый хост — иначе вешал бы цикл агента.
+FS_OP_TIMEOUT_SEC = 300
+
 
 class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
     is_sandbox = True
@@ -43,8 +47,14 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         exec_init: Optional[str] = None,
         exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS,
         walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS,
+        joins_argv: bool = False,
+        fs_op_timeout_sec: int = FS_OP_TIMEOUT_SEC,
     ) -> None:
         self.argv_prefix = tuple(str(a) for a in argv_prefix)
+        # ssh не сохраняет argv: склеивает хвост пробелами и отдаёт строкой
+        # шеллу той стороны. Таким транспортам команда уходит одним аргументом.
+        self.joins_argv = joins_argv
+        self.fs_op_timeout_sec = fs_op_timeout_sec
         self._cwd = cwd
         self._env = dict(env or {})
         self.exec_init = exec_init
@@ -61,8 +71,11 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         timeout: Optional[int] = None,
         capture_max_chars: int,
     ) -> ExecResult:
+        remote = ["sh", "-c", shell_command]
+        if self.joins_argv:
+            remote = [shlex.join(remote)]
         return await _arun_bounded_process(
-            [*self.argv_prefix, "sh", "-c", shell_command],
+            [*self.argv_prefix, *remote],
             shell=False,
             cwd=None,
             timeout=timeout,
@@ -102,7 +115,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
     ) -> ExecResult:
         return await self._run(
             self._shell(command),
-            timeout=timeout,
+            timeout=timeout or self.fs_op_timeout_sec,
             capture_max_chars=self.walk_output_max_chars,
         )
 
@@ -111,16 +124,26 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         res = await self._run(
             f'mkdir -p "$(dirname {q})" && base64 -d > {q}',
             stdin_text=base64.b64encode(data).decode("ascii"),
+            timeout=self.fs_op_timeout_sec,
             capture_max_chars=self.walk_output_max_chars,
         )
+        if res.timed_out:
+            raise OSError(
+                f"upload timed out after {self.fs_op_timeout_sec} s: {path}"
+            )
         if res.return_code != 0:
             raise OSError(res.stderr.strip() or f"upload failed: {path}")
 
     async def _adownload_bytes(self, path: str) -> bytes:
         res = await self._run(
             f"base64 < {shlex.quote(path)}",
+            timeout=self.fs_op_timeout_sec,
             capture_max_chars=self.walk_output_max_chars,
         )
+        if res.timed_out:
+            raise OSError(
+                f"download timed out after {self.fs_op_timeout_sec} s: {path}"
+            )
         if res.return_code != 0:
             raise FileNotFoundError(res.stderr.strip() or path)
         if res.stdout_hit_capture_cap:
@@ -207,6 +230,9 @@ def ssh_argv_prefix(
 ) -> list[str]:
     s = section.get("ssh") or {}
     argv = ["ssh", "-T", "-o", "BatchMode=yes", "-p", str(s.get("port") or 22)]
+    # Мёртвый хост или оборванный канал — ошибка через секунды, а не вечное ожидание.
+    argv += ["-o", "ConnectTimeout=10", "-o", "ServerAliveInterval=15"]
+    argv += ["-o", "ServerAliveCountMax=3"]
     if s.get("key_path"):
         argv += ["-i", os.path.expanduser(str(s["key_path"]))]
     for opt in s.get("options") or []:

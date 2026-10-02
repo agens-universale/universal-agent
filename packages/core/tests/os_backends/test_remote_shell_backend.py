@@ -187,3 +187,39 @@ def test_ssh_prefix_without_user_key_or_control(tmp_path):
     )
     assert "-i" not in pre and not any("ControlMaster" in o for o in pre)
     assert pre[-2:] == ["h", "--"]
+
+
+# --- транспорт, который склеивает argv (так делает ssh) ---
+# Шим ведёт себя как OpenSSH: всё после хоста склеивается пробелами и уходит
+# одной строкой в шелл той стороны.
+_SSH_LIKE = ["sh", "-c", 'exec sh -c "$*"', "fake-ssh"]
+
+
+async def test_joining_transport_keeps_cwd_and_writes(tmp_path):
+    d = tmp_path / "rv dir"
+    d.mkdir()
+    be = RemoteShellBackend(_SSH_LIKE, cwd=str(d), joins_argv=True)
+    res = await be.aexec("echo hi; pwd -P")
+    assert res.stdout.splitlines() == ["hi", str(d.resolve())]
+    p = str(d / "it's" / "a b.txt")
+    await be.write(p, "x")
+    assert await be.read(p) == "x"
+
+
+async def test_fs_ops_have_a_timeout():
+    # Зависший транспорт (пауза контейнера, мёртвый хост) не вешает ФС-операции.
+    be = RemoteShellBackend(
+        ["sh", "-c", "sleep 30", "hang"], fs_op_timeout_sec=1
+    )
+    t0 = asyncio.get_running_loop().time()
+    assert await be.exists("/x") is False
+    with pytest.raises(OSError):
+        await be.write("/x", "y")
+    with pytest.raises(OSError):
+        await be.read_bytes("/x")
+    assert asyncio.get_running_loop().time() - t0 < 15
+
+
+def test_ssh_prefix_has_connect_timeout_and_keepalive(tmp_path):
+    pre = ssh_argv_prefix({"ssh": {"host": "h"}}, control_dir=tmp_path)
+    assert "ConnectTimeout=10" in pre and "ServerAliveInterval=15" in pre

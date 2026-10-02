@@ -26,7 +26,10 @@ async def test_auto_workdir_becomes_launch_root(tmp_path, monkeypatch):
     assert os.path.realpath(ctx.workspace.root) == os.path.realpath(str(auto))
 
 
-async def test_explicit_launch_root_wins(tmp_path):
+async def test_auto_workdir_overrides_runtime_launch_root(tmp_path):
+    # TUI/ACP ставят launch_root=cwd ДО сборки контекста (apply_runtime_fields):
+    # каталог рана всё равно обязан стать периметром, иначе guards и бэкенд
+    # разойдутся — файловые тулы пишут в реальный проект, shell — в auto.
     auto = tmp_path / "sb"
     auto.mkdir()
     cfg = {
@@ -34,6 +37,8 @@ async def test_explicit_launch_root_wins(tmp_path):
         "system_prompt_id": "v1",
         "save_logs": False,
         "launch_root": str(tmp_path),
+        "project_root": str(tmp_path),
     }
-    await acreate_run_context(cfg, os_backend=AutoDirBackend(str(auto)))
-    assert cfg["launch_root"] == str(tmp_path)
+    ctx = await acreate_run_context(cfg, os_backend=AutoDirBackend(str(auto)))
+    assert cfg["launch_root"] == str(auto)
+    assert os.path.realpath(ctx.workspace.root) == os.path.realpath(str(auto))

@@ -110,6 +110,7 @@ def resolve_os_backend(
             walk_output_max_chars=walk_output_max_chars_from_config_dict(
                 config_dict
             ),
+            joins_argv=kind == "ssh",
         )
 
     if kind == "sandbox":

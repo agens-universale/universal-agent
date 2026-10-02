@@ -203,7 +203,10 @@ class SandboxBackend(LocalFsBackend):
         )
 
     async def aspawn_background(self, command, *, cwd=None, env=None):
+        # Без --die-with-parent: PDEATHSIG срабатывает на выход потока-родителя,
+        # и фоновый сервис из рабочего потока хода умирал бы вместе с ходом.
+        prefix = [a for a in self._wrap(cwd) if a != "--die-with-parent"]
         wrapped = " ".join(
-            shlex.quote(a) for a in [*self._wrap(cwd), "sh", "-c", command]
+            shlex.quote(a) for a in [*prefix, "sh", "-c", command]
         )
         return await super().aspawn_background(wrapped, cwd=cwd, env=env)

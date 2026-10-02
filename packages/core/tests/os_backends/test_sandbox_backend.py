@@ -179,3 +179,24 @@ def test_tracking_wraps_sandbox_like_local(tmp_path):
 
     be = SandboxBackend(wrapper=lambda cwd: [], root=str(tmp_path))
     assert isinstance(wrap_local_for_tracking(be, object()), TrackingFsBackend)
+
+
+async def test_background_spawn_outlives_parent_thread(tmp_path, monkeypatch):
+    # PDEATHSIG у bwrap срабатывает на выход ПОТОКА-родителя: фоновый сервис,
+    # запущенный из рабочего потока хода, умирал бы вместе с ходом.
+    seen = {}
+
+    async def fake_spawn(self, command, *, cwd=None, env=None):
+        seen["cmd"] = command
+        return {"pid": 1, "exit_code": None}
+
+    monkeypatch.setattr(LocalFsBackend, "aspawn_background", fake_spawn)
+    wrap = bwrap_wrapper(
+        str(tmp_path), network=True, extra_ro=[], home_to_root=False
+    )
+    be = SandboxBackend(wrapper=wrap, root=str(tmp_path))
+    await be.aspawn_background("sleep 1", cwd=str(tmp_path))
+    assert (
+        seen["cmd"].startswith("bwrap ")
+        and "--die-with-parent" not in seen["cmd"]
+    )
