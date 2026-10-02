@@ -14,6 +14,12 @@ class ProtectedSet:
     instructions: frozenset[Path]
     operational: frozenset[Path]
     skills_exceptions: frozenset[Path]
+    #: Рабочая область рана, лежащая ВНУТРИ служебного корня gc (sandbox
+    #: ``workdir: auto`` → ``<state>/sandboxes/<run_id>``). Сама она не
+    #: служебная — иначе каждая команда в ней ловила бы отказ; служебными
+    #: остаются её ``.gc`` и ``extra`` (``operational_hard``).
+    workspace_exception: Path | None = None
+    operational_hard: frozenset[Path] = frozenset()
 
 
 def protected_paths(
@@ -23,18 +29,28 @@ def protected_paths(
     paths = gc_paths()
     instr = set(instruction_file_paths(cwd=str(proj)).values())
 
-    operational = {project_gc_dir(str(proj))}
-    for key in ("config", "state", "cache", "data"):
-        operational.add(paths[key])
+    hard = {project_gc_dir(str(proj))}
     for raw in extra or []:
-        operational.add(Path(os.path.abspath(raw)))
+        hard.add(Path(os.path.abspath(raw)))
+    gc_roots = {paths[key] for key in ("config", "state", "cache", "data")}
+    ci = os.name == "nt"
+    workspace = (
+        proj
+        if any(
+            is_within_root(str(proj), str(r), case_insensitive=ci)
+            for r in gc_roots
+        )
+        else None
+    )
 
     skills = {project_gc_dir(str(proj)) / "skills", paths["data"] / "skills"}
 
     return ProtectedSet(
         instructions=frozenset(instr),
-        operational=frozenset(operational),
+        operational=frozenset(hard | gc_roots),
         skills_exceptions=frozenset(skills),
+        workspace_exception=workspace,
+        operational_hard=frozenset(hard),
     )
 
 
@@ -47,6 +63,14 @@ def classify_path(path, ps: ProtectedSet) -> str:
         return "skills"
     if any(is_within_root(p, r, case_insensitive=ci) for r in ps.instructions):
         return "instructions"
+    if any(
+        is_within_root(p, r, case_insensitive=ci) for r in ps.operational_hard
+    ):
+        return "operational"
+    if ps.workspace_exception is not None and is_within_root(
+        p, ps.workspace_exception, case_insensitive=ci
+    ):
+        return "none"
     if any(is_within_root(p, r, case_insensitive=ci) for r in ps.operational):
         return "operational"
     return "none"

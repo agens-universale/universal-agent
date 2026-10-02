@@ -22,3 +22,27 @@ def test_instruction_files_not_in_operational(tmp_path, monkeypatch):
     ps = protected_paths(cwd=str(proj))
     # L1 AGENTS.md лежит в gc config-каталоге, но это класс инструкций, не операционный
     assert any(p.name == "AGENTS.md" for p in ps.instructions)
+
+
+def test_workspace_inside_gc_state_is_not_operational(tmp_path, monkeypatch):
+    """sandbox workdir=auto: рабочая область рана лежит в <state>/sandboxes/<id>.
+
+    Сама область не служебная — иначе каждая команда в ней ловила бы
+    protected_path_denied. Служебными остаются её `.gc`, остальной state и extra.
+    """
+    from gc_core.config_modules import env_vars
+    from gc_core.security.protected_paths import classify_path
+
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    ws = tmp_path / "gc" / "sandboxes" / "r1"
+    ps = protected_paths(cwd=str(ws), extra=[str(ws / "secret")])
+
+    assert classify_path(ws / "in.txt", ps) == "none"
+    assert classify_path(ws / "sub" / "x.py", ps) == "none"
+    assert classify_path(ws / ".gc" / "config.yml", ps) == "operational"
+    assert classify_path(ws / "secret" / "k", ps) == "operational"
+    assert (
+        classify_path(tmp_path / "gc" / "sandboxes" / "r2" / "a", ps)
+        == "operational"
+    )
+    assert classify_path(tmp_path / "gc" / "config.yml", ps) == "operational"
