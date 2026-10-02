@@ -244,6 +244,12 @@ fs_tools:
     hard_max_matches: 300             # hard ceiling: max_matches_eff = min(requested, 300)
     max_visited: 500000               # walk safety cap (not a caller argument)
 
+# os_backend:                 # где работают FS/shell-тулы (см. docs/configuration.md)
+#   kind: local               # local | docker | ssh | exec | sandbox
+#   docker: {name: my-box}
+#   ssh: {host: dev.example, user: me, key_path: ~/.ssh/id_ed25519}
+#   sandbox: {workdir: null, network: true}
+
 # Чек-лист задачи (session_todo): каждые reminder_steps шагов без вызова тула —
 # напоминание. Есть незакрытые пункты — директивное «обнови список»; активного
 # плана нет (пусто ИЛИ всё закрыто) — мягкое «если задача того стоит, заведи»,

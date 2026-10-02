@@ -896,6 +896,27 @@ ddgs-mcp --http
 В `config.yml` агента укажи нужный транспорт (`http`, `stream_http` и т.д.)
 и endpoint подключения (см. раздел [MCP-серверы](#mcp-серверы) выше).
 
+## Секция `os_backend` — где живут файлы и команды тулов
+
+`kind`: `local` (по умолчанию) | `harbor` (только из Harbor-адаптера) | `docker` | `ssh` | `exec` | `sandbox`.
+Голая строка `os_backend: docker` эквивалентна `{kind: docker}`.
+
+| Ключ | Назначение |
+|---|---|
+| `cwd` | стартовый каталог на той стороне; `null` → `pwd` там при сборке контекста |
+| `env` | переменные для каждой команды модели |
+| `docker.name` / `docker.user` / `docker.binary` | `docker exec -i [-u USER] NAME`; `binary: podman` для podman |
+| `ssh.host` / `port` / `user` / `key_path` / `options` / `control_master` | `ssh -T -o BatchMode=yes …`; `key_path: null` → ssh-agent; пароль не поддерживается |
+| `exec.argv_prefix` | произвольный префикс (`kubectl exec -i -n NS POD --`, `container exec -i NAME`) |
+| `sandbox.workdir` | `null` → изолируем текущий `launch_root`; `auto` → `<GC_STATE_DIR>/sandboxes/<run_id>/` |
+| `sandbox.network` | `true` по умолчанию; `false` режет сеть у shell-команд |
+| `sandbox.extra_ro` | дополнительные read-only пути (Linux) |
+
+`agent.harbor_exec_init` действует и для `docker` / `ssh` / `exec` (профиль перед командой модели).
+`sandbox` требует `bwrap` (Linux) или `sandbox-exec` (macOS); без них запуск падает, тихого отката в `local` нет. Windows не поддерживается.
+Удалённой стороне нужны GNU `stat`/`find`, `sh`, `cat`, `base64`, `sha256sum`; `python3` — для `run_python_code` и MCP `execute_on: os_backend`; `bash` — для фоновых команд (`run_in_background`), как и в Harbor.
+Чистка `sandboxes/`: `python -m gc_server.swarm.cleanup … --core-sandboxes-dir ~/.local/state/gc/sandboxes`.
+
 ## Где gc-cli хранит runtime-данные
 
 Кросс-платформенная раскладка. По умолчанию:

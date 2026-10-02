@@ -12,6 +12,8 @@
 
 Слои независимы: `read_guard` блокирует чтение в любом `command_moderation.mode` (даже `allow`); `url_policy` не зависит от `mode`; `write_guard` независим от `read_guard`. **Secure-by-default: все пять слоёв включены по умолчанию.** `enabled: true` стоит и в pydantic-дефолтах (`config_modules/security.py`), и в поставляемом `config.default.yml`. Чтобы слой выключить, нужен явный `enabled: false` — обратное утверждение («safe-by-default-OFF») в старых редакциях этого документа было неверным.
 
+`os_backend: sandbox` — не шестой слой `security:`, а другая граница: файловые тулы по-прежнему держат `write_guard`/`read_guard`/`protected_paths`, а shell-команды модели (`execute_command`, `run_python_code`, фон) выполняются в bwrap / sandbox-exec с записью только в `launch_root`. Это закрывает то, что `command_moderation` ловит лишь эвристикой: произвольная команда не выйдет за корень даже при `mode: allow`.
+
 ## `security.protected_paths` — floor-защита `.gc` (ON по умолчанию)
 
 «Пол» безопасности: работает поверх всех остальных слоёв и не отключается вместе с `write_guard`/`read_guard`/`command_moderation`.
