@@ -77,7 +77,7 @@ models:
     model: deepseek/deepseek-chat-v3-0324
     url: https://api.provider.example/v1/chat/completions
     token: "${ENV:DEEPSEEK_API_KEY}"
-    strip_think: false                   # копировать скрытое поле мысли в историю; без ключа — глобальный флаг
+    strip_think: false                   # как дефолт кода: копировать мысль; true — вырезать
     main:
       temperature: 1.0
       top_p: 1.0
