@@ -30,7 +30,9 @@ def auxiliary_llm_completion_kwargs(
     """Kwargs служебного вызова: ``auxiliary`` алиаса, куда резолвится consumer.
 
     Сигнатура ``(ctx)`` сохранена: без consumer это ``summary`` (так зовёт CLI).
-    ``auxiliary_llm.completion_kwargs`` не читается. Субагент получает ``main``.
+    Секции ``auxiliary`` нет — ``chat_completions.auxiliary_llm.completion_kwargs``
+    из снимка конфига. Объект ``auxiliary_llm.completion_kwargs`` сам по себе
+    не читается. Субагент получает ``main``.
     """
     consumer = consumer or "summary"
     cfg = getattr(ctx, "config_dict", None)

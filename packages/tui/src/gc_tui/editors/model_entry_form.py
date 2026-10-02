@@ -126,7 +126,10 @@ _ALIAS_OR_MODEL_EMPTY = "укажите id модели или алиас"
 _ALIAS_RENAME_HINT = "переименование обновит уровни и привязки записи"
 _MODEL_LABEL = "Провайдерский id модели"
 _MAIN_LABEL = "main"
-_AUX_LABEL = "auxiliary"
+_AUX_LABEL = (
+    "auxiliary — всегда отключайте reasoning для корректной работы, "
+    "используйте параметры вашей модели"
+)
 
 # Канон спеки, секция «Текст подсказки». Один статический блок: в поля ничего
 # не подставляет.
@@ -141,7 +144,10 @@ KWARGS_HINT = """\
 Ключи `model`, `messages`, `tools`, `max_tokens`, `max_completion_tokens` сюда не
 писать — их выставляет рантайм. Лимиты служебных ответов
 (`max_tokens`, `judge_max_tokens`) — в `chat_completions.auxiliary_llm`, не здесь.
-Пустое поле значит «не слать vendor-ключей».
+Пустое поле снимает секцию: запрос берёт глобальный словарь
+(`backend.chat_completion_kwargs` для main,
+`chat_completions.auxiliary_llm.completion_kwargs` для auxiliary).
+Явный `{}` — не слать этих ключей, их выбирает сервер модели.
 
 Сэмплинг, общий для семей. У части моделей OpenAI (например gpt-5.5) `temperature`
 принимает только 1. `top_k`, `min_p`, `repetition_penalty` — vLLM и похожие, не
@@ -285,11 +291,15 @@ def _strip_choice(value) -> str:
 
 
 def _completion_field_text(value) -> str:
-    """Текст YAML-поля: пустой mapping и отсутствие секции — пустая строка.
+    """Текст YAML-поля.
 
-    Непустой mapping — раскрытый YAML (`safe_yaml_dump`), не `{a: b}`."""
-    if value is None or value == {}:
+    Секции нет — пустая строка (наследование глобального словаря). Явный ``{}``
+    остаётся ``{}``: пустой набор ключей, не наследование. Непустой mapping —
+    раскрытый YAML (`safe_yaml_dump`), не ``{a: b}``."""
+    if value is None:
         return ""
+    if value == {}:
+        return "{}"
     return safe_yaml_dump(value).rstrip("\n")
 
 
@@ -2091,8 +2101,8 @@ class ModelEntryForm(Vertical):
         )
         return True, alias, fields
 
-    def _write_yaml(self, field_id: str, value: dict) -> None:
-        """Поле после разбора — раскрытый YAML. Пустой mapping остаётся пустым."""
+    def _write_yaml(self, field_id: str, value: dict | None) -> None:
+        """Поле после разбора — раскрытый YAML. ``None`` очищает, ``{}`` остаётся ``{}``."""
         self.query_one(f"#{field_id}", TextArea).load_text(
             _completion_field_text(value)
         )

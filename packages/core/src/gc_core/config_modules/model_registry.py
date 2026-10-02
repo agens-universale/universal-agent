@@ -18,6 +18,9 @@ import yaml
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.chat_completions import (
+    auxiliary_llm_from_config_dict,
+)
 from gc_core.config_modules.pricing import ModelTariff
 
 RESERVED_WORDS = ("light", "default", "max", "auto")
@@ -45,15 +48,17 @@ LEVEL_FALLBACK: dict[str, tuple[str, str, str]] = {
 }
 
 
-def parse_completion_kwargs_text(text: str) -> dict[str, Any]:
-    """Текст поля ``main``/``auxiliary`` → mapping.
+def parse_completion_kwargs_text(text: str) -> dict[str, Any] | None:
+    """Текст поля ``main``/``auxiliary`` → mapping или «снять ключ».
 
-    Пустое поле — ``{}``. JSON object — валидный YAML, разбирается тем же
-    путём. Список и скаляр — ошибка. Protected-ключи — ошибка: в файл их
-    не кладут, рантайм всё равно вырежет."""
+    Пустое поле — ``None``: секция не задана, запрос берёт глобальный словарь.
+    Явный пустой mapping (``{}``) — ``{}``: в запрос эти ключи не класть.
+    JSON object — валидный YAML, разбирается тем же путём. Список и скаляр —
+    ошибка. Protected-ключи — ошибка: в файл их не кладут, рантайм всё равно
+    вырежет."""
     raw = text.strip()
     if not raw:
-        return {}
+        return None
     loaded = yaml.safe_load(raw)
     if loaded is None:
         return {}
@@ -74,19 +79,22 @@ def effective_completion_kwargs(
 ) -> dict[str, Any]:
     """Kwargs секции резолвленного алиаса.
 
-    ``main`` задан (в том числе пустой ``{}``) — целиком заменяет глобальный
-    ``backend.chat_completion_kwargs``. Не задан — глобальный dict.
-    ``auxiliary`` не мержится с ``main`` и не читает глобальный dict: пустая
-    или отсутствующая секция не копирует thinking-ключи ``main``.
-    ``models.<alias>.backend.chat_completion_kwargs`` не читается.
+    Заполненный mapping — целиком, без слияния с глобальным словарём.
+    Явный ``{}`` — пустой набор: в запрос эти ключи не кладутся, их выбирает
+    сервер модели. Секции нет (``None``) — глобальный словарь своей роли:
+    ``main`` читает ``backend.chat_completion_kwargs``, ``auxiliary`` —
+    ``chat_completions.auxiliary_llm.completion_kwargs``. Друг в друга секции
+    не подставляются. ``models.<alias>.backend.chat_completion_kwargs`` не
+    читается.
     """
     chosen = getattr(resolved, section, None) if resolved is not None else None
     if isinstance(chosen, dict):
         return copy.deepcopy(chosen)
-    if section != "main":
-        return {}
     cfg = config_dict if isinstance(config_dict, dict) else {}
-    global_kw = cfg.get("chat_completion_kwargs")
+    if section == "main":
+        global_kw = cfg.get("chat_completion_kwargs")
+    else:
+        global_kw = auxiliary_llm_from_config_dict(cfg).completion_kwargs
     if isinstance(global_kw, dict):
         return copy.deepcopy(global_kw)
     return {}
@@ -285,8 +293,9 @@ class ModelEntry(BaseModel):
     token: str | None = None
     pricing: ModelTariff | None = None
     backend: BackendConfig | None = None
-    # None — секция не задана (main наследует глобальный dict, auxiliary пуст).
-    # {} — задана и пуста: replace, без ключей main и без глобального dict.
+    # None — секция не задана: свой глобальный словарь (main —
+    # chat_completion_kwargs, auxiliary — auxiliary_llm.completion_kwargs).
+    # {} — задана и пуста: в запрос эти ключи не класть.
     main: dict[str, Any] | None = None
     auxiliary: dict[str, Any] | None = None
     # None — ключа нет, ход берёт глобальный strip_tags_projection.strip_think.

@@ -5,17 +5,26 @@ from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
 from gc_testkit import run_coro
 
 
-def test_auxiliary_llm_completion_kwargs_ignores_completion_kwargs_overlay():
+def test_auxiliary_llm_completion_kwargs_uses_global_when_section_is_absent():
     ctx = SimpleNamespace(
         auxiliary_llm=SimpleNamespace(
-            completion_kwargs={
-                "reasoning_effort": "none",
-                "separate_reasoning": False,
-                "chat_template_kwargs": {"enable_thinking": False},
+            completion_kwargs={"reasoning_effort": "high"}
+        ),
+        config_dict={
+            "auxiliary_llm_params": {
+                "completion_kwargs": {
+                    "reasoning_effort": "none",
+                    "separate_reasoning": False,
+                    "chat_template_kwargs": {"enable_thinking": False},
+                }
             }
-        )
+        },
     )
-    assert auxiliary_llm_completion_kwargs(ctx) == {}
+    assert auxiliary_llm_completion_kwargs(ctx) == {
+        "reasoning_effort": "none",
+        "separate_reasoning": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }
 
 
 def test_summarize_tool_intent_line_uses_auxiliary_llm_completion_kwargs(

@@ -173,6 +173,8 @@ chat_completions:
     # Генерация роли special_agent (subagent:subagent_special_agent) — одноразовый
     # системный промпт; потолок с запасом под мысль модели.
     subagent_role_max_tokens: 24576
+    # Служебный вызов, когда у алиаса нет своей секции auxiliary (и без реестра
+    # моделей). Явный models.<alias>.auxiliary: {} этот словарь не подмешивает.
     completion_kwargs:
       separate_reasoning: false
       chat_template_kwargs:

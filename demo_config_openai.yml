@@ -29,6 +29,7 @@ chat_completions:
   auxiliary_llm:
     max_tokens: 24576
     judge_max_tokens: 24576
+    # Когда у алиаса нет своей auxiliary (и без реестра). Явный auxiliary: {} не подмешивает.
     completion_kwargs:
       reasoning_effort: none
 

@@ -28,9 +28,10 @@ DEFAULT_SUBAGENT_ROLE_MAX_TOKENS = 24576
 class ChatCompletionsLlmConfig(BaseModel):
     """LLM-профиль вспомогательных chat/completions-вызовов (summary, finish gate, intent scope, judges).
 
-    ``completion_kwargs`` остаётся в схеме, чтобы старые файлы грузились, но в
-    запрос не подмешивается: служебный вызов читает ``models.<alias>.auxiliary``.
-    ``max_tokens`` / ``judge_max_tokens`` по-прежнему здесь.
+    ``completion_kwargs`` — глобальный словарь служебного вызова, когда у алиаса
+    нет своей секции ``auxiliary`` (и в легаси-режиме без реестра). Явный
+    ``models.<alias>.auxiliary: {}`` его не подмешивает. ``max_tokens`` /
+    ``judge_max_tokens`` по-прежнему здесь.
     """
 
     model_config = ConfigDict(extra="forbid")

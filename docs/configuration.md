@@ -485,7 +485,13 @@ assign:                                  # привязки отдельных �
 - имена `light`, `default`, `max`, `auto` зарезервированы и алиасом быть не могут;
 - одно и то же нельзя задать дважды: `token` вместе с
   `backend.chat_completion_headers.Authorization`, а `url` вместе с
-  `backend.completions_url` — ошибка валидации.
+  `backend.completions_url` — ошибка валидации;
+- `main` и `auxiliary` читаются одинаково и друг в друга не подставляются.
+  Секции нет — глобальный словарь своей роли: `backend.chat_completion_kwargs`
+  для диалога и субагентов, `chat_completions.auxiliary_llm.completion_kwargs`
+  для summary, судей, finish_gate и intent. Явный `{}` — в запрос эти ключи не
+  класть, их выбирает сервер модели. Секция с ключами заменяет глобальный
+  словарь целиком, без слияния.
 
 **`slots`** — какой алиас стоит за каким уровнем. Не заданный слот резолвится **матрицей
 фоллбэков**: `light` → `light, default, max`; `default` → `default, max, light`;

@@ -1721,7 +1721,7 @@ async def test_empty_model_id_means_the_alias_is_the_id():
         form.query_one("#mef-alias", Input).value = "gigacode"
         ok, alias, fields = form.submit()
         assert (ok, alias) == (True, "gigacode")
-        assert fields == {"main": {}, "auxiliary": {}, "strip_think": None}
+        assert fields == {"main": None, "auxiliary": None, "strip_think": None}
 
 
 async def test_malformed_url_is_rejected():
@@ -2852,7 +2852,7 @@ async def test_yaml_fields_round_trip_and_reject_bad_input():
         aux = form.query_one("#mef-auxiliary", TextArea)
         assert main.text.rstrip() == safe_yaml_dump(saved).rstrip("\n")
         assert "{" not in main.text
-        assert aux.text.strip() == ""
+        assert aux.text.strip() == "{}"
         hint = str(form.query_one("#mef-kwargs-hint", Static).render())
         assert "Поля `main` и `auxiliary`" in hint
         assert "enable_thinking: false" in hint

@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 from gc_core.config import flatten_app_config
+from gc_core.config_modules.model_registry import parse_completion_kwargs_text
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
@@ -231,6 +232,77 @@ def test_summary_finish_gate_and_subagent_read_different_sections():
         consumer="subagent:subagent_code_planner",
     )
     assert role["chat_template_kwargs"]["thinking"] is True
+
+
+def test_unset_auxiliary_keeps_the_global_aux_dict_not_main():
+    cfg = _cfg(
+        {
+            "backend": {
+                "chat_completion_kwargs": {
+                    "temperature": 0.7,
+                    "chat_template_kwargs": {"enable_thinking": True},
+                }
+            },
+            "chat_completions": {
+                "auxiliary_llm": {
+                    "completion_kwargs": {
+                        "separate_reasoning": False,
+                        "chat_template_kwargs": {"enable_thinking": False},
+                    }
+                }
+            },
+            "models": {
+                "only": {
+                    "url": "http://only/v1/chat/completions",
+                    "token": "",
+                }
+            },
+            "slots": {"default": "only"},
+        }
+    )
+    summary = _aux_payload(cfg, "summary")
+    assert summary["separate_reasoning"] is False
+    assert summary["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "temperature" not in summary
+
+    dialog = _main_payload(cfg, _router(cfg).resolve("main"))
+    assert dialog["temperature"] == 0.7
+    assert dialog["chat_template_kwargs"] == {"enable_thinking": True}
+
+
+def test_explicit_empty_auxiliary_sends_no_vendor_keys():
+    cfg = _cfg(
+        {
+            "chat_completions": {
+                "auxiliary_llm": {
+                    "completion_kwargs": {
+                        "chat_template_kwargs": {"enable_thinking": False}
+                    }
+                }
+            },
+            "models": {
+                "quiet": {
+                    "url": "http://quiet/v1/chat/completions",
+                    "token": "",
+                    "auxiliary": {},
+                }
+            },
+            "slots": {"default": "quiet"},
+            "assign": {"summary": "quiet"},
+        }
+    )
+    payload = _aux_payload(cfg, "summary")
+    assert "chat_template_kwargs" not in payload
+    assert "enable_thinking" not in payload
+
+
+def test_parse_completion_kwargs_text_blank_is_inherit_and_braces_are_empty():
+    assert parse_completion_kwargs_text("") is None
+    assert parse_completion_kwargs_text("   \n") is None
+    assert parse_completion_kwargs_text("{}") == {}
+    assert parse_completion_kwargs_text("temperature: 1\n") == {
+        "temperature": 1
+    }
 
 
 def test_empty_auxiliary_does_not_copy_main_or_global_thinking():
