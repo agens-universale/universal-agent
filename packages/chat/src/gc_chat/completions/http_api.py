@@ -7,7 +7,6 @@ import secrets
 from typing import Any
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
 from gc_chat.completions.errors import ApiError, error_payload
@@ -20,6 +19,7 @@ from gc_chat.completions.sse import (
 )
 from gc_chat.completions.turn import TurnRun
 from gc_chat.direct_completions import DirectCompletions
+from gc_chat.http_guard import install_http_guard
 from gc_chat.model_route import completions_route, models_body
 
 _JSON = "application/json"
@@ -30,7 +30,9 @@ def create_app(facade: CompletionsFacade) -> FastAPI:
     """Приложение только с маршрутом Chat Completions. Тесты ходят сюда."""
     app = FastAPI()
     app.state.completions_facade = facade
-    _install_cors(app, facade.cors_origins)
+    install_http_guard(
+        app, cors_origins=facade.cors_origins, bind_host=facade.bind_host
+    )
     app.add_api_route("/v1/models", models, methods=["GET"])
     mount(app)
     return app
@@ -40,23 +42,6 @@ def mount(app: FastAPI) -> None:
     """Маршрут Chat Completions. ``/v1/models`` регистрирует общее приложение."""
     app.add_api_route(
         "/v1/chat/completions", create_completion, methods=["POST"]
-    )
-
-
-def _install_cors(app: FastAPI, origins: list[str]) -> None:
-    """Пустой список — любой origin. Непустой — только перечисленные.
-
-    ``allow_private_network`` отвечает на preflight Chrome к loopback.
-    Страница чата этого процесса идёт с того же origin. Заголовок
-    нужен чужим клиентам.
-    """
-    allow = list(origins) if origins else ["*"]
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=allow,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type"],
-        allow_private_network=True,
     )
 
 

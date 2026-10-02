@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 import uuid
+from collections import OrderedDict
 from typing import Any
 
 from gc_core.thread_store import validate_thread_id
@@ -36,6 +37,10 @@ logger = logging.getLogger(__name__)
 _NOT_FOUND = "not_found"
 _RESPONSE_NOT_FOUND = "response not found"
 _CONFLICT = "conflict"
+# Живых агентов на процесс: у каждого открыт run-лог и MCP-сессии. Вытесняется
+# самый давний простаивающий; продолжение диалога поднимет его из файла треда.
+# ponytail: фиксированный потолок, в конфиг — если 32 параллельных чата мало.
+MAX_LIVE_AGENTS = 32
 
 
 class ResponsesFacade:
@@ -57,8 +62,9 @@ class ResponsesFacade:
         self._index = index or ResponseIndex(_threads_dir(config))
         self.auth_token = str(config.get("chat_api_auth_token") or "")
         self.cors_origins = _cors_origins(config)
+        self.bind_host = str(config.get("chat_api_host") or "127.0.0.1")
         self.model_id = str(config.get("model") or "")
-        self._agents: dict[str, Any] = {}
+        self._agents: OrderedDict[str, Any] = OrderedDict()
         self._busy: set[str] = set()
         self._live: dict[str, TurnRun] = {}
         self._gate = asyncio.Lock()
@@ -128,10 +134,12 @@ class ResponsesFacade:
     async def _agent_for(self, thread_id: str, cwd: str) -> Any:
         cached = self._agents.get(thread_id)
         if cached is not None:
+            self._agents.move_to_end(thread_id)
             return cached
         async with self._create_lock:
             cached = self._agents.get(thread_id)
             if cached is not None:
+                self._agents.move_to_end(thread_id)
                 return cached
             config = prepare_agent_config(
                 self._config,
@@ -150,7 +158,15 @@ class ResponsesFacade:
                 await _safe_aclose(agent)
                 raise
             self._agents[thread_id] = agent
+            await self._evict_idle()
             return agent
+
+    async def _evict_idle(self) -> None:
+        """Закрыть самых давних простаивающих агентов сверх ``MAX_LIVE_AGENTS``.
+        Агент с идущим ходом не трогается."""
+        idle = [tid for tid in self._agents if tid not in self._busy]
+        for thread_id in idle[: max(0, len(self._agents) - MAX_LIVE_AGENTS)]:
+            await _safe_aclose(self._agents.pop(thread_id))
 
     def _begin(
         self, incoming: IncomingTurn, thread_id: str, cwd: str, agent: Any

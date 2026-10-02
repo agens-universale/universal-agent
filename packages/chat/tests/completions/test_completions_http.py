@@ -7,6 +7,9 @@ from gc_chat.completions.facade import CompletionsFacade
 from gc_chat.completions.history import SYSTEM
 from gc_chat.completions.http_api import create_app
 
+# Host-guard пускает только loopback (gc_chat.http_guard).
+LOOPBACK = "http://127.0.0.1"
+
 
 class _Agent:
     def __init__(self, threads: str) -> None:
@@ -97,7 +100,7 @@ def _content(chunks: list[dict]) -> str:
 
 def test_stream_wraps_trace_and_matches_non_stream(tmp_path):
     app, _agent, threads = _app(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     body = {
         "model": "GC-UA",
         "messages": [
@@ -142,7 +145,7 @@ def test_stream_wraps_trace_and_matches_non_stream(tmp_path):
 
 def test_models_and_missing_user(tmp_path):
     app, _agent, _threads = _app(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     models = client.get("/v1/models")
     assert models.status_code == 200
     ids = [item["id"] for item in models.json()["data"]]

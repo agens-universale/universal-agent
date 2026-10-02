@@ -44,11 +44,13 @@ gc-chat --config ./config.yml --profile <имя>
 | `chat_api.host` | `127.0.0.1` | Адрес bind. Пустая строка отклоняется при загрузке. |
 | `chat_api.port` | `8090` | Порт, 1–65535. |
 | `chat_api.auth_token` | `""` | Пусто — заголовок не проверяется. Иначе каждый запрос к `/v1/` несёт `Authorization: Bearer <token>`, иначе 401 `invalid_api_key`. |
-| `chat_api.cors_origins` | `[]` | Пусто — любой origin (`Access-Control-Allow-Origin: *`). Непусто — только эти origin, методы `GET`, `POST`, `OPTIONS`, заголовок `Authorization`. `"*"` из списка выбрасывается. Preflight с `Access-Control-Request-Private-Network` получает `Access-Control-Allow-Private-Network: true`. Страница чата открывается с порта этого процесса и CORS не использует; заголовок нужен чужим клиентам. |
+| `chat_api.cors_origins` | `[]` | Пусто — CORS выключен: API доступен своей странице и не-браузерным клиентам. Непусто — только эти origin, методы `GET`, `POST`, `DELETE`, `OPTIONS`, заголовки `Authorization`, `Content-Type`. `"*"` из списка выбрасывается: любой сайт в браузере пользователя запускал бы агента с shell. Preflight с `Access-Control-Request-Private-Network` получает `Access-Control-Allow-Private-Network: true`. Страница чата открывается с порта этого процесса и CORS не использует. |
 | `chat_api.launch_root` | `null` | Рабочий каталог нового хода, если в запросе нет абсолютного `metadata.cwd`. Относительный путь не используется: тогда берётся каталог процесса. |
 | `chat_api.text_answer_mode` | `allow` | `deny`, `judge` или `allow`. После загрузки пишется в runtime-ключ `text_answer_mode`. |
 | `chat_api.finish_gate_mode` | `off` | `off`, `on` или `smart`. Пишется в `strict_turn_finish_validation` (`true`, когда режим не `off`) и `finish_gate_smart` (`true` только для `smart`). |
 | `chat_api.todo_reminder_steps` | `0` | Напоминания про `session_todo`. `0` — не напоминать. Сам тул остаётся. Значение пишется в `todo_params.reminder_steps` этого процесса. |
+
+Защита от чужих сайтов в браузере (CSRF, DNS rebinding) действует всегда, токен её не заменяет: `POST` без `Content-Type: application/json` получает 415 — такой запрос браузер не шлёт без preflight. При bind на `127.0.0.1` или `localhost` заголовок `Host` должен быть `127.0.0.1` или `localhost`, иначе 400. При другом bind (например `0.0.0.0`) проверка `Host` выключена — закрывайте доступ токеном.
 
 Значения `off` и `on` в yaml пишите в кавычках: без них YAML читает их как boolean, и загрузка конфига падает.
 

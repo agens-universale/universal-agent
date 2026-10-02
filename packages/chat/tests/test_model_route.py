@@ -15,6 +15,9 @@ from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.http_api import create_app as create_responses
 from gc_chat.responses.index_store import ResponseIndex
 
+# Host-guard пускает только loopback (gc_chat.http_guard).
+LOOPBACK = "http://127.0.0.1"
+
 _URL = "http://llm.test/v1/chat/completions"
 
 
@@ -121,7 +124,7 @@ def _bearer(client: TestClient):
 
 def test_models_list_order_and_empty_config(tmp_path):
     app, _created, _threads = _completions(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     models = client.get("/v1/models", headers=_bearer(client))
     body = models.json()
     assert [item["id"] for item in body["data"]] == [
@@ -136,7 +139,9 @@ def test_models_list_order_and_empty_config(tmp_path):
     }
 
     empty, _created, _threads = _completions(tmp_path, model="")
-    listed = TestClient(empty).get("/v1/models", headers=_bearer(client))
+    listed = TestClient(empty, base_url=LOOPBACK).get(
+        "/v1/models", headers=_bearer(client)
+    )
     assert [item["id"] for item in listed.json()["data"]] == ["GC-UA"]
 
 
@@ -156,8 +161,8 @@ def test_joint_and_responses_list_the_same_ids(tmp_path):
         index=ResponseIndex(str(threads)),
     )
     completions = CompletionsFacade(config=config, agent_factory=factory)
-    joint = TestClient(create_joint(responses, completions))
-    alone = TestClient(create_responses(responses))
+    joint = TestClient(create_joint(responses, completions), base_url=LOOPBACK)
+    alone = TestClient(create_responses(responses), base_url=LOOPBACK)
     assert [item["id"] for item in joint.get("/v1/models").json()["data"]] == [
         "GC-UA",
         "backend-model",
@@ -188,7 +193,7 @@ def test_config_model_gc_ua_exits_before_bind(monkeypatch, capsys):
 def test_spaced_and_lower_model_is_not_the_agent(tmp_path, monkeypatch):
     seen = _install_backend(monkeypatch, httpx.Response(200, json={"id": "u"}))
     app, created, _threads = _completions(tmp_path, model=" GC-UA")
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     listed = [
         item["id"]
         for item in client.get("/v1/models", headers=_bearer(client)).json()[
@@ -222,7 +227,7 @@ def test_spaced_and_lower_model_is_not_the_agent(tmp_path, monkeypatch):
 
 def test_agent_turn_keeps_config_model(tmp_path):
     app, created, threads = _completions(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     response = client.post(
         "/v1/chat/completions",
         headers=_bearer(client),
@@ -271,7 +276,7 @@ def test_direct_forwards_body_and_backend_headers(tmp_path, monkeypatch):
     facade_config = app.state.completions_facade._config
     facade_config["cert_path"] = str(cert)
     facade_config["key_path"] = str(key)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     messages = [
         {"role": "system", "content": "sys"},
         {"role": "user", "content": [{"type": "text", "text": "hi"}]},
@@ -325,7 +330,7 @@ def test_direct_stream_is_backend_sse(tmp_path, monkeypatch, capsys):
     raw = b'data: {"id":"cmpl_upstream","choices":[]}\n\n'
     seen = _install_backend(monkeypatch, httpx.Response(200, content=raw))
     app, created, _threads = _completions(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     response = client.post(
         "/v1/chat/completions",
         headers=_bearer(client),
@@ -349,7 +354,7 @@ def test_direct_stream_is_backend_sse(tmp_path, monkeypatch, capsys):
 def test_foreign_model_does_not_call_backend(tmp_path, monkeypatch):
     seen = _install_backend(monkeypatch, httpx.Response(200, json={"id": "x"}))
     app, created, _threads = _completions(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     for model in (None, "", "other", "gc-ua", "GC-UA "):
         payload = {"messages": [{"role": "user", "content": "a"}]}
         if model is not None:
@@ -368,7 +373,7 @@ def test_foreign_model_does_not_call_backend(tmp_path, monkeypatch):
 def test_direct_rejects_bad_messages_and_auth(tmp_path, monkeypatch):
     seen = _install_backend(monkeypatch, httpx.Response(200, json={"id": "x"}))
     app, created, _threads = _completions(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     denied = client.post(
         "/v1/chat/completions",
         json={
@@ -395,7 +400,7 @@ def test_backend_error_and_transport_failure(tmp_path, monkeypatch):
         httpx.Response(422, json={"error": {"message": "bad model"}}),
     )
     app, created, _threads = _completions(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     body = {
         "model": "backend-model",
         "messages": [{"role": "user", "content": "a"}],
@@ -443,7 +448,7 @@ def test_responses_rejects_other_models_without_a_thread(tmp_path):
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )
-    client = TestClient(create_responses(facade))
+    client = TestClient(create_responses(facade), base_url=LOOPBACK)
     for model in ("backend-model", "other", "", "gc-ua"):
         response = client.post(
             "/v1/responses", json={"model": model, "input": "привет"}
@@ -500,6 +505,7 @@ async def test_direct_stream_cancel_closes_upstream(tmp_path, monkeypatch):
         "raw_path": b"/v1/chat/completions",
         "query_string": b"",
         "headers": [
+            (b"host", b"127.0.0.1"),
             (b"content-type", b"application/json"),
             (b"authorization", b"Bearer client-secret"),
         ],

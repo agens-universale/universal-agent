@@ -50,6 +50,7 @@ class CompletionsFacade:
         self._threads_dir = _threads_dir(config)
         self.auth_token = str(config.get("chat_api_auth_token") or "")
         self.cors_origins = _cors_origins(config)
+        self.bind_host = str(config.get("chat_api_host") or "127.0.0.1")
         self.model_id = str(config.get("model") or "")
         self._create_lock = asyncio.Lock()
 

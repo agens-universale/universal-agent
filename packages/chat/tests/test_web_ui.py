@@ -10,6 +10,9 @@ from gc_chat.completions.facade import CompletionsFacade
 from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.index_store import ResponseIndex, ResponseRecord
 
+# Host-guard пускает только loopback (gc_chat.http_guard).
+LOOPBACK = "http://127.0.0.1"
+
 _TOKEN = "client-secret"
 
 
@@ -94,7 +97,7 @@ def _user(text: str) -> dict:
 
 def test_root_is_html_without_token_and_hides_endpoint_fields(tmp_path):
     app, _index, _threads = _joint(tmp_path, token=_TOKEN)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     response = client.get("/")
     assert response.status_code == 200
     ctype = response.headers["content-type"]
@@ -155,7 +158,7 @@ def test_root_does_not_serve_the_workdir(tmp_path, monkeypatch):
     secret.write_text("SECRET-BYTES-XYZ", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
     app, _index, _threads = _joint(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     root = client.get("/")
     assert "SECRET-BYTES-XYZ" not in root.text
     leaked = client.get("/secret.txt")
@@ -208,7 +211,7 @@ def test_dialogs_group_by_thread_head_and_updated_order(tmp_path):
         "thread-new",
         [_user("  новый\nдиалог  ")],
     )
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     body = client.get("/v1/dialogs").json()
     assert [item["thread_id"] for item in body] == [
         "thread-new",
@@ -268,7 +271,7 @@ def test_dialogs_skip_foreign_threads_and_broken_index(tmp_path):
     os.makedirs(os.path.dirname(bad_jsonl), exist_ok=True)
     with open(bad_jsonl, "w", encoding="utf-8") as handle:
         handle.write("{not json}\n")
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     body = client.get("/v1/dialogs").json()
     ids = [item["thread_id"] for item in body]
     assert "kept" in ids
@@ -322,7 +325,7 @@ def test_dialog_title_follows_tui_prompt_and_task(tmp_path):
     )
     _save(index, n=3, thread_id="only-short", cwd=str(cwd), created=5)
     _jsonl(index, "only-short", [_user("ты тут?")])
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     by_id = {
         item["thread_id"]: item for item in client.get("/v1/dialogs").json()
     }
@@ -406,7 +409,7 @@ def test_dialog_title_reads_intent_log_after_summary(tmp_path):
     )
     with open(meta_path, "w", encoding="utf-8") as handle:
         handle.write("{not json")
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     by_id = {
         item["thread_id"]: item for item in client.get("/v1/dialogs").json()
     }
@@ -452,7 +455,7 @@ def test_dialog_feed_is_chain_order_with_text_and_output(tmp_path):
         output=output_b,
     )
     _jsonl(index, "chain", [_user("первый"), _user("второй")])
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     response = client.get("/v1/dialogs/chain")
     assert response.status_code == 200
     turns = response.json()
@@ -500,7 +503,7 @@ def test_folder_lists_one_level_without_tool_calls(tmp_path):
             )
         ],
     )
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     response = client.get("/v1/dialogs/files/artifacts")
     assert response.status_code == 200
     assert response.json() == {
@@ -592,7 +595,7 @@ def test_folder_marks_text_and_binary(tmp_path):
     split = b"a" * 8191 + "я".encode()
     (cwd / "split.txt").write_bytes(split)
     _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     by_name = {
         item["name"]: item
         for item in client.get("/v1/dialogs/files/artifacts").json()["entries"]
@@ -618,7 +621,7 @@ def test_download_returns_any_file_inside_cwd(tmp_path, capsys):
     outside.write_bytes(b"SECRET-FILE")
     (cwd / "link.txt").symlink_to(outside)
     _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     got = client.get(
         "/v1/dialogs/files/artifacts/download",
         params={"path": "note.txt"},
@@ -715,7 +718,7 @@ def test_mkdir_and_delete_stay_inside_cwd(tmp_path):
     (cwd / "out-link").symlink_to(outside)
     (nested / "escape").symlink_to(outside_dir)
     _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
 
     created = client.post(
         "/v1/dialogs/files/artifacts",
@@ -820,7 +823,7 @@ def test_workspace_lists_new_dialog_root(tmp_path, monkeypatch):
     outside.write_bytes(b"no")
     (root / "link.txt").symlink_to(outside)
     app, _index, _threads = _joint(tmp_path, launch_root=str(root))
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     listed = client.get("/v1/workspace/artifacts")
     assert listed.status_code == 200
     assert listed.json() == {
@@ -864,11 +867,15 @@ def test_workspace_lists_new_dialog_root(tmp_path, monkeypatch):
         == 404
     )
     missing = _joint(tmp_path, launch_root=str(tmp_path / "absent"))
-    absent = TestClient(missing[0]).get("/v1/workspace/artifacts")
+    absent = TestClient(missing[0], base_url=LOOPBACK).get(
+        "/v1/workspace/artifacts"
+    )
     assert absent.status_code == 404
     monkeypatch.chdir(tmp_path)
     (tmp_path / "here.txt").write_bytes(b"h")
-    process = TestClient(_joint(tmp_path)[0]).get("/v1/workspace/artifacts")
+    process = TestClient(_joint(tmp_path)[0], base_url=LOOPBACK).get(
+        "/v1/workspace/artifacts"
+    )
     assert process.json()["cwd"] == os.path.normpath(str(tmp_path))
     assert {
         "name": "here.txt",
@@ -877,7 +884,7 @@ def test_workspace_lists_new_dialog_root(tmp_path, monkeypatch):
         "text": True,
     } in process.json()["entries"]
     relative = TestClient(
-        _joint(tmp_path, launch_root="relative/path")[0]
+        _joint(tmp_path, launch_root="relative/path")[0], base_url=LOOPBACK
     ).get("/v1/workspace/artifacts")
     assert relative.json()["cwd"] == os.path.normpath(str(tmp_path))
     created = client.post(
@@ -905,7 +912,7 @@ def test_v1_dialogs_require_bearer_and_root_stays_open(tmp_path):
     (cwd / "note.txt").write_bytes(b"x")
     _save(index, n=1, thread_id="files", cwd=str(cwd), created=1)
     _jsonl(index, "files", [_user("есть")])
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     paths = [
         "/v1/dialogs",
         "/v1/dialogs/files",

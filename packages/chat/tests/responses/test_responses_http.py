@@ -6,6 +6,9 @@ from gc_chat.responses.facade import ResponsesFacade
 from gc_chat.responses.http_api import create_app
 from gc_chat.responses.index_store import ResponseIndex
 
+# Host-guard пускает только loopback (gc_chat.http_guard).
+LOOPBACK = "http://127.0.0.1"
+
 
 class _Agent:
     def __init__(self) -> None:
@@ -67,7 +70,7 @@ def _events(body: str) -> list[dict]:
 
 def test_stream_emits_created_delta_and_completed(tmp_path):
     app, _agent = _app(tmp_path)
-    client = TestClient(app)
+    client = TestClient(app, base_url=LOOPBACK)
     response = client.post(
         "/v1/responses",
         json={"model": "GC-UA", "input": "привет", "stream": True},
@@ -85,7 +88,7 @@ def test_stream_emits_created_delta_and_completed(tmp_path):
 
 def test_models_and_auth_and_cors(tmp_path):
     open_app, _agent = _app(tmp_path)
-    client = TestClient(open_app)
+    client = TestClient(open_app, base_url=LOOPBACK)
     models = client.get("/v1/models")
     assert models.status_code == 200
     ids = [item["id"] for item in models.json()["data"]]
@@ -101,11 +104,11 @@ def test_models_and_auth_and_cors(tmp_path):
             "Access-Control-Request-Headers": "authorization,content-type",
         },
     )
-    assert preflight.status_code == 200
-    assert preflight.headers["access-control-allow-origin"] == "*"
+    # Пустой cors_origins — CORS выключен: чужой origin ничего не получает.
+    assert "access-control-allow-origin" not in preflight.headers
 
     locked, _agent = _app(tmp_path, token="secret", origins=["http://ui"])
-    guarded = TestClient(locked)
+    guarded = TestClient(locked, base_url=LOOPBACK)
     denied = guarded.get("/v1/models")
     assert denied.status_code == 401
     assert denied.json()["error"]["code"] == "invalid_api_key"
@@ -146,7 +149,7 @@ def test_non_stream_failure_is_500(tmp_path):
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )
-    client = TestClient(create_app(facade))
+    client = TestClient(create_app(facade), base_url=LOOPBACK)
     response = client.post(
         "/v1/responses", json={"model": "GC-UA", "input": "x"}
     )
@@ -205,7 +208,7 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
     assert "/v1/responses" in paths
     assert "/v1/chat/completions" in paths
     assert "/v1/models" in paths
-    preflight = TestClient(captured["app"]).options(
+    preflight = TestClient(captured["app"], base_url=LOOPBACK).options(
         "/v1/models",
         headers={
             "Origin": "http://localhost:3000",
@@ -213,9 +216,7 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
             "Access-Control-Request-Private-Network": "true",
         },
     )
-    assert preflight.status_code == 200
-    assert preflight.headers["access-control-allow-origin"] == "*"
-    assert preflight.headers["access-control-allow-private-network"] == "true"
+    assert "access-control-allow-origin" not in preflight.headers
     out = capsys.readouterr()
     assert out.out == ""
     assert "без авторизации" in out.err
@@ -236,3 +237,52 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
         "GET " + origin + "/v1/workspace/artifacts/download",
     ):
         assert "gc-chat: " + line in out.err
+
+
+def test_foreign_site_cannot_start_turn(tmp_path):
+    """Simple-запрос браузера (text/plain, без preflight) не доходит до агента."""
+    app, agent = _app(tmp_path, origins=["http://ui"])
+    client = TestClient(app, base_url=LOOPBACK)
+    body = '{"model": "GC-UA", "input": "rm -rf ~"}'
+    sneaky = client.post(
+        "/v1/responses",
+        content=body,
+        headers={
+            "Content-Type": "text/plain",
+            "Origin": "https://evil.example",
+        },
+    )
+    assert sneaky.status_code == 415
+    assert agent.calls == []
+    form = client.post("/v1/chat/completions", data={"x": "1"})
+    assert form.status_code == 415
+
+
+def test_rebound_host_is_rejected(tmp_path):
+    """DNS rebinding: чужой домен на 127.0.0.1 приходит со своим Host."""
+    app, agent = _app(tmp_path)
+    rebound = TestClient(app, base_url="http://evil.example:8090")
+    response = rebound.post(
+        "/v1/responses", json={"model": "GC-UA", "input": "x"}
+    )
+    assert response.status_code == 400
+    assert agent.calls == []
+    local = TestClient(app, base_url="http://localhost:8090")
+    assert local.get("/v1/models").status_code == 200
+
+
+def test_wide_bind_skips_host_check(tmp_path):
+    """Bind не на loopback — проверка Host выключена, доступ держит токен."""
+    threads = tmp_path / "threads"
+    threads.mkdir()
+
+    async def factory(config, **kwargs):
+        return _Agent()
+
+    facade = ResponsesFacade(
+        config={"model": "m", "chat_api_host": "0.0.0.0"},
+        agent_factory=factory,
+        index=ResponseIndex(str(threads)),
+    )
+    client = TestClient(create_app(facade), base_url="http://gpu-box:8090")
+    assert client.get("/v1/models").status_code == 200
