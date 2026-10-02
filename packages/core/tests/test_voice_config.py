@@ -12,7 +12,7 @@ def test_voice_config_defaults():
     cfg = VoiceConfig()
     assert cfg.provider == "openai"
     assert cfg.url == ""
-    assert cfg.token == ""
+    assert cfg.token.get_secret_value() == ""
     assert cfg.model == "whisper-1"
     assert cfg.language == "ru"
     assert cfg.max_seconds == 120
@@ -32,7 +32,7 @@ def test_voice_in_app_config():
         {"voice": {"url": "https://x", "token": "k"}}
     )
     assert app_cfg.voice.url == "https://x"
-    assert app_cfg.voice.token == "k"
+    assert app_cfg.voice.token.get_secret_value() == "k"
 
 
 def test_voice_enabled_rules():

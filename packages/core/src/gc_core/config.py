@@ -23,12 +23,20 @@ from gc_core.config_modules.common import (
     swarm_env_updates,
 )
 from gc_core.config_modules.compat import apply_compat
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.cross_validation import cross_field_notices
+from gc_core.config_modules.env_interpolation import (
+    UnresolvedPlaceholdersError,
+    raise_unresolved,
+    resolve_env_placeholders,
+    resolve_env_placeholders_strict,
+    tag_layer,
+)
 from gc_core.config_modules.env_vars import project_gc_dir
 
 # Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
 # реестра спрашивает их напрямую, минуя агрегатор). Здесь — ре-экспорт: снаружи их
 # зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
+from gc_core.config_modules.field_meta import plain_dump
 from gc_core.config_modules.frozen import (  # noqa: F401
     FrozenConfigDict,
     derived_cache,
@@ -48,6 +56,7 @@ from gc_core.config_modules.layers import (  # noqa: F401
     validate_config_text_with_sections,
     validate_profile_text_with_sections,
 )
+from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
     ModelEntry,
     validate_registry_pairs,
@@ -178,10 +187,16 @@ def _cli_updates(
 
     Плоские имена прежнего ``config_dict`` (``max_steps``) переводятся по таблице,
     путь с точкой (``agent.max_steps``) берётся как есть.
+
+    ``${ENV:…}``/``${FILE:…}`` — строго, как у файлов при старте: незаданная
+    обязательная переменная → ``UnresolvedPlaceholdersError`` (``ValueError``) с
+    ключом ``--<param>``, а не тихая пустая строка.
     """
     from gc_core.config_modules.flat_keys import setting_path
 
-    resolved = resolve_env_placeholders(extra_overrides)
+    resolved = resolve_env_placeholders_strict(
+        extra_overrides, source="--param"
+    )
     trace_id = resolved.pop("trace_id", None)
     if "models" in resolved:
         # `--models` задаёт весь реестр строкой: то же правило пары, что у файлов.
@@ -342,7 +357,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "voice": {
             "provider": app_cfg.voice.provider,
             "url": app_cfg.voice.url,
-            "token": app_cfg.voice.token,
+            "token": app_cfg.voice.token.get_secret_value(),
             "model": app_cfg.voice.model,
             "language": app_cfg.voice.language,
             "max_seconds": app_cfg.voice.max_seconds,
@@ -452,8 +467,9 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "model_steering": app_cfg.agent.model_steering,
         "limit_trace_summary": app_cfg.agent.limit_trace_summary,
         "loop_detector": app_cfg.agent.loop_detector.model_dump(),
+        # Плоский вид несёт сырые значения секретов (token): его читают транспорты.
         "mcp-servers": {
-            name: server.model_dump(by_alias=True)
+            name: plain_dump(server, by_alias=True)
             for name, server in app_cfg.mcp.servers.items()
         },
         "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
@@ -570,36 +586,63 @@ def load_settings(
         raise ValueError(unreadable_reason(base_path, exc)) from exc
     # Дорезолвный вид держим для отказа правила пары: после подстановки от `${ENV:X}`
     # остаётся пустая строка, и назвать незаданную переменную уже нечем.
+    #
+    # `${ENV:…}`/`${FILE:…}` на старте — СТРОГО: неразрешённые обязательные
+    # ссылки всех слоёв (файл + dotted-ключ) копятся в `unresolved`, и загрузка
+    # отказывает списком сразу (`UnresolvedPlaceholdersError`) — вместо токена,
+    # молча ставшего пустой строкой и всплывшего потом 401-м от бэкенда.
+    # Необязательное значение помечается умолчанием: `${ENV:VAR:-}`.
+    unresolved: list = []
     base_before_env = raw_config
-    raw_config = resolve_env_placeholders(raw_config)
-    raw_base_after_env = raw_config
-    validate_registry_pairs(
-        raw_config, source=str(base_path), raw_source=base_before_env
+    raw_config = resolve_env_placeholders(
+        raw_config, unresolved=unresolved, source=str(base_path)
     )
+    tag_layer(unresolved, 0, layer="base")
+    try:
+        # Формат файла (`config_version`) — каждый слой поднимается до текущей
+        # версии сам (`migrations.migrate_document`), до мержа и схемы.
+        raw_config, migration_notices = migrate_document(
+            raw_config, source=str(base_path)
+        )
+        notices.extend(migration_notices)
+        raw_base_after_env = raw_config
+        if not unresolved:
+            validate_registry_pairs(
+                raw_config, source=str(base_path), raw_source=base_before_env
+            )
 
-    (
-        raw_config,
-        ref,
-        active_name,
-        roots,
-        managed_path,
-        project_path,
-        managed_raw,
-        _base_voice,
-        layer_documents,
-    ) = _merge_layers(
-        raw_config,
-        path,
-        profile_override=profile_override,
-        notices=notices,
-        # Пути слоёв добывает ЗАГРУЗЧИК — своими именами, теми же, что зовёт
-        # `profile_mtime_set` ниже и что подменяют тесты, глуша слои машины
-        # разработчика. Спроси их `_merge_layers` сам у модулей-владельцев —
-        # подмена бы не действовала, и «изолированный» тест читал бы реальный
-        # `~/.gc/config.local.yml` и проектный `.gc/config.yml`.
-        managed_path=mcp_paths.managed_config_path(),
-        project_path=env_vars.project_local_config_path(),
-    )
+        (
+            raw_config,
+            ref,
+            active_name,
+            roots,
+            managed_path,
+            project_path,
+            managed_raw,
+            _base_voice,
+            layer_documents,
+        ) = _merge_layers(
+            raw_config,
+            path,
+            profile_override=profile_override,
+            notices=notices,
+            # Пути слоёв добывает ЗАГРУЗЧИК — своими именами, теми же, что зовёт
+            # `profile_mtime_set` ниже и что подменяют тесты, глуша слои машины
+            # разработчика. Спроси их `_merge_layers` сам у модулей-владельцев —
+            # подмена бы не действовала, и «изолированный» тест читал бы реальный
+            # `~/.gc/config.local.yml` и проектный `.gc/config.yml`.
+            managed_path=mcp_paths.managed_config_path(),
+            project_path=env_vars.project_local_config_path(),
+            unresolved=unresolved,
+        )
+    except ValueError as exc:
+        # Отказ, случившийся ПОСЛЕ незаданной переменной (пустая строка не
+        # прошла схему профиля, профиль по указателю не нашёлся…), — следствие;
+        # человеку нужна причина, и она уже собрана.
+        if not isinstance(exc, UnresolvedPlaceholdersError):
+            raise_unresolved(unresolved)
+        raise
+    raise_unresolved(unresolved)
 
     mtime_set = _build_mtime_set(
         base_path, managed_path, project_path, active_name, roots
@@ -645,6 +688,9 @@ def load_settings(
             f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
         ) from exc
     _model_section_notices = validate_model_sections(app_cfg)
+    # Межполевые предупреждения — до `resolve_paths`: там явные значения
+    # подменяются выведенными умолчаниями (см. `cross_validation`).
+    _model_section_notices += cross_field_notices(app_cfg)
     app_cfg = resolve_paths(app_cfg, config_dir)
 
     meta = ProfileMeta(

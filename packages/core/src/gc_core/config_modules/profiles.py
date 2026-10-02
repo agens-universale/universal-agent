@@ -18,7 +18,11 @@ import yaml
 from pydantic import ValidationError
 
 from gc_core.config_modules.compat import apply_compat
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import (
+    resolve_env_placeholders,
+    tag_layer,
+)
+from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
     RESERVED_WORDS,
     validate_registry_pairs,
@@ -244,12 +248,21 @@ def load_profile_document(
     *,
     warn_literal_tokens: bool = False,
     notices: Optional[list[str]] = None,
+    unresolved: Optional[list] = None,
+    layer: str = "profile",
 ) -> dict:
     """Прочитать + провалидировать документ одного профиля (спека §3.4):
 
     YAML → (опционально) warning на литеральные токены → per-file env-интерполяция →
-    compat-слой → частичная валидация `AppConfig` (фаза 1, ссылочная целостность не
-    проверяется) → запрет ключа `profile:` внутри (анти-рекурсия, спека §3.2).
+    миграция формата (`config_version`) → compat-слой → частичная валидация
+    `AppConfig` (фаза 1, ссылочная целостность не проверяется) → запрет ключа
+    `profile:` внутри (анти-рекурсия, спека §3.2).
+
+    `unresolved` — строгий режим `${ENV:…}`/`${FILE:…}` (`config.load_settings`):
+    неразрешённые ссылки копятся туда с путём файла и слоем `layer`, а проверки
+    пары и схемы для такого документа пропускаются — загрузчик всё равно
+    откажет списком незаданных переменных, и вердикт по подставленным пустым
+    строкам был бы следствием, а не причиной.
     """
     raw = _read_yaml_document(path)
     if warn_literal_tokens and notices is not None:
@@ -258,7 +271,15 @@ def load_profile_document(
                 f"{path}: models.{alias}.token — литеральный токен в проектном профиле; "
                 f"используйте ${{ENV:VAR}} или наследование из базового конфига"
             )
-    raw = resolve_env_placeholders(raw)
+    start = len(unresolved) if unresolved is not None else 0
+    raw = resolve_env_placeholders(
+        raw, unresolved=unresolved, source=str(path)
+    )
+    if unresolved is not None:
+        tag_layer(unresolved, start, layer=layer)
+    raw, migration_facts = migrate_document(raw, source=str(path))
+    if notices is not None:
+        notices.extend(migration_facts)
     # Compat ДО схемы — как `load_config_ex` делает для базы. Схема с
     # extra="forbid" иначе роняет ВЕСЬ профиль на устаревшем ключе, который в
     # config.yml тихо выбрасывается с нотисом; а в профиль такой ключ попадает
@@ -267,6 +288,8 @@ def load_profile_document(
     for fact in apply_compat(raw):
         if notices is not None:
             notices.append(f"{path}: {fact}")
+    if unresolved is not None and len(unresolved) > start:
+        return raw
     # Пары «адрес+токен» — по СЫРОМУ документу и ДО схемы: слои сливаются позже,
     # и половина пары, наложенная на чужую полную, даёт корректный на вид итог,
     # пока токен базы уходит на адрес этого файла. Здесь же видно, чей это файл.
@@ -293,7 +316,7 @@ def validate_profile_text(text: str) -> None:
         raise ValueError(f"невалидный YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError("профиль должен быть YAML-документом (словарём)")
-    raw = resolve_env_placeholders(raw)
+    raw, _facts = migrate_document(resolve_env_placeholders(raw))
     apply_compat(raw)
     _validate_profile_document(raw)
 

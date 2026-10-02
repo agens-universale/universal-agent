@@ -9,7 +9,9 @@ from gc_core.config import (
     flat_config,
     load_settings,
 )
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import (
+    resolve_env_placeholders_strict,
+)
 from gc_core.utils.user_text import read_user_text
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -119,8 +121,11 @@ def load_server_config() -> Dict[str, Any]:
 
     # ${ENV:VAR} / ${FILE:path} — как в основном config.yml, чтобы серверные
     # секреты (server.auth_token и пр.) не приходилось держать в файле открытым
-    # текстом. Отсутствующий источник → пустая строка + warning, как везде.
-    raw = resolve_env_placeholders(raw)
+    # текстом. Строго, как у config.yml на старте: незаданная обязательная
+    # переменная — отказ старта (ValueError → SystemExit в server.py) с файлом и
+    # ключом, а не пустой auth_token, с которым сервер поднялся бы без
+    # авторизации. Необязательное значение — с умолчанием: ${ENV:VAR:-}.
+    raw = resolve_env_placeholders_strict(raw, source=str(cfg_path))
 
     # Гарантируем наличие ключевых секций.
     server_cfg = raw.get("server") or {}

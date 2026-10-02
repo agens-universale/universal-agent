@@ -4,6 +4,8 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gc_core.config_modules.field_meta import gc_meta
+
 DEFAULT_CURRENCY = "₽"
 DEFAULT_PER_TOKENS = 1_000_000
 
@@ -45,8 +47,12 @@ class PricingConfig(BaseModel):
     # Дефолтный тариф (fallback, когда модели нет в ``models``).
     input: Optional[float] = None
     output: Optional[float] = None
-    cache_read: Optional[float] = None
-    models: dict[str, ModelTariff] = Field(default_factory=dict)
+    cache_read: Optional[float] = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    models: dict[str, ModelTariff] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(expert=True)
+    )
 
 
 class ResolvedTariff(BaseModel):

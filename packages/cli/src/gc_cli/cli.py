@@ -15,6 +15,9 @@ from gc_core.config import (
     resolve_config_path,
     user_config_path,
 )
+from gc_core.config_modules.env_interpolation import (
+    UnresolvedPlaceholdersError,
+)
 from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
@@ -573,20 +576,32 @@ async def arun_cli() -> int:
         return 1
 
     # Единая точка применения CLI-override поверх config.yml.
-    loaded = apply_cli_overrides(
-        loaded,
-        extra_overrides=getattr(arg_parser, "extra_config_overrides", None),
-        write_guard_enabled=arg_parser.run_args.write_guard,
-        no_write_guard=arg_parser.run_args.no_write_guard,
-        command_moderation_mode=arg_parser.run_args.command_moderation,
-        read_guard_enabled=getattr(arg_parser.run_args, "read_guard", None),
-        no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
-        read_guard_mode=getattr(arg_parser.run_args, "read_guard_mode", None),
-        agentsmd_override=getattr(
-            arg_parser.run_args, "agentsmd_override", False
-        ),
-        trace_id=getattr(arg_parser.run_args, "trace_id", None),
-    )
+    try:
+        loaded = apply_cli_overrides(
+            loaded,
+            extra_overrides=getattr(
+                arg_parser, "extra_config_overrides", None
+            ),
+            write_guard_enabled=arg_parser.run_args.write_guard,
+            no_write_guard=arg_parser.run_args.no_write_guard,
+            command_moderation_mode=arg_parser.run_args.command_moderation,
+            read_guard_enabled=getattr(
+                arg_parser.run_args, "read_guard", None
+            ),
+            no_read_guard=getattr(arg_parser.run_args, "no_read_guard", False),
+            read_guard_mode=getattr(
+                arg_parser.run_args, "read_guard_mode", None
+            ),
+            agentsmd_override=getattr(
+                arg_parser.run_args, "agentsmd_override", False
+            ),
+            trace_id=getattr(arg_parser.run_args, "trace_id", None),
+        )
+    except UnresolvedPlaceholdersError as exc:
+        # `--param key='${ENV:X}'` с незаданной X — отказ, как у файлов на
+        # старте (`_cli_updates` резолвит строго), а не traceback.
+        print(f"[gc] {exc}", file=sys.stderr)
+        return 1
     # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
     # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
     force_legacy = cli_forces_legacy_model(loaded)
@@ -734,6 +749,12 @@ def main() -> int:
     """
     import asyncio
 
+    # `gc-cli config …` — без агента, MCP и сети (gc_core.config_command);
+    # парсер агента её пропускает (arg_parser.CONFIG_COMMAND).
+    if sys.argv[1:2] == ["config"]:
+        from gc_core.config_command import main as config_main
+
+        return config_main(sys.argv[2:], program="gc-cli")
     return asyncio.run(arun_cli())
 
 

@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, replace
-from typing import Any, Mapping, Optional, get_args, get_origin
+from typing import Any, Mapping, Optional
 
 from pydantic import BaseModel
 
+from gc_core.config_modules.field_meta import _nested_model
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.provenance import Provenance
 from gc_core.config_modules.root import AppConfig, resolve_paths
@@ -68,24 +69,11 @@ def _alias_path(model: type[BaseModel], path: list[str]) -> list[str]:
             continue
         info = fields[name]
         keys.append(info.alias or name)
-        annotation = info.annotation
-        nested = None
-        for candidate in (annotation, *get_args(annotation)):
-            if isinstance(candidate, type) and issubclass(
-                candidate, BaseModel
-            ):
-                nested = candidate
-                break
-        if nested is None and get_origin(annotation) is dict:
-            args = get_args(annotation)
-            value_type = args[1] if len(args) == 2 else None
-            if isinstance(value_type, type) and issubclass(
-                value_type, BaseModel
-            ):
-                # Следующий сегмент — ключ словаря, затем поля его модели.
-                current = _DictOf(value_type)
-                continue
-        current = nested
+        # Словарь моделей проверяется раньше вложенной модели: у
+        # ``dict[str, Model]`` модель лежит в аргументах аннотации, и иначе
+        # ключ записи (сервер MCP) съедался бы как поле.
+        kind, nested = _nested_model(info.annotation)
+        current = _DictOf(nested) if kind == "dict" else nested
     return keys
 
 

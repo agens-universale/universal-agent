@@ -49,6 +49,12 @@ def _force_truecolor_if_supported() -> None:
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
     """Entrypoint для `gc-ua = "tui:main"`."""
+    args_list = list(argv) if argv is not None else sys.argv[1:]
+    # `gc-ua config …` — до TUI: без textual, агента, MCP и сети.
+    if args_list[:1] == ["config"]:
+        from gc_core.config_command import main as config_main
+
+        return config_main(args_list[1:], program="gc-ua")
     _force_truecolor_if_supported()
     try:
         # importlib.import_module goes through sys.modules, not the package
@@ -96,9 +102,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         dest="auto_mcp",
         help="Не поднимать HTTP/SSE MCP-daemon'ы при старте",
     )
-    args, _unknown = parser.parse_known_args(
-        list(argv) if argv is not None else sys.argv[1:]
-    )
+    args, _unknown = parser.parse_known_args(args_list)
 
     # Паритет с gc-cli: создать <cwd>/.gc/ (project-local слой: config overlay,
     # project skills). Тихо игнорит отсутствие прав на запись в cwd.

@@ -773,6 +773,81 @@ def _workaround_lines(
     return lines
 
 
+def _unresolved_error(exc: BaseException):
+    """`UnresolvedPlaceholdersError` из исключения или его цепочки причин
+    (загрузчик бросает его сам, но вызывающий мог завернуть); иначе None."""
+    from gc_core.config_modules.env_interpolation import (
+        UnresolvedPlaceholdersError,
+    )
+
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        if isinstance(current, UnresolvedPlaceholdersError):
+            return current
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _unresolved_fix_lines(error) -> list[str]:
+    """Советы по незаданным источникам: по строке на переменную/файл, с местами,
+    где на них ссылаются (файл: ключ)."""
+    import os
+
+    places: Dict[tuple, list[str]] = {}
+    for ref in error.refs:
+        where = ": ".join(
+            part
+            for part in (
+                os.path.abspath(ref.source)
+                if ref.source and ref.source != "--param"
+                else ref.source,
+                ref.key,
+            )
+            if part
+        )
+        places.setdefault((ref.kind, ref.name), []).append(where)
+    lines: list[str] = []
+    for (kind, name), wheres in places.items():
+        refs = "; ".join(dict.fromkeys(wheres))
+        if kind == "env":
+            lines.append(
+                f"задать переменную окружения {name} (export {name}=…) — "
+                f"на неё ссылается: {refs}"
+            )
+        else:
+            lines.append(
+                f"создать файл {name} (или поправить ссылку) — на него "
+                f"ссылается: {refs}"
+            )
+    lines.append(
+        "либо, если значение необязательное, дописать умолчание в ссылку: "
+        "${ENV:VAR:-умолчание} (пустое — ${ENV:VAR:-})"
+    )
+    return lines
+
+
+def _exc_summary(exc: Exception) -> str:
+    """Короткая причина для однострочных сообщений лестницы починки: список
+    незаданных переменных вместо многострочного объяснения."""
+    unresolved = _unresolved_error(exc)
+    if unresolved is None:
+        return str(exc)
+    parts = []
+    if unresolved.env_names:
+        parts.append(
+            "не заданы переменные окружения: "
+            + ", ".join(unresolved.env_names)
+        )
+    files = list(
+        dict.fromkeys(r.name for r in unresolved.refs if r.kind == "file")
+    )
+    if files:
+        parts.append("не читаются файлы: " + ", ".join(files))
+    return "; ".join(parts)
+
+
 def explain_broken_config(
     config_path: str,
     exc: Exception,
@@ -859,20 +934,34 @@ def explain_broken_config(
     # `__cause__`: его `loc` точнее текста (заходит в списки и не ограничен
     # закрытым списком подозреваемых `error_keys`), и виновники ищутся по нему.
     # Сырой `ValidationError` первым аргументом — страховка на прямых вызовах.
-    error_text, keys = _broken_error_text_and_keys(exc)
-    culprits = key_origins(
-        config_path, keys, profile_override=profile_override
-    )
+    unresolved = _unresolved_error(exc)
+    if unresolved is not None:
+        # Незаданная переменная — не поломка файла: чинится окружением (или
+        # умолчанием `:-` в ссылке), и откат конфига к шаблону тут ничего не
+        # чинит, а модели/MCP/голос теряет. Обход без профиля — только когда
+        # все ссылки живут в профиле.
+        error_text = str(unresolved)
+        fix_lines = _unresolved_fix_lines(unresolved)
+        base_to_blame = False
+        if not all(
+            ref.layer.startswith("profile:") for ref in unresolved.refs
+        ):
+            active = None
+    else:
+        error_text, keys = _broken_error_text_and_keys(exc)
+        culprits = key_origins(
+            config_path, keys, profile_override=profile_override
+        )
 
-    fix_lines, base_to_blame = _fix_targets(
-        culprits,
-        keys,
-        config_path,
-        participants,
-        error_text,
-        flagged_profile_missing=flagged_profile_missing,
-        active=active,
-    )
+        fix_lines, base_to_blame = _fix_targets(
+            culprits,
+            keys,
+            config_path,
+            participants,
+            error_text,
+            flagged_profile_missing=flagged_profile_missing,
+            active=active,
+        )
 
     # Советы-команды целятся в ФАЙЛ СЕССИИ, а не в дефолтный (ревью M9): при
     # `--config <путь>` фиксированный `gc-cli --reset-config` сбрасывал ЧУЖОЙ
@@ -971,7 +1060,7 @@ def _refusal_message(
     pointer_shown = os.path.abspath(str(pointer_path))
     return (
         f"[gc] Мастер эту раскладку не починит: config.yml не читается и без "
-        f'профиля ({exc}), а профиль "{profile}" останется активным — стек '
+        f'профиля ({_exc_summary(exc)}), а профиль "{profile}" останется активным — стек '
         f"следующего старта отвергнет запись мастера целиком.\n"
         f"  Что сделать:\n"
         f"    • поправить файл руками:  {base_shown}\n"
@@ -1002,14 +1091,14 @@ def _repair_message(
     if stage == REPAIR_STAGE_WITHOUT_PROFILE:
         named = f' "{profile}"' if profile else ""
         text = (
-            f"config.yml не читается с профилем{named} ({exc}) — профиль снят на этот "
+            f"config.yml не читается с профилем{named} ({_exc_summary(exc)}) — профиль снят на этот "
             f"запуск, остальные ваши настройки (адрес, токен, реестр моделей) действуют."
         )
         if pinned_by:
             text += f" Указатель на профиль лежит в managed-файле {pinned_by} — мастер его не снимет, снять нужно там."
         return text
     return (
-        f"config.yml не читается ({exc}) — продолжаю на пакетном шаблоне: ваших "
+        f"config.yml не читается ({_exc_summary(exc)}) — продолжаю на пакетном шаблоне: ваших "
         f"настроек в мастере не видно. Ответы лягут в ваш файл точечно, целиком он "
         f"не переписывается, и поломка, которой они не касаются, останется — тогда "
         f"поправьте файл руками или сбросьте его: gc-cli --reset-config."

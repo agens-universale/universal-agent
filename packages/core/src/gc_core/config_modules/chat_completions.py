@@ -11,6 +11,7 @@ from pydantic import (
 )
 
 from gc_core.config_modules.backend import parse_chat_completions_max_tokens
+from gc_core.config_modules.field_meta import gc_meta
 
 DEFAULT_AUXILIARY_LLM_MAX_TOKENS = 24576
 # Judges (command_moderation, finish_gate / text_answer): запас под мысль модели.
@@ -79,6 +80,7 @@ class ChatCompletionsConfig(BaseModel):
     auxiliary_llm: ChatCompletionsLlmConfig = Field(
         default_factory=ChatCompletionsLlmConfig,
         validation_alias=AliasChoices("auxiliary_llm", "llm"),
+        json_schema_extra=gc_meta(expert=True),
     )
 
 

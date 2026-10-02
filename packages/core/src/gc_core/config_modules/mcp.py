@@ -5,7 +5,14 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    SecretStr,
     field_validator,
+)
+
+from gc_core.config_modules.field_meta import (
+    SecretText,
+    gc_meta,
+    masked_repr_args,
 )
 
 
@@ -50,17 +57,23 @@ class McpServerConfig(BaseModel):
     # `transport`: the protocol does not change, only the locus.
     execute_on: Literal["agent", "os_backend"] = "agent"
     url: str | None = None
-    token: str | None = None
+    token: SecretText | None = Field(
+        default=None, json_schema_extra=gc_meta(secret=True)
+    )
     # Дополнительные HTTP-headers для MCP HTTP/SSE транспортов.
     # Применяются для транспортов: http, sse, stream_http, stream_sse.
     # Если задан `headers.Authorization`, он переопределяет Authorization из `token`.
-    headers: dict[str, str] = Field(default_factory=dict)
+    headers: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(secret=True)
+    )
     server_name: str | None = Field(default=None, alias="server-name")
     description: str | None = None
     command: str | None = None
     args: list[str] = Field(default_factory=list)
     cwd: str | None = None
-    env: dict[str, str] = Field(default_factory=dict)
+    env: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(secret=True)
+    )
     persistent_session: bool = False
     persistent_session_close_tool: str | None = None
     # Whitelist тулов сервера. Нет блока / enabled=False → все тулы доступны;
@@ -95,6 +108,9 @@ class McpServerConfig(BaseModel):
     client_cert: str | None = Field(default=None, alias="client-cert")
     client_key: str | None = Field(default=None, alias="client-key")
 
+    def __repr_args__(self):
+        return masked_repr_args(self)
+
     @field_validator(
         "url",
         "token",
@@ -110,6 +126,9 @@ class McpServerConfig(BaseModel):
     def normalize_optional_text(cls, value: object) -> str | None:
         if value is None:
             return None
+        if isinstance(value, SecretStr):
+            # Повторная валидация дампа (override_settings): str() дал бы маску.
+            value = value.get_secret_value()
         text = str(value).strip()
         return text or None
 
@@ -204,5 +223,11 @@ class McpMetaConfig(BaseModel):
 
 class McpConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    servers: dict[str, McpServerConfig] = Field(default_factory=dict)
-    meta: McpMetaConfig = Field(default_factory=McpMetaConfig)
+    servers: dict[str, McpServerConfig] = Field(
+        default_factory=dict,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )
+    meta: McpMetaConfig = Field(
+        default_factory=McpMetaConfig,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )

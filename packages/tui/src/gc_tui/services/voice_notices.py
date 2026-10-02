@@ -57,12 +57,13 @@ def voice_notices(config_dict: Dict[str, Any]) -> List[Notice]:
 
     `config_dict` — настройки окна (`LoadedSettings`): признак перекрытия
     managed-слоем живёт в их рантайме, плоский словарь его не переносит."""
+    from gc_core.config_modules.field_meta import plain_dump
     from gc_core.config_modules.voice import (
         voice_enabled,
         voice_section_filled,
     )
 
-    voice = settings_of(config_dict).voice.model_dump()
+    voice = plain_dump(settings_of(config_dict).voice)
     if not voice_section_filled(voice):
         return []
     if not voice_enabled(voice):

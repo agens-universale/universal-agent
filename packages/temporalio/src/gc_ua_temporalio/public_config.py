@@ -11,6 +11,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from gc_core.config_modules.field_meta import meta_for
+from gc_core.config_modules.flat_keys import FLAT_TO_PATH
 from gc_core.usage.currency import provider_currency_for_url
 from pydantic import BaseModel
 
@@ -27,42 +29,38 @@ class PublicConfigSnapshot:
     model_provider_currencies: dict[str, str]
 
 
-# Explicitly worker/frontend-only. Contents are never traversed or serialized.
-WORKER_ONLY_FIELDS = frozenset(
+# Не настройки схемы: рантайм-объекты, кэши и служебные признаки плоского
+# config_dict, которые воркеру/фронтенду нужны, а в снимок попасть не должны.
+_WORKER_ONLY_RUNTIME_FIELDS = frozenset(
     [
-        "_subagent_definitions_cache",
-        "_subagent_diagnostics",
-        "agent_auth",
-        "auth_connector",
-        "backend_connection",
-        "cert_path",
-        "chat_completion_headers",
-        "client_name",
-        "compat_notices",
-        "completions_url",
-        "endpoint_presets",
-        "env",
-        "environment",
-        "harbor_exec_init",
-        "headers",
-        "key_path",
-        "mcp-meta",
-        "mcp-servers",
-        "os_backend_client",
-        "proxy",
-        "tools_cache",
-        "trace_header_enabled",
-        "trace_id_header_name",
-        "tui_bang_shell",
-        "tui_file_view",
-        "update",
-        "use_ssl",
-        "voice",
-        "voice_endpoint_presets",
-        "voice_overridden_by_managed",
-        "x_cl_id",
+        "_subagent_definitions_cache",  # кэш определений сабагентов
+        "_subagent_diagnostics",  # диагностика загрузки сабагентов
+        "auth_connector",  # живой AuthConnector (agent_auth)
+        "backend_connection",  # живое подключение к backend
+        "compat_notices",  # уведомления совместимости загрузчика
+        "env",  # окружение процесса
+        "environment",  # окружение исполнения
+        "headers",  # собранные заголовки запроса
+        "os_backend_client",  # живой клиент os_backend
+        "tools_cache",  # кэш MCP discovery
+        "voice_overridden_by_managed",  # признак перекрытия voice managed-слоем
     ]
 )
+
+
+def _schema_worker_only_fields() -> frozenset[str]:
+    """Плоские имена настроек, помеченных в схеме ``gc_meta(worker_only=True)``
+    (флаг секции — у всех её листьев)."""
+    return frozenset(
+        flat
+        for flat, path in FLAT_TO_PATH.items()
+        if meta_for(path).worker_only
+    )
+
+
+# Explicitly worker/frontend-only. Contents are never traversed or serialized.
+# Настройки — по флагу worker_only в схеме; прочее — явный список выше.
+WORKER_ONLY_FIELDS = _schema_worker_only_fields() | _WORKER_ONLY_RUNTIME_FIELDS
 
 
 def _fields(names: str) -> dict[str, str]:

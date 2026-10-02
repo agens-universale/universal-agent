@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from gc_core.config_modules.field_meta import gc_meta
+
 ALLOWED_COMMAND_MODES = {"allow", "ask", "deny"}
 ALLOWED_BINARY_READ_MODES = {"allow", "ask", "deny"}
 
@@ -39,6 +41,28 @@ def validate_read_guard_mode(raw_mode: Any) -> str:
     return mode
 
 
+def reject_blank_paths(values: list[str]) -> list[str]:
+    """Пустой/пробельный элемент в списке путей guard'а — ошибка схемы.
+
+    Пустая строка не «ничего»: путевые политики раскрывают её в ТЕКУЩИЙ
+    каталог процесса (`os.path.abspath("")`). В `read_guard.allowed_read_paths`
+    это снимало все запреты (`.env`, ключи) для всего cwd; в
+    `write_guard.extra_paths` — роняло каждую охраняемую запись
+    (`path must not be empty`); в `protected_paths.extra` — объявляло
+    защищённым весь cwd. Типичный источник — `${ENV:VAR}`, раскрывшийся в
+    пустоту, поэтому отказ называет индекс элемента; pydantic добавит путь
+    поля (`security.read_guard.allowed_read_paths: …`)."""
+    blank = [i for i, value in enumerate(values) if not str(value).strip()]
+    if blank:
+        indices = ", ".join(f"[{i}]" for i in blank)
+        raise ValueError(
+            f"пустой путь в списке (элемент {indices}) — пустая строка "
+            "раскрывается в текущий каталог процесса; уберите элемент или "
+            "впишите путь"
+        )
+    return values
+
+
 def validate_binary_read_policy(raw_mode: Any) -> str:
     mode = str(raw_mode if raw_mode is not None else "ask").strip().lower()
     if mode not in ALLOWED_BINARY_READ_MODES:
@@ -72,6 +96,11 @@ class WriteGuardConfig(BaseModel):
                 "security.write_guard.mode должен быть 'allow', 'ask' или 'deny'"
             )
         return mode
+
+    @field_validator("extra_paths")
+    @classmethod
+    def validate_extra_paths(cls, value: list[str]) -> list[str]:
+        return reject_blank_paths(value)
 
 
 class UrlPolicyConfig(BaseModel):
@@ -124,13 +153,19 @@ class ReadGuardConfig(BaseModel):
     denied_file_patterns: list[str] = Field(default_factory=list)
     denied_extensions: list[str] = Field(default_factory=list)
     # forward-compat: размер и бинарная политика (не enforce'ятся в v1).
-    max_file_size_kb: int = 1024
-    binary_read_policy: str = "ask"
+    max_file_size_kb: int = Field(
+        default=1024, json_schema_extra=gc_meta(expert=True)
+    )
+    binary_read_policy: str = Field(
+        default="ask", json_schema_extra=gc_meta(expert=True)
+    )
     binary_allowed_types: list[str] = Field(
-        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES)
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_TYPES),
+        json_schema_extra=gc_meta(expert=True),
     )
     binary_allowed_extensions: list[str] = Field(
-        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS)
+        default_factory=lambda: list(_DEFAULT_BINARY_ALLOWED_EXTENSIONS),
+        json_schema_extra=gc_meta(expert=True),
     )
 
     @field_validator("mode")
@@ -147,6 +182,13 @@ class ReadGuardConfig(BaseModel):
     @classmethod
     def validate_binary(cls, value: str) -> str:
         return validate_binary_read_policy(value)
+
+    @field_validator(
+        "allowed_read_roots", "allowed_read_paths", "denied_read_paths"
+    )
+    @classmethod
+    def validate_path_lists(cls, value: list[str]) -> list[str]:
+        return reject_blank_paths(value)
 
 
 class DownloadConfig(BaseModel):
@@ -193,6 +235,11 @@ class ProtectedPathsConfig(BaseModel):
     enabled: bool = True
     extra: list[str] = Field(default_factory=list)
 
+    @field_validator("extra")
+    @classmethod
+    def validate_extra(cls, value: list[str]) -> list[str]:
+        return reject_blank_paths(value)
+
 
 class SecurityConfig(BaseModel):
     """
@@ -214,7 +261,9 @@ class SecurityConfig(BaseModel):
     write_guard: WriteGuardConfig = Field(default_factory=WriteGuardConfig)
     read_guard: ReadGuardConfig = Field(default_factory=ReadGuardConfig)
     url_policy: UrlPolicyConfig = Field(default_factory=UrlPolicyConfig)
-    download: DownloadConfig = Field(default_factory=DownloadConfig)
+    download: DownloadConfig = Field(
+        default_factory=DownloadConfig, json_schema_extra=gc_meta(expert=True)
+    )
     protected_paths: ProtectedPathsConfig = Field(
         default_factory=ProtectedPathsConfig
     )

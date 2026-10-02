@@ -10,7 +10,10 @@ from typing import Literal
 from gc_core.config import flat_config
 from gc_core.config_modules import AppConfig
 from gc_core.config_modules.auth import build_auth_connector
-from gc_core.config_modules.env_interpolation import resolve_env_placeholders
+from gc_core.config_modules.env_interpolation import (
+    resolve_env_placeholders_strict,
+)
+from gc_core.config_modules.field_meta import REVEAL_SECRETS
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
@@ -52,8 +55,14 @@ class NativeWorkerConfig(BaseModel):
 
     @classmethod
     def load(cls, path):
+        # `${ENV:…}`/`${FILE:…}` — строго, как у core-конфига на старте:
+        # незаданная обязательная переменная роняет запуск воркера списком
+        # (файл + ключ), а не подставляет пустую строку в адрес или токен.
+        # Необязательное значение — с умолчанием: `${ENV:VAR:-}`.
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
-        return cls.model_validate(resolve_env_placeholders(raw))
+        return cls.model_validate(
+            resolve_env_placeholders_strict(raw, source=str(path))
+        )
 
 
 def _digest(value):
@@ -117,7 +126,11 @@ class NativeContextProvider:
             receipts.save_operation_result(
                 "__native_profiles__",
                 identity,
-                _digest(profile.model_dump(mode="json")),
+                # Дайджест — по сырым секретам: смена токена при той же
+                # ревизии обязана ловиться, а json-дамп SecretStr их маскирует.
+                _digest(
+                    profile.model_dump(mode="json", context=REVEAL_SECRETS)
+                ),
                 {"profile": name, "revision": profile.revision},
             )
 

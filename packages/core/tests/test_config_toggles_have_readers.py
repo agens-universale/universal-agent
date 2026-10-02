@@ -52,6 +52,11 @@ KNOWN_UNREAD: dict = {
     "agent.stored_tool_outputs_max_entries": "",
     # --- не упомянуты нигде, даже в demo-конфигах ---
     "mcp.meta.tools_cache_ttl": "",
+    # --- не настройка, а версия формата файла ---
+    # Читает её загрузчик по СЫРОМУ документу каждого слоя
+    # (config_modules/migrations.py — вне поиска этого гейта), до схемы; в
+    # настройках значение всегда текущее, и читателю там нечего узнавать.
+    "config_version": "версия формата, читает config_modules/migrations.py",
 }
 
 

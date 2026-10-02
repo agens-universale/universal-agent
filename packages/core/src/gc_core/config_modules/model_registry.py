@@ -13,9 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.field_meta import SecretText, gc_meta, secret_value
 from gc_core.config_modules.pricing import ModelTariff
 
 RESERVED_WORDS = ("light", "default", "max", "auto")
@@ -221,7 +222,9 @@ class ModelEntry(BaseModel):
 
     model: str | None = None
     url: str | None = None
-    token: str | None = None
+    token: SecretText | None = Field(
+        default=None, json_schema_extra=gc_meta(secret=True)
+    )
     pricing: ModelTariff | None = None
     backend: BackendConfig | None = None
 
@@ -307,13 +310,10 @@ class ModelEntry(BaseModel):
     def authorization_header(self) -> str | None:
         """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
         иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        if (
-            self.token is None
-            or not self.token
-            or self.token.startswith("Bearer ")
-        ):
-            return self.token
-        return f"Bearer {self.token}"
+        token = secret_value(self.token)
+        if token is None or not token or token.startswith("Bearer "):
+            return token
+        return f"Bearer {token}"
 
 
 class SlotsConfig(BaseModel):

@@ -7,6 +7,7 @@ import copy
 import logging
 from typing import Any, Dict, Optional
 
+from gc_core.config_modules.field_meta import plain_dump
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
 from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp.api import (
@@ -495,9 +496,10 @@ def _prepare_mcp_tools_data(
     if not settings.mcp.servers:
         return None
     # Ниже по слою (кэш, транспорты, ssl_config) конфиг сервера — словарь в
-    # проекции плоского вида: ключи по alias (`server-name`, `verify-ssl`, ...).
+    # проекции плоского вида: ключи по alias (`server-name`, `verify-ssl`, ...),
+    # секреты (token) — сырыми: транспорту нужен сам токен.
     servers_cfg: Dict[str, Any] = {
-        name: server.model_dump(by_alias=True)
+        name: plain_dump(server, by_alias=True)
         for name, server in settings.mcp.servers.items()
     }
     # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),

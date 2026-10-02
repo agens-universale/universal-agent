@@ -12,7 +12,6 @@
 """
 
 import os
-import re
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
 
@@ -23,10 +22,13 @@ from gc_core.config_modules import env_vars
 from gc_core.config_modules import env_vars as mcp_paths
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.env_interpolation import (
+    _FILE_MARKER,
     resolve_env_only,
     resolve_env_placeholders,
+    tag_layer,
 )
 from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
     RESERVED_WORDS,
     validate_registry_pairs,
@@ -173,8 +175,17 @@ def _overlay_layer(
     subject: str,
     *,
     require_file: bool,
+    layer: str = "",
+    unresolved: Optional[list] = None,
+    notices: Optional[list] = None,
 ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    """Наложить файловый слой; ``(merged, слой, слой до ${ENV})``."""
+    """Наложить файловый слой; ``(merged, слой, слой до ${ENV})``.
+
+    `unresolved` — строгий режим `${ENV:…}`/`${FILE:…}` (см. `load_settings`):
+    неразрешённые ссылки слоя копятся туда, а правило пары для такого слоя не
+    спрашивается — его вердикт по подставленным пустым строкам был бы следствием,
+    а не причиной, и заслонил бы полный список незаданных переменных. Миграция
+    формата (`migrate_document`) — после подстановки, факты — в `notices`."""
     if layer_path is None or os.path.abspath(
         str(layer_path)
     ) == os.path.abspath(base_path):
@@ -188,12 +199,21 @@ def _overlay_layer(
         else _readable_layer_document(layer_path, subject)
     )
     before_env = layer_raw
-    layer_raw = resolve_env_placeholders(layer_raw)
-    validate_registry_pairs(
-        layer_raw,
-        source=str(layer_path) if require_file else layer_path,
-        raw_source=before_env,
+    start = len(unresolved) if unresolved is not None else 0
+    layer_raw = resolve_env_placeholders(
+        layer_raw, unresolved=unresolved, source=str(layer_path)
     )
+    if unresolved is not None:
+        tag_layer(unresolved, start, layer=layer)
+    layer_raw, facts = migrate_document(layer_raw, source=str(layer_path))
+    if notices is not None:
+        notices.extend(facts)
+    if unresolved is None or len(unresolved) == start:
+        validate_registry_pairs(
+            layer_raw,
+            source=str(layer_path) if require_file else layer_path,
+            raw_source=before_env,
+        )
     return deep_merge(raw_config, layer_raw), layer_raw, before_env
 
 
@@ -204,6 +224,7 @@ def _overlay_profile(
     candidates,
     candidate_for,
     notices: list[str],
+    unresolved: Optional[list] = None,
 ) -> tuple[Dict[str, Any], Optional[ProfileRef], Dict[str, Any]]:
     """Наложить профиль по указателю; ``(merged, ref, документ профиля)``."""
     if not pointer:
@@ -222,6 +243,8 @@ def _overlay_profile(
             ref.path,
             warn_literal_tokens=(ref.root_kind == "project"),
             notices=notices,
+            unresolved=unresolved,
+            layer=f"profile:{pointer}",
         )
     )
     return deep_merge(raw_config, profile_raw), ref, profile_raw
@@ -236,6 +259,7 @@ def _merge_layers(
     notices: Optional[list[str]] = None,
     managed_path=_UNSET,
     project_path=_UNSET,
+    unresolved: Optional[list] = None,
 ) -> _Layers:
     """Наложить на базу слои, которые накладывает загрузка: managed → project →
     профиль по указателю (оси 1-2 спеки §3). База приходит уже прочитанной и
@@ -261,6 +285,12 @@ def _merge_layers(
     третьего вида структуры для точки, где кандидат применяется (профильный
     фолбэк выше перебирает тот же словарь по имени файла, а не по факту пути,
     так что словарь не создаёт для него разнобоя).
+
+    `unresolved` — строгий режим `${ENV:…}`/`${FILE:…}` (только `load_settings`):
+    неразрешённые обязательные ссылки КАЖДОГО слоя копятся в этот список (с
+    файлом, слоем и dotted-ключом), а бросает вызывающий — когда соберёт все.
+    `None` — прежний мягкий режим («пусто + warning»): pre-write валидации и
+    витрины судят запись, а не окружение текущего процесса.
 
     Сравнение путей — ОДНО правило на все три слоя, хотя вырученная им защита не
     везде одинаково нужна: у профиля путь неоднозначен (`profile_roots` ищет в
@@ -312,6 +342,9 @@ def _merge_layers(
         _candidate_for,
         "config.local.yml",
         require_file=True,
+        layer="managed",
+        unresolved=unresolved,
+        notices=notices,
     )
     if managed_raw:
         documents.append(
@@ -333,6 +366,9 @@ def _merge_layers(
         _candidate_for,
         "проектный config.yml",
         require_file=False,
+        layer="project",
+        unresolved=unresolved,
+        notices=notices,
     )
     if project_raw:
         documents.append(
@@ -355,7 +391,13 @@ def _merge_layers(
     )
     active_name: Optional[str] = pointer or None
     raw_config, ref, profile_raw = _overlay_profile(
-        raw_config, pointer, roots, _candidates, _candidate_for, notices
+        raw_config,
+        pointer,
+        roots,
+        _candidates,
+        _candidate_for,
+        notices,
+        unresolved,
     )
     if ref is not None:
         documents.append(
@@ -383,17 +425,23 @@ def _merge_layers(
 def _raw_from_text(
     text: str, subject: str = _CONFIG_FILENAME
 ) -> Dict[str, Any]:
-    """Текст → документ → ${ENV:VAR}. Отдельный шаг, потому что стековая фаза 2
-    накладывает слои на СЫРОЙ документ и зовёт compat один раз на итог мержа —
-    ровно как загрузчик; склеенный с ним `_app_config_from_text` compat применил
-    бы к слою поодиночке."""
+    """Текст → документ → ${ENV:VAR} → миграция формата (`config_version`).
+    Отдельный шаг, потому что стековая фаза 2 накладывает слои на СЫРОЙ документ
+    и зовёт compat один раз на итог мержа — ровно как загрузчик; склеенный с ним
+    `_app_config_from_text` compat применил бы к слою поодиночке.
+
+    `${ENV:…}` здесь мягкий (незаданная → пусто + warning), а не строгий, как у
+    `load_settings`: отсюда судят ЗАПИСЬ (pre-write валидация, стек следующего
+    старта), а не окружение этого процесса — ссылку на переменную, заданную в
+    окружении сервиса, а не в этом терминале, писать законно."""
     try:
         raw = yaml.safe_load(text) or {}
     except yaml.YAMLError as exc:
         raise ValueError(f"невалидный YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise ValueError(f"{subject} должен быть YAML-объектом")
-    return resolve_env_placeholders(raw)
+    raw, _facts = migrate_document(resolve_env_placeholders(raw))
+    return raw
 
 
 def _app_config_from_raw(raw: Dict[str, Any]) -> AppConfig:
@@ -674,7 +722,9 @@ def resolve_pointer_value(value) -> str:
 # отсутствующий) не зовёт полный резолвер вовсе (ревью N7, находка 4: без
 # кэша битый путь писал «credential file not readable» на каждый кадр).
 _POINTER_FILE_CACHE: list = [None]
-_POINTER_FILE_RE = re.compile(r"\$\{FILE:([^}]*)\}")
+_POINTER_FILE_RE = (
+    _FILE_MARKER  # group(1) — путь (умолчание ``:-`` — в group(2))
+)
 
 
 def _pointer_file_resolved(value: str) -> str:

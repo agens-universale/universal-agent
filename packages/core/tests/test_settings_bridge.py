@@ -8,8 +8,6 @@
 from types import SimpleNamespace
 
 import pytest
-from pydantic import ValidationError
-
 from gc_core.config import flat_config
 from gc_core.settings import (
     LoadedSettings,
@@ -21,6 +19,7 @@ from gc_core.settings import (
     settings_from_flat,
     settings_of,
 )
+from pydantic import ValidationError
 
 
 def _rich_settings():
@@ -109,3 +108,16 @@ def test_is_explicit_follows_fields_set_along_the_path():
     assert is_explicit(settings, "tui.finish_gate_mode")
     assert not is_explicit(settings, "tui.text_answer_mode")
     assert not is_explicit(default_settings(), "tui.finish_gate_mode")
+
+
+def test_override_reaches_aliased_field_inside_dict_of_models():
+    # У `dict[str, Model]` модель лежит в аргументах аннотации: ключ записи
+    # (имя сервера) не должен съедаться как поле, а поле — терять свой alias.
+    settings = override_settings(
+        default_settings(),
+        {"mcp.servers": {"x": {"transport": "stdio", "command": "echo"}}},
+    )
+    updated = override_settings(
+        settings, {"mcp.servers.x.server_name": "renamed"}
+    )
+    assert updated.mcp.servers["x"].server_name == "renamed"

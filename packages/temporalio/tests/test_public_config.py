@@ -27,6 +27,49 @@ def json_value(value):
     return value
 
 
+# Список до переезда в метаданные схемы (gc_meta(worker_only=True)): производный
+# набор обязан совпадать с ним дословно — переезд не меняет политику снимка.
+_WORKER_ONLY_FIELDS_BEFORE_META = frozenset(
+    [
+        "_subagent_definitions_cache",
+        "_subagent_diagnostics",
+        "agent_auth",
+        "auth_connector",
+        "backend_connection",
+        "cert_path",
+        "chat_completion_headers",
+        "client_name",
+        "compat_notices",
+        "completions_url",
+        "endpoint_presets",
+        "env",
+        "environment",
+        "harbor_exec_init",
+        "headers",
+        "key_path",
+        "mcp-meta",
+        "mcp-servers",
+        "os_backend_client",
+        "proxy",
+        "tools_cache",
+        "trace_header_enabled",
+        "trace_id_header_name",
+        "tui_bang_shell",
+        "tui_file_view",
+        "update",
+        "use_ssl",
+        "voice",
+        "voice_endpoint_presets",
+        "voice_overridden_by_managed",
+        "x_cl_id",
+    ]
+)
+
+
+def test_worker_only_fields_derived_from_schema_metadata_match_previous_list():
+    assert WORKER_ONLY_FIELDS == _WORKER_ONLY_FIELDS_BEFORE_META
+
+
 def test_every_real_flatten_field_is_explicitly_classified_and_policy_preserved():
     config = flatten_app_config(AppConfig())
     snapshot = public_config_snapshot(config)

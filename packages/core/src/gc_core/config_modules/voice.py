@@ -1,7 +1,8 @@
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, SecretStr
 
+from gc_core.config_modules.field_meta import SecretText, gc_meta
 from gc_core.utils.url_addr import same_service
 
 
@@ -17,8 +18,9 @@ class VoiceConfig(BaseModel):
     # значение, не ломая конфиги, где оно уже прописано.
     provider: Literal["openai"] = "openai"
     url: str = ""  # полный endpoint /v1/audio/transcriptions
-    token: str = (
-        ""  # Bearer; локальному сервису и открытым endpoint'ам не нужен
+    # Bearer; локальному сервису и открытым endpoint'ам не нужен.
+    token: SecretText = Field(
+        default=SecretStr(""), json_schema_extra=gc_meta(secret=True)
     )
     model: str = "whisper-1"
     language: str = "ru"

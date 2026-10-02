@@ -3,6 +3,10 @@
 import json
 from dataclasses import asdict
 
+import pytest
+from gc_core.config_modules.env_interpolation import (
+    UnresolvedPlaceholdersError,
+)
 from gc_ua_temporalio.native_contracts import NativeCall
 from gc_ua_temporalio.native_provider import NativeWorkerConfig
 from gc_ua_temporalio.native_worker import build_native_runtime
@@ -67,10 +71,7 @@ async def test_native_file_interpolates_credentials_before_validation_and_keeps_
     assert secret not in caplog.text
 
 
-def test_native_missing_env_uses_same_core_policy(
-    tmp_path, monkeypatch, caplog
-):
-    monkeypatch.delenv("NATIVE_UNSET_TOKEN", raising=False)
+def _native_with_header(tmp_path, value):
     path = tmp_path / "native.json"
     path.write_text(
         json.dumps(
@@ -82,9 +83,7 @@ def test_native_missing_env_uses_same_core_policy(
                         "workspace": str(tmp_path),
                         "core": {
                             "backend": {
-                                "chat_completion_headers": {
-                                    "X-Token": "${ENV:NATIVE_UNSET_TOKEN}"
-                                }
+                                "chat_completion_headers": {"X-Token": value}
                             }
                         },
                     }
@@ -92,9 +91,29 @@ def test_native_missing_env_uses_same_core_policy(
             }
         )
     )
+    return path
+
+
+def test_native_missing_env_uses_same_core_policy(tmp_path, monkeypatch):
+    """Строгость core-старта: незаданная обязательная переменная — отказ
+    загрузки с файлом и ключом, а не пустой заголовок."""
+    monkeypatch.delenv("NATIVE_UNSET_TOKEN", raising=False)
+    path = _native_with_header(tmp_path, "${ENV:NATIVE_UNSET_TOKEN}")
+    with pytest.raises(UnresolvedPlaceholdersError) as info:
+        NativeWorkerConfig.load(path)
+    message = str(info.value)
+    assert "NATIVE_UNSET_TOKEN" in message
+    assert str(path) in message
+    assert (
+        "profiles.test.core.backend.chat_completion_headers.X-Token" in message
+    )
+
+
+def test_native_optional_env_default_is_honoured(tmp_path, monkeypatch):
+    monkeypatch.delenv("NATIVE_UNSET_TOKEN", raising=False)
+    path = _native_with_header(tmp_path, "${ENV:NATIVE_UNSET_TOKEN:-}")
     config = NativeWorkerConfig.load(path)
     assert (
         "X-Token"
         not in config.profiles["test"].core.backend.chat_completion_headers
     )
-    assert "env var not set" in caplog.text

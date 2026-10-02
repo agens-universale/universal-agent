@@ -586,3 +586,277 @@ def test_screen_config_noop_when_file_untouched(tmp_path, monkeypatch):
     app.screen_config()
 
     assert calls == {"load": 0, "invalidate": 0}
+
+
+# --- атомарность перечитки: всё или ничего ----------------------------------------
+#
+# `reload_config` собирает новое состояние целиком (`_plan_reload`) и применяет его
+# одним движением (`_commit_reload`). Сбой на любом шаге после загрузки базы —
+# окно ровно в прежнем состоянии, причина — в `/notices`.
+
+_STATE_ATTRS = (
+    "_settings",
+    "_config",
+    "_session_overrides",
+    "_session_profile_cache",
+    "_effective_cache",
+    "_config_mtime_set",
+    "_restart_pins",
+    "_threads_dir",
+    "_config_generation",
+    "_profile_source",
+)
+
+
+def _state(app):
+    return {name: getattr(app, name) for name in _STATE_ATTRS}
+
+
+def _assert_same_state(before, after):
+    for name, value in before.items():
+        got = after[name]
+        if isinstance(value, (dict, int, str)) or value is None:
+            assert got == value, name
+        else:
+            assert got is value, name
+
+
+@pytest.fixture
+def _typed_app(tmp_path, monkeypatch):
+    """Окно, собранное как в main(): типизированные настройки из config.yml,
+    каталог тредов привязан на старте, путь связан."""
+    from gc_core.config import apply_cli_overrides, load_settings
+    from gc_core.config_modules import env_vars
+    from gc_core.config_modules.env_vars import EnvVars
+    from gc_core.runtime_notices import clear_runtime_notices
+    from gc_core.thread_store import resolve_threads_dir
+    from gc_tui.runtime_config import apply_tui_runtime
+
+    monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path / "gc_home"))
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.chdir(project)
+    (tmp_path / "profiles").mkdir()
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        'backend:\n  completions_url: "http://x/v1"\n'
+        f'paths:\n  threads_data_path: "{tmp_path / "threads"}"\n',
+        encoding="utf-8",
+    )
+    loaded = apply_tui_runtime(
+        apply_cli_overrides(load_settings(str(cfg_file)))
+    )
+    app = app_mod.TuiApp(
+        threads_dir=resolve_threads_dir(loaded),
+        system="cli",
+        settings=loaded,
+    )
+    app.set_config_path(str(cfg_file))
+    clear_runtime_notices()
+    return app, cfg_file
+
+
+def _url(loaded):
+    from gc_core.config import flat_config
+
+    return flat_config(loaded)["completions_url"]
+
+
+def _rewrite(cfg_file, url="http://y/v2", threads=None):
+    threads = threads or str(cfg_file.parent / "threads")
+    cfg_file.write_text(
+        f'backend:\n  completions_url: "{url}"\n'
+        f'paths:\n  threads_data_path: "{threads}"\n',
+        encoding="utf-8",
+    )
+    _bump_mtime(cfg_file)
+
+
+@pytest.mark.parametrize(
+    "step",
+    ["_mtime_set_for", "_build_effective_entry", "_flat"],
+)
+def test_reload_failing_after_base_load_changes_nothing(
+    _typed_app, monkeypatch, step
+):
+    """Сбой на шаге ПОСЛЕ загрузки базы: прежняя перечитка успевала подменить
+    `_settings`/`_config`/кэши до санации и снимка мтайма — окно оставалось
+    наполовину на новой базе. Теперь — ни одного изменённого поля, раннер не
+    тронут, notice `config_reload_failed`."""
+    from gc_core.runtime_notices import collect_runtime_notices
+
+    app, cfg_file = _typed_app
+    app.effective_settings()  # прогретый кэш — тоже часть состояния
+    runner = _FakeRunner(running=False)
+    app.active_runner = runner
+    before = _state(app)
+    _rewrite(cfg_file)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("сбой посреди перечитки")
+
+    if step == "_flat":
+        monkeypatch.setattr(app_mod, "_flat", boom)
+    elif step == "_build_effective_entry":
+        monkeypatch.setattr(app_mod.TuiApp, step, classmethod(boom))
+    else:
+        monkeypatch.setattr(app, step, boom)
+
+    app._reload_config_or_notice()  # путь гейта и сохранения из /settings
+
+    _assert_same_state(before, _state(app))
+    assert app.active_runner is runner
+    assert _url(app.effective_settings()) == "http://x/v1"
+    assert [n.code for n in collect_runtime_notices()] == [
+        "config_reload_failed"
+    ]
+    monkeypatch.undo()
+    app.reload_config_if_changed()  # снимок мтайма не сдвинут — следующая попытка
+    assert _url(app.effective_settings()) == "http://y/v2"
+
+
+def test_reload_failing_session_profile_step_keeps_session_choice(
+    _typed_app, monkeypatch
+):
+    """Сессия выбрала профиль; перечитка падает уже ПОСЛЕ пере-мержа профиля —
+    сессионный выбор, его кэш и предохранитель моделей остаются прежними."""
+    app, cfg_file = _typed_app
+    (cfg_file.parent / "profiles" / "work.yml").write_text(
+        'models:\n  w:\n    model: "w-m"\nslots:\n  default: "w"\n',
+        encoding="utf-8",
+    )
+    app.switch_session_profile("work")
+    app._circuit_breaker.trip("w", "5xx")
+    before = _state(app)
+    _rewrite(cfg_file)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("сбой")
+
+    monkeypatch.setattr(app, "_mtime_set_for", boom)
+    app._reload_config_or_notice()
+
+    _assert_same_state(before, _state(app))
+    assert app._session_overrides["profile"] == "work"
+    assert app._circuit_breaker.is_open("w")
+
+
+def test_reload_drops_session_override_invalid_under_new_base(_typed_app):
+    """Сессионный слой проверяется под новой базой: ключ, который не проходит
+    схему (мета треда старой версии), снимается с notice — а не роняет
+    перечитку и не оставляет окно на прежней базе."""
+    from gc_core.runtime_notices import collect_runtime_notices
+
+    app, cfg_file = _typed_app
+    app.load_session_overrides(
+        {"level": "bogus", "tui.text_answer_mode": "allow"}
+    )
+    _rewrite(cfg_file)
+
+    app.reload_config()
+
+    assert "level" not in app._session_overrides
+    assert app._session_overrides["tui.text_answer_mode"] == "allow"
+    assert app.effective_settings().settings.tui.text_answer_mode == "allow"
+    assert _url(app.effective_settings()) == "http://y/v2"
+    dropped = [
+        n
+        for n in collect_runtime_notices()
+        if n.code == "session_override_dropped"
+    ]
+    assert len(dropped) == 1 and '"level"' in dropped[0].message
+
+
+def test_restart_only_change_is_held_until_restart(_typed_app, tmp_path):
+    """`paths.threads_data_path` — restart-only (флаг схемы): перечитка его не
+    применяет. Каталог тредов окна и тот, куда пишет агент (действующие
+    настройки), остаются прежними — без раздвоения истории; база окна
+    (то, что правит /settings) показывает записанное; notice — один раз."""
+    from gc_core.runtime_notices import collect_runtime_notices
+
+    app, cfg_file = _typed_app
+    old_dir = app._threads_dir
+    new_dir = str(tmp_path / "elsewhere")
+    _rewrite(cfg_file, threads=new_dir)
+
+    app.reload_config()
+
+    assert app._threads_dir == old_dir
+    effective = app.effective_settings()
+    assert effective.settings.paths.threads_data_path == old_dir
+    assert app.effective_config()["threads_data_path"] == old_dir
+    assert _url(effective) == "http://y/v2"  # остальное применено
+    assert app._config["threads_data_path"] == new_dir
+    frozen = [
+        n for n in collect_runtime_notices() if n.code == "boot_frozen_pending"
+    ]
+    assert len(frozen) == 1
+    assert "paths.threads_data_path" in frozen[0].message
+
+    _rewrite(cfg_file, url="http://z/v3", threads=new_dir)
+    app.reload_config()  # то же ожидание — повторно не шумим
+    assert app._threads_dir == old_dir
+    assert (
+        len(
+            [
+                n
+                for n in collect_runtime_notices()
+                if n.code == "boot_frozen_pending"
+            ]
+        )
+        == 1
+    )
+
+
+def test_reader_during_reload_sees_one_consistent_snapshot(
+    _typed_app, monkeypatch
+):
+    """Сборка раннера (worker-поток) читает `effective_settings()` в любой
+    момент перечитки: посреди сборки нового состояния — целиком прежнее; читатель,
+    снявший снимок ДО применения и закончивший ПОСЛЕ, получает прежнее целиком и
+    не затирает своим результатом уже применённый кэш."""
+    import threading
+
+    app, cfg_file = _typed_app
+    app.load_session_overrides({"level": "max"})
+    app._effective_cache = None  # читатель обязан собирать сам
+    entered = threading.Event()
+    release = threading.Event()
+    real_build = app_mod.TuiApp._build_effective_entry.__func__
+
+    def gated(cls, base, overrides, pins):
+        if threading.current_thread().name == "reader":
+            entered.set()
+            release.wait(5)
+        return real_build(cls, base, overrides, pins)
+
+    monkeypatch.setattr(
+        app_mod.TuiApp, "_build_effective_entry", classmethod(gated)
+    )
+    seen = {}
+    reader = threading.Thread(
+        target=lambda: seen.setdefault("loaded", app.effective_settings()),
+        name="reader",
+    )
+    reader.start()
+    assert entered.wait(5)
+
+    mid_plan = []
+    real_mtime = app._mtime_set_for
+
+    def spy(name):
+        mid_plan.append(app.effective_settings())
+        return real_mtime(name)
+
+    monkeypatch.setattr(app, "_mtime_set_for", spy)
+    _rewrite(cfg_file)
+    app.reload_config()
+    release.set()
+    reader.join(5)
+
+    old = seen["loaded"]
+    assert _url(old) == "http://x/v1" and old.settings.level == "max"
+    assert [_url(x) for x in mid_plan] == ["http://x/v1"]
+    current = app.effective_settings()
+    assert _url(current) == "http://y/v2" and current.settings.level == "max"
+    assert app._effective_cache[1] is current  # кэш перечитки не затёрт

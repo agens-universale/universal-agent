@@ -1280,8 +1280,11 @@ class TraceScreen(Screen):
         Читаем из ЕДИНОЙ точки (`effective_config`), как витрины и сборка executor:
         база `app._config` не знает про сессионный слой, и профиль, выбранный на
         сессию, со своей секцией `voice` до диктовки бы не доехал."""
+        from gc_core.config_modules.field_meta import plain_dump
+
         settings = self.app.current_settings().settings
-        voice = settings.voice.model_dump()
+        # Сырой токен: транскрайбер шлёт его в заголовке Authorization.
+        voice = plain_dump(settings.voice)
         voice.setdefault("proxy", settings.backend.proxy)
         return voice
 

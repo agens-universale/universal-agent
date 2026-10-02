@@ -1,4 +1,5 @@
 import argparse
+import sys
 from typing import Any, Dict, List
 
 import yaml
@@ -76,6 +77,11 @@ parser = argparse.ArgumentParser(
   agent -q "напиши функцию сортировки списка"
   agent --query "как оптимизировать этот код?" --verbose
   agent -q "..." --model CodeChat --max_steps 50
+
+Конфиг (агент не запускается):
+  gc-cli config explain [KEY ...]   значение и источник настроек
+  gc-cli config validate            проверить, что конфиг собирается
+  gc-cli config schema              JSON Schema конфига
         """,
 )
 
@@ -304,62 +310,76 @@ parser.add_argument(
 )
 
 
-parsed_args, unknown_args = parser.parse_known_args()
-if (
-    not parsed_args.init_config
-    and not getattr(parsed_args, "init", False)
-    and not parsed_args.sync_config
-    and not getattr(parsed_args, "reset_config", False)
-    and not parsed_args.check_update
-    and not parsed_args.update
-    and not parsed_args.query
-):
-    parser.error(
-        "Нужен -q/--query "
-        "(или --init-config для конфига, --sync-config для обновления конфига, "
-        "--reset-config для сброса конфига, --init для AGENTS.md, "
-        "--check-update/--update для обновления агента)."
-    )
-if parsed_args.init_config and parsed_args.query:
-    parser.error(
-        "--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит."
-    )
-if parsed_args.sync_config and parsed_args.query:
-    parser.error(
-        "--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит."
-    )
-if parsed_args.reset_config and parsed_args.query:
-    parser.error(
-        "--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит."
-    )
-if parsed_args.init_config and parsed_args.sync_config:
-    parser.error(
-        "--init-config и --sync-config нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.reset_config and parsed_args.sync_config:
-    parser.error(
-        "--reset-config и --sync-config нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.reset_config and parsed_args.init_config:
-    parser.error(
-        "--reset-config и --init-config нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.check_update and parsed_args.query:
-    parser.error(
-        "--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит."
-    )
-if parsed_args.update and parsed_args.query:
-    parser.error(
-        "--update и -q/--query нельзя вместе: --update только запускает обновление и выходит."
-    )
-if parsed_args.update and parsed_args.check_update:
-    parser.error(
-        "--update и --check-update нельзя вместе: используйте одно из двух."
-    )
-if parsed_args.new and not parsed_args.thread_id:
-    parser.error(
-        "Аргумент -n/--new можно использовать только вместе с -t/--thread-id."
-    )
+#: `gc-cli config …` — отдельная команда (gc_core.config_command) со своим
+#: разбором argv: её уводит `cli.main` до старта агента. Парсер агента разбирается
+#: на импорте модуля, поэтому здесь он её не трогает — иначе импорт `gc_cli.cli`
+#: падал бы на «Нужен -q/--query» раньше, чем `main` успеет её увести.
+CONFIG_COMMAND = sys.argv[1:2] == ["config"]
+
+
+def _check_combinations(parsed_args: argparse.Namespace) -> None:
+    if (
+        not parsed_args.init_config
+        and not getattr(parsed_args, "init", False)
+        and not parsed_args.sync_config
+        and not getattr(parsed_args, "reset_config", False)
+        and not parsed_args.check_update
+        and not parsed_args.update
+        and not parsed_args.query
+    ):
+        parser.error(
+            "Нужен -q/--query "
+            "(или --init-config для конфига, --sync-config для обновления конфига, "
+            "--reset-config для сброса конфига, --init для AGENTS.md, "
+            "--check-update/--update для обновления агента)."
+        )
+    if parsed_args.init_config and parsed_args.query:
+        parser.error(
+            "--init-config и -q/--query нельзя вместе: --init-config только настраивает и выходит."
+        )
+    if parsed_args.sync_config and parsed_args.query:
+        parser.error(
+            "--sync-config и -q/--query нельзя вместе: --sync-config только обновляет файл и выходит."
+        )
+    if parsed_args.reset_config and parsed_args.query:
+        parser.error(
+            "--reset-config и -q/--query нельзя вместе: --reset-config только сбрасывает конфиг и выходит."
+        )
+    if parsed_args.init_config and parsed_args.sync_config:
+        parser.error(
+            "--init-config и --sync-config нельзя вместе: используйте одно из двух."
+        )
+    if parsed_args.reset_config and parsed_args.sync_config:
+        parser.error(
+            "--reset-config и --sync-config нельзя вместе: используйте одно из двух."
+        )
+    if parsed_args.reset_config and parsed_args.init_config:
+        parser.error(
+            "--reset-config и --init-config нельзя вместе: используйте одно из двух."
+        )
+    if parsed_args.check_update and parsed_args.query:
+        parser.error(
+            "--check-update и -q/--query нельзя вместе: --check-update только проверяет и выходит."
+        )
+    if parsed_args.update and parsed_args.query:
+        parser.error(
+            "--update и -q/--query нельзя вместе: --update только запускает обновление и выходит."
+        )
+    if parsed_args.update and parsed_args.check_update:
+        parser.error(
+            "--update и --check-update нельзя вместе: используйте одно из двух."
+        )
+    if parsed_args.new and not parsed_args.thread_id:
+        parser.error(
+            "Аргумент -n/--new можно использовать только вместе с -t/--thread-id."
+        )
+
+
+parsed_args, unknown_args = parser.parse_known_args(
+    [] if CONFIG_COMMAND else None
+)
+if not CONFIG_COMMAND:
+    _check_combinations(parsed_args)
 run_args = parsed_args
 extra_config_overrides = _parse_unknown_args(list(unknown_args))
 if parsed_args.level is not None:

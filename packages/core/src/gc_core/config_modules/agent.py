@@ -13,6 +13,7 @@ from gc_core.backends.protocol import (
     DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS,
     WALK_OUTPUT_MAX_CHARS,
 )
+from gc_core.config_modules.field_meta import gc_meta
 
 DEFAULT_FINISH_GATE_MAX_ITERATIONS = 10
 DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS = 3
@@ -37,51 +38,87 @@ class AgentConfig(BaseModel):
     subagent_max_steps: int = 100
     # Папка с файлами-определениями кастомных сабагентов. None/пусто → папка не
     # читается вовсе и доступны только встроенные классы.
-    subagents_dir: str | None = None
+    subagents_dir: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     # Предел числа подхватываемых кастомных сабагентов. ge=1: ноль означал бы
     # «папка задана, но агентов нет» — тихая и необъяснимая для оператора ситуация.
-    subagents_max_count: int = Field(default=20, ge=1)
-    client_name: str = "mini_cli_pub_agent_1"
-    x_cl_id: str = "12345"
+    subagents_max_count: int = Field(
+        default=20, ge=1, json_schema_extra=gc_meta(expert=True)
+    )
+    client_name: str = Field(
+        default="mini_cli_pub_agent_1",
+        json_schema_extra=gc_meta(worker_only=True),
+    )
+    x_cl_id: str = Field(
+        default="12345", json_schema_extra=gc_meta(worker_only=True)
+    )
     # Имя HTTP-заголовка для внешнего trace_id. None → дефолты по назначению:
     # x_trace_id для бэкенда модели, trace_id для MCP. Сам trace_id схемным
     # ключом НЕ является: это свойство вызова, а не конфигурации.
-    trace_id_header_name: str | None = None
+    trace_id_header_name: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
     # Отправлять ли внешний trace_id в заголовке к бэкенду модели. False
     # (дефолт) — не отправлять: рассылка трейса наружу строго opt-in, как и для
     # MCP-серверов. Гейтит только заголовок; имя лог-файла, записи логов и
     # meta.runtime.trace_ids работают независимо от него.
-    trace_header_enabled: bool = False
+    trace_header_enabled: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
     verbose: bool = True
     stop_tools: list[str] = Field(default_factory=list)
     # Список canonical id скиллов / паков, которые исключаются из SkillsRegistry
     # при загрузке. Пакет (`pack-id`) выбрасывает и bootstrap, и все inner.
     # Flat-скилл (`skill-id`) выбрасывает один скилл. Дедуп+concat при merge
     # с проектным overlay (project может только усилить запрет).
-    disable_skills: list[str] = Field(default_factory=list)
+    disable_skills: list[str] = Field(
+        default_factory=list, json_schema_extra=gc_meta(expert=True)
+    )
     server_tool_prefix: str = "system"
     max_steps: int = 1000
     # Per-run лимиты надёжности (None = выключено). Область — один ран,
     # как max_steps; сабагент наследует те же значения на свой ран.
-    session_token_limit: int | None = None
-    max_tool_calls: int | None = None
+    session_token_limit: int | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    max_tool_calls: int | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
     # Kill-switch для аварийной LLM-суммаризации трейса при лимите
     # (step_limit / tool_call_limit / token_limit). По умолчанию on.
     # См. docs_md/actual/2026-08-01-limit-trace-summary-spec.md
     limit_trace_summary: bool = True
     no_tool_call_max_count: int = 5
-    max_unknown_tool_repeats: int = 5
-    strict_turn_finish_validation: bool = True
-    finish_gate_max_iterations: int = DEFAULT_FINISH_GATE_MAX_ITERATIONS
-    subagent_finish_gate_max_iterations: int = (
-        DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
+    max_unknown_tool_repeats: int = Field(
+        default=5, json_schema_extra=gc_meta(expert=True)
     )
-    finish_gate_use_rule_hints: bool = False
-    limit_project_metadata: bool = False
-    tool_output_inline_max_chars: int = 20000
-    stored_tool_outputs_max_entries: int = 50
+    strict_turn_finish_validation: bool = True
+    finish_gate_max_iterations: int = Field(
+        default=DEFAULT_FINISH_GATE_MAX_ITERATIONS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    subagent_finish_gate_max_iterations: int = Field(
+        default=DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    finish_gate_use_rule_hints: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True)
+    )
+    limit_project_metadata: bool = Field(
+        default=False, json_schema_extra=gc_meta(expert=True)
+    )
+    tool_output_inline_max_chars: int = Field(
+        default=20000, json_schema_extra=gc_meta(expert=True)
+    )
+    stored_tool_outputs_max_entries: int = Field(
+        default=50, json_schema_extra=gc_meta(expert=True)
+    )
     # Таймаут execute_command / run_python_code, если модель не передала timeout.
-    exec_timeout_sec: int = DEFAULT_EXEC_TIMEOUT_SEC
+    exec_timeout_sec: int = Field(
+        default=DEFAULT_EXEC_TIMEOUT_SEC,
+        json_schema_extra=gc_meta(expert=True),
+    )
     # Потолок RAM-буфера stdout/stderr на поток (decoded UTF-8 chars) для exec:
     # L = head floor(L/2) + tail (L - floor(L/2)).
     exec_output_capture_max_chars: int = DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
@@ -92,15 +129,23 @@ class AgentConfig(BaseModel):
     # Общий потолок внутренних exec-каналов бэкенда (decoded chars): обход дерева
     # (Harbor: find -printf для walk/listdir), нативный grep, MCP-carrier под os_backend.
     # Переполнение — fail-closed: walk_too_large / McpExecCarrierError, не частичный ответ.
-    walk_output_max_chars: int = WALK_OUTPUT_MAX_CHARS
+    walk_output_max_chars: int = Field(
+        default=WALK_OUTPUT_MAX_CHARS, json_schema_extra=gc_meta(expert=True)
+    )
     # Инициализация model-facing exec в Harbor: None = raw, "bashrc" = встроенный
     # profile/bootstrap, любая другая непустая строка = custom shell-префикс.
-    harbor_exec_init: str | None = None
+    harbor_exec_init: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
     # Синтетические поля tool schema: имя → description. Отсутствует или {} — без инжекта.
-    inject_tool_fields: dict[str, str] = Field(default_factory=dict)
+    inject_tool_fields: dict[str, str] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(expert=True)
+    )
     # Steering-текст: при рендере system prompt дописывается в <special_instructions>
     # для любой активной модели (пока непустой). Пусто / omit — без инжекта.
-    model_steering: str = ""
+    model_steering: str = Field(
+        default="", json_schema_extra=gc_meta(expert=True)
+    )
     loop_detector: LoopDetectorConfig = Field(
         default_factory=LoopDetectorConfig
     )

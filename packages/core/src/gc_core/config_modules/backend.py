@@ -1,6 +1,8 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from gc_core.config_modules.field_meta import gc_meta, masked_repr_args
 
 DEFAULT_REQUEST_TIMEOUT_SEC = 600
 
@@ -37,28 +39,53 @@ class BackendConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     api_mode: str = "responses"
-    completions_url: str = ""
+    completions_url: str = Field(
+        default="", json_schema_extra=gc_meta(worker_only=True)
+    )
     chat_completions_max_tokens: int = 32768
-    chat_completions_min_response_tokens: int = 1024
-    chat_completion_headers: dict[str, str] = {}
-    chat_completion_kwargs: dict[str, Any] = {}
+    chat_completions_min_response_tokens: int = Field(
+        default=1024, json_schema_extra=gc_meta(expert=True)
+    )
+    # Секрет-словарь: ключи (имена заголовков) видны, значения маскируются.
+    chat_completion_headers: dict[str, str] = Field(
+        default={}, json_schema_extra=gc_meta(secret=True, worker_only=True)
+    )
+    chat_completion_kwargs: dict[str, Any] = Field(
+        default={}, json_schema_extra=gc_meta(expert=True)
+    )
     use_max_tokens_param: bool = False
     openai_strict_tools_schema: bool = False
     send_tool_strict: bool = True
     # Разметка prompt cache в запросах главного цикла: не задано → авто по id модели
     # (подстрока claude); true/false — принудительно включить/выключить (в т.ч. на
     # одну модель через models.<alias>.backend).
-    claude_prompt_cache: bool | None = None
-    use_ssl: bool | str = True
-    cert_path: str | None = None
-    key_path: str | None = None
+    claude_prompt_cache: bool | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True)
+    )
+    use_ssl: bool | str = Field(
+        default=True, json_schema_extra=gc_meta(worker_only=True)
+    )
+    cert_path: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
+    key_path: str | None = Field(
+        default=None, json_schema_extra=gc_meta(expert=True, worker_only=True)
+    )
     use_retry: bool = False
-    retry_embedded_choice_errors: bool = True
+    retry_embedded_choice_errors: bool = Field(
+        default=True, json_schema_extra=gc_meta(expert=True)
+    )
     # HTTP-таймаут одного запроса к LLM (connect + idle между чанками при stream).
     request_timeout_sec: int = DEFAULT_REQUEST_TIMEOUT_SEC
-    stream: bool = True
+    stream: bool = Field(default=True, json_schema_extra=gc_meta(expert=True))
     # HTTP/SOCKS-прокси для backend-вызовов. Пусто → из env (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY).
-    proxy: str | None = None
+    # Секрет: адрес прокси может нести учётные данные (http://user:pass@host).
+    proxy: str | None = Field(
+        default=None, json_schema_extra=gc_meta(secret=True, worker_only=True)
+    )
+
+    def __repr_args__(self):
+        return masked_repr_args(self)
 
     @field_validator("api_mode")
     @classmethod

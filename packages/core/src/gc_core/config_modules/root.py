@@ -20,6 +20,7 @@ from gc_core.config_modules.endpoint_presets import (
     EndpointPreset,
     default_endpoint_presets,
 )
+from gc_core.config_modules.field_meta import gc_meta, masked_repr_args
 from gc_core.config_modules.fs_tools import FsToolsConfig
 from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
@@ -30,6 +31,10 @@ from gc_core.config_modules.mcp import McpConfig
 from gc_core.config_modules.message_notice import (
     ToolUsageNoticeRule,
     normalize_tool_usage_notice_rules,
+)
+from gc_core.config_modules.migrations import (
+    current_config_version,
+    document_version,
 )
 from gc_core.config_modules.model_registry import (
     AssignConfig,
@@ -83,6 +88,10 @@ from gc_core.config_modules.working_memory import (
 class AgentAuthConfig(BaseModel):
     model_config = ConfigDict(extra="allow", frozen=True)
 
+    def __repr_args__(self):
+        # Ключи секции произвольны: секрет — каждое значение.
+        return masked_repr_args(self, all_fields=True)
+
 
 class AppConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -94,15 +103,22 @@ class AppConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     summary: SummaryConfig = Field(default_factory=SummaryConfig)
-    quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
+    quality_gate: QualityGateConfig = Field(
+        default_factory=QualityGateConfig,
+        json_schema_extra=gc_meta(expert=True),
+    )
     intent_scope: IntentScopeConfig = Field(default_factory=IntentScopeConfig)
     working_memory: WorkingMemoryConfig = Field(
-        default_factory=WorkingMemoryConfig
+        default_factory=WorkingMemoryConfig,
+        json_schema_extra=gc_meta(expert=True),
     )
     todo: TodoConfig = Field(default_factory=TodoConfig)
-    tool_usage_notice: list[ToolUsageNoticeRule] = Field(default_factory=list)
+    tool_usage_notice: list[ToolUsageNoticeRule] = Field(
+        default_factory=list, json_schema_extra=gc_meta(expert=True)
+    )
     project_memory: ProjectMemoryConfig = Field(
-        default_factory=ProjectMemoryConfig
+        default_factory=ProjectMemoryConfig,
+        json_schema_extra=gc_meta(expert=True),
     )
     paths: PathsConfig = Field(default_factory=PathsConfig)
     thread_store: ThreadStoreSettings = Field(
@@ -112,28 +128,64 @@ class AppConfig(BaseModel):
     mcp: McpConfig = Field(default_factory=McpConfig)
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
-    voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    voice: VoiceConfig = Field(
+        default_factory=VoiceConfig,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
+    )
     endpoint_presets: list[EndpointPreset] = Field(
-        default_factory=default_endpoint_presets
+        default_factory=default_endpoint_presets,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
     )
     voice_endpoint_presets: list[EndpointPreset] = Field(
-        default_factory=default_voice_endpoint_presets
+        default_factory=default_voice_endpoint_presets,
+        json_schema_extra=gc_meta(expert=True, worker_only=True),
     )
-    update: UpdateConfig = Field(default_factory=UpdateConfig)
+    update: UpdateConfig = Field(
+        default_factory=UpdateConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
     diff_tui: DiffTuiConfig = Field(default_factory=DiffTuiConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig
     )
-    agent_auth: AgentAuthConfig | None = None
+    # Корп-авторизация: ключи секции произвольны, секретом считается вся секция.
+    agent_auth: AgentAuthConfig | None = Field(
+        default=None,
+        json_schema_extra=gc_meta(secret=True, worker_only=True, expert=True),
+    )
+
+    # Версия формата файла (`config_modules/migrations.py`): нет ключа — 1.
+    # Загрузчик поднимает КАЖДЫЙ файл-слой до текущей версии до схемы, поэтому
+    # здесь значение всегда текущее; больше текущей — конфиг новее приложения.
+    config_version: int = Field(default_factory=current_config_version)
 
     # Профили v2 (волна A, фаза 1): реестр моделей + уровни + привязки + указатели.
     # Ссылочная целостность (слоты/привязки против merged-реестра) — фаза 2.
     profile: str = ""
     level: str = "default"
-    models: dict[str, ModelEntry] = Field(default_factory=dict)
-    slots: SlotsConfig = Field(default_factory=SlotsConfig)
-    assign: AssignConfig = Field(default_factory=AssignConfig)
+    models: dict[str, ModelEntry] = Field(
+        default_factory=dict, json_schema_extra=gc_meta(expert=True)
+    )
+    slots: SlotsConfig = Field(
+        default_factory=SlotsConfig, json_schema_extra=gc_meta(expert=True)
+    )
+    assign: AssignConfig = Field(
+        default_factory=AssignConfig, json_schema_extra=gc_meta(expert=True)
+    )
+
+    @field_validator("config_version", mode="before")
+    @classmethod
+    def _validate_config_version(cls, value: object) -> object:
+        # Та же проверка, что у загрузчика по сырому файлу (`document_version`):
+        # bool — не версия (pydantic принял бы True за 1), новее текущей — отказ.
+        try:
+            return document_version({"config_version": value})
+        except ValueError as exc:
+            # pydantic сам припишет координату — без повтора её в тексте.
+            raise ValueError(
+                str(exc).removeprefix("config_version: ")
+            ) from None
 
     @field_validator("level")
     @classmethod

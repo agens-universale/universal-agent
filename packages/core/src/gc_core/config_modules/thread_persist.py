@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+from gc_core.config_modules.field_meta import gc_meta
 
 
 class ThreadStoreSettings(BaseModel):
@@ -16,4 +18,6 @@ class ThreadStoreSettings(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
-    persist: Literal["step", "turn"] = "step"
+    persist: Literal["step", "turn"] = Field(
+        default="step", json_schema_extra=gc_meta(expert=True)
+    )

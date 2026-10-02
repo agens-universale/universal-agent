@@ -724,11 +724,15 @@ def test_boot_frozen_diff_notice_on_profile_switch(tmp_path):
         {"paths": {"threads_data_path": threads_override}},
     )
     app = _app_with_base(tmp_path)
-    assert app.effective_config()["threads_data_path"] != threads_override
+    boot_value = app.effective_config()["threads_data_path"]
+    assert boot_value != threads_override
 
     app.switch_session_profile("work")
 
-    assert app.effective_config()["threads_data_path"] == threads_override
+    # Restart-only: профиль просит другой каталог, но процесс держит
+    # привязанный на старте — и окно, и агент пишут треды в одно место.
+    assert app.effective_config()["threads_data_path"] == boot_value
+    assert app._threads_dir == str(tmp_path / "threads")
     codes = [n.code for n in collect_runtime_notices()]
     assert "boot_frozen_pending" in codes
     msg = next(
