@@ -187,10 +187,7 @@ def test_special_agent_role_generation_declares_own_consumer(monkeypatch):
     instance = _create_instance()
     run_coro(instance.afinalize_role(ctx, _state()))
 
-    assert [c.args[0] for c in router.resolve.call_args_list] == [
-        "subagent:subagent_special_agent",
-        "subagent:subagent_special_agent",
-    ]
+    router.resolve.assert_called_once_with("subagent:subagent_special_agent")
 
 
 def test_special_agent_role_generation_uses_configured_max_tokens_default(

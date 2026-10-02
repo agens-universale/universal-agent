@@ -8,7 +8,6 @@ from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.model_router import (
     AliasCircuitOpenError,
     ResolvedModel,
-    completion_section,
 )
 from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
@@ -176,12 +175,12 @@ def _build_chat_completion_payload(
     max_tokens: int,
     payload_overrides: Optional[Dict[str, Any]] = None,
     resolved: Optional[ResolvedModel] = None,
-    consumer: str = "summary",
 ) -> Dict[str, Any]:
     cfg = getattr(ctx, "config_dict", {}) or {}
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
-    # finish-gate, компакция памяти) — инструменты не использует. Пустой
-    # "tools": [] — бессмысленный шум; для plain-completion ключ опускаем.
+    # finish-gate, генерация роли, компакция памяти) — инструменты не
+    # использует. Пустой "tools": [] — бессмысленный шум; для plain-completion
+    # ключ опускаем.
     model = (
         resolved.model
         if resolved is not None
@@ -201,11 +200,12 @@ def _build_chat_completion_payload(
     else:
         payload["max_completion_tokens"] = max_tokens
 
-    # Секция той модели, которой уходит этот запрос. При откате на запасную
+    # Секцию задаёт функция вызова, не id потребителя. Этот клиент — служебный
+    # one-shot, поэтому всегда ``auxiliary`` той модели, которой уходит запрос.
+    # Диалог и цикл субагента собираются в connect_backend и читают ``main``.
+    # ``consumer`` выбирает алиас выше по стеку. При откате на запасную
     # ``resolved`` уже активная: словарь мёртвого алиаса сюда не подмешивается.
-    extra = effective_completion_kwargs(
-        resolved, cfg, section=completion_section(consumer)
-    )
+    extra = effective_completion_kwargs(resolved, cfg, section="auxiliary")
     if isinstance(extra, dict) and extra:
         for key, value in extra.items():
             if key in _PROTECTED_CHAT_COMPLETION_KEYS:
@@ -247,7 +247,6 @@ async def _asend_chat_completion_text(
     request_label: str,
     payload_overrides: Optional[Dict[str, Any]],
     resolved: Optional[ResolvedModel],
-    consumer: str,
 ) -> ChatCompletionText:
     cfg = getattr(ctx, "config_dict", {}) or {}
     log_params = cfg.get("logging_params")
@@ -265,7 +264,6 @@ async def _asend_chat_completion_text(
             max_tokens=requested_max_tokens,
             payload_overrides=payload_overrides,
             resolved=resolved,
-            consumer=consumer,
         )
 
     _min_response_tokens_override = backend_override_value(
@@ -351,7 +349,6 @@ async def arequest_chat_completion_outcome(
         max_tokens=max_tokens,
         request_label=request_label,
         payload_overrides=payload_overrides,
-        consumer=consumer,
     )
     if router is None:
         return await send(resolved=None)

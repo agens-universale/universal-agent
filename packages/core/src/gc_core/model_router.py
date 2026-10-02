@@ -38,15 +38,6 @@ CONSUMERS = (
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
 
 
-def completion_section(consumer: str) -> str:
-    """Какую секцию kwargs читает вызов: основной и субагент — ``main``,
-    служебный (summary, судьи, finish_gate, intent_scope и прочие assign) —
-    ``auxiliary``."""
-    if consumer == "main" or consumer.startswith(SUBAGENT_CONSUMER_PREFIX):
-        return "main"
-    return "auxiliary"
-
-
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
 # кроме subagents-словаря и запрещённого main).
 _SCALAR_ASSIGN_FIELDS = (

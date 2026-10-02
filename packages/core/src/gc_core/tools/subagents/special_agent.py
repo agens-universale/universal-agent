@@ -184,9 +184,9 @@ class SpecialAgent(AbstractSubagent):
     async def afinalize_role(self, ctx: Any, state: Any) -> None:
         """Нативная форма: LLM-вызов идёт на loop вызывающего, без потока.
 
-        Роль генерируется через aux chat/completions (профиль kwargs +
-        strip_think); зовётся runner'ом после сборки child-контекста — нужны
-        ``ctx.model_router`` и сетевые параметры для Bearer.
+        Роль генерируется через aux chat/completions: модель субагента, секция
+        ``auxiliary`` и strip_think. Зовётся runner'ом после сборки
+        child-контекста — нужны ``ctx.model_router`` и сетевые параметры для Bearer.
         """
         self.agent_role = await self._agenerate_role(ctx, state)
 

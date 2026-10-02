@@ -23,7 +23,6 @@ def test_summary_payload_uses_global_auxiliary_when_section_is_absent():
         state=SimpleNamespace(default_model="m"),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=32,
-        consumer="summary",
     )
     assert payload["separate_reasoning"] is False
     assert payload["chat_template_kwargs"] == {"enable_thinking": False}

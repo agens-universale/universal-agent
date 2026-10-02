@@ -37,7 +37,6 @@ def _aux_payload(cfg: dict, consumer: str, *, level: str = "default") -> dict:
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=32,
         resolved=router.resolve(consumer),
-        consumer=consumer,
     )
 
 
@@ -224,15 +223,19 @@ def test_summary_finish_gate_and_subagent_read_different_sections():
     assert planner["chat_template_kwargs"]["thinking"] is True
     assert planner["chat_template_kwargs"]["reasoning_effort"] == "high"
 
+    # Черновик роли — тот же text-only клиент. Модель субагента, секция auxiliary.
     role = _build_chat_completion_payload(
         ctx=SimpleNamespace(config_dict=cfg),
         state=SimpleNamespace(default_model="legacy"),
         messages=[{"role": "user", "content": "hi"}],
         max_tokens=32,
         resolved=router.resolve("subagent:subagent_code_planner"),
-        consumer="subagent:subagent_code_planner",
     )
-    assert role["chat_template_kwargs"]["thinking"] is True
+    assert role["temperature"] == 0.2
+    assert role["chat_template_kwargs"] == {
+        "thinking": False,
+        "reasoning_effort": "none",
+    }
 
 
 def test_unset_auxiliary_keeps_the_global_aux_dict_not_main():
