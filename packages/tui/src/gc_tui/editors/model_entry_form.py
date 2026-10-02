@@ -52,7 +52,7 @@ from gc_core.onboarding_fields import (
 )
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import Vertical, VerticalScroll
+from textual.containers import Vertical
 from textual.css.query import NoMatches
 from textual.widget import Widget
 from textual.widgets import Input, Static, TextArea
@@ -153,7 +153,7 @@ KWARGS_HINT = """\
 `chat_completions.auxiliary_llm.completion_kwargs` для auxiliary).
 Явный `{}` — не слать этих ключей, их выбирает сервер модели.
 
-Сэмплинг, общий для семей. У части моделей OpenAI (например gpt-5.5) `temperature`
+Сэмплинг, общий для семейств моделей. У части моделей OpenAI (например gpt-5.5) `temperature`
 принимает только 1. `top_k`, `min_p`, `repetition_penalty` — vLLM и похожие, не
 каждый прокси.
 
@@ -166,7 +166,9 @@ tool_choice: auto
 # repetition_penalty: 1.2
 ```
 
-Qwen / vLLM. Выключить рассуждение:
+Qwen / vLLM.
+
+Выключить рассуждение:
 
 ```yaml
 temperature: 1.0
@@ -188,7 +190,9 @@ chat_template_kwargs:
   enable_thinking: true
 ```
 
-GLM / DeepSeek-style. Выключить:
+GLM / DeepSeek-style.
+
+Выключить рассуждение:
 
 ```yaml
 temperature: 1.0
@@ -199,7 +203,7 @@ chat_template_kwargs:
   reasoning_effort: none
 ```
 
-Слабее и сильнее:
+Слабее и сильнее рассуждения:
 
 ```yaml
 temperature: 1.0
@@ -273,14 +277,12 @@ tool_choice: auto
 который понимает этот бэкенд. Для Qwen это `enable_thinking: false`, для GLM —
 `thinking: false` и `reasoning_effort: none`, для OpenAI — `reasoning_effort: none`.
 
-В корабельных примерах та же форма файла: у модели с thinking в `main` секция
-`auxiliary` — off.
-
 Поле `backend` — транспорт этой модели поверх общего подключения, не тело
-запроса. Пустое поле снимает секцию: действуют общий таймаут, SSL, прокси и
-лимит. Записанный ключ переписывает только себя, остальные остаются общими.
+запроса. Пустое поле означает использование дефолтов конфига:
+действуют общий таймаут, SSL, прокси и лимит.
+Записанный ключ переписывает только себя, остальные ключи берутся с конфига.
 
-Можно ставить: __BACKEND_KEYS__
+Можно ставить:
 
 `use_max_tokens_param: false` — в тело пишется `max_completion_tokens`,
 `true` — `max_tokens`. `completions_url` — второе написание адреса: вместе с
@@ -516,9 +518,6 @@ class ModelEntryForm(Vertical):
     DEFAULT_CSS = """
     ModelEntryForm TextArea.mef-yaml {
         height: 5;
-    }
-    ModelEntryForm #mef-kwargs-hint-scroll {
-        height: 8;
     }
     ModelEntryForm #mef-kwargs-hint {
         height: auto;
@@ -1208,13 +1207,14 @@ class ModelEntryForm(Vertical):
             id="mef-backend",
             classes="mef-yaml",
         )
-        with VerticalScroll(id="mef-kwargs-hint-scroll"):
-            yield Static(
-                KWARGS_HINT,
-                id="mef-kwargs-hint",
-                classes=_CLS_ONB_HINT_ONB_DYN,
-                markup=False,
-            )
+        # Подсказка — обычный текст формы, без своего скролла: длинный блок
+        # уезжает вниз вместе со страницей в общем окне (#set-scroll).
+        yield Static(
+            KWARGS_HINT,
+            id="mef-kwargs-hint",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+            markup=False,
+        )
         yield Static(
             connection_line_text(None),
             id="mef-probe-line",

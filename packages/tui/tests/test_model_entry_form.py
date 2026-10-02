@@ -2858,7 +2858,9 @@ async def test_yaml_fields_round_trip_and_reject_bad_input():
         assert main.text.rstrip() == safe_yaml_dump(saved).rstrip("\n")
         assert "{" not in main.text
         assert aux.text.strip() == "{}"
-        hint = str(form.query_one("#mef-kwargs-hint", Static).render())
+        hint_widget = form.query_one("#mef-kwargs-hint", Static)
+        assert hint_widget.parent is form
+        hint = str(hint_widget.render())
         assert "Поля `main` и `auxiliary`" in hint
         assert "enable_thinking: false" in hint
         assert main.text == safe_yaml_dump(saved).rstrip(
