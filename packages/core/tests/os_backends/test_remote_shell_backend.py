@@ -223,3 +223,10 @@ async def test_fs_ops_have_a_timeout():
 def test_ssh_prefix_has_connect_timeout_and_keepalive(tmp_path):
     pre = ssh_argv_prefix({"ssh": {"host": "h"}}, control_dir=tmp_path)
     assert "ConnectTimeout=10" in pre and "ServerAliveInterval=15" in pre
+
+
+async def test_capability_probes_work(be):
+    # FsBackend._cap(name, cache_attr) — общий кэш проб; свой `_cap` на бэкенде
+    # перекрывал его, и `has_find` падал с TypeError (поймано docker live).
+    await be.awarm_capabilities()
+    assert isinstance(be.has_find, bool) and isinstance(be.has_grep, bool)

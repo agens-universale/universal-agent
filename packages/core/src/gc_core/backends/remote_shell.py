@@ -84,7 +84,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             capture_max_chars=capture_max_chars,
         )
 
-    def _cap(self, capture_max_chars: Optional[int]) -> int:
+    def _capture_cap(self, capture_max_chars: Optional[int]) -> int:
         return (
             self.exec_output_capture_max_chars
             if capture_max_chars is None
@@ -165,7 +165,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         return await self._run(
             self._shell(command, cwd=cwd, env=env, exec_init=self.exec_init),
             timeout=timeout,
-            capture_max_chars=self._cap(capture_max_chars),
+            capture_max_chars=self._capture_cap(capture_max_chars),
         )
 
     async def aexec_raw(
@@ -180,7 +180,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         return await self._run(
             self._shell(command, cwd=cwd, env=env),
             timeout=timeout,
-            capture_max_chars=self._cap(capture_max_chars),
+            capture_max_chars=self._capture_cap(capture_max_chars),
         )
 
     async def aexec_argv(
@@ -209,7 +209,7 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             self._shell("python3 -", cwd=cwd, env=env),
             stdin_text=code,
             timeout=timeout,
-            capture_max_chars=self._cap(capture_max_chars),
+            capture_max_chars=self._capture_cap(capture_max_chars),
         )
 
     def default_cwd(self) -> Optional[str]:
