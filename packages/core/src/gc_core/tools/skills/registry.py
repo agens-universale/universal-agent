@@ -284,7 +284,7 @@ class SkillsRegistry:
             self._system_root = None
             self._user_root = skills_root
             self._project_root = None
-            self._walk_packs_enabled = False
+            self._walk_packs_enabled = True
         else:
             self._system_root = (
                 system_root
@@ -815,6 +815,9 @@ def get_skills_registry(
     - Если config_dict содержит непустой "skills_data_path" — single-source режим:
       registry видит ТОЛЬКО эту папку (escape-hatch для production-сценариев,
       curated team set, тестов / CI с фикстурами). Все скиллы помечаются source="user".
+      Папка — родитель скиллов и паков: загружаются и flat-скиллы (подпапка с
+      SKILL.md), и паки (подпапка с pack.yaml). Корень, сам являющийся паком,
+      не распознаётся — указывайте родительскую директорию.
     - Иначе — three-layer режим: System (<repo>/skills/) + User (gc_paths()["data"]/skills)
       + Project (<cwd>/.gc/skills/), приоритет project > user > system.
     """
