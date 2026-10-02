@@ -1075,7 +1075,7 @@ async def test_the_second_writing_says_where_the_pair_is_edited():
     async with _harness(form).run_test() as pilot:
         await pilot.pause()
         assert str(form.query_one("#mef-pair", Static).render()) == (
-            "Адрес и токен: свои — заданы секцией backend, правятся в файле"
+            "Адрес и токен: свои — заданы полем backend, правятся там"
         )
 
 
@@ -1721,7 +1721,12 @@ async def test_empty_model_id_means_the_alias_is_the_id():
         form.query_one("#mef-alias", Input).value = "gigacode"
         ok, alias, fields = form.submit()
         assert (ok, alias) == (True, "gigacode")
-        assert fields == {"main": None, "auxiliary": None, "strip_think": None}
+        assert fields == {
+            "main": None,
+            "auxiliary": None,
+            "backend": None,
+            "strip_think": None,
+        }
 
 
 async def test_malformed_url_is_rejected():
@@ -2935,3 +2940,42 @@ async def test_strip_think_selector_cycles_and_default_is_absent():
         ) or "глобальный флаг" in " ".join(
             str(w.render()) for w in form.query(Static)
         )
+
+
+@pytest.mark.asyncio
+async def test_backend_field_round_trip_and_hint_lists_overlay_keys():
+    """Поле backend — оверлей транспорта. Пустое снимает секцию. Чужой ключ — ошибка."""
+    from gc_tui.editors.model_entry_form import KWARGS_HINT
+    from textual.widgets import TextArea
+
+    form = _paired_form(
+        initial={
+            "backend": {
+                "use_max_tokens_param": False,
+                "request_timeout_sec": 90,
+            }
+        }
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        area = form.query_one("#mef-backend", TextArea)
+        assert "use_max_tokens_param: false" in area.text
+        assert "request_timeout_sec: 90" in area.text
+        hint = str(form.query_one("#mef-kwargs-hint", Static).render())
+        assert "Поле `backend`" in hint
+        assert "use_max_tokens_param" in hint
+        assert "request_timeout_sec" in hint
+        assert KWARGS_HINT.splitlines()[0] in hint
+        ok, _alias, fields = form.submit()
+        assert ok is True
+        assert fields["backend"]["use_max_tokens_param"] is False
+        assert fields["backend"]["request_timeout_sec"] == 90
+
+        area.load_text("chat_completion_kwargs:\n  temperature: 0.2\n")
+        ok, _, fields = form.submit()
+        assert ok is False and fields is None
+        assert "main" in str(form.query_one("#mef-error", Static).render())
+
+        area.load_text("")
+        ok, _, fields = form.submit()
+        assert ok is True and fields["backend"] is None

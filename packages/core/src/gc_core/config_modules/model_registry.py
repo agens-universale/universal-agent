@@ -15,7 +15,13 @@ import copy
 from typing import Any
 
 import yaml
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.config_modules.chat_completions import (
@@ -25,6 +31,34 @@ from gc_core.config_modules.pricing import ModelTariff
 
 RESERVED_WORDS = ("light", "default", "max", "auto")
 LEVELS = ("light", "default", "max")
+
+# Транспорт одной модели поверх общего backend. Ключ в поле — переписывает
+# одноимённый дефолт; незаписанный остаётся общим. Сэмплинг сюда не входит.
+MODEL_BACKEND_OVERLAY_KEYS = (
+    "request_timeout_sec",
+    "proxy",
+    "use_ssl",
+    "cert_path",
+    "key_path",
+    "use_retry",
+    "retry_embedded_choice_errors",
+    "chat_completions_max_tokens",
+    "chat_completions_min_response_tokens",
+    "use_max_tokens_param",
+    "claude_prompt_cache",
+    "chat_completion_headers",
+    "completions_url",
+)
+# Поля BackendConfig, которые рантайм читает только из общего backend.
+MODEL_BACKEND_REJECTED = {
+    "chat_completion_kwargs": (
+        "температура и thinking задаются в main и auxiliary"
+    ),
+    "api_mode": "режим API задаётся в общем backend",
+    "stream": "stream задаётся в общем backend",
+    "openai_strict_tools_schema": "схема тулов задаётся в общем backend",
+    "send_tool_strict": "strict тулов задаётся в общем backend",
+}
 
 # Рантайм ставит их сам (модель, история, тулы, лимит ответа). В main/auxiliary
 # они не пишутся: воронка их режет, форма отказывает до записи.
@@ -72,6 +106,57 @@ def parse_completion_kwargs_text(text: str) -> dict[str, Any] | None:
             f"ключи {', '.join(forbidden)} задаёт рантайм — уберите их из поля"
         )
     return loaded
+
+
+def _reject_disallowed_backend_keys(loaded: dict) -> None:
+    """Ключи, которые форма принимает как YAML, но рантайм с модели не читает."""
+    rejected = [str(key) for key in loaded if key in MODEL_BACKEND_REJECTED]
+    if rejected:
+        details = "; ".join(
+            f"{key}: {MODEL_BACKEND_REJECTED[key]}" for key in rejected
+        )
+        raise ValueError(details)
+    unknown = [
+        str(key) for key in loaded if key not in MODEL_BACKEND_OVERLAY_KEYS
+    ]
+    if unknown:
+        allowed = ", ".join(MODEL_BACKEND_OVERLAY_KEYS)
+        raise ValueError(
+            f"неизвестные ключи: {', '.join(unknown)}. Допустимы: {allowed}"
+        )
+
+
+def _validated_backend_overlay(loaded: dict) -> dict[str, Any]:
+    """Только явно заданные ключи: дефолты схемы в файл модели не копируются."""
+    try:
+        model = BackendConfig.model_validate(loaded)
+    except ValidationError as exc:
+        err = exc.errors()[0]
+        loc = ".".join(str(part) for part in err.get("loc") or ())
+        msg = err.get("msg") or "неверное значение"
+        where = f"{loc}: " if loc else ""
+        raise ValueError(f"{where}{msg}") from exc
+    return model.model_dump(exclude_unset=True)
+
+
+def parse_model_backend_text(text: str) -> dict[str, Any] | None:
+    """Текст поля ``backend`` модели → оверлей транспорта или «снять секцию».
+
+    Пустое поле — ``None``: секции нет, запрос берёт общий ``backend``.
+    Явный ``{}`` — пустой оверлей. Записанный ключ потом переписывает одноимённый
+    дефолт; сюда не входят сэмплинг и поля, которые рантайм читает только из
+    общего ``backend``.
+    """
+    raw = text.strip()
+    if not raw:
+        return None
+    loaded = yaml.safe_load(raw)
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ValueError("нужен YAML-mapping, не список и не скаляр")
+    _reject_disallowed_backend_keys(loaded)
+    return _validated_backend_overlay(loaded)
 
 
 def effective_completion_kwargs(

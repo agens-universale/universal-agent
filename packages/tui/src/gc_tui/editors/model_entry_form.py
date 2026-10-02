@@ -7,8 +7,8 @@
 placeholder, контракт наружу — `peek()`/`is_dirty()`/`submit()`.
 
 Форма НЕ пишет никуда и цели записи не знает: `submit()` отдаёт только те поля,
-которые заданы явно, а merge со старой записью (и сохранность `pricing`/`backend`,
-о которых форма не подозревает) — забота писателя `config_modules/registry_write`.
+которые заданы явно, а merge со старой записью (и сохранность `pricing`,
+о котором форма не подозревает) — забота писателя `config_modules/registry_write`.
 Пустое поле поэтому и значит «ключ не трогаем»: наследование от основного конфига
 показано ЯВНО — placeholder называет конкретное значение, которое унаследуется
 (токен — маской), а пресет-лист адреса первым пунктом предлагает «основной
@@ -28,8 +28,10 @@ from types import SimpleNamespace
 
 from gc_core import onboarding
 from gc_core.config_modules.model_registry import (
+    MODEL_BACKEND_OVERLAY_KEYS,
     connection_parts,
     parse_completion_kwargs_text,
+    parse_model_backend_text,
     resolve_entry_address,
     validate_model_alias,
 )
@@ -125,6 +127,7 @@ _ALIAS_OR_MODEL_EMPTY = "укажите id модели или алиас"
 # одной транзакцией (см. `_submit_form` секции).
 _ALIAS_RENAME_HINT = "переименование обновит уровни и привязки записи"
 _MODEL_LABEL = "Провайдерский id модели"
+_BACKEND_LABEL = "backend — транспорт этой модели поверх общего подключения"
 _MAIN_LABEL = "main"
 _AUX_LABEL = (
     "auxiliary — всегда отключайте reasoning для корректной работы, "
@@ -272,7 +275,30 @@ tool_choice: auto
 
 В корабельных примерах та же форма файла: у модели с thinking в `main` секция
 `auxiliary` — off.
+
+Поле `backend` — транспорт этой модели поверх общего подключения, не тело
+запроса. Пустое поле снимает секцию: действуют общий таймаут, SSL, прокси и
+лимит. Записанный ключ переписывает только себя, остальные остаются общими.
+
+Можно ставить: __BACKEND_KEYS__
+
+`use_max_tokens_param: false` — в тело пишется `max_completion_tokens`,
+`true` — `max_tokens`. `completions_url` — второе написание адреса: вместе с
+полем адреса выше его не задавать. `chat_completion_headers` — дополнительные
+заголовки.
+
+Сюда не писать `chat_completion_kwargs` — температура и thinking живут в `main`
+и `auxiliary`. `api_mode`, `stream`, `openai_strict_tools_schema`,
+`send_tool_strict` читаются только из общего `backend`.
+
+```yaml
+use_max_tokens_param: false
+request_timeout_sec: 120
+```
 """
+KWARGS_HINT = KWARGS_HINT.replace(
+    "__BACKEND_KEYS__", ", ".join(MODEL_BACKEND_OVERLAY_KEYS)
+)
 
 
 _STRIP_CYCLE = ("default", "true", "false")
@@ -326,9 +352,7 @@ _PAIR_OWN = "Адрес и токен: свои"
 # — ни поля, ни клавиша «вернуть наследование» до неё не достают. Молчать об этом нельзя:
 # «свои» без уточнения обещали бы правку теми полями, которые к этой паре отношения не
 # имеют, и человеку негде было бы узнать, куда идти.
-_PAIR_OWN_BACKEND = (
-    "Адрес и токен: свои — заданы секцией backend, правятся в файле"
-)
+_PAIR_OWN_BACKEND = "Адрес и токен: свои — заданы полем backend, правятся там"
 # Поля пары — те, на которых работает «вернуть наследование» (§5). Галка в набор не входит:
 # она не поле, и её собственная клавиша (Space) на этой строке уже занята.
 _PAIR_FIELDS = ("mef-url", "mef-token")
@@ -551,6 +575,7 @@ class ModelEntryForm(Vertical):
         self._url0 = initial.get("url") or ""
         self._main_text = _completion_field_text(initial.get("main"))
         self._aux_text = _completion_field_text(initial.get("auxiliary"))
+        self._backend_text = _completion_field_text(initial.get("backend"))
         self._strip_think = _strip_choice(initial.get("strip_think"))
         # Второе написание пары (`backend.completions_url` / `proxy` /
         # `chat_completion_headers.Authorization`) форма не правит, но обязана ВИДЕТЬ:
@@ -606,6 +631,7 @@ class ModelEntryForm(Vertical):
             "mef-strip",
             "mef-main",
             "mef-auxiliary",
+            "mef-backend",
         )
         self._idx = 0
         self._models: list = []
@@ -706,6 +732,7 @@ class ModelEntryForm(Vertical):
             "model": self._model0,
             "main": self._main_text,
             "auxiliary": self._aux_text,
+            "backend": self._backend_text,
             "strip_think": self._strip_think,
         }
 
@@ -812,7 +839,8 @@ class ModelEntryForm(Vertical):
         Унаследованный адрес — у `_inherited_url`: у тёзки это адрес заслонённой
         записи, и общий здесь тоже был бы НЕдействующим."""
         own_url = resolve_entry_address(
-            url=None, completions_url=self._backend0.get("completions_url")
+            url=None,
+            completions_url=self._current_backend().get("completions_url"),
         )
         if own_url:
             return str(own_url)
@@ -844,6 +872,18 @@ class ModelEntryForm(Vertical):
 
         return resolve_env_only(value)
 
+    def _current_backend(self) -> dict:
+        """Оверлей из поля. До монтирования и при битом YAML — то, с чем форму открыли."""
+        try:
+            text = self._yaml_text("mef-backend")
+        except NoMatches:
+            return dict(self._backend0)
+        try:
+            parsed = parse_model_backend_text(text)
+        except ValueError:
+            return dict(self._backend0)
+        return parsed if isinstance(parsed, dict) else {}
+
     def _pair_parts(self) -> tuple[bool, bool]:
         """Что запись задаёт СВОЕГО — (адрес, токен) — ядровым определением §2
         (`model_registry.connection_parts`), тем же, каким судит валидатор конфига.
@@ -856,7 +896,8 @@ class ModelEntryForm(Vertical):
 
         Значения проходят через `_as_validator_sees`: в файл уезжает ссылка, а судится
         то, во что она раскроется."""
-        headers = self._backend0.get("chat_completion_headers") or {}
+        backend = self._current_backend()
+        headers = backend.get("chat_completion_headers") or {}
         if self._no_auth:
             token = ""
         elif self._token_value():
@@ -869,9 +910,9 @@ class ModelEntryForm(Vertical):
             url=self._as_validator_sees(self._url_value()),
             token=self._as_validator_sees(token),
             completions_url=self._as_validator_sees(
-                self._backend0.get("completions_url")
+                backend.get("completions_url")
             ),
-            proxy=self._as_validator_sees(self._backend0.get("proxy")),
+            proxy=self._as_validator_sees(backend.get("proxy")),
             authorization=self._as_validator_sees(
                 headers.get("Authorization")
             ),
@@ -885,14 +926,15 @@ class ModelEntryForm(Vertical):
         строки, и назвать причину уже нечем."""
         from gc_core.config_raw import missing_env_refs
 
-        headers = self._backend0.get("chat_completion_headers") or {}
+        backend = self._current_backend()
+        headers = backend.get("chat_completion_headers") or {}
         names: list[str] = []
         for value in (
             self._url_value(),
             self._token_value(),
             self._token_current,
-            self._backend0.get("completions_url"),
-            self._backend0.get("proxy"),
+            backend.get("completions_url"),
+            backend.get("proxy"),
             headers.get("Authorization"),
         ):
             for name in missing_env_refs(value):
@@ -906,15 +948,16 @@ class ModelEntryForm(Vertical):
         Тем же ядровым определением §2, что и всё остальное: спрашиваем его про слой
         `backend` в одиночку, обнулив свои поля. Своей проверки «есть ли ключ в
         backend» здесь быть не должно — она стала бы третьим определением пары."""
-        headers = self._backend0.get("chat_completion_headers") or {}
+        backend = self._current_backend()
+        headers = backend.get("chat_completion_headers") or {}
         return any(
             connection_parts(
                 url="",
                 token=None,
                 completions_url=self._as_validator_sees(
-                    self._backend0.get("completions_url")
+                    backend.get("completions_url")
                 ),
-                proxy=self._as_validator_sees(self._backend0.get("proxy")),
+                proxy=self._as_validator_sees(backend.get("proxy")),
                 authorization=self._as_validator_sees(
                     headers.get("Authorization")
                 ),
@@ -1154,6 +1197,17 @@ class ModelEntryForm(Vertical):
             id="mef-auxiliary",
             classes="mef-yaml",
         )
+        yield Static(
+            _BACKEND_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
+        )
+        yield TextArea(
+            self._backend_text,
+            soft_wrap=True,
+            show_line_numbers=False,
+            tab_behavior="focus",
+            id="mef-backend",
+            classes="mef-yaml",
+        )
         with VerticalScroll(id="mef-kwargs-hint-scroll"):
             yield Static(
                 KWARGS_HINT,
@@ -1390,7 +1444,7 @@ class ModelEntryForm(Vertical):
         У первой строки ↑ и у последней ↓ уходят форме. Раскрытый список модели
         или пресетов клавишу не держит."""
         target = self._positions[self._idx]
-        if target not in ("mef-main", "mef-auxiliary"):
+        if target not in ("mef-main", "mef-auxiliary", "mef-backend"):
             return False
         if self._list.is_open or self._presets_ctrl.is_open:
             return False
@@ -1677,6 +1731,12 @@ class ModelEntryForm(Vertical):
             return True
         return False
 
+    def on_text_area_changed(self, event: TextArea.Changed) -> None:
+        if event.text_area.id != "mef-backend":
+            return
+        self._sync_pair_state()
+        self._url_input.placeholder = self._url_placeholder()
+
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "mef-model":
             value = event.input.value
@@ -1942,6 +2002,7 @@ class ModelEntryForm(Vertical):
             "model": self._field_value("mef-model"),
             "main": self._yaml_text("mef-main"),
             "auxiliary": self._yaml_text("mef-auxiliary"),
+            "backend": self._yaml_text("mef-backend"),
             "strip_think": self._strip_think,
         }
 
@@ -2034,6 +2095,10 @@ class ModelEntryForm(Vertical):
             # по «трогали ли поле»: иначе плейсхолдер нельзя было бы и набрать. То же
             # исключение, что у пробы мастера (`screens/onboarding`).
             return self._fail(_URL_ERROR)
+        try:
+            backend = parse_model_backend_text(values["backend"])
+        except ValueError as exc:
+            return self._fail(f"backend: {exc}")
         # §2: своё подключение задаётся ЦЕЛИКОМ — половину пары форма не сохраняет.
         # Иначе отказ пришёл бы от валидатора конфига, когда правка уже сделана.
         has_address, has_token = self._pair_parts()
@@ -2058,9 +2123,20 @@ class ModelEntryForm(Vertical):
             auxiliary = parse_completion_kwargs_text(values["auxiliary"])
         except ValueError as exc:
             return self._fail(f"auxiliary: {exc}")
+        headers = (backend or {}).get("chat_completion_headers") or {}
+        if url and (backend or {}).get("completions_url"):
+            return self._fail(
+                "url и backend.completions_url — два написания одного адреса"
+            )
+        if values["token"] and headers.get("Authorization"):
+            return self._fail(
+                "token и backend.chat_completion_headers.Authorization "
+                "заданы одновременно"
+            )
         self._clear_error()
         self._write_yaml("mef-main", main)
         self._write_yaml("mef-auxiliary", auxiliary)
+        self._write_yaml("mef-backend", backend)
         fields: dict = {}
         if values["model"]:
             fields["model"] = values["model"]
@@ -2094,6 +2170,7 @@ class ModelEntryForm(Vertical):
             fields["token"] = None
         fields["main"] = main
         fields["auxiliary"] = auxiliary
+        fields["backend"] = backend
         # default — None: писатель снимает ключ, и модель снова берёт глобальный флаг.
         fields["strip_think"] = (
             None

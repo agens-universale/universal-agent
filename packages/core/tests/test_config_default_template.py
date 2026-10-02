@@ -41,6 +41,9 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "tui.stream",  # true (явно), кодовый дефолт None (наследуется от backend.stream)
     # --- Preset суммаризации: включена в шаблоне, выключена в кодовом дефолте ---
     "summary.chat_completions_summary_trigger_chars",  # 200000 вместо 0 (выключено)
+    # Шаблон вырезает мысль: копирование reasoning_content даёт 400 у части бэкендов.
+    # Кодовый дефолт (ключа нет) — false, поле копируется.
+    "strip_tags_projection.strip_think",
     # --- Preset безопасности: SSRF-blacklist и файловые фильтры ---
     "security.url_policy.url_blacklist",  # SSRF-blacklist cloud metadata/loopback/RFC1918
     "security.read_guard.allowed_read_paths",  # whitelist путей навыков

@@ -3,7 +3,10 @@
 from types import SimpleNamespace
 
 from gc_core.config import flatten_app_config
-from gc_core.config_modules.model_registry import parse_completion_kwargs_text
+from gc_core.config_modules.model_registry import (
+    parse_completion_kwargs_text,
+    parse_model_backend_text,
+)
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.utils import llm_chat_client
@@ -385,3 +388,25 @@ def test_two_aliases_with_one_model_id_do_not_collapse():
         cfg["slots"]["max"],
     }
     assert direct.resolve("main").alias == "gc_v2"
+
+
+def test_parse_model_backend_text_overlays_named_keys_only():
+    assert parse_model_backend_text("") is None
+    assert parse_model_backend_text("{}") == {}
+    assert parse_model_backend_text(
+        "use_max_tokens_param: false\nrequest_timeout_sec: 120\n"
+    ) == {"use_max_tokens_param": False, "request_timeout_sec": 120}
+    try:
+        parse_model_backend_text(
+            "chat_completion_kwargs: {temperature: 0.2}\n"
+        )
+    except ValueError as exc:
+        assert "main" in str(exc)
+    else:
+        raise AssertionError("kwargs в backend модели должны отвергаться")
+    try:
+        parse_model_backend_text("api_mode: chat_completions\n")
+    except ValueError as exc:
+        assert "общем backend" in str(exc)
+    else:
+        raise AssertionError("api_mode модели должен отвергаться")
