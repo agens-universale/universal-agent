@@ -3,17 +3,17 @@
 import asyncio
 import hashlib
 import json
-from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
-from gc_core.config import flatten_app_config
+from gc_core.config import flat_config
 from gc_core.config_modules import AppConfig
 from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
+from gc_core.settings import LoadedSettings, RuntimeEnv
 from pydantic import BaseModel, ConfigDict, Field
 
 from gc_ua_temporalio.payload_storage import PayloadStorageConfig
@@ -95,13 +95,24 @@ class NativeContextProvider:
                 raise ValueError(
                     f"Profile {name}: unknown store {profile.store_id}"
                 )
-            config = flatten_app_config(profile.core.model_copy(deep=True))
+            settings = profile.core
             if "thread_store" not in profile.core.model_fields_set:
                 # В Temporal по умолчанию тред пишется по ходам: шаги хода
                 # защищает история workflow. Явная настройка профиля главнее.
-                config["thread_store_persist"] = "turn"
-            config["launch_root"] = str(workspace.resolve())
-            self._profiles[name] = (profile.revision, profile.store_id, config)
+                # Точечно, без пересборки путей: профиль хранит пути как
+                # задано, ядро резолвит их от workspace при использовании.
+                settings = settings.model_copy(
+                    update={
+                        "thread_store": settings.thread_store.model_copy(
+                            update={"persist": "turn"}
+                        )
+                    }
+                )
+            loaded = LoadedSettings(
+                settings=settings,
+                runtime=RuntimeEnv(launch_root=str(workspace.resolve())),
+            )
+            self._profiles[name] = (profile.revision, profile.store_id, loaded)
             identity = _digest([name, profile.revision])
             receipts.save_operation_result(
                 "__native_profiles__",
@@ -113,7 +124,7 @@ class NativeContextProvider:
     def _resolve(self, call):
         if call.schema_version != 1 or not call.owner_id:
             raise ValueError("Invalid native context request")
-        revision, store_id, config = self._profiles[call.profile]
+        revision, store_id, loaded = self._profiles[call.profile]
         if call.revision != revision:
             raise ValueError(f"Profile revision mismatch: {call.profile}")
         if "store_id" in call.data and call.data["store_id"] != store_id:
@@ -130,10 +141,11 @@ class NativeContextProvider:
                 "store_id": store_id,
             },
         )
-        return store_id, config
+        return store_id, loaded
 
     async def __call__(self, call):
-        store_id, config = self._resolve(call)
+        store_id, loaded = self._resolve(call)
+        config = flat_config(loaded)
         lock = self._locks.setdefault(call.owner_id, asyncio.Lock())
         async with lock:
             if call.owner_id in self._contexts and (
@@ -145,7 +157,7 @@ class NativeContextProvider:
 
             async def bootstrap():
                 ctx = await acreate_run_context(
-                    deepcopy(config),
+                    loaded,
                     auth_connector=build_auth_connector(config),
                     run_id=_digest(call.owner_id)[:24],
                     thread_store=self.stores[store_id],

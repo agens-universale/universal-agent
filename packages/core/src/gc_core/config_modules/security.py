@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -58,7 +58,7 @@ class WriteGuardConfig(BaseModel):
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     extra_paths: list[str] = Field(default_factory=list)
@@ -84,7 +84,7 @@ class UrlPolicyConfig(BaseModel):
       allow — нарушение → пропустить, audit log пометит `out_of_perimeter`.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     allowed_schemes: list[str] = Field(
@@ -112,7 +112,7 @@ class ReadGuardConfig(BaseModel):
     forward‑compat, но в v1 не enforce'ятся (kept-for-future).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     # Пустой список трактуется как [launch_root] — строгий периметр проекта.
@@ -152,7 +152,7 @@ class ReadGuardConfig(BaseModel):
 class DownloadConfig(BaseModel):
     """Настройки тула download_file: каталог загрузки и лимит размера тела ответа."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     download_dir: str = "downloads"
     max_bytes: int = 52_428_800
 
@@ -166,7 +166,7 @@ class CommandModerationConfig(BaseModel):
     enabled=True + mode=ask/deny — судья активен.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     mode: str = "ask"
     allowed_command_examples: list[str] = Field(default_factory=list)
@@ -189,7 +189,7 @@ class ProtectedPathsConfig(BaseModel):
     extra — дополнительные пути, которые нельзя трогать.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
     extra: list[str] = Field(default_factory=list)
 
@@ -207,7 +207,7 @@ class SecurityConfig(BaseModel):
           protected_paths:    {enabled, extra}
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     command_moderation: CommandModerationConfig = Field(
         default_factory=CommandModerationConfig
     )
@@ -218,41 +218,3 @@ class SecurityConfig(BaseModel):
     protected_paths: ProtectedPathsConfig = Field(
         default_factory=ProtectedPathsConfig
     )
-
-
-def apply_cli_command_moderation_overrides(
-    config_dict: Dict[str, Any],
-    *,
-    write_guard_enabled: Optional[bool] = None,
-    command_moderation_mode: Optional[str] = None,
-    read_guard_enabled: Optional[bool] = None,
-    read_guard_mode: Optional[str] = None,
-) -> None:
-    """
-    Накладывает CLI-override'ы на top-level config_dict (после load_config).
-    Поля верхнего уровня: command_moderation, write_guard, read_guard, url_policy.
-    """
-    command_moderation = config_dict.setdefault("command_moderation", {})
-    if command_moderation_mode is not None:
-        command_moderation["mode"] = validate_command_moderation_mode(
-            command_moderation_mode
-        )
-    elif "mode" not in command_moderation:
-        command_moderation["mode"] = "ask"
-    command_moderation.setdefault("enabled", True)
-
-    write_guard = config_dict.setdefault("write_guard", {})
-    if write_guard_enabled is not None:
-        write_guard["enabled"] = bool(write_guard_enabled)
-    elif "enabled" not in write_guard:
-        write_guard["enabled"] = True
-
-    read_guard = config_dict.setdefault("read_guard", {})
-    if read_guard_enabled is not None:
-        read_guard["enabled"] = bool(read_guard_enabled)
-    elif "enabled" not in read_guard:
-        read_guard["enabled"] = True
-    if read_guard_mode is not None:
-        read_guard["mode"] = validate_read_guard_mode(read_guard_mode)
-    elif "mode" not in read_guard:
-        read_guard["mode"] = "ask"

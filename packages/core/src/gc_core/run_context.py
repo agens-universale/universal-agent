@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -130,6 +131,28 @@ class RunContext:
     # сессии параллельных агентов. Пустая строка — контекст собран в обход
     # create_run_context (тесты, ручная сборка); тогда владельца нет.
     mcp_session_owner: str = ""
+    #: Типизированные настройки (``AppConfig``) и рантайм (``RuntimeEnv``).
+    #: Переходный период: ``config_dict`` — производный плоский вид, потребители
+    #: переходят на ``settings``.
+    settings: Any = None
+    runtime: Any = None
+
+
+def _coerce_settings(config, runtime):
+    """``(settings, runtime, config_dict)`` из настроек или (переходно) dict."""
+    from gc_core.config import flat_config
+    from gc_core.settings import AppConfig, LoadedSettings, RuntimeEnv
+
+    if isinstance(config, LoadedSettings):
+        if runtime is not None and runtime is not config.runtime:
+            config = dataclasses.replace(config, runtime=runtime)
+        # Плоский вид — из LoadedSettings целиком: `profile` в нём —
+        # действующий профиль рантайма, а не указатель из файлов.
+        return config.settings, config.runtime, flat_config(config)
+    if isinstance(config, AppConfig):
+        runtime = runtime or RuntimeEnv()
+        return config, runtime, flat_config(config, runtime)
+    return None, runtime, config
 
 
 def assemble_run_context(
@@ -195,8 +218,9 @@ def assemble_run_context(
 
 
 async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
-    config_dict: Dict[str, Any],
+    config_dict: Any,
     *,
+    runtime: Any = None,
     auth_connector: Optional[AuthConnector] = None,
     run_id: Optional[str] = None,
     on_progress=None,
@@ -277,6 +301,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
 
         athread_store(thread_store)
 
+    settings, runtime, config_dict = _coerce_settings(config_dict, runtime)
     prep = _prepare_run_context(
         config_dict,
         run_id=run_id,
@@ -328,7 +353,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
                 tools_cache=tools_cache,
                 registered_names=registered,
             )
-        return _finish_run_context(
+        ctx = _finish_run_context(
             config_dict,
             prep,
             tools,
@@ -349,6 +374,8 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             guard_probe=guard_probe,
             tool_effect=tool_effect,
         )
+        ctx.settings, ctx.runtime = settings, runtime
+        return ctx
     except BaseException as exc:
         from gc_core.utils.logging_module import release_run_logger
 

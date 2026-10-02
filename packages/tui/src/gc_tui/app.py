@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, List, Optional
 if TYPE_CHECKING:
     from gc_core.model_router import ModelRouter
 
+from gc_core.config import flat_config as _flat
 from gc_core.runtime_notices import (
     collect_runtime_notices,
     collect_unread_runtime_notices,
@@ -201,12 +202,22 @@ class TuiApp(App):
         threads_dir: Optional[str] = None,
         system: str = "cli",
         config: Optional[dict] = None,
+        settings=None,
         profile_override: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._threads_dir = threads_dir
         self._system = system
-        self._config = config or {}
+        # База окна — `LoadedSettings` (файлы + CLI + рантайм TUI), `_config` — её
+        # плоский вид только для чтения. Переходно окно собирается и плоским
+        # словарём (тесты): тогда `_settings` нет и слой сессии ложится на словарь.
+        self._settings = settings
+        self._config = (
+            _flat(settings) if settings is not None else (config or {})
+        )
+        # (ключ, LoadedSettings, плоский вид): effective_config() зовётся каждый
+        # кадр, а наложение сессии — это валидация модели.
+        self._effective_cache = None
         # Профиль, выбранный флагом запуска `--profile` (`""` — «без профиля»), либо
         # None — флага не было. Тот же оверрайд, что main() отдал загрузчику на
         # старте: каждое перечитывание (`reload_config`) обязано отдавать его снова,
@@ -556,8 +567,8 @@ class TuiApp(App):
         except OSError:
             return {}
 
-    def _load_base_config(self) -> dict:
-        """`load_config_ex` под флагом запуска `--profile` — база окна.
+    def _load_base_settings(self):
+        """`load_settings` под флагом запуска `--profile` — база окна.
 
         Стек под флагом не собрался — отказ уходит наверх, к тому же гейту, что
         держит окно на битом config.yml (`reload_config_if_changed`): прежняя база,
@@ -582,13 +593,13 @@ class TuiApp(App):
         читается), и лишь затем, чтобы назвать виновником флаг, а не config.yml.
         `TypeError`/`KeyError` — дефект кода, и под видом «профиль больше не
         собирается» он жил бы до первого чтения логов."""
-        from gc_core.config import load_config_ex
+        from gc_core.config import load_settings
 
         name = self._profile_override
         if name is None:
-            return load_config_ex(self._config_path)[0]
+            return load_settings(self._config_path)
         try:
-            return load_config_ex(self._config_path, profile_override=name)[0]
+            return load_settings(self._config_path, profile_override=name)
         except (ValueError, OSError) as exc:
             what = (
                 f'профиль "{name}" из флага --profile'
@@ -619,18 +630,16 @@ class TuiApp(App):
         from gc_core.config import apply_cli_overrides
         from gc_core.thread_store import resolve_threads_dir
 
-        from gc_tui.runtime_config import carry_over_runtime_fields
-
-        cfg = self._load_base_config()
-        apply_cli_overrides(cfg)
-        # launch_root и прочие поля рантайма TUI в файле конфига отсутствуют: без переноса
-        # они исчезают при первом же сохранении настроек — /diff перестаёт работать, а
-        # периметр path_policy съезжает со снапшота cwd на живой os.getcwd().
-        carry_over_runtime_fields(self._config or {}, cfg)
+        loaded = self._with_tui_runtime(
+            apply_cli_overrides(self._load_base_settings())
+        )
+        cfg = _flat(loaded)
         old_effective = self.effective_config()
         old_mtime_set = self._config_mtime_set
         old_source = self._profile_source
+        self._settings = loaded
         self._config = cfg
+        self._effective_cache = None
         self._threads_dir = resolve_threads_dir(cfg)
         self._session_profile_cache = (
             None  # база сменилась — пере-мерж под сессионный профиль устарел
@@ -650,6 +659,19 @@ class TuiApp(App):
         # набором `_config_mtime_set`, его считает `_compute_mtime_set()` выше.
         self._notify_screen_config_changed()
         self.invalidate_runner()
+
+    def _with_tui_runtime(self, loaded):
+        """Рантайм TUI поверх свежей загрузки. `launch_root` — снапшот старта: без
+        переноса он съезжал бы на живой cwd при первом же сохранении настроек —
+        /diff перестаёт работать, а периметр path_policy уходит со снапшота."""
+        from gc_tui.runtime_config import apply_tui_runtime
+
+        previous = (
+            self._settings.runtime.launch_root if self._settings else None
+        )
+        if previous is None:
+            previous = (self._config or {}).get("launch_root")
+        return apply_tui_runtime(loaded, launch_root=previous)
 
     def _notify_screen_config_changed(self) -> None:
         """Сказать главному экрану, что действующий конфиг сменился.
@@ -730,17 +752,58 @@ class TuiApp(App):
         `profile` — особый ключ (спека §9.1): база не всегда `self._config` —
         сессия могла выбрать другой профиль, и тогда база — его пере-мерж
         (`_session_base_config`, закэшированный)."""
+        loaded = self.effective_settings()
+        if loaded is not None:
+            return self._effective_cache[2]
         from gc_tui.session_settings import apply_overrides
 
         cfg = dict(self._session_base_config())
         apply_overrides(cfg, self._session_overrides)
         return cfg
 
+    def effective_settings(self):
+        """`LoadedSettings` окна с сессионным слоем — то, на чём собирается агент.
+
+        None — окно собрано плоским словарём (переходно, тесты): тогда
+        действующий конфиг — только `effective_config()`."""
+        if self._settings is None:
+            return None
+        base = self._session_base_settings()
+        overrides = tuple(
+            sorted(
+                (k, v)
+                for k, v in self._session_overrides.items()
+                if k != "profile"
+            )
+        )
+        key = (id(base), overrides)
+        cached = self._effective_cache
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        from gc_tui.session_settings import SESSION_KEYS
+
+        loaded = base.with_overrides(
+            {k: v for k, v in overrides if k in SESSION_KEYS}, layer="session"
+        )
+        self._effective_cache = (key, loaded, _flat(loaded))
+        return loaded
+
+    def _session_base_settings(self):
+        """Типизированный двойник `_session_base_config`: база окна либо её
+        пере-сборка под выбранным в сессии профилем."""
+        override_name = self._session_overrides.get("profile")
+        base_name = self._config.get("profile") or None
+        if override_name is None or override_name == (base_name or ""):
+            return self._settings
+        return self._profile_remerge_settings(override_name)
+
     def _session_base_config(self) -> dict:
         """База для effective_config(): `self._config`, либо, если сессия выбрала
         ДРУГОЙ профиль (§9.1), — пере-смерженная под ним база (`_profile_remerge`,
         закэшированная по мтайм-набору+имени — рендер не должен гонять
         load_config_ex каждый кадр)."""
+        if self._settings is not None:
+            return _flat(self._session_base_settings())
         override_name = self._session_overrides.get("profile")
         base_name = (self._config or {}).get("profile") or None
         if override_name is None or override_name == (base_name or ""):
@@ -765,20 +828,21 @@ class TuiApp(App):
         (кэшируем фоллбэк под тем же ключом — повтор с тем же ключом отдаётся из
         кэша без повторного notice; смена набора/имени — новый шанс и новый
         notice, если всё ещё битый)."""
+        loaded = self._profile_remerge_settings(name)
+        return _flat(loaded) if loaded is not None else (self._config or {})
+
+    def _profile_remerge_settings(self, name: str):
+        """Пере-сборка настроек под профилем сессии (см. `_profile_remerge`)."""
         key = (frozenset((self._config_mtime_set or {}).items()), name)
         cached = self._session_profile_cache
         if cached is not None and cached[0] == key:
             return cached[1]
-        from gc_core.config import apply_cli_overrides, load_config_ex
-
-        from gc_tui.runtime_config import carry_over_runtime_fields
+        from gc_core.config import apply_cli_overrides, load_settings
 
         try:
-            cfg, meta = load_config_ex(
-                self._config_path, profile_override=name
-            )
+            loaded = load_settings(self._config_path, profile_override=name)
         except Exception as exc:
-            fallback = self._config or {}
+            fallback = self._settings
             self._session_profile_cache = (key, fallback)
             push_runtime_notice(
                 Notice(
@@ -789,11 +853,12 @@ class TuiApp(App):
                 )
             )
             return fallback
-        apply_cli_overrides(cfg)
-        carry_over_runtime_fields(self._config or {}, cfg)
-        self._session_profile_cache = (key, cfg)
-        self._maybe_notice_profile_activation(name, meta, cfg)
-        return cfg
+        loaded = self._with_tui_runtime(apply_cli_overrides(loaded))
+        self._session_profile_cache = (key, loaded)
+        self._maybe_notice_profile_activation(
+            name, loaded.profile_meta, _flat(loaded)
+        )
+        return loaded
 
     def _maybe_notice_profile_activation(
         self, name: str, meta, cfg: dict
@@ -885,9 +950,9 @@ class TuiApp(App):
         Имя публичное: судья «годен ли профиль» ОДИН на всех, и метку пикера
         (`toggles.profile_picker_options`) ставит он же. Вторая редакция правила
         разошлась бы с первой — витрина звала бы Enter туда, где Enter отказывает."""
-        from gc_core.config import load_config_ex
+        from gc_core.config import load_settings
 
-        load_config_ex(self._config_path, profile_override=name)
+        load_settings(self._config_path, profile_override=name)
 
     def switch_session_profile(self, name: str) -> None:
         """Переключить профиль сессии (спека §9.1/§9.3): применяет как обычный
@@ -1048,11 +1113,14 @@ class TuiApp(App):
         from gc_core.model_router import ModelRouter
 
         cfg = self.effective_config()
+        loaded = self.effective_settings()
         return ModelRouter(
             cfg,
             level_provider=self._level_provider,
             breaker=self._circuit_breaker,
-            force_legacy=cli_forces_legacy_model(cfg),
+            force_legacy=cli_forces_legacy_model(
+                loaded if loaded is not None else cfg
+            ),
         )
 
     def persist_circuit_breaker(self) -> None:
@@ -1314,22 +1382,17 @@ class TuiApp(App):
         from gc_core.run_context import acreate_run_context
 
         from gc_tui.services.mcp_progress import McpProgress
+        from gc_tui.toggles import tui_agent_settings
 
-        cfg = self.effective_config()
-        cfg["console_trace"] = False
-        from gc_tui.services.prompt_assets import tui_special_instructions_path
-
-        cfg["chat_completions_special_instructions_path"] = (
-            tui_special_instructions_path()
-        )
-        # TUI adaptive bounce: сигнал в общий run_agent (только TUI ставит его).
-        # CLI/server/swarm не ставят → строгий контракт. Управляется tui.text_answer_mode.
-        cfg["text_answer_mode"] = cfg.get("tui_text_answer_mode", "judge")
-        from gc_tui.toggles import apply_finish_gate_mode
-
-        apply_finish_gate_mode(
-            cfg
-        )  # /gate: off глушит судью только в TUI (спека §3)
+        # Своё у TUI поверх действующих настроек: промпт-ассеты, адаптивный bounce
+        # текстового ответа и режим судьи /gate (CLI/server/swarm их не ставят).
+        loaded = self.effective_settings()
+        if loaded is not None:
+            loaded = tui_agent_settings(loaded)
+            cfg = _flat(loaded)
+        else:
+            cfg = tui_agent_settings(dict(self.effective_config()))
+            loaded = cfg
         auth = build_auth_connector(cfg)
         progress = McpProgress()
         progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
@@ -1365,7 +1428,7 @@ class TuiApp(App):
 
             try:
                 return await acreate_run_context(
-                    cfg,
+                    loaded,
                     auth_connector=auth,
                     on_progress=progress.update,
                     on_stream_delta=self._stream_pump.on_delta,
@@ -1377,7 +1440,7 @@ class TuiApp(App):
                     # используют CLI/server (config.cli_forces_legacy_model); без
                     # него ран резолвил бы через реестр, расходясь с честным
                     # хинтом /level (display_router).
-                    force_legacy=cli_forces_legacy_model(cfg),
+                    force_legacy=cli_forces_legacy_model(loaded),
                 )
             finally:
                 await aclose_clients()

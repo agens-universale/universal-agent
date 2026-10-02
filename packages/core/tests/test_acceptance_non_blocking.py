@@ -14,6 +14,7 @@ import time
 
 import pytest
 from gc_core.aio import AsyncAgent
+from gc_core.settings import settings_from_flat
 from gc_testkit.paths import package_src_dirs
 from parity_harness import (
     ScriptedBackend,
@@ -71,7 +72,9 @@ TURNS = [
 
 async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     """Критерий 1: loop свободен всё время жизни агента — от сборки до закрытия."""
-    cfg = parity_config(tmp_path, monkeypatch)
+    # Типизированные настройки собираем ДО окна замера: валидация конфига —
+    # работа встраивающего, а не сборки агента.
+    settings = settings_from_flat(parity_config(tmp_path, monkeypatch))
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
     from gc_testkit import (
@@ -90,7 +93,7 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     # начале `create` тест не замечал.
     with quiet_gc_for_loop_timing():
         async with LoopPulse() as pulse:
-            async with await AsyncAgent.create(cfg) as agent:
+            async with await AsyncAgent.create(settings) as agent:
                 answer = await agent.run("поспи 0.3 секунды", thread_id="t1")
 
     assert answer
@@ -119,7 +122,9 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     # замерено 15 пауз на 872 мс в окне пары против одной в окне одиночки, и
     # отношение уезжало к 2× при неперекрываемых 0,09 с собственной работы.
     with quiet_gc_for_loop_timing():
-        async with await AsyncAgent.create(cfg_solo) as solo:
+        async with await AsyncAgent.create(
+            settings_from_flat(cfg_solo)
+        ) as solo:
             started = time.monotonic()
             await solo.run("поспи", thread_id="t1")
             single = time.monotonic() - started
@@ -136,8 +141,8 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
                 "агент-б": ScriptedBackend(list(TURNS)),
             },
         )
-        a = await AsyncAgent.create(cfg_a)
-        b = await AsyncAgent.create(cfg_b)
+        a = await AsyncAgent.create(settings_from_flat(cfg_a))
+        b = await AsyncAgent.create(settings_from_flat(cfg_b))
         started = time.monotonic()
         async with a, b:
             r1, r2 = await asyncio.gather(
@@ -160,9 +165,10 @@ def test_agent_runs_without_importing_frontends(tmp_path):
     script = """
 import asyncio, json, sys
 from gc_core.aio import AsyncAgent
+from gc_core.settings import settings_from_flat
 
 async def main():
-    agent = await AsyncAgent.create({{
+    agent = await AsyncAgent.create(settings_from_flat({{
         "backend_api_mode": "chat_completions",
         "completions_url": "http://acceptance.invalid/v1/chat/completions",
         "model": "acceptance-model",
@@ -172,7 +178,7 @@ async def main():
         "launch_root": {root!r},
         "backend_request_timeout_sec": 60,
         "max_steps": 1,
-    }})
+    }}))
     await agent.aclose()
 
 try:

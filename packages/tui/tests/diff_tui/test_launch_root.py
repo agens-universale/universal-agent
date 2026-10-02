@@ -6,10 +6,11 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import gc_tui as tui_pkg
+from gc_core.config import flat_config
 
 
 def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
-    """Перед созданием TuiApp в config_dict фиксируется launch_root = cwd.resolve()."""
+    """Перед созданием TuiApp в настройках (runtime) фиксируется launch_root = cwd.resolve()."""
     monkeypatch.chdir(tmp_path)
 
     captured: dict = {}
@@ -18,8 +19,8 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
         # `**_kw` не лень: дубль обязан переживать НОВЫЙ аргумент настоящего
         # TuiApp (последним приехал profile_override) — иначе проводка ломает
         # тест, который про неё ничего не знает.
-        def __init__(self, *, threads_dir, system, config, **_kw):
-            captured["config"] = config
+        def __init__(self, *, threads_dir, system, settings, **_kw):
+            captured["settings"] = settings
             self._config_path = None
             self._config_project_local = None
 
@@ -41,15 +42,17 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
 
     from gc_core.config_modules.profiles import ProfileMeta
 
+    from gc_core.settings import settings_from_flat
+
     monkeypatch.setattr(
-        "gc_core.config.load_config_ex",
-        lambda _path=None, **_kw: (
+        "gc_core.config.load_settings",
+        lambda _path=None, **_kw: settings_from_flat(
             {"threads_data_path": str(tmp_path / "threads")},
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
     monkeypatch.setattr(
-        "gc_core.config.apply_cli_overrides", lambda _cfg: None
+        "gc_core.config.apply_cli_overrides", lambda d, **_kw: d
     )
     monkeypatch.setattr(
         "gc_core.onboarding.is_unconfigured", lambda _cfg: False
@@ -75,7 +78,7 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     # модуль `importlib`), а `monkeypatch.setattr` по СТРОКОВОМУ пути сам
     # зовёт `importlib.import_module`, чтобы добраться до модуля. Поставь её
     # раньше — и все подмены ниже уедут в `MagicMock`, который эта лямбда и
-    # возвращает: настоящие `load_config_ex` и `is_unconfigured` останутся
+    # возвращает: настоящие `load_settings` и `is_unconfigured` останутся
     # нетронутыми, конфиг прочитается с диска, и тест начнёт зависеть от того,
     # настроен ли агент у запускающего. Именно так он и падал: на машине без
     # настроенного конфига `main` печатал экран настройки и выходил до
@@ -94,7 +97,9 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
 
     rc = tui_pkg.main([])
     assert rc == 0
-    assert captured["config"]["launch_root"] == str(tmp_path.resolve())
+    expected = str(tmp_path.resolve())
+    assert captured["settings"].runtime.launch_root == expected
+    assert flat_config(captured["settings"])["launch_root"] == expected
 
 
 def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
@@ -108,12 +113,12 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     captured: dict = {}
 
     class FakeApp:
-        def __init__(self, *, threads_dir, system, config, **_kw):
+        def __init__(self, *, threads_dir, system, settings, **_kw):
             # Имитация: cwd уже сменился к моменту конструктора.
             import os
 
             os.chdir(other)
-            captured["config"] = config
+            captured["settings"] = settings
             self._config_path = None
             self._config_project_local = None
 
@@ -135,15 +140,17 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
 
     from gc_core.config_modules.profiles import ProfileMeta
 
+    from gc_core.settings import settings_from_flat
+
     monkeypatch.setattr(
-        "gc_core.config.load_config_ex",
-        lambda _path=None, **_kw: (
+        "gc_core.config.load_settings",
+        lambda _path=None, **_kw: settings_from_flat(
             {"threads_data_path": str(tmp_path / "threads")},
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
     monkeypatch.setattr(
-        "gc_core.config.apply_cli_overrides", lambda _cfg: None
+        "gc_core.config.apply_cli_overrides", lambda d, **_kw: d
     )
     monkeypatch.setattr(
         "gc_core.onboarding.is_unconfigured", lambda _cfg: False
@@ -169,7 +176,7 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     # модуль `importlib`), а `monkeypatch.setattr` по СТРОКОВОМУ пути сам
     # зовёт `importlib.import_module`, чтобы добраться до модуля. Поставь её
     # раньше — и все подмены ниже уедут в `MagicMock`, который эта лямбда и
-    # возвращает: настоящие `load_config_ex` и `is_unconfigured` останутся
+    # возвращает: настоящие `load_settings` и `is_unconfigured` останутся
     # нетронутыми, конфиг прочитается с диска, и тест начнёт зависеть от того,
     # настроен ли агент у запускающего. Именно так он и падал: на машине без
     # настроенного конфига `main` печатал экран настройки и выходил до
@@ -187,5 +194,8 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
     )
 
     assert tui_pkg.main([]) == 0
-    assert captured["config"]["launch_root"] == str(start.resolve())
+    assert captured["settings"].runtime.launch_root == str(start.resolve())
+    assert flat_config(captured["settings"])["launch_root"] == str(
+        start.resolve()
+    )
     assert Path.cwd().resolve() == other.resolve()

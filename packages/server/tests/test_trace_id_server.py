@@ -10,8 +10,12 @@ def client(monkeypatch, tmp_path):
 
     captured = {}
 
-    async def _fake_create_run_context(config_dict, **kwargs):
-        captured["config_dict"] = config_dict
+    async def _fake_create_run_context(loaded, **kwargs):
+        from gc_core.config import flat_config
+
+        # Сервер отдаёт контексту LoadedSettings; плоский вид — то, что увидит ран.
+        captured["loaded"] = loaded
+        captured["config_dict"] = flat_config(loaded)
         return object()
 
     async def _fake_start_if_absent(**kwargs):
@@ -44,6 +48,7 @@ def test_trace_id_reaches_run_config(client):
     )
     assert resp.status_code == 200
     assert captured["config_dict"]["trace_id"] == "wf-42"
+    assert captured["loaded"].runtime.trace_id == "wf-42"
 
 
 def test_trace_id_is_removed_from_the_prompt(client):

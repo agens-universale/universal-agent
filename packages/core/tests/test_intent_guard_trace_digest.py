@@ -72,7 +72,7 @@ def _ask_human_scenario_messages(
 class FinishGateTraceDigestTest(unittest.TestCase):
     def test_normalize_quality_gate_config_clamps_invalid_values(self) -> None:
         qg = QualityGateConfig(max_dialogue_chars=0, max_message_chars=-1)
-        normalize_quality_gate_config(qg)
+        qg = normalize_quality_gate_config(qg)
         self.assertEqual(
             qg.max_dialogue_chars, DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS
         )
@@ -99,7 +99,7 @@ class FinishGateTraceDigestTest(unittest.TestCase):
                     max_dialogue_chars=0, max_message_chars=-1
                 )
             )
-            resolve_paths(cfg, tmp)
+            cfg = resolve_paths(cfg, tmp)
             limits = digest_limits_from_params(cfg.quality_gate.model_dump())
             self.assertEqual(
                 limits["max_dialogue_chars"],

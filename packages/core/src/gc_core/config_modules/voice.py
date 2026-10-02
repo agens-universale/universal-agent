@@ -8,7 +8,9 @@ from gc_core.utils.url_addr import same_service
 class VoiceConfig(BaseModel):
     """Секция voice: — голосовой ввод TUI (STT). Пустой url = фича выключена."""
 
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, frozen=True
+    )
 
     # Провайдер один — /v1/audio/transcriptions-совместимый сервис (локальная батарейка
     # или облако). Поле оставлено точкой расширения: появится второй протокол — добавим

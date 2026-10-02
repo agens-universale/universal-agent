@@ -12,7 +12,7 @@ class FsFindInFilesConfig(BaseModel):
     affix_or / complex). Overrides are optional; defaults match the spec.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_file_bytes: int = Field(
         default=16 * 1024 * 1024,
@@ -115,7 +115,7 @@ class FsFindFilesByNameConfig(BaseModel):
     ``max_visited`` is a walk safety cap, not a caller argument.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     default_max_matches: int = Field(
         default=100,
@@ -163,7 +163,7 @@ def parse_find_files_by_name_config(
 class FsToolsConfig(BaseModel):
     """Caps for FS tools that load whole-file content into memory."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_read_bytes: int = Field(
         default=8 * 1024 * 1024,

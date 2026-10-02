@@ -206,13 +206,13 @@ def test_effective_config_caches_profile_remerge(tmp_path, monkeypatch):
     from gc_core import config as cfg_mod
 
     calls = {"n": 0}
-    orig = cfg_mod.load_config_ex
+    orig = cfg_mod.load_settings
 
     def counting(*a, **kw):
         calls["n"] += 1
         return orig(*a, **kw)
 
-    monkeypatch.setattr(cfg_mod, "load_config_ex", counting)
+    monkeypatch.setattr(cfg_mod, "load_settings", counting)
     app.effective_config()
     app.effective_config()
     app.effective_config()

@@ -5,6 +5,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from gc_core.config_modules.editing import editable
+
 _logger = logging.getLogger(__name__)
 
 DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS = 500
@@ -17,7 +19,7 @@ IntentScopeRecordMode = Literal["aggregated", "raw"]
 
 
 class IntentScopeToolConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     record: IntentScopeRecordMode = "aggregated"
     store_arguments: bool = True
@@ -37,7 +39,7 @@ class IntentScopeToolConfig(BaseModel):
 
 
 class IntentScopeConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     tools: dict[str, IntentScopeToolConfig] = Field(default_factory=dict)
     max_summary_chars: int = DEFAULT_INTENT_SCOPE_MAX_SUMMARY_CHARS
@@ -52,7 +54,8 @@ class IntentScopeConfig(BaseModel):
     intent_scope_final_answer_summary_prompt_path: str | None = None
 
 
-def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
+def normalize_intent_scope_config(cfg: IntentScopeConfig) -> IntentScopeConfig:
+    cfg = editable(cfg)
     if cfg.max_summary_chars <= 0:
         _logger.warning(
             "intent_scope.max_summary_chars=%s must be > 0; using %s",
@@ -90,6 +93,7 @@ def normalize_intent_scope_config(cfg: IntentScopeConfig) -> None:
             DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT,
         )
         cfg.read_page_record_limit = DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
+    return cfg.result()
 
 
 def intent_scope_active(cfg: IntentScopeConfig) -> bool:

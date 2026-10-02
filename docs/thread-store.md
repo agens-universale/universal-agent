@@ -85,7 +85,9 @@ async-двойники было бы больно. Но дело не в ABC к�
 
 ```python
 from gc_core.aio import AsyncAgent
+from gc_core.config import load_settings
 
+cfg = load_settings("config.yml")  # или gc_core.settings.default_settings(...)
 agent = await AsyncAgent.create(cfg, thread_store=MyStore())
 answer = await agent.run("привет", thread_id="t1")
 ```
@@ -117,7 +119,7 @@ executor = AgentExecutor(
 from gc_core.thread_store import ThreadSession
 
 session = await ThreadSession.afrom_config(
-    config_dict=cfg,
+    config_dict=flat_config(cfg),  # gc_core.config.flat_config
     system_id="cli",
     thread_id="t1",
     store=MyStore(),

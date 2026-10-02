@@ -1,5 +1,6 @@
 import yaml
-from gc_core.config import apply_cli_overrides, load_config
+from gc_core.config import apply_cli_overrides, flat_config, load_config
+from gc_core.settings import settings_from_flat
 
 
 def _write_cfg(tmp_path, body: dict) -> str:
@@ -41,22 +42,27 @@ def test_load_config_resolves_env_in_mcp_and_headers(tmp_path, monkeypatch):
 
 def test_cli_override_resolves_env(monkeypatch):
     monkeypatch.setenv("U", "http://h/v1/chat")
-    cd = {"completions_url": "orig"}
-    apply_cli_overrides(cd, extra_overrides={"completions_url": "${ENV:U}"})
+    loaded = settings_from_flat({"completions_url": "orig"})
+    cd = flat_config(
+        apply_cli_overrides(
+            loaded, extra_overrides={"completions_url": "${ENV:U}"}
+        )
+    )
     assert cd["completions_url"] == "http://h/v1/chat"
 
 
 def test_cli_override_file_placeholder(tmp_path):
     f = tmp_path / "tok"
     f.write_text("cli-secret\n")
-    config_dict: dict = {}
-    apply_cli_overrides(
-        config_dict,
-        extra_overrides={
-            "chat_completion_headers": {
-                "Authorization": f"Bearer ${{FILE:{f}}}"
-            }
-        },
+    config_dict = flat_config(
+        apply_cli_overrides(
+            settings_from_flat({}),
+            extra_overrides={
+                "chat_completion_headers": {
+                    "Authorization": f"Bearer ${{FILE:{f}}}"
+                }
+            },
+        )
     )
     assert (
         config_dict["chat_completion_headers"]["Authorization"]

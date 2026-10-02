@@ -47,7 +47,7 @@ def test_garbage_falls_back_to_default():
 
 def test_normalize_clamps_negative():
     cfg = TodoConfig(reminder_steps=-1)
-    normalize_todo_config(cfg)
+    cfg = normalize_todo_config(cfg)
     assert cfg.reminder_steps == 0
 
 

@@ -25,7 +25,7 @@ def test_project_memory_notice_defaults():
 
 def test_normalize_long_memory_notice_rejects_non_positive():
     cfg = ProjectMemoryConfig(check_interval_messages=-1)
-    normalize_project_memory_config(cfg)
+    cfg = normalize_project_memory_config(cfg)
     assert cfg.check_interval_messages == 5
 
 
@@ -133,7 +133,7 @@ def test_project_memory_notice_enabled_from_nested_and_flat_config():
 
 def test_normalize_project_memory_limits_rejects_non_positive():
     cfg = ProjectMemoryConfig(max_chars=-1, max_append_chars=0)
-    normalize_project_memory_config(cfg)
+    cfg = normalize_project_memory_config(cfg)
     assert cfg.max_chars == 10_000
     assert cfg.max_append_chars == 3_000
 

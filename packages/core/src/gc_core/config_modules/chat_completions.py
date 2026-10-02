@@ -33,7 +33,7 @@ class ChatCompletionsLlmConfig(BaseModel):
     в YAML/бенч-профиле, не в коде.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_tokens: int = DEFAULT_AUXILIARY_LLM_MAX_TOKENS
     judge_max_tokens: int = DEFAULT_JUDGE_MAX_TOKENS
@@ -72,7 +72,9 @@ class ChatCompletionsLlmConfig(BaseModel):
 
 
 class ChatCompletionsConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, frozen=True
+    )
 
     auxiliary_llm: ChatCompletionsLlmConfig = Field(
         default_factory=ChatCompletionsLlmConfig,

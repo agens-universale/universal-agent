@@ -34,7 +34,7 @@ def _parse_max_tokens_str(raw: str, default: int) -> int:
 
 
 class BackendConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     api_mode: str = "responses"
     completions_url: str = ""

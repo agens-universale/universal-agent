@@ -22,12 +22,12 @@ DEFAULT_EXEC_TIMEOUT_SEC = 120
 
 
 class LoopDetectorConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = True
 
 
 class AgentConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     model: str = "MiniMax-M2.7"
     system_prompt_id: str = "v1"
     use_server_subagents: bool = False
@@ -179,21 +179,35 @@ class AgentConfig(BaseModel):
             )
         return n
 
-    @model_validator(mode="after")
-    def clamp_preview_edge_to_capture_tail(self) -> "AgentConfig":
+    @model_validator(mode="before")
+    @classmethod
+    def clamp_preview_edge_to_capture_tail(cls, data: Any) -> Any:
         """P ≤ T = L - floor(L / 2): оба края preview обязаны лежать внутри capture.
 
         Иначе контракт обещал бы полный короткий канал, уже обрезанный меньшим
         capture-cap. Зажимаем, а не отвергаем: ту же нормализацию делает плоский
-        путь, где бросок случился бы уже внутри вызова тулы.
+        путь, где бросок случился бы уже внутри вызова тулы. До валидации —
+        модель неизменяема, и так зажим работает и для конструктора.
         """
-        capture_tail = (
-            self.exec_output_capture_max_chars
-            - self.exec_output_capture_max_chars // 2
+        if not isinstance(data, dict):
+            return data
+        fields = cls.model_fields
+        capture = data.get(
+            "exec_output_capture_max_chars",
+            fields["exec_output_capture_max_chars"].default,
         )
-        if self.exec_output_preview_edge_chars > capture_tail:
-            self.exec_output_preview_edge_chars = capture_tail
-        return self
+        preview = data.get(
+            "exec_output_preview_edge_chars",
+            fields["exec_output_preview_edge_chars"].default,
+        )
+        try:
+            capture, preview = int(capture), int(preview)
+        except (TypeError, ValueError):
+            return data
+        capture_tail = capture - capture // 2
+        if preview > capture_tail:
+            return {**data, "exec_output_preview_edge_chars": capture_tail}
+        return data
 
     @field_validator("model_steering", mode="before")
     @classmethod

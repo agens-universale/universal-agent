@@ -99,38 +99,39 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
     from gc_core import config as cfg_mod
     from gc_core import thread_store as ts_mod
     from gc_core.config_modules.profiles import ProfileMeta
+    from gc_core.settings import settings_from_flat
     from gc_tui.app import TuiApp
+    from gc_tui.runtime_config import apply_tui_runtime
 
     on_disk = {
         "completions_url": "https://h/v1/chat/completions",
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
+    meta = ProfileMeta(active_name=None, ref=None, mtime_set={})
     # файл: без launch_root
     monkeypatch.setattr(
         cfg_mod,
-        "load_config_ex",
-        lambda p=None, **kw: (
-            dict(on_disk),
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
-        ),
+        "load_settings",
+        lambda p=None, **kw: settings_from_flat(on_disk, profile_meta=meta),
     )
-    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
+    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
         ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
     )
 
-    started = dict(on_disk)
-    started["launch_root"] = (
-        "D:/proj/snapshot-at-start"  # как ставит tui/__init__
+    # как собирает tui/__init__: снапшот cwd на старте + рантайм TUI
+    started = apply_tui_runtime(
+        settings_from_flat(on_disk, profile_meta=meta),
+        launch_root="D:/proj/snapshot-at-start",
     )
-    started["console_trace"] = False
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=started)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", settings=started)
     async with app.run_test() as pilot:
         await pilot.pause()
         app.reload_config()
         assert app._config["launch_root"] == "D:/proj/snapshot-at-start"
+        assert app._settings.runtime.launch_root == "D:/proj/snapshot-at-start"
         assert app._config["console_trace"] is False
 
 
@@ -307,8 +308,10 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
 
     seen_cfg = {}
 
-    async def _fake_acreate_run_context(cfg, **kw):
-        seen_cfg.update(cfg)
+    async def _fake_acreate_run_context(loaded, **kw):
+        from gc_core.config import flat_config
+
+        seen_cfg.update(flat_config(loaded))
         return _Ctx()
 
     monkeypatch.setattr(
@@ -521,7 +524,7 @@ def test_a_bug_inside_the_loader_is_not_relabelled_as_a_stale_profile(
 
     cfg_file, profiles = _profile_stack
     app = _app_that_could_lose_the_flag(cfg_file, profiles)
-    real = cfg_mod.load_config_ex
+    real = cfg_mod.load_settings
 
     def boom(path=None, **kw):
         # Ломается ТОЛЬКО сборка под флагом: сборка по указателю обязана
@@ -531,7 +534,7 @@ def test_a_bug_inside_the_loader_is_not_relabelled_as_a_stale_profile(
             raise TypeError("схема поехала")
         return real(path, **kw)
 
-    monkeypatch.setattr(cfg_mod, "load_config_ex", boom)
+    monkeypatch.setattr(cfg_mod, "load_settings", boom)
 
     with pytest.raises(TypeError):
         app.reload_config()

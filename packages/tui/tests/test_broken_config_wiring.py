@@ -209,7 +209,9 @@ def test_init_config_reaches_review_mode_on_broken_config_interactive(
 
     class _FakeApp:
         def __init__(self, **kw):
-            captured["config"] = kw.get("config")
+            from gc_core.config import flat_config
+
+            captured["config"] = flat_config(kw["settings"])
 
         def set_config_path(self, path):
             pass
@@ -417,7 +419,9 @@ def _capturing_app(monkeypatch):
 
     class _FakeApp:
         def __init__(self, **kw):
-            captured["config"] = kw.get("config")
+            from gc_core.config import flat_config
+
+            captured["config"] = flat_config(kw["settings"])
             captured["app"] = (
                 self  # признаки ставятся атрибутами уже после создания
             )

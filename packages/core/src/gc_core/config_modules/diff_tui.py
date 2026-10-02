@@ -13,7 +13,7 @@ DEFAULT_MAX_DIFF_CHARS = 100_000
 class DiffTuiConfig(BaseModel):
     """Yaml section ``diff_tui:`` — visual Diff-TUI, не параметры fs-тулов."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     cache_max_orig: int = DEFAULT_CACHE_MAX_ORIG
     preview_context_lines: int = DEFAULT_PREVIEW_CONTEXT_LINES

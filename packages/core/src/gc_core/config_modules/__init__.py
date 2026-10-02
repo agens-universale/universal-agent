@@ -26,10 +26,6 @@ _EXPORTS = {
     "AppConfig": ("gc_core.config_modules.root", "AppConfig"),
     "resolve_paths": ("gc_core.config_modules.root", "resolve_paths"),
     "SecurityConfig": ("gc_core.config_modules.security", "SecurityConfig"),
-    "apply_cli_command_moderation_overrides": (
-        "gc_core.config_modules.security",
-        "apply_cli_command_moderation_overrides",
-    ),
 }
 __all__ = list(_EXPORTS)
 

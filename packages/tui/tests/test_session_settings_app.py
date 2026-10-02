@@ -43,21 +43,23 @@ def test_overrides_survive_config_reload(tmp_path, monkeypatch):
     }
     from gc_core.config_modules.profiles import ProfileMeta
 
+    from gc_core.settings import settings_from_flat
+
     monkeypatch.setattr(
-        "gc_core.config.load_config_ex",
-        lambda *_a, **_k: (
-            dict(fresh),
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        "gc_core.config.load_settings",
+        lambda *_a, **_k: settings_from_flat(
+            fresh,
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
     monkeypatch.setattr(
-        "gc_core.config.apply_cli_overrides", lambda *_a, **_k: None
+        "gc_core.config.apply_cli_overrides", lambda d, **_k: d
     )
     app.reload_config()
 
     assert (
         app._config["model"] == "fresh-model"
-    )  # база реально перечиталась мокнутым load_config_ex
+    )  # база реально перечиталась мокнутым load_settings
     assert app.effective_config()["tui_text_answer_mode"] == "allow"
 
 

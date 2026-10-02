@@ -36,6 +36,39 @@ def apply_finish_gate_mode(cfg: Dict[str, Any]) -> None:
     cfg["finish_gate_smart"] = mode == "smart"
 
 
+def tui_agent_settings(loaded):
+    """Настройки агента TUI поверх действующих: промпт-ассеты, адаптивный bounce
+    текстового ответа (`tui.text_answer_mode`) и проекция режима /gate.
+
+    Принимает `LoadedSettings` и отдаёт новый; переходно — плоский словарь,
+    который правится на месте и возвращается (окна, собранные словарём)."""
+    from gc_tui.services.prompt_assets import tui_special_instructions_path
+
+    instructions = tui_special_instructions_path()
+    if isinstance(loaded, dict):
+        loaded["console_trace"] = False
+        loaded["chat_completions_special_instructions_path"] = instructions
+        loaded["text_answer_mode"] = loaded.get(
+            "tui_text_answer_mode", "judge"
+        )
+        apply_finish_gate_mode(loaded)
+        return loaded
+    from gc_core.config import flat_config
+
+    flat = flat_config(loaded)
+    mode = effective_finish_gate_mode(flat)
+    return loaded.with_overrides(
+        {
+            "paths.chat_completions_special_instructions_path": instructions,
+            "agent.strict_turn_finish_validation": mode != "off",
+        },
+        layer="runtime",
+    ).with_runtime(
+        text_answer_mode=effective_text_answer_mode(flat),
+        finish_gate_smart=mode == "smart",
+    )
+
+
 # --- /rigor: пресет как витрина над двумя ключами (спека §2, §6) --------------
 # Пресет НЕ хранится (производная). Пара — те же два существующих ключа сессии/
 # глобала; SESSION_KEYS их не расширяет — /rigor лишь ставит и резолвит.

@@ -111,16 +111,17 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
         "model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
+    from gc_core.settings import settings_from_flat
 
     monkeypatch.setattr(
         cfg_mod,
-        "load_config_ex",
-        lambda p=None, **kw: (
-            dict(configured),
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        "load_settings",
+        lambda p=None, **kw: settings_from_flat(
+            configured,
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
-    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
+    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
         ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
     )
@@ -199,10 +200,18 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict):
 
     from gc_core import config as cfg_mod
 
+    from gc_core.config_modules.profiles import ProfileMeta
+    from gc_core.settings import settings_from_flat
+
     monkeypatch.setattr(
-        cfg_mod, "load_config", lambda path=None: dict(config_dict)
+        cfg_mod,
+        "load_settings",
+        lambda path=None, **kw: settings_from_flat(
+            config_dict,
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        ),
     )
-    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
+    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
         cfg_mod, "user_config_path", lambda: tmp_path / "config.yml"
     )

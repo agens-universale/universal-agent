@@ -72,6 +72,9 @@ class _Layers(NamedTuple):
     # диска, а base-voice к этому моменту уже перезаписан мержем.
     managed_raw: Dict[str, Any]
     base_voice: Dict[str, Any]
+    # Документы наложенных слоёв по порядку — для происхождения настроек
+    # (`config explain`): ``(слой, путь, документ до ${ENV}, документ после)``.
+    documents: tuple = ()
 
 
 def _layer_document(path, subject: str) -> Dict[str, Any]:
@@ -170,14 +173,14 @@ def _overlay_layer(
     subject: str,
     *,
     require_file: bool,
-) -> tuple[Dict[str, Any], Dict[str, Any]]:
-    """Наложить один файловый слой (managed/project); ``(merged, слой_как_прочитан)``."""
+) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Наложить файловый слой; ``(merged, слой, слой до ${ENV})``."""
     if layer_path is None or os.path.abspath(
         str(layer_path)
     ) == os.path.abspath(base_path):
-        return raw_config, {}
+        return raw_config, {}, {}
     if require_file and not layer_path.is_file():
-        return raw_config, {}
+        return raw_config, {}, {}
     cand = candidate_for(layer_path)
     layer_raw = (
         cand
@@ -191,7 +194,7 @@ def _overlay_layer(
         source=str(layer_path) if require_file else layer_path,
         raw_source=before_env,
     )
-    return deep_merge(raw_config, layer_raw), layer_raw
+    return deep_merge(raw_config, layer_raw), layer_raw, before_env
 
 
 def _overlay_profile(
@@ -201,10 +204,10 @@ def _overlay_profile(
     candidates,
     candidate_for,
     notices: list[str],
-) -> tuple[Dict[str, Any], Optional[ProfileRef]]:
-    """Наложить профиль по указателю; ``(merged, ref)``, без указателя — как есть."""
+) -> tuple[Dict[str, Any], Optional[ProfileRef], Dict[str, Any]]:
+    """Наложить профиль по указателю; ``(merged, ref, документ профиля)``."""
     if not pointer:
-        return raw_config, None
+        return raw_config, None, {}
     try:
         ref = resolve_profile(pointer, roots, notices=notices)
     except ValueError:
@@ -221,7 +224,7 @@ def _overlay_profile(
             notices=notices,
         )
     )
-    return deep_merge(raw_config, profile_raw), ref
+    return deep_merge(raw_config, profile_raw), ref, profile_raw
 
 
 def _merge_layers(
@@ -301,7 +304,8 @@ def _merge_layers(
     # подмены — сьют тогда проверяет не то состояние, которое считает своим.
     if managed_path is _UNSET:
         managed_path = mcp_paths.managed_config_path()
-    raw_config, managed_raw = _overlay_layer(
+    documents = []
+    raw_config, managed_raw, managed_before = _overlay_layer(
         raw_config,
         managed_path,
         path,
@@ -309,11 +313,20 @@ def _merge_layers(
         "config.local.yml",
         require_file=True,
     )
+    if managed_raw:
+        documents.append(
+            (
+                "managed",
+                str(managed_path),
+                managed_before,
+                managed_raw,
+            )
+        )
 
     # Layered loading: project <cwd>/.gc/config.yml поверх глобального.
     if project_path is _UNSET:
         project_path = env_vars.project_local_config_path()
-    raw_config, _ = _overlay_layer(
+    raw_config, project_raw, project_before = _overlay_layer(
         raw_config,
         project_path,
         path,
@@ -321,6 +334,15 @@ def _merge_layers(
         "проектный config.yml",
         require_file=False,
     )
+    if project_raw:
+        documents.append(
+            (
+                "project",
+                str(project_path),
+                project_before,
+                project_raw,
+            )
+        )
 
     # Профиль (спека §3): указатель резолвится из пре-профильного мержа выше (ось 1,
     # анти-рекурсия — профиль не может выбрать профиль), либо из явного override
@@ -332,9 +354,18 @@ def _merge_layers(
         else str(raw_config.get("profile") or "").strip()
     )
     active_name: Optional[str] = pointer or None
-    raw_config, ref = _overlay_profile(
+    raw_config, ref, profile_raw = _overlay_profile(
         raw_config, pointer, roots, _candidates, _candidate_for, notices
     )
+    if ref is not None:
+        documents.append(
+            (
+                f"profile:{pointer}",
+                str(ref.path),
+                None,
+                profile_raw,
+            )
+        )
 
     return _Layers(
         raw_config,
@@ -345,6 +376,7 @@ def _merge_layers(
         project_path,
         managed_raw,
         _base_voice,
+        tuple(documents),
     )
 
 

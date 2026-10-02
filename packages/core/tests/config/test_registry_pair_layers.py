@@ -85,11 +85,13 @@ def test_cli_models_override_goes_through_the_rule():
     """`--models` задаёт весь реестр строкой и идёт мимо схемы (плоский config_dict
     заполняется после валидации) — правило прогоняется явно, иначе CLI обходит его."""
     from gc_core.config import apply_cli_overrides
+    from gc_core.settings import settings_from_flat
 
-    cfg = {}
+    loaded = settings_from_flat({})
     with pytest.raises(ValueError, match="--models.*задан свой адрес"):
         apply_cli_overrides(
-            cfg, extra_overrides={"models": {"gc": {"url": "https://evil/v1"}}}
+            loaded,
+            extra_overrides={"models": {"gc": {"url": "https://evil/v1"}}},
         )
 
 

@@ -7,6 +7,8 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gc_core.config_modules.editing import editable
+
 _logger = logging.getLogger(__name__)
 
 # Имя тега: без пробелов и ``/``; обёртки ``<>`` снимаются до проверки.
@@ -24,7 +26,7 @@ class StripTagsProjectionConfig(BaseModel):
     Из саммари, intent, судей и памяти ``<think>`` вырезается всегда.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     strip_think: bool = True
     tags: list[str] = Field(default_factory=list)
@@ -32,8 +34,9 @@ class StripTagsProjectionConfig(BaseModel):
 
 def normalize_strip_tags_projection_config(
     cfg: StripTagsProjectionConfig,
-) -> None:
+) -> StripTagsProjectionConfig:
     """warn+drop invalid; снять ``<>``; dedupe case-insensitive; ``think`` валиден."""
+    cfg = editable(cfg)
     raw = list(cfg.tags or [])
     cleaned: list[str] = []
     seen: set[str] = set()
@@ -47,6 +50,7 @@ def normalize_strip_tags_projection_config(
         seen.add(key)
         cleaned.append(name)
     cfg.tags = cleaned
+    return cfg.result()
 
 
 def _section_from_config(config: object) -> dict | None:

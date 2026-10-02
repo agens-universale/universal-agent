@@ -4,6 +4,8 @@ import logging
 
 from pydantic import BaseModel, ConfigDict
 
+from gc_core.config_modules.editing import editable
+
 _logger = logging.getLogger(__name__)
 
 DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS = 200_000
@@ -11,14 +13,15 @@ DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS = 5_000
 
 
 class QualityGateConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     max_dialogue_chars: int = DEFAULT_QUALITY_GATE_MAX_DIALOGUE_CHARS
     max_message_chars: int = DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
 
 
-def normalize_quality_gate_config(cfg: QualityGateConfig) -> None:
+def normalize_quality_gate_config(cfg: QualityGateConfig) -> QualityGateConfig:
     """Санитизация лимитов digest при загрузке конфига (аналог ``summary`` в ``resolve_paths``)."""
+    cfg = editable(cfg)
     if cfg.max_dialogue_chars <= 0:
         _logger.warning(
             "quality_gate.max_dialogue_chars=%s must be > 0; using default %s",
@@ -33,6 +36,7 @@ def normalize_quality_gate_config(cfg: QualityGateConfig) -> None:
             DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS,
         )
         cfg.max_message_chars = DEFAULT_QUALITY_GATE_MAX_MESSAGE_CHARS
+    return cfg.result()
 
 
 def digest_limits_from_params(params: dict | None) -> dict[str, int]:

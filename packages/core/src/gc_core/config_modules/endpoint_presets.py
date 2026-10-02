@@ -7,7 +7,7 @@ from pydantic import BaseModel, ConfigDict
 
 
 class EndpointPreset(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     name: str
     url: str
 

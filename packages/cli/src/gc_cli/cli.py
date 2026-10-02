@@ -9,8 +9,9 @@ from gc_core.config import (
     apply_cli_overrides,
     build_auth_connector,
     cli_forces_legacy_model,
+    flat_config,
     load_config,
-    load_config_ex,
+    load_settings,
     resolve_config_path,
     user_config_path,
 )
@@ -400,13 +401,14 @@ async def _run_init_agents_md() -> int:
     from gc_core.instructions.init_agents_md import build_init_prompt
     from gc_core.security.confirm_port import confirm_available
 
-    config_dict = load_config(arg_parser.run_args.config)
+    loaded = load_settings(arg_parser.run_args.config)
+    config_dict = flat_config(loaded)
     auth_connector = build_auth_connector(config_dict)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
     # create_run_context морозил бы его на всё MCP-дискавери — замер на
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
     # против 0.01 с и 365 тиков у асинхронного двойника.
-    ctx = await acreate_run_context(config_dict, auth_connector=auth_connector)
+    ctx = await acreate_run_context(loaded, auth_connector=auth_connector)
     # Тот же порт, что и в `arun_cli`. Без него вопрос агента в этом режиме шёл
     # старым путём — `input()` в потоке пула: Ctrl+C обрывал прогон, а выход
     # ждал строку в stdin. Режим `--init` как раз и спрашивает человека.
@@ -553,9 +555,7 @@ async def arun_cli() -> int:
     profile_arg = getattr(arg_parser.run_args, "profile", None)
     just_created = _bootstrap_user_config() if config_arg is None else False
     try:
-        config_dict, _profile_meta = load_config_ex(
-            config_arg, profile_override=profile_arg
-        )
+        loaded = load_settings(config_arg, profile_override=profile_arg)
     except ValueError as exc:
         # Нерезолвимый конфиг — объяснение в stderr и выход, а не голый traceback
         # из глубины загрузки (см. onboarding.explain_broken_config). Профиль —
@@ -572,8 +572,8 @@ async def arun_cli() -> int:
         return 1
 
     # Единая точка применения CLI-override поверх config.yml.
-    apply_cli_overrides(
-        config_dict,
+    loaded = apply_cli_overrides(
+        loaded,
         extra_overrides=getattr(arg_parser, "extra_config_overrides", None),
         write_guard_enabled=arg_parser.run_args.write_guard,
         no_write_guard=arg_parser.run_args.no_write_guard,
@@ -588,11 +588,15 @@ async def arun_cli() -> int:
     )
     # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
     # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
-    force_legacy = cli_forces_legacy_model(config_dict)
+    force_legacy = cli_forces_legacy_model(loaded)
     if force_legacy:
-        config_dict.setdefault("compat_notices", []).append(
-            "--model: уровни отключены на этот запуск (легаси-форс)"
+        loaded = loaded.with_runtime(
+            notices=(
+                *loaded.runtime.notices,
+                "--model: уровни отключены на этот запуск (легаси-форс)",
+            )
         )
+    config_dict = flat_config(loaded)
     from gc_core import upgrade_gate
 
     _upgrade_info = upgrade_gate.detect_upgrade()
@@ -628,7 +632,7 @@ async def arun_cli() -> int:
     # create_run_context морозил бы loop на всё MCP-дискавери (замер: 2.01 с
     # против 0.01 с). Сервер и SDK давно ходят через acreate_run_context.
     ctx = await acreate_run_context(
-        config_dict, auth_connector=auth_connector, force_legacy=force_legacy
+        loaded, auth_connector=auth_connector, force_legacy=force_legacy
     )
     # Порт «спросить человека». Без него ядро читает stdin через `to_thread`:
     # поток из пула, который `asyncio.run` ждёт на выходе, и Ctrl+C во время

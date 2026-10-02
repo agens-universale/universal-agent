@@ -5,6 +5,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from gc_core.config_modules.editing import editable
+
 _logger = logging.getLogger(__name__)
 
 DEFAULT_PROJECT_MEMORY_MAX_CHARS = 10_000
@@ -18,7 +20,7 @@ DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS = 16_384
 class ProjectMemoryConfig(BaseModel):
     """Yaml section ``project_memory:`` — limits and notice policy for long memory."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enable_project_memory_notice: bool = False
     check_interval_messages: int = (
@@ -29,7 +31,10 @@ class ProjectMemoryConfig(BaseModel):
     compaction_max_tokens: int = DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
 
 
-def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
+def normalize_project_memory_config(
+    cfg: ProjectMemoryConfig,
+) -> ProjectMemoryConfig:
+    cfg = editable(cfg)
     if cfg.check_interval_messages <= 0:
         _logger.warning(
             "project_memory.check_interval_messages=%s must be > 0; using default %s",
@@ -62,6 +67,7 @@ def normalize_project_memory_config(cfg: ProjectMemoryConfig) -> None:
         cfg.compaction_max_tokens = (
             DEFAULT_PROJECT_MEMORY_COMPACTION_MAX_TOKENS
         )
+    return cfg.result()
 
 
 def project_memory_from_config_dict(

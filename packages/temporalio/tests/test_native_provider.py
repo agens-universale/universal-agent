@@ -5,6 +5,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from gc_core.settings import override_settings
 from gc_core.config_modules import AppConfig
 from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.execution.resource_host import WorkerResourceHost
@@ -125,8 +126,14 @@ async def test_revision_store_and_owner_bindings_are_pinned(
         with pytest.raises(ValueError, match="store"):
             await provider(call(data={"store_id": "other"}))
         ctx = await provider(call())
-        changed = profile(tmp_path)
-        changed.core.agent.model_steering = "new behavior"
+        original = profile(tmp_path)
+        changed = original.model_copy(
+            update={
+                "core": override_settings(
+                    original.core, {"agent.model_steering": "new behavior"}
+                )
+            }
+        )
         with pytest.raises(Exception, match="different content"):
             make_provider(tmp_path, {"test": changed})
         assert await provider(call()) is ctx
@@ -149,30 +156,38 @@ async def test_actual_mcp_discovery_occurs_inside_resource_owner(
     import gc_ua_temporalio.native_provider as module
 
     monkeypatch.chdir(tmp_path)
-    configured = profile(tmp_path)
-    configured.core.mcp = AppConfig.model_validate(
-        {
-            "logging": {"save_logs": False},
-            "mcp": {
-                "servers": {
-                    "counter": {
-                        "transport": "stdio",
-                        "persistent_session": True,
-                        "command": sys.executable,
-                        "args": [
-                            str(
-                                Path(__file__).with_name(
-                                    "mcp_fixture_server.py"
-                                )
-                            ),
-                            "stdio",
-                            "0",
-                        ],
-                    }
+    base = profile(tmp_path)
+    configured = base.model_copy(
+        update={
+            "core": base.core.model_copy(
+                update={
+                    "mcp": AppConfig.model_validate(
+                        {
+                            "logging": {"save_logs": False},
+                            "mcp": {
+                                "servers": {
+                                    "counter": {
+                                        "transport": "stdio",
+                                        "persistent_session": True,
+                                        "command": sys.executable,
+                                        "args": [
+                                            str(
+                                                Path(__file__).with_name(
+                                                    "mcp_fixture_server.py"
+                                                )
+                                            ),
+                                            "stdio",
+                                            "0",
+                                        ],
+                                    }
+                                }
+                            },
+                        }
+                    ).mcp
                 }
-            },
+            )
         }
-    ).mcp
+    )
     events = []
     actual = module.acreate_run_context
 
@@ -200,9 +215,18 @@ async def test_child_uses_real_runner_and_parent_resource_owner(
     tmp_path, monkeypatch, live
 ):
     monkeypatch.chdir(tmp_path)
-    configured = profile(tmp_path)
-    configured.core.agent.use_local_subagents = True
-    configured.core.backend.api_mode = "chat_completions"
+    base = profile(tmp_path)
+    configured = base.model_copy(
+        update={
+            "core": override_settings(
+                base.core,
+                {
+                    "agent.use_local_subagents": True,
+                    "backend.api_mode": "chat_completions",
+                },
+            )
+        }
+    )
     provider, _ = make_provider(tmp_path, {"test": configured})
     try:
         parent = await provider(call())

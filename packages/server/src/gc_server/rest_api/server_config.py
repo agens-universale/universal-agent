@@ -6,8 +6,8 @@ import yaml
 from gc_core.bundled_assets import bundled_root, repo_root
 from gc_core.config import (
     apply_cli_overrides,
-    load_config,
-    sync_logging_flat_and_params,
+    flat_config,
+    load_settings,
 )
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.utils.user_text import read_user_text
@@ -193,62 +193,46 @@ def _resolve_server_agent_md(raw: str, server_cfg: Dict[str, Any]) -> str:
     return local
 
 
-def build_agent_config_for_server(
-    server_cfg: Dict[str, Any],
-) -> Dict[str, Any]:
-    """
-    Построить config_dict для агента при запуске через REST-сервер.
+def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
+    """Настройки агента для REST-сервера: ``LoadedSettings``.
 
-    Логика:
-    - Берём базовый config.yml через load_config().
-    - Если в server_cfg задана секция logging — мержим её в cfg["logging_params"]
-      и синхронизируем плоские ключи (console_trace, save_logs, full_log_backend).
-    - Если в server_cfg.agent задан server_agentmd_path:
-        - резолвим путь относительно PROJECT_ROOT (если он относительный);
-        - перезаписываем cfg["agent_md_path"] значением server_agentmd_path.
-    - Применяем перекрытия из server_cfg.agent_overrides через apply_cli_overrides
-      (тот же путь, что CLI-аргументы) — так agent_overrides.model/completions_url
-      тоже попадают в cli_explicit_keys и детектируются cli_forces_legacy_model
-      (легаси-форс §2: перекрытие модели поверх непустого реестра моделей).
+    - База — обычная загрузка ``config.yml`` со слоями.
+    - Секция ``logging`` сервера → правки ``logging.*``.
+    - ``agent.server_agentmd_path`` (относительно PROJECT_ROOT) → ``paths.agent_md_path``.
+    - ``agent_overrides`` → тем же путём, что CLI-аргументы: их ``model``/
+      ``completions_url`` видны легаси-форсу (§2) как заданные из CLI.
     """
-    cfg = load_config()
-
+    loaded = load_settings()
+    updates: Dict[str, Any] = {}
     log_block = server_cfg.get("logging")
     if isinstance(log_block, dict) and log_block:
-        lp = dict(cfg.get("logging_params") or {})
-        lp.update(log_block)
-        cfg["logging_params"] = lp
-        for key in (
-            "full_log_backend",
-            "console_trace",
-            "save_logs",
-        ):
-            if key in log_block:
-                cfg[key] = log_block[key]
-
+        for key, value in log_block.items():
+            updates[f"logging.{key}"] = value
     agent_cfg = server_cfg.get("agent") or {}
     server_agent_path = agent_cfg.get("server_agentmd_path")
     if isinstance(server_agent_path, str) and server_agent_path.strip():
-        server_agent_path = _resolve_server_agent_md(
+        updates["paths.agent_md_path"] = _resolve_server_agent_md(
             server_agent_path, server_cfg
         )
-        cfg["agent_md_path"] = server_agent_path
-
+    loaded = loaded.with_overrides(updates, layer="server")
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:
-        apply_cli_overrides(cfg, extra_overrides=overrides)
+        loaded = apply_cli_overrides(loaded, extra_overrides=overrides)
+    # Прежний `setdefault("limit_project_metadata", True)` ничего не менял:
+    # плоский словарь всегда уже содержал ключ. Поведение сохранено.
+    return loaded
 
-    sync_logging_flat_and_params(cfg)
 
-    # В серверном режиме ограничиваем проектные метаданные,
-    # чтобы не передавать структуру файловой системы пользователя.
-    cfg.setdefault("limit_project_metadata", True)
-
-    return cfg
+def build_agent_config_for_server(
+    server_cfg: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Переходный плоский вид ``build_agent_settings_for_server``."""
+    return flat_config(build_agent_settings_for_server(server_cfg))
 
 
 __all__ = [
     "PROJECT_ROOT",
     "build_agent_config_for_server",
+    "build_agent_settings_for_server",
     "load_server_config",
 ]

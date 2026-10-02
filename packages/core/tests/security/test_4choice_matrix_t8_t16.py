@@ -31,8 +31,10 @@ def test_t8_config_command_moderation_and_write_guard_are_separate_fields():
     assert hasattr(cfg, "write_guard"), "SecurityConfig must have write_guard"
     # They are distinct objects (not nested or aliased).
     assert cfg.command_moderation is not cfg.write_guard
-    # Changing one does not affect the other.
-    cfg.command_moderation.mode = "ask"
+    # Changing one does not affect the other (settings are immutable copies).
+    cfg = SecurityConfig.model_validate(
+        {"command_moderation": {"mode": "ask"}}
+    )
     assert (
         cfg.write_guard.mode != "ask"
         or cfg.write_guard.mode == cfg.write_guard.mode

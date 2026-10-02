@@ -14,7 +14,7 @@ SUMMARY_CHARS_PER_TOKEN = 2
 
 
 class SummaryConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     chat_completions_summary_prompt_path: str | None = None
     chat_completions_memory_patch_replace_prompt_path: str | None = None
     chat_completions_summary_trigger_chars: int = 0

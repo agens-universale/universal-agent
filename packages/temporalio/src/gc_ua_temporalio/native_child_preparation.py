@@ -44,9 +44,11 @@ async def prepare_native_child_context(call, parent_ctx):
 
 def prepared_subagent_factories(prepared):
     """Registry metadata with fixed builtin/file bindings, without discovery."""
-    prepared.context.config_dict["_subagent_definitions_cache"] = (
-        prepared.subagent_definitions
-    )
+    from gc_core.config_modules.frozen import derived_cache
+
+    derived_cache(prepared.context.config_dict)[
+        "_subagent_definitions_cache"
+    ] = prepared.subagent_definitions
     return {
         name: {"tool_fabric": None}
         for name in prepared.tool_metadata

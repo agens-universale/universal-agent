@@ -113,7 +113,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_core.config import (
         _bootstrap_user_config,
         apply_cli_overrides,
-        load_config_ex,
+        flat_config,
+        load_settings,
         resolve_config_path,
         user_config_path,
     )
@@ -151,7 +152,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        config_dict, profile_meta = loaded.config, loaded.meta
+        settings, profile_meta = loaded.settings, loaded.meta
+        config_dict = loaded.config
         if not _interactive():
             # TUI не стартует — stderr доезжает до человека и остаётся на экране.
             # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
@@ -207,7 +209,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             _bootstrap_user_config() if args.config is None else False
         )
         try:
-            config_dict, profile_meta = load_config_ex(
+            settings = load_settings(
                 args.config, profile_override=args.profile
             )
         except ValueError as exc:
@@ -226,7 +228,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 file=sys.stderr,
             )
             return 1
-        apply_cli_overrides(config_dict)
+        settings = apply_cli_overrides(settings)
+        config_dict, profile_meta = (
+            flat_config(settings),
+            settings.profile_meta,
+        )
 
         if args.config is None and onboarding.is_unconfigured(config_dict):
             if not _interactive():
@@ -244,9 +250,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     # Поля, вычисляемые рантаймом TUI (в файле конфига их нет) — владелец
     # tui/runtime_config; тот же модуль переносит их через hot-reload настроек.
-    from gc_tui.runtime_config import apply_runtime_fields
+    from gc_tui.runtime_config import apply_tui_runtime
 
-    apply_runtime_fields(config_dict)
+    settings = apply_tui_runtime(settings)
+    config_dict = flat_config(settings)
 
     from gc_core.thread_store import resolve_threads_dir
 
@@ -288,7 +295,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     app = _app_mod.TuiApp(
         threads_dir=threads_dir,
         system="cli",
-        config=config_dict,
+        settings=settings,
         profile_override=None if args.init_config else args.profile,
     )
     app.set_config_path(

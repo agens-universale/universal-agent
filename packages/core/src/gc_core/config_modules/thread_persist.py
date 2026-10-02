@@ -15,5 +15,5 @@ class ThreadStoreSettings(BaseModel):
     падении процесса, поэтому локальный прогон ``turn`` отклоняет.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     persist: Literal["step", "turn"] = "step"

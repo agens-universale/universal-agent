@@ -237,7 +237,7 @@ def test_profile_content_overlays_project_config(isolated_cwd, tmp_path):
 def test_level_from_profile_beats_project_but_loses_to_cli(
     isolated_cwd, tmp_path
 ):
-    from gc_core.config import apply_cli_overrides, load_config_ex
+    from gc_core.config import apply_cli_overrides, flat_config, load_settings
 
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
@@ -250,11 +250,14 @@ def test_level_from_profile_beats_project_but_loses_to_cli(
         isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"}
     )
 
-    cfg, meta = load_config_ex(str(base_config))
-    assert cfg["level"] == "light"
+    loaded = load_settings(str(base_config))
+    assert flat_config(loaded)["level"] == "light"
 
-    apply_cli_overrides(cfg, extra_overrides={"level": "default"})
-    assert cfg["level"] == "default"
+    overridden = apply_cli_overrides(
+        loaded, extra_overrides={"level": "default"}
+    )
+    assert flat_config(overridden)["level"] == "default"
+    assert overridden.provenance.source("level").layer == "cli"
 
 
 def test_env_interpolation_per_file_before_validation(

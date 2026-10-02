@@ -2,7 +2,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 CONFIG_FILE_NAME = "config.yml"
 
@@ -29,6 +29,10 @@ from gc_core.config_modules.env_vars import project_gc_dir
 # Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
 # реестра спрашивает их напрямую, минуя агрегатор). Здесь — ре-экспорт: снаружи их
 # зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
+from gc_core.config_modules.frozen import (  # noqa: F401
+    FrozenConfigDict,
+    derived_cache,
+)
 from gc_core.config_modules.layers import (  # noqa: F401
     _app_config_from_raw,
     _app_config_from_text,
@@ -61,9 +65,6 @@ from gc_core.config_modules.root import (
     AppConfig,
     resolve_paths,
     schema_error_details,
-)
-from gc_core.config_modules.security import (
-    apply_cli_command_moderation_overrides,
 )
 from gc_core.config_modules.summary import (
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
@@ -170,43 +171,30 @@ def resolve_base_config_path(config_path: Optional[str] = None) -> str:
     return config_path or _xdg_config_path() or _default_config_path()
 
 
-def _apply_models_override(
-    config_dict: Dict[str, Any], resolved: Dict[str, Any]
-) -> None:
-    if "models" not in resolved:
-        return
-    # `--models` задаёт весь реестр строкой и идёт мимо схемы (плоский
-    # config_dict заполняется уже после валидации), поэтому здесь руками
-    # повторяется то, что файловому пути делает flatten_app_config: правило
-    # пары и приведение записей к СЕРИАЛИЗОВАННОЙ форме. Без второго Router
-    # читал бы сырой словарь, где нет `authorization_header`, и `token` из
-    # CLI молча пропадал бы — запись уходила на свой адрес с общим ключом.
-    validate_registry_pairs({"models": resolved["models"]}, source="--models")
-    if isinstance(resolved["models"], dict):
-        config_dict["models"] = {
-            alias: _serialize_model_entry(ModelEntry.model_validate(entry))
-            for alias, entry in resolved["models"].items()
-        }
+def _cli_updates(
+    extra_overrides: Dict[str, Any],
+) -> tuple[Dict[str, Any], Optional[str]]:
+    """``--param`` → точечные пути настроек; ``trace_id`` — не настройка, а рантайм.
 
+    Плоские имена прежнего ``config_dict`` (``max_steps``) переводятся по таблице,
+    путь с точкой (``agent.max_steps``) берётся как есть.
+    """
+    from gc_core.config_modules.flat_keys import setting_path
 
-def _normalize_trace_id_key(
-    config_dict: Dict[str, Any], trace_id: Optional[str]
-) -> None:
-    # Внешний trace_id: значение могло приехать и настоящим флагом, и generic
-    # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
-    # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
-    # «отсутствует» было отсутствием ключа, а не пустой строкой.
-    if trace_id is not None:
-        config_dict["trace_id"] = trace_id
-    normalized_trace_id = normalize_trace_id(config_dict.get("trace_id"))
-    if normalized_trace_id:
-        config_dict["trace_id"] = normalized_trace_id
-    else:
-        config_dict.pop("trace_id", None)
+    resolved = resolve_env_placeholders(extra_overrides)
+    trace_id = resolved.pop("trace_id", None)
+    if "models" in resolved:
+        # `--models` задаёт весь реестр строкой: то же правило пары, что у файлов.
+        validate_registry_pairs(
+            {"models": resolved["models"]}, source="--models"
+        )
+    return {
+        setting_path(key): value for key, value in resolved.items()
+    }, trace_id
 
 
 def apply_cli_overrides(
-    config_dict: Dict[str, Any],
+    loaded,
     *,
     extra_overrides: Optional[Dict[str, Any]] = None,
     write_guard_enabled: Optional[bool] = None,
@@ -217,39 +205,45 @@ def apply_cli_overrides(
     read_guard_mode: Optional[str] = None,
     agentsmd_override: bool = False,
     trace_id: Optional[str] = None,
-) -> None:
-    if extra_overrides:
-        resolved = resolve_env_placeholders(extra_overrides)
-        config_dict.update(resolved)
-        _apply_models_override(config_dict, resolved)
-        # Признак «ключ пришёл именно из CLI» (спека §2): нужен, среди прочего,
-        # для детекта легаси-форса (см. cli_forces_legacy_model ниже).
-        explicit = set(config_dict.get("cli_explicit_keys") or ())
-        config_dict["cli_explicit_keys"] = sorted(explicit | set(resolved))
-    effective_write_guard_override = (
-        False if no_write_guard else write_guard_enabled
+):
+    """CLI поверх загруженного: новый ``LoadedSettings`` (слой ``cli``).
+
+    Значения проходят валидацию схемы; источник каждой правки помечается в
+    происхождении — по нему, например, видно легаси-форс модели.
+    """
+    from gc_core.config_modules.security import (
+        validate_command_moderation_mode,
+        validate_read_guard_mode,
     )
-    effective_read_guard_override = (
-        False if no_read_guard else read_guard_enabled
-    )
-    apply_cli_command_moderation_overrides(
-        config_dict,
-        write_guard_enabled=effective_write_guard_override,
-        command_moderation_mode=command_moderation_mode,
-        read_guard_enabled=effective_read_guard_override,
-        read_guard_mode=read_guard_mode,
-    )
+
+    updates, param_trace_id = _cli_updates(dict(extra_overrides or {}))
+    write_guard = False if no_write_guard else write_guard_enabled
+    read_guard = False if no_read_guard else read_guard_enabled
+    if write_guard is not None:
+        updates["security.write_guard.enabled"] = bool(write_guard)
+    if command_moderation_mode is not None:
+        updates["security.command_moderation.mode"] = (
+            validate_command_moderation_mode(command_moderation_mode)
+        )
+    if read_guard is not None:
+        updates["security.read_guard.enabled"] = bool(read_guard)
+    if read_guard_mode is not None:
+        updates["security.read_guard.mode"] = validate_read_guard_mode(
+            read_guard_mode
+        )
     if agentsmd_override:
-        config_dict["agentsmd_override"] = True
-    # Внешний trace_id: значение могло приехать и настоящим флагом, и generic
-    # `--param`-оверрайдом (там оно прошло через yaml.safe_load и может быть не
-    # строкой). Нормализуем в одной точке; пусто → ключа нет вовсе, чтобы
-    # «отсутствует» было отсутствием ключа, а не пустой строкой.
-    _normalize_trace_id_key(config_dict, trace_id)
-    sync_logging_flat_and_params(config_dict)
+        updates["tui.agentsmd_override"] = True
+    loaded = loaded.with_overrides(updates, layer="cli")
+    # Внешний trace_id: значение могло приехать и флагом, и `--param`
+    # (через yaml.safe_load — не обязательно строкой). Пусто → отсутствует.
+    raw_trace = trace_id if trace_id is not None else param_trace_id
+    normalized = normalize_trace_id(
+        raw_trace if raw_trace is not None else loaded.runtime.trace_id
+    )
+    return loaded.with_runtime(trace_id=normalized or None)
 
 
-def cli_forces_legacy_model(config_dict: Dict[str, Any]) -> bool:
+def cli_forces_legacy_model(loaded) -> bool:
     """Легаси-форс (спека §2, §12.1): CLI явно передал `model`/`completions_url`
     поверх непустого merged-реестра моделей — резолв уровней/алиасов у
     ``ModelRouter`` отключается на этот запуск (``force_legacy=True``).
@@ -257,10 +251,17 @@ def cli_forces_legacy_model(config_dict: Dict[str, Any]) -> bool:
     в стопке — это решает исключительно резолв модели, не сборку конфига.
     ``--model``/``--completions_url`` при пустом реестре — обычный легаси, без форса.
     """
-    explicit = set(config_dict.get("cli_explicit_keys") or ())
-    if not explicit & {"model", "completions_url"}:
-        return False
-    return bool(config_dict.get("models"))
+    if isinstance(loaded, Mapping):
+        # Переходно: плоский конфиг (тесты, собранные словарём).
+        explicit = set(loaded.get("cli_explicit_keys") or ())
+        return bool(explicit & {"model", "completions_url"}) and bool(
+            loaded.get("models")
+        )
+    from_cli = any(
+        loaded.provenance.source(path).layer == "cli"
+        for path in ("agent.model", "backend.completions_url")
+    )
+    return from_cli and bool(loaded.settings.models)
 
 
 def resolve_config_path(config_path: Optional[str] = None) -> str:
@@ -523,11 +524,18 @@ def profile_mtime_set(
     )
 
 
-def load_config_ex(
+def load_settings(
     config_path: Optional[str] = None,
     *,
     profile_override: Optional[str] = None,
-) -> tuple[Dict[str, Any], ProfileMeta]:
+):
+    """Загрузить настройки: ``LoadedSettings(settings, runtime, provenance)``.
+
+    Тот же конвейер, что описан у ``load_config_ex``, но без плоского словаря.
+    """
+    from gc_core.config_modules.provenance import Provenance
+    from gc_core.settings import LoadedSettings, RuntimeEnv
+
     """Загрузить эффективный конфиг + метаданные резолва профиля (спека §2, §3).
 
     Слои: base → managed → project (deep-merge, каждый слой интерполируется
@@ -564,6 +572,7 @@ def load_config_ex(
     # остаётся пустая строка, и назвать незаданную переменную уже нечем.
     base_before_env = raw_config
     raw_config = resolve_env_placeholders(raw_config)
+    raw_base_after_env = raw_config
     validate_registry_pairs(
         raw_config, source=str(base_path), raw_source=base_before_env
     )
@@ -577,6 +586,7 @@ def load_config_ex(
         project_path,
         managed_raw,
         _base_voice,
+        layer_documents,
     ) = _merge_layers(
         raw_config,
         path,
@@ -635,36 +645,81 @@ def load_config_ex(
             f"{SCHEMA_ERROR_PREFIX}{schema_error_details(exc)}"
         ) from exc
     _model_section_notices = validate_model_sections(app_cfg)
-    resolve_paths(app_cfg, config_dir)
+    app_cfg = resolve_paths(app_cfg, config_dir)
 
-    config_dict = flatten_app_config(app_cfg)
-    config_dict["level"] = app_cfg.level
-    # Плоский `profile` — ДЕЙСТВУЮЩИЙ профиль, а не указатель из файлов: документу
-    # профиля запрещено нести ключ `profile:`, поэтому после мержа app_cfg.profile
-    # остаётся пойнтером config.yml и при `--profile other` (или сессионном выборе,
-    # §9.1) врал бы витринам — `overriding_layer_note` называл бы чужое имя.
-    config_dict["profile"] = active_name or ""
-    # Не поле схемы: результат разбора СЫРОГО конфига compat-слоем — докладывает загрузчик.
-    # Фаза 2 секций моделей (ссылочная целостность на merged-реестре) и лоадер
-    # профилей (зарезервированные имена, секрет-политика) — тот же канал notices.
-    config_dict["compat_notices"] = (
-        _compat_notices + _model_section_notices + notices
-    )
-    # Не поле схемы: факт перекрытия юзерского voice managed-слоем — знает только загрузчик.
-    config_dict["voice_overridden_by_managed"] = _voice_overridden
-
-    apply_swarm_env_overrides(config_dict, config_dir)
-
-    sync_logging_flat_and_params(config_dict)
-
-    # Здесь глушились предупреждения urllib3 при `use_ssl: false`. Ядро ходит
-    # httpx, своих предупреждений urllib3 больше не рождает, а сам пакет ядро
-    # не объявляет — он приезжал транзитом через trafilatura. Тот же класс
-    # поломки, что был с requests у голоса, только тише.
     meta = ProfileMeta(
         active_name=active_name, ref=ref, mtime_set=mtime_set, notices=notices
     )
-    return config_dict, meta
+    provenance = Provenance.from_layers(
+        [("base", str(base_path), base_before_env, raw_base_after_env)]
+        + list(layer_documents)
+    )
+    runtime = RuntimeEnv(
+        config_path=os.path.abspath(path),
+        config_dir=config_dir,
+        active_profile=active_name or "",
+        notices=tuple(_compat_notices + _model_section_notices + notices),
+        voice_overridden_by_managed=_voice_overridden,
+    )
+    return LoadedSettings(
+        settings=app_cfg,
+        runtime=runtime,
+        provenance=provenance,
+        profile_meta=meta,
+    )
+
+
+def flat_config(loaded, runtime=None) -> Dict[str, Any]:
+    """Переходный плоский словарь из настроек (удаляется в конце миграции).
+
+    ``loaded`` — ``LoadedSettings`` или ``AppConfig`` (тогда ``runtime`` отдельно).
+    """
+    from gc_core.settings import LoadedSettings, RuntimeEnv
+
+    # Загруженные настройки знают действующий профиль (в том числе «никакого»);
+    # голая модель — только указатель из своего документа.
+    if isinstance(loaded, LoadedSettings):
+        app_cfg, runtime = loaded.settings, runtime or loaded.runtime
+        active_profile = runtime.active_profile
+    else:
+        app_cfg, runtime = loaded, runtime or RuntimeEnv()
+        active_profile = runtime.active_profile or app_cfg.profile
+    config_dict = flatten_app_config(app_cfg)
+    config_dict["level"] = app_cfg.level
+    # Плоский `profile` — ДЕЙСТВУЮЩИЙ профиль, а не указатель из файлов.
+    config_dict["profile"] = active_profile
+    config_dict["compat_notices"] = list(runtime.notices)
+    config_dict["voice_overridden_by_managed"] = (
+        runtime.voice_overridden_by_managed
+    )
+    for key in (
+        "launch_root",
+        "project_root",
+        "trace_id",
+        "text_answer_mode",
+        "finish_gate_smart",
+    ):
+        value = getattr(runtime, key)
+        if value:
+            config_dict[key] = value
+    if runtime.config_dir:
+        apply_swarm_env_overrides(config_dict, runtime.config_dir)
+    sync_logging_flat_and_params(config_dict)
+    return FrozenConfigDict(config_dict)
+
+
+def load_config_ex(
+    config_path: Optional[str] = None,
+    *,
+    profile_override: Optional[str] = None,
+) -> tuple[Dict[str, Any], ProfileMeta]:
+    """Переходная обёртка (до удаления): плоский словарь и метаданные профиля.
+
+    Отдаёт изменяемую копию — для витрин и тестов, собирающих конфиг словарём.
+    Путь агента (CLI, server, TUI) идёт через ``load_settings`` и неизменяемый вид.
+    """
+    loaded = load_settings(config_path, profile_override=profile_override)
+    return dict(flat_config(loaded)), loaded.profile_meta
 
 
 def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:

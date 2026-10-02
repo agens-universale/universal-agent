@@ -113,16 +113,17 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
         "model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
+    from gc_core.settings import settings_from_flat
 
     monkeypatch.setattr(
         cfg_mod,
-        "load_config_ex",
-        lambda p=None, **kw: (
-            dict(configured),
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        "load_settings",
+        lambda p=None, **kw: settings_from_flat(
+            configured,
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
-    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
+    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
         ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
     )
@@ -170,16 +171,17 @@ async def test_finish_onboarding_review_switches_to_main(
         "model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
+    from gc_core.settings import settings_from_flat
 
     monkeypatch.setattr(
         cfg_mod,
-        "load_config_ex",
-        lambda p=None, **kw: (
-            dict(configured),
-            ProfileMeta(active_name=None, ref=None, mtime_set={}),
+        "load_settings",
+        lambda p=None, **kw: settings_from_flat(
+            configured,
+            profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
-    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d: None)
+    monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
         ts_mod, "resolve_threads_dir", lambda c: str(tmp_path / "t")
     )

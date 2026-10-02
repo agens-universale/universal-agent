@@ -13,7 +13,7 @@ DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES = 16
 class ToolUsageNoticeRule(BaseModel):
     """Правило «не вызывали tool N persist-шагов» → technical notice."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     tool_name: str
     step_messages_count: int = DEFAULT_TOOL_USAGE_NOTICE_STEP_MESSAGES

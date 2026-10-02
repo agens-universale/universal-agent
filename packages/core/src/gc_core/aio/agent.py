@@ -56,13 +56,18 @@ class AsyncAgent:
     @classmethod
     async def create(
         cls,
-        config_dict: dict,
+        settings: Any,
         *,
         auth_connector: Any = None,
         on_stream_delta: Any = None,
         **context_kwargs: Any,
     ) -> AsyncAgent:
         """Собрать агента, не блокируя loop.
+
+        ``settings`` — ``AppConfig`` (``default_settings(...)``) или
+        ``LoadedSettings`` (``load_settings(path)``): провалидированные и
+        неизменяемые. Плоский словарь не принимается — правка настроек
+        только явная, ``override_settings`` даёт новый объект.
 
         ``on_stream_delta`` — необязательный «второй слушатель»: дельты и так
         уходят в очередь для ``stream()``, но приложению бывает нужен ещё и
@@ -74,8 +79,8 @@ class AsyncAgent:
         приложение, поднимающее агентов пачками, заплатит за каждого. Общий
         кэш снимает это, и он же достаётся субагентам через ``ctx``::
 
-            backend = resolve_os_backend(config_dict)   # harbor: + environment, loop
-            cache = ToolsCache(config_dict, os_backend=backend)
+            backend = resolve_os_backend(flat_config(settings))   # harbor: + environment, loop
+            cache = ToolsCache(flat_config(settings), os_backend=backend)
             a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
             a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
 
@@ -86,6 +91,16 @@ class AsyncAgent:
         процессе агента — для stdio это запуск сервера НА ХОСТЕ, мимо
         песочницы. Вызовы тулов при этом уходят правильно: течёт дискавери.
         """
+        from gc_core.config_modules.root import AppConfig
+        from gc_core.settings import LoadedSettings
+
+        if not isinstance(settings, (AppConfig, LoadedSettings)):
+            raise TypeError(
+                "AsyncAgent.create принимает AppConfig или LoadedSettings, "
+                f"а не {type(settings).__name__}: соберите настройки через "
+                "gc_core.config.load_settings(path) или "
+                "gc_core.settings.default_settings(**{'agent.model': ...})"
+            )
         # Набор ЖИВЫХ подписчиков вместо одной очереди на агента.
         #
         # Одна общая очередь давала два бага, оба воспроизводились замером:
@@ -117,7 +132,7 @@ class AsyncAgent:
         acquire_clients()
         try:
             ctx = await acreate_run_context(
-                config_dict,
+                settings,
                 auth_connector=auth_connector,
                 on_stream_delta=_sink,
                 **context_kwargs,

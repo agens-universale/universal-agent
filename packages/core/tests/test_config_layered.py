@@ -274,16 +274,19 @@ def test_cli_extra_overrides_win_over_layered(
     global_config_file, isolated_cwd
 ):
     """CLI args (через apply_cli_overrides extra_overrides) побеждают layered config."""
-    from gc_core.config import apply_cli_overrides, load_config
+    from gc_core.config import apply_cli_overrides, flat_config, load_settings
 
     _write_project_config(isolated_cwd, "agent:\n  max_steps: 999\n")
-    cfg = load_config(str(global_config_file))
+    loaded = load_settings(str(global_config_file))
     # Project уже применился: max_steps == 999.
-    assert cfg["max_steps"] == 999
+    assert flat_config(loaded)["max_steps"] == 999
 
     # CLI перебивает: max_steps == 12345.
-    apply_cli_overrides(cfg, extra_overrides={"max_steps": 12345})
-    assert cfg["max_steps"] == 12345
+    overridden = apply_cli_overrides(
+        loaded, extra_overrides={"max_steps": 12345}
+    )
+    assert flat_config(overridden)["max_steps"] == 12345
+    assert overridden.provenance.source("agent.max_steps").layer == "cli"
 
 
 def test_invalid_yaml_in_project_loud_error(global_config_file, isolated_cwd):
@@ -389,20 +392,22 @@ def test_empty_project_config_falls_back_to_global(
 
 
 def test_apply_cli_overrides_sets_agentsmd_override():
-    """apply_cli_overrides(agentsmd_override=True) sets config_dict key to True."""
-    from gc_core.config import apply_cli_overrides
+    """apply_cli_overrides(agentsmd_override=True) выставляет agentsmd_override в True."""
+    from gc_core.config import apply_cli_overrides, flat_config
+    from gc_core.settings import settings_from_flat
 
-    cfg: dict = {"agentsmd_override": False}
-    apply_cli_overrides(cfg, agentsmd_override=True)
+    loaded = settings_from_flat({"agentsmd_override": False})
+    cfg = flat_config(apply_cli_overrides(loaded, agentsmd_override=True))
     assert cfg["agentsmd_override"] is True
 
 
 def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
-    """apply_cli_overrides() without flag does NOT override agentsmd_override."""
-    from gc_core.config import apply_cli_overrides
+    """apply_cli_overrides() без флага НЕ трогает agentsmd_override."""
+    from gc_core.config import apply_cli_overrides, flat_config
+    from gc_core.settings import settings_from_flat
 
-    cfg: dict = {"agentsmd_override": False}
-    apply_cli_overrides(cfg)
+    loaded = settings_from_flat({"agentsmd_override": False})
+    cfg = flat_config(apply_cli_overrides(loaded))
     assert cfg["agentsmd_override"] is False
 
 

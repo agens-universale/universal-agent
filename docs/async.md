@@ -21,13 +21,29 @@
 
 ```python
 from gc_core.aio import AsyncAgent
-from gc_core.config import load_config
+from gc_core.config import load_settings
 
-config = load_config("~/.gc/config.yml")
+config = load_settings("~/.gc/config.yml")
 
 async with await AsyncAgent.create(config) as agent:
     answer = await agent.run("почини падающие тесты", thread_id="t1")
 ```
+
+`AsyncAgent.create` принимает типизированные настройки: `LoadedSettings` из
+`load_settings` (файлы, слои, профиль, `${ENV}` — с происхождением каждого
+значения) или `AppConfig`. Плоский словарь не принимается — `TypeError`.
+Настройки неизменяемы; правка даёт новый провалидированный объект:
+
+```python
+from gc_core.settings import default_settings, override_settings
+
+cfg = default_settings(**{"agent.model": "my-model", "agent.max_steps": 20})
+strict = override_settings(cfg, {"security.command_moderation.mode": "deny"})
+loaded = config.with_overrides({"agent.max_steps": 5})  # слой "cli" в происхождении
+```
+
+Недопустимое значение или неизвестный ключ — `ValidationError` сразу, а не
+сюрприз на середине хода.
 
 Живые дельты ответа:
 
@@ -338,9 +354,11 @@ logging:
 
 ```python
 from gc_core.backends.factory import resolve_os_backend
+from gc_core.config import flat_config
 
-backend = resolve_os_backend(config_dict)  # harbor: + environment=…, loop=…
-cache = ToolsCache(config_dict, os_backend=backend)
+view = flat_config(cfg)  # плоский вид только для чтения — для этих двух API
+backend = resolve_os_backend(view)  # harbor: + environment=…, loop=…
+cache = ToolsCache(view, os_backend=backend)
 a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
 a2 = await AsyncAgent.create(
     cfg, tools_cache=cache, os_backend=backend

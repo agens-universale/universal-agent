@@ -6,7 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class BangShellConfig(BaseModel):
     """Yaml ``tui.bang_shell`` — локальный `!command` в TUI (не агент)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = True
     # None / omit / <=0 = без лимита. Положительное N = авто-kill через N секунд.
@@ -18,7 +18,7 @@ class BangShellConfig(BaseModel):
 class FileViewConfig(BaseModel):
     """Yaml ``tui.file_view`` — постраничный `/view` в TUI."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = True
     max_file_bytes: int = 64 * 1024 * 1024
@@ -27,7 +27,7 @@ class FileViewConfig(BaseModel):
 
 
 class TuiConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     # Мастер-свитч live-стриминга в TUI (chat_completions). На CLI/server/swarm
     # НЕ влияет — там всегда non-stream (стрим гейтится наличием on_stream_delta,

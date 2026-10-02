@@ -16,7 +16,7 @@ class ModelTariff(BaseModel):
     Если не задана → кэшированные токены биллятся по обычной ``input``-ставке
     (обратная совместимость: провайдеры/модели без кэша не затронуты)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     input: float
     output: float
@@ -37,7 +37,7 @@ class PricingConfig(BaseModel):
     конкретные модели (мультимодельные сетапы).
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
     currency: str = DEFAULT_CURRENCY
@@ -55,7 +55,7 @@ class ResolvedTariff(BaseModel):
     ``cache_read`` — ставка кэшированных input-токенов; None → кэш биллится по ``input``.
     """
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     input: float
     output: float

@@ -5,6 +5,7 @@ import sys
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import cli
+from gc_core.settings import settings_from_flat
 
 
 def _stub_repair_load(monkeypatch, config):
@@ -131,15 +132,12 @@ def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     )
     monkeypatch.setattr(
         cli,
-        "load_config_ex",
-        lambda *a, **k: (
-            {
-                "completions_url": "http://your-backend:PORT/v1/chat/completions"
-            },
-            None,
+        "load_settings",
+        lambda *a, **k: settings_from_flat(
+            {"completions_url": "http://your-backend:PORT/v1/chat/completions"}
         ),
     )
-    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
     monkeypatch.setattr(
@@ -188,15 +186,12 @@ def test_unconfigured_with_structured_format_exits_1(
     )
     monkeypatch.setattr(
         cli,
-        "load_config_ex",
-        lambda *a, **k: (
-            {
-                "completions_url": "http://your-backend:PORT/v1/chat/completions"
-            },
-            None,
+        "load_settings",
+        lambda *a, **k: settings_from_flat(
+            {"completions_url": "http://your-backend:PORT/v1/chat/completions"}
         ),
     )
-    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
     monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
     monkeypatch.setattr(

@@ -15,6 +15,7 @@ from gc_core.config_modules.agent import (
 from gc_core.config_modules.backend import BackendConfig
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
 from gc_core.config_modules.diff_tui import DiffTuiConfig
+from gc_core.config_modules.editing import editable
 from gc_core.config_modules.endpoint_presets import (
     EndpointPreset,
     default_endpoint_presets,
@@ -80,11 +81,11 @@ from gc_core.config_modules.working_memory import (
 
 
 class AgentAuthConfig(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="allow", frozen=True)
 
 
 class AppConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     backend: BackendConfig = Field(default_factory=BackendConfig)
     chat_completions: ChatCompletionsConfig = Field(
@@ -180,8 +181,9 @@ def _to_abs(config_dir: str, path_value: str | None) -> str | None:
     return os.path.abspath(os.path.join(config_dir, path_value))
 
 
-def _normalize_summary_limits(cfg: AppConfig) -> None:
+def _normalize_summary_limits(cfg: AppConfig) -> AppConfig:
     """Нули/отрицательные лимиты summary → дефолты; производные триггеры — от основного."""
+    cfg = editable(cfg)
     if cfg.summary.intent_log_preview_chars <= 0:
         cfg.summary.intent_log_preview_chars = DEFAULT_INTENT_LOG_PREVIEW_CHARS
     cfg.summary.chat_completions_summary_trigger_chars = (
@@ -234,9 +236,11 @@ def _normalize_summary_limits(cfg: AppConfig) -> None:
             if trigger > 0
             else 0
         )
+    return cfg.result()
 
 
-def _normalize_finish_gate_limits(cfg: AppConfig) -> None:
+def _normalize_finish_gate_limits(cfg: AppConfig) -> AppConfig:
+    cfg = editable(cfg)
     if cfg.agent.finish_gate_max_iterations < 1:
         logging.getLogger(__name__).warning(
             "finish_gate_reject_limit_invalid finish_gate_max_iterations=%s; using %s",
@@ -255,9 +259,12 @@ def _normalize_finish_gate_limits(cfg: AppConfig) -> None:
         cfg.agent.subagent_finish_gate_max_iterations = (
             DEFAULT_SUBAGENT_FINISH_GATE_MAX_ITERATIONS
         )
+    return cfg.result()
 
 
-def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
+def resolve_paths(cfg: AppConfig, config_dir: str) -> AppConfig:
+    cfg = editable(cfg)
+
     def to_abs(path_value: str | None) -> str | None:
         return _to_abs(config_dir, path_value)
 
@@ -320,6 +327,7 @@ def resolve_paths(cfg: AppConfig, config_dir: str) -> None:
     write_guard.extra_paths = [
         to_abs(path) or path for path in write_guard.extra_paths
     ]
+    return cfg.result()
 
 
 def _clamp_summary_trigger(value: int) -> int:

@@ -217,7 +217,7 @@ class ModelEntry(BaseModel):
     """Запись реестра `models`: алиас (ключ словаря) → провайдерская модель + точечные
     оверлеи backend/pricing поверх эффективной секции backend."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     model: str | None = None
     url: str | None = None
@@ -319,7 +319,7 @@ class ModelEntry(BaseModel):
 class SlotsConfig(BaseModel):
     """Уровни light/default/max — указатели на алиас из `models`."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     light: str | None = None
     default: str | None = None
@@ -330,7 +330,7 @@ class AssignConfig(BaseModel):
     """Привязки потребителей → уровень или алиас. Ключ `main` запрещён — основной
     трейс управляется уровнем (`level`/`/level`), не привязкой."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     finish_gate: str | None = None
     text_answer_judge: str | None = None

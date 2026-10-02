@@ -42,7 +42,7 @@ def _config(overrides: dict | None = None) -> dict:
 
 def _schema_defaults() -> dict:
     app_cfg = AppConfig.model_validate({})
-    resolve_paths(app_cfg, str(_HARBOR_DIR))
+    app_cfg = resolve_paths(app_cfg, str(_HARBOR_DIR))
     return flatten_app_config(app_cfg)
 
 

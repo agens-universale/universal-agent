@@ -118,7 +118,7 @@ PUBLIC_POLICY_SCHEMA = {
     "subagent_tools_allow": "scalar_or_list",
     "subagent_tools_stop": ["scalar"],
     **_fields(
-        "backend_api_mode chat_completions_max_tokens chat_completions_min_response_tokens use_max_tokens_param openai_strict_tools_schema send_tool_strict claude_prompt_cache use_retry retry_embedded_choice_errors backend_request_timeout_sec stream tui_stream tui_stream_display tui_text_answer_mode tui_finish_gate_mode tui_finish_gate_mode_explicit strict_turn_finish_explicit_false working_memory_max_chars_goal working_memory_max_chars_constraints working_memory_max_chars_state working_memory_max_chars_knowledge working_memory_total_budget_chars project_memory_check_interval_messages project_memory_max_chars project_memory_max_append_chars enable_project_memory_notice agent_md_path chat_completions_system_prompt_path chat_completions_intent_guard_prompt_path chat_completions_custom_subagent_system_prompt_path chat_completions_special_instructions_path threads_data_path thread_store_persist skills_data_path logs_dump_dir agentsmd_override model system_prompt_id use_server_subagents subagent_max_steps subagents_dir subagents_max_count verbose server_tool_prefix max_steps session_token_limit max_tool_calls no_tool_call_max_count max_unknown_tool_repeats strict_turn_finish_validation finish_gate_max_iterations subagent_finish_gate_max_iterations finish_gate_use_rule_hints console_trace save_logs logging_format log_level limit_project_metadata tool_output_inline_max_chars stored_tool_outputs_max_entries exec_timeout_sec exec_output_capture_max_chars exec_output_preview_edge_chars walk_output_max_chars model_steering limit_trace_summary profile launch_root project_root level trace_id os_backend"
+        "backend_api_mode chat_completions_max_tokens chat_completions_min_response_tokens use_max_tokens_param openai_strict_tools_schema send_tool_strict claude_prompt_cache use_retry retry_embedded_choice_errors backend_request_timeout_sec stream tui_stream tui_stream_display tui_text_answer_mode tui_finish_gate_mode tui_finish_gate_mode_explicit strict_turn_finish_explicit_false working_memory_max_chars_goal working_memory_max_chars_constraints working_memory_max_chars_state working_memory_max_chars_knowledge working_memory_total_budget_chars project_memory_check_interval_messages project_memory_max_chars project_memory_max_append_chars enable_project_memory_notice agent_md_path chat_completions_system_prompt_path chat_completions_intent_guard_prompt_path chat_completions_custom_subagent_system_prompt_path chat_completions_special_instructions_path threads_data_path thread_store_persist skills_data_path logs_dump_dir agentsmd_override model system_prompt_id use_server_subagents subagent_max_steps subagents_dir subagents_max_count verbose server_tool_prefix max_steps session_token_limit max_tool_calls no_tool_call_max_count max_unknown_tool_repeats strict_turn_finish_validation finish_gate_max_iterations subagent_finish_gate_max_iterations finish_gate_use_rule_hints console_trace save_logs logging_format log_level limit_project_metadata tool_output_inline_max_chars stored_tool_outputs_max_entries exec_timeout_sec exec_output_capture_max_chars exec_output_preview_edge_chars walk_output_max_chars model_steering limit_trace_summary profile launch_root project_root level trace_id os_backend full_log_backend voice_overridden_by_managed"
     ),
     "chat_completion_kwargs": _COMPLETION_PARAMETERS,
     "deprecated_keys_used": ["scalar"],
@@ -161,7 +161,7 @@ PUBLIC_POLICY_SCHEMA = {
     "intent_scope_params": _INTENT_SCOPE,
     "logging_params": {
         **_fields(
-            "full_log_backend console_trace save_logs format log_level propagate"
+            "full_log_backend console_trace save_logs format logging_format log_level propagate"
         ),
         "redact_secrets": {
             **_fields("enabled"),
@@ -171,6 +171,7 @@ PUBLIC_POLICY_SCHEMA = {
     },
     "use_local_subagents": "scalar_or_list",
     "stop_tools": ["scalar"],
+    "compat_notices": ["scalar"],
     "disable_skills": ["scalar"],
     "redact_secrets": {
         **_fields("enabled"),

@@ -1018,7 +1018,26 @@ class SubagentRunner:
                 else None
             )
             child_config[SUBAGENT_TOOLS_STOP_KEY] = list(definition.stop_tools)
-        return child_config
+        from gc_core.config_modules.frozen import FrozenConfigDict
+
+        return FrozenConfigDict(child_config)
+
+    def _build_child_settings(self):
+        """Типизированные настройки ребёнка: настройки родителя без локальных
+        субагентов (тот же запрет, что ``use_local_subagents`` в плоском виде).
+        None — родитель собран плоским словарём (переходно)."""
+        parent = getattr(self._ctx, "settings", None)
+        if parent is None:
+            return None
+        from gc_core.settings import override_settings
+
+        return override_settings(
+            parent,
+            {"agent.use_local_subagents": False},
+            config_dir=getattr(
+                getattr(self._ctx, "runtime", None), "config_dir", None
+            ),
+        )
 
     def _build_child_model_router(
         self, tool_name: str, child_config: Dict[str, Any]
@@ -1292,6 +1311,8 @@ class SubagentRunner:
 
         child_ctx = RunContext(
             config_dict=child_config,
+            settings=self._build_child_settings(),
+            runtime=getattr(self._ctx, "runtime", None),
             run_id=child_run_id,
             # config_dict наследуется дословно через child_config, но поле ctx
             # собирается руками и НЕ наследуется автоматически — без этой строки

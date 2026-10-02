@@ -10,7 +10,11 @@ import yaml
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from gc_core.agent_executor import AgentExecutor
-from gc_core.config import build_auth_connector, cli_forces_legacy_model
+from gc_core.config import (
+    build_auth_connector,
+    cli_forces_legacy_model,
+    flat_config,
+)
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import (
     load_thread_messages,
@@ -26,7 +30,7 @@ from gc_core.utils.generate_message_id import (
 
 from gc_server.rest_api.agent_execution_registry import agent_run_registry
 from gc_server.rest_api.server_config import (
-    build_agent_config_for_server,
+    build_agent_settings_for_server,
     load_server_config,
 )
 from gc_server.rest_api.utils import ensure_task_id, normalize_system
@@ -72,9 +76,8 @@ try:
     # тот же приём, что config_modules/env_vars.py уже применяет к битым
     # GC_*-переменным окружения.
     SERVER_CONFIG: Dict[str, Any] = load_server_config()
-    BASE_AGENT_CONFIG: Dict[str, Any] = build_agent_config_for_server(
-        SERVER_CONFIG
-    )
+    BASE_AGENT_SETTINGS = build_agent_settings_for_server(SERVER_CONFIG)
+    BASE_AGENT_CONFIG: Dict[str, Any] = flat_config(BASE_AGENT_SETTINGS)
 except (ValueError, OSError, yaml.YAMLError) as exc:
     raise SystemExit(
         f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
@@ -566,16 +569,18 @@ async def events_webhook(request: Request):
     # Всё, что может упасть после взятия брони, — внутри `try`: бронь, не
     # снятая из-за исключения до него, навсегда усыпила бы вебхуки задачи.
     try:
-        config_dict = dict(BASE_AGENT_CONFIG)
-        if trace_id:
-            # Shallow copy достаточно: значение — скаляр. Мутировать
-            # BASE_AGENT_CONFIG нельзя, он процесс-глобальный.
-            config_dict["trace_id"] = trace_id
+        # Настройки процесса неизменяемы; trace_id — рантайм этого прогона.
+        loaded = (
+            BASE_AGENT_SETTINGS.with_runtime(trace_id=trace_id)
+            if trace_id
+            else BASE_AGENT_SETTINGS
+        )
+        config_dict = flat_config(loaded)
         auth_connector = build_auth_connector(config_dict)
         # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх
         # непустого реестра моделей — тот же контракт, что CLI --model
         # (agent_overrides перекрывают config.yml так же, как CLI-аргументы).
-        force_legacy = cli_forces_legacy_model(config_dict)
+        force_legacy = cli_forces_legacy_model(loaded)
         if force_legacy:
             logger.warning(
                 "agent_overrides: уровни отключены на этот запуск (легаси-форс)"
@@ -585,7 +590,7 @@ async def events_webhook(request: Request):
         # всё это время, а с переездом прогоны стали тасками на общем loop,
         # поэтому заморозка била разом по всем эндпоинтам и всем идущим прогонам.
         ctx = await acreate_run_context(
-            config_dict,
+            loaded,
             auth_connector=auth_connector,
             force_legacy=force_legacy,
         )

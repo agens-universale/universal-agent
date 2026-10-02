@@ -900,6 +900,9 @@ class RepairLoad(NamedTuple):
     message: Optional[str]
     profile: str = ""  # умолчания = «ничего не снималось» (ступень full)
     deactivate_profile: bool = False
+    settings: Any = (
+        None  # LoadedSettings той же ступени; config — его плоский вид
+    )
 
 
 class RepairRefused(Exception):
@@ -1019,25 +1022,33 @@ def load_config_for_repair() -> RepairLoad:
     в `RepairLoad.config` доехал бы до `resolve_threads_dir` следом."""
     from gc_core.config import (
         _default_config_path,
-        load_config_ex,
+        flat_config,
+        load_settings,
         resolve_config_path,
     )
 
     try:
-        config, meta = load_config_ex(None)
-        return RepairLoad(config, meta, REPAIR_STAGE_FULL, None, "", False)
+        loaded = load_settings(None)
+        return RepairLoad(
+            flat_config(loaded),
+            loaded.profile_meta,
+            REPAIR_STAGE_FULL,
+            None,
+            "",
+            False,
+            loaded,
+        )
     except ValueError as exc:
         broken = exc
 
     try:
-        config, meta = load_config_ex(None, profile_override="")
+        loaded = load_settings(None, profile_override="")
     except ValueError:
         try:
-            config, meta = load_config_ex(
-                _default_config_path(), profile_override=""
-            )
+            loaded = load_settings(_default_config_path(), profile_override="")
         except ValueError:
             raise broken from None
+        config, meta = flat_config(loaded), loaded.profile_meta
         # Живой указатель на ступени шаблона — тупик записи (M10): гейт судит
         # стек следующего старта, где профиль лежит поверх несобираемой базы, и
         # отвергнет всё, что мастер соберёт (включая отдельное снятие
@@ -1066,8 +1077,10 @@ def load_config_for_repair() -> RepairLoad:
             _repair_message(REPAIR_STAGE_TEMPLATE, broken, ""),
             "",
             False,
+            loaded,
         )
 
+    config, meta = flat_config(loaded), loaded.profile_meta
     from gc_core.config_modules.layers import (
         profile_pointer_write_target,
         resolve_profile_pointer,
@@ -1106,6 +1119,7 @@ def load_config_for_repair() -> RepairLoad:
         ),
         profile,
         pinned_by is None,
+        loaded,
     )
 
 

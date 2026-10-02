@@ -181,7 +181,11 @@ def _subagent_definitions(config_dict: Dict[str, Any]) -> List[Notice]:
         )
 
         resolve_subagent_definitions(config_dict)
-        records = config_dict.get(SUBAGENT_DIAGNOSTICS_KEY) or []
+        from gc_core.config_modules.frozen import derived_cache
+
+        records = (
+            derived_cache(config_dict).get(SUBAGENT_DIAGNOSTICS_KEY) or []
+        )
     except Exception:  # уведомления не должны ронять старт
         return []
 

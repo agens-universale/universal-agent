@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 class RedactSecretsConfig(BaseModel):
     """Маскировка секретов в логах (key-name + value-regex). По умолчанию ВЫКЛ."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
     extra_keys: list[str] = []  # доп. подстроки имён ключей (к встроенным)
@@ -14,7 +14,7 @@ class RedactSecretsConfig(BaseModel):
 class LoggingConfig(BaseModel):
     """Параметры логирования рантайма (не путать со stdlib logging)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     full_log_backend: bool = False
     console_trace: bool = True

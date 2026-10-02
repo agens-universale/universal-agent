@@ -11,11 +11,14 @@ import yaml
 from gc_core.config import (
     apply_cli_overrides,
     cli_forces_legacy_model,
+    flat_config,
     load_config_ex,
+    load_settings,
 )
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.model_router import ModelRouter
+from gc_core.settings import settings_from_flat
 
 
 def _write_yaml(path: Path, body: dict) -> Path:
@@ -88,51 +91,55 @@ def test_level_flag_rejects_invalid_choice(monkeypatch):
         importlib.reload(importlib.import_module("gc_cli.arg_parser"))
 
 
-# --- config.py: cli_explicit_keys + детект легаси-форса ----------------------------
+# --- config.py: происхождение CLI-правок + детект легаси-форса --------------------
 
 
 def test_apply_cli_overrides_tracks_explicit_keys():
-    cfg = {"models": {"flash": {}}}
-    apply_cli_overrides(cfg, extra_overrides={"model": "X"})
-    assert cfg["cli_explicit_keys"] == ["model"]
+    loaded = settings_from_flat({"models": {"flash": {}}})
+    overridden = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    assert overridden.provenance.source("agent.model").layer == "cli"
+    # Не заданное CLI — не помечено как cli; исходный объект не изменён.
+    assert overridden.provenance.source("level").layer != "cli"
+    assert loaded.provenance.source("agent.model").layer != "cli"
 
 
 def test_apply_cli_overrides_accumulates_explicit_keys_across_calls():
-    cfg = {"models": {"flash": {}}}
-    apply_cli_overrides(cfg, extra_overrides={"model": "X"})
-    apply_cli_overrides(cfg, extra_overrides={"level": "light"})
-    assert cfg["cli_explicit_keys"] == ["level", "model"]
+    loaded = settings_from_flat({"models": {"flash": {}}})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"level": "light"})
+    assert loaded.provenance.source("agent.model").layer == "cli"
+    assert loaded.provenance.source("level").layer == "cli"
 
 
 def test_force_legacy_true_when_model_override_and_registry_nonempty():
-    cfg = {"models": {"flash": {}}}
-    apply_cli_overrides(cfg, extra_overrides={"model": "X"})
-    assert cli_forces_legacy_model(cfg) is True
+    loaded = settings_from_flat({"models": {"flash": {}}})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    assert cli_forces_legacy_model(loaded) is True
 
 
 def test_force_legacy_true_when_completions_url_override_and_registry_nonempty():
-    cfg = {"models": {"flash": {}}}
-    apply_cli_overrides(
-        cfg, extra_overrides={"completions_url": "http://x/v1"}
+    loaded = settings_from_flat({"models": {"flash": {}}})
+    loaded = apply_cli_overrides(
+        loaded, extra_overrides={"completions_url": "http://x/v1"}
     )
-    assert cli_forces_legacy_model(cfg) is True
+    assert cli_forces_legacy_model(loaded) is True
 
 
 def test_force_legacy_false_when_registry_empty():
-    cfg = {"models": {}}
-    apply_cli_overrides(cfg, extra_overrides={"model": "X"})
-    assert cli_forces_legacy_model(cfg) is False
+    loaded = settings_from_flat({"models": {}})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    assert cli_forces_legacy_model(loaded) is False
 
 
 def test_force_legacy_false_without_model_or_url_override():
-    cfg = {"models": {"flash": {}}}
-    apply_cli_overrides(cfg, extra_overrides={"max_steps": 5})
-    assert cli_forces_legacy_model(cfg) is False
+    loaded = settings_from_flat({"models": {"flash": {}}})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"max_steps": 5})
+    assert cli_forces_legacy_model(loaded) is False
 
 
 def test_force_legacy_false_when_no_cli_overrides_at_all():
-    cfg = {"models": {"flash": {}}}
-    assert cli_forces_legacy_model(cfg) is False
+    loaded = settings_from_flat({"models": {"flash": {}}})
+    assert cli_forces_legacy_model(loaded) is False
 
 
 # --- Интеграция: --profile активирует поверх конфиг-указателя ---------------------
@@ -205,13 +212,13 @@ def test_level_override_wins_over_config_and_profile(isolated_cwd, tmp_path):
         isolated_cwd / ".gc" / "profiles" / "work.yml", {"level": "light"}
     )
 
-    cfg, meta = load_config_ex(str(base_config))
+    loaded = load_settings(str(base_config))
     assert (
-        cfg["level"] == "light"
+        flat_config(loaded)["level"] == "light"
     )  # профиль побеждает конфиг-указатель (ось 1)
 
-    apply_cli_overrides(cfg, extra_overrides={"level": "default"})
-    assert cfg["level"] == "default"  # CLI побеждает профиль
+    loaded = apply_cli_overrides(loaded, extra_overrides={"level": "default"})
+    assert flat_config(loaded)["level"] == "default"  # CLI побеждает профиль
 
 
 # --- Интеграция: --model при непустом реестре -> force_legacy=True, security профиля жива --
@@ -239,10 +246,13 @@ def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_
         {"security": {"write_guard": {"enabled": True}}},
     )
 
-    cfg, meta = load_config_ex(str(base_config))
-    apply_cli_overrides(cfg, extra_overrides={"model": "forced-model"})
+    loaded = apply_cli_overrides(
+        load_settings(str(base_config)),
+        extra_overrides={"model": "forced-model"},
+    )
+    cfg = flat_config(loaded)
 
-    assert cli_forces_legacy_model(cfg) is True
+    assert cli_forces_legacy_model(loaded) is True
     # Профиль-слой обычных секций (гварды) остаётся в стопке — низкоуровневый
     # флаг модели не имеет права молча снимать security-настройки профиля.
     assert cfg["write_guard"]["enabled"] is True
@@ -271,15 +281,18 @@ def test_model_override_without_registry_is_plain_legacy_not_forced(
     base_config = tmp_path / "base_config.yml"
     _write_yaml(base_config, _MINIMAL_BASE)
 
-    cfg, meta = load_config_ex(str(base_config))
-    apply_cli_overrides(cfg, extra_overrides={"model": "forced-model"})
+    loaded = apply_cli_overrides(
+        load_settings(str(base_config)),
+        extra_overrides={"model": "forced-model"},
+    )
+    cfg = flat_config(loaded)
 
-    assert cli_forces_legacy_model(cfg) is False
+    assert cli_forces_legacy_model(loaded) is False
 
     router = ModelRouter(
         cfg,
         level_provider=lambda: "default",
-        force_legacy=cli_forces_legacy_model(cfg),
+        force_legacy=cli_forces_legacy_model(loaded),
     )
     resolved = router.resolve("main")
     assert resolved.model == "forced-model"
@@ -296,20 +309,24 @@ def test_cli_models_override_carries_its_own_token_to_the_router():
     него с ОБЩИМ ключом. Оверрайд обязан приводиться к той же форме, что кладёт
     `flatten_app_config`, иначе правило пары на `--models` декоративно: пара в строке
     есть, а до сети доезжает половина."""
-    cfg = {
-        "completions_url": "https://common/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk-common"},
-    }
-    apply_cli_overrides(
-        cfg,
-        extra_overrides={
-            "models": {
-                "gc": {
-                    "url": "https://own/v1/chat/completions",
-                    "token": "sk-own",
-                }
+    loaded = settings_from_flat(
+        {
+            "completions_url": "https://common/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer sk-common"},
+        }
+    )
+    cfg = flat_config(
+        apply_cli_overrides(
+            loaded,
+            extra_overrides={
+                "models": {
+                    "gc": {
+                        "url": "https://own/v1/chat/completions",
+                        "token": "sk-own",
+                    }
+                },
             },
-        },
+        )
     )
 
     resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(

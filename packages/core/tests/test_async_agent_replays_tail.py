@@ -20,6 +20,7 @@ import types
 
 import pytest
 from gc_core.aio import AsyncAgent
+from gc_core.settings import settings_from_flat
 
 #: Потолок ожидания в тестах: зависший ход — красный тест, а не вечный набор.
 _BOUND_SEC = 5.0
@@ -75,7 +76,7 @@ def env(monkeypatch):
 
 async def _agent(tmp_path, env) -> AsyncAgent:
     """Агент, у которого записывается, в каком треде и как идёт каждый ход."""
-    agent = await AsyncAgent.create(_cfg(tmp_path))
+    agent = await AsyncAgent.create(settings_from_flat(_cfg(tmp_path)))
     arun = agent.executor.arun
 
     async def _recording_arun(messages, **kw):

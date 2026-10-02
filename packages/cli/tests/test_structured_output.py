@@ -17,6 +17,7 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.config_modules.chat_completions import (
     DEFAULT_AUXILIARY_LLM_MAX_TOKENS,
 )
+from gc_core.settings import settings_from_flat
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 from gc_core.usage.context import record_usage
 
@@ -672,8 +673,10 @@ async def test_meta_write_error_still_shuts_down_mcp(monkeypatch, tmp_path):
             structured_output_format=str(fmt),
         ),
     )
-    monkeypatch.setattr(cli, "load_config_ex", lambda *_a, **_k: ({}, None))
-    monkeypatch.setattr(cli, "apply_cli_overrides", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        cli, "load_settings", lambda *_a, **_k: settings_from_flat({})
+    )
+    monkeypatch.setattr(cli, "apply_cli_overrides", lambda d, **_kw: d)
     monkeypatch.setattr(
         "gc_core.upgrade_gate.detect_upgrade", lambda *_a, **_k: None
     )

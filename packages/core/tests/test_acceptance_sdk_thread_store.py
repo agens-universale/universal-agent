@@ -24,6 +24,7 @@ import asyncio
 
 import pytest
 from gc_core.aio import AsyncAgent
+from gc_core.settings import settings_from_flat
 from gc_testkit.memory_thread_store import MemoryThreadStore
 from parity_harness import (
     ScriptedBackend,
@@ -134,7 +135,9 @@ async def test_sdk_run_writes_only_to_the_given_store(
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+    async with await AsyncAgent.create(
+        settings_from_flat(cfg), thread_store=store
+    ) as agent:
         answer = await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert answer, "агент не ответил"
@@ -162,7 +165,9 @@ async def test_sdk_run_persists_the_whole_thread(tmp_path, monkeypatch, store):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+    async with await AsyncAgent.create(
+        settings_from_flat(cfg), thread_store=store
+    ) as agent:
         await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     inner = _inner(store)
@@ -196,7 +201,9 @@ async def test_runtime_flags_are_cleared_after_the_run(
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+    async with await AsyncAgent.create(
+        settings_from_flat(cfg), thread_store=store
+    ) as agent:
         await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     runtime = _inner(store).load_meta(SDK_SYS, "t-sdk").get("runtime", {})
@@ -216,12 +223,16 @@ async def test_second_run_continues_the_same_thread(
     cfg = parity_config(tmp_path, monkeypatch)
 
     install(monkeypatch, ScriptedBackend(list(TURNS)))
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+    async with await AsyncAgent.create(
+        settings_from_flat(cfg), thread_store=store
+    ) as agent:
         await agent.run("первый", thread_id="t-sdk")
     after_first = len(_inner(store).load_messages(SDK_SYS, "t-sdk"))
 
     install(monkeypatch, ScriptedBackend(list(TURNS)))
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+    async with await AsyncAgent.create(
+        settings_from_flat(cfg), thread_store=store
+    ) as agent:
         await agent.run("второй", thread_id="t-sdk")
 
     messages = _inner(store).load_messages(SDK_SYS, "t-sdk")
@@ -247,7 +258,9 @@ async def test_native_async_store_is_awaited_not_adapted(
     install(monkeypatch, ScriptedBackend(list(TURNS)))
     store = AsyncMemoryThreadStore()
 
-    async with await AsyncAgent.create(cfg, thread_store=store) as agent:
+    async with await AsyncAgent.create(
+        settings_from_flat(cfg), thread_store=store
+    ) as agent:
         await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
     assert store.awaited > 0, "ни одна корутина хранилища не была дождана"
@@ -307,6 +320,9 @@ async def test_loop_stays_responsive_with_a_slow_async_store(
     )
 
     store = SlowAsyncStore()
+    # Типизированные настройки — до окна замера: валидация конфига не часть
+    # сборки агента.
+    settings = settings_from_flat(cfg)
     # Сборщик глушится на окне: тест судит НАТИВНОСТЬ ожидания хранилища, а
     # пауза поколения 2 на куче набора (180–220 мс) кратно больше бюджета.
     # Пульс прогрет и тикает ДО сборки агента: иначе синхронный кусок сборки
@@ -314,7 +330,7 @@ async def test_loop_stays_responsive_with_a_slow_async_store(
     with quiet_gc_for_loop_timing():
         async with LoopPulse() as pulse:
             async with await AsyncAgent.create(
-                cfg, thread_store=store
+                settings, thread_store=store
             ) as agent:
                 await agent.run("сделай что-нибудь", thread_id="t-sdk")
 
@@ -339,7 +355,9 @@ async def test_broken_store_fails_loudly_at_wiring(tmp_path, monkeypatch):
         pass
 
     with pytest.raises(ThreadStoreContractError) as err:
-        await AsyncAgent.create(cfg, thread_store=NotAStore())
+        await AsyncAgent.create(
+            settings_from_flat(cfg), thread_store=NotAStore()
+        )
 
     text = str(err.value)
     assert "NotAStore" in text, "отказ не назвал класс встраивающего"

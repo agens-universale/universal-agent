@@ -157,7 +157,10 @@ def resolve_subagent_definitions(
     if config_dict is None:
         return {}
 
-    cached = config_dict.get(_DEFS_CACHE_KEY)
+    from gc_core.config_modules.frozen import derived_cache
+
+    cache = derived_cache(config_dict)
+    cached = cache.get(_DEFS_CACHE_KEY)
     if isinstance(cached, dict):
         return cached
 
@@ -176,7 +179,7 @@ def resolve_subagent_definitions(
         logger=logger,
         diagnostics=diagnostics,
     )
-    config_dict[SUBAGENT_DIAGNOSTICS_KEY] = diagnostics
+    cache[SUBAGENT_DIAGNOSTICS_KEY] = diagnostics
     for definition in definitions:
         banned = FileDefinedSubagent.required_tools_banned(definition)
         if banned:
@@ -202,7 +205,7 @@ def resolve_subagent_definitions(
             )
 
     resolved = {definition.name: definition for definition in definitions}
-    config_dict[_DEFS_CACHE_KEY] = resolved
+    cache[_DEFS_CACHE_KEY] = resolved
     return resolved
 
 

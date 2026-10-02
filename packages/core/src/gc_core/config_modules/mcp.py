@@ -12,7 +12,7 @@ from pydantic import (
 class McpToolsWhitelistConfig(BaseModel):
     """Whitelist тулов сервера: enabled=True → модель видит строго `tools`."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
     tools: list[str] = Field(default_factory=list)
@@ -37,7 +37,9 @@ class McpToolsWhitelistConfig(BaseModel):
 
 
 class McpServerConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, frozen=True
+    )
 
     transport: Literal[
         "http", "sse", "stdio", "stream_sse", "stream_http", "stream_stdio"
@@ -173,7 +175,9 @@ class McpServerConfig(BaseModel):
 
 
 class McpMetaConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+    model_config = ConfigDict(
+        extra="forbid", populate_by_name=True, frozen=True
+    )
 
     tools_cache_ttl: int = Field(default=3600, alias="tools-cache-ttl")
     request_timeout_sec: int = 600
@@ -199,6 +203,6 @@ class McpMetaConfig(BaseModel):
 
 
 class McpConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", frozen=True)
     servers: dict[str, McpServerConfig] = Field(default_factory=dict)
     meta: McpMetaConfig = Field(default_factory=McpMetaConfig)

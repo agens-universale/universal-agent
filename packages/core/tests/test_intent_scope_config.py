@@ -72,7 +72,7 @@ def test_intent_scope_read_page_record_limit_from_config():
 
 def test_normalize_intent_scope_config_clamps_invalid_read_page_record_limit():
     cfg = IntentScopeConfig(read_page_record_limit=0)
-    normalize_intent_scope_config(cfg)
+    cfg = normalize_intent_scope_config(cfg)
     assert (
         cfg.read_page_record_limit == DEFAULT_INTENT_LOG_READ_PAGE_RECORD_LIMIT
     )
@@ -80,7 +80,7 @@ def test_normalize_intent_scope_config_clamps_invalid_read_page_record_limit():
 
 def test_normalize_intent_scope_config_clamps_invalid_max_raw_record_chars():
     cfg = IntentScopeConfig(max_raw_record_chars=0)
-    normalize_intent_scope_config(cfg)
+    cfg = normalize_intent_scope_config(cfg)
     assert (
         cfg.max_raw_record_chars == DEFAULT_INTENT_SCOPE_MAX_RAW_RECORD_CHARS
     )

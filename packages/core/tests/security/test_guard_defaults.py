@@ -1,7 +1,6 @@
-from gc_core.config_modules.security import (
-    SecurityConfig,
-    apply_cli_command_moderation_overrides,
-)
+from gc_core.config import apply_cli_overrides, flat_config
+from gc_core.config_modules.security import SecurityConfig
+from gc_core.settings import settings_from_flat
 
 
 def test_pydantic_defaults_on_ask():
@@ -17,8 +16,8 @@ def test_pydantic_defaults_on_ask():
 
 
 def test_cli_overrides_no_args_yield_on_ask():
-    cfg: dict = {}
-    apply_cli_command_moderation_overrides(cfg)
+    # CLI без флагов гвардов не ослабляет дефолты: всё включено, режим ask.
+    cfg = flat_config(apply_cli_overrides(settings_from_flat({})))
     assert cfg["command_moderation"]["enabled"] is True
     assert cfg["command_moderation"]["mode"] == "ask"
     assert cfg["write_guard"]["enabled"] is True

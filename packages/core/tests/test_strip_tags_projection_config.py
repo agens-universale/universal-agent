@@ -15,13 +15,13 @@ _SAMPLE = "<think>t</think><redacted_thinking>r</redacted_thinking>ok"
 
 def test_normalize_missing_section_defaults_empty():
     cfg = StripTagsProjectionConfig()
-    normalize_strip_tags_projection_config(cfg)
+    cfg = normalize_strip_tags_projection_config(cfg)
     assert cfg.tags == []
 
 
 def test_normalize_strips_angle_brackets():
     cfg = StripTagsProjectionConfig(tags=["<redacted_thinking>"])
-    normalize_strip_tags_projection_config(cfg)
+    cfg = normalize_strip_tags_projection_config(cfg)
     assert cfg.tags == ["redacted_thinking"]
 
 
@@ -30,7 +30,7 @@ def test_normalize_warn_drop_invalid(caplog):
         tags=["", "  ", "bad/name", "has space", "ok_tag", "think", "THINK"]
     )
     with caplog.at_level("WARNING"):
-        normalize_strip_tags_projection_config(cfg)
+        cfg = normalize_strip_tags_projection_config(cfg)
     assert cfg.tags == ["ok_tag", "think"]
 
 
@@ -58,13 +58,13 @@ def test_persist_reasoning_content_default_false():
 
 def test_normalize_keeps_think_in_tags():
     cfg = StripTagsProjectionConfig(tags=["think", "<THINK>"])
-    normalize_strip_tags_projection_config(cfg)
+    cfg = normalize_strip_tags_projection_config(cfg)
     assert cfg.tags == ["think"]
 
 
 def test_normalize_dedupe_case_insensitive():
     cfg = StripTagsProjectionConfig(tags=["Foo", "foo", "FOO", "bar"])
-    normalize_strip_tags_projection_config(cfg)
+    cfg = normalize_strip_tags_projection_config(cfg)
     assert cfg.tags == ["Foo", "bar"]
 
 
