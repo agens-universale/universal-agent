@@ -1,7 +1,11 @@
 import asyncio
 
 import pytest
-from gc_core.backends.factory import parse_os_backend_kind, resolve_os_backend
+from gc_core.backends.factory import (
+    os_backend_section,
+    parse_os_backend_kind,
+    resolve_os_backend,
+)
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
 from gc_core.run_context import acreate_run_context
@@ -129,3 +133,17 @@ async def test_workspace_is_assembled_once_even_when_wrapped(monkeypatch):
     assert ctx.workspace.backend is ctx.os_backend, (
         "рабочая область обязана смотреть на ту же обёртку, что и контекст"
     )
+
+
+def test_section_accepts_string_dict_and_missing():
+    assert os_backend_section({}) == {"kind": "local"}
+    assert os_backend_section({"os_backend": "Harbor"}) == {"kind": "harbor"}
+    sec = os_backend_section(
+        {"os_backend": {"kind": "docker", "docker": {"name": "b"}}}
+    )
+    assert sec["kind"] == "docker" and sec["docker"]["name"] == "b"
+
+
+def test_parse_kind_lists_all_supported():
+    for k in ("local", "harbor", "docker", "ssh", "exec", "sandbox"):
+        assert parse_os_backend_kind({"os_backend": k}) == k

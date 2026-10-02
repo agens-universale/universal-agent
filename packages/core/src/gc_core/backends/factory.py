@@ -14,19 +14,38 @@ from gc_core.config_modules.agent import (
     walk_output_max_chars_from_config_dict,
 )
 
-_SUPPORTED = frozenset({"local", "harbor"})
+_SUPPORTED = frozenset({"local", "harbor", "docker", "ssh", "exec", "sandbox"})
+
+
+def os_backend_section(config_dict: dict) -> dict:
+    """Нормализовать ``config_dict['os_backend']`` к словарю с ``kind``.
+
+    Принимает отсутствие ключа, голую строку (старые конфиги, Harbor-адаптер)
+    и секцию из ``flatten_app_config``.
+    """
+    raw = config_dict.get("os_backend", "local")
+    if raw is None:
+        return {"kind": "local"}
+    if isinstance(raw, str):
+        return {"kind": raw.strip().lower() or "local"}
+    if isinstance(raw, dict):
+        section = dict(raw)
+        kind = section.get("kind")
+        section["kind"] = (
+            (str(kind).strip().lower() or "local") if kind else "local"
+        )
+        return section
+    raise ValueError(
+        f"unsupported os_backend: {raw!r} (expected str or section)"
+    )
 
 
 def parse_os_backend_kind(config_dict: dict) -> str:
-    """Return normalized ``os_backend`` kind (``local`` or ``harbor``)."""
-    raw = config_dict.get("os_backend", "local")
-    if not isinstance(raw, str) or not raw.strip():
-        kind = "local"
-    else:
-        kind = raw.strip().lower()
+    """Нормализованный ``kind`` секции ``os_backend``."""
+    kind = os_backend_section(config_dict)["kind"]
     if kind not in _SUPPORTED:
         raise ValueError(
-            f"unsupported os_backend: {raw!r} (expected local or harbor)"
+            f"unsupported os_backend: {kind!r} (expected one of {sorted(_SUPPORTED)})"
         )
     return kind
 
@@ -66,4 +85,4 @@ def resolve_os_backend(
             exec_init=harbor_exec_init_from_config_dict(config_dict),
         )
 
-    raise ValueError(f"unsupported os_backend: {kind!r}")
+    raise NotImplementedError(f"os_backend={kind} is wired in a later task")
