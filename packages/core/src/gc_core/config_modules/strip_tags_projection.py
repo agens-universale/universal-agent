@@ -71,13 +71,34 @@ def projection_tags_from_config(config: object) -> tuple[str, ...]:
 def persist_reasoning_content_from_config(config: object) -> bool:
     """Класть ли ``reasoning_content`` на канонический item в ``state.messages``.
 
-    Единственный потребитель — ``get_output_list`` / вход в канон.
-    YAML ``strip_think: false`` = persist True.
+    Глобальный флаг. YAML ``strip_think: false`` = persist True.
+    Алиас со своим ``strip_think`` перекрывает его через
+    ``persist_reasoning_content_for_model``. Служебные вызовы этот флаг не
+    читают: summary, судьи, finish_gate и intent режут мысль всегда.
     """
     section = _section_from_config(config)
     if section is None:
         return False
     return not bool(section.get("strip_think", True))
+
+
+def persist_reasoning_content_for_model(
+    resolved: object, config: object
+) -> bool:
+    """Persist мысли хода этой модели.
+
+    ``strip_think`` алиаса, если он задан булевым. Ключа нет — глобальный
+    ``strip_tags_projection.strip_think``. ``true`` не копирует поле в историю,
+    ``false`` копирует.
+    """
+    flag = (
+        getattr(resolved, "strip_think", None)
+        if resolved is not None
+        else None
+    )
+    if isinstance(flag, bool):
+        return not flag
+    return persist_reasoning_content_from_config(config)
 
 
 def _clean_tag_name(item: object) -> str | None:

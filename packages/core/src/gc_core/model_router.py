@@ -76,6 +76,8 @@ class ResolvedModel:
     # None — секция в записи не задана. {} — задана пустой (replace без ключей).
     main: dict | None = None
     auxiliary: dict | None = None
+    # None — у алиаса ключа нет, persist берёт глобальный strip_think.
+    strip_think: bool | None = None
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -327,6 +329,9 @@ class ModelRouter:
             if isinstance(entry.get("auxiliary"), dict)
             else None
         )
+        strip_think = entry.get("strip_think")
+        if not isinstance(strip_think, bool):
+            strip_think = None
         url = (
             entry.get("url")
             or backend_overrides.get("completions_url")
@@ -342,6 +347,7 @@ class ModelRouter:
             source=source,
             main=main,
             auxiliary=auxiliary,
+            strip_think=strip_think,
         )
         # Сессионный предохранитель (спека §8): открытый алиас — мгновенный отказ
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).

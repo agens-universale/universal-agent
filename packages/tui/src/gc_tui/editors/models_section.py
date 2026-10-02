@@ -81,6 +81,7 @@ _FOOTER_RESERVE_FORM = (
 _FOOTER_FORM_URL = "Enter — сохранить · Alt+↓ — показать список · Ctrl+Space — проверить связь · Esc — к списку"
 _FOOTER_FORM_MODEL = "Enter — сохранить · Alt+↓ — перечитать список · Ctrl+Space — проверить связь · Esc — к списку"
 _FOOTER_FORM_NOAUTH = "↑/↓ · Enter — сохранить · Space — переключить · Ctrl+Space — проверить связь · Esc — к списку"
+_FOOTER_FORM_STRIP = "↑/↓ · Enter — сохранить · Space — переключить · Ctrl+Space — проверить связь · Esc — к списку"
 _FOOTER_FORM_FIELD = (
     "↑/↓ · Enter — сохранить · Ctrl+Space — проверить связь · Esc — к списку"
 )
@@ -1887,6 +1888,8 @@ class ModelsSectionEditor(Vertical):
             return _FOOTER_FORM_MODEL
         if form.on_no_auth_row:
             return _FOOTER_FORM_NOAUTH
+        if form.on_strip_row:
+            return _FOOTER_FORM_STRIP
         # Остались поле токена и поле алиаса. Ни одному из них футер клавишу не
         # обещает: у токена её называет ПОДПИСЬ ПОЛЯ (`_TOKEN_LABEL_INHERIT`, канон
         # `ConnectionEditor._token_label`) — повторять то же обещание в одном кадре
@@ -2062,7 +2065,9 @@ class ModelsSectionEditor(Vertical):
         if self._picker is not None or self._env_pending is not None:
             return False  # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
-            return self._form.toggle_no_auth()
+            return (
+                self._form.toggle_no_auth() or self._form.cycle_strip_think()
+            )
         return False
 
     def clear_token(self) -> bool:

@@ -297,6 +297,8 @@ def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
         projected["main"] = copy.deepcopy(entry.main)
     if isinstance(entry.auxiliary, dict):
         projected["auxiliary"] = copy.deepcopy(entry.auxiliary)
+    if isinstance(entry.strip_think, bool):
+        projected["strip_think"] = entry.strip_think
     return projected
 
 

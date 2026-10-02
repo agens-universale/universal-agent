@@ -268,6 +268,22 @@ tool_choice: auto
 """
 
 
+_STRIP_CYCLE = ("default", "true", "false")
+_STRIP_HINT = (
+    "default — глобальный флаг · true — вырезать мысль из истории · "
+    "false — копировать скрытое поле · пробел — сменить"
+)
+
+
+def _strip_choice(value) -> str:
+    """Значение селектора. Не-bool (ключа нет) — ``default``, в файл не пишется."""
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "default"
+
+
 def _completion_field_text(value) -> str:
     """Текст YAML-поля: пустой mapping и отсутствие секции — пустая строка.
 
@@ -524,6 +540,7 @@ class ModelEntryForm(Vertical):
         self._url0 = initial.get("url") or ""
         self._main_text = _completion_field_text(initial.get("main"))
         self._aux_text = _completion_field_text(initial.get("auxiliary"))
+        self._strip_think = _strip_choice(initial.get("strip_think"))
         # Второе написание пары (`backend.completions_url` / `proxy` /
         # `chat_completion_headers.Authorization`) форма не правит, но обязана ВИДЕТЬ:
         # правило §2 считает его таким же своим подключением, и запись, задавшую пару
@@ -575,6 +592,7 @@ class ModelEntryForm(Vertical):
             None,
             "mef-model",
             "mef-alias",
+            "mef-strip",
             "mef-main",
             "mef-auxiliary",
         )
@@ -677,6 +695,7 @@ class ModelEntryForm(Vertical):
             "model": self._model0,
             "main": self._main_text,
             "auxiliary": self._aux_text,
+            "strip_think": self._strip_think,
         }
 
     # --- рендер ---
@@ -1099,6 +1118,13 @@ class ModelEntryForm(Vertical):
             classes=icls,
         )
         yield Static(self._alias_hint(), classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            self._strip_text(),
+            id="mef-strip",
+            classes="onb-option onb-dyn set-spaced",
+            markup=False,
+        )
+        yield Static(_STRIP_HINT, classes=_CLS_ONB_HINT_ONB_DYN, markup=False)
         yield Static(_MAIN_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         yield TextArea(
             self._main_text,
@@ -1322,9 +1348,15 @@ class ModelEntryForm(Vertical):
             self._set_status("")
         row = self.query_one(_SEL_MEF_NOAUTH, Static)
         (row.add_class if target is None else row.remove_class)("selected")
-        if target is None:
-            # Галка — не Input: снять фокус явно, иначе прежний фокусный Input
-            # «съедал» бы Space и печать.
+        strip_row = self.query_one("#mef-strip", Static)
+        (
+            strip_row.add_class
+            if target == "mef-strip"
+            else strip_row.remove_class
+        )("selected")
+        if target is None or target == "mef-strip":
+            # Галка и селектор — не Input: снять фокус явно, иначе прежний
+            # фокусный Input «съедал» бы Space и печать.
             self.screen.set_focus(None)
         else:
             self.query_one(f"#{target}", Widget).focus()
@@ -1336,8 +1368,8 @@ class ModelEntryForm(Vertical):
         списки, а над пустым полем модели ещё и идёт за ними в сеть). Здесь курсор
         никуда не двигался — вернулось лишь право поля принимать клавиши."""
         target = self._positions[self._idx]
-        if target is None:
-            self.screen.set_focus(None)  # позиция галки: у неё поля нет
+        if target is None or target == "mef-strip":
+            self.screen.set_focus(None)  # галка и селектор: поля ввода нет
         else:
             self.query_one(f"#{target}", Widget).focus()
 
@@ -1375,6 +1407,20 @@ class ModelEntryForm(Vertical):
         self._sync_token_visibility()
         self._sync_pair_state()
         return True
+
+    def cycle_strip_think(self) -> bool:
+        """Пробел на строке ``strip_think``: default → true → false → default.
+
+        ``default`` в файл не пишется. False — курсор не здесь, пробел печатается."""
+        if self._positions[self._idx] != "mef-strip":
+            return False
+        nxt = _STRIP_CYCLE.index(self._strip_think) + 1
+        self._strip_think = _STRIP_CYCLE[nxt % len(_STRIP_CYCLE)]
+        self.query_one("#mef-strip", Static).update(self._strip_text())
+        return True
+
+    def _strip_text(self) -> str:
+        return f"strip_think: {self._strip_think}"
 
     @property
     def can_return_shared_pair(self) -> bool:
@@ -1821,6 +1867,10 @@ class ModelEntryForm(Vertical):
         return self._positions[self._idx] is None
 
     @property
+    def on_strip_row(self) -> bool:
+        return self._positions[self._idx] == "mef-strip"
+
+    @property
     def presets_open(self) -> bool:
         return self._presets_ctrl.is_open
 
@@ -1881,6 +1931,7 @@ class ModelEntryForm(Vertical):
             "model": self._field_value("mef-model"),
             "main": self._yaml_text("mef-main"),
             "auxiliary": self._yaml_text("mef-auxiliary"),
+            "strip_think": self._strip_think,
         }
 
     def is_dirty(self) -> bool:
@@ -2032,6 +2083,12 @@ class ModelEntryForm(Vertical):
             fields["token"] = None
         fields["main"] = main
         fields["auxiliary"] = auxiliary
+        # default — None: писатель снимает ключ, и модель снова берёт глобальный флаг.
+        fields["strip_think"] = (
+            None
+            if self._strip_think == "default"
+            else self._strip_think == "true"
+        )
         return True, alias, fields
 
     def _write_yaml(self, field_id: str, value: dict) -> None:

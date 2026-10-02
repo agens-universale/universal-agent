@@ -145,6 +145,9 @@ def test_demo_profile_has_full_and_minimal_registry_forms(demo_profile_raw):
         "thinking": False,
         "reasoning_effort": "none",
     }
+    assert models["deepseek-max"]["strip_think"] is False
+    assert "strip_think" not in models["flash"]
+    assert "strip_think" not in models["glm-local"]
 
 
 def test_demo_profile_has_slots_and_overlay_example(demo_profile_raw):

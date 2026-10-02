@@ -289,6 +289,20 @@ class ModelEntry(BaseModel):
     # {} — задана и пуста: replace, без ключей main и без глобального dict.
     main: dict[str, Any] | None = None
     auxiliary: dict[str, Any] | None = None
+    # None — ключа нет, ход берёт глобальный strip_tags_projection.strip_think.
+    # true — вырезать мысль из истории. false — копировать скрытое поле.
+    strip_think: bool | None = None
+
+    @field_validator("strip_think", mode="before")
+    @classmethod
+    def _strip_think_flag(cls, value: Any) -> bool | None:
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        raise ValueError(
+            "strip_think: true, false или отсутствие ключа (глобальный флаг)"
+        )
 
     @field_validator("main", "auxiliary", mode="before")
     @classmethod

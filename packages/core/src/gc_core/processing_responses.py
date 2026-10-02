@@ -11,7 +11,7 @@ from gc_core.config import (
 )
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.strip_tags_projection import (
-    persist_reasoning_content_from_config,
+    persist_reasoning_content_for_model,
     projection_tags_from_config,
 )
 from gc_core.constants.tool_names import (
@@ -662,7 +662,7 @@ async def _arequest_backend_canonical_once(
     choices = res.get("choices")
     if isinstance(choices, list) and len(choices) > 0:
         first_choice_payload["choices"] = [choices[0]]
-    persist_reasoning = persist_reasoning_content_from_config(cfg)
+    persist_reasoning = persist_reasoning_content_for_model(resolved, cfg)
     canonical = output_chat_completion_to_response(
         first_choice_payload,
         logger_override=getattr(ctx, "logger", _fallback_logger),

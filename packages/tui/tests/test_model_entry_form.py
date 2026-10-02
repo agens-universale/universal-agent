@@ -1721,7 +1721,7 @@ async def test_empty_model_id_means_the_alias_is_the_id():
         form.query_one("#mef-alias", Input).value = "gigacode"
         ok, alias, fields = form.submit()
         assert (ok, alias) == (True, "gigacode")
-        assert fields == {"main": {}, "auxiliary": {}}
+        assert fields == {"main": {}, "auxiliary": {}, "strip_think": None}
 
 
 async def test_malformed_url_is_rejected():
@@ -2908,3 +2908,30 @@ async def test_yaml_field_keeps_enter_and_arrows_inside_the_text():
         assert form.keeps_key("up") is True
         assert form.keeps_key("down") is False
         assert form.keeps_key("enter") is True
+
+
+@pytest.mark.asyncio
+async def test_strip_think_selector_cycles_and_default_is_absent():
+    """Пробел крутит default → true → false. default уходит как None — ключ снять."""
+    from textual.widgets import Static
+
+    form = _paired_form(initial={"strip_think": True})
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert "strip_think: true" in str(
+            form.query_one("#mef-strip", Static).render()
+        )
+        _land(form, "mef-strip")
+        assert form.cycle_strip_think() is True
+        assert form._strip_think == "false"
+        ok, _alias, fields = form.submit()
+        assert ok is True and fields["strip_think"] is False
+        assert form.cycle_strip_think() is True
+        assert form._strip_think == "default"
+        ok, _alias, fields = form.submit()
+        assert ok is True and fields["strip_think"] is None
+        assert "глобальный флаг" in str(
+            form.query_one("#mef-strip", Static).parent.render()
+        ) or "глобальный флаг" in " ".join(
+            str(w.render()) for w in form.query(Static)
+        )
