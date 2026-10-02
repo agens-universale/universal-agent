@@ -486,7 +486,8 @@ assign:                                  # привязки отдельных �
   `backend.chat_completion_headers.Authorization`, а `url` вместе с
   `backend.completions_url` — ошибка валидации;
 - `main` и `auxiliary` читаются одинаково и друг в друга не подставляются.
-  Секции нет — глобальный словарь своей роли: `backend.chat_completion_kwargs`
+  Секции нет и YAML `null` — одно и то же, глобальный словарь своей роли:
+  `backend.chat_completion_kwargs`
   для диалога и цикла субагента, `chat_completions.auxiliary_llm.completion_kwargs`
   для summary, судей, finish_gate, intent и черновика роли. Явный `{}` — в запрос
   эти ключи не класть, их выбирает сервер модели. Секция с ключами заменяет глобальный

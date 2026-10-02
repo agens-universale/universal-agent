@@ -85,8 +85,9 @@ LEVEL_FALLBACK: dict[str, tuple[str, str, str]] = {
 def parse_completion_kwargs_text(text: str) -> dict[str, Any] | None:
     """Текст поля ``main``/``auxiliary`` → mapping или «снять ключ».
 
-    Пустое поле — ``None``: секция не задана, запрос берёт глобальный словарь.
-    Явный пустой mapping (``{}``) — ``{}``: в запрос эти ключи не класть.
+    Пустое поле, YAML ``null`` / ``~`` и текст из одних комментариев — ``None``:
+    секция не задана, как ``auxiliary: null`` в файле. Запрос берёт глобальный
+    словарь. Явный пустой mapping (``{}``) — ``{}``: в запрос эти ключи не класть.
     JSON object — валидный YAML, разбирается тем же путём. Список и скаляр —
     ошибка. Protected-ключи — ошибка: в файл их не кладут, рантайм всё равно
     вырежет."""
@@ -95,7 +96,7 @@ def parse_completion_kwargs_text(text: str) -> dict[str, Any] | None:
         return None
     loaded = yaml.safe_load(raw)
     if loaded is None:
-        return {}
+        return None
     if not isinstance(loaded, dict):
         raise ValueError("нужен YAML-mapping, не список и не скаляр")
     forbidden = [

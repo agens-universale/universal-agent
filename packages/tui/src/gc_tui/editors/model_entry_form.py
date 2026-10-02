@@ -148,7 +148,7 @@ KWARGS_HINT = """\
 Ключи `model`, `messages`, `tools`, `max_tokens`, `max_completion_tokens` сюда не
 писать — их выставляет рантайм. Лимиты служебных ответов
 (`max_tokens`, `judge_max_tokens`) — в `chat_completions.auxiliary_llm`, не здесь.
-Пустое поле снимает секцию: запрос берёт глобальный словарь
+Пустое поле и YAML `null` снимают секцию: запрос берёт глобальный словарь
 (`backend.chat_completion_kwargs` для main,
 `chat_completions.auxiliary_llm.completion_kwargs` для auxiliary).
 Явный `{}` — не слать этих ключей, их выбирает сервер модели.

@@ -306,6 +306,9 @@ def test_explicit_empty_auxiliary_sends_no_vendor_keys():
 def test_parse_completion_kwargs_text_blank_is_inherit_and_braces_are_empty():
     assert parse_completion_kwargs_text("") is None
     assert parse_completion_kwargs_text("   \n") is None
+    assert parse_completion_kwargs_text("null") is None
+    assert parse_completion_kwargs_text("~") is None
+    assert parse_completion_kwargs_text("# только комментарий\n") is None
     assert parse_completion_kwargs_text("{}") == {}
     assert parse_completion_kwargs_text("temperature: 1\n") == {
         "temperature": 1
