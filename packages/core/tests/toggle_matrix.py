@@ -620,6 +620,28 @@ SINGLE += [
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
 NOT_IN_MATRIX = {
+    # --- os_backend: выбор физического бэкенда (docker/ssh/exec/sandbox) ------
+    #
+    # Ключи выбирают, ГДЕ исполняется I/O, а не путь async/sync внутри ядра:
+    # эталон матрицы снят на local, и случай с docker/ssh требовал бы живого
+    # контейнера или хоста. Покрытие: os_backends/test_os_backend_factory.py,
+    # test_remote_shell_backend.py, test_sandbox_backend.py.
+    "os_backend.kind": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.cwd": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.env": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.docker.name": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.docker.user": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.docker.binary": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.host": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.port": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.user": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.key_path": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.options": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.control_master": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.exec.argv_prefix": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.sandbox.workdir": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.sandbox.network": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.sandbox.extra_ro": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
     # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв
     # эталон на этой же ветке. Паритет async/sync того же координатора уже

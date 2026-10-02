@@ -68,7 +68,7 @@ def test_bench_defaults_win_over_schema_defaults():
     config = _config()
 
     assert config["backend_api_mode"] == "chat_completions"
-    assert config["os_backend"] == "harbor"
+    assert config["os_backend"]["kind"] == "harbor"
     assert config["read_guard"]["enabled"] is False
     assert config["command_moderation"]["mode"] == "allow"
     assert config["exec_timeout_sec"] == 600

@@ -337,7 +337,15 @@ def _prepare_run_context(
         environment=environment,
         loop=loop,
         override=os_backend,
+        run_id=effective_run_id,
     )
+    # sandbox.workdir=auto: каталог рана обязан стать launch_root — его читают
+    # write_guard (`launch_root_from_config`) и workspace, а бэкенда у них нет.
+    auto_workdir = getattr(backend, "auto_workdir", None)
+    if auto_workdir and not (
+        config_dict.get("launch_root") or config_dict.get("project_root")
+    ):
+        config_dict["launch_root"] = auto_workdir
     skills_registry = get_skills_registry(config_dict, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в
