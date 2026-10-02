@@ -8,11 +8,17 @@ from typing import Any, Optional
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
+from gc_core.backends.remote_shell import (
+    RemoteShellBackend,
+    docker_argv_prefix,
+    ssh_argv_prefix,
+)
 from gc_core.config_modules.agent import (
     exec_output_capture_max_chars_from_config_dict,
     harbor_exec_init_from_config_dict,
     walk_output_max_chars_from_config_dict,
 )
+from gc_core.config_modules.env_vars import gc_paths
 
 _SUPPORTED = frozenset({"local", "harbor", "docker", "ssh", "exec", "sandbox"})
 
@@ -85,4 +91,39 @@ def resolve_os_backend(
             exec_init=harbor_exec_init_from_config_dict(config_dict),
         )
 
+    section = os_backend_section(config_dict)
+    if kind in ("docker", "ssh", "exec"):
+        return RemoteShellBackend(
+            _remote_argv_prefix(kind, section),
+            cwd=section.get("cwd"),
+            env=section.get("env") or {},
+            exec_init=harbor_exec_init_from_config_dict(config_dict),
+            exec_output_capture_max_chars=cap,
+            walk_output_max_chars=walk_output_max_chars_from_config_dict(
+                config_dict
+            ),
+        )
+
     raise NotImplementedError(f"os_backend={kind} is wired in a later task")
+
+
+def _remote_argv_prefix(kind: str, section: dict) -> list:
+    """argv-префикс RemoteShellBackend; плоский dict мог обойти pydantic."""
+    if kind == "docker":
+        if not (section.get("docker") or {}).get("name"):
+            raise ValueError(
+                "os_backend.docker.name обязателен при kind=docker"
+            )
+        return docker_argv_prefix(section)
+    if kind == "ssh":
+        if not (section.get("ssh") or {}).get("host"):
+            raise ValueError("os_backend.ssh.host обязателен при kind=ssh")
+        return ssh_argv_prefix(
+            section, control_dir=gc_paths()["state"] / "ssh"
+        )
+    prefix = list((section.get("exec") or {}).get("argv_prefix") or [])
+    if not prefix:
+        raise ValueError(
+            "os_backend.exec.argv_prefix обязателен при kind=exec"
+        )
+    return prefix

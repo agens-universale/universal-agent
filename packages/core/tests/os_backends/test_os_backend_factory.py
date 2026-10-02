@@ -8,6 +8,7 @@ from gc_core.backends.factory import (
 )
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.remote_shell import RemoteShellBackend
 from gc_core.run_context import acreate_run_context
 
 
@@ -147,3 +148,36 @@ def test_section_accepts_string_dict_and_missing():
 def test_parse_kind_lists_all_supported():
     for k in ("local", "harbor", "docker", "ssh", "exec", "sandbox"):
         assert parse_os_backend_kind({"os_backend": k}) == k
+
+
+def test_resolve_docker_builds_remote_shell():
+    be = resolve_os_backend(
+        {
+            "os_backend": {"kind": "docker", "docker": {"name": "box"}},
+            "harbor_exec_init": "bashrc",
+        }
+    )
+    assert isinstance(be, RemoteShellBackend)
+    assert (
+        be.argv_prefix == ("docker", "exec", "-i", "box")
+        and be.exec_init == "bashrc"
+    )
+
+
+def test_resolve_docker_without_name_fails_loudly():
+    with pytest.raises(ValueError, match="docker.name"):
+        resolve_os_backend({"os_backend": "docker"})
+
+
+def test_resolve_exec_passes_prefix_cwd_env():
+    be = resolve_os_backend(
+        {
+            "os_backend": {
+                "kind": "exec",
+                "cwd": "/w",
+                "env": {"A": "1"},
+                "exec": {"argv_prefix": ["env"]},
+            }
+        }
+    )
+    assert be.argv_prefix == ("env",) and be.default_cwd() == "/w"
