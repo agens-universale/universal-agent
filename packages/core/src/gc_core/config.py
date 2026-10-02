@@ -20,7 +20,7 @@ from gc_core.config_modules.backend import (
     parse_chat_completions_max_tokens,  # noqa: F401  # re-export: processing_responses импортирует из config
 )
 from gc_core.config_modules.common import (
-    apply_swarm_env_overrides,
+    swarm_env_updates,
 )
 from gc_core.config_modules.compat import apply_compat
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
@@ -654,6 +654,16 @@ def load_settings(
         [("base", str(base_path), base_before_env, raw_base_after_env)]
         + list(layer_documents)
     )
+    # SWARM_* окружения — последний слой файлов: сервер swarm-раннера задаёт
+    # ими каталоги тредов/скиллов и AGENTS.md поверх конфига.
+    swarm_updates = swarm_env_updates(config_dir)
+    if swarm_updates:
+        from gc_core.settings import override_settings
+
+        app_cfg = override_settings(
+            app_cfg, swarm_updates, config_dir=config_dir
+        )
+        provenance = provenance.with_layer("env", swarm_updates)
     runtime = RuntimeEnv(
         config_path=os.path.abspath(path),
         config_dir=config_dir,
@@ -709,8 +719,6 @@ def flat_config(loaded, runtime=None) -> Dict[str, Any]:
         )
     if runtime.subagent_tools_stop:
         config_dict["subagent_tools_stop"] = list(runtime.subagent_tools_stop)
-    if runtime.config_dir:
-        apply_swarm_env_overrides(config_dict, runtime.config_dir)
     sync_logging_flat_and_params(config_dict)
     return FrozenConfigDict(config_dict)
 

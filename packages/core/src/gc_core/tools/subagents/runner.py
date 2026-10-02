@@ -51,6 +51,14 @@ from gc_core.model_router import (
 from gc_core.run_context import RunContext
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.settings import (
+    AppConfig,
+    LoadedSettings,
+    RuntimeEnv,
+    override_settings,
+    runtime_of,
+    settings_of,
+)
 from gc_core.state_preparation import prepare_state
 from gc_core.states import State
 from gc_core.summarize.config import (
@@ -79,7 +87,6 @@ from gc_core.tools.subagents.sidecar import (
     bind_thread_identity,
     clear_thread_identity,
 )
-from gc_core.trace_id import trace_id_from_config
 from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
 from gc_core.usage.account import UsageAccount
@@ -270,14 +277,36 @@ class SubagentRunner:
             tool_name, subagent_cls, arguments, run_agent_func
         )
 
+    def _parent_has_settings(self) -> bool:
+        return isinstance(
+            getattr(self._ctx, "settings", None), (AppConfig, LoadedSettings)
+        )
+
+    def _parent_settings(self) -> AppConfig:
+        """Настройки родителя: из ``ctx.settings``, иначе (переходно, тестовые
+        двойники ctx) — из переданного плоского вида."""
+        if self._parent_has_settings():
+            return settings_of(self._ctx)
+        return settings_of(self._config)
+
+    def _parent_runtime(self) -> RuntimeEnv:
+        """Рантайм родителя — в паре с ``_parent_settings``."""
+        if self._parent_has_settings():
+            return runtime_of(self._ctx)
+        runtime = getattr(self._ctx, "runtime", None)
+        if isinstance(runtime, RuntimeEnv):
+            return runtime
+        return runtime_of(self._config)
+
     def _pre_backend_compaction_hook(
         self, child_ctx: Any, child_state: Any
     ) -> Optional[Callable]:
         """Хук компакции ребёнка перед backend-вызовом; ``None`` — компакция выключена."""
-        summary_trigger_chars = parse_summary_trigger_chars(self._config)
+        settings = self._parent_settings()
+        summary_trigger_chars = parse_summary_trigger_chars(settings)
         should_enable_summary = (
             child_state.backend_api_mode == "chat_completions"
-            and summary_mid_turn_enabled(self._config)
+            and summary_mid_turn_enabled(settings)
         )
         if not should_enable_summary:
             return None
@@ -286,7 +315,7 @@ class SubagentRunner:
             state=child_state,
             thread_session=None,
             summary_trigger_chars=summary_trigger_chars,
-            summary_trigger_tokens=parse_summary_trigger_tokens(self._config),
+            summary_trigger_tokens=parse_summary_trigger_tokens(settings),
             is_cli_mode=False,
             pre_backend_trigger_reason="subagent_pre_backend",
             logger=_log,
@@ -546,7 +575,9 @@ class SubagentRunner:
         # здесь родительский — набор ребёнка знает только его State, собранный
         # выше уже с учётом tools/stop_tools из файла сабагента.
         bootstrap_text = (
-            subagent_thread_memory_bootstrap_text(self._config, shared_mf)
+            subagent_thread_memory_bootstrap_text(
+                self._parent_settings(), shared_mf
+            )
             if tool_is_available(
                 available_tool_names(child_state), SESSION_MEMORY_TOOL_NAME
             )
@@ -1008,48 +1039,57 @@ class SubagentRunner:
         for key in _CHILD_CONFIG_DEEP_COPY_KEYS:
             if key in child_config:
                 child_config[key] = copy.deepcopy(child_config[key])
-        definition = resolve_subagent_definitions(self._config).get(
-            self._active_tool_name
-        )
-        if definition is not None:
+        scope = self._child_tool_scope()
+        if scope is not None:
+            allow, stop = scope
             child_config[SUBAGENT_TOOLS_ALLOW_KEY] = (
-                list(definition.tools)
-                if definition.tools is not None
-                else None
+                list(allow) if allow is not None else None
             )
-            child_config[SUBAGENT_TOOLS_STOP_KEY] = list(definition.stop_tools)
+            child_config[SUBAGENT_TOOLS_STOP_KEY] = list(stop)
         from gc_core.config_modules.frozen import FrozenConfigDict
 
         return FrozenConfigDict(child_config)
 
-    def _build_child_runtime(self, child_config):
-        """Рантайм ребёнка: рантайм родителя + область инструментов из его файла."""
-        from gc_core.settings import RuntimeEnv
+    def _child_tool_scope(
+        self,
+    ) -> Optional[tuple[Optional[tuple[str, ...]], tuple[str, ...]]]:
+        """Область инструментов из файла сабагента: ``(allow, stop)``.
 
-        parent = getattr(self._ctx, "runtime", None) or RuntimeEnv()
-        allow = child_config.get(SUBAGENT_TOOLS_ALLOW_KEY)
+        ``None`` — сабагент встроенный, область наследуется от родителя. Один
+        источник и для плоского вида (``_build_child_config``), и для рантайма
+        (``_build_child_runtime``) — иначе они могли бы разъехаться.
+        """
+        definition = resolve_subagent_definitions(self._config).get(
+            self._active_tool_name
+        )
+        if definition is None:
+            return None
+        allow = (
+            tuple(definition.tools) if definition.tools is not None else None
+        )
+        return allow, tuple(definition.stop_tools)
+
+    def _build_child_runtime(self) -> RuntimeEnv:
+        """Рантайм ребёнка: рантайм родителя + область инструментов из его файла."""
+        parent = self._parent_runtime()
+        scope = self._child_tool_scope()
+        if scope is None:
+            return parent
+        allow, stop = scope
         return parent.with_values(
-            subagent_tools_allow=tuple(allow) if allow is not None else None,
-            subagent_tools_stop=tuple(
-                child_config.get(SUBAGENT_TOOLS_STOP_KEY) or ()
-            ),
+            subagent_tools_allow=allow, subagent_tools_stop=stop
         )
 
-    def _build_child_settings(self):
+    def _build_child_settings(self) -> Optional[AppConfig]:
         """Типизированные настройки ребёнка: настройки родителя без локальных
         субагентов (тот же запрет, что ``use_local_subagents`` в плоском виде).
         None — родитель собран плоским словарём (переходно)."""
-        parent = getattr(self._ctx, "settings", None)
-        if parent is None:
+        if not self._parent_has_settings():
             return None
-        from gc_core.settings import override_settings
-
         return override_settings(
-            parent,
+            settings_of(self._ctx),
             {"agent.use_local_subagents": False},
-            config_dir=getattr(
-                getattr(self._ctx, "runtime", None), "config_dir", None
-            ),
+            config_dir=runtime_of(self._ctx).config_dir,
         )
 
     def _build_child_model_router(
@@ -1173,7 +1213,7 @@ class SubagentRunner:
             tools_spec=prepared.tools_spec,
             tools_descr=prepared.tools_description,
             skills_list=parent.skills_list,
-            max_steps=self._config.get("subagent_max_steps", 50),
+            max_steps=self._parent_settings().agent.subagent_max_steps,
             system_prompt_id=parent.system_prompt_id,
             use_server_subagents=False,
             chat_completions_system_prompt=prepared.system_prompt,
@@ -1206,14 +1246,17 @@ class SubagentRunner:
         что роль написана оператором в локальном файле, прав не выдаёт и может
         расходиться с фактическим набором инструментов.
         """
+        # Путь из настроек есть только у кастомных; встроенные берут пакетный.
         if self._is_custom_subagent():
-            config_key = "chat_completions_custom_subagent_system_prompt_path"
+            paths = self._parent_settings().paths
+            prompt_path_raw = (
+                paths.chat_completions_custom_subagent_system_prompt_path
+            )
             default_name = "chat_completions_custom_subagent_system_prompt.md"
         else:
-            config_key = "chat_completions_subagent_system_prompt_path"
+            prompt_path_raw = None
             default_name = "chat_completions_subagent_system_prompt.md"
 
-        prompt_path_raw = self._config.get(config_key)
         candidate_paths: List[str] = []
         if isinstance(prompt_path_raw, str) and prompt_path_raw.strip():
             candidate_paths.append(os.path.abspath(prompt_path_raw.strip()))
@@ -1322,15 +1365,17 @@ class SubagentRunner:
             tools_cache=getattr(self._ctx, "tools_cache", None),
         )
 
+        child_runtime = self._build_child_runtime()
         child_ctx = RunContext(
             config_dict=child_config,
             settings=self._build_child_settings(),
-            runtime=self._build_child_runtime(child_config),
+            runtime=child_runtime,
             run_id=child_run_id,
-            # config_dict наследуется дословно через child_config, но поле ctx
-            # собирается руками и НЕ наследуется автоматически — без этой строки
-            # ctx.trace_id ребёнка разъедется с его же config_dict.
-            trace_id=trace_id_from_config(child_config),
+            # Рантайм наследуется через child_runtime, но поле ctx собирается
+            # руками и НЕ наследуется автоматически — без этой строки
+            # ctx.trace_id ребёнка разъедется с его же рантаймом.
+            # "" — отсутствие (как trace_id_from_config).
+            trace_id=str(child_runtime.trace_id or "").strip(),
             auth_connector=getattr(self._ctx, "auth_connector", None),
             logger=child_logger,
             logging_path=child_log_path,

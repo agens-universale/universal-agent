@@ -30,7 +30,9 @@ def context(preparer):
             "max_steps": 10,
             "system_prompt_id": "test-prompt",
             "agent_md_path": "/worker/instructions.md",
-            "api_key": "credential-not-to-be-sent",
+            "chat_completion_headers": {
+                "Authorization": "Bearer credential-not-to-be-sent"
+            },
         },
         tools_spec=[],
         tools_description=[],

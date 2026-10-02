@@ -18,6 +18,10 @@ def _screen(**over):
         mcp=_FakeMcp(),
     )
     kw.update(over)
+    if isinstance(kw["config"], dict) and "model" not in kw["config"]:
+        # В загруженном конфиге `agent.model` есть всегда; словарь теста без
+        # него означает шаблон — плейсхолдер, а не умолчание схемы.
+        kw["config"] = {**kw["config"], "model": cfg["model"]}
     return OnboardingScreen(**kw)
 
 
@@ -4389,8 +4393,13 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(
     def _reader(prompt, secret):
         return next(answers, "")
 
+    # Незаполненные адрес и модель — плейсхолдеры шаблона (в загруженном
+    # конфиге оба ключа есть всегда).
     wz.run(
-        {},
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "model": onboarding.MODEL_SENTINEL,
+        },
         tmp_path / "nowhere.yml",
         review_all=False,
         io=wz.WizardIO(reader=_reader, printer=printed.append),

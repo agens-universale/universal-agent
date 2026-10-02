@@ -557,26 +557,12 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         )
         self.assertEqual(aux.max_tokens, 8192)
 
-    def test_stale_legacy_chat_completions_llm_object_ignored_when_params_present(
-        self,
-    ):
-        """Дефолтный объект-близнец не должен перебивать auxiliary_llm_params."""
-        from gc_core.config_modules.chat_completions import (
-            ChatCompletionsLlmConfig,
-            auxiliary_llm_from_config_dict,
-        )
-
-        cfg = {
-            "chat_completions_llm": ChatCompletionsLlmConfig(),  # = schema defaults
-            "auxiliary_llm_params": {
-                "completion_kwargs": {"enable_thinking": False},
-            },
-        }
-        aux = auxiliary_llm_from_config_dict(cfg)
-        self.assertEqual(aux.completion_kwargs, {"enable_thinking": False})
-
     def test_legacy_nested_overlay_survives_when_flat_is_schema_default(self):
-        """Старый harbor-оверлей в chat_completions_params.auxiliary_llm не глохнет."""
+        """Оверлей в chat_completions_params.auxiliary_llm без плоского листа не глохнет.
+
+        Лист ``auxiliary_llm_params`` и секция ведут в одно поле настроек; лист,
+        если он есть, перекрывает секцию (см. test_flat_wins_over_diverged_nested_defaults).
+        """
         from gc_core.config import flatten_app_config
         from gc_core.config_modules.chat_completions import (
             auxiliary_llm_from_config_dict,
@@ -585,6 +571,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         from gc_core.config_modules.root import AppConfig
 
         base = flatten_app_config(AppConfig.model_validate({}))
+        base.pop("auxiliary_llm_params")
         merged = deep_merge(
             base,
             {
@@ -603,11 +590,6 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 },
             },
         )
-        # flat остаётся schema default после такого оверлея
-        self.assertEqual(
-            merged["auxiliary_llm_params"]["completion_kwargs"], {}
-        )
-        self.assertEqual(merged["auxiliary_llm_params"]["max_tokens"], 24576)
         aux = auxiliary_llm_from_config_dict(merged)
         self.assertEqual(aux.max_tokens, 4096)
         self.assertFalse(

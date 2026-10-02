@@ -119,24 +119,19 @@ def intent_scope_tool_store_flags(
 
 
 def intent_scope_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
 ) -> IntentScopeConfig:
-    """Собрать IntentScopeConfig из ``config_dict`` (после ``load_config``)."""
-    raw = (config_dict or {}).get("intent_scope")
-    if isinstance(raw, IntentScopeConfig):
-        return raw
-    params = (config_dict or {}).get("intent_scope_params")
-    if isinstance(params, dict):
-        return IntentScopeConfig.model_validate(params)
-    return IntentScopeConfig()
+    """``IntentScopeConfig`` настроек (``config_dict`` — всё, что принимает ``settings_of``)."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return settings_of(config_dict).intent_scope
 
 
 def backend_allows_intent_scope_hook(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
 ) -> bool:
-    raw_mode = (
-        str((config_dict or {}).get("backend_api_mode", "responses"))
-        .strip()
-        .lower()
-    )
+    from gc_core.settings import settings_of
+
+    raw_mode = str(settings_of(config_dict).backend.api_mode).strip().lower()
     return raw_mode == "chat_completions"

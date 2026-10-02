@@ -1,7 +1,8 @@
 """ModelRouter — единственный владелец вопроса «какой моделью идёт этот вызов».
 
-Router читает секции `models`/`slots`/`assign` из снимка `config_dict`, зафиксированного
-при сборке executor (`flatten_app_config`, `src/config.py`), и активный уровень — через
+Router читает секции `models`/`slots`/`assign` из снимка настроек (``settings_of``:
+``AppConfig``, контекст или переходный плоский ``config_dict``), зафиксированного
+при сборке executor, и активный уровень — через
 инжектируемый `level_provider`: сессионный слой живёт вне Router (`/level` меняет его
 без пересборки executor).
 
@@ -20,6 +21,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 from gc_core.config_modules.model_registry import LEVEL_FALLBACK, LEVELS
+from gc_core.settings import settings_of
 
 # Канонический реестр потребителей (спека §5.1). `subagent:<agent_name>` — отдельный
 # префиксный consumer id, не перечислимый статически здесь (канонический реестр имён
@@ -141,14 +143,24 @@ class ModelRouter:
         вернул None — явные привязки (и уровнем, и алиасом, §5.2: индирекция
         через слоты/реестр) резолвятся как обычно, override их не перекрывает.
         `None` (по умолчанию) — прежнее поведение (level_provider → слот)."""
-        self._snapshot = config_snapshot or {}
+        from gc_core.config import _serialize_model_entry
+
+        # Снимок фиксируется типизированным: клон (`with_override`) берёт его же,
+        # без повторного разбора плоского вида.
+        self._settings = settings_of(config_snapshot or {})
         self._level_provider = level_provider
         self.breaker = breaker if breaker is not None else CircuitBreaker()
         self._force_legacy = force_legacy
         self._unbound_override = unbound_override
-        self._models: dict[str, Any] = self._snapshot.get("models") or {}
-        self._slots: dict[str, Any] = self._snapshot.get("slots") or {}
-        self._assign: dict[str, Any] = self._snapshot.get("assign") or {}
+        # Записи реестра — в проекции `_serialize_model_entry`: вычисленный
+        # `authorization_header`, `backend_overrides` только из явных ключей,
+        # тариф словарём (его и ждут потребители `ResolvedModel.tariff`).
+        self._models: dict[str, Any] = {
+            alias: _serialize_model_entry(entry)
+            for alias, entry in self._settings.models.items()
+        }
+        self._slots: dict[str, Any] = self._settings.slots.model_dump()
+        self._assign: dict[str, Any] = self._settings.assign.model_dump()
 
     def registry_empty(self) -> bool:
         return not self._models
@@ -182,7 +194,7 @@ class ModelRouter:
         level_provider и breaker (спека §8: деградация субагента на активную
         модель без пересборки снимка/уровня, см. ``SubagentRunner``)."""
         return ModelRouter(
-            self._snapshot,
+            self._settings,
             level_provider=self._level_provider,
             breaker=self.breaker,
             force_legacy=self._force_legacy,
@@ -309,7 +321,7 @@ class ModelRouter:
         url = (
             entry.get("url")
             or backend_overrides.get("completions_url")
-            or self._snapshot.get("completions_url")
+            or self._settings.backend.completions_url
         )
         resolved = ResolvedModel(
             alias=alias,
@@ -333,8 +345,8 @@ class ModelRouter:
     def _resolve_legacy(self, source: str) -> ResolvedModel:
         return ResolvedModel(
             alias=None,
-            model=self._snapshot.get("model"),
-            url=self._snapshot.get("completions_url"),
+            model=self._settings.agent.model,
+            url=self._settings.backend.completions_url,
             authorization=None,
             backend_overrides={},
             tariff=None,

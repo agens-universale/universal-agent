@@ -22,19 +22,14 @@ def test_intent_scope_active_requires_non_empty_tools():
     )
 
 
-def test_intent_scope_from_config_dict_prefers_model_on_dict():
-    model = IntentScopeConfig(
-        tools={"turn_finish": IntentScopeToolConfig(record="raw")}
+def test_intent_scope_from_config_dict_returns_the_settings_section():
+    from gc_core.settings import default_settings
+
+    settings = default_settings(
+        **{"intent_scope.tools": {"turn_finish": {"record": "raw"}}}
     )
-    cfg = intent_scope_from_config_dict(
-        {
-            "intent_scope": model,
-            "intent_scope_params": {
-                "tools": {"turn_ask_human": {"record": "aggregated"}}
-            },
-        }
-    )
-    assert cfg is model
+    cfg = intent_scope_from_config_dict(settings)
+    assert cfg is settings.intent_scope
     assert cfg.tools["turn_finish"].record == "raw"
 
 

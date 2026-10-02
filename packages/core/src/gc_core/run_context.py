@@ -288,7 +288,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     - ``is_tui=True`` только помечает контекст; diff-журнал включает сам TUI
       (``gc_tui.diff_tui.tracking.attach_to_context``) — ядро о нём не знает.
     - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
-      CLI/server не передают его → константный провайдер из ключа ``config_dict["level"]``.
+      CLI/server не передают его → константный провайдер из ``settings.level``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
       инверсия зависимости через этот параметр.
     - ``circuit_breaker`` — предохранитель модели (спека §8); по умолчанию свежий.
@@ -542,17 +542,20 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     logging_path = prep.logging_path
     summary_trace_path = prep.summary_trace_path
     mcp_session_owner = prep.mcp_session_owner
+    from gc_core.settings import settings_of
+
+    settings = settings_of(config_dict)
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
-        config_dict.get("model"),
-        config_dict.get("completions_url"),
-        config_dict.get("backend_api_mode"),
+        settings.agent.model,
+        settings.backend.completions_url,
+        settings.backend.api_mode,
         extra={
             "event": "agent_start",
-            "model": config_dict.get("model"),
-            "url": config_dict.get("completions_url") or None,
-            "backend_api_mode": config_dict.get("backend_api_mode"),
+            "model": settings.agent.model,
+            "url": settings.backend.completions_url or None,
+            "backend_api_mode": settings.backend.api_mode,
         },
     )
 
@@ -575,18 +578,17 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
             extra={
                 "event": "trace_binding",
                 "trace_id": _trace_id,
-                "model_header": trace_header_name(config_dict, "x_trace_id"),
-                "mcp_header": trace_header_name(config_dict, "trace_id"),
+                "model_header": trace_header_name(settings, "x_trace_id"),
+                "mcp_header": trace_header_name(settings, "trace_id"),
             },
         )
 
     workspace = build_execution_workspace(backend, config_dict)
 
-    effective_level_provider = level_provider or (
-        lambda: config_dict.get("level") or "default"
-    )
+    configured_level = settings.level or "default"
+    effective_level_provider = level_provider or (lambda: configured_level)
     model_router = ModelRouter(
-        config_dict,
+        settings,
         level_provider=effective_level_provider,
         breaker=circuit_breaker,
         force_legacy=force_legacy,

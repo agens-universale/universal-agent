@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 from gc_core.execution.message_keys import make_message_key
+from gc_core.settings import settings_of
 
 logger = logging.getLogger(__name__)
 
@@ -107,15 +108,16 @@ def sanitize_system_id(system_id: str) -> str:
     return s
 
 
-def resolve_threads_dir(config_dict: Dict[str, Any]) -> str:
+def resolve_threads_dir(config_dict: Any) -> str:
     """
     Определить директорию для хранения тредов.
 
-    Контракт: config_dict["threads_data_path"] должен быть АБСОЛЮТНЫМ
-    путём, заполненным config_modules.root.resolve_paths(). Пустое значение
-    означает, что resolve_paths() не вызывался — это ошибка интеграции.
+    ``config_dict`` — всё, что принимает ``settings_of``. Контракт:
+    ``paths.threads_data_path`` должен быть АБСОЛЮТНЫМ путём, заполненным
+    config_modules.root.resolve_paths(). Пустое значение означает, что
+    resolve_paths() не вызывался — это ошибка интеграции.
     """
-    path_cfg = config_dict.get("threads_data_path")
+    path_cfg = settings_of(config_dict).paths.threads_data_path
     if not isinstance(path_cfg, str) or len(path_cfg.strip()) == 0:
         raise ValueError(
             "threads_data_path пуст; config_modules.root.resolve_paths() должен был его заполнить"
@@ -913,7 +915,7 @@ class ThreadSession:
         session._store_snapshot = snapshot
         session._defer_persist = (
             capability is not None
-            and config_dict.get("thread_store_persist") == "turn"
+            and settings_of(config_dict).thread_store.persist == "turn"
         )
         return session
 

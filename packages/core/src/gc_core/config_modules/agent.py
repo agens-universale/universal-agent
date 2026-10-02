@@ -231,81 +231,56 @@ class AgentConfig(BaseModel):
         return text or None
 
 
+def _agent_of(config_dict: Any) -> AgentConfig:
+    """Секция ``agent`` из всего, что принимает ``settings_of``."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return settings_of(config_dict).agent
+
+
 def exec_output_preview_edge_chars_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
 ) -> int:
-    """Размер края front-loaded preview из плоского config_dict.
+    """Размер края front-loaded preview (``agent.exec_output_preview_edge_chars``).
 
-    Плоский dict приходит и мимо ``AgentConfig`` (bench-профили доливают
-    overrides в уже провалидированный дамп), поэтому ``P <= T`` дожимается
-    здесь, а не только в схеме: иначе preview продублировал бы весь capture.
+    ``P <= T`` схема дожимает сама (``clamp_preview_edge_to_capture_tail``);
+    здесь — страховка, чтобы preview не продублировал весь capture.
     """
-    raw = (config_dict or {}).get(
-        "exec_output_preview_edge_chars",
-        DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS,
-    )
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        n = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
-    if n < 0:
-        n = DEFAULT_EXEC_OUTPUT_PREVIEW_EDGE_CHARS
-    capture = exec_output_capture_max_chars_from_config_dict(config_dict)
-    return min(n, capture - capture // 2)
+    agent = _agent_of(config_dict)
+    capture = agent.exec_output_capture_max_chars
+    return min(agent.exec_output_preview_edge_chars, capture - capture // 2)
 
 
-def exec_timeout_from_config_dict(config_dict: dict[str, Any] | None) -> int:
-    """Дефолтный exec-timeout из плоского config_dict (после flatten_app_config)."""
-    raw = (config_dict or {}).get("exec_timeout_sec", DEFAULT_EXEC_TIMEOUT_SEC)
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_EXEC_TIMEOUT_SEC
-    return n if n > 0 else DEFAULT_EXEC_TIMEOUT_SEC
+def exec_timeout_from_config_dict(config_dict: Any) -> int:
+    """Дефолтный exec-timeout (``agent.exec_timeout_sec``; схема гарантирует > 0)."""
+    return _agent_of(config_dict).exec_timeout_sec
 
 
 def exec_output_capture_max_chars_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
 ) -> int:
-    """Потолок captured stdout/stderr на поток из плоского config_dict."""
-    raw = (config_dict or {}).get(
-        "exec_output_capture_max_chars", DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-    )
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-    return n if n >= 0 else DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
+    """Потолок captured stdout/stderr на поток (``agent.exec_output_capture_max_chars``)."""
+    return _agent_of(config_dict).exec_output_capture_max_chars
 
 
 def walk_output_max_chars_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
 ) -> int:
-    """Потолок приватного канала обхода (Harbor walk/listdir) из плоского config_dict."""
-    raw = (config_dict or {}).get(
-        "walk_output_max_chars", WALK_OUTPUT_MAX_CHARS
-    )
-    try:
-        n = int(raw)
-    except (TypeError, ValueError):
-        return WALK_OUTPUT_MAX_CHARS
+    """Потолок приватного канала обхода (Harbor walk/listdir)."""
+    n = _agent_of(config_dict).walk_output_max_chars
     return n if n > 0 else WALK_OUTPUT_MAX_CHARS
 
 
 def harbor_exec_init_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
 ) -> str | None:
-    """Optional Harbor model-facing shell init from the flat config."""
-    raw = (config_dict or {}).get("harbor_exec_init")
-    if raw is None:
-        return None
-    if not isinstance(raw, str):
-        raise ValueError("harbor_exec_init должен быть строкой или null")
-    return raw.strip() or None
+    """Optional Harbor model-facing shell init (``agent.harbor_exec_init``)."""
+    return _agent_of(config_dict).harbor_exec_init
 
 
 def resolve_model_steering_text(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
     model: str | None = None,
 ) -> str | None:
     """Текст model_steering или None, если пусто.
@@ -313,22 +288,26 @@ def resolve_model_steering_text(
     ``model`` зарезервирован для совместимости вызовов; сейчас не используется.
     """
     del model  # API stable; matching by model name may return later
-    cfg = config_dict or {}
-    raw = cfg.get("model_steering")
-    if not isinstance(raw, str):
-        return None
-    text = raw.strip()
-    return text or None
+    return _agent_of(config_dict).model_steering.strip() or None
 
 
 def merge_special_instructions_with_model_steering(
     base: str | None,
     *,
-    config_dict: dict[str, Any] | None = None,
+    config_dict: Any = None,
     model: str | None = None,
 ) -> str | None:
-    """Склеить client special_instructions с model_steering из config_dict."""
-    steering = resolve_model_steering_text(config_dict, model=model)
+    """Склеить client special_instructions с model_steering из настроек."""
+    return join_special_instructions_with_steering(
+        base, resolve_model_steering_text(config_dict, model=model)
+    )
+
+
+def join_special_instructions_with_steering(
+    base: str | None, steering: str | None
+) -> str | None:
+    """Склеить special_instructions с уже прочитанным текстом steering."""
+    steering = steering.strip() if isinstance(steering, str) else None
     parts: list[str] = []
     if isinstance(base, str) and base.strip():
         parts.append(base.strip())

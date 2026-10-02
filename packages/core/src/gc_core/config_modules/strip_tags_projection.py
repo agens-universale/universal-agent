@@ -53,23 +53,17 @@ def normalize_strip_tags_projection_config(
     return cfg.result()
 
 
-def _section_from_config(config: object) -> dict | None:
-    if isinstance(config, dict):
-        section = config.get("strip_tags_projection")
-        if isinstance(section, dict):
-            return section
-    return None
+def _section_from_config(config: object) -> StripTagsProjectionConfig:
+    """Секция ``strip_tags_projection`` из всего, что принимает ``settings_of``."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return settings_of(config).strip_tags_projection
 
 
 def projection_tags_from_config(config: object) -> tuple[str, ...]:
     """Extra-теги прозы. Persist-флаг ``strip_think`` сюда не входит."""
-    section = _section_from_config(config)
-    if section is None:
-        return ()
-    raw_tags = section.get("tags") or ()
-    if isinstance(raw_tags, (list, tuple)):
-        return tuple(str(item) for item in raw_tags)
-    return ()
+    return tuple(_section_from_config(config).tags)
 
 
 def persist_reasoning_content_from_config(config: object) -> bool:
@@ -78,10 +72,7 @@ def persist_reasoning_content_from_config(config: object) -> bool:
     Единственный потребитель — ``get_output_list`` / вход в канон.
     YAML ``strip_think: false`` = persist True.
     """
-    section = _section_from_config(config)
-    if section is None:
-        return False
-    return not bool(section.get("strip_think", True))
+    return not _section_from_config(config).strip_think
 
 
 def _clean_tag_name(item: object) -> str | None:

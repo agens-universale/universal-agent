@@ -198,9 +198,7 @@ class RunSummaryCoordinator:
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
-        self._proj_tags = projection_tags_from_config(
-            getattr(ctx, "config_dict", None)
-        )
+        self._proj_tags = projection_tags_from_config(ctx)
         # Слепой токенный порог: был ли уже хук (значит, и главный запрос) и
         # сказано ли об этом в лог в этом прогоне.
         self._backend_requested = False

@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, Optional
+from typing import Dict
 
 from gc_core.config_modules import env_vars
 
@@ -10,41 +10,25 @@ def resolve_path_from_config_dir(path_value: str, config_dir: str) -> str:
     return os.path.join(config_dir, path_value)
 
 
-def maybe_override_and_resolve(
-    maybe_env_value: Optional[str],
-    key: str,
-    config_dict: Dict[str, Any],
-    config_dir: str,
-) -> None:
-    if not isinstance(maybe_env_value, str):
-        return
-    env_value = maybe_env_value.strip()
-    if not env_value:
-        return
-    config_dict[key] = resolve_path_from_config_dir(env_value, config_dir)
+#: SWARM_* окружения → путь настройки (паритет с raw-YAML веткой swarm runner'а).
+_SWARM_ENV_PATHS = (
+    ("swarm_agentmd_path", "paths.agent_md_path"),
+    ("swarm_threads_dir", "paths.threads_data_path"),
+    ("swarm_skills_dir", "paths.skills_data_path"),
+)
 
 
-def apply_swarm_env_overrides(
-    config_dict: Dict[str, Any], config_dir: str
-) -> None:
-    if env_vars.env.swarm_agentmd_path is not None:
-        maybe_override_and_resolve(
-            str(env_vars.env.swarm_agentmd_path),
-            "agent_md_path",
-            config_dict,
-            config_dir,
-        )
-    if env_vars.env.swarm_threads_dir is not None:
-        maybe_override_and_resolve(
-            str(env_vars.env.swarm_threads_dir),
-            "threads_data_path",
-            config_dict,
-            config_dir,
-        )
-    if env_vars.env.swarm_skills_dir is not None:
-        maybe_override_and_resolve(
-            str(env_vars.env.swarm_skills_dir),
-            "skills_data_path",
-            config_dict,
-            config_dir,
-        )
+def swarm_env_updates(config_dir: str) -> Dict[str, str]:
+    """Правки настроек из SWARM_* окружения: ``{"paths.threads_data_path": abs}``.
+
+    Пустое значение не переопределяет; относительный путь — от каталога конфига.
+    """
+    updates: Dict[str, str] = {}
+    for attr, dotted in _SWARM_ENV_PATHS:
+        value = getattr(env_vars.env, attr)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if value:
+            updates[dotted] = resolve_path_from_config_dir(value, config_dir)
+    return updates

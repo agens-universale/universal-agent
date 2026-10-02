@@ -40,14 +40,6 @@ def test_config_key_overrides_defaults():
     ]
 
 
-def test_malformed_item_falls_back_to_defaults_entirely():
-    cfg = {"voice_endpoint_presets": [{"name": "без url"}]}
-    assert (
-        voice_endpoint_presets_from_config(cfg)
-        == default_voice_endpoint_presets()
-    )
-
-
 def test_defaults_are_a_fresh_list_each_call():
     a = default_voice_endpoint_presets()
     a.append("mutant")

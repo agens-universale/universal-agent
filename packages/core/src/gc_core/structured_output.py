@@ -176,7 +176,7 @@ async def _arequest_rephrase(
         messages=messages,
         output_text=outcome.text,
     )
-    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    tags = projection_tags_from_config(ctx)
     projected = project_text_for_model(
         outcome.text, tags=tags, strip_think=True
     )

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -88,23 +88,13 @@ class FsFindInFilesConfig(BaseModel):
 
 
 def parse_find_in_files_config(
-    config_dict: Optional[dict[str, Any]] = None,
+    config_dict: Any = None,
 ) -> FsFindInFilesConfig:
-    """Read ``fs_tools.find_in_files`` from a raw config dict.
+    """``fs_tools.find_in_files`` настроек (всё, что принимает ``settings_of``)."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
 
-    Invalid nested values fall back to class defaults (same as runtime tools).
-    """
-    fif_raw: Any = {}
-    if isinstance(config_dict, dict):
-        fs_raw = config_dict.get("fs_tools", {})
-        if isinstance(fs_raw, dict):
-            fif_raw = fs_raw.get("find_in_files", {}) or {}
-    try:
-        return FsFindInFilesConfig.model_validate(
-            fif_raw if isinstance(fif_raw, dict) else {}
-        )
-    except Exception:
-        return FsFindInFilesConfig()
+    return settings_of(config_dict).fs_tools.find_in_files
 
 
 class FsFindFilesByNameConfig(BaseModel):
@@ -141,23 +131,12 @@ class FsFindFilesByNameConfig(BaseModel):
 
 
 def parse_find_files_by_name_config(
-    config_dict: Optional[dict[str, Any]] = None,
+    config_dict: Any = None,
 ) -> FsFindFilesByNameConfig:
-    """Read ``fs_tools.find_files_by_name`` from a raw config dict.
+    """``fs_tools.find_files_by_name`` настроек (всё, что принимает ``settings_of``)."""
+    from gc_core.settings import settings_of
 
-    Invalid nested values fall back to class defaults (same as runtime tools).
-    """
-    ffbn_raw: Any = {}
-    if isinstance(config_dict, dict):
-        fs_raw = config_dict.get("fs_tools", {})
-        if isinstance(fs_raw, dict):
-            ffbn_raw = fs_raw.get("find_files_by_name", {}) or {}
-    try:
-        return FsFindFilesByNameConfig.model_validate(
-            ffbn_raw if isinstance(ffbn_raw, dict) else {}
-        )
-    except Exception:
-        return FsFindFilesByNameConfig()
+    return settings_of(config_dict).fs_tools.find_files_by_name
 
 
 class FsToolsConfig(BaseModel):

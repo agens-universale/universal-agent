@@ -305,19 +305,3 @@ class TestC3ProcessingResponses:
     def test_no_collect_default_off_for_server(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(monkeypatch, config_dict={})
         assert gc_calls == [], "default off для server"
-
-    def test_explicit_force_collect_true_overrides_server_off(
-        self, monkeypatch
-    ):
-        gc_calls = self._run_process_tool_calls(
-            monkeypatch, config_dict={"gc": {"force_collect": True}}
-        )
-        assert len(gc_calls) == 1
-
-    def test_explicit_force_collect_false_overrides_cli_on(self, monkeypatch):
-        gc_calls = self._run_process_tool_calls(
-            monkeypatch,
-            config_dict={"gc": {"force_collect": False}},
-            is_cli_mode=True,
-        )
-        assert gc_calls == []

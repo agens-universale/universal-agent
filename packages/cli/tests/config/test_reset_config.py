@@ -218,7 +218,7 @@ def test_is_unconfigured_false_when_registry_covers_model_placeholder():
         "completions_url": "http://real/v1",
         "chat_completion_headers": {"Authorization": "Bearer sk-1"},
         "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"url": "http://x"}},
+        "models": {"flash": {"model": "flash-model"}},
     }
     assert onboarding.is_unconfigured(config) is False
 
@@ -233,7 +233,7 @@ def test_is_unconfigured_true_when_registry_but_endpoint_placeholder():
             "Authorization": onboarding.TOKEN_SENTINEL
         },
         "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"url": "http://x"}},
+        "models": {"flash": {"model": "flash-model"}},
     }
     assert onboarding.is_unconfigured(config) is True
 

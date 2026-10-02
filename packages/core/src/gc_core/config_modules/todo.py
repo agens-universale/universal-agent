@@ -33,12 +33,9 @@ def normalize_todo_config(cfg: TodoConfig) -> TodoConfig:
     return cfg.result()
 
 
-def todo_reminder_steps_from_config(config_dict: dict[str, Any] | None) -> int:
-    params = (config_dict or {}).get("todo_params")
-    if not isinstance(params, dict):
-        return DEFAULT_TODO_REMINDER_STEPS
-    try:
-        steps = int(params.get("reminder_steps", DEFAULT_TODO_REMINDER_STEPS))
-    except (TypeError, ValueError):
-        return DEFAULT_TODO_REMINDER_STEPS
-    return max(0, steps)
+def todo_reminder_steps_from_config(config_dict: Any) -> int:
+    """``todo.reminder_steps`` настроек (``config_dict`` — всё, что принимает ``settings_of``)."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return max(0, settings_of(config_dict).todo.reminder_steps)

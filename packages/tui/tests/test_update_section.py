@@ -840,8 +840,17 @@ async def test_reset_notice_mentions_session_profile_and_onboarding_suggestion(
     app = app_mod.TuiApp(config={})
     app._session_overrides = {"profile": "work"}
 
+    from gc_core import onboarding
+
     def _apply() -> None:
-        app._config = {}  # эмулируем реальный reload_config на плейсхолдерах
+        # эмулируем реальный reload_config на плейсхолдерах шаблона
+        app._config = {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+        }
 
     async with app.run_test() as pilot:
         scr = SettingsScreen(

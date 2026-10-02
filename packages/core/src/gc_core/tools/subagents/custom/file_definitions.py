@@ -17,6 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 import yaml
 
+from gc_core.settings import settings_of
 from gc_core.utils.user_text import read_user_text
 
 # Имя сабагента = имя тула. Префикс обязателен: по нему `is_subagent_tool`
@@ -254,7 +255,9 @@ def discover_subagent_definitions(
     Всё деградирует до варнинга: один битый файл не должен лишать оператора
     остальных.
     """
-    raw_dir = (config_dict or {}).get("subagents_dir")
+    raw_dir = (
+        settings_of(config_dict).agent.subagents_dir if config_dict else None
+    )
     base_dir = str(raw_dir).strip() if raw_dir is not None else ""
     if not base_dir:
         return []
@@ -349,7 +352,11 @@ def discover_subagent_definitions(
 
 
 def resolve_max_count(config_dict: Dict[str, Any]) -> int:
-    raw = (config_dict or {}).get("subagents_max_count", DEFAULT_MAX_COUNT)
+    raw = (
+        settings_of(config_dict).agent.subagents_max_count
+        if config_dict
+        else DEFAULT_MAX_COUNT
+    )
     try:
         value = int(raw)
     except (TypeError, ValueError):

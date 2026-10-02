@@ -3,6 +3,7 @@
 from types import SimpleNamespace
 
 import pytest
+from gc_core.config_modules.agent import AgentConfig
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.registry import is_subagent_tool
 from gc_core.tools.subagents.runner import SubagentRunner
@@ -122,7 +123,9 @@ class TestBuildChildState:
         del cfg["subagent_max_steps"]
         runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
         child = await runner._build_child_state("test role")
-        assert child.max_steps == 50
+        # Умолчание — из модели настроек (agent.subagent_max_steps), а не
+        # прежний локальный fallback 50 плоского чтения.
+        assert child.max_steps == AgentConfig().subagent_max_steps
 
     @pytest.mark.asyncio
     async def test_model_inherited_from_orchestrator(self):

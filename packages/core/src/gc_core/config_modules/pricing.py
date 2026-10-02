@@ -78,11 +78,13 @@ coerce_pricing = _coerce_pricing
 
 
 def pricing_from_config_dict(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
 ) -> PricingConfig:
-    """Достать ``PricingConfig`` из плоского config_dict (ключ ``pricing``)."""
-    cfg = config_dict if isinstance(config_dict, dict) else {}
-    return _coerce_pricing(cfg.get("pricing"))
+    """``PricingConfig`` настроек (``config_dict`` — всё, что принимает ``settings_of``)."""
+    # Ленивый импорт: settings → root → этот модуль.
+    from gc_core.settings import settings_of
+
+    return settings_of(config_dict).pricing
 
 
 def _rates_configured(input_rate: Any, output_rate: Any) -> bool:

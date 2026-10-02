@@ -5648,15 +5648,28 @@ class SettingsScreen(Screen):
             backend.get("chat_completion_headers"),
         )
         proxy = backend.get("proxy")
-        return {
+        connection = {
             "completions_url": url if isinstance(url, str) else "",
             "chat_completion_headers": headers
             if isinstance(headers, dict)
             else {},
             "use_ssl": backend.get("use_ssl", True),
             "proxy": proxy if isinstance(proxy, str) else None,
-            "endpoint_presets": sections.get("endpoint_presets"),
         }
+        # Пресеты — только годные по форме: их читают типизированно (строго),
+        # а документ схему не проходил. Нет или не по форме — кодовый дефолт.
+        presets = sections.get("endpoint_presets")
+        if isinstance(presets, list):
+            from gc_core.config_modules.endpoint_presets import EndpointPreset
+
+            try:
+                for item in presets:
+                    EndpointPreset.model_validate(item)
+            except ValueError:
+                pass
+            else:
+                connection["endpoint_presets"] = presets
+        return connection
 
     def _profile_document(self, path) -> dict:
         """Сырой документ профиля через кэш прохода — сосед `_profile_summary`:

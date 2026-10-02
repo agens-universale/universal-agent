@@ -10,10 +10,7 @@ import time
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-from gc_core.config import (
-    parse_chat_completions_max_tokens,
-    resolve_tui_stream_enabled,
-)
+from gc_core.config import parse_chat_completions_max_tokens
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.config_modules.strip_tags_projection import (
     persist_reasoning_content_from_config,
@@ -79,6 +76,7 @@ from gc_core.run_summary_coordinator import (
     filter_messages_not_in_state,
 )
 from gc_core.runtime_notices import maybe_push_llm_failure_notice
+from gc_core.settings import AppConfig, settings_of
 from gc_core.states import State
 from gc_core.summarize.limit_trace_summary import abuild_limit_envelope
 from gc_core.tools import (
@@ -408,14 +406,14 @@ async def _arequest_responses_once(
     *,
     resolved: Any,
     call_headers: Dict[str, str],
-    cfg: Dict[str, Any],
+    settings: AppConfig,
     set_previous_response_id: bool,
     network: tuple,
 ) -> Tuple[List[Dict], str, Dict]:
-    # Preserve explicit legacy overrides. Typed AppConfig exposes its endpoint
-    # as backend.completions_url for both API modes.
+    # Адрес — backend.completions_url в обоих режимах API. Прежний плоский
+    # `agent_url` в схеме не существует (строгая валидация его не пропустит).
     verify, cert, use_retry, request_timeout_sec, config_proxy = network
-    url = cfg.get("agent_url") or cfg["completions_url"]
+    url = settings.backend.completions_url
     call_data = create_call_data(
         messages,
         state,
@@ -440,7 +438,7 @@ async def _arequest_responses_once(
 
 
 def _chat_token_limits(
-    cfg: Dict[str, Any], resolved_for_network: Any
+    settings: AppConfig, resolved_for_network: Any
 ) -> Tuple[int, int]:
     """(max_tokens, min_response_tokens) с учётом per-model оверрайдов backend."""
     # Лимиты токенов — тоже поля backend, и у модели реестра они СВОИ: окно
@@ -451,7 +449,7 @@ def _chat_token_limits(
         resolved_for_network, "chat_completions_max_tokens"
     )
     completions_max_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_max_tokens", 8096)
+        settings.backend.chat_completions_max_tokens
         if _max_tokens_override is NO_BACKEND_OVERRIDE
         else _max_tokens_override,
         default=8096,
@@ -460,12 +458,20 @@ def _chat_token_limits(
         resolved_for_network, "chat_completions_min_response_tokens"
     )
     min_response_tokens = parse_chat_completions_max_tokens(
-        cfg.get("chat_completions_min_response_tokens", 1024)
+        settings.backend.chat_completions_min_response_tokens
         if _min_tokens_override is NO_BACKEND_OVERRIDE
         else _min_tokens_override,
         default=1024,
     )
     return completions_max_tokens, min_response_tokens
+
+
+def _tui_stream_enabled(settings: AppConfig) -> bool:
+    """Мастер-свитч live-стриминга TUI: явный ``tui.stream`` побеждает, иначе
+    legacy ``backend.stream`` (его дефолт True)."""
+    if settings.tui.stream is not None:
+        return bool(settings.tui.stream)
+    return bool(settings.backend.stream)
 
 
 def _first_choice_finish_reason(res: Dict[str, Any]) -> Any:
@@ -496,13 +502,13 @@ async def _arequest_backend_canonical_once(
     # backend_overrides), не только id модели (спека §6/§7) — поэтому и резолв идёт
     # по уровню, зафиксированному на ход (`_resolve_main_for_turn`), а не по живому:
     # иначе /level посреди хода уводил бы запрос на другой слот. Без ctx.model_router
-    # (легаси/тестовые двойники) — resolved=None, воронки читают cfg напрямую как раньше.
+    # (легаси/тестовые двойники) — resolved=None, воронки читают настройки напрямую как раньше.
     resolved = _resolve_main_for_turn(state, ctx)
     call_headers = await acreate_call_headers(state, ctx, resolved=resolved)
-    cfg = getattr(ctx, "config_dict", {}) or {}
+    settings = settings_of(ctx)
     backend_mode = _get_backend_api_mode(ctx)
     # Per-model url/token/backend-квирки — chat_completions-only (спека §4): в responses
-    # из ResolvedModel действует только id модели, сетевые параметры — легаси cfg.
+    # из ResolvedModel действует только id модели, сетевые параметры — из settings.backend.
     resolved_for_network = (
         resolved if backend_mode == "chat_completions" else None
     )
@@ -513,7 +519,7 @@ async def _arequest_backend_canonical_once(
         request_timeout_sec,
         config_proxy,
         retry_embedded_choice_errors,
-    ) = resolve_network_params(cfg, resolved_for_network)
+    ) = resolve_network_params(settings, resolved_for_network)
 
     if backend_mode == "responses":
         return await _arequest_responses_once(
@@ -522,7 +528,7 @@ async def _arequest_backend_canonical_once(
             ctx,
             resolved=resolved,
             call_headers=call_headers,
-            cfg=cfg,
+            settings=settings,
             set_previous_response_id=set_previous_response_id,
             network=(
                 verify,
@@ -533,7 +539,11 @@ async def _arequest_backend_canonical_once(
             ),
         )
 
-    url = resolved.url if resolved is not None else cfg["completions_url"]
+    url = (
+        resolved.url
+        if resolved is not None
+        else settings.backend.completions_url
+    )
     sanitized_messages = sanitize_messages_for_chat_completions(
         messages,
         invalid_tool_call_factory=build_invalid_tool_call_feedback_message,
@@ -552,7 +562,7 @@ async def _arequest_backend_canonical_once(
     # долбил бы её от чужого потолка к чужому полу. Тот же приём, что в служебной
     # воронке (`utils/llm_chat_client._send_chat_completion_text`).
     completions_max_tokens, min_response_tokens = _chat_token_limits(
-        cfg, resolved_for_network
+        settings, resolved_for_network
     )
 
     def _create_payload(max_tokens: int) -> Dict[str, Any]:
@@ -560,11 +570,11 @@ async def _arequest_backend_canonical_once(
             sanitized_messages,
             chat_state,
             max_tokens=max_tokens,
-            config_dict=cfg,
+            config_dict=settings,
             resolved=resolved,
         )
 
-    _stream_on = resolve_tui_stream_enabled(cfg)
+    _stream_on = _tui_stream_enabled(settings)
     _on_delta = getattr(ctx, "on_stream_delta", None) if _stream_on else None
     prompt_message_count = len(getattr(state, "messages", []) or [])
 
@@ -608,7 +618,7 @@ async def _arequest_backend_canonical_once(
     choices = res.get("choices")
     if isinstance(choices, list) and len(choices) > 0:
         first_choice_payload["choices"] = [choices[0]]
-    persist_reasoning = persist_reasoning_content_from_config(cfg)
+    persist_reasoning = persist_reasoning_content_from_config(settings)
     canonical = output_chat_completion_to_response(
         first_choice_payload,
         logger_override=getattr(ctx, "logger", _fallback_logger),

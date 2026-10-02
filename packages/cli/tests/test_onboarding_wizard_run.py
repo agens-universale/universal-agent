@@ -571,7 +571,9 @@ def test_summary_reports_all_three_levels_from_the_fresh_config():
 
 
 def test_summary_of_an_empty_registry_says_nothing_is_set():
-    assert wz._summary_lines({}) == [
+    # Плоский `agent.model` в загруженном конфиге есть всегда; «пусто» —
+    # плейсхолдер шаблона.
+    assert wz._summary_lines({"model": onboarding.MODEL_SENTINEL}) == [
         "    модель       не задан",
         "    light        не задан",
         "    max          не задан",

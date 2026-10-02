@@ -73,20 +73,25 @@ def test_routing_identity_assignments_overrides_and_limits_survive_without_url()
             "level": "max",
             "completions_url": "https://secret.invalid/v1",
             "models": {
+                # Подключение записи — парой (§3): у fast в форме backend,
+                # у large — url + token.
                 "fast": {
                     "model": "provider-fast",
                     "url": None,
-                    "authorization_header": "SECRET",
+                    "authorization_header": None,
                     "pricing": None,
-                    "backend_overrides": {"chat_completions_max_tokens": 1234},
+                    "backend_overrides": {
+                        "completions_url": "https://secret.invalid/fast",
+                        "chat_completion_headers": {"Authorization": "SECRET"},
+                        "chat_completions_max_tokens": 1234,
+                    },
                 },
                 "large": {
                     "model": "provider-large",
                     "url": "https://private.ru/SECRET",
-                    "authorization_header": "SECRET",
+                    "authorization_header": "Bearer SECRET",
                     "pricing": {"input": 2, "output": 3},
                     "backend_overrides": {
-                        "chat_completion_headers": {"Authorization": "SECRET"},
                         "chat_completion_kwargs": {"temperature": 0.2},
                     },
                 },

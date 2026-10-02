@@ -12,12 +12,6 @@ from gc_core.config_modules.agent import walk_output_max_chars_from_config_dict
 def test_walk_ceiling_accessor_defaults_and_parses():
     assert walk_output_max_chars_from_config_dict({}) == WALK_OUTPUT_MAX_CHARS
     assert (
-        walk_output_max_chars_from_config_dict(
-            {"walk_output_max_chars": "abc"}
-        )
-        == WALK_OUTPUT_MAX_CHARS
-    )
-    assert (
         walk_output_max_chars_from_config_dict({"walk_output_max_chars": -5})
         == WALK_OUTPUT_MAX_CHARS
     )

@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from gc_core.config_modules.agent import (
-    merge_special_instructions_with_model_steering,
+    join_special_instructions_with_steering,
     resolve_model_steering_text,
 )
+from gc_core.settings import settings_of
 
 
 @dataclass(frozen=True)
@@ -17,17 +18,21 @@ class PromptPreparationRequest:
     verbose: bool = False
 
     @classmethod
-    def from_config(cls, config: dict, *, verbose: bool):
-        def path(key):
-            value = config.get(key)
+    def from_config(cls, config: Any, *, verbose: bool):
+        """``config`` — всё, что принимает ``settings_of``."""
+        settings = settings_of(config)
+
+        def path(value):
             return value if isinstance(value, str) and value.strip() else None
 
         return cls(
-            system_prompt_path=path("chat_completions_system_prompt_path"),
-            special_instructions_path=path(
-                "chat_completions_special_instructions_path"
+            system_prompt_path=path(
+                settings.paths.chat_completions_system_prompt_path
             ),
-            model_steering=resolve_model_steering_text(config),
+            special_instructions_path=path(
+                settings.paths.chat_completions_special_instructions_path
+            ),
+            model_steering=resolve_model_steering_text(settings),
             verbose=verbose,
         )
 
@@ -81,8 +86,7 @@ def load_run_prompts(
             special_instructions = None
     return PreparedPrompts(
         system_prompt=system_prompt,
-        special_instructions=merge_special_instructions_with_model_steering(
-            special_instructions,
-            config_dict={"model_steering": request.model_steering},
+        special_instructions=join_special_instructions_with_steering(
+            special_instructions, request.model_steering
         ),
     )

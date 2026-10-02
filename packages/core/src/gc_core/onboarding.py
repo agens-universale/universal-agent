@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from gc_core import config_raw
 from gc_core.app_version import REPO_GIT_URL
+from gc_core.settings import settings_of
 
 
 def _mcp_hint() -> str:
@@ -175,7 +176,7 @@ def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
     )
 
 
-def _registry_is_self_sufficient(c: Dict[str, Any]) -> bool:
+def _registry_is_self_sufficient(c: Any) -> bool:
     """КАЖДАЯ запись реестра работает через СВОЁ подключение — тогда плоский
     `backend` не нужен вовсе (спека §4: незаданное у записи наследуется от него).
 
@@ -186,28 +187,32 @@ def _registry_is_self_sufficient(c: Dict[str, Any]) -> bool:
     тащить его в детект первого запуска нельзя, а «самодостаточны все» ошибается
     только в безопасную сторону — лишний раз предложить мастер, но не объявить
     готовым конфиг, который уйдёт на `your-backend:PORT`."""
-    models = c.get("models") or {}
+    from gc_core.config import _serialize_model_entry
+
+    settings = settings_of(c)
+    models = settings.models
     return (
-        c.get("backend_api_mode") == "chat_completions"
+        settings.backend.api_mode == "chat_completions"
         and bool(models)
         and all(
-            _entry_carries_own_connection(entry) for entry in models.values()
+            _entry_carries_own_connection(_serialize_model_entry(entry))
+            for entry in models.values()
         )
     )
 
 
-def _endpoint_set(c: Dict[str, Any]) -> bool:
-    if c.get("completions_url") not in (None, URL_SENTINEL):
+def _endpoint_set(c: Any) -> bool:
+    if settings_of(c).backend.completions_url != URL_SENTINEL:
         return True
     return _registry_is_self_sufficient(c)
 
 
-def _legacy_model_set(c: Dict[str, Any]) -> bool:
+def _legacy_model_set(c: Any) -> bool:
     """Плоский `agent.model` заполнен (не плейсхолдер шаблона)."""
-    return c.get("model") not in (None, "", MODEL_SENTINEL)
+    return settings_of(c).agent.model not in ("", MODEL_SENTINEL)
 
 
-def _model_set(c: Dict[str, Any]) -> bool:
+def _model_set(c: Any) -> bool:
     """Требование модели: непустой merged-реестр (любой слой, спека §11) ИЛИ
     заполненный легаси-ключ.
 
@@ -216,22 +221,23 @@ def _model_set(c: Dict[str, Any]) -> bool:
     поэтому такой реестр поверх плейсхолдерного endpoint'а — «нечем работать», а не
     «настроено». Адрес и токен реестр закрывает отдельно и по другому условию —
     когда их несут сами записи (`_registry_is_self_sufficient`)."""
-    return bool(c.get("models")) or _legacy_model_set(c)
+    return bool(settings_of(c).models) or _legacy_model_set(c)
 
 
-def _agent_auth_set(c: Dict[str, Any]) -> bool:
-    auth_cfg = c.get("agent_auth") or {}
+def _agent_auth_set(c: Any) -> bool:
+    agent_auth = settings_of(c).agent_auth
+    auth_cfg = agent_auth.model_dump() if agent_auth else {}
     return bool(auth_cfg) and bool(auth_cfg.get("auth_endpoint"))
 
 
-def _auth_set(c: Dict[str, Any]) -> bool:
+def _auth_set(c: Any) -> bool:
     # Auth «не задан» (pending) ТОЛЬКО если в конфиге остался шаблонный плейсхолдер
     # токена (и нет полноценного agent_auth). Реальный токен ИЛИ намеренное отсутствие
     # заголовка (локальный прокси / эндпоинт без auth сам ставит авторизацию) → задан.
     # Гейт — детектор незаполненного шаблона, а не валидатор auth: отсутствие ≠ сентинел.
     # Симметрично адресу: авторизацию может нести и сама запись реестра — целой парой
     # со своим адресом, порознь их правило пары (§3) в конфиг не пускает.
-    auth = (c.get("chat_completion_headers") or {}).get("Authorization")
+    auth = settings_of(c).backend.chat_completion_headers.get("Authorization")
     if auth == TOKEN_SENTINEL:
         return _agent_auth_set(c) or _registry_is_self_sufficient(c)
     return True
@@ -278,17 +284,24 @@ FIELD_ANCHOR_PATHS: Dict[str, str] = {
 }
 
 
-def pending_field_keys(config: Dict[str, Any]) -> set:
-    """Ключи-якоря полей, ещё не удовлетворённых конфигом (для визарда)."""
-    return {key for key, is_set in _FIELD_CHECKS.items() if not is_set(config)}
+def pending_field_keys(config: Any) -> set:
+    """Ключи-якоря полей, ещё не удовлетворённых конфигом (для визарда).
+
+    ``config`` — всё, что принимает ``settings_of``.
+    """
+    settings = settings_of(config)
+    return {
+        key for key, is_set in _FIELD_CHECKS.items() if not is_set(settings)
+    }
 
 
-def pending_requirements(config: Dict[str, Any]) -> List[_Requirement]:
+def pending_requirements(config: Any) -> List[_Requirement]:
     """Требования, ещё не удовлетворённые текущим конфигом."""
-    return [r for r in REQUIREMENTS if not r.is_satisfied(config)]
+    settings = settings_of(config)
+    return [r for r in REQUIREMENTS if not r.is_satisfied(settings)]
 
 
-def is_unconfigured(config: Dict[str, Any]) -> bool:
+def is_unconfigured(config: Any) -> bool:
     """True, если конфиг ещё не готов к запуску (есть незакрытое требование).
 
     Требования проверяются ВСЕ — реестр моделей входит в них через `_model_set`
@@ -333,7 +346,7 @@ def _registry_overridden_above(
     return any(origin.overlay_kind for origin in found.values())
 
 
-def effective_model(config: Dict[str, Any]) -> str:
+def effective_model(config: Any) -> str:
     """Действующая модель конфига — ПРОВАЙДЕРСКИЙ id из резолва `ModelRouter`
     (§6/§7), а не плоский `agent.model`: волна B пишет реестр (`models.<алиас>`
     + `slots.default`), а плоский ключ оставляет шаблонным сентинелом — по нему
@@ -348,13 +361,14 @@ def effective_model(config: Dict[str, Any]) -> str:
     на несуществующий алиас) — фоллбэк на плоский ключ: мастер обязан
     открываться на любом конфиге. Сентинел шаблона — «ещё не задано», а не
     значение: отдаём пусто, как и на конфиге без модели вовсе."""
-    name = config.get("model")
+    settings = settings_of(config)
+    name = settings.agent.model
     try:
         from gc_core.model_router import ModelRouter
 
         resolved = ModelRouter(
-            config,
-            level_provider=lambda: config.get("level") or "default",
+            settings,
+            level_provider=lambda: settings.level or "default",
         ).resolve("main", check_breaker=False)
         name = resolved.model
     except Exception:
@@ -362,7 +376,7 @@ def effective_model(config: Dict[str, Any]) -> str:
     return "" if not name or name == MODEL_SENTINEL else name
 
 
-def assigned_level_model(config: Dict[str, Any], level: str) -> str:
+def assigned_level_model(config: Any, level: str) -> str:
     """Провайдерский id модели, ЯВНО назначенной уровню, — или пусто, если слот
     не задан.
 
@@ -370,15 +384,21 @@ def assigned_level_model(config: Dict[str, Any], level: str) -> str:
     моделью `default`, но написать против него её имя значило бы сказать
     «уровень назначен» там, где он не назначен, — и следующий шаг закрепил бы
     выдуманное."""
-    alias = (config.get("slots") or {}).get(level)
+    settings = settings_of(config)
+    alias = getattr(settings.slots, level, None)
     if not alias:
         return ""
-    entry = (config.get("models") or {}).get(alias)
-    model = entry.get("model") if isinstance(entry, dict) else None
+    entry = settings.models.get(alias)
+    model = entry.model if entry is not None else None
     return model or alias
 
 
-def model_step_current(config: Dict[str, Any]) -> str:
+def _any_slot(config: Any) -> bool:
+    """Задан ли хоть один слот уровня."""
+    return any(settings_of(config).slots.model_dump().values())
+
+
+def model_step_current(config: Any) -> str:
     """Что шаг «Модель» называет текущим (пусто — «нечего показать»).
 
     Шаг задаёт слот `default` — про него и говорит. Не `effective_model`: та
@@ -397,12 +417,12 @@ def model_step_current(config: Dict[str, Any]) -> str:
     вторая редакция этого правила разошлась бы с первой на первой же правке: ровно
     так дефект и жил — в плоском починен, в TUI остался."""
     current = assigned_level_model(config, "default")
-    if not current and not any((config.get("slots") or {}).values()):
+    if not current and not _any_slot(config):
         current = effective_model(config)
     return current
 
 
-def default_fallback_model(config: Dict[str, Any]) -> tuple:
+def default_fallback_model(config: Any) -> tuple:
     """`slots.default` пуст: чем уровень default работает СЕЙЧАС — (модель,
     подпись об источнике). Источник ищем тем же обходом матрицы `LEVEL_FALLBACK`
     (`config_modules/model_registry.py`), что и резолв: первый уровень после
@@ -424,7 +444,7 @@ def default_fallback_model(config: Dict[str, Any]) -> tuple:
     return effective_model(config), "(default не задан)"
 
 
-def model_step_display(config: Dict[str, Any]) -> tuple:
+def model_step_display(config: Any) -> tuple:
     """Строка «сейчас» шага «Модель»: (модель, подпись об источнике или пусто).
 
     Слот `default` задан (или слотов нет вовсе — прежнее правило
@@ -439,16 +459,17 @@ def model_step_display(config: Dict[str, Any]) -> tuple:
 
     Дом — здесь, по той же причине, что у `model_step_current`: поверхностей две,
     и вторая редакция правила уже расходилась с первой."""
+    config = settings_of(config)
     current = model_step_current(config)
     if current:
         return current, ""
-    if any((config.get("slots") or {}).values()):
+    if _any_slot(config):
         return default_fallback_model(config)
     return "", ""
 
 
 def overriding_layer_note(
-    config: Dict[str, Any], config_path=None, *, ignore_profile: bool = False
+    config: Any, config_path=None, *, ignore_profile: bool = False
 ) -> Optional[str]:
     """Спека §11: что перекроет выбор, сделанный в мастере (мастер пишет БАЗОВЫЙ
     config.yml, а конфиг собирается стопкой слоёв — ось 2, §2).
@@ -458,7 +479,15 @@ def overriding_layer_note(
     файла: свой же реестр config.yml мастер с волны B дописывает сам (решение 10),
     и предупреждать там не о чем, а проектный слой молча оставил бы выбор человека
     без эффекта. Без `config_path` слой не различить — тогда только профиль."""
-    profile = config.get("profile") or None
+    from gc_core.settings import AppConfig, runtime_of
+
+    # Действующий профиль — рантайм; у голой модели рантайма нет — указатель
+    # из её документа (то же правило, что у плоского вида).
+    profile = (
+        config.profile
+        if isinstance(config, AppConfig)
+        else runtime_of(config).active_profile
+    )
     if profile and not ignore_profile:
         # Текст — общий для всех поверхностей (экран мастера и подсказка gc-cli),
         # поэтому это чистый факт без адреса действия: звать в «Настройки · Профили»
@@ -466,7 +495,7 @@ def overriding_layer_note(
         return (
             f'действует профиль "{profile}" — он перекроет модельные настройки'
         )
-    if config.get("models") and _registry_overridden_above(
+    if settings_of(config).models and _registry_overridden_above(
         config_path, ignore_profile=ignore_profile
     ):
         return (

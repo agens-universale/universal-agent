@@ -43,6 +43,7 @@ from gc_core.run_summary_coordinator import (
     aset_tui_finish_gate_checking,
 )
 from gc_core.security.permission_store import PermissionStore
+from gc_core.settings import settings_of
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.config import (
     parse_summary_trigger_chars,
@@ -277,7 +278,6 @@ class AgentExecutor:
         logger,
     ):
         """Тред-сессия прогона → (thread_session, thread_shared, previous_response_id, system_id)."""
-        config_dict = self._ctx.config_dict
         system_id = system or "cli"
         if thread_id is None:
             clear_thread_identity(self._ctx)
@@ -289,14 +289,12 @@ class AgentExecutor:
             if _reset_store is None:
                 from gc_core.thread_store_file import FileThreadStore
 
-                _reset_store = FileThreadStore(
-                    resolve_threads_dir(config_dict)
-                )
+                _reset_store = FileThreadStore(resolve_threads_dir(self._ctx))
             from gc_core.thread_store_async import athread_store
 
             await athread_store(_reset_store).areset(system_id, thread_id)
         thread_session = await ThreadSession.afrom_config(
-            config_dict=config_dict,
+            config_dict=self._ctx,
             system_id=system_id,
             thread_id=thread_id,
             # Хранилище встраивающего, если он его передал. None — файловое
@@ -346,14 +344,13 @@ class AgentExecutor:
         self, thread_session, thread_id, system_id: str
     ) -> None:
         # Снимок MCP «сервер→тулы» для TUI-экрана /mcp (необязателен — не валим run).
-        config_dict = self._ctx.config_dict
-        if thread_id is None or not config_dict.get("mcp-servers"):
+        if thread_id is None or not settings_of(self._ctx).mcp.servers:
             return
         try:
             from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
 
             snap = build_mcp_tools_snapshot(
-                config_dict, self._ctx.tools_data, self._ctx.mcp_status
+                self._ctx, self._ctx.tools_data, self._ctx.mcp_status
             )
             await thread_session.port.aupdate_runtime_meta(
                 system_id,
@@ -377,7 +374,7 @@ class AgentExecutor:
         )
 
         request = PromptPreparationRequest.from_config(
-            self._ctx.config_dict, verbose=effective_verbose
+            self._ctx, verbose=effective_verbose
         )
         loader = getattr(self._ctx, "prompt_loader", None)
         if loader is None:
@@ -400,35 +397,29 @@ class AgentExecutor:
         logger,
     ) -> tuple:
         """State прогона и отрендеренный system prompt (chat/completions) либо None."""
-        config_dict = self._ctx.config_dict
+        settings = settings_of(self._ctx)
         state_data = {
-            "limit_project_metadata": config_dict.get(
-                "limit_project_metadata", False
-            ),
+            "limit_project_metadata": settings.agent.limit_project_metadata,
             "parent_state_id": None,
             "verbose": effective_verbose,
-            "model": config_dict["model"],
+            "model": settings.agent.model,
             "tools_spec": self._ctx.tools_spec,
             "tools_descr": self._ctx.tools_description,
-            "max_steps": config_dict["max_steps"],
+            "max_steps": settings.agent.max_steps,
             "skills_list": skills_list,
-            "system_prompt_id": config_dict["system_prompt_id"],
+            "system_prompt_id": settings.agent.system_prompt_id,
             "chat_completions_system_prompt": chat_completions_system_prompt,
-            "use_server_subagents": config_dict.get(
-                "use_server_subagents", False
-            ),
-            "agent_md_path": config_dict.get("agent_md_path"),
+            "use_server_subagents": settings.agent.use_server_subagents,
+            "agent_md_path": settings.paths.agent_md_path,
             "is_tui": bool(getattr(self._ctx, "is_tui", False)),
-            "agentsmd_override": bool(
-                config_dict.get("agentsmd_override", False)
-            ),
+            "agentsmd_override": settings.tui.agentsmd_override,
             "thread_id": thread_id,
             "shared": thread_shared,
-            "workspace_config": config_dict,
+            "workspace_config": self._ctx.config_dict,
             "logger": logger,
             "workspace": getattr(self._ctx, "workspace", None),
         }
-        if subagents_enabled(config_dict.get("use_local_subagents", False)):
+        if subagents_enabled(settings.agent.use_local_subagents):
             state_data["specific_role"] = ORCHESTRATOR_SPECIFIC_ROLE
         preparer = getattr(self._ctx, "state_preparer", None)
         if preparer is None:
@@ -452,7 +443,7 @@ class AgentExecutor:
         # AliasCircuitOpenError на старте рана.
         begin_turn_main_trace(state, self._ctx)
         state.tool_call_outputs_store.set_max_entries(
-            get_stored_tool_outputs_max_entries(config_dict)
+            get_stored_tool_outputs_max_entries(settings)
         )
         state.backend_api_mode = backend_api_mode
         state.on_messages_evicted = getattr(
@@ -657,7 +648,6 @@ class AgentExecutor:
         return messages, None, None
 
     async def _afinalize_thread(self, thread_session, state, logger) -> None:
-        config_dict = self._ctx.config_dict
         if thread_session is None or (
             state.discard_writes_after_stop and state.stop_requested
         ):
@@ -674,7 +664,7 @@ class AgentExecutor:
         flush = getattr(thread_session, "aflush_deferred", None)
         if flush is not None:
             await flush()
-        _run_trace_id = trace_id_from_config(config_dict)
+        _run_trace_id = trace_id_from_config(self._ctx)
         if _run_trace_id:
             # После persist_batch: он пересобирает мету с диска, поэтому
             # запись должна быть последней, иначе её затрёт.
@@ -687,16 +677,16 @@ class AgentExecutor:
     ) -> None:
         # Отчёт по токенам/стоимости за этот прогон (дельта от снимка до старта).
         # ``console=False`` — тот же отчёт только в лог, без таблицы в stdout.
-        config_dict = self._ctx.config_dict
+        settings = settings_of(self._ctx)
         try:
             run_usage = state.usage.delta_from(run_start_usage)
             # Доступно in-memory: get_state().usage (кумулятив) и .last_run_usage (этот прогон).
             state.last_run_usage = run_usage
             usage_text = build_run_usage_report(
                 run_usage,
-                config_dict.get("pricing"),
-                config_dict.get("model"),
-                config_dict.get("completions_url"),
+                settings.pricing,
+                settings.agent.model,
+                settings.backend.completions_url,
                 provider_currency=getattr(
                     self._ctx, "provider_currency", None
                 ),
@@ -706,14 +696,14 @@ class AgentExecutor:
                     logger.info(
                         "\n<run_usage>\n%s\n</run_usage>\n", usage_text
                     )
-                if console and human_console_enabled(config_dict):
+                if console and human_console_enabled(settings):
                     print(f"\n{usage_text}\n")
             if logger is not None:
                 usage_dict = build_run_usage_dict(
                     run_usage,
-                    config_dict.get("pricing"),
-                    config_dict.get("model"),
-                    config_dict.get("completions_url"),
+                    settings.pricing,
+                    settings.agent.model,
+                    settings.backend.completions_url,
                     provider_currency=getattr(
                         self._ctx, "provider_currency", None
                     ),
@@ -797,7 +787,7 @@ class AgentExecutor:
         return None
 
     def _report_log_path(self, logger: Any) -> None:
-        if human_console_enabled(self._ctx.config_dict):
+        if human_console_enabled(self._ctx):
             print(f"\nПуть к файлу с логами: {self._ctx.logging_path}\n")
         if logger is not None:
             logger.info(
@@ -851,8 +841,8 @@ class AgentExecutor:
             # молча погасил бы следующий запрос человека.
             self._state = None
             self._accounting_closed = False
-        config_dict = self._ctx.config_dict
-        if config_dict.get("thread_store_persist") == "turn" and not getattr(
+        settings = settings_of(self._ctx)
+        if settings.thread_store.persist == "turn" and not getattr(
             self._ctx, "durable_execution", False
         ):
             # Без истории durable-исполнителя несохранённые шаги пропали бы
@@ -863,16 +853,10 @@ class AgentExecutor:
             )
         logger = getattr(self._ctx, "logger", None)
         effective_verbose = (
-            verbose
-            if verbose is not None
-            else config_dict.get("verbose", False)
+            verbose if verbose is not None else settings.agent.verbose
         )
         skills_list = await self._alist_skills()
-        backend_api_mode = (
-            str(config_dict.get("backend_api_mode", "responses"))
-            .strip()
-            .lower()
-        )
+        backend_api_mode = str(settings.backend.api_mode).strip().lower()
         (
             thread_session,
             thread_shared,
@@ -893,14 +877,12 @@ class AgentExecutor:
         await areset_run_flags(thread_session)
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
-        summary_trigger_chars = parse_summary_trigger_chars(config_dict)
-        summary_trigger_tokens = parse_summary_trigger_tokens(config_dict)
+        summary_trigger_chars = parse_summary_trigger_chars(settings)
+        summary_trigger_tokens = parse_summary_trigger_tokens(settings)
         turn_end_trigger_tokens = parse_summary_turn_end_trigger_tokens(
-            config_dict
+            settings
         )
-        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(
-            config_dict
-        )
+        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(settings)
 
         chat_completions_system_prompt: str | None = None
         special_instructions: str | None = None

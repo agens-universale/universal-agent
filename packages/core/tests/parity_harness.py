@@ -405,8 +405,14 @@ def run_thread_dump(
     """
     from gc_core.thread_store import _thread_paths, resolve_threads_dir
 
+    # Только путь тредов: дамп снимают и после отказа на невыразимом схемой
+    # конфиге (матрица переключателей), и проверять весь словарь здесь нельзя.
     data_path, _meta = _thread_paths(
-        resolve_threads_dir(config_dict), system_id, thread_id
+        resolve_threads_dir(
+            {"threads_data_path": config_dict.get("threads_data_path")}
+        ),
+        system_id,
+        thread_id,
     )
     path = Path(data_path)
     if not path.exists():

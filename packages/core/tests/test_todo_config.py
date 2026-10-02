@@ -35,14 +35,17 @@ def test_negative_clamped_to_zero():
     )
 
 
-def test_garbage_falls_back_to_default():
-    assert (
+def test_garbage_is_rejected_by_schema():
+    """Мусор в ``todo`` не доходит до чтения: схема отвергает его строго."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
         todo_reminder_steps_from_config(
             {"todo_params": {"reminder_steps": "x"}}
         )
-        == 10
-    )
-    assert todo_reminder_steps_from_config({"todo_params": "not a dict"}) == 10
+    with pytest.raises(ValidationError):
+        todo_reminder_steps_from_config({"todo_params": "not a dict"})
 
 
 def test_normalize_clamps_negative():

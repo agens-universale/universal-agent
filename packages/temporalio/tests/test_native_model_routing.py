@@ -15,12 +15,12 @@ def context():
             "active": {
                 "model": "good",
                 "url": "https://active.example/v1",
-                "authorization_header": "secret-active",
+                "authorization_header": "Bearer secret-active",
             },
             "pin": {
                 "model": "dead",
                 "url": "https://pin.example/v1",
-                "authorization_header": "secret-pin",
+                "authorization_header": "Bearer secret-pin",
             },
         },
         "slots": {"default": "active"},
@@ -55,7 +55,7 @@ def test_current_child_fallback_identity_materializes_only_worker_transport():
         "active",
         "good",
         "https://active.example/v1",
-        "secret-active",
+        "Bearer secret-active",
     )
     assert ctx.model_router.resolve("main").alias == "pin"
 

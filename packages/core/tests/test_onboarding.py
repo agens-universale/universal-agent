@@ -214,9 +214,11 @@ def test_registry_with_one_entry_without_url_does_not_close_endpoint():
     assert onboarding.is_unconfigured(cfg) is True
 
 
-def test_registry_with_own_url_but_no_token_does_not_close_auth():
-    """Адрес записей закрыт, авторизация — нет: плоский заголовок остался шаблонным,
-    а записи своего не несут."""
+def test_registry_with_own_url_but_no_token_is_rejected():
+    """Адрес записи без токена — половина подключения: правило пары (§3) не пускает
+    её в настройки, поэтому детект такой конфиг даже не видит."""
+    from pydantic import ValidationError
+
     cfg = {
         "backend_api_mode": "chat_completions",
         "completions_url": onboarding.URL_SENTINEL,
@@ -226,7 +228,8 @@ def test_registry_with_own_url_but_no_token_does_not_close_auth():
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "g", "url": "https://x/v1"}},
     }
-    assert onboarding.is_unconfigured(cfg) is True
+    with pytest.raises(ValidationError, match="задан свой адрес"):
+        onboarding.is_unconfigured(cfg)
 
 
 def test_registry_of_local_servers_without_auth_closes_auth():

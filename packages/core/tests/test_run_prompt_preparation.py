@@ -89,7 +89,9 @@ async def test_executor_uses_prepared_prompts_without_local_io(monkeypatch):
     config = {
         "chat_completions_system_prompt_path": "/worker/system.md",
         "model_steering": "concise",
-        "api_key": "credential-not-to-be-sent",
+        "chat_completion_headers": {
+            "Authorization": "Bearer credential-not-to-be-sent"
+        },
     }
     executor = AgentExecutor(
         SimpleNamespace(config_dict=config, prompt_loader=loader)

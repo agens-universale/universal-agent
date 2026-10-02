@@ -1,6 +1,7 @@
 import logging
 from typing import Any, Dict, List, Optional, Type
 
+from gc_core.settings import AppConfig, settings_of
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 from gc_core.tools.subagents.code_planner import CodePlanner
 from gc_core.tools.subagents.code_reviewer import CodeReviewer
@@ -111,7 +112,7 @@ def _limit_definitions(
 
 def _apply_allowlist_and_limit(
     definitions: List[SubagentDefinition],
-    config_dict: Dict[str, Any],
+    settings: AppConfig,
     *,
     builtin_names: set,
     logger: Any = None,
@@ -128,9 +129,7 @@ def _apply_allowlist_and_limit(
     порядке приоритета.
     """
     log = logger or _log
-    ordered = subagents_allowlist_ordered(
-        config_dict.get("use_local_subagents", False)
-    )
+    ordered = subagents_allowlist_ordered(settings.agent.use_local_subagents)
 
     if ordered is not None:
         by_name = {d.name: d for d in definitions}
@@ -140,7 +139,7 @@ def _apply_allowlist_and_limit(
         definitions = [by_name[n] for n in ordered if n in by_name]
 
     return _limit_definitions(
-        definitions, resolve_max_count(config_dict), log, diagnostics
+        definitions, resolve_max_count(settings), log, diagnostics
     )
 
 
@@ -164,17 +163,19 @@ def resolve_subagent_definitions(
     if isinstance(cached, dict):
         return cached
 
+    # Кэш — при виде настроек, сами значения — из типизированных настроек.
+    settings = settings_of(config_dict)
     builtin = builtin_subagent_names()
     diagnostics: List[Dict[str, Any]] = []
     definitions = discover_subagent_definitions(
-        config_dict,
+        settings,
         builtin_names=builtin,
         logger=logger,
         diagnostics=diagnostics,
     )
     definitions = _apply_allowlist_and_limit(
         definitions,
-        config_dict,
+        settings,
         builtin_names=builtin,
         logger=logger,
         diagnostics=diagnostics,
