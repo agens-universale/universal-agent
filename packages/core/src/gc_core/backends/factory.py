@@ -13,12 +13,18 @@ from gc_core.backends.remote_shell import (
     docker_argv_prefix,
     ssh_argv_prefix,
 )
+from gc_core.backends.sandbox import (
+    SandboxBackend,
+    build_sandbox_wrapper,
+    sandbox_auto_workdir,
+)
 from gc_core.config_modules.agent import (
     exec_output_capture_max_chars_from_config_dict,
     harbor_exec_init_from_config_dict,
     walk_output_max_chars_from_config_dict,
 )
 from gc_core.config_modules.env_vars import gc_paths
+from gc_core.execution_workspace import launch_root_from_config
 
 _SUPPORTED = frozenset({"local", "harbor", "docker", "ssh", "exec", "sandbox"})
 
@@ -62,11 +68,13 @@ def resolve_os_backend(
     environment: Optional[Any] = None,
     loop: Optional[asyncio.AbstractEventLoop] = None,
     override: Optional[FsBackend] = None,
+    run_id: Optional[str] = None,
 ) -> FsBackend:
     """Build the physical I/O backend for a run.
 
     ``override`` wins (tests) and keeps its own ``exec_output_capture_max_chars``.
-    ``harbor`` requires ``environment`` and ``loop``.
+    ``harbor`` requires ``environment`` and ``loop``. ``run_id`` нужен только
+    ``sandbox`` с ``workdir: auto`` — имя свежего каталога рана.
     """
     if override is not None:
         return override
@@ -104,7 +112,21 @@ def resolve_os_backend(
             ),
         )
 
-    raise NotImplementedError(f"os_backend={kind} is wired in a later task")
+    if kind == "sandbox":
+        auto = (
+            sandbox_auto_workdir(run_id or "adhoc")
+            if (section.get("sandbox") or {}).get("workdir") == "auto"
+            else None
+        )
+        root = auto or launch_root_from_config(config_dict)
+        return SandboxBackend(
+            wrapper=build_sandbox_wrapper(root, section),
+            root=root,
+            auto_workdir=auto,
+            exec_output_capture_max_chars=cap,
+        )
+
+    raise ValueError(f"unsupported os_backend: {kind!r}")
 
 
 def _remote_argv_prefix(kind: str, section: dict) -> list:

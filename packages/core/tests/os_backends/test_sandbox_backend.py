@@ -1,0 +1,181 @@
+# packages/core/tests/os_backends/test_sandbox_backend.py
+"""SandboxBackend: файлы на хосте, shell-команды модели — в bwrap / sandbox-exec."""
+
+import os
+import shutil
+import sys
+
+import pytest
+from gc_core.backends.local import LocalFsBackend
+from gc_core.backends.sandbox import (
+    SandboxBackend,
+    build_sandbox_wrapper,
+    bwrap_wrapper,
+    seatbelt_wrapper,
+)
+
+HAVE_TOOL = (sys.platform == "darwin" and shutil.which("sandbox-exec")) or (
+    sys.platform.startswith("linux") and shutil.which("bwrap")
+)
+live = pytest.mark.skipif(
+    not HAVE_TOOL, reason="нужен bwrap (Linux) или sandbox-exec (macOS)"
+)
+
+
+def _be(root, **kw):
+    return SandboxBackend(
+        wrapper=build_sandbox_wrapper(str(root), {"sandbox": kw}),
+        root=str(root),
+    )
+
+
+@pytest.fixture
+def outside(tmp_path):
+    """Путь ВНЕ root и вне TMPDIR: pytest'овский tmp_path лежит в системном temp,
+    который профиль sandbox-exec разрешает (иначе внутри не работает tempfile).
+    Поэтому «снаружи» — домашний каталог; на Linux он ro-bind, на macOS не в allow."""
+    import uuid
+    from pathlib import Path
+
+    p = Path.home() / f".gc-sandbox-test-{uuid.uuid4().hex}.txt"
+    yield p
+    p.unlink(missing_ok=True)
+
+
+def test_is_local_not_sandbox_flag(tmp_path):
+    be = SandboxBackend(wrapper=lambda cwd: [], root=str(tmp_path))
+    assert isinstance(be, LocalFsBackend)
+    assert (
+        be.is_sandbox is False
+    )  # файлы настоящие → guards работают как для local
+
+
+def test_bwrap_argv_shape(tmp_path):
+    argv = bwrap_wrapper(
+        str(tmp_path), network=True, extra_ro=["/opt/x"], home_to_root=False
+    )(str(tmp_path))
+    assert (
+        argv[0] == "bwrap"
+        and "--unshare-all" in argv
+        and "--share-net" in argv
+    )
+    assert "--die-with-parent" in argv
+    i = argv.index("--bind")
+    assert argv[i + 1] == argv[i + 2] == str(tmp_path)
+    assert argv[argv.index("--chdir") + 1] == str(tmp_path)
+    assert "--ro-bind" in argv and "/usr" in argv
+
+
+def test_bwrap_no_network_drops_share_net(tmp_path):
+    argv = bwrap_wrapper(
+        str(tmp_path), network=False, extra_ro=[], home_to_root=False
+    )(None)
+    assert "--share-net" not in argv
+
+
+def test_seatbelt_profile_mentions_root_and_denies_network(tmp_path):
+    argv = seatbelt_wrapper(str(tmp_path), network=False)(None)
+    assert argv[:2] == ["sandbox-exec", "-p"]
+    profile = argv[2]
+    assert "(deny file-write*)" in profile
+    assert f'(subpath "{os.path.realpath(tmp_path)}")' in profile
+    assert "(deny network*)" in profile
+
+
+def test_build_wrapper_fails_closed_without_tool(tmp_path, monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(ValueError, match="sandbox"):
+        build_sandbox_wrapper(str(tmp_path), {"sandbox": {}})
+
+
+def test_build_wrapper_rejects_windows(tmp_path, monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    with pytest.raises(ValueError, match="Windows"):
+        build_sandbox_wrapper(str(tmp_path), {"sandbox": {}})
+
+
+@live
+async def test_write_inside_root_allowed(tmp_path):
+    be = _be(tmp_path)
+    res = await be.aexec("echo ok > inside.txt", cwd=str(tmp_path))
+    assert (
+        res.return_code == 0
+        and (tmp_path / "inside.txt").read_text() == "ok\n"
+    )
+
+
+@live
+async def test_write_outside_root_denied(tmp_path, outside):
+    root = tmp_path / "root"
+    root.mkdir()
+    be = _be(root)
+    res = await be.aexec(f"echo x > {outside}", cwd=str(root))
+    assert res.return_code != 0 and not outside.exists()
+
+
+@live
+async def test_symlink_escape_denied(tmp_path, outside):
+    root = tmp_path / "root"
+    root.mkdir()
+    (root / "link").symlink_to(outside.parent)
+    be = _be(root)
+    res = await be.aexec(f"echo x > link/{outside.name}", cwd=str(root))
+    assert res.return_code != 0 and not outside.exists()
+
+
+@live
+async def test_no_network_blocks_sockets(tmp_path):
+    be = _be(tmp_path, network=False)
+    code = (
+        "import socket; socket.create_connection(('1.1.1.1', 53), timeout=3)"
+    )
+    res = await be.arun_python(code, cwd=str(tmp_path))
+    assert res.return_code != 0
+
+
+@live
+async def test_run_python_and_argv_go_through_wrapper(tmp_path):
+    be = _be(tmp_path)
+    assert (
+        await be.arun_python("print(6*7)", cwd=str(tmp_path))
+    ).stdout.strip() == "42"
+    assert (
+        await be.aexec_argv(["echo", "a b"], cwd=str(tmp_path))
+    ).stdout == "a b\n"
+
+
+@live
+async def test_background_is_wrapped_too(tmp_path, outside):
+    root = tmp_path / "root"
+    root.mkdir()
+    be = _be(root)
+    info = await be.aspawn_background(
+        f"sleep 1; echo x > {outside}", cwd=str(root)
+    )
+    assert info["pid"] > 0
+    import asyncio
+
+    await asyncio.sleep(2)
+    assert not outside.exists()
+
+
+def test_fs_ops_stay_local(tmp_path):
+    be = SandboxBackend(
+        wrapper=lambda cwd: ["definitely-not-a-binary"], root=str(tmp_path)
+    )
+    import asyncio
+
+    asyncio.run(be.write(str(tmp_path / "f.txt"), "hi"))
+    assert (
+        tmp_path / "f.txt"
+    ).read_text() == "hi"  # запись не идёт через обёртку
+
+
+def test_tracking_wraps_sandbox_like_local(tmp_path):
+    from gc_core.agent_edits.tracking import (
+        TrackingFsBackend,
+        wrap_local_for_tracking,
+    )
+
+    be = SandboxBackend(wrapper=lambda cwd: [], root=str(tmp_path))
+    assert isinstance(wrap_local_for_tracking(be, object()), TrackingFsBackend)

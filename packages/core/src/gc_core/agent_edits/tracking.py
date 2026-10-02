@@ -48,8 +48,9 @@ def wrap_local_for_tracking(inner: Any, ctx: Any) -> Any:
     """Local → TrackingFsBackend. Уже Tracking / не Local — без изменений."""
     if isinstance(inner, TrackingFsBackend):
         return inner
-    # LocalFsBackend по имени класса — без импорта tools.* на module load
-    if type(inner).__name__ != "LocalFsBackend":
+    # LocalFsBackend по имени класса (с наследниками: SandboxBackend) — без
+    # импорта tools.* на module load
+    if "LocalFsBackend" not in {c.__name__ for c in type(inner).__mro__}:
         return inner
     return TrackingFsBackend(inner, ctx)
 

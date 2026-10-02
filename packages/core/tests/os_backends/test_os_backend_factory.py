@@ -1,4 +1,7 @@
 import asyncio
+import os
+import shutil
+import sys
 
 import pytest
 from gc_core.backends.factory import (
@@ -9,6 +12,7 @@ from gc_core.backends.factory import (
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.remote_shell import RemoteShellBackend
+from gc_core.backends.sandbox import SandboxBackend
 from gc_core.run_context import acreate_run_context
 
 
@@ -181,3 +185,31 @@ def test_resolve_exec_passes_prefix_cwd_env():
         }
     )
     assert be.argv_prefix == ("env",) and be.default_cwd() == "/w"
+
+
+_tool = (
+    sys.platform == "darwin" and shutil.which("sandbox-exec")
+) or shutil.which("bwrap")
+
+
+@pytest.mark.skipif(not _tool, reason="нужен bwrap / sandbox-exec")
+def test_resolve_sandbox_auto_workdir(tmp_path, monkeypatch):
+    # env — закэшированный синглтон: setenv не виден, подменяем сам gc_paths
+    monkeypatch.setattr(
+        "gc_core.backends.sandbox.gc_paths", lambda: {"state": tmp_path}
+    )
+    be = resolve_os_backend(
+        {"os_backend": {"kind": "sandbox", "sandbox": {"workdir": "auto"}}},
+        run_id="r1",
+    )
+    assert isinstance(be, SandboxBackend)
+    assert be.auto_workdir == str(
+        tmp_path / "sandboxes" / "r1"
+    ) and os.path.isdir(be.auto_workdir)
+    assert be.default_cwd() == be.auto_workdir
+
+
+def test_resolve_sandbox_fails_closed_without_tool(monkeypatch):
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    with pytest.raises(ValueError, match="sandbox"):
+        resolve_os_backend({"os_backend": "sandbox"})
