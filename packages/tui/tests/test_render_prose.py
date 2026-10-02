@@ -50,3 +50,10 @@ def test_para_bold_and_code_styled_spans():
     assert any(
         "afbdff" in str(s.style).lower() for s in t.spans
     )  # code (slate)
+
+
+def test_prose_fence_state_ignores_inner_fence_with_info_string():
+    text = "```markdown\n# T\n```bash\nx\n```\n## после\n"
+    out = render_prose(text).plain.split("\n")
+    # «## после» — уже проза: блок закрыл голый ```, а не ```bash
+    assert out[-2] == "после"

@@ -12,6 +12,7 @@ from gc_core.utils.file_text import (
     try_encode_text_bytes,
     try_encode_text_bytes_for_append,
 )
+from gc_core.utils.fs_size_limits import fs_mutate_max_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
@@ -39,6 +40,23 @@ def _validate_append_args(
             "message": "path must be absolute",
         }
     return encoding_used, None
+
+
+def _written_bytes(
+    written: str, chunk: str, encoding_used: str, payload_bytes: bytes
+) -> bytes:
+    """Байты, реально легшие на диск: при нормализации CRLF кусок другой.
+
+    В журнал и в ``bytes_appended`` должно уйти именно это, а не исходный payload.
+    """
+    if written == chunk:
+        return payload_bytes
+    crlf_bytes, crlf_err = try_encode_text_bytes_for_append(
+        written, encoding_used
+    )
+    if crlf_err is None and crlf_bytes is not None:
+        return crlf_bytes
+    return payload_bytes
 
 
 def _encode_chunk(chunk: str, encoding_used: str, is_create: bool):
@@ -189,8 +207,12 @@ Usage:
 
     async def _append_existing(
         self, path: str, chunk: str, encoding_used: str, size: int
-    ) -> "dict | None":
-        """Дописать в существующий непустой файл; ошибка проверки кодировки головы — как dict."""
+    ) -> "tuple[dict | None, str]":
+        """Дописать в существующий непустой файл.
+
+        (ошибка проверки кодировки головы как dict | None, кусок, реально
+        легший на диск — после нормализации CRLF).
+        """
         head = await self._backend.read_head_bytes(
             path, APPEND_HEAD_SAMPLE_BYTES
         )
@@ -200,7 +222,7 @@ Usage:
             sample_is_complete_file=size <= len(head),
         )
         if head_err is not None:
-            return head_err
+            return head_err, chunk
         # Preserve the existing newline style: if the file head uses
         # CRLF (\r\n), normalize lone \n in the appended chunk to \r\n
         # so we don't mix line endings. LF files are written as-is.
@@ -211,7 +233,54 @@ Usage:
                 .replace("\n", "\r\n")
             )
         await self._backend.append(path, chunk, encoding=encoding_used)
+        return None, chunk
+
+    async def _journal_old_bytes(
+        self, path: str, size: int, created_file: bool
+    ) -> bytes | None:
+        """Старый контент — ради baseline-снапшота и честного хэша в журнале.
+
+        Тул сам файл целиком не читает, поэтому поднимаем его только когда
+        запись правок ведётся и файл в пределах капа мутирующих тулов; иначе
+        правка уйдёт в журнал как partial (кусок без baseline). У нового
+        файла старого контента нет.
+        """
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            is_recording,
+        )
+
+        if created_file or not is_recording(self._ctx):
+            return None
+        try:
+            if size <= fs_mutate_max_bytes(self._config_dict):
+                return await self._backend.read_bytes(path)
+        except Exception:
+            return None
         return None
+
+    async def _record(
+        self,
+        path: str,
+        old_bytes: bytes | None,
+        appended_bytes: bytes,
+        created_file: bool,
+    ) -> None:
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            record_edit,
+        )
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=old_bytes,
+            new_bytes=appended_bytes
+            if old_bytes is None
+            else old_bytes + appended_bytes,
+            op="create" if created_file else "append",
+            call_id=self._call_id,
+            # create: дописанное и есть весь файл; append без old: только кусок
+            partial=old_bytes is None and not created_file,
+        )
 
     @enforce_write_guard(path_arg="path", operation="append")
     async def acall(
@@ -265,6 +334,14 @@ Usage:
             return self._result(
                 ok=False, path=path, separator=separator, error=size_error
             )
+        # ДВА разных вопроса, и раньше их нёс один флаг:
+        #   `is_create`   — нужен ли ведущий BOM (у пустого файла нужен);
+        #   `created_file` — новый ли это файл для ЖУРНАЛА.
+        # Пустой существующий файл отвечает «да» на первый и «нет» на второй.
+        # Слитые вместе, они делали `op="create"`, а откат такой записи файл
+        # УДАЛЯЕТ, базу не спрашивая: пустой закоммиченный `__init__.py` после
+        # дописывания и отката исчезал вместо возврата к пустому.
+        created_file = not exists
         # Empty existing file behaves like create: needs a leading BOM.
         is_create = not exists or size == 0
         payload_bytes, encode_err = _encode_chunk(
@@ -276,11 +353,14 @@ Usage:
             )
         assert payload_bytes is not None
 
+        old_bytes = await self._journal_old_bytes(path, size, created_file)
+        appended_bytes = payload_bytes
+
         try:
             if is_create:
                 await self._backend.write_bytes(path, payload_bytes)
             else:
-                head_err = await self._append_existing(
+                head_err, written = await self._append_existing(
                     path, chunk, encoding_used, size
                 )
                 if head_err is not None:
@@ -290,6 +370,9 @@ Usage:
                         separator=separator,
                         error=head_err,
                     )
+                appended_bytes = _written_bytes(
+                    written, chunk, encoding_used, payload_bytes
+                )
             content_sha256 = await self._backend.sha256_bytes(path)
         except Exception as e:
             return self._result(
@@ -299,12 +382,16 @@ Usage:
                 error={"type": "append_failed", "message": str(e)},
             )
 
+        await self._record(path, old_bytes, appended_bytes, created_file)
+
         return self._result(
             ok=True,
             path=path,
             separator=separator,
-            created=is_create,
-            bytes_appended=len(payload_bytes),
+            created=created_file,
+            # appended_bytes, а не payload_bytes: при нормализации CRLF на диск
+            # могло лечь больше байт, чем в исходном payload (см. запись в журнал выше).
+            bytes_appended=len(appended_bytes),
             sha256=content_sha256,
             encoding_used=encoding_used,
             error=None,

@@ -280,3 +280,53 @@ def test_sync_keeps_new_template_keys_when_user_has_key_outside_template(
     assert "/etc/ssl/client.key" in out
     assert "request_timeout_sec: 600" in out  # новый ключ шаблона не потерян
     assert config_sync.needs_sync(out, tmpl) is False  # и sync идемпотентен
+
+
+def test_sync_moves_the_old_diff_tui_section_to_agent_edits(tmp_path):
+    """`--sync-config` переносит старую секцию под новое имя вместе со старыми листьями
+    — без мусора и без повторного требования синка."""
+    import yaml
+    from gc_testkit.paths import ASSETS
+
+    template = (ASSETS / "config.default.yml").read_text(encoding="utf-8")
+    user = (
+        "diff_tui:\n"
+        "  cache_max_orig: 42\n"
+        "  preview_context_lines: 50\n"
+        "  hunk_context_lines: 5\n"
+    )
+    cfg, _ = _run_sync(tmp_path, user=user, template=template)
+    out = cfg.read_text(encoding="utf-8")
+    parsed = yaml.safe_load(out)
+
+    assert "diff_tui" not in parsed
+    assert parsed["agent_edits"]["snapshots_max_files"] == 42
+    assert parsed["agent_edits"]["hunk_context_lines"] == 5
+    assert "preview_context_lines" not in parsed["agent_edits"]
+    assert config_sync.needs_sync(out, template) is False
+
+
+@pytest.mark.parametrize("new_first", [True, False])
+def test_sync_keeps_the_new_name_when_both_sections_are_in_one_file(
+    tmp_path, new_first
+):
+    """Секция под обоими именами в одном файле: после sync действует то же, что
+    до него. Загрузчик сливает старую под новую, заданное в новой побеждает —
+    sync обязан прийти к тому же, в каком бы порядке секции ни стояли в файле
+    (раньше исход решал порядок: новое 99 молча становилось старым 11)."""
+    import yaml
+    from gc_testkit.paths import ASSETS
+
+    template = (ASSETS / "config.default.yml").read_text(encoding="utf-8")
+    new = "agent_edits:\n  trace_inline_max_lines: 99\n"
+    old = (
+        "diff_tui:\n  trace_inline_max_lines: 11\n  replay_expanded_turns: 4\n"
+    )
+    user = new + old if new_first else old + new
+    cfg, _ = _run_sync(tmp_path, user=user, template=template)
+    parsed = yaml.safe_load(cfg.read_text(encoding="utf-8"))
+
+    assert "diff_tui" not in parsed
+    assert parsed["agent_edits"]["trace_inline_max_lines"] == 99
+    # лист, заданный только старым именем, не теряется — как у загрузчика
+    assert parsed["agent_edits"]["replay_expanded_turns"] == 4

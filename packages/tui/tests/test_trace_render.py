@@ -72,6 +72,16 @@ def test_build_agent_widgets_code_and_prose_order_and_focus():
     assert ws[1].has_class("code-block-panel") is True  # code-block
 
 
+def test_build_agent_widgets_empty_fence_yields_no_block_panel():
+    """Е2: пустой fenced-блок не становится сегментом → без BlockPanel."""
+    pytest.importorskip("textual")
+    from gc_tui.services.trace_render import build_agent_widgets
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    ws = build_agent_widgets("```\n\n```", event_no=1)
+    assert not any(isinstance(w, BlockPanel) for w in ws)
+
+
 def _env(payload, ts="2026-05-30T10:00:00Z"):
     return {
         "type": "message",
@@ -145,6 +155,42 @@ async def test_render_thread_readonly_kinds():
         assert len(scr.query(ToolCallRow)) == 1
         body = "\n".join(str(w.render()) for w in scr.query())
         assert "ответ агента" in body
+
+
+@pytest.mark.asyncio
+async def test_render_thread_readonly_call_row_uses_wire_tool_name():
+    """Д11/R3: readonly-превью показывает wire-имя тула (как в реестре), не
+    канонический id маппера — fs_append_file, не append_to_file."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from textual.containers import VerticalScroll
+    from gc_tui.services.trace_render import render_thread_readonly
+    from gc_tui.widgets.tool_call_row import ToolCallRow
+
+    records = [
+        _env(
+            {
+                "type": "function_call",
+                "id": "fc1",
+                "call_id": "c1",
+                "name": "fs_append_file",
+                "arguments": '{"path": "x.py", "content": "hi"}',
+            }
+        ),
+    ]
+
+    class _A(App):
+        def compose(self):
+            yield VerticalScroll(id="t")
+
+        def on_mount(self):
+            render_thread_readonly(
+                self.query_one("#t", VerticalScroll), records
+            )
+
+    async with _A().run_test() as pilot:
+        row = pilot.app.screen.query_one(ToolCallRow)
+        assert row._tool_name == "fs_append_file"
 
 
 def _seg(payloads, synthesis=None, n=0, index=0):

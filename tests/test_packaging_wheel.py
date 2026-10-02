@@ -213,9 +213,25 @@ def test_tui_wheel_contents(wheels):
     assert "gc_tui/styles.tcss" in names, (
         "стили TUI обязаны ехать вместе с пакетом"
     )
-    assert "gc_tui/diff_tui/tracking.py" in names, (
-        "diff_tui — часть TUI-профиля"
+    assert "gc_tui/services/edits_view.py" in names, (
+        "показ журнала правок — часть TUI-профиля"
     )
+
+
+def test_core_wheel_ships_the_edits_journal(wheels):
+    """Запись правок едет с ЯДРОМ, а не с фронтендом.
+
+    Раньше подсистема жила в `gc_tui/diff_tui` и проверялась в колесе TUI.
+    После переработки её зовут файловые инструменты ядра, поэтому и место её —
+    в `gc_core`: headless-установка обязана уметь вести журнал.
+    """
+    names = wheels["gc_core"]
+    for m in (
+        "gc_core/agent_edits/tracking.py",
+        "gc_core/agent_edits/recorder.py",
+        "gc_core/agent_edits/journal.py",
+    ):
+        assert m in names, f"{m} не доехал в колесо ядра"
 
 
 def test_server_wheel_contents(wheels):
