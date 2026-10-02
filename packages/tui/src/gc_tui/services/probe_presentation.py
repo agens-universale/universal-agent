@@ -12,21 +12,20 @@ from __future__ import annotations
 from rich.text import Text
 
 from gc_tui.palette import DEEP_DIM, ERR, OK, WARN
+from gc_tui.services.plural import plural_form
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _MSG_SERVER_OK = "✓ сервер доступен · "
 
 
 def plural_models(n: int) -> str:
-    """1 модель · 2-4 модели · 5+ моделей (11-14 — исключение: «моделей»)."""
-    if 11 <= (n % 100) <= 14:
-        return "моделей"
-    d = n % 10
-    if d == 1:
-        return "модель"
-    if 2 <= d <= 4:
-        return "модели"
-    return "моделей"
+    """1 модель · 2-4 модели · 5+ моделей (11-14 — исключение: «моделей»).
+
+    Само правило живёт в `services.plural`: второй реализации полосы 11–14 в
+    кодовой базе быть не должно (страж `test_no_second_implementation_of_the_rule`).
+    Здесь — только своя пара слов.
+    """
+    return plural_form(n, "модель", "модели", "моделей")
 
 
 def connection_line_text(result) -> Text:

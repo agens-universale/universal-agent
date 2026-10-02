@@ -5,9 +5,8 @@ import os
 import re
 import threading
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
-
-logger = logging.getLogger(__name__)
 
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
@@ -84,6 +83,9 @@ def validate_thread_id(thread_id: str) -> str:
             "thread_id может содержать только латинские буквы, цифры, '_' и '-'"
         )
     return normalized
+
+
+_logger = logging.getLogger(__name__)
 
 
 def sanitize_system_id(system_id: str) -> str:
@@ -175,6 +177,15 @@ def touched_journal_path(
     return os.path.join(threads_dir, f"touched_{sys_norm}_{tid}.json")
 
 
+def edits_journal_path(
+    threads_dir: str, system_id: str, thread_id: str
+) -> Path:
+    """Путь журнала правок агента: edits_<system>_<thread_id>.jsonl."""
+    sys_norm = sanitize_system_id(system_id)
+    tid = validate_thread_id(thread_id)
+    return Path(threads_dir) / f"edits_{sys_norm}_{tid}.jsonl"
+
+
 def ensure_threads_dir(threads_dir: str) -> None:
     os.makedirs(threads_dir, exist_ok=True)
     os.makedirs(os.path.join(threads_dir, "locks"), exist_ok=True)
@@ -187,12 +198,46 @@ def _lock_path(threads_dir: str, system_id: str, thread_id: str) -> str:
     return os.path.join(threads_dir, "locks", f"lock_{sys_norm}_{tid}.json")
 
 
+def _remove_existing(paths: Sequence[str]) -> List[str]:
+    """Снести существующие файлы из списка; вернуть те, что реально снесены.
+
+    Отказ по ОДНОМУ файлу не имеет права срывать весь сброс или удаление.
+    Причина конкретная: в списке есть `<журнал>.lock`, а `file_lock` держит
+    его дескриптор весь захват — на Windows `os.remove` по открытому файлу
+    даёт `PermissionError`. Голый цикл падал трейсбеком ПОСРЕДИ работы:
+    часть файлов уже снесена, а уборка снимков стоит после цикла и не
+    выполнялась вовсе.
+
+    Неудалённый файл в результат не попадает: список — это «что снесено», и
+    соврать в нём значило бы обмануть вызывающего. Отказ уходит в лог
+    предупреждением: пережить его сброс обязан, но тихо проглатывать нельзя —
+    оставшийся файл виден только по логу (лок `file_lock` — пустой файл без
+    TTL, он останется сиротой, пока его не снесёт следующий сброс).
+    """
+    deleted: List[str] = []
+    for path in paths:
+        if not os.path.exists(path):
+            continue
+        try:
+            os.remove(path)
+        except OSError:
+            _logger.warning("файл треда не удалён: %s", path, exc_info=True)
+            continue
+        deleted.append(path)
+    return deleted
+
+
 def reset_thread_files(
     threads_dir: str, system_id: str, thread_id: str
 ) -> List[str]:
     """
     Удалить файлы конкретного треда (data/meta/lock/sidecar), включая legacy data/meta.
     Возвращает список удалённых путей.
+
+    Снимки баз журнала правок здесь НЕ трогаются: тем же сбросом ходит
+    запасной путь компакции (хранилище → ``areplace_messages``), где сносить
+    базы отката нельзя. Их убирает пользовательский сброс треда
+    (``agent_edits.snapshots.purge_thread_snapshots`` из ``agent_executor``).
     """
     sys_norm = sanitize_system_id(system_id)
     normalized_thread_id = validate_thread_id(thread_id)
@@ -204,13 +249,19 @@ def reset_thread_files(
     paths.append(
         touched_journal_path(threads_dir, sys_norm, normalized_thread_id)
     )
+    edits_path = str(
+        edits_journal_path(threads_dir, sys_norm, normalized_thread_id)
+    )
+    paths.append(edits_path)
+    # `file_lock` кладёт межпроцессный лок журнала рядом, как `<путь>.lock`
+    # (gc_core.utils.file_lock); сам журнал сносим строкой выше, и без этой
+    # записи лок остаётся сиротой в threads_dir навсегда — TTL-чистка сервера
+    # его не видит.
+    paths.append(edits_path + ".lock")
     paths.append(_lock_path(threads_dir, sys_norm, normalized_thread_id))
 
-    deleted: List[str] = []
-    for path in paths:
-        if os.path.exists(path):
-            os.remove(path)
-            deleted.append(path)
+    deleted = _remove_existing(paths)
+
     # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
     with _sidecar_seq_lock:
         _sidecar_last_seq.pop(sidecar, None)
@@ -224,6 +275,10 @@ def _thread_archive_paths(
 
     Legacy ``touched_*__pre_summary__*`` тоже подхватываем при delete — раньше
     journal ошибочно архивировали вместе с data/meta.
+
+    ``edits_*__pre_summary__*`` в новых тредах не появляется вовсе: суммаризация
+    архивирует data и meta, журнал правок она не трогает. Ветка остаётся уборкой
+    за тредами той поры, когда трогала.
     """
     sys_norm = sanitize_system_id(system_id)
     tid = validate_thread_id(thread_id)
@@ -236,10 +291,14 @@ def _thread_archive_paths(
     touched_glob = os.path.join(
         threads_dir, f"touched_{sys_norm}_{tid}__pre_summary__*.json"
     )
+    edits_glob = os.path.join(
+        threads_dir, f"edits_{sys_norm}_{tid}__pre_summary__*.jsonl"
+    )
     return (
         sorted(glob.glob(data_glob))
         + sorted(glob.glob(meta_glob))
         + sorted(glob.glob(touched_glob))
+        + sorted(glob.glob(edits_glob))
     )
 
 
@@ -257,13 +316,14 @@ def delete_thread(
     sidecar = subagent_trace_path(threads_dir, system_id, thread_id)
     paths.append(sidecar)
     paths.append(touched_journal_path(threads_dir, system_id, thread_id))
+    edits_path = str(edits_journal_path(threads_dir, system_id, thread_id))
+    paths.append(edits_path)
+    # См. комментарий в `reset_thread_files`: лок журнала — отдельный файл,
+    # сам по себе он не сносится удалением журнала.
+    paths.append(edits_path + ".lock")
     paths.append(_lock_path(threads_dir, system_id, thread_id))
 
-    deleted: List[str] = []
-    for path in paths:
-        if os.path.exists(path):
-            os.remove(path)
-            deleted.append(path)
+    deleted = _remove_existing(paths)
     # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
     with _sidecar_seq_lock:
         _sidecar_last_seq.pop(sidecar, None)
@@ -1248,7 +1308,7 @@ class ThreadSession:
         реализовать ``replace_messages`` одной операцией (у SQL это
         ``DELETE … INSERT`` в транзакции), о чём и говорит предупреждение.
         """
-        logger.warning(
+        _logger.warning(
             "thread_store_replace_messages_missing store=%s thread=%s: компакция "
             "идёт через reset — трасса субагентов переписывается со свежими "
             "штампами. Реализуйте replace_messages/areplace_messages или "

@@ -15,6 +15,13 @@
 Управляется из TraceScreen._poll_active: meta-флаг `runtime.summarizing` →
 compressing; иначе по `_last_event_kind`: "_finalized" sentinel → validating,
 иначе → thinking.
+
+У строки-итога есть правый сегмент — сводка правок хода («изменено 3 файла ·
++120 −15»), и он КЛИКАБЕЛЕН: нажатие открывает экран изменений сразу в
+источнике «Ход». Кликает только сам сегмент, поэтому `compose_status_line`
+отдаёт вместе со строкой его x-диапазон: по цельному `Text` координаты первой
+клетки сегмента не восстановить, а «клик по всей строке» открывал бы экран от
+нажатия мимо цифр.
 """
 
 from __future__ import annotations
@@ -23,11 +30,19 @@ import random
 import time
 
 from rich.text import Text
+from textual import events
 from textual.widgets import Static
 
+from gc_tui.messages import OpenEditsScreenRequest
+
+# `_HOVER` — ровно тот `$accent`, которым база красит наведение на служебные
+# элементы блоков (`.diff-more:hover` / `.block-copy:hover` в styles.tcss).
+# `_ACCENT` здесь занят янтарным цветом РАБОТЫ (RUN_COLOR) — это другой смысл.
+from gc_tui.palette import ACCENT as _HOVER
 from gc_tui.palette import DEEP_DIM as _DIM
 from gc_tui.palette import RUN_COLOR as _ACCENT
 from gc_tui.services.duration_format import format_compact_int, format_duration
+from gc_tui.services.plural import files_word
 
 THINKING_PHRASES = [
     "думаю",
@@ -172,6 +187,70 @@ def is_terminal_indicator_state(state: str) -> bool:
     return state in TERMINAL_INDICATOR_STATES
 
 
+# Минимальный зазор между строкой-итогом и правым сегментом сводки правок.
+_SUMMARY_GAP = 2
+# Ширина, когда измерить нельзя (виджет вне DOM): та же страховка, что у
+# адаптивного футера.
+_FALLBACK_WIDTH = 80
+
+
+def format_turn_summary(files: int, add: int, del_: int) -> str | None:
+    """«изменено 3 файла · +120 −15»; ход без правок → None.
+
+    Знаки счётчиков — те же, что в шапке DiffBlock (`+N −M`, U+2212)."""
+    if files <= 0:
+        return None
+    return f"изменено {files} {files_word(files)} · +{add} −{del_}"
+
+
+def compose_status_line(
+    head: Text,
+    summary: str | None,
+    available_width: int,
+    *,
+    hover: bool = False,
+) -> tuple[Text, tuple[int, int] | None]:
+    """`(строка, x-диапазон сегмента)`; `None` — сегмента в строке нет.
+
+    Сегмент не влезает по ширине — скрываем целиком: строка индикатора ровно
+    в одну клетку высотой, а обрезанное «изменено 3 фай…» врало бы о числах.
+
+    Диапазон отдаётся вместе с текстом, потому что он известен только здесь:
+    сегмент кликабелен (открывает экран изменений в источнике «Ход»), а по
+    цельному `Text` координаты его первой клетки не восстановить.
+
+    `hover` — курсор стоит на сегменте: текст берёт АКЦЕНТ. Это единственный
+    язык наведения, который база знает: `.diff-more:hover` и `.block-copy:hover`
+    красят `$accent`, других hover-правил в проекте нет. Сегмент — такой же
+    кликабельный элемент, и отвечать руке он обязан тем же цветом.
+    """
+    if not summary:
+        return head, None
+    segment = Text(summary, style=_HOVER if hover else _DIM)
+    gap = available_width - head.cell_len - segment.cell_len
+    if gap < _SUMMARY_GAP:
+        return head, None
+    out = Text()
+    out.append_text(head)
+    out.append(" " * gap)
+    out.append_text(segment)
+    return out, (head.cell_len + gap, out.cell_len)
+
+
+# Исходы хода, кроме «Выполнил» (у него своя голова — время хода): глиф и слова.
+_TERMINAL_ENDINGS = {
+    _STATE_CANCELLED: ("■", "Отменено"),
+    _STATE_FAILED: ("✗", "Ошибка"),
+    _STATE_STOPPED_STEPS: ("⏹", "Остановлено: превышен лимит шагов"),
+    _STATE_STOPPED_ERRORS: ("⏹", "Остановлено: превышен лимит ошибок"),
+    _STATE_STOPPED_TOKENS: ("⏹", "Остановлено: превышен лимит токенов"),
+    _STATE_STOPPED_TOOL_CALLS: (
+        "⏹",
+        "Остановлено: превышен лимит вызовов инструментов",
+    ),
+}
+
+
 class ThinkingIndicator(Static):
     """Индикатор активности агента (thinking / validating / compressing).
 
@@ -193,6 +272,7 @@ class ThinkingIndicator(Static):
         reasoning_tag: bool = False,
         reasoning_clock=None,
         frozen_elapsed: int | None = None,
+        turn_summary: tuple[int, int, int] | None = None,
     ) -> None:
         self._clock = clock
         self._sink = sink
@@ -204,10 +284,26 @@ class ThinkingIndicator(Static):
         self._frame: int = 0
         self._state: str = state
         self._frozen_elapsed: int | None = frozen_elapsed
+        self._turn_summary: str | None = (
+            format_turn_summary(*turn_summary) if turn_summary else None
+        )
+        # Диапазон сегмента сводки — след последней отрисовки: только по нему
+        # мышь отличает клик по сводке от клика по строке-итогу.
+        self._summary_span: tuple[int, int] | None = None
+        self._summary_hover = False
+        # Жест начался НА сегменте: клик засчитывается только целиком, от
+        # нажатия до отпускания (см. `on_mouse_down`).
+        self._pressed_in_summary = False
         self._rotator = PhraseRotator(THINKING_PHRASES)
         super().__init__(
             self._render_text(), classes="thinking-indicator", markup=False
         )
+
+    def set_turn_summary(self, summary: tuple[int, int, int] | None) -> None:
+        """Сводка правок завершившегося хода — правый сегмент строки-итога."""
+        self._turn_summary = format_turn_summary(*summary) if summary else None
+        if self.is_mounted:
+            self.refresh()
 
     def set_state(self, state: str) -> None:
         """Переключить визуал без размонтирования. Идемпотентен."""
@@ -266,11 +362,102 @@ class ThinkingIndicator(Static):
         """Цвет «дыхания» искры ✦ «завершаю…»: серая рампа, кадр = тик."""
         return _VALIDATING_SHADES[self._frame % len(_VALIDATING_SHADES)]
 
+    def _status_width(self) -> int:
+        """Ширина строки для правого сегмента: своя, иначе экрана, иначе страховка.
+
+        `_render_text` зовётся и до монтирования (из `__init__`) — там мерить
+        нечего, и обе пробы падают."""
+        for probe in (lambda: self.size.width, lambda: self.app.size.width):
+            try:
+                width = int(probe())
+            except Exception:
+                width = 0
+            if width > 0:
+                return width
+        return _FALLBACK_WIDTH
+
+    # ---- сегмент сводки: единственная кликабельная часть строки ----------
+
+    def _in_summary(self, event: events.MouseEvent) -> bool:
+        """Стоит ли указатель на сегменте сводки.
+
+        Сверка идёт по ЭКРАННОЙ координате и области контента: `event.x`
+        отсчитывается от края региона виджета вместе с паддингом, а диапазон
+        сегмента живёт в координатах содержимого — при ненулевом левом
+        паддинге шкалы разъехались бы.
+        """
+        span = self._summary_span
+        if span is None:
+            return False
+        x = event.screen_x - self.content_region.x
+        return span[0] <= x < span[1]
+
+    def _set_summary_hover(self, hover: bool) -> None:
+        if hover == self._summary_hover:
+            return
+        self._summary_hover = hover
+        if self.is_mounted:
+            self.refresh()
+
+    def on_mouse_down(self, event: events.MouseDown) -> None:
+        """Запомнить, что жест НАЧАЛСЯ на сегменте.
+
+        Строка-итог — обычный текст, её выделяют мышью. Протяжка выделения от
+        начала строки с отпусканием на сводке даёт `Click` ровно там же, где
+        и настоящее нажатие: отличить их можно только по началу жеста.
+        """
+        self._pressed_in_summary = event.button == 1 and self._in_summary(
+            event
+        )
+
+    def on_click(self, event: events.Click) -> None:
+        """Клик по сводке — экран изменений сразу в источнике «Ход».
+
+        Засчитывается ОДИН короткий жест левой кнопкой, начатый и отпущенный
+        на сегменте. Каждое из условий закрывает свой живой промах:
+
+        * `chain != 1` — двойной клик. Сообщение всплывает несколько тактов, и
+          второй `Click` успевает прийти в тот же виджет: экран открывался
+          дважды, Esc «не закрывал» его. Клик-модель базы (`click_model`) вторым
+          кликом ничего и не открывает;
+        * `button != 1` — правая кнопка: у неё в интерфейсе своей семантики нет,
+          и открывать ею экран пользователь не просил;
+        * `_pressed_in_summary` — протяжка выделения, отпущенная на сводке.
+        """
+        pressed, self._pressed_in_summary = self._pressed_in_summary, False
+        if event.button != 1 or event.chain != 1:
+            return
+        if not pressed or not self._in_summary(event):
+            return
+        event.stop()
+        # Импорт локальный: `edits_view` тянет за собой весь слой `agent_edits`,
+        # а виджет живёт в каждом кадре трейса — грузить это ради одной
+        # константы на импорте модуля незачем (`main.py` его тоже импортирует
+        # лениво).
+        from gc_tui.services.edits_view import SOURCE_TURN
+
+        self.post_message(OpenEditsScreenRequest(SOURCE_TURN))
+
+    def on_mouse_move(self, event: events.MouseMove) -> None:
+        self._set_summary_hover(self._in_summary(event))
+
+    def on_leave(self, _event: events.Leave) -> None:
+        # Указатель ушёл с виджета — начатый на сегменте жест закончится уже не
+        # здесь, и засчитывать его по возвращении нельзя.
+        self._pressed_in_summary = False
+        self._set_summary_hover(False)
+
+    # ---- отрисовка -------------------------------------------------------
+
     def render(self) -> Text:
         return self._render_text()
 
     def _render_text(self) -> Text:
         text = Text()
+        # Сегмент рисует только строка-итог «Выполнил»; во всех прочих
+        # состояниях его нет, и след прошлой отрисовки обязан пропасть вместе
+        # с ним — иначе клик попал бы в пустоту на месте старых цифр.
+        self._summary_span = None
         if self._state == _STATE_DONE:
             text.append("✓", style=_DIM)
             text.append(" ")
@@ -284,39 +471,29 @@ class ThinkingIndicator(Static):
                 )
             else:
                 text.append("Выполнил", style=_DIM)
-            return text
-        if self._state == _STATE_CANCELLED:
-            text.append("■", style=_DIM)
-            text.append(" ")
-            text.append("Отменено", style=_DIM)
-            return text
-        if self._state == _STATE_FAILED:
-            text.append("✗", style=_DIM)
-            text.append(" ")
-            text.append("Ошибка", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_STEPS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append("Остановлено: превышен лимит шагов", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_ERRORS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append("Остановлено: превышен лимит ошибок", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_TOKENS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append("Остановлено: превышен лимит токенов", style=_DIM)
-            return text
-        if self._state == _STATE_STOPPED_TOOL_CALLS:
-            text.append("⏹", style=_DIM)
-            text.append(" ")
-            text.append(
-                "Остановлено: превышен лимит вызовов инструментов", style=_DIM
+            line, self._summary_span = compose_status_line(
+                text,
+                self._turn_summary,
+                self._status_width(),
+                hover=self._summary_hover,
             )
-            return text
+            return line
+        ending = _TERMINAL_ENDINGS.get(self._state)
+        if ending is not None:
+            # Сводка правок — у ЛЮБОГО исхода, не только у «Выполнил»: упавший
+            # или остановленный ход файлы уже менял, и после ошибки знать это
+            # пользователю важнее всего (ревью PR, находка 7).
+            glyph, label = ending
+            text.append(glyph, style=_DIM)
+            text.append(" ")
+            text.append(label, style=_DIM)
+            line, self._summary_span = compose_status_line(
+                text,
+                self._turn_summary,
+                self._status_width(),
+                hover=self._summary_hover,
+            )
+            return line
         if self._state == _STATE_VALIDATING:
             text.append("✦", style=self._validating_shade())
             text.append(" ")

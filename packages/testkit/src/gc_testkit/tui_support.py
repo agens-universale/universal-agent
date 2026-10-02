@@ -50,3 +50,17 @@ def open_settings_section(scr, name: str) -> None:
     idx = settings_section_index(name)
     scr._menu_idx = idx
     scr._open_section(idx)
+
+
+def span_style(text, needle: str) -> str:
+    """Стиль спана `rich.Text`, накрывающего первый символ подстроки.
+
+    Возвращает `""`, когда подстрока не покрыта ни одним спаном (цвет виджета).
+    Общий для тестов экрана изменений: там счётчики `+N`/`−M` красятся точечно,
+    и проверять надо именно спан, а не цвет всего виджета.
+    """
+    start = text.plain.index(needle)
+    for span in text.spans:
+        if span.start <= start < span.end:
+            return str(span.style)
+    return ""

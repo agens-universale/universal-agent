@@ -1,3 +1,4 @@
+import copy
 import os
 import shutil
 import sys
@@ -220,6 +221,16 @@ def apply_cli_overrides(
 ) -> None:
     if extra_overrides:
         resolved = resolve_env_placeholders(extra_overrides)
+        # Перекрытия (`--ключ` CLI, `agent_overrides` сервера) ложатся в готовый
+        # конфиг мимо compat загрузки: переименованный ключ оседал бы мёртвым, и
+        # настройка молча не действовала. Копия — словарь принадлежит вызывающему.
+        resolved = copy.deepcopy(resolved)
+        _override_facts = apply_compat(resolved)
+        if _override_facts:
+            config_dict["compat_notices"] = [
+                *(config_dict.get("compat_notices") or []),
+                *(f"перекрытие: {fact}" for fact in _override_facts),
+            ]
         config_dict.update(resolved)
         _apply_models_override(config_dict, resolved)
         # Признак «ключ пришёл именно из CLI» (спека §2): нужен, среди прочего,
@@ -328,6 +339,9 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "tui_stream": app_cfg.tui.stream,
         "tui_stream_display": app_cfg.tui.stream_display,
         "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
+        "acp_text_answer_mode": app_cfg.acp.text_answer_mode,
+        "acp_finish_gate_mode": app_cfg.acp.finish_gate_mode,
+        "acp_todo_reminder_steps": app_cfg.acp.todo_reminder_steps,
         "chat_api_host": app_cfg.chat_api.host,
         "chat_api_port": app_cfg.chat_api.port,
         "chat_api_auth_token": app_cfg.chat_api.auth_token,
@@ -467,7 +481,7 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "agent_auth": app_cfg.agent_auth.model_dump()
         if app_cfg.agent_auth
         else {},
-        "diff_tui": app_cfg.diff_tui.model_dump(),
+        "agent_edits": app_cfg.agent_edits.model_dump(),
         "fs_tools": app_cfg.fs_tools.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
         # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).

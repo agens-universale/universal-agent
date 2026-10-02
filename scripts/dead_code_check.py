@@ -42,6 +42,7 @@ PROD_PATHS = [
     "packages/server/src",
     "packages/testkit/src",
     "packages/tui/src",
+    "packages/acp/src",
     "packages/chat/src",
     "packages/core/assets/skills",
     "scripts",
@@ -54,6 +55,7 @@ USAGE_PATHS = [
     "packages/mcp/tests",
     "packages/server/tests",
     "packages/tui/tests",
+    "packages/acp/tests",
     "packages/chat/tests",
     "tests",
 ]

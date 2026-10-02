@@ -37,7 +37,7 @@ CORE_REQUIRED = [
 ]
 
 # Ядро не должно содержать код фронтендов — ради этого всё и затевалось.
-CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/"]
+CORE_FORBIDDEN = ["gc_tui/", "gc_cli/", "gc_server/", "gc_acp/"]
 
 MANIFESTS = {
     "gc_ua": ".",
@@ -46,6 +46,7 @@ MANIFESTS = {
     "gc_tui": "packages/tui",
     "gc_server": "packages/server",
     "gc_mcp": "packages/mcp",
+    "gc_acp": "packages/acp",
     "gc_chat": "packages/chat",
 }
 
@@ -215,9 +216,25 @@ def test_tui_wheel_contents(wheels):
     assert "gc_tui/styles.tcss" in names, (
         "стили TUI обязаны ехать вместе с пакетом"
     )
-    assert "gc_tui/diff_tui/tracking.py" in names, (
-        "diff_tui — часть TUI-профиля"
+    assert "gc_tui/services/edits_view.py" in names, (
+        "показ журнала правок — часть TUI-профиля"
     )
+
+
+def test_core_wheel_ships_the_edits_journal(wheels):
+    """Запись правок едет с ЯДРОМ, а не с фронтендом.
+
+    Раньше подсистема жила в `gc_tui/diff_tui` и проверялась в колесе TUI.
+    После переработки её зовут файловые инструменты ядра, поэтому и место её —
+    в `gc_core`: headless-установка обязана уметь вести журнал.
+    """
+    names = wheels["gc_core"]
+    for m in (
+        "gc_core/agent_edits/tracking.py",
+        "gc_core/agent_edits/recorder.py",
+        "gc_core/agent_edits/journal.py",
+    ):
+        assert m in names, f"{m} не доехал в колесо ядра"
 
 
 def test_server_wheel_contents(wheels):
@@ -315,6 +332,7 @@ OWN_COMMANDS = {
     "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
+    "gc_acp": {"gc-acp"},
     "gc_chat": {"gc-chat"},
 }
 
@@ -398,6 +416,7 @@ def test_meta_pulls_every_profile():
         f"gc-tui=={ver}",
         f"gc-server=={ver}",
         f"gc-mcp=={ver}",
+        f"gc-acp=={ver}",
         f"gc-chat=={ver}",
     }
 
@@ -425,6 +444,7 @@ def test_versions_are_pinned_together():
         "packages/tui",
         "packages/server",
         "packages/mcp",
+        "packages/acp",
         "packages/chat",
     ):
         leaf = tomllib.loads(
@@ -436,6 +456,7 @@ def test_versions_are_pinned_together():
         "packages/tui",
         "packages/server",
         "packages/mcp",
+        "packages/acp",
         "packages/chat",
     ):
         leaf = tomllib.loads(
@@ -486,6 +507,7 @@ def test_profile_subdirs_match_layout():
         "gc-tui": "packages/tui",
         "gc-server": "packages/server",
         "gc-mcp": "packages/mcp",
+        "gc-acp": "packages/acp",
     }
     assert set(app_version.PROFILE_DISTS) - set(
         app_version.PROFILE_SUBDIRS

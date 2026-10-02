@@ -18,6 +18,7 @@ resolution-markers = [
 
 [manifest]
 members = [
+    "gc-acp",
     "gc-chat",
     "gc-cli",
     "gc-core",
@@ -1055,6 +1056,17 @@ wheels = [
 ]
 
 [[package]]
+name = "gc-acp"
+version = "0.3.1"
+source = { editable = "packages/acp" }
+dependencies = [
+    { name = "gc-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "gc-core", editable = "packages/core" }]
+
+[[package]]
 name = "gc-chat"
 version = "0.3.1"
 source = { editable = "packages/chat" }
@@ -1202,6 +1214,7 @@ name = "gc-ua"
 version = "0.3.1"
 source = { editable = "." }
 dependencies = [
+    { name = "gc-acp" },
     { name = "gc-chat" },
     { name = "gc-cli" },
     { name = "gc-core" },
@@ -1258,6 +1271,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gc-acp", editable = "packages/acp" },
     { name = "gc-chat", editable = "packages/chat" },
     { name = "gc-cli", editable = "packages/cli" },
     { name = "gc-core", editable = "packages/core" },

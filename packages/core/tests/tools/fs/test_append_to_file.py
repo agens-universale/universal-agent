@@ -368,11 +368,17 @@ def test_append_utf8_sig_create_missing_has_bom(tmp_path):
     "encoding", ["utf-16", "utf-16-le", "utf-16-be", "utf-8-sig"]
 )
 def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
-    """An existing but empty (size==0) file must be treated like create: BOM emitted.
+    """An existing but empty (size==0) file takes the create PATH: BOM emitted.
 
     Without this, appending utf-16/utf-8-sig to a zero-byte file would produce a
     BOM-less file that later decodes incorrectly. size==0 → create-path (write_bytes
     with BOM) rather than append-path (no BOM).
+
+    Путь записи — ещё не история пути: файл СУЩЕСТВОВАЛ, и ``created`` о нём
+    врать не должен. Тот же смысл, что у соседа по неймспейсу
+    (``write_to_file`` отдаёт ``created=not exists``), и та же величина, по
+    которой журнал решает породу записи: назвав пустой файл созданным, откат
+    получал право УДАЛИТЬ файл, который у пользователя уже был.
     """
     from gc_core.utils.file_text import decode_text_bytes
 
@@ -389,8 +395,7 @@ def test_append_to_empty_existing_file_writes_bom(tmp_path, encoding):
         )
     )
     assert res["ok"], res
-    # created flag set because size==0 is treated as create.
-    assert res["created"] is True, res
+    assert res["created"] is False, res  # файл существовал — не создание
     raw = p.read_bytes()
     if encoding in ("utf-16", "utf-16-le"):
         assert raw[:2] == b"\xff\xfe", f"{encoding}: BOM missing: {raw[:2]!r}"
@@ -431,6 +436,31 @@ def test_append_to_crlf_file_preserves_crlf(tmp_path):
     assert lone_lf == 0, f"mixed endings: lone LF={lone_lf}, raw={raw!r}"
     assert crlf == 5, f"unexpected CRLF count: {crlf}, raw={raw!r}"
     assert raw == b"line1\r\nline2\r\n\r\n\r\nadded line3\r\nmore text"
+
+
+def test_append_to_crlf_file_reports_normalized_bytes(tmp_path):
+    """bytes_appended must count what actually landed on disk.
+
+    When the chunk is normalized from LF to CRLF (see test above), the byte
+    count written is larger than the raw UTF-8 payload before normalization.
+    The tool's report must match the real delta, not the pre-normalization
+    payload length.
+    """
+    p = tmp_path / "crlf_report.txt"
+    p.write_bytes(b"line1\r\nline2\r\n")
+    size_before = p.stat().st_size
+    res = json.loads(
+        with_local_ctx(AppendToFile)(
+            path=str(p),
+            content="added line3\nmore text",
+            separator="\n\n",
+        )
+    )
+    assert res["ok"], res
+    size_after = p.stat().st_size
+    assert res["bytes_appended"] == size_after - size_before, res[
+        "bytes_appended"
+    ]
 
 
 def test_append_to_lf_file_keeps_lf(tmp_path):

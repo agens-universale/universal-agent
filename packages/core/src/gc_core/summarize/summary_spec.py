@@ -44,7 +44,8 @@ SUMMARY_SECTIONS: tuple[SummarySection, ...] = (
             "- If the current user turn/batch is finished with no blocker, use `- none` or one idle line — no hypothetical future [TODO].\n"
             "- Brief completed outcomes from this batch belong in last_verified_facts, not here.\n"
             "- If `planning-only`, tasks are analysis, review, clarification, or planning artifacts only (no implementation edits unless user approved).\n"
-            "- If `execution`, concrete solving may continue (tools, edits, drafting, coding, research)."
+            "- If `execution`, concrete solving may continue (tools, edits, drafting, coding, research).\n"
+            '- Explicit user prohibitions ("don\'t write code", "discussion only", "docs only", "don\'t install") force `mode: planning-only` and forbid inventing implementation [TODO] (scripts, tools, installs) against them.'
         ),
     ),
     SummarySection(

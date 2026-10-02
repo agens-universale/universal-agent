@@ -539,3 +539,30 @@ def test_a_broken_layer_leaves_prospective_registry_on_the_file_itself(
 
     models, _slots = prospective_registry(text, base_path=base)
     assert sorted(models) == ["a"]
+
+
+def test_prospective_registry_puts_the_profile_through_compat_before_merging(
+    stack, monkeypatch
+):
+    """Текст профиля проходит compat ДО склейки с базой — как все слои загрузчика.
+
+    Склеенный стек compat видит уже без слоёв: старое имя в профиле столкнулось
+    бы с новым в базе и проиграло ему — модели профиля молча выпали бы из ответа.
+    Переименования внутри `models` сейчас нет, поэтому оно подставлено: сторож
+    стережёт правило «все слои — до склейки», а не конкретный ключ."""
+    from gc_core.config import prospective_registry
+    from gc_core.config_modules import compat
+
+    monkeypatch.setattr(
+        compat, "RENAMES", {**compat.RENAMES, "legacy_models": "models"}
+    )
+    base, _profiles = stack
+    base.write_text('models:\n  a:\n    model: "x"\n', encoding="utf-8")
+
+    models, _slots = prospective_registry(
+        'legacy_models:\n  b:\n    model: "y"\n',
+        base_path=base,
+        is_profile=True,
+    )
+
+    assert sorted(models) == ["a", "b"]
