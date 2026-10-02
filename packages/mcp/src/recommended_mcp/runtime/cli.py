@@ -439,8 +439,11 @@ def installed_state(
 def manual_server_names(user_config: Optional[dict]) -> list:
     """Имена серверов, заведённых вручную в user config.yml (рантайм-ключ
     'mcp-servers'), — управлять ими из TUI нельзя (read-only блок)."""
-    servers = (user_config or {}).get("mcp-servers") or {}
-    return list(servers.keys())
+    if not user_config:
+        return []
+    from gc_core.settings import settings_of
+
+    return list(settings_of(user_config).mcp.servers)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@
 import sys
 from typing import Any
 
+from gc_core.settings import settings_of
 from gc_core.structured_output import (
     REQUEST_LABEL,  # noqa: F401  # public compatibility
     StructuredOutputError,
@@ -46,7 +47,7 @@ async def aemit_structured_result(
         _log_structured_output_failed(logger, exc)
         print(f"[gc] {exc}", file=sys.stderr)
         return 1
-    if not _stdout_is_jsonl_stream(config_dict):
+    if not _stdout_is_jsonl_stream(settings_of(config_dict)):
         print(rendered)
     _log_final_answer(logger, rendered)
     return 0
@@ -74,12 +75,12 @@ def _log_structured_output_failed(
     )
 
 
-def _stdout_is_jsonl_stream(config_dict: dict[str, Any]) -> bool:
+def _stdout_is_jsonl_stream(settings: Any) -> bool:
     """Хендлер jsonl на stdout, как в ``_build_jsonl_logger``.
 
-    Он вешается только при ``logging_format: jsonl`` и ``console_trace``.
+    Он вешается только при ``logging.format: jsonl`` и ``console_trace``.
     """
-    logging_format = str(config_dict.get("logging_format", "text"))
+    logging_format = str(settings.logging.format or "text")
     if logging_format.strip().lower() != "jsonl":
         return False
-    return bool(config_dict.get("console_trace", True))
+    return bool(settings.logging.console_trace)

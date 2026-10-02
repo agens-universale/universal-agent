@@ -8,6 +8,8 @@ import time
 from typing import Any
 from urllib.parse import urlparse
 
+from gc_core.settings import settings_of
+
 from recommended_mcp.manifest import load_manifest
 from recommended_mcp.process_supervisor import RunSupervisor, SupervisorError
 from recommended_mcp.run import run_entry
@@ -85,8 +87,8 @@ def _warn(text: str, *, code: str, highlights: tuple[str, ...] = ()) -> None:
 _DEFAULT_DISABLE_HINT = "отключить автозапуск MCP — см. справку вашей команды"
 
 
-def _report_daemon_ready(name: str, server_cfg: dict[str, Any]) -> None:
-    url = server_cfg.get("url")
+def _report_daemon_ready(name: str, server_cfg: Any) -> None:
+    url = server_cfg.url
     if not url:
         return
     print(f"[wait] {name}: {url}")
@@ -118,7 +120,7 @@ def ensure_daemons_for_agent(
 
     recommended_root = recipe_root()
     manifest = load_manifest(path)
-    servers = config_dict.get("mcp-servers") or {}
+    servers = settings_of(config_dict).mcp.servers
     supervisor = RunSupervisor()
 
     for entry in manifest:
@@ -127,7 +129,7 @@ def ensure_daemons_for_agent(
         if entry.run is None or entry.run.type != "command":
             continue
         server_cfg = servers[entry.name]
-        transport = str(server_cfg.get("transport", "")).strip()
+        transport = str(server_cfg.transport or "").strip()
         if transport not in _DAEMON_TRANSPORTS:
             continue
         try:

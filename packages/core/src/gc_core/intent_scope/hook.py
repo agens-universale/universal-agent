@@ -19,6 +19,7 @@ from gc_core.intent_scope.append import (
     append_tool_raw_to_current,
 )
 from gc_core.intent_scope.raw_payload import truncate_raw_tool_payload
+from gc_core.settings import settings_of
 
 _logger = logging.getLogger(__name__)
 
@@ -168,9 +169,8 @@ async def amaybe_update_intent_scope_from_tool(
         )
         return
 
-    config_dict = getattr(ctx, "config_dict", {}) or {}
     if (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        str(settings_of(ctx).backend.api_mode).strip().lower()
         != "chat_completions"
     ):
         log_intent_scope_skipped(

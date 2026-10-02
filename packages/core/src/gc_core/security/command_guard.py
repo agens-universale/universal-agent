@@ -20,7 +20,7 @@ from gc_core.security.confirm_port import confirmation_step
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.path_policy import (
-    _extract_config_dict,
+    _settings_source,
     resolve_tool_context,
 )
 from gc_core.security.protected_paths import (
@@ -174,9 +174,7 @@ def _command_guard_flow(
     # `return (yield)` — точка, где вызывается сам тул.
     self_obj = args[0] if args else None
     ctx_obj = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
-    cfg = _extract_config_dict(self_obj, ctx_obj, kwargs)
-
-    if not protection_enabled(cfg):
+    if not protection_enabled(_settings_source(self_obj, ctx_obj, kwargs)):
         return (yield)
 
     # Extract the payload (command string or code string).
@@ -267,7 +265,7 @@ def enforce_command_guard(
     ask   → prompts via confirm_port; if not confirmed → blocked.
     allow → falls through to the decorated function unchanged.
 
-    Activated only when protection_enabled(config_dict) is True.
+    Activated only when protection_enabled(...) is True.
     """
 
     def decorator(func: Callable[..., str]) -> Callable[..., str]:

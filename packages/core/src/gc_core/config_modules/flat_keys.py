@@ -69,6 +69,7 @@ FLAT_TO_PATH: dict[str, str] = {
     "project_memory_max_append_chars": "project_memory.max_append_chars",
     "project_memory_max_chars": "project_memory.max_chars",
     "project_memory_params": "project_memory",
+    "protected_paths": "security.protected_paths",
     "proxy": "backend.proxy",
     "quality_gate_params": "quality_gate",
     "read_guard": "security.read_guard",

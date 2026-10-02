@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.config_modules.message_notice import (
-    ToolUsageNoticeRule,
-    tool_usage_notice_policy_enabled,
-)
+from gc_core.config_modules.message_notice import ToolUsageNoticeRule
 from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_CURRENT_CONTEXT,
     wrap_technical_user_content,
 )
+from gc_core.settings import settings_of
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id,
 )
@@ -155,12 +153,33 @@ def get_thread_memory_registers_from_shared(shared: Any) -> dict[str, str]:
     }
 
 
+def active_tool_usage_notice_rules(
+    config_dict: Any,
+) -> list[ToolUsageNoticeRule]:
+    """Правила ``tool_usage_notice`` без тулов из ``agent.stop_tools``.
+
+    ``config_dict`` — настройки (``AppConfig``) или то, что знает ``settings_of``.
+    Правила уже нормализованы при загрузке настроек.
+    """
+    settings = settings_of(config_dict)
+    stopped = {
+        str(item).strip()
+        for item in settings.agent.stop_tools
+        if isinstance(item, str) and item.strip()
+    }
+    return [
+        rule
+        for rule in settings.tool_usage_notice
+        if rule.tool_name not in stopped
+    ]
+
+
 def subagent_thread_memory_bootstrap_text(
-    config_dict: dict[str, Any] | None,
+    config_dict: Any,
     registers: dict[str, str] | None,
 ) -> str | None:
     """Текст one-shot bootstrap для subagent при старте; без meta/state side effects."""
-    if not tool_usage_notice_policy_enabled(config_dict):
+    if not active_tool_usage_notice_rules(config_dict):
         return None
     return build_subagent_thread_memory_bootstrap_message(registers)
 

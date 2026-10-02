@@ -16,12 +16,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List
 
+from gc_core.settings import runtime_of, settings_of
 from gc_core.startup_notices import Notice
 
 
 def _extras(config_dict: Dict[str, Any]) -> List[Notice]:
     """Перекрытие managed-слоем и битая установка. Зовётся в конце `voice_notices`."""
-    overridden = config_dict.get("voice_overridden_by_managed")
+    overridden = runtime_of(config_dict).voice_overridden_by_managed
     extra: List[Notice] = []
     if overridden:
         extra.append(
@@ -52,13 +53,16 @@ def _extras(config_dict: Dict[str, Any]) -> List[Notice]:
 
 
 def voice_notices(config_dict: Dict[str, Any]) -> List[Notice]:
-    """Конфиг-проблемы голосового ввода. Пустая секция — не замечание."""
+    """Конфиг-проблемы голосового ввода. Пустая секция — не замечание.
+
+    `config_dict` — настройки окна (`LoadedSettings`): признак перекрытия
+    managed-слоем живёт в их рантайме, плоский словарь его не переносит."""
     from gc_core.config_modules.voice import (
         voice_enabled,
         voice_section_filled,
     )
 
-    voice = config_dict.get("voice") or {}
+    voice = settings_of(config_dict).voice.model_dump()
     if not voice_section_filled(voice):
         return []
     if not voice_enabled(voice):

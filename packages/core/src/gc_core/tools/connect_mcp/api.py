@@ -7,7 +7,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from gc_core.config import load_config
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.transport_policy import (
     resolve_effective_transport,
@@ -88,13 +87,10 @@ def _default_mcp_media_dir() -> str:
 def _mcp_media_save_dir() -> str:
     """Куда складывать декодированные image/audio.
 
-    Приоритет: config `mcp-meta.media_save_dir` → gc_paths()['cache']/mcp-media.
-    Создаётся при первой записи.
+    gc_paths()['cache']/mcp-media. Создаётся при первой записи. Ключа
+    `mcp-meta.media_save_dir` в схеме нет (``McpMetaConfig`` — extra=forbid),
+    поэтому прежнее чтение конфига всегда давало дефолт.
     """
-    config = load_config()
-    raw = config.get("mcp-meta", {}).get("media_save_dir")
-    if raw:
-        return os.path.expanduser(str(raw))
     return _default_mcp_media_dir()
 
 

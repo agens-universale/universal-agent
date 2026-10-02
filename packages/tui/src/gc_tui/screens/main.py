@@ -1014,19 +1014,19 @@ class TraceScreen(Screen):
         if not snapshot:
             return (None, None)
         session_meta, request_meta = snapshot
-        cfg = getattr(self.app, "_config", None) or {}
+        settings = self.app.base_settings().settings
         return usage_segments(
             session_meta,
             request_meta,
-            cfg.get("pricing"),
-            cfg.get("model"),
-            cfg.get("completions_url"),
+            settings.pricing,
+            settings.agent.model,
+            settings.backend.completions_url,
         )
 
     def _context_meter(self) -> Text | None:
         """Rich-Text индикатора контекста или None (скрыт)."""
-        cfg = getattr(self.app, "_config", None) or {}
-        if str(cfg.get("backend_api_mode")) != "chat_completions":
+        cfg = self.app.base_settings()
+        if str(cfg.settings.backend.api_mode) != "chat_completions":
             return None
         # Знаменатель шкалы — её mid-turn. turn-end (60%) подставляется только когда
         # mid-turn этой шкалы выключен: иначе проактивная уборка показывала бы 100%.
@@ -1280,9 +1280,9 @@ class TraceScreen(Screen):
         Читаем из ЕДИНОЙ точки (`effective_config`), как витрины и сборка executor:
         база `app._config` не знает про сессионный слой, и профиль, выбранный на
         сессию, со своей секцией `voice` до диктовки бы не доехал."""
-        cfg = self.app.effective_config() or {}
-        voice = dict(cfg.get("voice") or {})
-        voice.setdefault("proxy", cfg.get("proxy"))
+        settings = self.app.current_settings().settings
+        voice = settings.voice.model_dump()
+        voice.setdefault("proxy", settings.backend.proxy)
         return voice
 
     def _ensure_voice_flow(self):
@@ -1372,10 +1372,8 @@ class TraceScreen(Screen):
         try:
             from gc_tui.services.voice_setup import status_cheap
 
-            cfg = (
-                self.app.effective_config() or {}
-            )  # единая точка, как в _voice_config
-            return status_cheap(cfg).mode == "local"
+            # единая точка, как в _voice_config
+            return status_cheap(self.app.current_settings()).mode == "local"
         except Exception:
             return False
 
@@ -1414,9 +1412,7 @@ class TraceScreen(Screen):
         """Поднять батарейку фоном. Запись не начинаем сами: холодный старт долгий, и
         человек за это время успевает уйти — зовём его обратно тостом."""
         self._voice_service_pending = True
-        cfg = (
-            self.app.effective_config() or {}
-        )  # единая точка, как в _voice_config
+        cfg = self.app.current_settings()  # единая точка, как в _voice_config
 
         def _work() -> None:
             from gc_tui.voice_runtime.autostart import ensure_voice_service
@@ -1941,13 +1937,12 @@ class TraceScreen(Screen):
             self._thinking.remove_class("hidden")
             self._thinking.set_state(state)
             return
-        _cfg = getattr(self.app, "_config", None) or {}
+        stream_display = self.app.base_settings().settings.tui.stream_display
         indicator = ThinkingIndicator(
             started_at=self._thinking_started_at,
             state=state,
             sink=getattr(self.app, "_stream_sink", None),
-            reasoning_tag=_cfg.get("tui_stream_display", "minimal")
-            != "answer_reasoning",
+            reasoning_tag=stream_display != "answer_reasoning",
             reasoning_clock=self._reasoning_clock,
         )
         self._thinking = indicator
@@ -3014,8 +3009,8 @@ class TraceScreen(Screen):
         return threads_dir, system_id, thread_id
 
     def _diff_service_for_preview(self):
-        cfg = getattr(self.app, "_config", None) or {}
-        launch_root = cfg.get("launch_root")
+        cfg = self.app.base_settings()
+        launch_root = cfg.runtime.launch_root
         if not launch_root:
             return None
         from gc_tui.screens.diff import _service_from_config
@@ -3789,8 +3784,7 @@ class TraceScreen(Screen):
                 from gc_tui.widgets.stream_block import StreamBlock
 
                 think, answer = sink.snapshot()
-                _cfg = getattr(self.app, "_config", None) or {}
-                mode = _cfg.get("tui_stream_display", "minimal")
+                mode = self.app.base_settings().settings.tui.stream_display
                 clean = format_stream_block(answer=answer)
                 reasoning = format_reasoning_line(think=think)
                 kind, thinking = select_stream_render(mode, clean, reasoning)
@@ -4014,8 +4008,7 @@ class TraceScreen(Screen):
     def _has_mcp_servers(self) -> bool:
         """Заданы ли MCP-серверы в конфиге. При них mcp_status осядет только на
         MCP-settle — карточку досбираем тогда; без них — сразу на boot."""
-        cfg = getattr(self.app, "_config", None) or {}
-        return bool(cfg.get("mcp-servers"))
+        return bool(self.app.base_settings().settings.mcp.servers)
 
     def _compose_card_lines(self, mcp_line: Optional[str]) -> Text:
         """Итог-содержимое правой колонки карточки: до четырёх строк через пустую строку.
@@ -5345,7 +5338,7 @@ class TraceScreen(Screen):
         from gc_tui.screens.file_view import FileViewerScreen
         from gc_tui.services.file_view import FileViewSettings
 
-        cfg = self.app.screen_config()
+        file_view = self.app.base_settings().settings.tui.file_view
         store = getattr(self.app, "view_positions", None)
         if store is None:
             from gc_tui.services.file_view import ViewPositionStore
@@ -5357,9 +5350,7 @@ class TraceScreen(Screen):
                 raw_path=arg or "",
                 cwd=self._current_cwd(),
                 store=store,
-                settings=FileViewSettings.from_mapping(
-                    cfg.get("tui_file_view")
-                ),
+                settings=FileViewSettings.from_mapping(file_view.model_dump()),
             )
         )
 
@@ -5376,8 +5367,8 @@ class TraceScreen(Screen):
     def _cmd_diff(self) -> None:
         from gc_tui.screens.diff import DiffScreen
 
-        cfg = self.app.screen_config()
-        launch_root = cfg.get("launch_root")
+        cfg = self.app.base_settings()
+        launch_root = cfg.runtime.launch_root
         if not launch_root:
             self._mount_trace_row(
                 prefix="· ",
@@ -6050,8 +6041,8 @@ class TraceScreen(Screen):
             self._clear_bang_blocks(clear_meta.count)
             return
 
-        cfg = getattr(self.app, "_config", None) or {}
-        settings = BangShellSettings.from_mapping(cfg.get("tui_bang_shell"))
+        bang_shell = self.app.base_settings().settings.tui.bang_shell
+        settings = BangShellSettings.from_mapping(bang_shell.model_dump())
         self._bang_timeout_sec = settings.timeout_sec
 
         self._mount_bang_row(
@@ -6602,7 +6593,7 @@ class TraceScreen(Screen):
 
         runner = self.app.active_runner
         ah = self.app.tui_state.ask_human_state
-        cfg = self.app.effective_config()
+        active_profile = self.app.current_settings().runtime.active_profile
         router = self.app.display_router()
         # check_breaker=False: /status показывает модель честно даже при открытом
         # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.
@@ -6622,7 +6613,7 @@ class TraceScreen(Screen):
             ),
             "last_runner_error": getattr(self.app, "last_runner_error", None),
             "profile": {
-                "name": cfg.get("profile") or None,
+                "name": active_profile or None,
                 "source": _profile_source_label(ref),
                 "level": router.active_level(),
                 "model": resolved.alias or resolved.model,
@@ -6639,8 +6630,8 @@ class TraceScreen(Screen):
 
     def _cmd_compact(self) -> None:
         """/compact — принудительно сжать сессию (гарды: режим/простой/контент)."""
-        cfg = getattr(self.app, "_config", None) or {}
-        if str(cfg.get("backend_api_mode")) != "chat_completions":
+        settings = self.app.base_settings().settings
+        if str(settings.backend.api_mode) != "chat_completions":
             self._mount_trace_row(
                 prefix="· ",
                 content="/compact недоступен в режиме responses",

@@ -302,7 +302,7 @@ def test_command_guard_decline_caches(monkeypatch, tmp_path):
     ctx, calls = _tui_ctx("deny")
     ctx.config_dict = {
         "launch_root": str(tmp_path),
-        "gc_protection": {"enabled": True},
+        "security.protected_paths": {"enabled": True},
     }
 
     class _Tool:

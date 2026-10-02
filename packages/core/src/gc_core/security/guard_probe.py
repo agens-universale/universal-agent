@@ -55,7 +55,7 @@ def evaluate_guard_probe(
             path = check_write_path_allowed(
                 request.value,
                 request.cwd,
-                (config_dict.get("write_guard") or {}).get("extra_paths"),
+                _write_guard_extra_paths(config_dict),
                 base_dir=request.cwd,
                 operation=request.operation or "write",
             )
@@ -100,11 +100,7 @@ def evaluate_guard_probe(
             protected_decision=scan_command_for_protected(
                 request.value,
                 cwd=request.cwd,
-                extra=list(
-                    (config_dict.get("write_guard") or {}).get("extra_paths")
-                    or []
-                )
-                or None,
+                extra=list(_write_guard_extra_paths(config_dict)) or None,
             ),
         )
     elif request.kind == "download_destination":
@@ -130,6 +126,12 @@ def evaluate_guard_probe(
         json.dumps(payload, sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
     return replace(result, facts_digest=digest)
+
+
+def _write_guard_extra_paths(config_dict: Any) -> list[str]:
+    from gc_core.settings import settings_of
+
+    return list(settings_of(config_dict).security.write_guard.extra_paths)
 
 
 def _command_host(request):

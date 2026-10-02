@@ -62,7 +62,7 @@ async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
 
     cfg = {
         "model": "M",
-        "chat_completions_auth_token": "sk-REAL",
+        "chat_completion_headers": {"Authorization": "Bearer sk-REAL"},
         "agent_md_path": "/p/agent.md",
         "threads_data_path": "/p/threads",
         "logs_dump_dir": "/p/logs",

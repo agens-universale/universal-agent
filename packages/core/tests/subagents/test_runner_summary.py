@@ -29,9 +29,7 @@ def _make_config(trigger=100):
     return {
         "use_local_subagents": True,
         "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
         "model": "test-model",
         "system_prompt_id": "test-prompt",
         "summary_params": {

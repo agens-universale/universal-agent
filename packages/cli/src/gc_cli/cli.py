@@ -20,6 +20,7 @@ from gc_core.message_policy.user_message_policy import (
     wrap_technical_user_content,
 )
 from gc_core.run_context import RunContext, acreate_run_context
+from gc_core.settings import is_explicit
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
@@ -654,9 +655,13 @@ async def arun_cli() -> int:
         getattr(ctx, "mcp_status", None),
         is_tui=False,
         known_tool_names=getattr(ctx, "registered_tool_names", None),
-        deprecated_keys_used=config_dict.get("deprecated_keys_used"),
+        deprecated_keys_used=(
+            ["backend.stream"]
+            if is_explicit(loaded.settings, "backend.stream")
+            else []
+        ),
         upgrade_info=_upgrade_info,
-        compat_notices=config_dict.get("compat_notices"),
+        compat_notices=list(loaded.runtime.notices),
     )
     if _notices:
         print(render_notices_for_cli(_notices), file=sys.stderr)

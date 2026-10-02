@@ -42,33 +42,20 @@ def _identity_from_ctx(ctx: Any) -> tuple[str, str, str] | None:
     return threads_dir.strip(), system_id.strip(), thread_id.strip()
 
 
-def _config_from_ctx(ctx: Any) -> dict:
-    config_dict = getattr(ctx, "config_dict", None) or {}
-    return config_dict if isinstance(config_dict, dict) else {}
-
-
 def _perimeter(ctx: Any) -> tuple[str, list, list[str], int]:
     """launch_root, extra_paths, protected_extra, cache_max_orig."""
-    config_dict = _config_from_ctx(ctx)
-    launch_root = config_dict.get("launch_root") or ""
+    from gc_core.settings import runtime_of, settings_of
+
+    settings = settings_of(ctx)
+    launch_root = runtime_of(ctx).launch_root or ""
     if not isinstance(launch_root, str) or not launch_root.strip():
         workspace = getattr(ctx, "workspace", None)
         root = getattr(workspace, "root", None)
         launch_root = str(root) if root else ""
-    wg = config_dict.get("write_guard") or {}
-    extra_paths = (
-        list(wg.get("extra_paths") or []) if isinstance(wg, dict) else []
-    )
-    protected = config_dict.get("protected_paths") or {}
-    protected_extra = (
-        list(protected.get("extra") or [])
-        if isinstance(protected, dict)
-        else []
-    )
-    diff_cfg = config_dict.get("diff_tui") or {}
-    if not isinstance(diff_cfg, dict):
-        diff_cfg = {}
-    cache_max_orig = int(diff_cfg.get("cache_max_orig", 500))
+    security = settings.security
+    extra_paths = list(security.write_guard.extra_paths)
+    protected_extra = list(security.protected_paths.extra)
+    cache_max_orig = settings.diff_tui.cache_max_orig
     return launch_root, extra_paths, protected_extra, cache_max_orig
 
 

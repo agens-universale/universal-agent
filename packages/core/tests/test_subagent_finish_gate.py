@@ -39,9 +39,7 @@ def _make_config():
         "strict_turn_finish_validation": True,
         "finish_gate_max_iterations": 10,
         "subagent_finish_gate_max_iterations": 3,
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
         "model": "test-model",
         "system_prompt_id": "test-prompt",
     }

@@ -10,7 +10,7 @@ def minimal_config_dict(monkeypatch):
         "abuild_tools_data",
         as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
-    return {"model": "M"}
+    return {"model": "M", "save_logs": False}
 
 
 async def test_on_stream_delta_defaults_none(minimal_config_dict):

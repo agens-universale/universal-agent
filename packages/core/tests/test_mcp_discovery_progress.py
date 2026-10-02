@@ -113,6 +113,6 @@ async def test_create_run_context_accepts_on_progress(monkeypatch):
         ),
     )
     await rc.acreate_run_context(
-        {"model": "M"}, on_progress=lambda s, st: None
+        {"model": "M", "save_logs": False}, on_progress=lambda s, st: None
     )
     assert captured and callable(captured[0])

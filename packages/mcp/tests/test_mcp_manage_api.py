@@ -86,7 +86,8 @@ def test_installed_state_installed_with_version(monkeypatch):
 
 
 def test_manual_server_names_reads_runtime_key():
-    cfg = {"mcp-servers": {"corp-jira": {}, "corp-confluence": {}}}
+    server = {"transport": "stdio", "command": "x"}
+    cfg = {"mcp-servers": {"corp-jira": server, "corp-confluence": server}}
     assert sorted(cli.manual_server_names(cfg)) == [
         "corp-confluence",
         "corp-jira",

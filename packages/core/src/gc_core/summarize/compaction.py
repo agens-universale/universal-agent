@@ -18,6 +18,7 @@ from gc_core.message_policy.user_message_policy import (
     TECHNICAL_TYPE_DIALOG_SUMMARY,
     wrap_technical_user_content,
 )
+from gc_core.settings import settings_of
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
     log_compaction_completed,
@@ -95,13 +96,10 @@ def _emit_messages_evicted(state: Any, dropped: List[dict]) -> None:
 def _intent_log_preview_chars_from_ctx(ctx: Any | None) -> int:
     if ctx is None:
         return resolve_intent_log_preview_chars(None)
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = (
-        cfg.get("summary_params")
-        if isinstance(cfg.get("summary_params"), dict)
-        else {}
+    summary = settings_of(ctx).summary
+    return resolve_intent_log_preview_chars(
+        {"intent_log_preview_chars": summary.intent_log_preview_chars}
     )
-    return resolve_intent_log_preview_chars(summary_params)
 
 
 def _ensure_shared(state: Any):

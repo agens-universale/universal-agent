@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass
 
 from gc_core.onboarding_config_writer import write_values as _write_values
+from gc_core.settings import settings_of
 
 from gc_tui.voice_runtime.net import with_system_trust_retry
 from gc_tui.voice_runtime.service import make_silence_wav
@@ -90,7 +91,7 @@ def status_cheap(config_dict: dict) -> VoiceStatus:
     и синхронный вызов с UI-потока замораживал каждый ход курсора в /settings, пока
     сервис лежал. Живость меряет probe_alive — из воркера экрана."""
     st = _load_state()
-    url = str((config_dict.get("voice") or {}).get("url") or "")
+    url = str(settings_of(config_dict).voice.url or "")
     if st is not None:
         from gc_tui.voice_runtime.autostart import url_is_ours
 
@@ -222,9 +223,7 @@ def local_language(config_dict: dict | None = None) -> str:
     managed = _managed_language("")
     if managed:
         return managed
-    return str(
-        ((config_dict or {}).get("voice") or {}).get("language") or "ru"
-    )
+    return str(settings_of(config_dict or {}).voice.language or "ru")
 
 
 def set_local_language(language: str) -> bool:

@@ -5,6 +5,7 @@ import json
 import os
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
+from gc_core.config_modules.security import DownloadConfig
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
 from gc_core.security.path_policy import (
     WriteGuardViolation,
@@ -14,6 +15,7 @@ from gc_core.security.path_policy import (
     resolve_tool_context,
 )
 from gc_core.security.url_policy import enforce_url_policy
+from gc_core.settings import AppConfig, LoadedSettings, settings_of
 from gc_core.tools.exec.redirect_policy import (
     DEFAULT_MAX_REDIRECTS,
     stream_validating_redirects,
@@ -157,14 +159,26 @@ class DownloadFile(AbstractSimpleTool):
             return ctx_config
         return {}
 
+    def _download_config(self) -> DownloadConfig:
+        """Секция ``security.download``: явный config_dict, иначе настройки ctx."""
+        explicit = self._config_dict
+        if isinstance(explicit, dict):
+            return settings_of(explicit).security.download
+        if isinstance(
+            getattr(self._ctx, "settings", None), (AppConfig, LoadedSettings)
+        ):
+            return settings_of(self._ctx).security.download
+        ctx_config = getattr(self._ctx, "config_dict", None)
+        if isinstance(ctx_config, dict):
+            return settings_of(ctx_config).security.download
+        return DownloadConfig()
+
     def _resolve_download_settings(
         self, launch_root: str
     ) -> tuple[str, int] | Dict[str, Any]:
-        cfg = self._get_config_dict().get("download") or {}
+        cfg = self._download_config()
         raw = os.path.expanduser(
-            os.path.expandvars(
-                str(cfg.get("download_dir") or "downloads").strip()
-            )
+            os.path.expandvars(str(cfg.download_dir or "downloads").strip())
         )
         if not raw:
             return {
@@ -178,7 +192,7 @@ class DownloadFile(AbstractSimpleTool):
                 "type": "invalid_download_dir",
                 "message": "download_dir resolved to an empty path.",
             }
-        max_bytes = int(cfg.get("max_bytes") or 52_428_800)
+        max_bytes = int(cfg.max_bytes or 52_428_800)
         return download_root, max_bytes
 
     @classmethod

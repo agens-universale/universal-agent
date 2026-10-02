@@ -14,6 +14,7 @@ from gc_core.onboarding import (
     authorization_header,
     mask_authorization,
 )  # re-export
+from gc_core.settings import settings_of
 from gc_core.utils.is_number import is_number
 
 
@@ -163,15 +164,16 @@ def _collect_auth(io: WizardIO, values: dict) -> None:
     # 3 → пропуск (ничего не пишем, остаётся pending)
 
 
-def _effective(values: dict, config: dict, key: str, header: bool = False):
+def _effective(values: dict, backend, key: str, header: bool = False):
+    """Значение, введённое в этом прогоне, иначе — из секции ``backend``."""
     if header:
         v = values.get("Authorization")
         if v is None:
-            v = (config.get("chat_completion_headers") or {}).get(
-                "Authorization"
-            )
+            v = (backend.chat_completion_headers or {}).get("Authorization")
         return v
-    return values.get(key) if values.get(key) is not None else config.get(key)
+    if values.get(key) is not None:
+        return values.get(key)
+    return getattr(backend, key)
 
 
 def _print_models(io: WizardIO, shown, *, current: str) -> None:
@@ -195,7 +197,7 @@ def _current_line(
     и с именем записи она не встречается."""
     if not model_id:
         return f"сейчас: {_of.LEVEL_UNSET} · Enter — оставить"
-    alias = (config.get("slots") or {}).get(level)
+    alias = getattr(settings_of(config).slots, level)
     entry = f"  (имя записи «{alias}»)" if alias and alias != model_id else ""
     if note:
         entry = f"  {note}"
@@ -319,16 +321,17 @@ def _fetch_models(config: dict, values: dict, fetch=None):
     from gc_core.model_picker import fetch_models
 
     fetch = fetch or fetch_models
+    backend = settings_of(config).backend
     endpoint = onboarding.configured_endpoint(
-        _effective(values, config, "completions_url")
+        _effective(values, backend, "completions_url")
     )
-    auth = _effective(values, config, "Authorization", header=True)
+    auth = _effective(values, backend, "Authorization", header=True)
     if auth == onboarding.TOKEN_SENTINEL:
         auth = None
     if not endpoint:
         return None
     try:
-        return fetch(endpoint, auth, verify=config.get("use_ssl", True))
+        return fetch(endpoint, auth, verify=backend.use_ssl)
     except Exception:
         return None
 
@@ -424,7 +427,9 @@ def _collect_endpoint(
     # пути ниже): показать её как действующий адрес значит соврать о том,
     # куда пойдёт запрос. Сюда она доходит, когда требование адреса закрыл
     # самодостаточный реестр, а плоский `backend` так и остался шаблонным.
-    current = onboarding.configured_endpoint(config.get("completions_url"))
+    current = onboarding.configured_endpoint(
+        settings_of(config).backend.completions_url
+    )
     if review_all and field.leaf not in pending and current:
         io.printer(f"  [текущее: {current}]")
     while True:
@@ -535,6 +540,7 @@ def _summary_lines(config: dict) -> list[str]:
     выглядят одинаково — и это правда: сводка говорит, что лежит в файле, а не
     что человек вводил."""
     lines = []
+    slots = settings_of(config).slots
     for level in ("default", "light", "max"):
         model = onboarding.assigned_level_model(config, level)
         via_fallback = not model and level == "default"
@@ -548,7 +554,7 @@ def _summary_lines(config: dict) -> list[str]:
         if via_fallback:
             entry = f"  {note}"
         else:
-            alias = (config.get("slots") or {}).get(level)
+            alias = getattr(slots, level)
             entry = (
                 f"  (имя записи «{alias}»)" if alias and alias != model else ""
             )

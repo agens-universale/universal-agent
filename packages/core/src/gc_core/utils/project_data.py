@@ -6,6 +6,7 @@ from gc_core.execution_workspace import (
     build_execution_workspace,
     host_os_label,
 )
+from gc_core.settings import settings_of
 from gc_core.utils.directory_write_access import directory_allows_probe_write
 
 cut_first = 100
@@ -215,12 +216,10 @@ def _dedupe_ordered_abs_paths(paths: List[str]) -> List[str]:
 
 
 def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
-    if not isinstance(config_dict, dict):
+    """``security.write_guard.extra_paths``; без конфига — пусто."""
+    if config_dict is None:
         return []
-    write_guard = config_dict.get("write_guard")
-    if not isinstance(write_guard, dict):
-        return []
-    extra = write_guard.get("extra_paths")
+    extra = settings_of(config_dict).security.write_guard.extra_paths
     return [str(x) for x in (extra or []) if x is not None and str(x).strip()]
 
 

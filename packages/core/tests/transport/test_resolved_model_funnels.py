@@ -899,7 +899,6 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     ctx = SimpleNamespace(
         config_dict={
             "backend_api_mode": "responses",
-            "agent_url": "http://legacy.local/v1/responses",
             "completions_url": "http://legacy.local/v1/chat/completions",
             "use_ssl": True,
             "use_retry": False,

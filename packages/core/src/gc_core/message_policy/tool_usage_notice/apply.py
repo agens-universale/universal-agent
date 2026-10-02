@@ -2,12 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from gc_core.config_modules.message_notice import (
-    active_tool_usage_notice_rules,
-)
-from gc_core.config_modules.project_memory import (
-    project_memory_from_config_dict,
-)
 from gc_core.constants.tool_names import PROJECT_MEMORY_TOOL_NAME
 from gc_core.message_policy.notice_policy_log import log_notice_policy_step
 from gc_core.message_policy.project_memory_notice.policy import (
@@ -22,6 +16,7 @@ from gc_core.message_policy.tool_availability import (
     tool_is_available,
 )
 from gc_core.message_policy.tool_usage_notice.policy import (
+    active_tool_usage_notice_rules,
     batch_used_tool,
     collect_tool_usage_notices,
     get_thread_memory_registers_from_shared,
@@ -32,6 +27,7 @@ from gc_core.message_policy.tool_usage_notice.state import (
     get_project_memory_check_cnt,
     persist_tool_usage_notice_state,
 )
+from gc_core.settings import AppConfig, settings_of
 
 
 def _tool_thresholds(rules: list[Any]) -> dict[str, int]:
@@ -69,7 +65,7 @@ def _emit_project_memory_hints(
     state: Any,
     meta: dict,
     ctx: Any,
-    cfg: dict,
+    settings: AppConfig,
     *,
     enabled: bool,
     get_hash_fn=None,
@@ -79,7 +75,7 @@ def _emit_project_memory_hints(
     if not enabled:
         return emitted
     for hint_text in collect_project_memory_hints(
-        state, meta, ctx, cfg, get_hash_fn=get_hash_fn
+        state, meta, ctx, settings, get_hash_fn=get_hash_fn
     ):
         out.append(
             wrap_project_memory_hint_user_message(
@@ -134,7 +130,7 @@ async def aapply_tool_usage_notice_before_llm(
         value = await loader()
         project_memory_hash_fn = lambda _ctx: value
 
-    cfg = getattr(ctx, "config_dict", None) or {}
+    settings = settings_of(ctx)
     if not isinstance(meta, dict):
         meta = {}
 
@@ -146,17 +142,17 @@ async def aapply_tool_usage_notice_before_llm(
 
     notice_rules = [
         rule
-        for rule in active_tool_usage_notice_rules(cfg)
+        for rule in active_tool_usage_notice_rules(settings)
         if tool_is_available(available_tools, rule.tool_name)
     ]
     tool_thresholds = _tool_thresholds(notice_rules)
     counters_before = dict(getattr(state, "tool_usage_notice_cnt", None) or {})
 
     project_hints_enabled = project_memory_hints_enabled(
-        cfg
+        settings
     ) and tool_is_available(available_tools, PROJECT_MEMORY_TOOL_NAME)
     project_interval = (
-        project_memory_from_config_dict(cfg).check_interval_messages
+        settings.project_memory.check_interval_messages
         if project_hints_enabled
         else None
     )
@@ -180,7 +176,7 @@ async def aapply_tool_usage_notice_before_llm(
         state,
         meta,
         ctx,
-        cfg,
+        settings,
         enabled=project_hints_enabled,
         get_hash_fn=project_memory_hash_fn,
     )
@@ -202,7 +198,7 @@ async def aapply_tool_usage_notice_before_llm(
     out = apply_todo_reminder(
         out,
         state,
-        cfg,
+        settings,
         step_messages=step_messages,
         available_tools=available_tools,
     )
@@ -234,14 +230,14 @@ async def aapply_tool_usage_notice_before_llm(
 
 
 def _needs_project_hash(state, ctx, meta) -> bool:
-    cfg = getattr(ctx, "config_dict", None) or {}
-    if not project_memory_hints_enabled(cfg):
+    settings = settings_of(ctx)
+    if not project_memory_hints_enabled(settings):
         return False
     if not tool_is_available(
         available_tool_names(ctx, state), PROJECT_MEMORY_TOOL_NAME
     ):
         return False
-    interval = project_memory_from_config_dict(cfg).check_interval_messages
+    interval = settings.project_memory.check_interval_messages
     return (
         get_project_memory_check_cnt(meta if isinstance(meta, dict) else {})
         + 1

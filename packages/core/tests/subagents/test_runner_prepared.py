@@ -41,7 +41,7 @@ def _state():
 
 class Preparation:
     def __init__(self):
-        self.config = {"summary_mid_turn": False, "subagent_max_steps": 5}
+        self.config = {"subagent_max_steps": 5}
         self.child_ctx = SimpleNamespace(
             run_id="child-run",
             logger=None,

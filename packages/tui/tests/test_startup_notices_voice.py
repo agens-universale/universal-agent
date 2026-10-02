@@ -9,6 +9,16 @@ from gc_core.startup_notices import collect_startup_notices
 from gc_tui.services.voice_notices import voice_notices
 
 
+def _overridden(cfg):
+    """Настройки с признаком перекрытия managed-слоем: он живёт в рантайме
+    загрузки, плоский словарь его не переносит."""
+    from gc_core.settings import settings_from_flat
+
+    return settings_from_flat(cfg).with_runtime(
+        voice_overridden_by_managed="https://api.groq.com/x"
+    )
+
+
 def _collect(voice):
     cfg = {"voice": voice}
     return collect_startup_notices(
@@ -60,10 +70,9 @@ def test_missing_sounddevice_does_not_hide_the_other_voice_notices(
             "url": "http://127.0.0.1:8735/v1/audio/transcriptions",
             "token": "local",
         },
-        "voice_overridden_by_managed": "https://api.groq.com/x",
     }
     notices = collect_startup_notices(
-        cfg, set(), None, is_tui=True, extra=voice_notices(cfg)
+        cfg, set(), None, is_tui=True, extra=voice_notices(_overridden(cfg))
     )
     codes = [n.code for n in notices]
     assert "voice_no_sounddevice" in codes
@@ -145,10 +154,9 @@ def test_voice_overridden_notice(monkeypatch):
             "url": "http://127.0.0.1:8735/v1/audio/transcriptions",
             "token": "local",
         },
-        "voice_overridden_by_managed": "https://api.groq.com/x",
     }
     notices = collect_startup_notices(
-        cfg, set(), None, is_tui=True, extra=voice_notices(cfg)
+        cfg, set(), None, is_tui=True, extra=voice_notices(_overridden(cfg))
     )
     codes = [n.code for n in notices]
     assert "voice_overridden" in codes

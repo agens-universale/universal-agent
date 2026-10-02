@@ -10,6 +10,7 @@ import yaml
 from gc_core.backends.local import LocalFsBackend
 from gc_core.backends.protocol import FsBackend
 from gc_core.bundled_assets import bundled_root
+from gc_core.settings import settings_of
 
 SKILL_MD = "SKILL.md"
 
@@ -812,7 +813,7 @@ def get_skills_registry(
     Фабрика реестра скиллов.
 
     Поведение:
-    - Если config_dict содержит непустой "skills_data_path" — single-source режим:
+    - Если в настройках непустой ``paths.skills_data_path`` — single-source режим:
       registry видит ТОЛЬКО эту папку (escape-hatch для production-сценариев,
       curated team set, тестов / CI с фикстурами). Все скиллы помечаются source="user".
       Папка — родитель скиллов и паков: загружаются и flat-скиллы (подпапка с
@@ -824,18 +825,15 @@ def get_skills_registry(
     skills_root: Optional[str] = None
     disable_skills: List[str] = []
     if config_dict is not None:
-        raw = config_dict.get("skills_data_path")
-        if isinstance(raw, str):
-            path = raw.strip()
-            if path:
-                skills_root = path
-        raw_disabled = config_dict.get("disable_skills")
-        if isinstance(raw_disabled, list):
-            disable_skills = [
-                str(item).strip()
-                for item in raw_disabled
-                if isinstance(item, (str, int)) and str(item).strip()
-            ]
+        settings = settings_of(config_dict)
+        path = (settings.paths.skills_data_path or "").strip()
+        if path:
+            skills_root = path
+        disable_skills = [
+            item.strip()
+            for item in settings.agent.disable_skills
+            if item.strip()
+        ]
 
     if skills_root is not None:
         return SkillsRegistry(

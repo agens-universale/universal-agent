@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from gc_core.settings import settings_of
 from gc_core.trace_id import trace_id_from_config
 
 _TRIGGER_REASON_LABELS: dict[str, str] = {
@@ -36,10 +37,10 @@ def resolve_summary_trace_path(ctx: Any) -> str:
     path = getattr(ctx, "summary_trace_path", "")
     if isinstance(path, str) and path.strip():
         return path.strip()
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    if not cfg.get("save_logs", False):
+    settings = settings_of(ctx)
+    if not settings.logging.save_logs:
         return ""
-    base_dir = cfg.get("logs_dump_dir") or os.getcwd()
+    base_dir = settings.paths.logs_dump_dir or os.getcwd()
     return os.path.join(base_dir, "summary_trace.jsonl")
 
 

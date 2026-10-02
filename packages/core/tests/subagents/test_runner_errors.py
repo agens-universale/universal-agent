@@ -30,9 +30,7 @@ def _make_config(**overrides):
     cfg = {
         "use_local_subagents": True,
         "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
         "model": "test-model",
         "system_prompt_id": "test-prompt",
     }

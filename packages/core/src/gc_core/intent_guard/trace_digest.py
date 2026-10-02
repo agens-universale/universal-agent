@@ -3,12 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from gc_core.config_modules.quality_gate import digest_limits_from_params
-from gc_core.config_modules.strip_tags_projection import (
-    projection_tags_from_config,
-)
 from gc_core.constants.tool_names import FINISH_TOOL_NAME
 from gc_core.message_format import dialog_history
+from gc_core.settings import settings_of
 
 _FINISH_TOOL_NAMES = frozenset({FINISH_TOOL_NAME})
 
@@ -50,7 +47,7 @@ def _without_last_turn_finish_call(
 def build_finish_gate_trace_digest(
     *,
     state: Any,
-    cfg: dict | None = None,
+    cfg: Any = None,
     exclude_pending_turn_finish: bool = True,
 ) -> FinishGateTraceDigest:
     """
@@ -69,13 +66,14 @@ def build_finish_gate_trace_digest(
     if exclude_pending_turn_finish:
         history_messages = _without_last_turn_finish_call(history_messages)
 
-    qg_params = None
-    if isinstance(cfg, dict) and isinstance(
-        cfg.get("quality_gate_params"), dict
-    ):
-        qg_params = cfg["quality_gate_params"]
-    limits = digest_limits_from_params(qg_params)
-    tags = projection_tags_from_config(cfg)
+    # cfg — настройки или то, что знает settings_of (ctx, плоский словарь);
+    # None — дефолты модели.
+    settings = settings_of(cfg)
+    limits = {
+        "max_dialogue_chars": int(settings.quality_gate.max_dialogue_chars),
+        "max_message_chars": int(settings.quality_gate.max_message_chars),
+    }
+    tags = tuple(str(tag) for tag in settings.strip_tags_projection.tags)
     trimmed = dialog_history.trim_history_to_max_dialogue_chars(
         history_messages,
         max_dialogue_chars=limits["max_dialogue_chars"],

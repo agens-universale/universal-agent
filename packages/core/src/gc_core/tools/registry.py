@@ -2,6 +2,7 @@ import copy
 from typing import Any, Dict, Optional
 
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, copy_loop_warn
+from gc_core.settings import settings_of
 from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.exec.download_file import DownloadFile
 from gc_core.tools.exec.execute_command import ExecuteCommand
@@ -110,9 +111,7 @@ def _session_registry(
         "session_todo": _tool_entry(SessionTodo, config_dict),
     }
 
-    backend_mode = (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
-    )
+    backend_mode = settings_of(config_dict).backend.api_mode.strip().lower()
     if backend_mode == "chat_completions":
         registry["session_read_user_intent_log"] = _tool_entry(
             ReadUserIntentLog, config_dict
@@ -132,12 +131,9 @@ def _project_registry(
 
 def _apply_stop_tools(
     tools_data: Dict[str, Dict[str, Any]],
-    config_dict: Dict[str, Any],
+    config_dict: Any,
 ) -> Dict[str, Dict[str, Any]]:
-    stop_tools_cfg = config_dict.get("stop_tools", [])
-    if not isinstance(stop_tools_cfg, list):
-        return tools_data
-
+    stop_tools_cfg = settings_of(config_dict).agent.stop_tools
     stop_tools = {
         tool_name.strip()
         for tool_name in stop_tools_cfg

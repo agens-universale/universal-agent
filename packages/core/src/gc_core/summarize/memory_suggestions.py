@@ -9,6 +9,7 @@ from gc_core.execution.resources import (
     PromptResourceRequest,
     aload_prompt_resource,
 )
+from gc_core.settings import settings_of
 from gc_core.summarize.llm import arequest_summary_text
 from gc_core.summarize.prompt_loading import load_memory_patch_replace_prompt
 from gc_core.summarize.working_memory_gateway import (
@@ -36,15 +37,8 @@ class MemoryPatchLlmResult:
 
 
 def _resolve_prompt_path(ctx: Any, config_key: str, default_path: str) -> str:
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    summary_params = (
-        cfg.get("summary_params")
-        if isinstance(cfg.get("summary_params"), dict)
-        else {}
-    )
-    prompt_path_raw = str(
-        summary_params.get(config_key) or default_path
-    ).strip()
+    summary = settings_of(ctx).summary
+    prompt_path_raw = str(getattr(summary, config_key) or default_path).strip()
     if not prompt_path_raw:
         raise ValueError(f"summary_params.{config_key} is empty")
     if os.path.isabs(prompt_path_raw):
@@ -101,18 +95,14 @@ async def arequest_patch_replace(
 
     Основная реализация шага; ``request_patch_replace`` — синхронный шим.
     """
-    params = (getattr(ctx, "config_dict", None) or {}).get(
-        "summary_params"
-    ) or {}
+    summary = settings_of(ctx).summary
     subagent = _is_subagent_state(state)
     # Soft-only: subagent addendum lives in system prompt only (no user duplicate).
     system = await aload_prompt_resource(
         ctx,
         PromptResourceRequest(
             "memory_patch",
-            path=params.get(
-                "chat_completions_memory_patch_replace_prompt_path"
-            ),
+            path=summary.chat_completions_memory_patch_replace_prompt_path,
             subagent=subagent,
         ),
         local=lambda: load_memory_patch_replace_prompt(

@@ -17,7 +17,6 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def _cfg(root):
     return {
         "launch_root": str(root),
-        "root_box": {"enabled": True, "launch_root": str(root)},
         "read_guard": {
             "enabled": True,
             "mode": "deny",

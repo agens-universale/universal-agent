@@ -56,7 +56,6 @@ async def test_native_executor_uses_real_file_session_and_replays(
         "use_local_subagents": False,
         "strict_turn_finish_validation": False,
         "tui_text_answer_mode": "deny",
-        "gc": {"force_collect": False},
         "thread_store_persist": persist,
     }
     contexts = {}

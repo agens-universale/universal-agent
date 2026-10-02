@@ -283,7 +283,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
         _release_voice = release_voice_service
         _vs = _voice_state()
-        voice_expected = _vs is not None and url_is_ours(config_dict, _vs.port)
+        voice_expected = _vs is not None and url_is_ours(settings, _vs.port)
     except Exception:
         voice_expected = False
 
@@ -314,7 +314,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # (`TuiApp._profile_remerge`), но здесь ProfileMeta есть только на этом
     # единственном старте загрузки, до создания app/треда.
     app._maybe_notice_profile_activation(
-        profile_meta.active_name or "", profile_meta, config_dict
+        profile_meta.active_name or "", profile_meta, settings
     )
     app._onboarding_mode = onboarding_mode
     app._onboarding_deactivate_profile = onboarding_deactivate_profile

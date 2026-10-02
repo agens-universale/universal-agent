@@ -24,6 +24,7 @@ def _cfg(tmp_path):
         "max_steps": 1,
         "system_prompt_id": "v1",
         "trace_id": "trace-1",
+        "save_logs": False,
     }
 
 

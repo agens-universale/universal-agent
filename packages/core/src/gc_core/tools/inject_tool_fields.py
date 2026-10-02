@@ -9,6 +9,7 @@ import copy
 import logging
 from typing import Any, Dict, List
 
+from gc_core.settings import settings_of
 from gc_core.tools.schema_optional import (
     X_SUPPRESS_OPTIONAL_HINT,
     mark_property_optional,
@@ -17,18 +18,9 @@ from gc_core.tools.schema_optional import (
 logger = logging.getLogger(__name__)
 
 
-def resolve_inject_tool_fields(config_dict: Dict[str, Any]) -> Dict[str, str]:
-    """Нормализовать inject_tool_fields из config_dict."""
-    raw = config_dict.get("inject_tool_fields")
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        logger.warning(
-            "inject_tool_fields must be a mapping (field → description), got %s",
-            type(raw).__name__,
-        )
-        return {}
-
+def resolve_inject_tool_fields(config_dict: Any) -> Dict[str, str]:
+    """Нормализовать ``agent.inject_tool_fields`` из настроек."""
+    raw = settings_of(config_dict).agent.inject_tool_fields
     result: Dict[str, str] = {}
     for key, value in raw.items():
         if not isinstance(key, str):

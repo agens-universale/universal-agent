@@ -16,7 +16,7 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_generic_chat_completion_headers(self):
         ctx = SimpleNamespace(
             config_dict={
-                "x_cl_id": 12345,
+                "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {
                     "HTTP-Referer": "https://example.org",
@@ -34,7 +34,7 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_chat_completions_token_and_generic_headers(self):
         ctx = SimpleNamespace(
             config_dict={
-                "x_cl_id": 12345,
+                "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {
                     "Authorization": "Bearer sk-or-v1-token",
@@ -58,7 +58,7 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
 
         ctx = SimpleNamespace(
             config_dict={
-                "x_cl_id": 12345,
+                "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {
                     "Authorization": "Bearer chat-token"
@@ -78,7 +78,7 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
         """
         ctx = SimpleNamespace(
             config_dict={
-                "x_cl_id": 12345,
+                "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {
                     "x-session-id": "sympy__sympy-12419"

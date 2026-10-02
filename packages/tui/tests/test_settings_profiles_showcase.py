@@ -599,11 +599,27 @@ async def test_shadow_hint_shown_for_registry_without_profile(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
     app = app_mod.TuiApp(
-        config={**_base_dict(), "models": {"flash": {"url": "http://x"}}}
+        config={
+            **_base_dict(),
+            "models": {
+                "flash": {
+                    "url": "http://x",
+                    "authorization_header": "Bearer sk",
+                }
+            },
+        }
     )
     async with app.run_test() as pilot:
         scr = _mk_screen(
-            config={**_base_dict(), "models": {"flash": {"url": "http://x"}}},
+            config={
+                **_base_dict(),
+                "models": {
+                    "flash": {
+                        "url": "http://x",
+                        "authorization_header": "Bearer sk",
+                    }
+                },
+            },
             config_path=base_cfg,
         )
         app.push_screen(scr)

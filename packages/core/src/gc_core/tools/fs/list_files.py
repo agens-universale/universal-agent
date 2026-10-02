@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 from gc_core.backends.protocol import WalkOutputTooLargeError
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import (
-    _extract_config_dict,
+    _settings_source,
     resolve_tool_context,
 )
 from gc_core.security.read_guard import (
@@ -187,13 +187,11 @@ Examples:
         `extra_allowed` — программные exceptions (например, путь до skills).
         """
         context = resolve_tool_context(self)
-        config_dict = _extract_config_dict(
-            self, getattr(context, "ctx", None), {}
-        )
-        cfg = parse_read_guard_config(config_dict)
+        source = _settings_source(self, getattr(context, "ctx", None), {})
+        cfg = parse_read_guard_config(source)
         if not cfg.enabled:
             return None, None, None
-        skills_root = _resolve_skills_root(config_dict)
+        skills_root = _resolve_skills_root(source)
         extra_allowed = [skills_root] if skills_root else None
         return cfg, context.launch_root, extra_allowed
 

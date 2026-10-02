@@ -18,6 +18,7 @@ from typing import (
 )
 
 from gc_core.message_policy.user_message_policy import TECHNICAL_TYPE_TECHNICAL
+from gc_core.settings import settings_of
 from gc_core.utils.backend_errors import is_previous_response_cache_miss
 
 if TYPE_CHECKING:
@@ -162,10 +163,7 @@ class ExecutionPolicy:
         return is_previous_response_cache_miss(exc)
 
     def _get_backend_api_mode(self, ctx: Any) -> str:
-        cfg = getattr(ctx, "config_dict", {}) or {}
-        raw_mode = (
-            str(cfg.get("backend_api_mode", "responses")).strip().lower()
-        )
+        raw_mode = str(settings_of(ctx).backend.api_mode).strip().lower()
         if raw_mode in {"responses", "chat_completions"}:
             return raw_mode
         raise ValueError(f"Unsupported backend_api_mode: {raw_mode!r}")

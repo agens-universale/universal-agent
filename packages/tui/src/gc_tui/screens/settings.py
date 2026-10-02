@@ -9,6 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import replace
 
+from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -708,8 +709,13 @@ class SettingsScreen(Screen):
         from gc_tui.services.file_view import FileViewSettings
 
         return FileViewSettings.from_mapping(
-            (self._config or {}).get("tui_file_view")
+            self._cfg_settings().tui.file_view.model_dump()
         )
+
+    def _cfg_settings(self):
+        """Типизированный вид базы экрана (`self._config`) — для витрин. Правка и
+        запись config.yml по-прежнему идут сырыми документами."""
+        return settings_of(self._config or {})
 
     def _connection_editor(self):
         """Свежесмонтированный редактор секции «Подключение».
@@ -1302,7 +1308,7 @@ class SettingsScreen(Screen):
                 )  # адреса нет ни у записей, ни в «Подключении»
             return "✓", OK
         r = self._probe_config
-        model = self._config.get("model") or ""
+        model = self._cfg_settings().agent.model or ""
         if not model or r is None or r.models is None:
             return "—", DEEP_DIM
         ids = [m.id for m in r.models]
@@ -1389,7 +1395,9 @@ class SettingsScreen(Screen):
             return "—", DEEP_DIM
         if i == _PROFILES:
             return (
-                ("✓", OK) if self._config.get("profile") else ("—", DEEP_DIM)
+                ("✓", OK)
+                if runtime_of(self._config or {}).active_profile
+                else ("—", DEEP_DIM)
             )
         return "—", DEEP_DIM
 
@@ -1558,7 +1566,7 @@ class SettingsScreen(Screen):
         session = (getattr(self.app, "_session_overrides", None) or {}).get(
             "level"
         )
-        return str(session or (self._config or {}).get("level") or "default")
+        return str(session or self._cfg_settings().level or "default")
 
     # --- probe-инфраструктура (спека B2.1: слоты + generation) ---
     def _probe_args_from_config(self, config=None):
@@ -2228,15 +2236,15 @@ class SettingsScreen(Screen):
         выбранный профиль — более конкретная причина «эти поля не действуют»).
         Источник — effective_config(): сессионный выбор профиля обязан отразиться в
         подсказке немедленно, как и everywhere в TUI."""
-        cfg = (
-            self.app.effective_config()
-            if hasattr(self.app, "effective_config")
-            else self._config
+        loaded = (
+            self.app.current_settings()
+            if hasattr(self.app, "current_settings")
+            else settings_of(self._config or {})
         )
-        profile_name = cfg.get("profile") or None
+        profile_name = runtime_of(loaded).active_profile or None
         if profile_name:
             return f"действует профиль {profile_name} · эти поля — база для незаданного"
-        if cfg.get("models"):
+        if settings_of(loaded).models:
             return "действует реестр моделей · эти поля — база для незаданного"
         return None
 
@@ -2488,7 +2496,7 @@ class SettingsScreen(Screen):
                 fetch=self._voice_setup.list_models,
                 saved_token=str(raw_token or ""),
                 verify_ssl=self._voice_verify_ssl(),
-                config_proxy=self._config.get("proxy") or None,
+                config_proxy=self._cfg_settings().backend.proxy or None,
                 # Поле «URL» — со списком пресетов адреса (спека 2026-08-05 §3). Только
                 # облачная панель: локальная показывает адрес ФАКТОМ (readonly), и
                 # VoiceEndpointEditor сам не заводит список у readonly-поля.
@@ -2497,7 +2505,7 @@ class SettingsScreen(Screen):
                 ),
             )
         )
-        if self._config.get("proxy"):
+        if self._cfg_settings().backend.proxy:
             # Только облачная панель: локальный сервис на этой же машине и идёт мимо
             # прокси — упоминать его там было бы неправдой.
             frame.mount(
@@ -2516,14 +2524,7 @@ class SettingsScreen(Screen):
     def _voice_verify_ssl(self):
         """voice.verify_ssl ДЕЙСТВУЮЩЕГО конфига (там ключ уже нормализован из
         `verify-ssl` схемой) или True — проверять сертификат по умолчанию."""
-        voice = (
-            self._config.get("voice")
-            if isinstance(self._config, dict)
-            else None
-        )
-        if not isinstance(voice, dict) or "verify_ssl" not in voice:
-            return True
-        return voice["verify_ssl"]
+        return self._cfg_settings().voice.verify_ssl
 
     def _voice_fields_shown(self) -> bool:
         """Есть ли что показывать в полях: у локального режима без батарейки — нет."""
@@ -3490,7 +3491,7 @@ class SettingsScreen(Screen):
                 url,
                 token,
                 model,
-                config_proxy=self._config.get("proxy") or None,
+                config_proxy=self._cfg_settings().backend.proxy or None,
                 verify=verify_ssl,
             )
 

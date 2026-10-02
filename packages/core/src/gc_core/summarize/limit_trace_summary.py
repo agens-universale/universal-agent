@@ -16,6 +16,7 @@ from gc_core.execution.resources import (
     PromptResourceRequest,
     aload_prompt_resource,
 )
+from gc_core.settings import AppConfig, settings_of
 from gc_core.usage.account import UsageAccount
 
 _REASON_LABELS = {
@@ -62,17 +63,15 @@ def _tokens_spent(state: Any) -> Any:
         return "?"
 
 
-def _build_message(
-    state: Any, reason: str, config_dict: dict[str, Any]
-) -> str:
+def _build_message(state: Any, reason: str, settings: AppConfig) -> str:
     label = _REASON_LABELS.get(reason, reason)
     if reason == "step_limit":
         return f"Agent stopped: {label} ({state.steps}/{getattr(state, 'max_steps', '?')})."
     if reason == "tool_call_limit":
-        limit = config_dict.get("max_tool_calls")
+        limit = settings.agent.max_tool_calls
         return f"Agent stopped: {label} ({state.tool_calls}/{limit})."
     if reason == "token_limit":
-        limit = config_dict.get("session_token_limit")
+        limit = settings.agent.session_token_limit
         spent = _tokens_spent(state)
         return f"Agent stopped: {label} ({spent}/{limit})."
     return f"Agent stopped: {label}."
@@ -121,15 +120,6 @@ def _serialize_trace(state_messages: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _should_enable(config_dict: dict[str, Any]) -> bool:
-    raw = config_dict.get("limit_trace_summary")
-    if raw is None:
-        return True  # по умолчанию on
-    if isinstance(raw, bool):
-        return raw
-    return str(raw).strip().lower() in ("true", "1", "yes", "on")
-
-
 async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     """Возвращает JSON-строку envelope для limit-path.
 
@@ -139,16 +129,17 @@ async def abuild_limit_envelope(state: Any, reason: str, ctx: Any) -> str:
     Args:
         state: State с .messages, .steps, .tool_calls, .max_steps.
         reason: "step_limit" | "tool_call_limit" | "token_limit".
-        ctx: RunContext (нужен config_dict и auxiliary_llm).
+        ctx: RunContext (нужны настройки и auxiliary_llm).
 
     Returns:
         JSON-строка {"ok": false, "status", "message", "raw_trace_summary"}.
     """
-    config_dict = getattr(ctx, "config_dict", {}) or {}
-    message = _build_message(state, reason, config_dict)
+    settings = settings_of(ctx)
+    message = _build_message(state, reason, settings)
 
     raw_summary = ""
-    if _should_enable(config_dict):
+    # agent.limit_trace_summary — bool модели, по умолчанию on.
+    if settings.agent.limit_trace_summary:
         max_tokens = getattr(
             getattr(ctx, "auxiliary_llm", None), "max_tokens", None
         )

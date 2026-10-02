@@ -36,6 +36,27 @@ def effective_text_answer_mode(cfg: Dict[str, Any]) -> str:
     return str(cfg.get("tui_text_answer_mode") or "judge")
 
 
+def finish_gate_mode_of(settings: Any) -> str:
+    """Типизированный двойник `effective_finish_gate_mode` — то же правило
+    коллизии по явности полей (`is_explicit`) вместо плоских признаков."""
+    from gc_core.settings import is_explicit
+
+    mode = str(settings.tui.finish_gate_mode or "smart")
+    if is_explicit(settings, "tui.finish_gate_mode"):
+        return mode
+    if (
+        is_explicit(settings, "agent.strict_turn_finish_validation")
+        and not settings.agent.strict_turn_finish_validation
+    ):
+        return "off"
+    return "smart"
+
+
+def text_answer_mode_of(settings: Any) -> str:
+    """Типизированный двойник `effective_text_answer_mode`."""
+    return str(settings.tui.text_answer_mode or "judge")
+
+
 @dataclass(frozen=True)
 class SessionKey:
     """Переопределяемый ключ: dotted-имя (конфиг/метаданные), плоское имя

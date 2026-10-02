@@ -78,7 +78,7 @@ def test_propagate_is_off_by_default():
 def test_propagate_can_be_enabled():
     """С флагом записи всплывают в корневой логгер приложения."""
     cfg = dict(_CFG)
-    cfg["logging_propagate"] = True
+    cfg["logging_params"] = {"propagate": True}
     logger, *_ = create_run_logger(cfg, run_id="t5", agent_kind="main")
     assert logger.propagate is True
 

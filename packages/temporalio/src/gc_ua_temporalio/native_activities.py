@@ -25,6 +25,7 @@ from gc_core.project_memory.operations import (
     ProjectMemoryRequest,
 )
 from gc_core.run_preparation import PreparedPrompts, PromptPreparationRequest
+from gc_core.settings import settings_of
 from gc_core.state_preparation import PreparedState, StatePreparationRequest
 from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_durable import durable_store_capability
@@ -192,7 +193,7 @@ class NativeActivities:
         public = self.public_config(ctx.config_dict)
         config = getattr(public, "config_dict", public)
         prompts_request = PromptPreparationRequest.from_config(
-            config, verbose=bool(config.get("verbose", False))
+            config, verbose=bool(settings_of(ctx).agent.verbose)
         )
         prompts = await asyncio.to_thread(
             load_run_prompts, prompts_request, logger=ctx.logger

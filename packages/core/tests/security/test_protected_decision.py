@@ -29,4 +29,7 @@ def test_decisions(tmp_path, monkeypatch):
 
 def test_protection_enabled_default_true():
     assert protection_enabled({}) is True
-    assert protection_enabled({"protected_paths": {"enabled": False}}) is False
+    assert (
+        protection_enabled({"security.protected_paths": {"enabled": False}})
+        is False
+    )

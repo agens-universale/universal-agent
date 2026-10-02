@@ -616,6 +616,26 @@ SINGLE += [
     ),
 ]
 
+#: Случаи, чьё положение схема конфига НЕ выражает: значение отвергает модель
+#: (и на develop — та же схема), а ключ без поля в схеме не существует. Эталон
+#: снят правкой плоского словаря в обход схемы, и потребитель молча игнорировал
+#: такое значение — сверять тут нечего. Теперь настройки валидируются строго, и
+#: наблюдаемое поведение — громкий отказ сборки; его и проверяет
+#: ``test_unrepresentable_case_is_rejected_by_schema``.
+UNREPRESENTABLE = {
+    "limits/subagents_max_count_0": "agent.subagents_max_count >= 1",
+    "guards/write_guard_strict": "security.write_guard.mode: allow|ask|deny",
+    "guards/read_guard_strict": "security.read_guard.mode: allow|ask|deny",
+    "pair/read_guard_x_skills": "security.read_guard.mode: allow|ask|deny",
+    "logging/format_json": "logging.format: text|jsonl",
+    "logging/format_json_flat": "logging.format: text|jsonl",
+    "logging/propagate_on": "плоского ключа logging_propagate нет (в YAML — logging.propagate)",
+    "llm/max_tokens_small": "секции chat_completions.llm в схеме нет",
+    "llm/judge_max_tokens_small": "секции chat_completions.llm в схеме нет",
+    "llm/completion_kwargs": "секции chat_completions.llm в схеме нет",
+    "agent/inject_tool_fields": "agent.inject_tool_fields: {инструмент: имя поля}",
+}
+
 #: Ключи схемы, НЕ включённые в матрицу, и почему. Ведётся явно: «не покрыт»
 #: и «покрывать нечем» — разные вещи, и отличать их должен читатель, а не
 #: тот, кто однажды пересчитает покрытие и решит, что про них забыли.
@@ -747,6 +767,26 @@ NOT_IN_MATRIX = {
     "diff_tui.preview_context_lines": "только TUI",
     "diff_tui.full_file_max_lines": "только TUI",
     "diff_tui.max_diff_chars": "только TUI",
+    # --- единственный случай матрицы задавал значение, невыразимое схемой ----
+    #
+    # См. UNREPRESENTABLE: эталон develop снят правкой плоского словаря в обход
+    # схемы, и для этих листов валидного случая в нём нет — сверять нечего, а
+    # переснять эталон с этой ветки нельзя. Поведение покрыто наборами ниже.
+    "security.write_guard.mode": "в эталоне только невалидный strict; покрытие — security/test_guards_dual_mode, test_native_tool_effects",
+    "security.read_guard.mode": "в эталоне только невалидный strict; покрытие — security/test_guard_defaults, security/test_native_guard_probe",
+    "security.command_moderation.mode": "в эталоне только невалидный strict (лист mode); покрытие — test_command_moderation_config",
+    "security.url_policy.mode": "в эталоне только невалидный strict (лист mode); покрытие — security/test_guards_dual_mode",
+    "logging.format": "в эталоне только невалидный json; покрытие — cli/test_structured_output, test_logging_emission_dispatch3",
+    "logging.propagate": "в эталоне только несуществующий плоский logging_propagate (флаг не доходил); покрытие — test_log_handlers_injectable",
+    "agent.inject_tool_fields": "в эталоне только невалидная форма значения; покрытие — test_inject_tool_fields, test_schema_optional",
+    "chat_completions.auxiliary_llm.max_tokens": "в эталоне только несуществующая секция chat_completions.llm; покрытие — test_summary_llm_request",
+    "chat_completions.auxiliary_llm.judge_max_tokens": "в эталоне только несуществующая секция chat_completions.llm; покрытие — test_finish_gate_handoff_form",
+    "chat_completions.auxiliary_llm.completion_kwargs": "в эталоне только несуществующая секция chat_completions.llm; покрытие — test_summary_llm_request",
+    # --- читатель был скрыт в помощниках config_modules (KNOWN_UNREAD по ошибке)
+    "mcp.meta.recommended_mcp_manifest": "путь манифеста для gc-cli -a/install, не ход агента; покрытие — mcp/test_manifest_versions",
+    "project_memory.enable_project_memory_notice": "эталон develop случая не содержит; покрытие — test_project_memory_notice_policy",
+    "todo.reminder_steps": "эталон develop случая не содержит; покрытие — test_todo_reminder, test_todo_config",
+    "tui.stream_display": "только отображение TUI, не ход агента; покрытие — tui/test_tui_config",
 }
 
 

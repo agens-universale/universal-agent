@@ -7,6 +7,7 @@ import threading
 from typing import Any
 from urllib.parse import urlsplit
 
+from gc_core.settings import settings_of
 from gc_core.utils.url_addr import is_loopback
 from recommended_mcp.autostart import wait_daemon_url_ready
 from recommended_mcp.process_supervisor import (
@@ -53,8 +54,11 @@ def url_is_ours(config_dict: dict[str, Any], port: int) -> bool:
     `"localhost" in url` промахивался в обе стороны: адрес без пути и IPv6-форма
     считались чужими (автостарт молчал, а /settings показывал «облако» для своей же
     машины), а `http://localhost.чужой-домен.com:8735/…` — своим, и агент брался
-    поднимать локальный сервис под удалённый хост."""
-    url = str((config_dict.get("voice") or {}).get("url") or "")
+    поднимать локальный сервис под удалённый хост.
+
+    `config_dict` — то, что даёт `settings_of`: настройки окна или (переходно)
+    плоский словарь."""
+    url = str(settings_of(config_dict).voice.url or "")
     if not is_loopback(url):
         return False
     try:

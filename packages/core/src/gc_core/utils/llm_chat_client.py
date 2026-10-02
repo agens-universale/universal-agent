@@ -9,6 +9,7 @@ from gc_core.request_backend_policy import (
     arequest_chat_completions_with_policy,
 )
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
+from gc_core.settings import settings_of
 from gc_core.usage.account import category_for_request_label
 from gc_core.usage.context import usage_scope
 from gc_core.utils.backend_errors import is_model_unavailable_error
@@ -173,14 +174,14 @@ def _build_chat_completion_payload(
     payload_overrides: Optional[Dict[str, Any]] = None,
     resolved: Optional[ResolvedModel] = None,
 ) -> Dict[str, Any]:
-    cfg = getattr(ctx, "config_dict", {}) or {}
+    settings = settings_of(ctx)
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
     # finish-gate, компакция памяти) — инструменты не использует. Пустой
     # "tools": [] — бессмысленный шум; для plain-completion ключ опускаем.
     model = (
         resolved.model
         if resolved is not None
-        else (getattr(state, "default_model", None) or cfg.get("model"))
+        else (getattr(state, "default_model", None) or settings.agent.model)
     )
     payload: Dict[str, Any] = {
         "model": model,
@@ -190,7 +191,7 @@ def _build_chat_completion_payload(
         resolved, "use_max_tokens_param"
     )
     if use_max_tokens_param is NO_BACKEND_OVERRIDE:
-        use_max_tokens_param = cfg.get("use_max_tokens_param", False)
+        use_max_tokens_param = settings.backend.use_max_tokens_param
     if bool(use_max_tokens_param):
         payload["max_tokens"] = max_tokens
     else:
@@ -198,7 +199,7 @@ def _build_chat_completion_payload(
 
     extra = backend_override_value(resolved, "chat_completion_kwargs")
     if extra is NO_BACKEND_OVERRIDE:
-        extra = cfg.get("chat_completion_kwargs")
+        extra = settings.backend.chat_completion_kwargs
     if isinstance(extra, dict) and extra:
         for key, value in extra.items():
             if key in _PROTECTED_CHAT_COMPLETION_KEYS:
@@ -241,13 +242,8 @@ async def _asend_chat_completion_text(
     payload_overrides: Optional[Dict[str, Any]],
     resolved: Optional[ResolvedModel],
 ) -> ChatCompletionText:
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    log_params = cfg.get("logging_params")
-    full_log_backend = (
-        bool(log_params.get("full_log_backend", False))
-        if isinstance(log_params, dict)
-        else False
-    )
+    settings = settings_of(ctx)
+    full_log_backend = bool(settings.logging.full_log_backend)
 
     def _payload_factory(requested_max_tokens: int) -> Dict[str, Any]:
         return _build_chat_completion_payload(
@@ -263,13 +259,17 @@ async def _asend_chat_completion_text(
         resolved, "chat_completions_min_response_tokens"
     )
     min_response_tokens = _positive_int(
-        cfg.get("chat_completions_min_response_tokens")
+        settings.backend.chat_completions_min_response_tokens
         if _min_response_tokens_override is NO_BACKEND_OVERRIDE
         else _min_response_tokens_override,
         default=1024,
     )
     headers = await acreate_call_headers(state, ctx, resolved=resolved)
-    url = resolved.url if resolved is not None else cfg["completions_url"]
+    url = (
+        resolved.url
+        if resolved is not None
+        else settings.backend.completions_url
+    )
     (
         verify,
         cert,
@@ -277,7 +277,7 @@ async def _asend_chat_completion_text(
         timeout,
         config_proxy,
         retry_embedded_choice_errors,
-    ) = resolve_network_params(cfg, resolved)
+    ) = resolve_network_params(settings, resolved)
 
     usage_category = category_for_request_label(request_label)
     with usage_scope(

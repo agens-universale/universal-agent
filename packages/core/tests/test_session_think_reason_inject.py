@@ -31,9 +31,7 @@ def _inject_config(**overrides):
     cfg = {
         "use_local_subagents": False,
         "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": {},
         "stop_tools": [],
         "inject_tool_fields": {
             "reason": "Brief rationale (1–2 sentences): goal, why now, expected outcome."

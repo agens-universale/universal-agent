@@ -16,6 +16,7 @@ from gc_core.intent_guard.feedback import build_text_answer_reject_feedback
 from gc_core.intent_guard.guard import judge_available
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log import deserialize_list, records_to_jsonl_lines
+from gc_core.settings import runtime_of, settings_of
 
 
 @dataclass(frozen=True)
@@ -55,18 +56,18 @@ async def ashould_return_text_answer(
     """Принять ли текст-ответ как ответ хода — по режиму ``text_answer_mode``.
 
     Пустой текст → reject (любой режим). ``allow`` → accept без судьи. ``judge`` →
-    судья (только если доступна машинерия судейства, т.е. ``backend_api_mode ==
+    судья (только если доступна машинерия судейства, т.е. ``backend.api_mode ==
     "chat_completions"``; иначе deny-путь) — от тоггла /gate (finish-gate) НЕ зависит:
     accept → accept; reject → reject c фидбэком судьи; ошибка судьи → reject generic.
     ``deny`` / нет ключа → reject generic."""
     if not (assistant_text or "").strip():
         return TextAnswerDecision(False)
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    mode = cfg.get("text_answer_mode") if isinstance(cfg, dict) else None
+    # Режим — сигнал поверхности (только TUI), а не настройка: рантайм.
+    mode = runtime_of(ctx).text_answer_mode
     if mode == "allow":
         return TextAnswerDecision(True)
     if mode == "judge":
-        if not judge_available(cfg):
+        if not judge_available(settings_of(ctx)):
             return TextAnswerDecision(False)
         result = await ajudge_text_answer(ctx, state, assistant_text)
         if result is None:

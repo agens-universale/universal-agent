@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from gc_core import onboarding
 from gc_core import onboarding_fields as _of
+from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -327,7 +328,7 @@ class OnboardingScreen(Screen):
         note = onboarding.overriding_layer_note(
             config, self._config_path, ignore_profile=self._deactivate_profile
         )
-        if note and config.get("profile"):
+        if note and runtime_of(config).active_profile:
             note += self._NOTE_SETTINGS_TAIL
         return note
 
@@ -422,13 +423,19 @@ class OnboardingScreen(Screen):
         на подтверждении, «модель:» в ленте рядом с ним), и при `level: max` на одном
         экране стояли «модель default: <модель max>» и «модель max: <она же>». Слой
         профиля от этого никуда не девается — читается тот же `self._config`."""
+        backend = self._cfg_settings().backend
         return {
-            "completions_url": self._config.get("completions_url"),
+            "completions_url": backend.completions_url or None,
             "model": self._model_step_current(),
-            "Authorization": (
-                self._config.get("chat_completion_headers") or {}
-            ).get("Authorization"),
+            "Authorization": backend.chat_completion_headers.get(
+                "Authorization"
+            ),
         }
+
+    def _cfg_settings(self):
+        """Типизированный вид конфига мастера (`self._config` — резолвнутый
+        конфиг запуска)."""
+        return settings_of(self._config or {})
 
     def _summary_text(self) -> str:
         from gc_tui.services.onboarding_summary import summary_line
@@ -719,7 +726,7 @@ class OnboardingScreen(Screen):
                 current=self._values.get("model", ""),
                 endpoint=endpoint,
                 auth=auth,
-                verify=self._config.get("use_ssl", True),
+                verify=self._cfg_settings().backend.use_ssl,
                 fetch=self._fetch,
                 # Список приезжает воркером: до него метить нечего, после —
                 # курсор встаёт на помеченную. Футер обещает роль Enter — догоняем.
@@ -995,15 +1002,15 @@ class OnboardingScreen(Screen):
         Заглушка адреса — не адрес (`configured_endpoint`, то же правило, что у
         витрин шага): по ней не стучимся, а ведём себя как на чистой установке —
         адреса нет, списка нет, остаётся ручной ввод."""
+        backend = self._cfg_settings().backend
         endpoint = onboarding.configured_endpoint(
             self._values.get("completions_url")
-            or (self._config or {}).get("completions_url")
+            or backend.completions_url
+            or None
         )
         auth = self._values.get("Authorization")
         if auth is None:
-            auth = (
-                (self._config or {}).get("chat_completion_headers") or {}
-            ).get("Authorization")
+            auth = backend.chat_completion_headers.get("Authorization")
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
         return endpoint, auth
@@ -1064,7 +1071,7 @@ class OnboardingScreen(Screen):
                 current=current,
                 endpoint=endpoint,
                 auth=auth,
-                verify=(self._config or {}).get("use_ssl", True),
+                verify=self._cfg_settings().backend.use_ssl,
                 fetch=self._fetch,
                 input_id="onb-level-model",
                 on_loaded=self._refresh_footer,
@@ -1356,14 +1363,7 @@ class OnboardingScreen(Screen):
     def _voice_verify_ssl(self):
         """voice.verify_ssl ДЕЙСТВУЮЩЕГО конфига (тот же приём, что
         `SettingsScreen._voice_verify_ssl`) или True — проверять сертификат по умолчанию."""
-        voice = (
-            self._config.get("voice")
-            if isinstance(self._config, dict)
-            else None
-        )
-        if not isinstance(voice, dict) or "verify_ssl" not in voice:
-            return True
-        return voice["verify_ssl"]
+        return self._cfg_settings().voice.verify_ssl
 
     def _effective_proxy(self):
         """Прокси, известный мастеру ПРЯМО СЕЙЧАС — тот же приём, что праймит поле
@@ -1374,7 +1374,7 @@ class OnboardingScreen(Screen):
         снятый человеком прокси молча вернулся бы обратно из конфига."""
         proxy = self._values.get("proxy")
         if proxy is None:
-            proxy = (self._config or {}).get("proxy")
+            proxy = self._cfg_settings().backend.proxy
         return proxy
 
     def _mount_voice_fields(self, body) -> None:
@@ -1808,12 +1808,14 @@ class OnboardingScreen(Screen):
         else:
             auth = self._values.get("Authorization")
             if auth is None:
-                auth = (self._config.get("chat_completion_headers") or {}).get(
-                    "Authorization"
+                auth = (
+                    self._cfg_settings().backend.chat_completion_headers.get(
+                        "Authorization"
+                    )
                 )
         if auth == onboarding.TOKEN_SENTINEL:
             auth = None
-        verify = (self._config or {}).get("use_ssl", True)
+        verify = self._cfg_settings().backend.use_ssl
         self._probe_gen += 1
         gen = self._probe_gen
         self._set_conn_probe_line(Text("проверяю…", style=DEEP_DIM))
@@ -1978,7 +1980,7 @@ class OnboardingScreen(Screen):
         результат сообщаем toast'ом приложения. Сбой (и погасшее приложение) не валит
         финал онбординга — как и установки выше."""
         app = self.app
-        cfg = getattr(app, "_config", None) or {}
+        cfg = app.base_settings()
 
         def _work() -> None:
             from gc_tui.voice_runtime.autostart import ensure_voice_service

@@ -16,6 +16,7 @@ from gc_core.intent_guard.validation_result import (
     fail_open_validation_result,
     parse_validator_response,
 )
+from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_completion_kwargs,
@@ -210,18 +211,15 @@ async def avalidate_final_report_vs_user_intent(
         str(x) for x in (context_user_messages or []) if isinstance(x, str)
     ]
 
+    settings = settings_of(ctx)
     if trace_digest is None:
-        cfg = getattr(ctx, "config_dict", {}) or {}
         trace_digest = build_finish_gate_trace_digest(
             state=state,
-            cfg=cfg if isinstance(cfg, dict) else None,
+            cfg=settings,
         )
 
-    ctx_cfg = getattr(ctx, "config_dict", {}) or {}
     guard_prompt_path = (
-        ctx_cfg.get("chat_completions_intent_guard_prompt_path")
-        if isinstance(ctx_cfg, dict)
-        else None
+        settings.paths.chat_completions_intent_guard_prompt_path
     )
     system_prompt = await aload_prompt_resource(
         ctx,

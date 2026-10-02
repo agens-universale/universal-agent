@@ -7,19 +7,18 @@ from typing import Any, Optional
 
 from gc_core.backends.harbor import HarborBackend
 from gc_core.backends.local import LocalFsBackend
-from gc_core.backends.protocol import FsBackend
-from gc_core.config_modules.agent import (
-    exec_output_capture_max_chars_from_config_dict,
-    harbor_exec_init_from_config_dict,
-    walk_output_max_chars_from_config_dict,
-)
+from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS, FsBackend
+from gc_core.settings import runtime_of, settings_of
 
 _SUPPORTED = frozenset({"local", "harbor"})
 
 
 def parse_os_backend_kind(config_dict: dict) -> str:
-    """Return normalized ``os_backend`` kind (``local`` or ``harbor``)."""
-    raw = config_dict.get("os_backend", "local")
+    """Return normalized ``os_backend`` kind (``local`` or ``harbor``).
+
+    Вид бэкенда выбирает встраивающий: ``RuntimeEnv.os_backend`` (None — local).
+    """
+    raw = runtime_of(config_dict).os_backend or "local"
     if not isinstance(raw, str) or not raw.strip():
         kind = "local"
     else:
@@ -46,7 +45,9 @@ def resolve_os_backend(
     if override is not None:
         return override
 
-    cap = exec_output_capture_max_chars_from_config_dict(config_dict)
+    agent = settings_of(config_dict).agent
+    # Нормализацию (None → дефолт, нечисло и < 0 — ошибка) делает схема.
+    cap = agent.exec_output_capture_max_chars
     kind = parse_os_backend_kind(config_dict)
     if kind == "local":
         return LocalFsBackend(exec_output_capture_max_chars=cap)
@@ -60,10 +61,12 @@ def resolve_os_backend(
             environment,
             loop,
             exec_output_capture_max_chars=cap,
-            walk_output_max_chars=walk_output_max_chars_from_config_dict(
-                config_dict
+            walk_output_max_chars=(
+                agent.walk_output_max_chars
+                if agent.walk_output_max_chars > 0
+                else WALK_OUTPUT_MAX_CHARS
             ),
-            exec_init=harbor_exec_init_from_config_dict(config_dict),
+            exec_init=(agent.harbor_exec_init or "").strip() or None,
         )
 
     raise ValueError(f"unsupported os_backend: {kind!r}")

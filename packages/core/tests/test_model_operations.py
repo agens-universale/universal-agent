@@ -46,7 +46,6 @@ def _ctx(with_port, **config):
     ctx = SimpleNamespace(
         config_dict={
             "completions_url": "https://model.test/v1/chat/completions",
-            "agent_url": "https://model.test/v1/responses",
             "backend_request_timeout_sec": 600,
             "backend_api_mode": "chat_completions",
             **config,

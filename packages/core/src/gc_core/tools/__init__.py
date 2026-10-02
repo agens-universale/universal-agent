@@ -13,6 +13,7 @@ from gc_core.execution.contracts import (
     ToolResult,
 )
 from gc_core.execution.reducers import apply_state_delta, tool_state_view
+from gc_core.settings import AppConfig, LoadedSettings, runtime_of, settings_of
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
@@ -120,7 +121,7 @@ def _warn_unknown_filter_names(
 
 def apply_subagent_tools_filter(
     tools_data: Dict[str, Dict[str, Any]],
-    config_dict: Dict[str, Any],
+    config_dict: Any,
     *,
     logger: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
@@ -137,8 +138,9 @@ def apply_subagent_tools_filter(
     раньше: служебное ядро возвращается только если оно ещё есть во входящем
     наборе, снятое им не восстанавливаем.
     """
-    allow_raw = config_dict.get(SUBAGENT_TOOLS_ALLOW_KEY)
-    stop_raw = config_dict.get(SUBAGENT_TOOLS_STOP_KEY)
+    runtime = runtime_of(config_dict)
+    allow_raw = runtime.subagent_tools_allow
+    stop_raw = runtime.subagent_tools_stop
     allow = set(allow_raw) if allow_raw is not None else None
     stop = set(stop_raw or ())
     if allow is None and not stop:
@@ -271,12 +273,15 @@ def _finish_tools_data(
     for k, v in mcp_tools_data.items():
         tools_data[k] = v
 
-    local_subagents_cfg = config_dict.get("use_local_subagents", False)
-    backend_mode = (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+    # Настройки — один раз и до реестра субагентов: фильтры и спеки ниже
+    # читают их отсюда, а не конвертируют config_dict заново.
+    loaded = LoadedSettings(
+        settings=settings_of(config_dict), runtime=runtime_of(config_dict)
     )
+    settings = loaded.settings
+    backend_mode = settings.backend.api_mode.strip().lower()
     if (
-        subagents_enabled(local_subagents_cfg)
+        subagents_enabled(settings.agent.use_local_subagents)
         and backend_mode == "chat_completions"
     ):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
@@ -296,18 +301,16 @@ def _finish_tools_data(
     if registered_names is not None:
         registered_names[:] = list(tools_data)
 
-    tools_data = _apply_stop_tools(tools_data, config_dict)
-    tools_data = apply_subagent_tools_filter(
-        tools_data, config_dict, logger=logger
-    )
+    tools_data = _apply_stop_tools(tools_data, loaded)
+    tools_data = apply_subagent_tools_filter(tools_data, loaded, logger=logger)
 
     # Логирование оставляем модульным, так как build_tools_data вызывается
     # при создании RunContext, когда logger ещё не привязан к контексту.
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
 
-    openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
-    send_tool_strict = bool(config_dict.get("send_tool_strict", True))
-    inject_tool_fields = resolve_inject_tool_fields(config_dict)
+    openai_strict = settings.backend.openai_strict_tools_schema
+    send_tool_strict = settings.backend.send_tool_strict
+    inject_tool_fields = resolve_inject_tool_fields(loaded)
 
     # Бэкенд требует parameters.required — нормализуем все spec'и
     for v in tools_data.values():
@@ -395,6 +398,17 @@ def _config_dict_for_call(
     return cfg if isinstance(cfg, dict) else {}
 
 
+def _settings_for_call(
+    ctx: Optional[Any], config_dict: Dict[str, Any]
+) -> AppConfig:
+    """Типизированные настройки вызова: из ``ctx.settings``, иначе из плоского вида."""
+    if ctx is not None and isinstance(
+        getattr(ctx, "settings", None), (AppConfig, LoadedSettings)
+    ):
+        return settings_of(ctx)
+    return settings_of(config_dict)
+
+
 def _logger_for_call(
     ctx: Optional[Any],
 ) -> logging.Logger | logging.LoggerAdapter:
@@ -471,7 +485,7 @@ def _prepare_tool_call(
 
     - tools_data_ — явный словарь tools_data (обычный путь в тестах/утилитах);
     - ctx — RunContext; если передан и tools_data_ не задан, берём tools_data из ctx.
-      Также из ctx.config_dict читаются use_server_subagents и server_tool_prefix.
+      Также из настроек ctx читаются use_server_subagents и server_tool_prefix.
     """
     if tools_data_ is None:
         if ctx is None or not hasattr(ctx, "tools_data"):
@@ -482,8 +496,9 @@ def _prepare_tool_call(
 
     # Настройки server subagents
     config_dict = _config_dict_for_call(ctx, kwargs)
-    use_server_subagents = config_dict.get("use_server_subagents", False)
-    server_tool_prefix = config_dict.get("server_tool_prefix")
+    settings = _settings_for_call(ctx, config_dict)
+    use_server_subagents = settings.agent.use_server_subagents
+    server_tool_prefix = settings.agent.server_tool_prefix
 
     if (
         use_server_subagents
@@ -492,7 +507,7 @@ def _prepare_tool_call(
     ):
         return f"{tool_name} call"
 
-    local_subagents_cfg = config_dict.get("use_local_subagents", False)
+    local_subagents_cfg = settings.agent.use_local_subagents
     # Отдельная сверка со списком не нужна: реестр уже отдаёт только разрешённых
     # кастомных, поэтому is_subagent_tool на отфильтрованном вернёт False.
     if subagents_enabled(local_subagents_cfg) and is_subagent_tool(

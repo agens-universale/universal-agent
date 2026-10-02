@@ -5,10 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional, Sequence
 
-from gc_core.config_modules.diff_tui import (
-    DEFAULT_FULL_FILE_MAX_LINES,
-    DEFAULT_PREVIEW_CONTEXT_LINES,
-)
+from gc_core.settings import settings_of
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -105,21 +102,19 @@ def _service_from_config(
     system_id: Optional[str] = None,
     thread_id: Optional[str] = None,
 ) -> DiffService:
-    wg = config.get("write_guard") or {}
-    dt = config.get("diff_tui") or {}
-    protected = config.get("protected_paths") or {}
+    """`config` — то, что принимает `settings_of`: настройки окна или
+    (переходно) плоский словарь."""
+    settings = settings_of(config)
+    security = settings.security
+    dt = settings.diff_tui
     return DiffService(
         launch_root,
-        extra_paths=list(wg.get("extra_paths") or []),
-        protected_extra=list(protected.get("extra") or []),
-        cache_max_orig=int(dt.get("cache_max_orig", 500)),
-        preview_context_lines=int(
-            dt.get("preview_context_lines", DEFAULT_PREVIEW_CONTEXT_LINES)
-        ),
-        full_file_max_lines=int(
-            dt.get("full_file_max_lines", DEFAULT_FULL_FILE_MAX_LINES)
-        ),
-        max_diff_chars=int(dt.get("max_diff_chars", 100_000)),
+        extra_paths=list(security.write_guard.extra_paths),
+        protected_extra=list(security.protected_paths.extra),
+        cache_max_orig=dt.cache_max_orig,
+        preview_context_lines=dt.preview_context_lines,
+        full_file_max_lines=dt.full_file_max_lines,
+        max_diff_chars=dt.max_diff_chars,
         emit_notices=True,
         threads_dir=threads_dir,
         system_id=system_id,

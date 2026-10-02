@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+import pytest
 from gc_core.config import load_config
 from gc_core.summarize.config import (
     parse_summary_trigger_chars,
@@ -9,6 +10,7 @@ from gc_core.summarize.config import (
     parse_summary_turn_end_trigger_tokens,
     summary_mid_turn_enabled,
 )
+from pydantic import ValidationError
 
 
 def test_parse_turn_end_reads_normalized_value_only():
@@ -53,7 +55,8 @@ def test_turn_end_default_sixty_percent_via_load_config():
 
 def test_parse_trigger_tokens_broken_value_is_zero():
     assert parse_summary_trigger_tokens({"summary_params": {}}) == 0
-    assert (
+    # Нечисло отсекает схема настроек (строгая конвертация плоского вида).
+    with pytest.raises(ValidationError):
         parse_summary_trigger_tokens(
             {
                 "summary_params": {
@@ -61,8 +64,6 @@ def test_parse_trigger_tokens_broken_value_is_zero():
                 }
             }
         )
-        == 0
-    )
     assert (
         parse_summary_turn_end_trigger_tokens(
             {

@@ -320,7 +320,10 @@ def _run_touching_instructions(tmp_path):
 
     class _Tool(_Blocked):
         _ctx = _ctx(
-            {"launch_root": str(tmp_path), "gc_protection": {"enabled": True}}
+            {
+                "launch_root": str(tmp_path),
+                "security.protected_paths": {"enabled": True},
+            }
         )
 
         @enforce_command_guard(

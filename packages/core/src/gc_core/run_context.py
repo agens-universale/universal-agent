@@ -213,6 +213,12 @@ def assemble_run_context(
         summary_trace_sink=bindings.summary_trace_sink,
         collect_garbage=bindings.collect_garbage,
     )
+    # Настройки контекста — из того же снимка, что `config_dict`: durable-сборка
+    # (Temporal) получает только его. Локальная сборка затем ставит настоящие.
+    from gc_core.settings import settings_from_flat
+
+    loaded = settings_from_flat(prepared.config_dict)
+    ctx.settings, ctx.runtime = loaded.settings, loaded.runtime
     ctx.is_tui = prepared.is_tui
     return ctx
 
@@ -374,7 +380,12 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             guard_probe=guard_probe,
             tool_effect=tool_effect,
         )
-        ctx.settings, ctx.runtime = settings, runtime
+        if settings is not None:
+            ctx.settings, ctx.runtime = settings, runtime
+        elif runtime is not None:
+            # Плоский словарь (переходно): настройки уже собраны из снимка при
+            # сборке, явный рантайм вызывающего — главнее.
+            ctx.runtime = runtime
         return ctx
     except BaseException as exc:
         from gc_core.utils.logging_module import release_run_logger

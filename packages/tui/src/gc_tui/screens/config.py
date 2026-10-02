@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 from textual import events
 from textual.app import ComposeResult
@@ -101,11 +102,12 @@ def _effective_model_name(config: dict) -> str:
     from gc_core.model_router import ModelRouter
     from gc_core.onboarding import MODEL_SENTINEL
 
-    name = config.get("model")
+    settings = settings_of(config)
+    name = settings.agent.model
     try:
         resolved = ModelRouter(
             config,
-            level_provider=lambda: config.get("level") or "default",
+            level_provider=lambda: settings.level or "default",
         ).resolve("main", check_breaker=False)
         name = resolved.alias or resolved.model
     except Exception:
@@ -115,8 +117,8 @@ def _effective_model_name(config: dict) -> str:
 
 def _profile_header_text(config: dict, profile_source: str | None) -> Text:
     """Спека §12.3a: «профиль: work (проектный) · уровень: default · модель: glm-local»."""
-    profile = config.get("profile") or None
-    level = config.get("level") or "default"
+    profile = runtime_of(config).active_profile or None
+    level = settings_of(config).level or "default"
     model = _effective_model_name(config)
     t = Text()
     t.append("профиль: ", style=DIM)

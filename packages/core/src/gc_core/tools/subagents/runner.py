@@ -1022,6 +1022,19 @@ class SubagentRunner:
 
         return FrozenConfigDict(child_config)
 
+    def _build_child_runtime(self, child_config):
+        """Рантайм ребёнка: рантайм родителя + область инструментов из его файла."""
+        from gc_core.settings import RuntimeEnv
+
+        parent = getattr(self._ctx, "runtime", None) or RuntimeEnv()
+        allow = child_config.get(SUBAGENT_TOOLS_ALLOW_KEY)
+        return parent.with_values(
+            subagent_tools_allow=tuple(allow) if allow is not None else None,
+            subagent_tools_stop=tuple(
+                child_config.get(SUBAGENT_TOOLS_STOP_KEY) or ()
+            ),
+        )
+
     def _build_child_settings(self):
         """Типизированные настройки ребёнка: настройки родителя без локальных
         субагентов (тот же запрет, что ``use_local_subagents`` в плоском виде).
@@ -1312,7 +1325,7 @@ class SubagentRunner:
         child_ctx = RunContext(
             config_dict=child_config,
             settings=self._build_child_settings(),
-            runtime=getattr(self._ctx, "runtime", None),
+            runtime=self._build_child_runtime(child_config),
             run_id=child_run_id,
             # config_dict наследуется дословно через child_config, но поле ctx
             # собирается руками и НЕ наследуется автоматически — без этой строки

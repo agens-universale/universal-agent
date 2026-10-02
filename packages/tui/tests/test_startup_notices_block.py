@@ -17,7 +17,7 @@ async def test_startup_block_collapsed_shows_max_three(tmp_path):
         "stop_tools": ["bogus1", "bogus2"],
         "agentsmd_override": True,
         "agent_md_path": "/some/agent.md",
-        "deprecated_keys_used": ["backend.stream"],
+        "stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), config=cfg
@@ -41,7 +41,7 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
     cfg = {
         "model": "M",
         "stop_tools": ["bogus1"],
-        "deprecated_keys_used": ["backend.stream"],
+        "stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), config=cfg
@@ -246,7 +246,7 @@ async def test_warning_toasts_fire_on_change_then_silent(
     cfg = {
         "model": "M",
         "stop_tools": ["bogus1"],
-        "deprecated_keys_used": ["backend.stream"],
+        "stream": True,  # устаревший ключ задан явно → deprecated_key
     }
 
     t1 = []
@@ -283,7 +283,7 @@ async def test_card_readiness_always_plain(tmp_path):
     cfg = {
         "model": "M",
         "stop_tools": ["bogus1"],
-        "deprecated_keys_used": ["backend.stream"],
+        "stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), config=cfg

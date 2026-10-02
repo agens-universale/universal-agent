@@ -22,7 +22,7 @@ def minimal_config_dict(monkeypatch):
         "abuild_tools_data",
         as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
-    return {"model": "M", "level": "max"}
+    return {"model": "M", "level": "max", "save_logs": False}
 
 
 def _snapshot(raw: dict) -> dict:

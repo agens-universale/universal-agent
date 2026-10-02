@@ -25,9 +25,9 @@ def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
         "write_guard": {"enabled": False},
     }
     if protection_enabled:
-        cfg["protected_paths"] = {"enabled": True}
+        cfg["security.protected_paths"] = {"enabled": True}
     else:
-        cfg["protected_paths"] = {"enabled": False}
+        cfg["security.protected_paths"] = {"enabled": False}
     if command_moderation:
         cfg["command_moderation"] = {"enabled": True, "mode": "deny"}
     return types.SimpleNamespace(

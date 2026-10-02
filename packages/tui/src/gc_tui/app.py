@@ -218,6 +218,8 @@ class TuiApp(App):
         # (ключ, LoadedSettings, плоский вид): effective_config() зовётся каждый
         # кадр, а наложение сессии — это валидация модели.
         self._effective_cache = None
+        # Окно-словарь: (снимок словаря, LoadedSettings) — см. `_flat_as_settings`.
+        self._flat_settings_cache: list = []
         # Профиль, выбранный флагом запуска `--profile` (`""` — «без профиля»), либо
         # None — флага не было. Тот же оверрайд, что main() отдал загрузчику на
         # старте: каждое перечитывание (`reload_config`) обязано отдавать его снова,
@@ -363,7 +365,7 @@ class TuiApp(App):
         поднимается."""
         from gc_tui.voice_runtime.autostart import ensure_voice_service
 
-        cfg = self._config
+        cfg = self.base_settings()
 
         def _work() -> None:
             try:
@@ -549,7 +551,7 @@ class TuiApp(App):
         override = self._session_overrides.get("profile")
         if override:
             return override
-        return (self._config or {}).get("profile") or None
+        return self.base_settings().runtime.active_profile or None
 
     def _compute_mtime_set(self) -> dict:
         """Снимок мтайм-набора ДЕЙСТВУЮЩЕГО указателя (спека §3.3) — только
@@ -670,7 +672,7 @@ class TuiApp(App):
             self._settings.runtime.launch_root if self._settings else None
         )
         if previous is None:
-            previous = (self._config or {}).get("launch_root")
+            previous = self.base_settings().runtime.launch_root
         return apply_tui_runtime(loaded, launch_root=previous)
 
     def _notify_screen_config_changed(self) -> None:
@@ -742,6 +744,46 @@ class TuiApp(App):
         зовётся на каждый кадр; здесь — только выдача базы при открытии экрана."""
         return self._config or {}
 
+    def current_settings(self):
+        """Действующие настройки окна (`LoadedSettings`: база + сессия) — точка
+        типизированного чтения для экранов, сервисов и виджетов.
+
+        Окно, собранное плоским словарём (переходно, тесты), отдаёт его строгую
+        конвертацию; результат кэшируется по содержимому — витрины зовут это
+        каждый кадр, а конвертация — валидация модели."""
+        loaded = self.effective_settings()
+        if loaded is not None:
+            return loaded
+        return self._flat_as_settings(self.effective_config())
+
+    def base_settings(self):
+        """Типизированный двойник `screen_config()`: база окна без сессионного
+        слоя (то, что правит /settings и что открывают экраны)."""
+        if self._settings is not None:
+            return self._settings
+        return self._flat_as_settings(self._config or {})
+
+    def _flat_as_settings(self, flat: dict):
+        """Плоский словарь окна-словаря → `LoadedSettings`, с кэшем по значению:
+        тесты подменяют `app._config` целиком и правят его на месте, поэтому
+        ключ — копия содержимого, а не id."""
+        import copy
+
+        from gc_core.settings import settings_from_flat
+
+        cache = self._flat_settings_cache
+        for snapshot, loaded in cache:
+            if snapshot == flat:
+                return loaded
+        loaded = settings_from_flat(flat)
+        try:
+            snapshot = copy.deepcopy(dict(flat))
+        except Exception:
+            return loaded
+        # Два слота: база и действующий вид чередуются в одном кадре.
+        self._flat_settings_cache = [(snapshot, loaded)] + cache[:1]
+        return loaded
+
     def effective_config(self) -> dict:
         """Конфиг, который видят и UI, и агент: база + сессионные переопределения.
 
@@ -792,7 +834,7 @@ class TuiApp(App):
         """Типизированный двойник `_session_base_config`: база окна либо её
         пере-сборка под выбранным в сессии профилем."""
         override_name = self._session_overrides.get("profile")
-        base_name = self._config.get("profile") or None
+        base_name = self._settings.runtime.active_profile or None
         if override_name is None or override_name == (base_name or ""):
             return self._settings
         return self._profile_remerge_settings(override_name)
@@ -856,17 +898,16 @@ class TuiApp(App):
         loaded = self._with_tui_runtime(apply_cli_overrides(loaded))
         self._session_profile_cache = (key, loaded)
         self._maybe_notice_profile_activation(
-            name, loaded.profile_meta, _flat(loaded)
+            name, loaded.profile_meta, loaded
         )
         return loaded
 
-    def _maybe_notice_profile_activation(
-        self, name: str, meta, cfg: dict
-    ) -> None:
+    def _maybe_notice_profile_activation(self, name: str, meta, cfg) -> None:
         """Спека §3.5: первая активация ПРОЕКТНОГО профиля в сессии — notice с
         файлом и урлами моделей: файл приезжает с клоном репозитория и уводит
         запросы на свои адреса — пользователь должен видеть это сам, не только в
-        логах провайдера."""
+        логах провайдера. `cfg` — настройки собранного стека (`LoadedSettings`;
+        переходно и плоский словарь)."""
         ref = meta.ref
         if (
             ref is None
@@ -875,13 +916,11 @@ class TuiApp(App):
         ):
             return
         self._profile_notice_seen.add(name)
-        models = cfg.get("models") or {}
+        from gc_core.settings import settings_of
+
+        models = settings_of(cfg).models
         urls = sorted(
-            {
-                str(entry.get("url"))
-                for entry in models.values()
-                if entry.get("url")
-            }
+            {str(entry.url) for entry in models.values() if entry.url}
         )
         urls_text = ", ".join(urls) if urls else "—"
         push_runtime_notice(
@@ -907,7 +946,7 @@ class TuiApp(App):
         name = self._session_overrides.get("profile")
         if not name:
             return
-        base_name = (self._config or {}).get("profile") or None
+        base_name = self.base_settings().runtime.active_profile or None
         if name == base_name:
             return
         try:
@@ -973,7 +1012,7 @@ class TuiApp(App):
 
         Снятие (`name == ""`) пробы не знает — это дверь наружу, и судить её по
         сборке снимаемого значило бы запереть человека внутри битого выбора."""
-        base_name = (self._config or {}).get("profile") or None
+        base_name = self.base_settings().runtime.active_profile or None
         if name and name != base_name:
             self.probe_profile_assembly(name)
         old_effective = self.effective_config()
@@ -1083,7 +1122,7 @@ class TuiApp(App):
         пересборки executor."""
         if "level" in self._session_overrides:
             return self._session_overrides["level"]
-        return (self._config or {}).get("level") or "default"
+        return self.base_settings().settings.level or "default"
 
     def active_profile_ref(self):
         """`ProfileRef` действующего (эффективного, сессионно-осознанного) профиля
@@ -1095,7 +1134,7 @@ class TuiApp(App):
 
         from gc_core.config_modules.profiles import find_active_ref
 
-        name = self.effective_config().get("profile") or None
+        name = self.current_settings().runtime.active_profile or None
         return find_active_ref(
             name, Path(os.getcwd()), Path(self._config_path or "")
         )
@@ -1380,6 +1419,7 @@ class TuiApp(App):
             cli_forces_legacy_model,
         )
         from gc_core.run_context import acreate_run_context
+        from gc_core.settings import settings_of
 
         from gc_tui.services.mcp_progress import McpProgress
         from gc_tui.toggles import tui_agent_settings
@@ -1395,7 +1435,7 @@ class TuiApp(App):
             loaded = cfg
         auth = build_auth_connector(cfg)
         progress = McpProgress()
-        progress.begin(list((cfg.get("mcp-servers") or {}).keys()))
+        progress.begin(list(settings_of(loaded).mcp.servers))
         self._mcp_progress = progress
         from gc_tui.services.stream_pump import STREAM_REFRESH_MS, StreamPump
 
@@ -1529,17 +1569,24 @@ class TuiApp(App):
 
     def _startup_notices(self) -> List[Notice]:
         """Стартовые уведомления — единая сборка для полного списка и для бейджей."""
+        from gc_core.settings import is_explicit
+
         cfg = self._config or {}
+        loaded = self.base_settings()
         return collect_startup_notices(
             cfg,
             all_builtin_tool_names(cfg),
             self._mcp_status,
             is_tui=True,
             known_tool_names=getattr(self, "_registered_tool_names", None),
-            extra=voice_notices(cfg),
-            deprecated_keys_used=cfg.get("deprecated_keys_used"),
+            extra=voice_notices(loaded),
+            deprecated_keys_used=(
+                ["backend.stream"]
+                if is_explicit(loaded.settings, "backend.stream")
+                else []
+            ),
             upgrade_info=self._upgrade_info,
-            compat_notices=cfg.get("compat_notices"),
+            compat_notices=list(loaded.runtime.notices),
         )
 
     def _update_notice(self) -> List[Notice]:

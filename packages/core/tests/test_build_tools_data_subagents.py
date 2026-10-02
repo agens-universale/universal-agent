@@ -29,9 +29,7 @@ def _base_config(**overrides):
     cfg = {
         "use_local_subagents": False,
         "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
     }
     cfg.update(overrides)
     return cfg

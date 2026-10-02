@@ -10,9 +10,6 @@ from typing import Any, Callable, Sequence
 
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.security import validate_command_moderation_mode
-from gc_core.config_modules.strip_tags_projection import (
-    projection_tags_from_config,
-)
 from gc_core.constants.tool_names import EXEC_PYTHON_NAME
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.message_projection import project_text_for_model
@@ -25,11 +22,14 @@ from gc_core.security.dual_wrapper import AwaitOnCaller, OffLoop, dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.path_policy import (
     ToolSecurityContext,
-    _extract_config_dict,
+    _is_flat_source,
+    _setting_or,
+    _settings_source,
     audit_policy_decision,
     resolve_tool_context,
 )
 from gc_core.security.protected_paths import protected_paths
+from gc_core.settings import AppConfig, LoadedSettings, settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
     auxiliary_llm_completion_kwargs,
@@ -448,22 +448,26 @@ def moderate_command_execution(
         # свой пул httpx и новое TLS-рукопожатие на каждый `exec_command`.
         def _flow(*args: Any, **kwargs: Any):
             context = resolve_tool_context(*args, **kwargs)
-            # Если в config_dict отсутствует блок command_moderation вообще —
-            # модерация не сконфигурирована, пропускаем (legacy / unit-test поведение,
-            # симметрично write_guard.enabled default'у).
-            _cfg = _extract_config_dict(
+            # Если в плоском config_dict нет блока command_moderation (или в нём
+            # нет enabled) — модерация не сконфигурирована, пропускаем (legacy /
+            # unit-test поведение, симметрично write_guard.enabled default'у).
+            # Runtime-fallback — OFF (судья не вызывается). На нормальном пути
+            # настройки несут command_moderation из pydantic (secure-by-default
+            # enabled=True), поэтому fallback достижим лишь в обход load_config
+            # (bespoke/тест-конфиги), а не в проде.
+            _source = _settings_source(
                 args[0] if args else None,
                 getattr(context, "ctx", None),
                 kwargs,
             )
-            cm_cfg = _cfg.get("command_moderation")
-            if not isinstance(cm_cfg, dict):
-                return (yield)
-            # Runtime-fallback при отсутствии enabled — OFF (судья не вызывается).
-            # На нормальном пути load_config кладёт command_moderation из pydantic
-            # (secure-by-default enabled=True), поэтому fallback достижим лишь в
-            # обход load_config (bespoke/тест-конфиги), а не в проде.
-            if not bool(cm_cfg.get("enabled", False)):
+            if not bool(
+                _setting_or(
+                    settings_of(_source),
+                    _is_flat_source(_source),
+                    "security.command_moderation.enabled",
+                    False,
+                )
+            ):
                 return (yield)
             try:
                 payload = _extract_payload(
@@ -760,6 +764,17 @@ def _join_reasons(reasons: list[str], *, default: str) -> str:
     return "; ".join(reason for reason in reasons if reason) or default
 
 
+def _judge_settings_source(self_obj: Any, ctx: Any) -> Any:
+    """Настройки для судьи: ctx (типизированные или его ``config_dict``), иначе тул."""
+    if isinstance(getattr(ctx, "settings", None), (AppConfig, LoadedSettings)):
+        return ctx
+    return (
+        getattr(ctx, "config_dict", None)
+        or getattr(self_obj, "_config_dict", None)
+        or {}
+    )
+
+
 def _default_judge_client(
     args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> Callable[[dict[str, Any]], Any]:
@@ -775,14 +790,10 @@ def _default_judge_client(
     self_obj = args[0] if args else None
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
-    cfg = (
-        getattr(ctx, "config_dict", None)
-        or getattr(self_obj, "_config_dict", None)
-        or {}
-    )
+    settings = settings_of(_judge_settings_source(self_obj, ctx))
     configured = getattr(ctx, "model_transport_configured", None)
     if configured is None:
-        configured = bool(cfg.get("completions_url"))
+        configured = bool(settings.backend.completions_url)
     if ctx is None or state is None or not configured:
         raise JudgeUnavailable("chat/completions context is not configured")
 
@@ -808,7 +819,7 @@ def _default_judge_client(
             consumer="command_judge",
             payload_overrides=auxiliary_llm_completion_kwargs(ctx),
         )
-        tags = projection_tags_from_config(cfg)
+        tags = tuple(str(tag) for tag in settings.strip_tags_projection.tags)
         return _parse_judge_json(
             raw_text,
             logger=getattr(ctx, "logger", None),

@@ -156,9 +156,7 @@ class TestChildCtxCopiesThreadIdentity:
             "logs_dump_dir": str(tmp_path),
             "use_local_subagents": True,
             "backend_api_mode": "chat_completions",
-            "enabled_tools": [],
             "skills_data_path": "",
-            "mcp_servers": [],
             "model": "m",
             "system_prompt_id": "p",
             "chat_completions_params": {
@@ -224,9 +222,7 @@ async def _child_ctx_of_parent_with(tmp_path, *, threads_dir: str):
         "logs_dump_dir": str(tmp_path),
         "use_local_subagents": True,
         "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
         "model": "m",
         "system_prompt_id": "p",
         "chat_completions_params": {

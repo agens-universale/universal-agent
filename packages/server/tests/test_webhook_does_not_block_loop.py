@@ -74,7 +74,9 @@ async def test_context_build_leaves_the_loop_free(blocking_ctx):
         await asyncio.sleep(0.05)
 
         started = time.monotonic()
-        await blocking_ctx.acreate_run_context({}, auth_connector=None)
+        await blocking_ctx.acreate_run_context(
+            {"save_logs": False}, auth_connector=None
+        )
         elapsed = time.monotonic() - started
 
         stop.set()

@@ -25,7 +25,7 @@ from gc_core.config_modules.fs_tools import (
 )
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.security.path_policy import (
-    _extract_config_dict,
+    _settings_source,
     resolve_tool_context,
 )
 from gc_core.security.read_guard import (
@@ -35,6 +35,7 @@ from gc_core.security.read_guard import (
     enforce_read_guard,
     parse_read_guard_config,
 )
+from gc_core.settings import settings_of
 from gc_core.tools.fs.agent_hidden import is_agent_hidden
 from gc_core.tools.fs.cooperative import LoopYielder
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -334,16 +335,18 @@ class FindInFiles(AbstractSimpleTool):
 
     def _resolve_config(
         self,
-    ) -> Tuple[Any, FsFindInFilesConfig, Dict[str, Any]]:
-        rg_context = resolve_tool_context(self)
-        cfg_dict = _extract_config_dict(
-            self, getattr(rg_context, "ctx", None), {}
-        )
-        cfg_dict = cfg_dict if isinstance(cfg_dict, dict) else {}
-        return rg_context, parse_find_in_files_config(cfg_dict), cfg_dict
+    ) -> Tuple[Any, FsFindInFilesConfig, Any]:
+        """(контекст гарда, ``fs_tools.find_in_files``, источник настроек).
 
-    def _resolve_max_bytes(self, cfg_dict: Dict[str, Any]) -> int:
-        return fs_find_in_files_max_bytes(cfg_dict)
+        Источник — то, что знает ``settings_of`` (ctx с настройками или,
+        переходно, плоский словарь); из него же read_guard и лимит размера.
+        """
+        rg_context = resolve_tool_context(self)
+        source = _settings_source(self, getattr(rg_context, "ctx", None), {})
+        return rg_context, settings_of(source).fs_tools.find_in_files, source
+
+    def _resolve_max_bytes(self, cfg_source: Any) -> int:
+        return fs_find_in_files_max_bytes(cfg_source)
 
     def _candidate_limit_for_mode(
         self, mode: PatternMode, config: FsFindInFilesConfig
@@ -488,8 +491,8 @@ class FindInFiles(AbstractSimpleTool):
         if query_error is not None:
             return query_error
 
-        rg_context, config, cfg_dict = self._resolve_config()
-        max_bytes = self._resolve_max_bytes(cfg_dict)
+        rg_context, config, cfg_source = self._resolve_config()
+        max_bytes = self._resolve_max_bytes(cfg_source)
 
         limit_requested = limit if limit is not None else config.default_limit
         limit_eff = min(limit_requested, config.max_total_matches)
@@ -531,7 +534,7 @@ class FindInFiles(AbstractSimpleTool):
                 max_bytes,
                 config,
                 rg_context,
-                cfg_dict,
+                cfg_source,
                 show_excluded_dirs=show_excluded_dirs,
             )
         return self._error("not_a_directory")
@@ -1905,7 +1908,7 @@ class FindInFiles(AbstractSimpleTool):
         max_bytes: int,
         config: FsFindInFilesConfig,
         rg_context: Any,
-        cfg_dict: Dict[str, Any],
+        cfg_source: Any,
         *,
         show_excluded_dirs: bool = False,
     ) -> str:
@@ -1925,7 +1928,7 @@ class FindInFiles(AbstractSimpleTool):
             return self._error("invalid_argument", "exclude_dirs", excl_err)
         assert accepted_excludes is not None
 
-        rg_pass = self._make_rg_pass(cfg_dict, rg_context)
+        rg_pass = self._make_rg_pass(cfg_source, rg_context)
 
         native_resp, fallback_reason = await self._try_native_grep_directory(
             path=path,
@@ -2093,15 +2096,15 @@ class FindInFiles(AbstractSimpleTool):
         )
 
     def _make_rg_pass(
-        self, cfg_dict: Dict[str, Any], rg_context: Any
+        self, cfg_source: Any, rg_context: Any
     ) -> Callable[[str], bool]:
         """Read-guard predicate for the walk: hidden names and guarded paths are out."""
-        rg_cfg = parse_read_guard_config(cfg_dict)
+        rg_cfg = parse_read_guard_config(cfg_source)
         rg_active = rg_cfg.enabled
         rg_root = rg_context.launch_root if rg_active else None
         rg_extra = None
         if rg_active:
-            _skills_root = _resolve_skills_root(cfg_dict)
+            _skills_root = _resolve_skills_root(cfg_source)
             if _skills_root:
                 rg_extra = [_skills_root]
 

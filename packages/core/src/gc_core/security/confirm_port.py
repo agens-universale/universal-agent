@@ -7,6 +7,7 @@ from typing import Any, Callable
 
 from gc_core.constants.tool_names import ASK_HUMAN_TOOL_NAME
 from gc_core.execution.human import HumanRequest, HumanRequestInterrupted
+from gc_core.settings import settings_of
 
 CONFIRM_ALLOW_REMEMBER = (
     "allow_remember"  # Y — exec + session True + few-shot allowed
@@ -83,8 +84,7 @@ def coerce_confirm_choice(choice: Any) -> str:
 
 
 def _ask_human_enabled(ctx: Any) -> bool:
-    cfg = getattr(ctx, "config_dict", None) or {}
-    stop = cfg.get("stop_tools") or []
+    stop = settings_of(ctx).agent.stop_tools or []
     return ASK_HUMAN_TOOL_NAME not in stop
 
 

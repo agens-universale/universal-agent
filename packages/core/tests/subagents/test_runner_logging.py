@@ -31,9 +31,7 @@ def _make_config(tmp_path):
         "use_local_subagents": True,
         "backend_api_mode": "chat_completions",
         "subagent_max_steps": 30,
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
         "model": "test-model",
         "system_prompt_id": "test-prompt",
         "chat_completions_params": {

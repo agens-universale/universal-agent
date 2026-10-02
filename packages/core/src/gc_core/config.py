@@ -698,10 +698,17 @@ def flat_config(loaded, runtime=None) -> Dict[str, Any]:
         "trace_id",
         "text_answer_mode",
         "finish_gate_smart",
+        "os_backend",
     ):
         value = getattr(runtime, key)
         if value:
             config_dict[key] = value
+    if runtime.subagent_tools_allow is not None:
+        config_dict["subagent_tools_allow"] = list(
+            runtime.subagent_tools_allow
+        )
+    if runtime.subagent_tools_stop:
+        config_dict["subagent_tools_stop"] = list(runtime.subagent_tools_stop)
     if runtime.config_dir:
         apply_swarm_env_overrides(config_dict, runtime.config_dir)
     sync_logging_flat_and_params(config_dict)

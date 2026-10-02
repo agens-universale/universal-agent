@@ -100,6 +100,7 @@ def _make_executor_cfg(tmp_path):
         "model": "x",
         "max_steps": 1,
         "system_prompt_id": "v1",
+        "save_logs": False,
     }
 
 

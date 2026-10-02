@@ -172,6 +172,7 @@ class TestC2AgentExecutorFinally:
             "model": "x",
             "max_steps": 1,
             "system_prompt_id": "v1",
+            "save_logs": False,
         }
 
     async def test_collect_called_in_finally(self, monkeypatch, tmp_path):

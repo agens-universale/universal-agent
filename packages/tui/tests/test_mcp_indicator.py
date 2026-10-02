@@ -135,7 +135,12 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "mcp-servers": {"office": {}}},
+        config={
+            "model": "M",
+            "mcp-servers": {
+                "office": {"transport": "stdio", "command": "office-mcp"}
+            },
+        },
     )
     _stub_factory(app)
     async with app.run_test() as pilot:

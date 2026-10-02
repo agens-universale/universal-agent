@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
 from gc_core.execution.contracts import ExecutionFailure
+from gc_core.settings import settings_of
 
 if TYPE_CHECKING:
     from gc_core.execution.state import ExecutionState as State
@@ -84,14 +85,17 @@ class AgentLoop:
         self.run_logger = (
             getattr(ctx, "logger", None) or self.bindings._fallback_logger
         )
+        # Плоский вид — только для привязок, которые пока читают его сами
+        # (strip_tags_projection, human_console_enabled).
         self.cfg = getattr(ctx, "config_dict", {}) or {}
+        agent_cfg = settings_of(ctx).agent
         self.proj_tags = self.bindings.projection_tags_from_config(self.cfg)
         self.console_human = self.bindings.human_console_enabled(self.cfg)
-        self.max_tool_errors = self.cfg.get("no_tool_call_max_count", 0)
-        self.session_token_limit = self.cfg.get("session_token_limit")
-        self.max_tool_calls_limit = self.cfg.get("max_tool_calls")
+        self.max_tool_errors = agent_cfg.no_tool_call_max_count
+        self.session_token_limit = agent_cfg.session_token_limit
+        self.max_tool_calls_limit = agent_cfg.max_tool_calls
         self.max_unknown_tool_repeats = int(
-            self.cfg.get("max_unknown_tool_repeats", 5) or 5
+            agent_cfg.max_unknown_tool_repeats or 5
         )
         state.last_unknown_tool_name = None
         state.unknown_tool_repeat_count = 0

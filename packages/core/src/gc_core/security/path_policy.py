@@ -8,11 +8,18 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable
+from typing import Any, Callable, Iterable, Mapping
 
 from gc_core.security.confirm_port import confirmation_step
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
+from gc_core.settings import (
+    AppConfig,
+    LoadedSettings,
+    is_explicit,
+    runtime_of,
+    settings_of,
+)
 from gc_core.trace_id import trace_id_from_config
 
 _WRITE_GUARD_TITLE = "Защита записи"
@@ -161,43 +168,61 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
     ctx = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
     state = kwargs.get("state") or getattr(self_obj, "_state", None)
     logger = kwargs.get("logger") or getattr(ctx, "logger", None)
-    config_dict = _extract_config_dict(self_obj, ctx, kwargs)
+    source = _settings_source(self_obj, ctx, kwargs)
+    settings = settings_of(source)
+    runtime = runtime_of(source)
+    legacy = _is_flat_source(source)
     project_data = getattr(state, "initial_project_data", None)
     launch_root = (
-        config_dict.get("launch_root")
-        or config_dict.get("project_root")
+        runtime.launch_root
+        or runtime.project_root
         or (project_data or {}).get("projectDir")
         or os.getcwd()
     )
-    # Runtime-fallback при отсутствии блока — OFF. На нормальном пути load_config
-    # кладёт write_guard/url_policy/command_moderation из pydantic (secure-by-default:
+    # Runtime-fallback при отсутствии ключа — OFF. На нормальном пути настройки
+    # несут write_guard/url_policy/command_moderation из pydantic (secure-by-default:
     # enabled=True, mode=ask), поэтому эти fallback'и достижимы лишь в обход
-    # load_config (bespoke/тест-конфиги), а не в проде.
-    moderation = config_dict.get("command_moderation") or {}
-    write_guard_cfg = config_dict.get("write_guard") or {}
-    url_policy_cfg = config_dict.get("url_policy") or {}
+    # load_config (bespoke/тест-словари без блока), а не в проде.
     return ToolSecurityContext(
         launch_root=str(launch_root),
         write_guard=WriteGuardConfig(
-            enabled=bool(write_guard_cfg.get("enabled", False)),
-            mode=str(write_guard_cfg.get("mode", "deny")).strip().lower(),
-            extra_paths=list(write_guard_cfg.get("extra_paths") or []),
+            enabled=bool(
+                _setting_or(
+                    settings, legacy, "security.write_guard.enabled", False
+                )
+            ),
+            mode=str(
+                _setting_or(
+                    settings, legacy, "security.write_guard.mode", "deny"
+                )
+            )
+            .strip()
+            .lower(),
+            extra_paths=list(settings.security.write_guard.extra_paths or []),
         ),
-        command_moderation_mode=str(moderation.get("mode", "allow"))
+        command_moderation_mode=str(
+            _setting_or(
+                settings, legacy, "security.command_moderation.mode", "allow"
+            )
+        )
         .strip()
         .lower(),
         allowed_command_examples=list(
-            moderation.get("allowed_command_examples") or []
+            settings.security.command_moderation.allowed_command_examples or []
         ),
         denied_command_examples=list(
-            moderation.get("denied_command_examples") or []
+            settings.security.command_moderation.denied_command_examples or []
         ),
         url_allowed_schemes=list(
-            url_policy_cfg.get("allowed_schemes") or ["http", "https"]
+            settings.security.url_policy.allowed_schemes or ["http", "https"]
         ),
-        url_blacklist=list(url_policy_cfg.get("url_blacklist") or []),
-        url_policy_enabled=bool(url_policy_cfg.get("enabled", False)),
-        url_policy_mode=str(url_policy_cfg.get("mode", "deny"))
+        url_blacklist=list(settings.security.url_policy.url_blacklist or []),
+        url_policy_enabled=bool(
+            _setting_or(settings, legacy, "security.url_policy.enabled", False)
+        ),
+        url_policy_mode=str(
+            _setting_or(settings, legacy, "security.url_policy.mode", "deny")
+        )
         .strip()
         .lower(),
         ctx=ctx,
@@ -220,8 +245,7 @@ def _protected_write_block(
         protection_enabled,
     )
 
-    _cfg = getattr(context.ctx, "config_dict", None) or {}
-    if not protection_enabled(_cfg):
+    if not protection_enabled(_settings_source(None, context.ctx, {})):
         return None
     if callable(getattr(context.ctx, "guard_probe", None)):
         facts = yield probe_step(
@@ -519,9 +543,10 @@ def audit_policy_decision(
     # Внутрь payload, а не в extra=: событие сериализуется в текст сообщения,
     # поэтому только так аудит-объект остаётся самодостаточным. В jsonl фильтр
     # логгера дополнительно ставит trace_id верхним полем записи.
-    trace_id = trace_id_from_config(
-        getattr(getattr(context, "ctx", None), "config_dict", None)
+    runtime = runtime_of(
+        _settings_source(None, getattr(context, "ctx", None), {})
     )
+    trace_id = trace_id_from_config({"trace_id": runtime.trace_id})
     if trace_id:
         event["trace_id"] = trace_id
     try:
@@ -533,12 +558,18 @@ def audit_policy_decision(
         return
 
 
-def _extract_config_dict(
-    self_obj: Any, ctx: Any, kwargs: dict[str, Any]
-) -> dict[str, Any]:
+def _settings_source(self_obj: Any, ctx: Any, kwargs: dict[str, Any]) -> Any:
+    """Откуда гарду читать настройки — порядок прежний.
+
+    Явный ``config_dict=`` вызова, затем ctx (типизированные ``settings``, иначе
+    его плоский ``config_dict``), затем ``self._config_dict`` тула. Ничего нет —
+    пустой словарь: все гарды на runtime-fallback'ах (как раньше).
+    """
     explicit = kwargs.get("config_dict")
     if isinstance(explicit, dict):
         return explicit
+    if isinstance(getattr(ctx, "settings", None), (AppConfig, LoadedSettings)):
+        return ctx
     ctx_config = getattr(ctx, "config_dict", None)
     if isinstance(ctx_config, dict):
         return ctx_config
@@ -546,6 +577,29 @@ def _extract_config_dict(
     if isinstance(self_config, dict):
         return self_config
     return {}
+
+
+def _is_flat_source(source: Any) -> bool:
+    """Источник — плоский словарь (переходно: тесты и bespoke-конфиги)."""
+    return isinstance(source, Mapping)
+
+
+def _setting_or(
+    settings: AppConfig, legacy: bool, dotted: str, fallback: Any
+) -> Any:
+    """Значение настройки по пути ``dotted``.
+
+    Переходно, пока жив плоский вид: в словаре без этого ключа прежний код брал
+    свой runtime-fallback (``.get(key, fallback)``), а не дефолт модели. Явность
+    поля сохраняет эту разницу; у типизированных настроек — всегда значение
+    модели. Уходит вместе с плоским ``config_dict``.
+    """
+    if legacy and not is_explicit(settings, dotted):
+        return fallback
+    value: Any = settings
+    for name in dotted.split("."):
+        value = getattr(value, name)
+    return value
 
 
 def _guard_path_argument(func, args, kwargs, path_arg, path_extractor):

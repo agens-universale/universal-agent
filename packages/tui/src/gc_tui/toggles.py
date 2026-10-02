@@ -16,6 +16,8 @@ from gc_tui.session_settings import (
     SESSION_KEYS,
     effective_finish_gate_mode,
     effective_text_answer_mode,
+    finish_gate_mode_of,
+    text_answer_mode_of,
 )
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -53,10 +55,7 @@ def tui_agent_settings(loaded):
         )
         apply_finish_gate_mode(loaded)
         return loaded
-    from gc_core.config import flat_config
-
-    flat = flat_config(loaded)
-    mode = effective_finish_gate_mode(flat)
+    mode = finish_gate_mode_of(loaded.settings)
     return loaded.with_overrides(
         {
             "paths.chat_completions_special_instructions_path": instructions,
@@ -64,7 +63,7 @@ def tui_agent_settings(loaded):
         },
         layer="runtime",
     ).with_runtime(
-        text_answer_mode=effective_text_answer_mode(flat),
+        text_answer_mode=text_answer_mode_of(loaded.settings),
         finish_gate_smart=mode == "smart",
     )
 

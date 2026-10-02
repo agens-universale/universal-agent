@@ -34,6 +34,7 @@ def _within(awaitable):
 
 def _cfg(tmp_path):
     return {
+        "save_logs": False,  # без каталога логов: умолчание модели — писать
         "threads_data_path": str(tmp_path),
         "backend_api_mode": "chat_completions",
         "completions_url": "http://test",

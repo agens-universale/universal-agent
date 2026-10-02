@@ -98,9 +98,7 @@ def _runner_cfg(tmp_path, *, trigger=0):
         "use_local_subagents": True,
         "backend_api_mode": "chat_completions",
         "subagent_max_steps": 30,
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
         "model": "m",
         "system_prompt_id": "p",
         "summary_params": {

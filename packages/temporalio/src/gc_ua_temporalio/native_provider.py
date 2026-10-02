@@ -145,11 +145,11 @@ class NativeContextProvider:
 
     async def __call__(self, call):
         store_id, loaded = self._resolve(call)
-        config = flat_config(loaded)
+        live = bool(loaded.settings.mcp.servers)
         lock = self._locks.setdefault(call.owner_id, asyncio.Lock())
         async with lock:
             if call.owner_id in self._contexts and (
-                not config.get("mcp-servers") or call.owner_id in self._refs
+                not live or call.owner_id in self._refs
             ):
                 return self._contexts[call.owner_id]
             if call.child_context is not None:
@@ -158,7 +158,8 @@ class NativeContextProvider:
             async def bootstrap():
                 ctx = await acreate_run_context(
                     loaded,
-                    auth_connector=build_auth_connector(config),
+                    # build_auth_connector пока читает плоский вид.
+                    auth_connector=build_auth_connector(flat_config(loaded)),
                     run_id=_digest(call.owner_id)[:24],
                     thread_store=self.stores[store_id],
                 )
@@ -167,11 +168,10 @@ class NativeContextProvider:
 
             # Only MCP discovery eagerly owns a task. Ordinary FS/model work
             # remains reconstructible; background commands acquire one lazily.
-            live = bool(config.get("mcp-servers"))
             if live:
                 self._refs[call.owner_id] = await self.resource_host.open(
                     call.owner_id,
-                    config["launch_root"],
+                    loaded.runtime.launch_root,
                     bootstrap,
                 )
             else:

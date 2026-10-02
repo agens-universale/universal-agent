@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from gc_core.loop_detector.constants import GENERIC_PROFILE, LOOP_WARN_KEY
+from gc_core.settings import settings_of
 from gc_core.tools.connect_mcp.api import (
     acall_mcp_tool,  # transport injection compatibility
 )
@@ -424,10 +425,10 @@ def _servers_cfg_with_trace(
     """Копия конфига MCP-серверов с внешним trace_id.
 
     ПЕРЕСБОРКА, не мутация, и это требование корректности, а не стиль: в
-    серверном режиме config_dict — shallow copy процесс-глобального конфига, то
-    есть ``config_dict["mcp-servers"]`` — тот же объект. Мутация пометила бы все
-    последующие раны процесса, включая раны без trace, а раны идут в
-    конкурентных потоках и писали бы друг другу чужие id.
+    серверном режиме словари серверов могут делиться между ранами (кэш, общий
+    конфиг процесса). Мутация пометила бы все последующие раны процесса,
+    включая раны без trace, а раны идут в конкурентных потоках и писали бы
+    друг другу чужие id.
 
     Отсутствие trace → исходный объект возвращается по identity, то есть
     «ничего не изменилось» буквально.
@@ -490,9 +491,15 @@ def _prepare_mcp_tools_data(
     некому чистить), протечка между арендаторами сервера с разными наборами
     серверов, и переживание между тестами.
     """
-    servers_cfg = config_dict.get("mcp-servers") or {}
-    if not servers_cfg:
+    settings = settings_of(config_dict)
+    if not settings.mcp.servers:
         return None
+    # Ниже по слою (кэш, транспорты, ssl_config) конфиг сервера — словарь в
+    # проекции плоского вида: ключи по alias (`server-name`, `verify-ssl`, ...).
+    servers_cfg: Dict[str, Any] = {
+        name: server.model_dump(by_alias=True)
+        for name, server in settings.mcp.servers.items()
+    }
     # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),
     # и в замыкание каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же
     # для сабагентов через build_tools_data(child_config).
@@ -500,8 +507,8 @@ def _prepare_mcp_tools_data(
 
     cfg: Dict[str, Any] = {
         "mcp-servers": servers_cfg,
-        "mcp-meta": config_dict.get("mcp-meta") or {},
-        "use_retry": bool(config_dict.get("use_retry", False)),
+        "mcp-meta": settings.mcp.meta.model_dump(by_alias=True),
+        "use_retry": settings.backend.use_retry,
     }
 
     if tools_cache is None:
@@ -579,10 +586,11 @@ def _assemble_mcp_tools_data(
     дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
     нормализации схем не за что.
     """
-    timeout = config_dict.get("mcp-meta", {}).get("request_timeout_sec") or 600
+    settings = settings_of(config_dict)
+    timeout = settings.mcp.meta.request_timeout_sec or 600
 
-    default_use_retry = bool(config_dict.get("use_retry", False))
-    openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
+    default_use_retry = settings.backend.use_retry
+    openai_strict = settings.backend.openai_strict_tools_schema
 
     def make_fabric(full_tool_name: str):
         def fabric(**_kwargs: Any) -> MCPToolWrapper:

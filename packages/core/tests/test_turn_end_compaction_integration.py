@@ -456,7 +456,7 @@ def _agent_executor_config_dict() -> dict:
         "max_steps": 5,
         "system_prompt_id": "v1",
         "use_server_subagents": False,
-        "agent_md_path": None,
+        "agent_md_path": "",
         "limit_project_metadata": True,
         "backend_api_mode": "chat_completions",
         "console_trace": False,

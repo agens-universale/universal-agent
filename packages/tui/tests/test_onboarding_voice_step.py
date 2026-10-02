@@ -529,7 +529,10 @@ async def test_commit_local_starts_service_after_reload(monkeypatch, tmp_path):
             if seen:
                 break
         assert voice.calls == ["switch_to_local"]
-        assert seen == [new_cfg]  # конфиг ПОСЛЕ reload
+        # конфиг ПОСЛЕ reload
+        assert [loaded.settings.voice.url for loaded in seen] == [
+            new_cfg["voice"]["url"]
+        ]
 
 
 @pytest.mark.asyncio

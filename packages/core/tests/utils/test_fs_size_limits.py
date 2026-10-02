@@ -1,3 +1,4 @@
+import pytest
 from gc_core.utils.fs_size_limits import (
     DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES,
     DEFAULT_FS_MUTATE_MAX_BYTES,
@@ -8,6 +9,7 @@ from gc_core.utils.fs_size_limits import (
     fs_mutate_max_bytes,
     fs_read_max_bytes,
 )
+from pydantic import ValidationError
 
 
 def test_defaults_and_config_keys():
@@ -21,10 +23,9 @@ def test_defaults_and_config_keys():
         fs_read_max_bytes({"fs_tools": {"max_read_bytes": 0}})
         == DEFAULT_FS_READ_MAX_BYTES
     )
-    assert (
+    # Нечисло отсекает схема настроек (строгая конвертация), а не фолбэк.
+    with pytest.raises(ValidationError):
         fs_read_max_bytes({"fs_tools": {"max_read_bytes": "x"}})
-        == DEFAULT_FS_READ_MAX_BYTES
-    )
 
 
 def test_find_in_files_max_bytes_defaults():
@@ -68,23 +69,19 @@ def test_find_in_files_max_bytes_invalid_fallbacks():
         )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
-    assert (
+    # Нечисло и не-словарь секции отсекает схема настроек.
+    with pytest.raises(ValidationError):
         fs_find_in_files_max_bytes(
             {"fs_tools": {"find_in_files": {"max_file_bytes": "x"}}}
         )
-        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    )
     assert (
         fs_find_in_files_max_bytes(
             {"fs_tools": {"find_in_files": {"max_file_bytes": -5}}}
         )
         == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
     )
-    # Non-mapping find_in_files section → default
-    assert (
+    with pytest.raises(ValidationError):
         fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": 42}})
-        == DEFAULT_FS_FIND_IN_FILES_MAX_FILE_BYTES
-    )
     # find_in_files present but without max_file_bytes → default
     assert (
         fs_find_in_files_max_bytes({"fs_tools": {"find_in_files": {}}})

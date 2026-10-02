@@ -7,6 +7,7 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
+from gc_core.settings import settings_of
 from gc_core.trace_id import trace_id_from_config, trace_id_slug
 
 
@@ -145,12 +146,10 @@ def human_console_enabled(config_dict: Dict[str, Any]) -> bool:
     stdout уже идёт структурный event-поток, и дублировать его человекочитаемым
     рендером не нужно (иначе jsonl-потребитель получает мусор пополам с JSON).
     """
-    if not config_dict.get("console_trace", True):
+    logging_cfg = settings_of(config_dict).logging
+    if not logging_cfg.console_trace:
         return False
-    return (
-        str(config_dict.get("logging_format", "text")).strip().lower()
-        != "jsonl"
-    )
+    return str(logging_cfg.format).strip().lower() != "jsonl"
 
 
 def _normalize_agent_kind(agent_kind: Optional[str]) -> str:
@@ -175,7 +174,7 @@ def build_run_log_paths(
     Пути к логам одного запуска: общий лог агента (расширение log_ext) и
     отдельный trace-лог суммаризации (всегда .jsonl).
     """
-    base_dir = config_dict.get("logs_dump_dir")
+    base_dir = settings_of(config_dict).paths.logs_dump_dir
     if not isinstance(base_dir, str) or not base_dir.strip():
         raise ValueError(
             "logs_dump_dir пуст; config_modules.root.resolve_paths() должен был его заполнить"
@@ -207,7 +206,9 @@ _TEXT_FMT_TRACE = (
 )
 
 
-def _build_text_logger(logger, config_dict, run_id, kind, redactor):
+def _build_text_logger(
+    logger, config_dict, logging_cfg, run_id, kind, redactor
+):
     # Историческое поведение main: DEBUG-уровень, .log файл, stderr ERROR-хендлер.
     logger.setLevel(logging.DEBUG)
     trace = trace_id_from_config(config_dict)
@@ -216,7 +217,7 @@ def _build_text_logger(logger, config_dict, run_id, kind, redactor):
         text_fmt = _TEXT_FMT_TRACE
     else:
         text_fmt = _TEXT_FMT
-    if config_dict.get("save_logs", False):
+    if logging_cfg.save_logs:
         logging_path, summary_trace_path = build_run_log_paths(
             config_dict, run_id=run_id, agent_kind=kind, log_ext="log"
         )
@@ -238,15 +239,17 @@ def _build_text_logger(logger, config_dict, run_id, kind, redactor):
     return logger, logging_path, summary_trace_path
 
 
-def _build_jsonl_logger(logger, config_dict, run_id, kind, redactor):
-    logger.setLevel(resolve_log_level(config_dict.get("log_level")))
+def _build_jsonl_logger(
+    logger, config_dict, logging_cfg, run_id, kind, redactor
+):
+    logger.setLevel(resolve_log_level(logging_cfg.log_level))
     logger.addFilter(
         RunContextFilter(run_id, kind, trace_id_from_config(config_dict))
     )
     formatter = JsonlFormatter(redactor=redactor)
     logging_path = _DISABLED_LOG_PATH
     summary_trace_path = ""
-    if config_dict.get("save_logs", False):
+    if logging_cfg.save_logs:
         logging_path, summary_trace_path = build_run_log_paths(
             config_dict, run_id=run_id, agent_kind=kind, log_ext="jsonl"
         )
@@ -256,7 +259,7 @@ def _build_jsonl_logger(logger, config_dict, run_id, kind, redactor):
         )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
-    if config_dict.get("console_trace", True):
+    if logging_cfg.console_trace:
         stdout_handler = logging.StreamHandler(sys.stdout)
         stdout_handler.setFormatter(formatter)
         logger.addHandler(stdout_handler)
@@ -271,7 +274,7 @@ def create_run_logger(
     log_handlers: Optional[List[logging.Handler]] = None,
 ) -> Tuple[logging.Logger, str, str]:
     """
-    Создать per-run логгер. Формат берётся из config_dict['logging_format']:
+    Создать per-run логгер. Формат берётся из ``settings.logging.format``:
     'text' (дефолт) = историческое поведение; 'jsonl' = структурный event-поток.
     Редактирование секретов — только при redact_secrets.enabled.
 
@@ -283,7 +286,7 @@ def create_run_logger(
 
     * ``logger.propagate = False`` — записи не всплывали в корневой логгер, и
       приложение со своей настройкой ``logging`` не видело НИЧЕГО. Теперь
-      управляется ключом ``logging_propagate`` (дефолт ``false`` — прежнее
+      управляется ключом ``logging.propagate`` (дефолт ``false`` — прежнее
       поведение: ран пишет в свой файл и не засоряет чужие хендлеры);
     * ``logger.handlers.clear()`` — стирало всё, подключённое заранее. Поэтому
       хендлеры принимаются ЗДЕСЬ и ставятся после очистки.
@@ -299,7 +302,8 @@ def create_run_logger(
     kind = _normalize_agent_kind(agent_kind)
     logger_name = f"agent_run_{kind}_{effective_run_id}"
     logger = logging.getLogger(logger_name)
-    logger.propagate = bool(config_dict.get("logging_propagate", False))
+    logging_cfg = settings_of(config_dict).logging
+    logger.propagate = bool(logging_cfg.propagate)
     logger.handlers.clear()
     for existing in list(logger.filters):
         logger.removeFilter(existing)
@@ -307,16 +311,16 @@ def create_run_logger(
     # Ленивый импорт: security тяжёлый, а logging грузится очень рано (run_context).
     from gc_core.security.log_redaction import build_redactor
 
-    redactor = build_redactor(config_dict.get("redact_secrets"))
+    redactor = build_redactor(logging_cfg.redact_secrets.model_dump())
 
-    fmt = str(config_dict.get("logging_format", "text")).strip().lower()
+    fmt = str(logging_cfg.format).strip().lower()
     if fmt == "jsonl":
         built = _build_jsonl_logger(
-            logger, config_dict, effective_run_id, kind, redactor
+            logger, config_dict, logging_cfg, effective_run_id, kind, redactor
         )
     else:
         built = _build_text_logger(
-            logger, config_dict, effective_run_id, kind, redactor
+            logger, config_dict, logging_cfg, effective_run_id, kind, redactor
         )
 
     # Хендлеры вызывающего — ПОСЛЕ сборки: handlers.clear() выше стёр бы их.

@@ -30,9 +30,7 @@ def _make_ctx(tools_data, use_local=True):
     cfg = {
         "use_local_subagents": use_local,
         "backend_api_mode": "chat_completions",
-        "enabled_tools": [],
         "skills_data_path": "",
-        "mcp_servers": [],
         "model": "test-model",
         "system_prompt_id": "test-prompt",
     }

@@ -52,8 +52,9 @@ def resolve_agent_manifest_path(
     """
     del cwd  # cwd больше не используется — агент может работать из любой папки
 
-    mcp_meta = config_dict.get("mcp-meta") or {}
-    raw = mcp_meta.get("recommended-mcp-manifest")
+    from gc_core.settings import settings_of
+
+    raw = settings_of(config_dict).mcp.meta.recommended_mcp_manifest
     if raw:
         path = Path(str(raw)).expanduser()
         if not path.is_absolute():
