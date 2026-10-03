@@ -24,6 +24,7 @@ from gc_core.config_modules import compat
 from gc_core.onboarding_config_writer import (
     find_anchor,
     insert_missing,
+    remove_mapping_entry,
     section_end,
 )
 from gc_core.utils.atomic_io import atomic_replace
@@ -165,9 +166,10 @@ def needs_sync(user_text: str, template_text: str) -> bool:
         return True
     legacy = set(compat.RENAMES) | set(compat.REMOVED)
     # RENAMES/REMOVED часто указывают на секцию (не лист); _user_paths отдаёт
-    # листья вроде chat_completions.llm.max_tokens — нужен prefix-match.
+    # листья вроде chat_completions.llm.max_tokens — нужен prefix-match;
+    # ``*`` в шаблоне REMOVED — любое имя записи (``models.*.backend.stream``).
     return any(
-        up == leg or up.startswith(leg + ".")
+        compat.matches_pattern(up, leg, prefix=True)
         for leg in legacy
         for up in user_paths
     )
@@ -188,6 +190,30 @@ def _validate_subtree(top_key: str, subtree: Any) -> bool:
         return True
     except Exception:
         return False
+
+
+def _strip_removed_patterns(
+    user_text: str, user_raw: Any
+) -> tuple[str, List[str]]:
+    """Вырезать записи ``REMOVED`` с ``*`` (``models.*.backend.stream``) из текста
+    и данных юзера до переноса.
+
+    Секцию вне шаблона (``models``) перенос копирует текстом целиком, и без
+    этого устаревший лист уехал бы в новый файл, а при строгой проверке
+    поддерева вся секция — в бэкап. Возвращает текст и снятые пути.
+    """
+    stripped: List[str] = []
+    for pattern in compat.REMOVED:
+        if "*" not in pattern:
+            continue  # точные пути — прежним порядком в _sync_path
+        for parts in compat.expand_path(user_raw, pattern):
+            dotted = ".".join(parts)
+            compat.pop_parts(user_raw, parts)
+            user_text = remove_mapping_entry(
+                user_text, ".".join(parts[:-1]), parts[-1]
+            )
+            stripped.append(dotted)
+    return user_text, stripped
 
 
 def _verbatim_block(user_text: str, top_key: str) -> Optional[str]:
@@ -457,7 +483,9 @@ def sync_config(
     if not isinstance(user_raw, dict):
         raise ValueError("config.yml должен быть YAML-объектом")
 
+    user_text, stripped = _strip_removed_patterns(user_text, user_raw)
     st = _SyncState(template_text)
+    st.removed.extend(stripped)
     ctx = _SyncContext(
         user_text,
         user_raw,

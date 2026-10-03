@@ -22,12 +22,57 @@ RENAMES: Dict[str, str] = {
 # опциональное преобразование значения при переносе (смена формата/смысла)
 RENAME_CONVERTERS: Dict[str, Callable[[Any], Any]] = {}
 # {"dotted.путь": "почему удалён"}  # noqa: ERA001  # описание формата, не выключенный код
+# Сегмент ``*`` — любое имя записи словаря (алиас модели и т.п.).
 REMOVED: Dict[str, str] = {
     "update.check_interval_days": "проверка идёт при каждом запуске; выключить — update.check: off",
     "logging.dump_storage": "debug-дамп storage удалён; обновите config.yml: gc-cli --sync-config",
+    # На уровне модели никогда не применялись: протокол, поток и строгость
+    # схем тулов действуют на весь бэкенд.
+    "models.*.backend.api_mode": "на уровне модели не применяется — задайте в общей секции backend",
+    "models.*.backend.stream": "на уровне модели не применяется — задайте в общей секции backend",
+    "models.*.backend.send_tool_strict": "на уровне модели не применяется — задайте в общей секции backend",
+    "models.*.backend.openai_strict_tools_schema": "на уровне модели не применяется — задайте в общей секции backend",
 }
 
 _SYNC_HINT = "обновите config.yml: gc-cli --sync-config"
+
+
+def expand_path(d: Dict[str, Any], pattern: str) -> List[Tuple[str, ...]]:
+    """Пути документа (сегментами), совпадающие с ``pattern``; ``*`` — любое
+    имя записи. Сегменты, а не строка: алиас модели может содержать точку."""
+    found: List[Tuple[Tuple[str, ...], Any]] = [((), d)]
+    for part in pattern.split("."):
+        found = [
+            ((*path, str(key)), node[key])
+            for path, node in found
+            if isinstance(node, dict)
+            for key in (list(node) if part == "*" else [part])
+            if key in node
+        ]
+    return [path for path, _ in found]
+
+
+def pop_parts(d: Dict[str, Any], parts: Tuple[str, ...]) -> Tuple[bool, Any]:
+    """Снять значение по пути-сегментам (без разбора строки по точкам)."""
+    cur: Any = d
+    for part in parts[:-1]:
+        if not isinstance(cur, dict) or part not in cur:
+            return False, None
+        cur = cur[part]
+    if not isinstance(cur, dict) or parts[-1] not in cur:
+        return False, None
+    return True, cur.pop(parts[-1])
+
+
+def matches_pattern(
+    dotted: str, pattern: str, *, prefix: bool = False
+) -> bool:
+    """Путь совпадает с шаблоном (``*`` — любой сегмент); ``prefix`` — путь
+    лежит внутри шаблона (сам шаблон или его потомок)."""
+    parts, pat = dotted.split("."), pattern.split(".")
+    if len(parts) < len(pat) or (not prefix and len(parts) != len(pat)):
+        return False
+    return all(p in ("*", q) for p, q in zip(pat, parts))
 
 
 def _pop_path(d: Dict[str, Any], dotted: str) -> Tuple[bool, Any]:
@@ -88,9 +133,10 @@ def apply_compat(raw: Dict[str, Any]) -> List[str]:
                 f"{old} устарел: действует явно заданный {new}, старое значение отброшено — {_SYNC_HINT}"
             )
     for old, why in REMOVED.items():
-        present, _ = _pop_path(raw, old)
-        if present:
-            facts.append(
-                f"{old} устарел и игнорируется ({why}) — {_SYNC_HINT}"
-            )
+        for concrete in expand_path(raw, old):
+            present, _ = pop_parts(raw, concrete)
+            if present:
+                facts.append(
+                    f"{'.'.join(concrete)} устарел и игнорируется ({why}) — {_SYNC_HINT}"
+                )
     return facts

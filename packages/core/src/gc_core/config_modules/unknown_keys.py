@@ -129,21 +129,11 @@ def _walk(
 
 
 def unknown_key_notice(unknown: UnknownKey, source: str | None = None) -> str:
-    """Текст уведомления об отброшенном ключе."""
-    from gc_core.config_modules.backend import MODEL_LEVEL_UNSUPPORTED
+    """Текст уведомления об отброшенном ключе.
 
+    Устаревшие ключи сюда не доходят: их раньше снимает ``compat`` (REMOVED)
+    со своим пояснением — например, поля backend, неприменимые на модели."""
     where = f"{source}: " if source else ""
-    parts = unknown.parts
-    if (
-        len(parts) == 4
-        and parts[0] == "models"
-        and parts[2] == "backend"
-        and parts[3] in MODEL_LEVEL_UNSUPPORTED
-    ):
-        return (
-            f"{where}«{unknown.dotted}» на уровне модели не применяется и "
-            f"проигнорирован — задайте backend.{parts[3]} в общей секции backend"
-        )
     hint = f" — возможно, «{unknown.suggestion}»" if unknown.suggestion else ""
     return f"{where}неизвестный ключ «{unknown.dotted}» проигнорирован{hint}"
 

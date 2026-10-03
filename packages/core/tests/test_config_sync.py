@@ -280,3 +280,63 @@ def test_sync_keeps_new_template_keys_when_user_has_key_outside_template(
     assert "/etc/ssl/client.key" in out
     assert "request_timeout_sec: 600" in out  # новый ключ шаблона не потерян
     assert config_sync.needs_sync(out, tmpl) is False  # и sync идемпотентен
+
+
+# --- поля backend, неприменимые на модели (REMOVED с `*`) ---
+
+
+def test_sync_keeps_models_and_drops_model_level_backend_fields(tmp_path):
+    """Модель с `backend.stream` переносится целиком без этого поля, а не
+    уезжает в бэкап вся (строгая проверка поддерева раньше отвергала секцию)."""
+    from pathlib import Path as P
+
+    from gc_core.config import _default_config_path, load_settings
+
+    user = (
+        "models:\n"
+        "  flash:\n"
+        "    model: qwen\n"
+        "    url: http://h/v1/chat/completions\n"
+        "    token: t\n"
+        "    backend:\n"
+        "      stream: false\n"
+        "      use_retry: true\n"
+        "  plain:\n"
+        "    model: p\n"
+        "    backend:\n"
+        "      api_mode: chat_completions\n"
+        "slots:\n"
+        "  default: flash\n"
+    )
+    cfg = tmp_path / "config.yml"
+    cfg.write_text(user, encoding="utf-8")
+    report = config_sync.sync_config(
+        cfg, _default_config_path(), timestamp="t"
+    )
+    assert report.unknown == []
+    assert sorted(report.removed) == [
+        "models.flash.backend.stream",
+        "models.plain.backend.api_mode",
+    ]
+    out = P(cfg).read_text(encoding="utf-8")
+    assert (
+        "stream: false" not in out
+        and "api_mode: chat_completions\n" not in out.split("\nmodels:")[1]
+    )
+    loaded = load_settings(str(cfg))
+    assert sorted(loaded.settings.models) == ["flash", "plain"]
+    assert loaded.settings.models["flash"].backend.use_retry is True
+    assert not any("models." in n for n in loaded.runtime.notices)
+
+
+def test_needs_sync_true_for_model_level_backend_field():
+    from pathlib import Path as P
+
+    from gc_core.config import _default_config_path
+
+    template = P(_default_config_path()).read_text(encoding="utf-8")
+    user = (
+        template
+        + "\nmodels:\n  m:\n    model: x\n    backend:\n      stream: false\n"
+    )
+    assert config_sync.needs_sync(user, template) is True

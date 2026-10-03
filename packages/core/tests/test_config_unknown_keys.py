@@ -8,7 +8,6 @@
 
 import pytest
 import yaml
-
 from gc_core.config import load_settings
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.root import AppConfig
@@ -66,12 +65,11 @@ def test_model_level_backend_field_is_explained(stack):
     backend = loaded.settings.models["gpt-4.1"].backend
     assert backend.use_retry is True
     assert not hasattr(backend, "stream")
+    # Устаревший ключ снимает compat (REMOVED с `*`), а не общий фильтр
+    # лишних ключей; алиас с точкой — не помеха.
     notices = "\n".join(loaded.runtime.notices)
-    assert (
-        "«models.gpt-4.1.backend.stream» на уровне модели не применяется"
-        in notices
-    )
-    assert "backend.stream в общей секции backend" in notices
+    assert "models.gpt-4.1.backend.stream устарел и игнорируется" in notices
+    assert "задайте в общей секции backend" in notices
 
 
 def test_unknown_key_in_profile_does_not_break_loading(stack):
