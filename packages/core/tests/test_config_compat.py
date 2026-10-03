@@ -86,7 +86,7 @@ def test_llm_dropped_when_auxiliary_llm_already_present():
 
 def test_layered_llm_and_auxiliary_llm_loads(tmp_path, monkeypatch):
     """User llm + project auxiliary_llm: агент стартует, побеждает project."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
     from gc_core.config_modules import env_vars
     from gc_core.config_modules.env_vars import EnvVars
 
@@ -108,29 +108,33 @@ def test_layered_llm_and_auxiliary_llm_loads(tmp_path, monkeypatch):
     )
     monkeypatch.chdir(proj)
 
-    cfg = load_config(str(global_cfg))
+    loaded = load_settings(str(global_cfg))
     from gc_core.config_modules.chat_completions import (
         auxiliary_llm_from_config_dict,
     )
 
-    assert cfg["auxiliary_llm_params"]["max_tokens"] == 4096
-    assert auxiliary_llm_from_config_dict(cfg).max_tokens == 4096
-    assert "llm" not in cfg["chat_completions_params"]
+    settings = loaded.settings
+    assert settings.chat_completions.auxiliary_llm.max_tokens == 4096
+    assert auxiliary_llm_from_config_dict(loaded).max_tokens == 4096
+    assert "llm" not in settings.chat_completions.model_dump(by_alias=True)
 
 
-def test_load_config_survives_renamed_key(monkeypatch, tmp_path):
+def test_load_settings_survives_renamed_key(monkeypatch, tmp_path):
     monkeypatch.setattr(
         compat, "RENAMES", {"backend.legacy_url": "backend.completions_url"}
     )
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
         'backend:\n  legacy_url: "http://x/v1/chat/completions"\n',
         encoding="utf-8",
     )
-    config_dict = load_config(
+    loaded = load_settings(
         str(cfg_file)
     )  # без compat здесь упал бы extra=forbid
-    assert config_dict["completions_url"] == "http://x/v1/chat/completions"
-    assert config_dict["compat_notices"]
+    assert (
+        loaded.settings.backend.completions_url
+        == "http://x/v1/chat/completions"
+    )
+    assert loaded.runtime.notices

@@ -64,10 +64,10 @@ def _cases() -> list[_Case]:
     cases: list[_Case] = []
 
     # --- слои конфига (дома правила, закрытые прежними коммитами) ---
-    def _load_config_ex(path, **_):
+    def _load_settings(path, **_):
         from gc_core import config as config_mod
 
-        return config_mod.load_config_ex(str(path))
+        return config_mod.load_settings(str(path))
 
     def _read_document(path, **_):
         from gc_core import config_raw
@@ -101,7 +101,7 @@ def _cases() -> list[_Case]:
 
     cases += [
         _Case(
-            "config.load_config_ex", "config.yml", _BODY_YAML, _load_config_ex
+            "config.load_settings", "config.yml", _BODY_YAML, _load_settings
         ),
         _Case(
             "config_raw.read_document",
@@ -397,9 +397,11 @@ def _cases() -> list[_Case]:
         from gc_core.tools.subagents.custom.file_definitions import (
             discover_subagent_definitions,
         )
+        from gc_testkit.settings import make_settings
 
         return discover_subagent_definitions(
-            {"subagents_dir": str(Path(path).parent)}, builtin_names=()
+            make_settings({"subagents_dir": str(Path(path).parent)}),
+            builtin_names=(),
         )
 
     cases.append(

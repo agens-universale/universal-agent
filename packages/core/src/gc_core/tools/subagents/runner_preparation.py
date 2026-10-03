@@ -20,8 +20,8 @@ from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 @dataclass(frozen=True)
 class PreparedChildState:
     #: Настройки ребёнка — всё, что принимает ``settings_of`` (локально —
-    #: ``LoadedSettings``). Имя поля прежнее: его знает durable-исполнитель.
-    config_dict: Any
+    #: ``LoadedSettings``).
+    settings: Any
     tools_spec: list[dict[str, Any]]
     tools_description: list[Any]
     system_prompt: str | None

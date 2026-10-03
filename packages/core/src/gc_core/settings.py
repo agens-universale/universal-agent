@@ -142,179 +142,36 @@ class LoadedSettings:
         return replace(self, runtime=self.runtime.with_values(**values))
 
 
-#: Плоские ключи рантайма → поле ``RuntimeEnv``.
-_RUNTIME_FLAT = {
-    "launch_root": "launch_root",
-    "project_root": "project_root",
-    "trace_id": "trace_id",
-    "text_answer_mode": "text_answer_mode",
-    "finish_gate_smart": "finish_gate_smart",
-    "subagent_tools_allow": "subagent_tools_allow",
-    "subagent_tools_stop": "subagent_tools_stop",
-    "os_backend": "os_backend",
-}
-#: Вычисляемые плоские ключи: в настройки не переносятся.
-_COMPUTED_FLAT = {
-    "compat_notices",
-    "voice_overridden_by_managed",
-    "deprecated_keys_used",
-    "cli_explicit_keys",
-}
-
-
-def _flat_key_is_set(flat: Mapping[str, Any], key: str) -> bool:
-    """Задан ли ключ явно — там, где плоский вид сам это помнит.
-
-    Плоский вид кладёт ``stream`` и ``tui_finish_gate_mode`` всегда; явность
-    хранят ``deprecated_keys_used`` и ``tui_finish_gate_mode_explicit``. Без
-    этих признаков (словарь собран руками) ключ считается заданным.
-    """
-    if key == "stream" and "deprecated_keys_used" in flat:
-        return "backend.stream" in (flat.get("deprecated_keys_used") or ())
-    if (
-        key == "tui_finish_gate_mode"
-        and "tui_finish_gate_mode_explicit" in flat
-    ):
-        return bool(flat.get("tui_finish_gate_mode_explicit"))
-    return True
-
-
-def _model_entry_input(entry: Any) -> Any:
-    """Запись реестра моделей из её плоской проекции для ``ModelRouter``.
-
-    Проекция хранит вычисленный ``authorization_header`` (``Bearer``-нормализация
-    ``token``, уже с префиксом не дублируется) и ``backend_overrides`` — только
-    явно заданные ключи backend. Обратно: ``token`` и ``backend``.
-    """
-    if not isinstance(entry, dict) or not (
-        {"authorization_header", "backend_overrides"} & set(entry)
-    ):
-        return entry
-    entry = dict(entry)
-    if "authorization_header" in entry:
-        header = entry.pop("authorization_header")
-        if header is not None:
-            entry["token"] = header
-    overrides = entry.pop("backend_overrides", None)
-    if overrides:
-        entry["backend"] = overrides
-    return {key: value for key, value in entry.items() if value is not None}
-
-
-def settings_from_flat(
-    flat: Mapping[str, Any],
-    *,
-    profile_meta: Any = None,
-    config_dir: Optional[str] = None,
-    layer: str = "base",
-) -> LoadedSettings:
-    """Переходно: плоский словарь прежнего ``config_dict`` → ``LoadedSettings``.
-
-    Для тестов и миграции, пока они собирают конфиг словарём. Ключи переводятся
-    по ``FLAT_TO_PATH`` (путь с точкой — как есть) и проходят валидацию модели;
-    секции накладываются раньше своих листьев. Вычисляемые признаки
-    (``*_explicit``, ``compat_notices``) пропускаются — их даёт происхождение.
-    """
-    import copy
-
-    from gc_core.config_modules.flat_keys import FLAT_TO_PATH, setting_path
-
-    runtime: dict[str, Any] = {}
-    updates: dict[str, Any] = {}
-    for key, value in flat.items():
-        if key == "profile":
-            # Плоский `profile` — действующий профиль; он же указатель.
-            runtime["active_profile"] = updates["profile"] = value or ""
-            continue
-        if key in _RUNTIME_FLAT:
-            if key.startswith("subagent_tools_") and value is not None:
-                value = tuple(value)
-            runtime[_RUNTIME_FLAT[key]] = value
-            continue
-        if key.startswith("_"):
-            continue  # кэш производных значений (derived_cache), не настройка
-        if key in _COMPUTED_FLAT or key.endswith(
-            ("_explicit", "_explicit_false")
-        ):
-            continue
-        if not _flat_key_is_set(flat, key):
-            continue
-        path = setting_path(key)
-        value = copy.deepcopy(value)
-        if key == "models" and isinstance(value, dict):
-            value = {
-                alias: _model_entry_input(entry)
-                for alias, entry in value.items()
-            }
-        if isinstance(value, dict) and path != key:
-            # В секции плоского вида бывают плоские имена соседей
-            # (`logging_params.logging_format` рядом с `format`) — переводим их.
-            value = {
-                (
-                    FLAT_TO_PATH[sub][len(path) + 1 :]
-                    if FLAT_TO_PATH.get(sub, "").startswith(path + ".")
-                    else sub
-                ): item
-                for sub, item in value.items()
-            }
-        updates[path] = value
-    updates = dict(sorted(updates.items(), key=lambda kv: kv[0].count(".")))
-    # Без resolve_paths: пути плоского вида либо уже абсолютны (вид собран из
-    # загруженных настроек), либо пусты — «умолчание при использовании», как
-    # их и читал прежний код. Резолв подменил бы пустой путь путём от cwd и
-    # полез бы в home — в песочнице workflow Temporal это запрещено.
-    settings = AppConfig.model_validate(_nested(updates) if updates else {})
-    return LoadedSettings(
-        settings=settings,
-        runtime=RuntimeEnv(config_dir=config_dir, **runtime),
-        provenance=Provenance().with_layer(layer, updates),
-        profile_meta=profile_meta,
-    )
-
-
 def _loaded_of(source: Any) -> LoadedSettings:
-    """LoadedSettings из контекста, настроек или (переходно) плоского словаря."""
+    """LoadedSettings из контекста рана, ``LoadedSettings`` или ``AppConfig``."""
     if isinstance(source, LoadedSettings):
         return source
     if isinstance(source, AppConfig):
         return LoadedSettings(settings=source)
-    settings = getattr(source, "settings", None)
-    if settings is not None and not isinstance(source, Mapping):
-        if isinstance(settings, LoadedSettings):
-            return settings
-        runtime = getattr(source, "runtime", None) or RuntimeEnv()
-        return LoadedSettings(settings=settings, runtime=runtime)
-    flat = (
-        source
-        if isinstance(source, Mapping)
-        else getattr(source, "config_dict", None)
-    )
-    if flat is None:
+    if source is None:
         return LoadedSettings(settings=AppConfig())
-    if os.environ.get("GC_STRICT_SETTINGS") == "1":
-        # Репетиция финала переходного периода: плоский словарь — ошибка.
-        raise TypeError(
-            "ожидались настройки (контекст, LoadedSettings, AppConfig), а не "
-            f"плоский словарь: {type(source).__name__}"
+    settings = getattr(source, "settings", None)
+    if isinstance(settings, LoadedSettings):
+        return settings
+    if isinstance(settings, AppConfig):
+        runtime = getattr(source, "runtime", None)
+        return LoadedSettings(
+            settings=settings,
+            runtime=runtime
+            if isinstance(runtime, RuntimeEnv)
+            else RuntimeEnv(),
         )
-    # Переходно (тесты с плоским словарём): строгая конвертация, кэш при
-    # неизменяемом виде.
-    from gc_core.config_modules.frozen import FrozenConfigDict, derived_cache
-
-    if isinstance(flat, FrozenConfigDict):
-        cache = derived_cache(flat)
-        if "_settings" not in cache:
-            cache["_settings"] = settings_from_flat(flat)
-        return cache["_settings"]
-    return settings_from_flat(flat)
+    raise TypeError(
+        "ожидались настройки (контекст рана, LoadedSettings, AppConfig), "
+        f"а не {type(source).__name__}"
+    )
 
 
 def settings_of(source: Any) -> AppConfig:
     """Настройки (``AppConfig``) из ``RunContext``, ``LoadedSettings``, ``AppConfig``.
 
-    Единая точка чтения для потребителей. Переходно принимает и плоский
-    ``config_dict`` (или объект с ним) — конвертирует строго: неизвестный ключ —
-    ``ValidationError``.
+    Единая точка чтения для потребителей; ``None`` — умолчания. Плоский словарь
+    не принимается: ``TypeError``.
     """
     return _loaded_of(source).settings
 
@@ -355,6 +212,5 @@ __all__ = [
     "is_explicit",
     "override_settings",
     "runtime_of",
-    "settings_from_flat",
     "settings_of",
 ]

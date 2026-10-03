@@ -10,6 +10,7 @@ from gc_core.thread_store_async import athread_store
 from gc_core.thread_store_file import FileThreadStore
 from gc_core.usage.account import CATEGORY_MAIN, MONEY_FIELD, UsageAccount
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def test_cost_survives_meta_write_and_read():
@@ -110,8 +111,8 @@ def test_cost_survives_manual_compaction(monkeypatch, tmp_path):
     monkeypatch.setattr(mc, "State", _UsageState)
 
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
-    ex._ctx = types.SimpleNamespace(
-        config_dict={
+    ex._ctx = fake_ctx(
+        {
             "model": "M",
             "max_steps": 30,
             "system_prompt_id": "x",

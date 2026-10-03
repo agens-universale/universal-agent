@@ -90,7 +90,7 @@ def _write_cfg(
 
 def _loaded(cfg_file):
     """Конфиг, как его видит приложение: YAML файла + резолв ${ENV:VAR} — тот же
-    resolve_env_placeholders, что и в config.load_config (секции backend/agent — плоско)."""
+    resolve_env_placeholders, что и в config.load_settings (секции backend/agent — плоско)."""
     import yaml
     from gc_core.config_modules.env_interpolation import (
         resolve_env_placeholders,
@@ -339,11 +339,16 @@ async def test_open_section_noop_when_file_unchanged(tmp_path, monkeypatch):
     app._config_path = str(cfg_file)
     app.reload_config()
 
+    import gc_core.config as core_config
+
     calls = {"load": 0, "invalidate": 0}
-    monkeypatch.setattr(
-        "gc_core.config.load_config",
-        lambda *_a, **_k: calls.__setitem__("load", calls["load"] + 1) or {},
-    )
+    orig_load = core_config.load_settings
+
+    def counting_load(*a, **k):
+        calls["load"] += 1
+        return orig_load(*a, **k)
+
+    monkeypatch.setattr("gc_core.config.load_settings", counting_load)
     orig_invalidate = app.invalidate_runner
 
     def counting_invalidate():

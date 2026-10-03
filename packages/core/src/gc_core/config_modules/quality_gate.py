@@ -41,7 +41,7 @@ def normalize_quality_gate_config(cfg: QualityGateConfig) -> QualityGateConfig:
 
 def digest_limits_from_params(params: dict | None) -> dict[str, int]:
     """
-    Лимиты digest из уже нормализованного ``quality_gate_params`` (``config_dict``).
+    Лимиты digest из уже нормализованной секции ``quality_gate`` (``model_dump()``).
 
     Ожидается, что значения прошли ``normalize_quality_gate_config`` в ``resolve_paths``.
     """

@@ -1180,7 +1180,7 @@ class SubagentRunner:
             if self._preparation is not None
             else await self._prepare_local_child_state()
         )
-        child_config = prepared.config_dict
+        child_config = prepared.settings
         parent = self._orchestrator_state
         child_state = State.from_prepared(
             prepared.state,
@@ -1342,17 +1342,12 @@ class SubagentRunner:
             tools_cache=getattr(self._ctx, "tools_cache", None),
         )
 
-        from gc_core.config import flat_config
-
         child_loaded = LoadedSettings(
             settings=settings_of(child_config),
             runtime=runtime_of(child_config),
         )
         child_runtime = child_loaded.runtime
         child_ctx = RunContext(
-            # Переходно: плоский вид для кода, ещё читающего ctx.config_dict;
-            # уходит вместе с полем RunContext.config_dict.
-            config_dict=flat_config(child_loaded),
             settings=child_loaded.settings,
             runtime=child_runtime,
             run_id=child_run_id,

@@ -50,7 +50,7 @@ def test_request_auxiliary_projects_and_logs_dirty(monkeypatch):
     )
     monkeypatch.setattr(summary_llm, "log_llm_prompt_and_result", _fake_log)
 
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         logger=object(),
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,

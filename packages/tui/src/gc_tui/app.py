@@ -1601,9 +1601,9 @@ class TuiApp(App):
         """Build the real AgentExecutor from config. Called when no factory injected."""
         from gc_core.agent_executor import AgentExecutor
         from gc_core.config import (
-            build_auth_connector,
             cli_forces_legacy_model,
         )
+        from gc_core.config_modules.auth import build_auth_connector
         from gc_core.run_context import acreate_run_context
         from gc_core.settings import settings_of
 

@@ -19,7 +19,7 @@ from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
 from gc_core.config_raw import missing_env_refs
-from gc_core.settings import settings_from_flat
+from gc_testkit.settings import settings_from_flat
 
 
 @pytest.fixture

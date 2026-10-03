@@ -157,7 +157,7 @@ def test_stringify_handles_none_str_and_parts():
     )
 
 
-def test_gc_cli_config_overrides_merge_into_build_config():
+def test_gc_cli_config_overrides_merge_into_build_settings():
     from pathlib import Path
 
     agent = GcCliExternal(
@@ -170,10 +170,10 @@ def test_gc_cli_config_overrides_merge_into_build_config():
             "chat_completion_kwargs": {"temperature": 0.7},
         },
     )
-    cfg = agent._build_config()
+    cfg = agent._build_settings().settings
     # scalar override wins
-    assert cfg["no_tool_call_max_count"] == 5
-    assert cfg["chat_completion_kwargs"] == {"temperature": 0.7}
+    assert cfg.agent.no_tool_call_max_count == 5
+    assert cfg.backend.chat_completion_kwargs == {"temperature": 0.7}
 
 
 def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
@@ -198,7 +198,7 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
         def get_state(self):
             return partial_state
 
-    async def _actx(*a, **k):
+    async def _actx(*_a, **_k):
         return SimpleNamespace()
 
     monkeypatch.setattr("gc_core.run_context.acreate_run_context", _actx)
@@ -232,8 +232,8 @@ def _agent(**kwargs) -> GcCliExternal:
 
 def test_polar_session_id_goes_into_every_llm_call(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    cfg = _agent(session_id="sympy__sympy-12419")._build_config()
-    headers = cfg["chat_completion_headers"]
+    cfg = _agent(session_id="sympy__sympy-12419")._build_settings().settings
+    headers = cfg.backend.chat_completion_headers
     # Lowercase key: it must REPLACE the core's internal state-UUID x-session-id.
     assert headers["x-session-id"] == "sympy__sympy-12419"
     assert headers["Authorization"] == "Bearer sympy__sympy-12419"
@@ -241,34 +241,40 @@ def test_polar_session_id_goes_into_every_llm_call(monkeypatch):
 
 def test_profile_authorization_wins_over_session_bearer(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    cfg = _agent(
-        session_id="task-1",
-        gc_cli_config={
-            "chat_completion_headers": {"Authorization": "Bearer real-key"}
-        },
-    )._build_config()
-    headers = cfg["chat_completion_headers"]
+    cfg = (
+        _agent(
+            session_id="task-1",
+            gc_cli_config={
+                "chat_completion_headers": {"Authorization": "Bearer real-key"}
+            },
+        )
+        ._build_settings()
+        .settings
+    )
+    headers = cfg.backend.chat_completion_headers
     assert headers["Authorization"] == "Bearer real-key"
     assert headers["x-session-id"] == "task-1"  # session routing still applied
 
 
 def test_session_id_falls_back_to_openai_api_key_env(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "task-from-env")
-    cfg = _agent(api_base="http://polar/v1")._build_config()
-    assert cfg["chat_completion_headers"]["x-session-id"] == "task-from-env"
+    cfg = _agent(api_base="http://polar/v1")._build_settings().settings
+    assert (
+        cfg.backend.chat_completion_headers["x-session-id"] == "task-from-env"
+    )
 
 
 def test_env_fallback_ignored_without_runner_api_base(monkeypatch):
     """A real key in the env must not become a session id in a local / otk run."""
     monkeypatch.setenv("OPENAI_API_KEY", "sk-real-key")
-    cfg = _agent()._build_config()
-    assert "x-session-id" not in (cfg.get("chat_completion_headers") or {})
+    cfg = _agent()._build_settings().settings
+    assert "x-session-id" not in cfg.backend.chat_completion_headers
 
 
 def test_no_session_id_leaves_headers_untouched(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    cfg = _agent()._build_config()
-    assert "x-session-id" not in (cfg.get("chat_completion_headers") or {})
+    cfg = _agent()._build_settings().settings
+    assert "x-session-id" not in cfg.backend.chat_completion_headers
 
 
 def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
@@ -283,11 +289,11 @@ def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
         model_name="openai/real-model",
         gc_cli_config={"completions_url": "http://stale", "model": "stale"},
     )
-    cfg = agent._build_config()
+    cfg = agent._build_settings().settings
     assert (
-        cfg["model"] == "real-model"
+        cfg.agent.model == "real-model"
     )  # openai/ stripped, profile value ignored
-    assert cfg["completions_url"] == "http://runtime/v1/chat/completions"
+    assert cfg.backend.completions_url == "http://runtime/v1/chat/completions"
 
 
 def _state_with_usage(**calls):

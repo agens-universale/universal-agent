@@ -11,9 +11,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config import (
-    build_auth_connector,
     cli_forces_legacy_model,
 )
+from gc_core.config_modules.auth import build_auth_connector
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import (
     load_thread_messages,

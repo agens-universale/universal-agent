@@ -1,6 +1,6 @@
 import pytest
-from gc_core.config import apply_cli_overrides, flat_config
-from gc_core.settings import settings_from_flat
+from gc_core.config import apply_cli_overrides
+from gc_testkit.settings import settings_from_flat
 
 
 def _apply(base: dict | None = None, **kwargs):
@@ -9,20 +9,17 @@ def _apply(base: dict | None = None, **kwargs):
 
 
 class TestApplyCliOverridesTraceId:
-    def test_absent_leaves_no_key(self):
+    def test_absent_leaves_no_trace_id(self):
         loaded = _apply()
         assert loaded.runtime.trace_id is None
-        assert "trace_id" not in flat_config(loaded)
 
     def test_flag_value_is_normalized(self):
         loaded = _apply(trace_id="  wf-42  ")
         assert loaded.runtime.trace_id == "wf-42"
-        assert flat_config(loaded)["trace_id"] == "wf-42"
 
-    def test_blank_flag_leaves_no_key(self):
+    def test_blank_flag_leaves_no_trace_id(self):
         loaded = _apply(trace_id="   ")
         assert loaded.runtime.trace_id is None
-        assert "trace_id" not in flat_config(loaded)
 
     def test_invalid_flag_raises(self):
         with pytest.raises(ValueError, match="управляющие символы"):
@@ -44,7 +41,6 @@ class TestApplyCliOverridesTraceId:
     def test_empty_generic_override_is_dropped(self):
         loaded = _apply({"trace_id": ""})
         assert loaded.runtime.trace_id is None
-        assert "trace_id" not in flat_config(loaded)
 
     def test_source_settings_are_not_mutated(self):
         # Новый API не мутирует вход: trace_id уезжает только в возвращённый объект.

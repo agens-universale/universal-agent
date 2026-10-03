@@ -1,24 +1,22 @@
-"""Мост переходного периода: потребители читают ``settings_of``/``runtime_of``.
+"""Мост к настройкам: потребители читают ``settings_of``/``runtime_of``.
 
-Пока часть кода и тестов живёт на плоском ``config_dict``, мост обязан давать
-те же настройки, что и типизированный путь: плоский вид → настройки → плоский
-вид — без потерь, включая признаки «задано явно».
+Мост принимает только контекст рана, ``LoadedSettings``, ``AppConfig`` или
+``None``; плоский словарь — ``TypeError``. Тестовый ``settings_from_flat``
+обязан давать те же настройки, что и типизированный путь, — без потерь,
+включая признаки «задано явно».
 """
 
 from types import SimpleNamespace
 
 import pytest
-from gc_core.config import flat_config
 from gc_core.settings import (
-    LoadedSettings,
-    RuntimeEnv,
     default_settings,
     is_explicit,
     override_settings,
     runtime_of,
-    settings_from_flat,
     settings_of,
 )
+from gc_testkit.settings import settings_from_flat
 from pydantic import ValidationError
 
 
@@ -45,49 +43,74 @@ def _rich_settings():
 
 
 @pytest.mark.parametrize("settings", [default_settings(), _rich_settings()])
-def test_flat_view_round_trip_is_lossless(settings):
-    loaded = LoadedSettings(
-        settings=settings, runtime=RuntimeEnv(launch_root="/w")
+def test_settings_from_flat_round_trip_is_lossless(settings):
+    # Явно заданное (dump с exclude_unset) → тестовый мост → те же настройки
+    # и та же явность полей; рантайм-ключи уходят в RuntimeEnv.
+    explicit = settings.model_dump(by_alias=True, exclude_unset=True)
+    back = settings_from_flat({**explicit, "launch_root": "/w"})
+    assert back.settings == settings
+    assert back.settings.model_dump(exclude_unset=True) == settings.model_dump(
+        exclude_unset=True
     )
-    flat = flat_config(loaded)
-    assert dict(flat_config(settings_from_flat(flat))) == dict(flat)
+    assert back.runtime.launch_root == "/w"
 
 
 def test_round_trip_keeps_implicit_defaults_implicit():
-    # Плоский вид всегда несёт `stream` и `tui_finish_gate_mode`; обратный путь
-    # не имеет права сделать их явными — иначе ложное предупреждение об
-    # устаревшем ключе и другое правило /gate.
-    back = settings_from_flat(flat_config(default_settings())).settings
+    # Прежний плоский вид всегда нёс `stream` и `tui_finish_gate_mode` с
+    # признаками явности; обратный путь не имеет права сделать их явными —
+    # иначе ложное предупреждение об устаревшем ключе и другое правило /gate.
+    defaults = default_settings()
+    back = settings_from_flat(
+        {
+            "stream": defaults.backend.stream,
+            "deprecated_keys_used": [],
+            "tui_finish_gate_mode": defaults.tui.finish_gate_mode,
+            "tui_finish_gate_mode_explicit": False,
+        }
+    ).settings
     assert not is_explicit(back, "backend.stream")
     assert not is_explicit(back, "tui.finish_gate_mode")
 
 
+def test_explicit_markers_make_fields_explicit():
+    back = settings_from_flat(
+        {
+            "stream": False,
+            "deprecated_keys_used": ["backend.stream"],
+            "tui_finish_gate_mode": "on",
+            "tui_finish_gate_mode_explicit": True,
+        }
+    ).settings
+    assert is_explicit(back, "backend.stream")
+    assert back.backend.stream is False
+    assert is_explicit(back, "tui.finish_gate_mode")
+    assert back.tui.finish_gate_mode == "on"
+
+
 def test_settings_of_reads_every_source_the_same_way():
     loaded = settings_from_flat({"max_steps": 3, "launch_root": "/r"})
-    ctx = SimpleNamespace(
-        settings=loaded.settings,
-        runtime=loaded.runtime,
-        config_dict=flat_config(loaded),
-    )
-    legacy_ctx = SimpleNamespace(
-        config_dict={"max_steps": 3, "launch_root": "/r"}
-    )
-    for source in (loaded, ctx, legacy_ctx, flat_config(loaded)):
+    ctx = SimpleNamespace(settings=loaded.settings, runtime=loaded.runtime)
+    for source in (loaded, ctx):
         assert settings_of(source).agent.max_steps == 3
         assert runtime_of(source).launch_root == "/r"
     assert settings_of(loaded.settings).agent.max_steps == 3
 
 
-def test_settings_of_converts_a_frozen_view_once():
-    view = flat_config(settings_from_flat({"max_steps": 3}))
-    assert settings_of(view) is settings_of(view)
+def test_settings_of_rejects_flat_dicts():
+    # Плоский словарь больше не источник настроек — ни сам, ни в контексте.
+    with pytest.raises(TypeError):
+        settings_of({"max_steps": 3})
+    with pytest.raises(TypeError):
+        runtime_of({"launch_root": "/r"})
+    with pytest.raises(TypeError):
+        settings_of(SimpleNamespace(config_dict={"max_steps": 3}))
 
 
-def test_legacy_flat_dict_is_validated_strictly():
+def test_test_flat_dict_is_validated_strictly():
     with pytest.raises(ValidationError):
-        settings_of({"max_steps": "много"})
+        settings_from_flat({"max_steps": "много"})
     with pytest.raises(ValidationError):
-        settings_of({"no_such_setting": 1})
+        settings_from_flat({"no_such_setting": 1})
 
 
 def test_subagent_tool_scope_lives_in_runtime():
@@ -96,9 +119,6 @@ def test_subagent_tool_scope_lives_in_runtime():
     )
     assert loaded.runtime.subagent_tools_allow == ("a",)
     assert loaded.runtime.subagent_tools_stop == ("b",)
-    flat = flat_config(loaded)
-    assert flat["subagent_tools_allow"] == ["a"]
-    assert flat["subagent_tools_stop"] == ["b"]
 
 
 def test_is_explicit_follows_fields_set_along_the_path():

@@ -91,8 +91,12 @@ harbor run \
 
 ## Конфигурация из профиля (без правки кода)
 
-Любой ключ `config_dict` gc-cli задаётся из harbor-профиля через
-`agent_kwargs.gc_cli_config` (deep-merge поверх дефолтов адаптера, **плоские** ключи):
+Любая настройка gc-cli задаётся из harbor-профиля через `agent_kwargs.gc_cli_config`
+(deep-merge поверх дефолтов адаптера). Ключи — прежние **плоские** имена (`max_steps`,
+`summary_params`, `mcp-servers`; перевод — `gc_core.config_modules.flat_keys.FLAT_TO_PATH`)
+или путь через точку (`agent.max_steps`). Итог валидируется схемой `AppConfig`: опечатка
+в ключе или негодное значение роняет трайл на сборке, а не теряется молча. `os_backend`
+— не настройка, а рантайм (`RuntimeEnv`), адаптер ставит `harbor` сам:
 
 ```yaml
 import_path: adapters.gc_cli_external:GcCliExternal
@@ -122,7 +126,7 @@ agent_kwargs:
   их не перебивает.
 - **Два профиля сэмплинга:** `chat_completion_kwargs` — tool-цикл агента (thinking обычно вкл);
   `auxiliary_llm_params.completion_kwargs` — summary / finish-gate / judges (thinking обычно выкл).
-  В harbor пишите **плоский** `auxiliary_llm_params`, не `chat_completions_params.auxiliary_llm`.
+  В harbor пишите `auxiliary_llm_params` (или путь `chat_completions.auxiliary_llm`).
 
 ## Замечания
 
@@ -131,7 +135,7 @@ agent_kwargs:
 - **Model id сохраняет vendor-path** (`MiniMaxAI/MiniMax-M2.7`); срезается только префикс
   провайдера `openai/`.
 - Security-декораторы (`@enforce_write_guard`/`@enforce_read_guard`/`@moderate_command_execution`)
-  остаются на тулах, но адаптер **явно пинит их OFF** в `_build_config()`
+  остаются на тулах, но адаптер **явно пинит их OFF** в `_build_settings()`
   (`read_guard`/`write_guard`/`url_policy` → `enabled: false`, `command_moderation` → `allow`) —
   независимо от дефолтов релиза gc-cli. Причины: (1) контейнер сам песочница; (2) гарды
   резолвят пути по ФС **раннера** (`launch_root` = cwd раннера) — контейнерный `/app` для них

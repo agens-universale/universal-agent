@@ -1,7 +1,7 @@
 """Бенч-профиль не обязан хранить секрет открытым: `${ENV:…}` разворачивается.
 
-Файловый путь ядра (`load_config`) маркеры разворачивает, а бенч-путь собирает
-`config_dict` в памяти и раньше отдавал их как есть — литерал `${ENV:GC_API_KEY}`
+Файловый путь ядра (`load_settings`) маркеры разворачивает, а бенч-путь собирает
+настройки в памяти и раньше отдавал их как есть — литерал `${ENV:GC_API_KEY}`
 уехал бы в HTTP-заголовок, и провайдер ответил бы 401.
 
 Почему это не «мелкое удобство»: `agent_kwargs.gc_cli_config` попадает в
@@ -31,14 +31,14 @@ def _config_module():
 
 def _build(tmp_path, overrides):
     mod = _config_module()
-    return mod.build_gc_cli_config(
+    return mod.build_gc_cli_settings(
         completions_url="http://test-backend/v1/chat/completions",
         model="test-model",
         prompts_dir=tmp_path / "prompts",
         skills_dir=tmp_path / "skills",
         config_dir=str(tmp_path),
         overrides=overrides,
-    )
+    ).settings
 
 
 def test_env_marker_in_a_header_is_resolved(tmp_path, monkeypatch):
@@ -54,7 +54,8 @@ def test_env_marker_in_a_header_is_resolved(tmp_path, monkeypatch):
     )
 
     assert (
-        config["chat_completion_headers"]["X-Api-Key"] == "секрет-из-окружения"
+        config.backend.chat_completion_headers["X-Api-Key"]
+        == "секрет-из-окружения"
     )
 
 
@@ -72,7 +73,9 @@ def test_marker_never_leaks_as_a_literal(tmp_path, monkeypatch):
         },
     )
 
-    assert "${ENV:" not in repr(config)
+    # repr маскирует секреты — смотрим в дамп со значениями.
+    assert "${ENV:" not in repr(config.model_dump(mode="python"))
+    assert config.backend.proxy == "k"
 
 
 def test_file_marker_reads_the_secret_from_disk(tmp_path):
@@ -87,4 +90,6 @@ def test_file_marker_reads_the_secret_from_disk(tmp_path):
         },
     )
 
-    assert config["chat_completion_headers"]["X-Api-Key"] == "ключ-из-файла"
+    assert (
+        config.backend.chat_completion_headers["X-Api-Key"] == "ключ-из-файла"
+    )

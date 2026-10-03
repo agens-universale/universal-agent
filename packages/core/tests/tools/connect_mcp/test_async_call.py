@@ -190,7 +190,7 @@ async def test_dispatcher_awaits_acall_without_a_thread(monkeypatch):
             return "прямо на loop"
 
     data = {"t": {"tool_fabric": lambda **kw: _Tool()}}
-    out = await aapply_tool("t", {}, data, ctx=None, config_dict={})
+    out = await aapply_tool("t", {}, data, ctx=None)
 
     assert out == "прямо на loop"
     assert pooled["n"] == 0, "тул снова уехал в поток из пула"
@@ -207,7 +207,7 @@ async def test_dispatcher_refuses_a_tool_without_acall():
 
     data = {"t": {"tool_fabric": lambda **kw: _Legacy()}}
     with pytest.raises(TypeError, match="acall"):
-        await aapply_tool("t", {}, data, ctx=None, config_dict={})
+        await aapply_tool("t", {}, data, ctx=None)
 
 
 async def test_durable_scope_disables_outer_retry_even_when_config_enabled(

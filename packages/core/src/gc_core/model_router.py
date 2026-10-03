@@ -20,7 +20,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from gc_core.config_modules.model_registry import LEVEL_FALLBACK, LEVELS
+from gc_core.config_modules.model_registry import (
+    LEVEL_FALLBACK,
+    LEVELS,
+    ModelEntry,
+)
 from gc_core.settings import settings_of
 
 # Канонический реестр потребителей (спека §5.1). `subagent:<agent_name>` — отдельный
@@ -126,6 +130,30 @@ def _level_phrase(requested_level: str, resolved_level: str) -> str:
     return f"фоллбэк {requested_level} → {resolved_level}"
 
 
+def serialize_model_entry(entry: ModelEntry) -> dict[str, Any]:
+    """Проекция ``ModelEntry`` для роутера.
+
+    ``authorization_header`` — уже Bearer-нормализованное значение (None=наследовать,
+    ""=явно без, иначе значение) — потребителю нужен именно computed-результат, не
+    сырой ``token``. ``backend_overrides`` — только явно заданные ключи
+    (``exclude_unset``), чтобы Router накладывал поверх эффективного backend лишь то,
+    что модель реально переопределяет, а не дефолты ``BackendConfig``.
+    """
+    return {
+        "model": entry.model,
+        "url": entry.url,
+        "authorization_header": entry.authorization_header,
+        "pricing": entry.pricing.model_dump()
+        if entry.pricing is not None
+        else None,
+        "backend_overrides": (
+            entry.backend.model_dump(exclude_unset=True)
+            if entry.backend is not None
+            else {}
+        ),
+    }
+
+
 class ModelRouter:
     """Резолвит `consumer -> ResolvedModel` из снимка конфига (спека §6.3)."""
 
@@ -146,7 +174,6 @@ class ModelRouter:
 
         ``settings`` — снимок настроек: всё, что принимает ``settings_of``
         (``AppConfig``, ``LoadedSettings``, контекст); ``None`` — умолчания."""
-        from gc_core.config import _serialize_model_entry
 
         # Снимок фиксируется типизированным: клон (`with_override`) берёт его же.
         self._settings = settings_of(settings)
@@ -154,11 +181,11 @@ class ModelRouter:
         self.breaker = breaker if breaker is not None else CircuitBreaker()
         self._force_legacy = force_legacy
         self._unbound_override = unbound_override
-        # Записи реестра — в проекции `_serialize_model_entry`: вычисленный
+        # Записи реестра — в проекции `serialize_model_entry`: вычисленный
         # `authorization_header`, `backend_overrides` только из явных ключей,
         # тариф словарём (его и ждут потребители `ResolvedModel.tariff`).
         self._models: dict[str, Any] = {
-            alias: _serialize_model_entry(entry)
+            alias: serialize_model_entry(entry)
             for alias, entry in self._settings.models.items()
         }
         self._slots: dict[str, Any] = self._settings.slots.model_dump()

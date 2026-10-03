@@ -1,6 +1,5 @@
 """Метаданные полей настроек: флаги, наследование, маскировка, SecretStr."""
 
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.field_meta import (
     MASK,
     REVEAL_SECRETS,
@@ -13,7 +12,8 @@ from gc_core.config_modules.field_meta import (
     redacted_dump,
 )
 from gc_core.config_modules.root import AppConfig
-from gc_core.settings import settings_from_flat
+from gc_core.model_router import serialize_model_entry
+from gc_testkit.settings import settings_from_flat
 from pydantic import SecretStr
 
 _SECRETS = {
@@ -180,18 +180,22 @@ def test_scalar_secrets_are_secret_str_with_raw_value_on_request():
     assert server["token"] == "mcp-SECRET"
 
 
-def test_flat_view_carries_plain_secrets_and_round_trips():
+def test_plain_dumps_carry_secrets_and_test_bridge_round_trips():
     settings = _settings()
-    flat = flatten_app_config(settings)
-    assert flat["voice"]["token"] == "voice-SECRET"
-    assert flat["mcp-servers"]["srv"]["token"] == "mcp-SECRET"
-    assert flat["models"]["m1"]["authorization_header"] == (
-        "Bearer model-SECRET"
-    )
-    back = settings_from_flat(flat).settings
+    # Проекция записи для ModelRouter несёт уже нормализованный заголовок.
+    projected = serialize_model_entry(settings.models["m1"])
+    assert projected["authorization_header"] == "Bearer model-SECRET"
+    revealed = settings.model_dump(by_alias=True, context=REVEAL_SECRETS)
+    back = settings_from_flat(revealed).settings
+    assert back == settings
     assert back.voice.token.get_secret_value() == "voice-SECRET"
     assert back.mcp.servers["srv"] == settings.mcp.servers["srv"]
-    assert flatten_app_config(back) == flat
+    # Прежняя форма записи модели (проекция роутера) переводится обратно в token.
+    from_projection = settings_from_flat({"models": {"m1": projected}})
+    assert (
+        serialize_model_entry(from_projection.settings.models["m1"])
+        == projected
+    )
 
 
 def test_python_dump_round_trip_keeps_secret_values():

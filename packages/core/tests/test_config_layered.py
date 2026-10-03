@@ -101,42 +101,42 @@ def _write_project_config(project_dir: Path, content: str) -> Path:
 
 
 def test_global_only_when_no_project_config(global_config_file, isolated_cwd):
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
-    cfg = load_config(str(global_config_file))
-    assert cfg["max_steps"] == 50
-    assert cfg["stop_tools"] == ["bash_run", "fs_write"]
+    settings = load_settings(str(global_config_file)).settings
+    assert settings.agent.max_steps == 50
+    assert settings.agent.stop_tools == ["bash_run", "fs_write"]
 
 
 def test_project_overrides_scalar(global_config_file, isolated_cwd):
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     _write_project_config(isolated_cwd, "agent:\n  max_steps: 999\n")
-    cfg = load_config(str(global_config_file))
-    assert cfg["max_steps"] == 999
+    settings = load_settings(str(global_config_file)).settings
+    assert settings.agent.max_steps == 999
     # Не-переопределённые поля из global сохраняются.
-    assert cfg["stop_tools"] == ["bash_run", "fs_write"]
+    assert settings.agent.stop_tools == ["bash_run", "fs_write"]
 
 
 def test_project_extends_list_with_dedup(global_config_file, isolated_cwd):
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     # project добавляет новый stop_tool, плюс дублирует существующий.
     _write_project_config(
         isolated_cwd,
         "agent:\n  stop_tools: [bash_run, browse_url]\n",
     )
-    cfg = load_config(str(global_config_file))
+    settings = load_settings(str(global_config_file)).settings
     # Порядок: сначала global (bash_run, fs_write), потом новые из project (browse_url).
     # bash_run — дубль, не повторяется.
-    assert cfg["stop_tools"] == ["bash_run", "fs_write", "browse_url"]
+    assert settings.agent.stop_tools == ["bash_run", "fs_write", "browse_url"]
 
 
 def test_project_extends_dict_mcp_servers(
     global_config_file, isolated_cwd, tmp_path
 ):
     """Project добавляет новый MCP-сервер, не трогая существующие из global."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     # Перезаписываем global с MCP-серверами.
     extended_global = """
@@ -166,18 +166,18 @@ mcp:
       command: psql
 """,
     )
-    cfg = load_config(str(extended_path))
-    assert "fileserver" in cfg["mcp-servers"]
-    assert "db" in cfg["mcp-servers"]
+    settings = load_settings(str(extended_path)).settings
+    assert "fileserver" in settings.mcp.servers
+    assert "db" in settings.mcp.servers
     # fileserver сохранил свои поля из global.
-    assert cfg["mcp-servers"]["fileserver"]["url"] == "http://localhost:8080"
+    assert settings.mcp.servers["fileserver"].url == "http://localhost:8080"
 
 
 def test_project_overrides_nested_scalar(
     global_config_file, isolated_cwd, tmp_path
 ):
     """Project переопределяет конкретное scalar-поле внутри dict в global."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     extended_global = """
 backend:
@@ -205,11 +205,11 @@ mcp:
       url: "http://localhost:9090"
 """,
     )
-    cfg = load_config(str(extended_path))
+    settings = load_settings(str(extended_path)).settings
     # url переопределён в project.
-    assert cfg["mcp-servers"]["fileserver"]["url"] == "http://localhost:9090"
+    assert settings.mcp.servers["fileserver"].url == "http://localhost:9090"
     # transport остался из global.
-    assert cfg["mcp-servers"]["fileserver"]["transport"] == "http"
+    assert settings.mcp.servers["fileserver"].transport == "http"
 
 
 def test_explicit_config_pointing_to_project_local_no_recursion(
@@ -225,7 +225,7 @@ def test_explicit_config_pointing_to_project_local_no_recursion(
     """
     import builtins
 
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     project_cfg = _write_project_config(
         isolated_cwd,
@@ -255,7 +255,7 @@ agent:
 
     monkeypatch.setattr(builtins, "open", counting_open)
 
-    cfg = load_config(str(project_cfg))
+    settings = load_settings(str(project_cfg)).settings
 
     # Recursion guard работает: project_cfg открыт ровно один раз — как global.
     # Без guard'а файл бы открылся дважды (global + project local).
@@ -266,26 +266,26 @@ agent:
     )
 
     # Дополнительная проверка end-state: данные из файла применились корректно.
-    assert cfg["stop_tools"] == ["foo"]
-    assert cfg["max_steps"] == 77
+    assert settings.agent.stop_tools == ["foo"]
+    assert settings.agent.max_steps == 77
 
 
 def test_cli_extra_overrides_win_over_layered(
     global_config_file, isolated_cwd
 ):
     """CLI args (через apply_cli_overrides extra_overrides) побеждают layered config."""
-    from gc_core.config import apply_cli_overrides, flat_config, load_settings
+    from gc_core.config import apply_cli_overrides, load_settings
 
     _write_project_config(isolated_cwd, "agent:\n  max_steps: 999\n")
     loaded = load_settings(str(global_config_file))
     # Project уже применился: max_steps == 999.
-    assert flat_config(loaded)["max_steps"] == 999
+    assert loaded.settings.agent.max_steps == 999
 
     # CLI перебивает: max_steps == 12345.
     overridden = apply_cli_overrides(
         loaded, extra_overrides={"max_steps": 12345}
     )
-    assert flat_config(overridden)["max_steps"] == 12345
+    assert overridden.settings.agent.max_steps == 12345
     assert overridden.provenance.source("agent.max_steps").layer == "cli"
 
 
@@ -298,14 +298,14 @@ def test_invalid_yaml_in_project_loud_error(global_config_file, isolated_cwd):
     валидация стека ловит `(OSError, ValueError)` и откатывается к одному файлу,
     а `yaml.YAMLError` уходил мимо этого отката и ронял /settings на рендере
     меню. Предмет стража прежний: молчания здесь быть не должно."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     _write_project_config(
         isolated_cwd,
         "this is: : : not [valid yaml }\n",
     )
     with pytest.raises(ValueError, match="невалидный YAML"):
-        load_config(str(global_config_file))
+        load_settings(str(global_config_file))
 
 
 def test_invalid_schema_in_project_loud_error(
@@ -323,14 +323,14 @@ def test_invalid_schema_in_project_loud_error(
     файла в хинт пикера); сырой `ValidationError` — в `__cause__`, по нему
     `explain_broken_config` берёт точные координаты.
     """
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     _write_project_config(
         isolated_cwd,
         "backend:\n  api_mode: bogus\n",
     )
     with pytest.raises(ValueError, match="не проходит схему") as excinfo:
-        load_config(str(global_config_file))
+        load_settings(str(global_config_file))
     assert isinstance(excinfo.value.__cause__, ValidationError)
     assert "input_value" not in str(excinfo.value)
 
@@ -343,12 +343,12 @@ def test_invalid_yaml_in_base_loud_error(tmp_path):
     какой-либо защиты: наружу летел сырой yaml.ScannerError, а не ValueError —
     ни один из входов (cli.py/tui/__init__.py) не смог бы поймать его одним
     except ValueError."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     base = tmp_path / "base_config.yml"
     base.write_text("this is: : : not [valid yaml }\n", encoding="utf-8")
     with pytest.raises(ValueError, match="невалидный YAML"):
-        load_config(str(base))
+        load_settings(str(base))
 
 
 def test_base_config_not_dict_loud_error(tmp_path):
@@ -356,23 +356,23 @@ def test_base_config_not_dict_loud_error(tmp_path):
     а не AttributeError из глубины мержа/схемы (`'list' object has no attribute
     'get'`). `_layer_document` уже отвергает такой документ явно — базе того же
     приёма не хватало."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     base = tmp_path / "base_config.yml"
     base.write_text("- a\n- b\n", encoding="utf-8")
     with pytest.raises(ValueError) as exc_info:
-        load_config(str(base))
+        load_settings(str(base))
     assert not isinstance(exc_info.value, AttributeError)
 
 
 def test_unreadable_base_config_loud_error(tmp_path):
     """Несуществующий путь БАЗОВОГО config.yml → ValueError с именем файла, а не
     сырой FileNotFoundError/OSError."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     missing = tmp_path / "does_not_exist.yml"
     with pytest.raises(ValueError) as exc_info:
-        load_config(str(missing))
+        load_settings(str(missing))
     assert str(missing) in str(exc_info.value)
 
 
@@ -380,32 +380,32 @@ def test_empty_project_config_falls_back_to_global(
     global_config_file, isolated_cwd
 ):
     """Пустой project config = пустой dict; deep_merge с global = global. Это нормальное поведение."""
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     _write_project_config(isolated_cwd, "")  # абсолютно пустой файл
-    cfg = load_config(str(global_config_file))
+    settings = load_settings(str(global_config_file)).settings
     # max_steps из global, никаких ошибок.
-    assert cfg["max_steps"] == 50
+    assert settings.agent.max_steps == 50
 
 
 def test_apply_cli_overrides_sets_agentsmd_override():
     """apply_cli_overrides(agentsmd_override=True) выставляет agentsmd_override в True."""
-    from gc_core.config import apply_cli_overrides, flat_config
-    from gc_core.settings import settings_from_flat
+    from gc_core.config import apply_cli_overrides
+    from gc_testkit.settings import settings_from_flat
 
     loaded = settings_from_flat({"agentsmd_override": False})
-    cfg = flat_config(apply_cli_overrides(loaded, agentsmd_override=True))
-    assert cfg["agentsmd_override"] is True
+    settings = apply_cli_overrides(loaded, agentsmd_override=True).settings
+    assert settings.tui.agentsmd_override is True
 
 
 def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
     """apply_cli_overrides() без флага НЕ трогает agentsmd_override."""
-    from gc_core.config import apply_cli_overrides, flat_config
-    from gc_core.settings import settings_from_flat
+    from gc_core.config import apply_cli_overrides
+    from gc_testkit.settings import settings_from_flat
 
     loaded = settings_from_flat({"agentsmd_override": False})
-    cfg = flat_config(apply_cli_overrides(loaded))
-    assert cfg["agentsmd_override"] is False
+    settings = apply_cli_overrides(loaded).settings
+    assert settings.tui.agentsmd_override is False
 
 
 def test_hiding_the_project_layer_works_from_its_home_module(
@@ -426,9 +426,9 @@ def test_hiding_the_project_layer_works_from_its_home_module(
     _write_project_config(isolated_cwd, "agent:\n  max_steps: 4242\n")
     monkeypatch.setattr(env_vars, "project_local_config_path", lambda: None)
 
-    cfg = config_mod.load_config(str(global_config_file))
+    settings = config_mod.load_settings(str(global_config_file)).settings
 
-    assert cfg["max_steps"] == 50  # значение базы, слой скрыт
+    assert settings.agent.max_steps == 50  # значение базы, слой скрыт
 
 
 def test_pointing_the_managed_overlay_works_from_its_home_module(
@@ -444,6 +444,8 @@ def test_pointing_the_managed_overlay_works_from_its_home_module(
         "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
     )
 
-    cfg = config_mod.load_config(str(global_config_file))
+    settings = config_mod.load_settings(str(global_config_file)).settings
 
-    assert cfg["max_steps"] == 777  # патч действует: оверлей взят отсюда
+    assert (
+        settings.agent.max_steps == 777
+    )  # патч действует: оверлей взят отсюда

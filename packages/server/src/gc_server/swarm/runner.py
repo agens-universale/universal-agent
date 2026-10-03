@@ -60,9 +60,9 @@ def _normalize_agent_overrides_to_raw(
 
 
 def _apply_swarm_env_to_raw(raw: Dict[str, Any], config_dir: str) -> None:
-    """Параллель `config_modules.common.apply_swarm_env_overrides` для raw YAML.
+    """Параллель `config_modules.common.swarm_env_updates` для raw YAML.
 
-    Та функция работает на FLAT dict (`config_dict["agent_md_path"] = ...`),
+    Та функция работает на настройках (`paths.agent_md_path` и т.п. слоем env),
     а в materialize мы оперируем сырой YAML-структурой, где те же поля
     лежат в `paths.*`. Чтобы избежать divergence с обычным CLI'ем — здесь
     делаем такую же логику, но на raw.

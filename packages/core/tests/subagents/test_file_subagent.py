@@ -121,7 +121,6 @@ class TestInstance:
                 task="t",
                 reason="r",
                 model="какая-то-модель",
-                config_dict={"a": 1},
                 runtime_notices_enabled=True,
             )
         )
@@ -161,7 +160,6 @@ class TestBoundFileSubagent:
                 task="t",
                 reason="r",
                 model="какая-то-модель",
-                config_dict={"a": 1},
                 runtime_notices_enabled=True,
             )
         )

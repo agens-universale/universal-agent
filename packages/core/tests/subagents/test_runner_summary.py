@@ -1,6 +1,5 @@
 """Tests for summary integration inside SubagentRunner."""
 
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core import run_summary_coordinator as run_summary_coordinator_module
@@ -71,7 +70,7 @@ class TestRunnerSummary:
 
         with (
             patch.object(
-                runner, "_build_child_ctx", return_value=SimpleNamespace()
+                runner, "_build_child_ctx", return_value=_make_ctx(cfg)
             ),
         ):
             await runner.arun(
@@ -105,7 +104,7 @@ class TestRunnerSummary:
 
         with (
             patch.object(
-                runner, "_build_child_ctx", return_value=SimpleNamespace()
+                runner, "_build_child_ctx", return_value=_make_ctx(cfg)
             ),
             patch.object(
                 run_summary_coordinator_module,
@@ -136,7 +135,7 @@ class TestRunnerSummary:
             return "ok"
 
         with patch.object(
-            runner, "_build_child_ctx", return_value=SimpleNamespace()
+            runner, "_build_child_ctx", return_value=_make_ctx(cfg)
         ):
             await runner.arun(
                 "subagent_worker", {"task": "task"}, fake_run_agent
@@ -161,7 +160,7 @@ class TestRunnerSummary:
             return "ok"
 
         with patch.object(
-            runner, "_build_child_ctx", return_value=SimpleNamespace()
+            runner, "_build_child_ctx", return_value=_make_ctx(cfg)
         ):
             await runner.arun(
                 "subagent_worker", {"task": "task"}, fake_run_agent

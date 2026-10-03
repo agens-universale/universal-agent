@@ -2,7 +2,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Optional
 
 CONFIG_FILE_NAME = "config.yml"
 
@@ -15,7 +15,6 @@ from gc_core.config_modules import env_vars
 # путь принадлежит конфигу, и держать его в MCP-подсистеме значило бы вернуть
 # статическую зависимость ядра конфига от MCP, снятую при разбиении на пакеты.
 from gc_core.config_modules import env_vars as mcp_paths
-from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.backend import (
     parse_chat_completions_max_tokens,  # noqa: F401  # re-export: processing_responses импортирует из config
 )
@@ -36,11 +35,6 @@ from gc_core.config_modules.env_vars import project_gc_dir
 # Наложение слоёв и pre-write валидация живут в `config_modules.layers` (слой записи
 # реестра спрашивает их напрямую, минуя агрегатор). Здесь — ре-экспорт: снаружи их
 # зовут как `config.<имя>`, и второй адрес у одного правила заводить незачем.
-from gc_core.config_modules.field_meta import plain_dump
-from gc_core.config_modules.frozen import (  # noqa: F401
-    FrozenConfigDict,
-    derived_cache,
-)
 from gc_core.config_modules.layers import (  # noqa: F401
     _app_config_from_raw,
     _app_config_from_text,
@@ -58,7 +52,6 @@ from gc_core.config_modules.layers import (  # noqa: F401
 )
 from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
-    ModelEntry,
     validate_registry_pairs,
 )
 from gc_core.config_modules.model_sections_validation import (
@@ -89,36 +82,6 @@ from gc_core.utils.user_text import unreadable_reason
 _DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS = (
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS
 )
-
-_LOGGING_SYNC_KEYS = (
-    "full_log_backend",
-    "console_trace",
-    "save_logs",
-    "logging_format",
-    "log_level",
-)
-
-
-def sync_logging_flat_and_params(config_dict: Dict[str, Any]) -> None:
-    """Согласовать logging_params и плоские ключи (после merge overrides и т.п.)."""
-    lp = dict(config_dict.get("logging_params") or {})
-    for key in _LOGGING_SYNC_KEYS:
-        if key in config_dict:
-            lp[key] = config_dict[key]
-    config_dict["logging_params"] = lp
-    for key in _LOGGING_SYNC_KEYS:
-        if key in lp:
-            config_dict[key] = lp[key]
-
-
-def resolve_tui_stream_enabled(config_dict: Dict[str, Any]) -> bool:
-    """Мастер-свитч live-стриминга TUI: явный `tui_stream` (True/False) побеждает;
-    иначе legacy top-level `stream` (backend.stream); иначе дефолт True.
-    None у `tui_stream` = «не задан» → падаем на legacy, чтобы не затирать его."""
-    tui_stream = config_dict.get("tui_stream")
-    if tui_stream is not None:
-        return bool(tui_stream)
-    return bool(config_dict.get("stream", True))
 
 
 def _default_config_path() -> str:
@@ -270,12 +233,6 @@ def cli_forces_legacy_model(loaded) -> bool:
     в стопке — это решает исключительно резолв модели, не сборку конфига.
     ``--model``/``--completions_url`` при пустом реестре — обычный легаси, без форса.
     """
-    if isinstance(loaded, Mapping):
-        # Переходно: плоский конфиг (тесты, собранные словарём).
-        explicit = set(loaded.get("cli_explicit_keys") or ())
-        return bool(explicit & {"model", "completions_url"}) and bool(
-            loaded.get("models")
-        )
     from_cli = any(
         loaded.provenance.source(path).layer == "cli"
         for path in ("agent.model", "backend.completions_url")
@@ -286,216 +243,6 @@ def cli_forces_legacy_model(loaded) -> bool:
 def resolve_config_path(config_path: Optional[str] = None) -> str:
     """Путь config.yml, использованный сессией (та же цепочка, что в load_config)."""
     return config_path or _xdg_config_path() or _default_config_path()
-
-
-def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
-    """Проекция ``ModelEntry`` для ``ModelRouter`` (src/model_router.py).
-
-    ``authorization_header`` — уже Bearer-нормализованное значение (None=наследовать,
-    ""=явно без, иначе значение) — потребителю нужен именно computed-результат, не
-    сырой ``token``. ``backend_overrides`` — только явно заданные ключи
-    (``exclude_unset``), чтобы Router накладывал поверх эффективного backend лишь то,
-    что модель реально переопределяет, а не дефолты ``BackendConfig``.
-    """
-    return {
-        "model": entry.model,
-        "url": entry.url,
-        "authorization_header": entry.authorization_header,
-        "pricing": entry.pricing.model_dump()
-        if entry.pricing is not None
-        else None,
-        "backend_overrides": (
-            entry.backend.model_dump(exclude_unset=True)
-            if entry.backend is not None
-            else {}
-        ),
-    }
-
-
-def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
-    """Проекция валидированного AppConfig в плоский config_dict агентного слоя.
-
-    Единственное место, где схема раскладывается в плоские ключи. Любой сборщик
-    конфига (load_config, harbor-адаптер) обязан идти через неё, иначе новый ключ
-    схемы не доедет до потребителей, которые читают его как cfg["..."].
-    """
-    # Устаревшие ключи, заданные юзером ЯВНО (pydantic model_fields_set знает
-    # explicit-set vs дефолт). Голый факт → startup_notices форматирует текст.
-    _deprecated_keys_used: list[str] = []
-    if "stream" in app_cfg.backend.model_fields_set:
-        _deprecated_keys_used.append("backend.stream")
-
-    config_dict: Dict[str, Any] = {
-        "backend_api_mode": app_cfg.backend.api_mode,
-        "completions_url": app_cfg.backend.completions_url,
-        "chat_completions_max_tokens": app_cfg.backend.chat_completions_max_tokens,
-        "chat_completions_min_response_tokens": app_cfg.backend.chat_completions_min_response_tokens,
-        "chat_completion_headers": app_cfg.backend.chat_completion_headers,
-        "chat_completion_kwargs": app_cfg.backend.chat_completion_kwargs,
-        "use_max_tokens_param": app_cfg.backend.use_max_tokens_param,
-        "openai_strict_tools_schema": app_cfg.backend.openai_strict_tools_schema,
-        "send_tool_strict": app_cfg.backend.send_tool_strict,
-        "claude_prompt_cache": app_cfg.backend.claude_prompt_cache,
-        "use_ssl": app_cfg.backend.use_ssl,
-        "cert_path": app_cfg.backend.cert_path,
-        "key_path": app_cfg.backend.key_path,
-        "use_retry": app_cfg.backend.use_retry,
-        "retry_embedded_choice_errors": app_cfg.backend.retry_embedded_choice_errors,
-        "backend_request_timeout_sec": app_cfg.backend.request_timeout_sec,
-        "proxy": app_cfg.backend.proxy,
-        "stream": app_cfg.backend.stream,  # legacy: канонический ключ — tui.stream
-        "deprecated_keys_used": _deprecated_keys_used,
-        "tui_stream": app_cfg.tui.stream,
-        "tui_stream_display": app_cfg.tui.stream_display,
-        "tui_text_answer_mode": app_cfg.tui.text_answer_mode,
-        "tui_finish_gate_mode": app_cfg.tui.finish_gate_mode,
-        "tui_finish_gate_mode_explicit": "finish_gate_mode"
-        in app_cfg.tui.model_fields_set,
-        "strict_turn_finish_explicit_false": (
-            "strict_turn_finish_validation" in app_cfg.agent.model_fields_set
-            and not app_cfg.agent.strict_turn_finish_validation
-        ),
-        "update": app_cfg.update.model_dump(),  # спека D: check/extra_args
-        "tui_bang_shell": app_cfg.tui.bang_shell.model_dump(),
-        "tui_file_view": app_cfg.tui.file_view.model_dump(),
-        "voice": {
-            "provider": app_cfg.voice.provider,
-            "url": app_cfg.voice.url,
-            "token": app_cfg.voice.token.get_secret_value(),
-            "model": app_cfg.voice.model,
-            "language": app_cfg.voice.language,
-            "max_seconds": app_cfg.voice.max_seconds,
-            "timeout_seconds": app_cfg.voice.timeout_seconds,
-            "verify_ssl": app_cfg.voice.verify_ssl,
-        },
-        "endpoint_presets": [p.model_dump() for p in app_cfg.endpoint_presets],
-        "voice_endpoint_presets": [
-            p.model_dump() for p in app_cfg.voice_endpoint_presets
-        ],
-        "command_moderation": {
-            "enabled": app_cfg.security.command_moderation.enabled,
-            "mode": app_cfg.security.command_moderation.mode,
-            "allowed_command_examples": app_cfg.security.command_moderation.allowed_command_examples,
-            "denied_command_examples": app_cfg.security.command_moderation.denied_command_examples,
-        },
-        "write_guard": {
-            "enabled": app_cfg.security.write_guard.enabled,
-            "mode": app_cfg.security.write_guard.mode,
-            "extra_paths": app_cfg.security.write_guard.extra_paths,
-        },
-        "read_guard": app_cfg.security.read_guard.model_dump(),
-        "url_policy": {
-            "enabled": app_cfg.security.url_policy.enabled,
-            "mode": app_cfg.security.url_policy.mode,
-            "allowed_schemes": app_cfg.security.url_policy.allowed_schemes,
-            "url_blacklist": app_cfg.security.url_policy.url_blacklist,
-        },
-        "download": app_cfg.security.download.model_dump(),
-        "summary_params": app_cfg.summary.model_dump(),
-        "chat_completions_params": app_cfg.chat_completions.model_dump(),
-        # Плоский dict рядом с chat_completion_kwargs: deep_merge (бенч/project)
-        # обновляет его; живой pydantic-объект сюда не кладём — иначе early-return
-        # в auxiliary_llm_from_config_dict игнорирует overlay.
-        "auxiliary_llm_params": app_cfg.chat_completions.auxiliary_llm.model_dump(),
-        "quality_gate_params": app_cfg.quality_gate.model_dump(),
-        # Limits for ``session_memory`` tool; yaml/config keys stay ``working_memory*``.
-        "working_memory": app_cfg.working_memory,
-        "working_memory_params": app_cfg.working_memory.model_dump(),
-        "todo_params": app_cfg.todo.model_dump(),
-        "working_memory_max_chars_goal": app_cfg.working_memory.max_chars_goal,
-        "working_memory_max_chars_constraints": app_cfg.working_memory.max_chars_constraints,
-        "working_memory_max_chars_state": app_cfg.working_memory.max_chars_state,
-        "working_memory_max_chars_knowledge": app_cfg.working_memory.max_chars_knowledge,
-        "working_memory_total_budget_chars": app_cfg.working_memory.total_budget_chars,
-        "tool_usage_notice": app_cfg.tool_usage_notice,
-        "tool_usage_notice_params": [
-            rule.model_dump() for rule in app_cfg.tool_usage_notice
-        ],
-        "project_memory": app_cfg.project_memory,
-        "project_memory_params": app_cfg.project_memory.model_dump(),
-        "project_memory_check_interval_messages": app_cfg.project_memory.check_interval_messages,
-        "project_memory_max_chars": app_cfg.project_memory.max_chars,
-        "project_memory_max_append_chars": app_cfg.project_memory.max_append_chars,
-        "enable_project_memory_notice": app_cfg.project_memory.enable_project_memory_notice,
-        "intent_scope": app_cfg.intent_scope,
-        "intent_scope_params": app_cfg.intent_scope.model_dump(),
-        "logging_params": app_cfg.logging.model_dump(),
-        "agent_md_path": app_cfg.paths.agent_md_path,
-        "chat_completions_system_prompt_path": app_cfg.paths.chat_completions_system_prompt_path,
-        "chat_completions_intent_guard_prompt_path": app_cfg.paths.chat_completions_intent_guard_prompt_path,
-        "chat_completions_custom_subagent_system_prompt_path": app_cfg.paths.chat_completions_custom_subagent_system_prompt_path,
-        "chat_completions_special_instructions_path": app_cfg.paths.chat_completions_special_instructions_path,
-        "threads_data_path": app_cfg.paths.threads_data_path,
-        "thread_store_persist": app_cfg.thread_store.persist,
-        "skills_data_path": app_cfg.paths.skills_data_path,
-        "logs_dump_dir": app_cfg.paths.logs_dump_dir,
-        "agentsmd_override": app_cfg.tui.agentsmd_override,
-        "model": app_cfg.agent.model,
-        "system_prompt_id": app_cfg.agent.system_prompt_id,
-        "use_server_subagents": app_cfg.agent.use_server_subagents,
-        "use_local_subagents": app_cfg.agent.use_local_subagents,
-        "subagent_max_steps": app_cfg.agent.subagent_max_steps,
-        "subagents_dir": app_cfg.agent.subagents_dir,
-        "subagents_max_count": app_cfg.agent.subagents_max_count,
-        "client_name": app_cfg.agent.client_name,
-        "x_cl_id": app_cfg.agent.x_cl_id,
-        "trace_id_header_name": app_cfg.agent.trace_id_header_name,
-        "trace_header_enabled": app_cfg.agent.trace_header_enabled,
-        "verbose": app_cfg.agent.verbose,
-        "stop_tools": app_cfg.agent.stop_tools,
-        "disable_skills": app_cfg.agent.disable_skills,
-        "server_tool_prefix": app_cfg.agent.server_tool_prefix,
-        "max_steps": app_cfg.agent.max_steps,
-        "session_token_limit": app_cfg.agent.session_token_limit,
-        "max_tool_calls": app_cfg.agent.max_tool_calls,
-        "no_tool_call_max_count": app_cfg.agent.no_tool_call_max_count,
-        "max_unknown_tool_repeats": app_cfg.agent.max_unknown_tool_repeats,
-        "strict_turn_finish_validation": app_cfg.agent.strict_turn_finish_validation,
-        "finish_gate_max_iterations": app_cfg.agent.finish_gate_max_iterations,
-        "subagent_finish_gate_max_iterations": app_cfg.agent.subagent_finish_gate_max_iterations,
-        "finish_gate_use_rule_hints": app_cfg.agent.finish_gate_use_rule_hints,
-        "console_trace": app_cfg.logging.console_trace,
-        "save_logs": app_cfg.logging.save_logs,
-        "logging_format": app_cfg.logging.format,
-        "log_level": app_cfg.logging.log_level,
-        "redact_secrets": app_cfg.logging.redact_secrets.model_dump(),
-        "limit_project_metadata": app_cfg.agent.limit_project_metadata,
-        "tool_output_inline_max_chars": app_cfg.agent.tool_output_inline_max_chars,
-        "stored_tool_outputs_max_entries": app_cfg.agent.stored_tool_outputs_max_entries,
-        "exec_timeout_sec": app_cfg.agent.exec_timeout_sec,
-        "exec_output_capture_max_chars": app_cfg.agent.exec_output_capture_max_chars,
-        "exec_output_preview_edge_chars": app_cfg.agent.exec_output_preview_edge_chars,
-        "walk_output_max_chars": app_cfg.agent.walk_output_max_chars,
-        "harbor_exec_init": app_cfg.agent.harbor_exec_init,
-        "inject_tool_fields": dict(app_cfg.agent.inject_tool_fields),
-        "model_steering": app_cfg.agent.model_steering,
-        "limit_trace_summary": app_cfg.agent.limit_trace_summary,
-        "loop_detector": app_cfg.agent.loop_detector.model_dump(),
-        # Плоский вид несёт сырые значения секретов (token): его читают транспорты.
-        "mcp-servers": {
-            name: plain_dump(server, by_alias=True)
-            for name, server in app_cfg.mcp.servers.items()
-        },
-        "mcp-meta": app_cfg.mcp.meta.model_dump(by_alias=True),
-        "pricing": app_cfg.pricing.model_dump(),
-        "agent_auth": app_cfg.agent_auth.model_dump()
-        if app_cfg.agent_auth
-        else {},
-        "diff_tui": app_cfg.diff_tui.model_dump(),
-        "fs_tools": app_cfg.fs_tools.model_dump(),
-        "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
-        # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).
-        # Router работает от этого снимка, а не от app_cfg напрямую (§6.4).
-        "models": {
-            alias: _serialize_model_entry(entry)
-            for alias, entry in app_cfg.models.items()
-        },
-        "slots": app_cfg.slots.model_dump(),
-        "assign": app_cfg.assign.model_dump(),
-        "profile": app_cfg.profile,
-    }
-
-    return config_dict
 
 
 def _build_mtime_set(
@@ -527,7 +274,7 @@ def _build_mtime_set(
 def profile_mtime_set(
     config_path: Optional[str], active_name: Optional[str] = None
 ) -> Dict[str, Optional[float]]:
-    """Тот же снимок, что строит `load_config_ex` (спека §3.3), но БЕЗ парсинга/
+    """Тот же снимок, что строит `load_settings` (спека §3.3), но БЕЗ парсинга/
     валидации файлов — только `stat()`. Точка входа для TUI (`set_config_path`):
     связывание пути с окном не обязано гонять полную загрузку конфига ради снимка
     свежести."""
@@ -551,7 +298,7 @@ def load_settings(
 ):
     """Загрузить настройки: ``LoadedSettings(settings, runtime, provenance)``.
 
-    Тот же конвейер, что описан у ``load_config_ex``, но без плоского словаря.
+    Конвейер загрузки: слои → ${ENV} → миграции → compat → схема → пути.
     """
     from gc_core.config_modules.provenance import Provenance
     from gc_core.settings import LoadedSettings, RuntimeEnv
@@ -741,74 +488,3 @@ def load_settings(
         provenance=provenance,
         profile_meta=meta,
     )
-
-
-def flat_config(loaded, runtime=None) -> Dict[str, Any]:
-    """Переходный плоский словарь из настроек (удаляется в конце миграции).
-
-    ``loaded`` — ``LoadedSettings`` или ``AppConfig`` (тогда ``runtime`` отдельно).
-    """
-    from gc_core.settings import LoadedSettings, RuntimeEnv
-
-    # Загруженные настройки знают действующий профиль (в том числе «никакого»);
-    # голая модель — только указатель из своего документа.
-    if isinstance(loaded, LoadedSettings):
-        app_cfg, runtime = loaded.settings, runtime or loaded.runtime
-        active_profile = runtime.active_profile
-    else:
-        app_cfg, runtime = loaded, runtime or RuntimeEnv()
-        active_profile = runtime.active_profile or app_cfg.profile
-    config_dict = flatten_app_config(app_cfg)
-    config_dict["level"] = app_cfg.level
-    # Плоский `profile` — ДЕЙСТВУЮЩИЙ профиль, а не указатель из файлов.
-    config_dict["profile"] = active_profile
-    config_dict["compat_notices"] = list(runtime.notices)
-    config_dict["voice_overridden_by_managed"] = (
-        runtime.voice_overridden_by_managed
-    )
-    for key in (
-        "launch_root",
-        "project_root",
-        "trace_id",
-        "text_answer_mode",
-        "finish_gate_smart",
-        "os_backend",
-    ):
-        value = getattr(runtime, key)
-        if value:
-            config_dict[key] = value
-    if runtime.subagent_tools_allow is not None:
-        config_dict["subagent_tools_allow"] = list(
-            runtime.subagent_tools_allow
-        )
-    if runtime.subagent_tools_stop:
-        config_dict["subagent_tools_stop"] = list(runtime.subagent_tools_stop)
-    sync_logging_flat_and_params(config_dict)
-    return FrozenConfigDict(config_dict)
-
-
-def load_config_ex(
-    config_path: Optional[str] = None,
-    *,
-    profile_override: Optional[str] = None,
-) -> tuple[Dict[str, Any], ProfileMeta]:
-    """Переходная обёртка (до удаления): плоский словарь и метаданные профиля.
-
-    Отдаёт изменяемую копию — для витрин и тестов, собирающих конфиг словарём.
-    Путь агента (CLI, server, TUI) идёт через ``load_settings`` и неизменяемый вид.
-    """
-    loaded = load_settings(config_path, profile_override=profile_override)
-    return dict(flat_config(loaded)), loaded.profile_meta
-
-
-def load_config(config_path: Optional[str] = None) -> Dict[str, Any]:
-    config_dict, _meta = load_config_ex(config_path)
-    return config_dict
-
-
-if __name__ == "__main__":
-    cfg = load_config()
-    print(cfg)
-    auth = build_auth_connector(cfg)
-    if auth:
-        print(auth.get_token())

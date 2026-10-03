@@ -90,7 +90,7 @@ def test_build_real_executor_stores_mcp_snapshot(tmp_path, monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "gc_core.config.build_auth_connector", lambda cfg: None
+        "gc_core.config_modules.auth.build_auth_connector", lambda cfg: None
     )
     monkeypatch.setattr(
         "gc_core.run_context.acreate_run_context",

@@ -82,10 +82,10 @@ def test_document_without_registry_passes():
 
 
 def test_cli_models_override_goes_through_the_rule():
-    """`--models` задаёт весь реестр строкой и идёт мимо схемы (плоский config_dict
-    заполняется после валидации) — правило прогоняется явно, иначе CLI обходит его."""
+    """`--models` задаёт весь реестр строкой поверх уже загруженных настроек (мимо
+    послойной проверки файлов) — правило прогоняется явно, иначе CLI обходит его."""
     from gc_core.config import apply_cli_overrides
-    from gc_core.settings import settings_from_flat
+    from gc_testkit.settings import settings_from_flat
 
     loaded = settings_from_flat({})
     with pytest.raises(ValueError, match="--models.*задан свой адрес"):
@@ -103,7 +103,7 @@ def test_project_layer_cannot_take_the_base_token_to_its_own_url(
     запись с полной парой — токен базы уходит на адрес проекта, и проверка итогового
     документа молчит. Ловит это только точка B, и она обязана быть подключена в загрузчике
     (файл приезжает с клоном репозитория — сам пользователь его не писал)."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)
@@ -115,7 +115,7 @@ def test_project_layer_cannot_take_the_base_token_to_its_own_url(
     with pytest.raises(
         ValueError, match=r"\.gc[\\/]config\.yml: models\.gc: задан свой адрес"
     ):
-        load_config_ex(str(base))
+        load_settings(str(base))
 
 
 def test_profile_layer_cannot_take_the_base_token_to_its_own_url(
@@ -123,7 +123,7 @@ def test_profile_layer_cannot_take_the_base_token_to_its_own_url(
 ):
     """§9.8, тот же сценарий носителем-профилем: контент профиля мержится ПОВЕРХ всех
     файловых слоёв, значит и он способен подменить один адрес под чужим токеном."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, dict(_BASE_WITH_A_WHOLE_PAIR, profile="work"))
@@ -135,7 +135,7 @@ def test_profile_layer_cannot_take_the_base_token_to_its_own_url(
     with pytest.raises(
         ValueError, match=r"work\.yml: models\.gc: задан свой адрес"
     ):
-        load_config_ex(str(base))
+        load_settings(str(base))
 
 
 def test_managed_layer_cannot_take_the_base_token_to_its_own_url(
@@ -144,7 +144,7 @@ def test_managed_layer_cannot_take_the_base_token_to_its_own_url(
     """§9.8, третий слой: machine-managed оверлей (`config.local.yml`, его пишет
     `gc-mcp install`) идёт тем же `deep_merge` и правилу не подсуден иначе, чем своей
     проверкой до слияния."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_core.config_modules.env_vars import managed_config_path
 
     base = tmp_path / "base_config.yml"
@@ -157,7 +157,7 @@ def test_managed_layer_cannot_take_the_base_token_to_its_own_url(
     with pytest.raises(
         ValueError, match=r"config\.local\.yml: models\.gc: задан свой адрес"
     ):
-        load_config_ex(str(base))
+        load_settings(str(base))
 
 
 def test_pre_write_validator_accepts_what_the_loader_accepts(tmp_path):
@@ -204,7 +204,7 @@ def test_base_config_half_a_pair_names_its_own_file(isolated_cwd, tmp_path):
     """Проводка точки B на базовом слое. Половина пары в самом `config.yml` падает и без
     неё — точкой A на итоговом документе, — но БЕЗ пути файла. Слоёв у пользователя три
     (базовый, managed, проектный) плюс профиль, и «в каком файле» здесь половина ответа."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base = tmp_path / "base_config.yml"
     _write_yaml(
@@ -221,7 +221,7 @@ def test_base_config_half_a_pair_names_its_own_file(isolated_cwd, tmp_path):
     with pytest.raises(
         ValueError, match=r"base_config\.yml: models\.gc: задан свой адрес"
     ):
-        load_config_ex(str(base))
+        load_settings(str(base))
 
 
 def test_layer_removing_only_the_address_is_caught_on_the_merged_document(
@@ -231,7 +231,7 @@ def test_layer_removing_only_the_address_is_caught_on_the_merged_document(
     слой законен — он ничего не задаёт, и проверка слоя молчит правильно; половина
     рождается только в мерже, где остался свой токен базы без адреса. Ловит её точка A на
     итоговом документе — то есть точки не дублируют друг друга, а закрывают разное."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base = tmp_path / "base_config.yml"
     _write_yaml(base, _BASE_WITH_A_WHOLE_PAIR)
@@ -242,7 +242,7 @@ def test_layer_removing_only_the_address_is_caught_on_the_merged_document(
     with pytest.raises(
         ValueError, match="задан свой токен, но не задан адрес"
     ):
-        load_config_ex(str(base))
+        load_settings(str(base))
 
 
 def test_weakened_transport_notice_reaches_the_startup_notices(
@@ -250,9 +250,9 @@ def test_weakened_transport_notice_reaches_the_startup_notices(
 ):
     """§7: запись без своего подключения работает ОБЩИМ токеном и при этом вправе
     ослабить транспорт под собой. Это notice, а не отказ, — значит он обязан ДОЕХАТЬ:
-    канал стартовых предупреждений один (`compat_notices`), и сказанное валидатором
+    канал стартовых предупреждений один (`runtime.notices`), и сказанное валидатором
     в пустоту равно несказанному."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     base = tmp_path / "base_config.yml"
     _write_yaml(
@@ -271,10 +271,10 @@ def test_weakened_transport_notice_reaches_the_startup_notices(
         },
     )
 
-    config_dict, _meta = load_config_ex(str(base))
+    loaded = load_settings(str(base))
     assert (
         "запись gc ослабляет защиту запроса, который идёт с общим токеном"
-        in config_dict["compat_notices"]
+        in loaded.runtime.notices
     )
 
 

@@ -11,6 +11,7 @@ if str(HARBOR) not in sys.path:
     sys.path.insert(0, str(HARBOR))
 
 from adapters.gc_cli_external import GcCliExternal
+from gc_testkit.settings import make_settings
 
 
 def _server(name, transport, url=None, command=None, args=None):
@@ -111,17 +112,19 @@ def test_stream_http_and_stdio_are_tagged_os_backend():
 def test_explicit_entry_wins_even_under_the_servers_natural_name():
     """The mapper sanitises `user-server` to `user_server`; comparing raw keys
     would register the same sidecar twice under two tool prefixes."""
-    config_dict = {
-        "mcp-servers": {
-            "user-server": {
-                "transport": "stream_http",
-                "url": "http://user-server:8000/mcp",
-                "execute_on": "agent",
+    settings = make_settings(
+        {
+            "mcp-servers": {
+                "user-server": {
+                    "transport": "stream_http",
+                    "url": "http://user-server:8000/mcp",
+                    "execute_on": "agent",
+                }
             }
         }
-    }
-    GcCliExternal._apply_mcp_servers(
-        config_dict,
+    )
+    servers = GcCliExternal._apply_mcp_servers(
+        settings,
         [
             _server(
                 "user-server",
@@ -129,23 +132,25 @@ def test_explicit_entry_wins_even_under_the_servers_natural_name():
                 url="http://user-server:8000/mcp",
             )
         ],
-    )
-    assert list(config_dict["mcp-servers"]) == ["user-server"]
-    assert config_dict["mcp-servers"]["user-server"]["execute_on"] == "agent"
+    ).settings.mcp.servers
+    assert list(servers) == ["user-server"]
+    assert servers["user-server"].execute_on == "agent"
 
 
 def test_existing_config_entry_wins_over_autotagging():
-    config_dict = {
-        "mcp-servers": {
-            "user_server": {
-                "transport": "stream_http",
-                "url": "http://user-server:8000/mcp",
-                "execute_on": "agent",
+    settings = make_settings(
+        {
+            "mcp-servers": {
+                "user_server": {
+                    "transport": "stream_http",
+                    "url": "http://user-server:8000/mcp",
+                    "execute_on": "agent",
+                }
             }
         }
-    }
-    GcCliExternal._apply_mcp_servers(
-        config_dict,
+    )
+    servers = GcCliExternal._apply_mcp_servers(
+        settings,
         [
             _server(
                 "user-server",
@@ -153,25 +158,36 @@ def test_existing_config_entry_wins_over_autotagging():
                 url="http://user-server:8000/mcp",
             )
         ],
+    ).settings.mcp.servers
+    assert list(servers) == ["user_server"]
+    assert servers["user_server"].execute_on == "agent"
+
+
+def test_task_servers_are_added_next_to_config_entries():
+    settings = make_settings(
+        {"mcp-servers": {"keep": {"transport": "http", "url": "http://k"}}}
     )
-    assert config_dict["mcp-servers"]["user_server"]["execute_on"] == "agent"
+    servers = GcCliExternal._apply_mcp_servers(
+        settings, [_server("s", "streamable-http", url="http://x/mcp")]
+    ).settings.mcp.servers
+    assert set(servers) == {"keep", "s"}
+    assert servers["keep"].execute_on == "agent"
+    assert servers["s"].transport == "stream_http"
+    assert servers["s"].execute_on == "os_backend"
+    assert servers["s"].url == "http://x/mcp"
 
 
 def test_empty_server_list_leaves_config_untouched():
-    config_dict = {
-        "mcp-servers": {"keep": {"transport": "http", "url": "http://k"}}
-    }
-    GcCliExternal._apply_mcp_servers(config_dict, [])
-    assert config_dict["mcp-servers"] == {
-        "keep": {"transport": "http", "url": "http://k"}
-    }
-    assert "mcp-meta" not in config_dict
+    settings = make_settings(
+        {"mcp-servers": {"keep": {"transport": "http", "url": "http://k"}}}
+    )
+    assert GcCliExternal._apply_mcp_servers(settings, []) is settings
 
 
 def test_timeouts_are_raised_for_exec_round_trips():
-    config_dict = {}
-    GcCliExternal._apply_mcp_servers(
-        config_dict,
+    settings = make_settings()
+    meta = GcCliExternal._apply_mcp_servers(
+        settings,
         [
             _server(
                 "user-server",
@@ -179,14 +195,14 @@ def test_timeouts_are_raised_for_exec_round_trips():
                 url="http://user-server:8000/mcp",
             )
         ],
-    )
-    assert config_dict["mcp-meta"]["request_timeout_sec"] >= 600
-    assert config_dict["mcp-meta"]["discovery_timeout_sec"] >= 120
+    ).settings.mcp.meta
+    assert meta.request_timeout_sec >= 600
+    assert meta.discovery_timeout_sec >= 120
 
 
 def test_existing_higher_timeouts_are_kept():
-    config_dict = {"mcp-meta": {"request_timeout_sec": 900}}
-    GcCliExternal._apply_mcp_servers(
-        config_dict, [_server("s", "streamable-http", url="http://x/mcp")]
-    )
-    assert config_dict["mcp-meta"]["request_timeout_sec"] == 900
+    settings = make_settings({"mcp-meta": {"request_timeout_sec": 900}})
+    meta = GcCliExternal._apply_mcp_servers(
+        settings, [_server("s", "streamable-http", url="http://x/mcp")]
+    ).settings.mcp.meta
+    assert meta.request_timeout_sec == 900

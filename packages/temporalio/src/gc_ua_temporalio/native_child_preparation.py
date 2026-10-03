@@ -82,7 +82,7 @@ class NativeChildActivities:
         # Настройки ребёнка едут один раз — публичным снимком его контекста
         # (`context.context`); в подготовленном состоянии их нет. Workflow
         # подставляет типизированные настройки собранного из снимка контекста.
-        return NativePreparedChild(context, replace(state, config_dict={}))
+        return NativePreparedChild(context, replace(state, settings={}))
 
 
 class PreparedNativeChild:
@@ -114,7 +114,7 @@ class PreparedNativeChild:
         return self.ctx
 
     async def prepare_child_state(self, _runner):
-        return replace(self.prepared.state, config_dict=self._child_settings())
+        return replace(self.prepared.state, settings=self._child_settings())
 
     def release_child_context(self, _ctx):
         # The worker provider owns logs and the parent's live-resource lease.

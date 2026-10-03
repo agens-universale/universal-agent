@@ -7,12 +7,12 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.config import (
     _bootstrap_user_config,
     apply_cli_overrides,
-    build_auth_connector,
     cli_forces_legacy_model,
     load_settings,
     resolve_config_path,
     user_config_path,
 )
+from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
     UnresolvedPlaceholdersError,
 )

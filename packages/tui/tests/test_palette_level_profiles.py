@@ -519,7 +519,7 @@ def _stub_create_run_context(monkeypatch, captured):
         return _Ctx()
 
     monkeypatch.setattr(
-        "gc_core.config.build_auth_connector", lambda cfg: None
+        "gc_core.config_modules.auth.build_auth_connector", lambda cfg: None
     )
     monkeypatch.setattr(
         "gc_core.run_context.acreate_run_context", _fake_acreate_run_context

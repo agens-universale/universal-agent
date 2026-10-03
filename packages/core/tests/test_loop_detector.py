@@ -1114,20 +1114,17 @@ def test_profiles_hang_on_listed_tools_not_on_write_exec_finish():
         assert getattr(cls, LOOP_WARN_ATTR, None) is None
 
 
-def test_config_flatten_wires_loop_detector():
-    from gc_core.config import flatten_app_config
+def test_app_config_wires_loop_detector():
     from gc_core.config_modules.agent import AgentConfig, LoopDetectorConfig
     from gc_core.config_modules.root import AppConfig
 
-    cd_on = flatten_app_config(AppConfig(agent=AgentConfig()))
-    assert cd_on["loop_detector"] == {"enabled": True}
+    cfg_on = AppConfig(agent=AgentConfig())
+    assert cfg_on.agent.loop_detector.model_dump() == {"enabled": True}
 
-    cd_off = flatten_app_config(
-        AppConfig(
-            agent=AgentConfig(loop_detector=LoopDetectorConfig(enabled=False))
-        )
+    cfg_off = AppConfig(
+        agent=AgentConfig(loop_detector=LoopDetectorConfig(enabled=False))
     )
-    assert cd_off["loop_detector"] == {"enabled": False}
+    assert cfg_off.agent.loop_detector.model_dump() == {"enabled": False}
 
 
 def test_serializer_drops_loop_window():

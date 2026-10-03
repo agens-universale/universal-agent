@@ -319,7 +319,7 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
         return _Ctx()
 
     monkeypatch.setattr(
-        "gc_core.config.build_auth_connector", lambda cfg: None
+        "gc_core.config_modules.auth.build_auth_connector", lambda cfg: None
     )
     monkeypatch.setattr(
         "gc_core.run_context.acreate_run_context", _fake_acreate_run_context

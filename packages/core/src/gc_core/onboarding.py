@@ -152,7 +152,7 @@ def _entry_carries_own_connection(entry: Dict[str, Any]) -> bool:
     `backend.chat_completion_headers.Authorization`), и заполненный по документации
     реестр объявлялся бы ненастроенным.
 
-    Форма здесь — снимок (`config._serialize_model_entry`): сырого `token` в
+    Форма здесь — снимок (`model_router.serialize_model_entry`): сырого `token` в
     загруженном конфиге уже нет, вместо него вычисленный `authorization_header`
     (None — наследовать, "" — ЗАДАННЫЙ токен «сервер не требует авторизации»), а
     явные оверлеи backend лежат в `backend_overrides`.
@@ -187,7 +187,7 @@ def _registry_is_self_sufficient(c: Any) -> bool:
     тащить его в детект первого запуска нельзя, а «самодостаточны все» ошибается
     только в безопасную сторону — лишний раз предложить мастер, но не объявить
     готовым конфиг, который уйдёт на `your-backend:PORT`."""
-    from gc_core.config import _serialize_model_entry
+    from gc_core.model_router import serialize_model_entry
 
     settings = settings_of(c)
     models = settings.models
@@ -195,7 +195,7 @@ def _registry_is_self_sufficient(c: Any) -> bool:
         settings.backend.api_mode == "chat_completions"
         and bool(models)
         and all(
-            _entry_carries_own_connection(_serialize_model_entry(entry))
+            _entry_carries_own_connection(serialize_model_entry(entry))
             for entry in models.values()
         )
     )
@@ -854,11 +854,11 @@ def explain_broken_config(
     program: str = "gc-cli",
     profile_override: Optional[str] = None,
 ) -> str:
-    """Человекочитаемое объяснение вместо трейсбека, когда `load_config_ex()` не
+    """Человекочитаемое объяснение вместо трейсбека, когда `load_settings()` не
     смог собрать конфиг. `exc` — пойманный `ValueError` (pydantic `ValidationError`
     входит в него подклассом — единственный исход загрузки после защиты чтения
     базы, см. config.py/layers.py::_layer_document). `profile_override` — тот же,
-    что ушёл в `load_config_ex` (`--profile`): объяснение обязано описывать стек,
+    что ушёл в `load_settings` (`--profile`): объяснение обязано описывать стек,
     который грузила сессия, а не указатель из файла — иначе при `--profile broken`
     карта называла одну базу и советовала чинить в ней ключ, который верен
     (ревью). Имя из флага, не нашедшее файла, так и называется: чинить его во
@@ -927,7 +927,7 @@ def explain_broken_config(
     # Координаты названных ошибкой ключей — ОДИН разбор на всё объяснение: их
     # спрашивают и виновники, и совет про профиль из флага. Второе чтение той же
     # строки — второе прочтение одного правила, и разъезжаются они молча.
-    # Загрузка (`config.load_config_ex`) отдаёт отказ схемы уже завёрнутым —
+    # Загрузка (`config.load_settings`) отдаёт отказ схемы уже завёрнутым —
     # ValueError с текстом без pydantic-дампа (`input_value=<repr записи>` нёс
     # токен из файла; MR #80, класс L28), а сам `ValidationError` едет в
     # `__cause__`: его `loc` точнее текста (заходит в списки и не ограничен

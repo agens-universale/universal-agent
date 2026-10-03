@@ -1,4 +1,4 @@
-"""DiffTuiConfig defaults + flatten в config_dict."""
+"""DiffTuiConfig defaults + значение из config.yml в настройках."""
 
 from __future__ import annotations
 
@@ -30,8 +30,8 @@ def test_app_config_includes_diff_tui():
     assert app.diff_tui.max_diff_chars == 100_000
 
 
-def test_flatten_exposes_diff_tui(tmp_path):
-    """Значение из config.yml доходит до config_dict['diff_tui']."""
+def test_load_settings_exposes_diff_tui(tmp_path):
+    """Значение из config.yml доходит до settings.diff_tui."""
     from gc_core import config as cfgmod
 
     conf = tmp_path / "config.yml"
@@ -43,8 +43,8 @@ def test_flatten_exposes_diff_tui(tmp_path):
         "  max_diff_chars: 100\n",
         encoding="utf-8",
     )
-    cfg = cfgmod.load_config(str(conf))
-    assert cfg["diff_tui"] == {
+    settings = cfgmod.load_settings(str(conf)).settings
+    assert settings.diff_tui.model_dump() == {
         "cache_max_orig": 42,
         "preview_context_lines": 7,
         "full_file_max_lines": 120,

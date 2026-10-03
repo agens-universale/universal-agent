@@ -65,7 +65,7 @@ def test_voice_section_filled():
 
 
 def test_voice_overridden_fact_computed(tmp_path, monkeypatch):
-    """load_config кладёт voice_overridden_by_managed при живом managed-перекрытии."""
+    """load_settings кладёт voice_overridden_by_managed в рантайм при живом managed-перекрытии."""
     from gc_core import config as config_mod
 
     base = tmp_path / "config.yml"
@@ -81,12 +81,12 @@ def test_voice_overridden_fact_computed(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
     )
-    cfg = config_mod.load_config(str(base))
+    loaded = config_mod.load_settings(str(base))
     assert (
-        cfg["voice_overridden_by_managed"]
+        loaded.runtime.voice_overridden_by_managed
         == "https://api.groq.com/openai/v1/audio/transcriptions"
     )
-    assert cfg["voice"]["url"].endswith(":8735/v1/audio/transcriptions")
+    assert loaded.settings.voice.url.endswith(":8735/v1/audio/transcriptions")
 
 
 def test_voice_override_notice_is_silent_when_the_project_layer_wins(
@@ -122,12 +122,12 @@ def test_voice_override_notice_is_silent_when_the_project_layer_wins(
         lambda: str(project),
     )
 
-    cfg = config_mod.load_config(str(base))
+    loaded = config_mod.load_settings(str(base))
     assert (
-        cfg["voice"]["url"]
+        loaded.settings.voice.url
         == "https://project.example/v1/audio/transcriptions"
     )
-    assert cfg["voice_overridden_by_managed"] is None
+    assert loaded.runtime.voice_overridden_by_managed is None
 
 
 def test_voice_override_notice_survives_a_project_layer_about_other_keys(
@@ -156,10 +156,10 @@ def test_voice_override_notice_survives_a_project_layer_about_other_keys(
         lambda: str(project),
     )
 
-    cfg = config_mod.load_config(str(base))
-    assert cfg["voice"]["language"] == "en"
+    loaded = config_mod.load_settings(str(base))
+    assert loaded.settings.voice.language == "en"
     assert (
-        cfg["voice_overridden_by_managed"]
+        loaded.runtime.voice_overridden_by_managed
         == "https://api.groq.com/openai/v1/audio/transcriptions"
     )
 
@@ -183,8 +183,8 @@ def test_voice_overridden_fact_ignores_the_address_form(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
     )
-    cfg = config_mod.load_config(str(base))
-    assert cfg["voice_overridden_by_managed"] is None
+    loaded = config_mod.load_settings(str(base))
+    assert loaded.runtime.voice_overridden_by_managed is None
 
 
 def test_voice_overridden_fact_none_without_managed(tmp_path):
@@ -192,8 +192,8 @@ def test_voice_overridden_fact_none_without_managed(tmp_path):
 
     base = tmp_path / "config.yml"
     base.write_text("voice:\n  url: https://x\n  token: t\n", encoding="utf-8")
-    cfg = config_mod.load_config(str(base))
-    assert cfg["voice_overridden_by_managed"] is None
+    loaded = config_mod.load_settings(str(base))
+    assert loaded.runtime.voice_overridden_by_managed is None
 
 
 def test_voice_overridden_fact_token_only(tmp_path, monkeypatch):
@@ -210,8 +210,8 @@ def test_voice_overridden_fact_token_only(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gc_core.config_modules.env_vars.managed_config_path", lambda: managed
     )
-    cfg = config_mod.load_config(str(base))
-    assert cfg["voice_overridden_by_managed"] == "<без url>"
+    loaded = config_mod.load_settings(str(base))
+    assert loaded.runtime.voice_overridden_by_managed == "<без url>"
 
 
 def test_broken_voice_section_fails_validation_not_arithmetic(tmp_path):
@@ -228,5 +228,5 @@ def test_broken_voice_section_fails_validation_not_arithmetic(tmp_path):
 
     # отказ схемы приходит завёрнутым (MR #80, L28) — ключ назван, дампа нет
     with pytest.raises(ValueError, match="не проходит схему") as exc:
-        config_mod.load_config(str(base))
+        config_mod.load_settings(str(base))
     assert "voice" in str(exc.value)

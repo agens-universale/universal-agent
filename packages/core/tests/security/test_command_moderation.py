@@ -474,9 +474,9 @@ def test_build_judge_payload_includes_denied_examples():
     assert payload["allowed_command_examples"] == ["pytest tests/"]
 
 
-def test_load_config_maps_denied_examples(tmp_path):
+def test_load_settings_maps_denied_examples(tmp_path):
     import yaml
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     p = tmp_path / "config.yml"
     p.write_text(
@@ -493,8 +493,8 @@ def test_load_config_maps_denied_examples(tmp_path):
         ),
         encoding="utf-8",
     )
-    cfg = load_config(str(p))
-    assert cfg["command_moderation"]["denied_command_examples"] == ["rm -rf /"]
+    moderation = load_settings(str(p)).settings.security.command_moderation
+    assert moderation.denied_command_examples == ["rm -rf /"]
 
 
 def test_judge_prompt_documents_denied_examples_and_flag():

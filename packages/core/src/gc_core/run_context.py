@@ -4,6 +4,7 @@ import dataclasses
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
 
 from gc_core.backends.factory import resolve_os_backend
@@ -48,7 +49,7 @@ class RunContext:
     Контекст одного запуска агента (CLI или REST‑запрос).
 
     Содержит:
-    - config_dict — словарь конфигурации;
+    - settings / runtime — настройки (``AppConfig``) и рантайм (``RuntimeEnv``);
     - auth_connector — коннектор авторизации для бэкенда;
     - logger / logging_path — логгер и путь к файлу логов для этого запуска;
     - summary_trace_path — отдельный файл trace для суммаризации;
@@ -62,7 +63,6 @@ class RunContext:
       см. turn_boundary.begin_turn.
     """
 
-    config_dict: Dict[str, Any]
     run_id: str
     auth_connector: Optional[AuthConnector]
     logger: logging.Logger
@@ -78,7 +78,7 @@ class RunContext:
     workspace: ExecutionWorkspace
     model_router: ModelRouter
     # Внешний trace_id этого рана; "" = отсутствует. Производное чтение
-    # config_dict["trace_id"] — источник правды один, вычисление в одном месте
+    # runtime.trace_id — источник правды один, вычисление в одном месте
     # (create_run_context), чтобы значения не разъехались.
     operations: Optional[AgentOperations] = None
     # None keeps local file loading. External runtimes supply prepared values
@@ -132,8 +132,6 @@ class RunContext:
     # create_run_context (тесты, ручная сборка); тогда владельца нет.
     mcp_session_owner: str = ""
     #: Типизированные настройки (``AppConfig``) и рантайм (``RuntimeEnv``).
-    #: Переходный период: ``config_dict`` — производный плоский вид, потребители
-    #: переходят на ``settings``.
     settings: Any = None
     runtime: Any = None
     #: Определения кастомных субагентов этого контекста (кэш дискавери) и
@@ -143,21 +141,26 @@ class RunContext:
     subagent_diagnostics: Any = None
 
 
-def _coerce_settings(config, runtime):
-    """``(settings, runtime, config_dict)`` из настроек или (переходно) dict."""
-    from gc_core.config import flat_config
+def _coerce_settings(settings, runtime):
+    """``LoadedSettings`` сборки из ``LoadedSettings`` или ``AppConfig``.
+
+    Явный ``runtime`` вызывающего главнее рантайма загрузки. Плоский словарь
+    не принимается: ``TypeError``.
+    """
     from gc_core.settings import AppConfig, LoadedSettings, RuntimeEnv
 
-    if isinstance(config, LoadedSettings):
-        if runtime is not None and runtime is not config.runtime:
-            config = dataclasses.replace(config, runtime=runtime)
-        # Плоский вид — из LoadedSettings целиком: `profile` в нём —
-        # действующий профиль рантайма, а не указатель из файлов.
-        return config.settings, config.runtime, flat_config(config)
-    if isinstance(config, AppConfig):
-        runtime = runtime or RuntimeEnv()
-        return config, runtime, flat_config(config, runtime)
-    return None, runtime, config
+    if isinstance(settings, LoadedSettings):
+        if runtime is not None and runtime is not settings.runtime:
+            settings = dataclasses.replace(settings, runtime=runtime)
+        return settings
+    if isinstance(settings, AppConfig):
+        return LoadedSettings(
+            settings=settings, runtime=runtime or RuntimeEnv()
+        )
+    raise TypeError(
+        "acreate_run_context принимает LoadedSettings или AppConfig, "
+        f"а не {type(settings).__name__}"
+    )
 
 
 def assemble_run_context(
@@ -172,7 +175,6 @@ def assemble_run_context(
         raise ValueError("Unsupported PreparedRunContext schema_version")
     # Настройки — из подготовленных значений: локально это сами объекты,
     # durable-сборка (Temporal) получает публичный JSON-снимок.
-    from gc_core.config import flat_config
     from gc_core.context_preparation import settings_from_snapshot
 
     loaded = settings_from_snapshot(prepared.settings, prepared.runtime)
@@ -184,10 +186,6 @@ def assemble_run_context(
         root_writable=prepared.workspace_root_writable,
     )
     ctx = RunContext(
-        # Переходно, до удаления ``RunContext.config_dict``: плоский вид из тех
-        # же настроек. Локальная сборка затем ставит свой — тот, из которого
-        # собраны тулы.
-        config_dict=flat_config(loaded),
         settings=loaded.settings,
         runtime=loaded.runtime,
         run_id=prepared.run_id,
@@ -234,7 +232,7 @@ def assemble_run_context(
 
 
 async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
-    config_dict: Any,
+    settings: Any,
     *,
     runtime: Any = None,
     auth_connector: Optional[AuthConnector] = None,
@@ -293,7 +291,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
       ``mcp-servers`` перестанут ходить в сеть (866–1405 мс на реальном
       конфиге). Не передали — поведение прежнее, каждая сборка платит полностью.
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
-    - ``os_backend`` собирается фабрикой из ``config_dict['os_backend']`` (default: local).
+    - ``os_backend`` собирается фабрикой по ``runtime.os_backend`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
     - ``is_tui=True`` только помечает контекст; diff-журнал включает сам TUI
       (``gc_tui.diff_tui.tracking.attach_to_context``) — ядро о нём не знает.
@@ -317,10 +315,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
 
         athread_store(thread_store)
 
-    settings, runtime, config_dict = _coerce_settings(config_dict, runtime)
-    # Подготовке — сами настройки; плоский вид — только переходно, когда
-    # вызывающий передал словарь.
-    source = _settings_source(settings, runtime, config_dict)
+    source = _coerce_settings(settings, runtime)
     prep = _prepare_run_context(
         source,
         run_id=run_id,
@@ -362,9 +357,19 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         # develop, у нас её не было; тело, которое список заполняет, слилось
         # автоматически — без самого списка оно осталось бы мёртвым кодом.
         registered: list[str] = []
+        # Источник сборки — двойник контекста: реестр субагентов запоминает на
+        # нём найденные определения, и контекст получает их готовыми (иначе
+        # дискавери шёл бы второй раз на первом вызове тула, с повтором
+        # предупреждений).
+        build_source = SimpleNamespace(
+            settings=source.settings,
+            runtime=source.runtime,
+            subagent_definitions=None,
+            subagent_diagnostics=None,
+        )
         with use_owner(prep.mcp_session_owner):
             tools = await abuild_tools_data(
-                source,
+                build_source,
                 on_progress=on_progress,
                 os_backend=prep.backend,
                 skills_registry=prep.skills_registry,
@@ -373,7 +378,6 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
                 registered_names=registered,
             )
         ctx = _finish_run_context(
-            config_dict,
             prep,
             tools,
             registered_names=registered,
@@ -393,12 +397,11 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             guard_probe=guard_probe,
             tool_effect=tool_effect,
         )
-        if settings is not None:
-            ctx.settings, ctx.runtime = settings, runtime
-        elif runtime is not None:
-            # Плоский словарь (переходно): настройки уже собраны из снимка при
-            # сборке, явный рантайм вызывающего — главнее.
-            ctx.runtime = runtime
+        # Локально — сами объекты сборки, а не их пересборка из снимка.
+        ctx.settings, ctx.runtime = source.settings, source.runtime
+        if ctx.subagent_definitions is None:
+            ctx.subagent_definitions = build_source.subagent_definitions
+            ctx.subagent_diagnostics = build_source.subagent_diagnostics
         return ctx
     except BaseException as exc:
         from gc_core.utils.logging_module import release_run_logger
@@ -464,20 +467,8 @@ class _RunContextPrep:
     #: сравнивалось с локальной переменной, всегда не-None. Условие стало
     #: вечно ложным, а обёртка — мёртвым кодом.
     backend_was_overridden: bool
-    #: Источник настроек сборки (``LoadedSettings``; переходно — плоский dict,
-    #: если вызывающий передал словарь): из него читает и досборка.
+    #: Настройки сборки (``LoadedSettings``): из них читает и досборка.
     settings: Any = None
-
-
-def _settings_source(settings: Any, runtime: Any, config_dict: Any) -> Any:
-    """Что отдавать читателям настроек при сборке: ``LoadedSettings`` из
-    типизированных настроек, а плоский словарь — только переходно (вызывающий
-    передал dict, типизированных настроек нет)."""
-    if settings is None:
-        return config_dict
-    from gc_core.settings import LoadedSettings, RuntimeEnv
-
-    return LoadedSettings(settings=settings, runtime=runtime or RuntimeEnv())
 
 
 def _prepare_run_context(
@@ -531,7 +522,6 @@ def _prepare_run_context(
 
 
 def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
-    config_dict: Dict[str, Any],
     prep: _RunContextPrep,
     tools: tuple,
     *,
@@ -661,8 +651,6 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         tool_effect=tool_effect,
     )
     ctx = assemble_run_context(prepared, bindings)
-    # Переходно: плоский вид локальной сборки — тот, из которого собраны тулы.
-    ctx.config_dict = config_dict
     # ``is_tui`` контекст только ПОМЕЧАЕТ. Обёртку в ``TrackingFsBackend``
     # (diff-журнал) ставит сам TUI — ``gc_tui.diff_tui.tracking.attach_to_context``,
     # его зовёт ``TuiApp``. Здесь стоял лениво-импортируемый вызов

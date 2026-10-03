@@ -557,16 +557,10 @@ def _settings_source(
 
 
 def _has_settings(ctx: Any) -> bool:
-    """Несёт ли ctx настройки рана.
-
-    Переходно: и контекст с одним плоским ``config_dict`` (тесты, ещё не
-    перешедшие на ``fake_ctx``) — ``settings_of`` читает его строго, без
-    прежних runtime-fallback'ов «нет блока — гард выключен». Ветка уходит
-    вместе с плоским видом; при ``GC_STRICT_SETTINGS=1`` такой ctx — ошибка.
-    """
-    if isinstance(getattr(ctx, "settings", None), (AppConfig, LoadedSettings)):
-        return True
-    return isinstance(getattr(ctx, "config_dict", None), Mapping)
+    """Несёт ли ctx настройки рана."""
+    return isinstance(
+        getattr(ctx, "settings", None), (AppConfig, LoadedSettings)
+    )
 
 
 def _guard_path_argument(func, args, kwargs, path_arg, path_extractor):

@@ -40,7 +40,7 @@ def _coord(
         messages=[{"role": "user", "content": "x" * 20_000}],
     )
     coord = rsc.RunSummaryCoordinator(
-        ctx=types.SimpleNamespace(),
+        ctx=fake_ctx(),
         state=state,
         thread_session=None,
         summary_trigger_chars=10_000,

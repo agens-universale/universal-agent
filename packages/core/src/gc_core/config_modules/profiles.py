@@ -2,7 +2,7 @@
 раздел «Профили и уровни моделей».
 
 Профиль — YAML-файл в одном из двух корней (проектный/`рядом с базой`), мержится
-поверх проектного конфига под CLI-оверрайдами (см. `config.py::load_config_ex`).
+поверх проектного конфига под CLI-оверрайдами (см. `config.py::load_settings`).
 Этот модуль — только механика поиска/чтения/пофайловой валидации одного профиля;
 оркестрация мержа и итоговая (фаза 2) ссылочная целостность — в `config.py` /
 `config_modules/model_sections_validation.py` соответственно.
@@ -59,7 +59,7 @@ class ProfileRef:
 
 @dataclass
 class ProfileMeta:
-    """Метаданные резолва профиля для одного вызова `load_config_ex` (спека §3.3)."""
+    """Метаданные резолва профиля для одного вызова `load_settings` (спека §3.3)."""
 
     active_name: Optional[str]
     ref: Optional[ProfileRef]
@@ -283,7 +283,7 @@ def load_profile_document(
     raw, migration_facts = migrate_document(raw, source=str(path))
     if notices is not None:
         notices.extend(migration_facts)
-    # Compat ДО схемы — как `load_config_ex` делает для базы. Схема с
+    # Compat ДО схемы — как `load_settings` делает для базы. Схема с
     # extra="forbid" иначе роняет ВЕСЬ профиль на устаревшем ключе, который в
     # config.yml тихо выбрасывается с нотисом; а в профиль такой ключ попадает
     # ровно копипастой секции из старого config.yml. Факты — в тот же канал

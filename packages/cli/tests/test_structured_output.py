@@ -66,6 +66,9 @@ class _Logger:
 
 class _Ctx:
     def __init__(self):
+        loaded = make_settings()
+        self.settings = loaded.settings
+        self.runtime = loaded.runtime
         self.auxiliary_llm = _Aux()
         self.logger = _Logger()
 

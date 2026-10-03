@@ -1,6 +1,7 @@
 import yaml
-from gc_core.config import apply_cli_overrides, flat_config, load_config
-from gc_core.settings import settings_from_flat
+from gc_core.config import apply_cli_overrides, load_settings
+from gc_core.config_modules.field_meta import plain_dump
+from gc_testkit.settings import settings_from_flat
 
 
 def _write_cfg(tmp_path, body: dict) -> str:
@@ -9,7 +10,7 @@ def _write_cfg(tmp_path, body: dict) -> str:
     return str(p)
 
 
-def test_load_config_resolves_env_in_mcp_and_headers(tmp_path, monkeypatch):
+def test_load_settings_resolves_env_in_mcp_and_headers(tmp_path, monkeypatch):
     monkeypatch.setenv("GITHUB_TOKEN", "ght_xyz")
     monkeypatch.setenv("OR_KEY", "or_abc")
     cfg_path = _write_cfg(
@@ -33,47 +34,42 @@ def test_load_config_resolves_env_in_mcp_and_headers(tmp_path, monkeypatch):
             },
         },
     )
-    cfg = load_config(cfg_path)
-    assert cfg["chat_completion_headers"]["Authorization"] == "Bearer or_abc"
-    servers = cfg["mcp-servers"]
-    assert servers["github"]["token"] == "ght_xyz"
-    assert servers["github"]["env"]["GITHUB_TOKEN"] == "ght_xyz"
+    settings = load_settings(cfg_path).settings
+    headers = plain_dump(settings.backend)["chat_completion_headers"]
+    assert headers["Authorization"] == "Bearer or_abc"
+    github = plain_dump(settings.mcp.servers["github"], by_alias=True)
+    assert github["token"] == "ght_xyz"
+    assert github["env"]["GITHUB_TOKEN"] == "ght_xyz"
 
 
 def test_cli_override_resolves_env(monkeypatch):
     monkeypatch.setenv("U", "http://h/v1/chat")
     loaded = settings_from_flat({"completions_url": "orig"})
-    cd = flat_config(
-        apply_cli_overrides(
-            loaded, extra_overrides={"completions_url": "${ENV:U}"}
-        )
-    )
-    assert cd["completions_url"] == "http://h/v1/chat"
+    settings = apply_cli_overrides(
+        loaded, extra_overrides={"completions_url": "${ENV:U}"}
+    ).settings
+    assert settings.backend.completions_url == "http://h/v1/chat"
 
 
 def test_cli_override_file_placeholder(tmp_path):
     f = tmp_path / "tok"
     f.write_text("cli-secret\n")
-    config_dict = flat_config(
-        apply_cli_overrides(
-            settings_from_flat({}),
-            extra_overrides={
-                "chat_completion_headers": {
-                    "Authorization": f"Bearer ${{FILE:{f}}}"
-                }
-            },
-        )
-    )
-    assert (
-        config_dict["chat_completion_headers"]["Authorization"]
-        == "Bearer cli-secret"
-    )
+    settings = apply_cli_overrides(
+        settings_from_flat({}),
+        extra_overrides={
+            "chat_completion_headers": {
+                "Authorization": f"Bearer ${{FILE:{f}}}"
+            }
+        },
+    ).settings
+    headers = plain_dump(settings.backend)["chat_completion_headers"]
+    assert headers["Authorization"] == "Bearer cli-secret"
 
 
-def test_validate_config_text_resolves_env_like_load_config(monkeypatch):
+def test_validate_config_text_resolves_env_like_load_settings(monkeypatch):
     """Writer валидирует конфиг тем же конвейером, что и загрузчик: ${ENV:} → compat → схема.
 
-    load_config_ex резолвит ${ENV:VAR} до валидации, а validate_config_text — нет. В строковом
+    load_settings резолвит ${ENV:VAR} до валидации, а validate_config_text — нет. В строковом
     поле это незаметно, но в нестроковом (backend.request_timeout_sec: int) плейсхолдер
     не проходит схему: агент на таком конфиге работает, а сохранение в /settings, финал
     онбординга и --sync-config падают «конфиг не проходит схему» — юзер заблокирован в UI
@@ -89,12 +85,12 @@ def test_validate_config_text_resolves_env_like_load_config(monkeypatch):
     )
     config_mod.validate_config_text(
         text
-    )  # не бросает: ${ENV:} резолвится как в load_config_ex
+    )  # не бросает: ${ENV:} резолвится как в load_settings
 
 
 def test_validate_config_text_interpolates_before_compat(monkeypatch):
     """Порядок конвейера validate_config_text — ${ENV:VAR} ДО apply_compat (как в
-    load_config_ex, который перенёс интерполяцию на per-file фазу до compat/валидации).
+    load_settings, который перенёс интерполяцию на per-file фазу до compat/валидации).
     Пин через spy на реальных функциях модуля — не зависит от текущего (пустого)
     состояния config_modules.compat.RENAMES."""
     # Порядок держит `validate_config_text`, а её дом — `config_modules.layers`

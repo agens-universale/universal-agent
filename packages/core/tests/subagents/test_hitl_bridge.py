@@ -21,7 +21,6 @@ def _child_ctx(sink, *, tool_name="subagent_worker"):
         subagent_progress_sink=sink,
         subagent_tool_name=tool_name,
         is_tui=True,
-        config_dict={},
         logger=None,
     )
 
@@ -120,7 +119,6 @@ class TestAskHumanEmit:
             run_id="main",
             subagent_progress_sink=sink,
             is_tui=True,
-            config_dict={},
             logger=None,
         )
         assert not child_progress_enabled(ctx)
