@@ -25,6 +25,7 @@ from gc_core.security.path_policy import (
 )
 from gc_core.security.protected_paths import (
     classify_path,
+    protected_extra_paths,
     protected_paths,
     protection_enabled,
 )
@@ -195,7 +196,13 @@ def _command_guard_flow(
             effective_tool_name, kwargs, context
         )
 
-    extra = list(context.write_guard.extra_paths) or None
+    # Защищённые пути — из ``security.protected_paths.extra``; каталоги
+    # ``write_guard.extra_paths`` разрешены для записи и идут обычной
+    # модерацией команд (command_moderation), а не автоматическим запретом.
+    extra = (
+        protected_extra_paths(_settings_source(self_obj, ctx_obj, kwargs))
+        or None
+    )
     if callable(getattr(ctx_obj, "guard_probe", None)):
         facts = yield probe_step(
             ctx_obj,

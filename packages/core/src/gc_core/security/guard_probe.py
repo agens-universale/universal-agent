@@ -94,13 +94,14 @@ def evaluate_guard_probe(
         )
     elif request.kind == "command":
         from gc_core.security.command_guard import scan_command_for_protected
+        from gc_core.security.protected_paths import protected_extra_paths
 
         result = replace(
             result,
             protected_decision=scan_command_for_protected(
                 request.value,
                 cwd=request.cwd,
-                extra=list(_write_guard_extra_paths(config_dict)) or None,
+                extra=protected_extra_paths(config_dict) or None,
             ),
         )
     elif request.kind == "download_destination":

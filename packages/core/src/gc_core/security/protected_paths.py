@@ -67,6 +67,23 @@ def protected_decision(path, *, cwd=None, extra=None) -> str:
     return "allow"
 
 
+def protected_extra_paths(source: Any) -> list[str]:
+    """Дополнительные защищённые пути из ``security.protected_paths.extra``.
+
+    Это ЗАПРЕТНЫЕ пути («нельзя читать/писать агенту»), а не разрешённые:
+    ``write_guard.extra_paths`` — их противоположность (дополнительные каталоги
+    для записи), и в набор защищённых им не место. ``~`` раскрывается здесь —
+    ``protected_paths`` берёт только ``abspath``.
+    """
+    from gc_core.settings import settings_of
+
+    return [
+        os.path.expanduser(raw)
+        for raw in settings_of(source).security.protected_paths.extra
+        if str(raw).strip()
+    ]
+
+
 def protection_enabled(config_dict: Any) -> bool:
     """Включена ли floor-защита системных путей (по умолчанию — да).
 
