@@ -557,7 +557,9 @@ async def test_a_validator_error_with_brackets_reaches_the_screen(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     profile = _write(
         tmp_path / "base" / "profiles" / "work.yml",
-        '"[bogus]": []\n' + _PROFILE_BODY,
+        # Сервер без обязательного `transport`: координата отказа несёт
+        # `[bogus]` (лишний ключ отказа больше не даёт — только уведомление).
+        'mcp:\n  servers:\n    "[bogus]": {}\n' + _PROFILE_BODY,
     )
 
     app = app_mod.TuiApp(config=_base_dict())

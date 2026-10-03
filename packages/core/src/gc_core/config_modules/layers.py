@@ -48,6 +48,7 @@ from gc_core.config_modules.root import (
     AppConfig,
     schema_error_details,
 )
+from gc_core.config_modules.unknown_keys import drop_unknown_keys
 from gc_core.utils.user_text import read_user_text_or_none, unreadable_reason
 
 # `None` у пути слоя — законное значение («слоя нет»), поэтому «не передано»
@@ -454,6 +455,9 @@ def _app_config_from_raw(raw: Dict[str, Any]) -> AppConfig:
     хвостом (ревью MR #80, L28). Координата и причина у этих правил самодостаточны —
     `input_value`/`input_type`/ссылка на errors.pydantic.dev человеку не нужны."""
     apply_compat(raw)
+    # Лишние ключи не отвергают документ (см. unknown_keys): загрузка их
+    # отбросит с уведомлением, и гейт записи судит так же.
+    raw, _unknown = drop_unknown_keys(raw, AppConfig)
     try:
         return AppConfig.model_validate(raw)
     except ValidationError as exc:

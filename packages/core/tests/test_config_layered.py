@@ -314,12 +314,9 @@ def test_invalid_schema_in_project_loud_error(
     """
     Невалидная схема в project config → ValidationError от Pydantic, не silent fallback.
 
-    AppConfig (src/config_modules/root.py) имеет model_config = ConfigDict(extra='forbid').
-    Добавление несуществующего top-level поля гарантированно ломает model_validate.
-
-    (Полагаться на отказ coerce'ить scalar в int нельзя: Pydantic v2 по умолчанию
-    coerce'ит "123" → 123 без ошибки, и тест становится хрупким. Extra-forbid —
-    чёткий тест.)
+    Лишний ключ отказа больше не даёт (отбрасывается с уведомлением, см.
+    config_modules/unknown_keys.py) — ломаем негодным значением: `api_mode` вне
+    `responses`/`chat_completions` отвергает валидатор поля.
 
     Ревизия (MR #80, класс L28): отказ схемы приходит завёрнутым — ValueError с
     текстом из координат и причин, БЕЗ pydantic-дампа (`input_value` нёс токен из
@@ -330,7 +327,7 @@ def test_invalid_schema_in_project_loud_error(
 
     _write_project_config(
         isolated_cwd,
-        "this_top_level_field_does_not_exist_in_appconfig_schema: 123\n",
+        "backend:\n  api_mode: bogus\n",
     )
     with pytest.raises(ValueError, match="не проходит схему") as excinfo:
         load_config(str(global_config_file))

@@ -596,7 +596,9 @@ async def test_hub_glyph_stays_quiet_about_a_foreign_config_error(tmp_path):
     чужой ошибке: вердикта нет — «—»."""
     from gc_tui.palette import DEEP_DIM
 
-    body = 'models:\n  flash:\n    model: "google/gemini-2.5-flash"\nmax_steps: не-число\n'
+    # Ошибка в посторонней секции: негодное значение (лишний ключ отказа уже не
+    # даёт — только уведомление).
+    body = 'models:\n  flash:\n    model: "google/gemini-2.5-flash"\nlogging:\n  format: json\n'
     async with _section(tmp_path, body) as (_pilot, scr, _cfg_file):
         assert scr._menu_glyph(1) == ("—", DEEP_DIM)
 

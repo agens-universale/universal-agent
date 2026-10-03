@@ -32,6 +32,7 @@ from gc_core.config_modules.root import (
     AppConfig,
     schema_error_details,
 )
+from gc_core.config_modules.unknown_keys import drop_unknown_keys
 from gc_core.utils.user_text import unreadable_reason
 
 # Бланк нового файла профиля (`onboarding_config_writer.create_profile_file`):
@@ -229,7 +230,9 @@ def _validate_profile_document(
     сообщение без привязки к пути, как `config.validate_config_text`)."""
     prefix = f"{source}: " if source else ""
     try:
-        AppConfig.model_validate(raw)
+        # Лишние ключи профиля отбросит общая загрузка (с уведомлением и
+        # файлом); здесь они документ не отвергают.
+        AppConfig.model_validate(drop_unknown_keys(raw, AppConfig)[0])
     except ValidationError as exc:
         # Не сырой `str(exc)`: pydantic-дамп несёт `input_value=<repr записи>` —
         # токен НЕАКТИВНОГО профиля уезжал в нотис секции «Модели» этим, вторым

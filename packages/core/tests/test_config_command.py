@@ -274,11 +274,12 @@ def test_validate_ok(stack):
 @pytest.mark.usefixtures("isolated")
 def test_validate_invalid_explains_and_exits_1(tmp_path):
     bad = tmp_path / "bad.yml"
+    # Лишний ключ (`nope`) — только уведомление; отказ даёт негодное значение.
     bad.write_text("agent:\n  max_steps: abc\n  nope: 1\n", encoding="utf-8")
     code, out, err = _run(["validate", "--config", str(bad)], program="gc-ua")
     assert code == EXIT_INVALID
     assert out == ""
-    assert "agent.max_steps" in err and "agent.nope" in err
+    assert "agent.max_steps" in err
     assert str(bad) in err
 
 

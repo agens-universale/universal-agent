@@ -404,29 +404,45 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 "Bearer sk-or-v1-test-token",
             )
 
-    def test_summary_original_user_messages_max_chars_in_yaml_is_rejected(
+    def test_summary_original_user_messages_max_chars_in_yaml_is_ignored(
         self,
     ):
+        # Удалённый ключ — уведомление с координатой, а не отказ загрузки.
+        from gc_core.config import load_settings
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
                     "backend:\n  api_mode: chat_completions\nsummary:\n  original_user_messages_max_chars: 12000\n"
                 )
-            # отказ схемы приходит завёрнутым (без pydantic-дампа), ключ назван
-            with self.assertRaisesRegex(ValueError, "summary"):
-                load_config(cfg_path)
+            loaded = load_settings(cfg_path)
+            self.assertTrue(
+                any(
+                    "«summary.original_user_messages_max_chars» проигнорирован"
+                    in n
+                    for n in loaded.runtime.notices
+                )
+            )
 
-    def test_summary_llm_in_yaml_is_rejected(self):
+    def test_summary_llm_in_yaml_is_ignored_with_a_notice(self):
+        # Устаревший ключ — не отказ загрузки, а уведомление с координатой:
+        # лишние ключи файла отбрасываются (config_modules/unknown_keys.py).
+        from gc_core.config import load_settings
+
         with tempfile.TemporaryDirectory() as tmp_dir:
             cfg_path = os.path.join(tmp_dir, "config.yml")
             with open(cfg_path, "w", encoding="utf-8") as fd:
                 fd.write(
                     "backend:\n  api_mode: chat_completions\nsummary:\n  llm:\n    max_tokens: 4096\n"
                 )
-            # отказ схемы приходит завёрнутым (без pydantic-дампа), ключ назван
-            with self.assertRaisesRegex(ValueError, "summary"):
-                load_config(cfg_path)
+            loaded = load_settings(cfg_path)
+            self.assertTrue(
+                any(
+                    "«summary.llm» проигнорирован" in n
+                    for n in loaded.runtime.notices
+                )
+            )
 
     def test_chat_completion_kwargs_and_flags_loaded_from_backend_section(
         self,

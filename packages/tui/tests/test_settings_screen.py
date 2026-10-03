@@ -5494,9 +5494,10 @@ async def test_modes_write_leaves_the_file_untouched_when_it_fails(
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         scr._modes_idx = modes_row_index("level")
-        # правка руками, пока окно открыто: ключ вне схемы (`extra="forbid"`)
+        # правка руками, пока окно открыто: файл «новее» поддерживаемой версии
+        # (лишний ключ отказа больше не даёт — только уведомление)
         base_cfg.write_text(
-            base_cfg.read_text(encoding="utf-8") + "ключ_вне_схемы: 1\n",
+            base_cfg.read_text(encoding="utf-8") + "config_version: 999\n",
             encoding="utf-8",
         )
         before = base_cfg.read_text(encoding="utf-8")
@@ -5528,11 +5529,12 @@ async def test_modes_restore_failure_is_reported_not_swallowed(
     async with app.run_test() as pilot:
         scr = await _open_modes_section(pilot)
         scr._modes_idx = modes_row_index("level")
-        # правка руками, пока окно открыто: ключ вне схемы валит write_values ПОСЛЕ
-        # того, как якорь level: уже дописан — снимок и текущий текст расходятся,
-        # и без успешного отката файл остаётся с чужим значением уровня.
+        # правка руками, пока окно открыто: файл «новее» поддерживаемой версии
+        # валит write_values ПОСЛЕ того, как якорь level: уже дописан — снимок и
+        # текущий текст расходятся, и без успешного отката файл остаётся с чужим
+        # значением уровня. (Лишний ключ отказа уже не даёт — только уведомление.)
         base_cfg.write_text(
-            base_cfg.read_text(encoding="utf-8") + "ключ_вне_схемы: 1\n",
+            base_cfg.read_text(encoding="utf-8") + "config_version: 999\n",
             encoding="utf-8",
         )
 

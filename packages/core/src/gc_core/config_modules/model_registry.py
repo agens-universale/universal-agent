@@ -15,7 +15,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.backend import ModelBackendConfig
 from gc_core.config_modules.field_meta import SecretText, gc_meta, secret_value
 from gc_core.config_modules.pricing import ModelTariff
 
@@ -226,7 +226,7 @@ class ModelEntry(BaseModel):
         default=None, json_schema_extra=gc_meta(secret=True)
     )
     pricing: ModelTariff | None = None
-    backend: BackendConfig | None = None
+    backend: ModelBackendConfig | None = None
 
     @model_validator(mode="after")
     def _validate_no_duplicate_settings(self) -> ModelEntry:

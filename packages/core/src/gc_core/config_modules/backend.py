@@ -1,6 +1,12 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    create_model,
+    field_validator,
+)
 
 from gc_core.config_modules.field_meta import gc_meta, masked_repr_args
 
@@ -35,7 +41,90 @@ def _parse_max_tokens_str(raw: str, default: int) -> int:
     return n if n >= 1 else default
 
 
-class BackendConfig(BaseModel):
+class _BackendNormalizers:
+    """Нормализация полей backend — общая для секции ``backend`` и её
+    переопределения на модели (``models.<alias>.backend``)."""
+
+    @field_validator(
+        "chat_completions_max_tokens", mode="before", check_fields=False
+    )
+    @classmethod
+    def normalize_tokens(cls, value: Any) -> int:
+        return parse_chat_completions_max_tokens(value, default=8096)
+
+    @field_validator(
+        "chat_completions_min_response_tokens",
+        mode="before",
+        check_fields=False,
+    )
+    @classmethod
+    def normalize_min_response_tokens(cls, value: Any) -> int:
+        return parse_chat_completions_max_tokens(value, default=1024)
+
+    @field_validator("request_timeout_sec", mode="before", check_fields=False)
+    @classmethod
+    def normalize_request_timeout_sec(cls, value: Any) -> int:
+        if value is None:
+            return DEFAULT_REQUEST_TIMEOUT_SEC
+        try:
+            n = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "backend.request_timeout_sec должен быть положительным целым числом"
+            ) from exc
+        if n <= 0:
+            raise ValueError(
+                "backend.request_timeout_sec должен быть положительным целым числом"
+            )
+        return n
+
+    @field_validator(
+        "chat_completion_kwargs", mode="before", check_fields=False
+    )
+    @classmethod
+    def normalize_chat_completion_kwargs(cls, value: Any) -> dict[str, Any]:
+        if value is None:
+            return {}
+        if isinstance(value, dict):
+            return value
+        return {}
+
+    @field_validator(
+        "chat_completion_headers", mode="before", check_fields=False
+    )
+    @classmethod
+    def normalize_chat_completion_headers(cls, value: Any) -> dict[str, str]:
+        if value is None:
+            return {}
+        if not isinstance(value, dict):
+            return {}
+        normalized: dict[str, str] = {}
+        for key, raw_val in value.items():
+            if not isinstance(key, str):
+                continue
+            key_clean = key.strip()
+            if not key_clean:
+                continue
+            if raw_val is None:
+                continue
+            val_clean = str(raw_val).strip()
+            if not val_clean:
+                continue
+            normalized[key_clean] = val_clean
+        return normalized
+
+    @field_validator("proxy", mode="before", check_fields=False)
+    @classmethod
+    def normalize_proxy(cls, value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            stripped = value.strip()
+            return stripped or None
+        return None
+
+
+class BackendConfig(_BackendNormalizers, BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     api_mode: str = "responses"
@@ -97,70 +186,32 @@ class BackendConfig(BaseModel):
             )
         return normalized
 
-    @field_validator("chat_completions_max_tokens", mode="before")
-    @classmethod
-    def normalize_tokens(cls, value: Any) -> int:
-        return parse_chat_completions_max_tokens(value, default=8096)
 
-    @field_validator("chat_completions_min_response_tokens", mode="before")
-    @classmethod
-    def normalize_min_response_tokens(cls, value: Any) -> int:
-        return parse_chat_completions_max_tokens(value, default=1024)
+#: Поля backend, которые на уровне модели не применяются: протокол и режим
+#: потока выбираются для всего бэкенда, строгость схем тулов — тоже. В
+#: ``models.<alias>.backend`` их нет: лишний ключ в YAML — предупреждение.
+MODEL_LEVEL_UNSUPPORTED = frozenset(
+    {"api_mode", "openai_strict_tools_schema", "send_tool_strict", "stream"}
+)
 
-    @field_validator("request_timeout_sec", mode="before")
-    @classmethod
-    def normalize_request_timeout_sec(cls, value: Any) -> int:
-        if value is None:
-            return DEFAULT_REQUEST_TIMEOUT_SEC
-        try:
-            n = int(value)
-        except (TypeError, ValueError) as exc:
-            raise ValueError(
-                "backend.request_timeout_sec должен быть положительным целым числом"
-            ) from exc
-        if n <= 0:
-            raise ValueError(
-                "backend.request_timeout_sec должен быть положительным целым числом"
-            )
-        return n
 
-    @field_validator("chat_completion_kwargs", mode="before")
-    @classmethod
-    def normalize_chat_completion_kwargs(cls, value: Any) -> dict[str, Any]:
-        if value is None:
-            return {}
-        if isinstance(value, dict):
-            return value
-        return {}
+class _ModelBackendBase(_BackendNormalizers, BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
 
-    @field_validator("chat_completion_headers", mode="before")
-    @classmethod
-    def normalize_chat_completion_headers(cls, value: Any) -> dict[str, str]:
-        if value is None:
-            return {}
-        if not isinstance(value, dict):
-            return {}
-        normalized: dict[str, str] = {}
-        for key, raw_val in value.items():
-            if not isinstance(key, str):
-                continue
-            key_clean = key.strip()
-            if not key_clean:
-                continue
-            if raw_val is None:
-                continue
-            val_clean = str(raw_val).strip()
-            if not val_clean:
-                continue
-            normalized[key_clean] = val_clean
-        return normalized
+    def __repr_args__(self):
+        return masked_repr_args(self)
 
-    @field_validator("proxy", mode="before")
-    @classmethod
-    def normalize_proxy(cls, value: Any) -> str | None:
-        if value is None:
-            return None
-        if isinstance(value, str):
-            stripped = value.strip()
-            return stripped or None
-        return None
+
+#: Переопределения backend на одной модели — поля ``BackendConfig`` без
+#: ``MODEL_LEVEL_UNSUPPORTED``. Собирается из полей ``BackendConfig``, чтобы
+#: умолчания и метаданные не расходились.
+ModelBackendConfig = create_model(
+    "ModelBackendConfig",
+    __base__=_ModelBackendBase,
+    __doc__="Переопределения backend на модели (models.<alias>.backend).",
+    **{
+        name: (info.annotation, info)
+        for name, info in BackendConfig.model_fields.items()
+        if name not in MODEL_LEVEL_UNSUPPORTED
+    },
+)

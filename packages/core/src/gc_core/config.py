@@ -78,6 +78,10 @@ from gc_core.config_modules.root import (
 from gc_core.config_modules.summary import (
     DEFAULT_LAST_DIALOG_STEP_MESSAGE_MAX_CHARS,
 )
+from gc_core.config_modules.unknown_keys import (
+    drop_unknown_keys,
+    unknown_key_notice,
+)
 from gc_core.trace_id import normalize_trace_id
 from gc_core.utils.user_text import unreadable_reason
 
@@ -677,6 +681,9 @@ def load_settings(
     # Применяется к итоговому мержу — профильный слой проходит его так же, как
     # остальные (единый вызов после всех merge-слоёв, включая профиль).
     _compat_notices = apply_compat(raw_config)
+    # Лишние ключи — предупреждение, а не отказ: файл пишет человек, и
+    # опечатка или поле из новой версии не должны лишать его агента.
+    raw_config, _unknown_keys = drop_unknown_keys(raw_config, AppConfig)
 
     # Отказ схемы — из `exc.errors()`, не `str(exc)`: pydantic-дамп несёт
     # `input_value=<repr записи>` — токен из файла уезжал в хинт пикера профилей
@@ -710,11 +717,22 @@ def load_settings(
             app_cfg, swarm_updates, config_dir=config_dir
         )
         provenance = provenance.with_layer("env", swarm_updates)
+    _unknown_notices = [
+        unknown_key_notice(
+            unknown, provenance.source(unknown.dotted).path or None
+        )
+        for unknown in _unknown_keys
+    ]
     runtime = RuntimeEnv(
         config_path=os.path.abspath(path),
         config_dir=config_dir,
         active_profile=active_name or "",
-        notices=tuple(_compat_notices + _model_section_notices + notices),
+        notices=tuple(
+            _compat_notices
+            + _unknown_notices
+            + _model_section_notices
+            + notices
+        ),
         voice_overridden_by_managed=_voice_overridden,
     )
     return LoadedSettings(

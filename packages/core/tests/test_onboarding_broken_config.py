@@ -705,7 +705,7 @@ def test_pydantic_validation_error_gets_readable_prefix(tmp_path):
 
     base = tmp_path / "base.yml"
     base.write_text(
-        _BACKEND + "this_field_does_not_exist_in_schema: 123\n",
+        _BACKEND + "agent:\n  max_steps: abc\n",
         encoding="utf-8",
     )
 
