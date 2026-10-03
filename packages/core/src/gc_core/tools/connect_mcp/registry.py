@@ -379,7 +379,7 @@ class ToolsCache:
 
     def __init__(
         self,
-        cfg: Dict[str, Any],
+        cfg: Optional[Dict[str, Any]] = None,
         ttl_default: int = 3600,
         *,
         os_backend: Any = None,
@@ -388,8 +388,12 @@ class ToolsCache:
         cfg — словарь с mcp-конфигурацией, ожидаются ключи:
         - "mcp-servers": {...}
         - "mcp-meta": {...} (опционально, для TTL).
+
+        Кэшу, которым владеет приложение (``tools_cache=`` у сборки контекста),
+        ``cfg`` не нужен: каждая сборка перепривязывает его к своим серверам
+        (``rebind``) — достаточно ``ToolsCache(os_backend=backend)``.
         """
-        self._config = cfg
+        self._config = cfg or {}
         self._ttl_default = ttl_default
         self._os_backend = os_backend
         self._data: Optional[Dict[str, Dict[str, Any]]] = None

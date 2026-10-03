@@ -335,23 +335,29 @@ def test_pending_new_metadata_is_recovered_before_listing(
 
 
 def test_legacy_path_reader_and_exact_reset_share_barrier(tmp_path):
+    # Барьер — свойство durable-хранилища: сброс идёт через журнал
+    # (DurableFileThreadStore.reset). Сырая thread_store.reset_thread_files —
+    # путь develop без журнала, и барьера у неё нет по замыслу.
+    import time
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
 
-    from gc_core.thread_store import reset_thread_files
-
+    store = DurableFileThreadStore(str(tmp_path))
     legacy = tmp_path / "meta_legacy_id.json"
     legacy.write_text('{"value": "before"}')
     started = Event()
 
     def reset():
         started.set()
-        return reset_thread_files(str(tmp_path), "cli", "legacy_id")
+        return store.reset("cli", "legacy_id")
 
     with ThreadPoolExecutor(max_workers=1) as workers:
         with journal.thread_file_read_scope(str(tmp_path), "legacy_id"):
             future = workers.submit(reset)
             assert started.wait(timeout=2)
+            # Дать сбросу время пройти барьер, будь тот сломан: проверка
+            # должна ловить поломку всегда, а не при удачном расписании.
+            time.sleep(0.2)
             assert not future.done()
             assert legacy.exists()
         assert str(legacy) in future.result(timeout=2)

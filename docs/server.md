@@ -117,7 +117,7 @@ swarm нет: он запускается только через `POST /swarm/r
 
 - **Папка со скиллами**:
   - как и для CLI, пути к скиллам настраиваются в `config.yml`;
-  - серверный режим использует тот же `build_tools_data(config_dict)` и `skills_registry`,
+  - серверный режим использует ту же сборку тулов (`build_tools_data(settings)`) и `skills_registry`,
     но с учётом `agent_overrides.stop_tools` (опасные FS‑тулзы вырезаются из реестра - чтобы не работать с файловой системой веб приложения).
 
 ## Запуск серверного режима
@@ -277,7 +277,7 @@ threads_cleanup:
 
 - В `config_server.yml` в секции `agent_overrides.stop_tools` перечислены simple‑tools,
   которые **отключаются** в серверном режиме (fs/командные тулзы).
-- При построении `config_dict` для сервера эти поля попадают в конфиг как `stop_tools`,
+- При построении настроек агента для сервера (`build_agent_settings_for_server`) эти поля ложатся в `agent.stop_tools`,
   и `packages/core/src/gc_core/tools/registry.py` (`_apply_stop_tools`) автоматически вырезает такие тулы из реестра.
 - Это защищает директорию библиотеки и окружение сервера от нежелательных изменений файловой системы.
 

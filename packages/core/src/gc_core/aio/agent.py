@@ -80,7 +80,7 @@ class AsyncAgent:
         кэш снимает это, и он же достаётся субагентам через ``ctx``::
 
             backend = resolve_os_backend(settings)   # harbor: + environment, loop
-            cache = ToolsCache(settings, os_backend=backend)
+            cache = ToolsCache(os_backend=backend)
             a1 = await AsyncAgent.create(settings, tools_cache=cache, os_backend=backend)
             a2 = await AsyncAgent.create(settings, tools_cache=cache, os_backend=backend)
 

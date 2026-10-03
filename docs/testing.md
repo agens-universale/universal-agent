@@ -94,7 +94,7 @@ test_project_data_backend import FakeSandboxBackend`): pytest кладёт ка�
 
 | Что изолируете | Что подменять |
 |---|---|
-| `load_config` (плоский `config_dict`) | `gc_core.config.managed_config_path` — `config.py` связывает имя на импорте |
+| `load_settings` (загрузка настроек) | `gc_core.config_modules.env_vars.managed_config_path` — `config.py` зовёт его через модуль |
 | перекрытия в `/settings` (`config_origin`) | `gc_core.config_modules.env_vars.managed_config_path` — он импортирует лениво |
 | запись managed-слоя рецептами | `recommended_mcp.runtime.wiring.managed_config_path` |
 

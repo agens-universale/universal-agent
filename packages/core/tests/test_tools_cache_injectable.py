@@ -49,6 +49,20 @@ def test_rebind_keeps_the_payload():
     assert cache._is_valid(cache._make_cache_key(servers), ttl=3600) is True
 
 
+def test_owner_cache_needs_no_config():
+    """Кэш приложения создаётся без внутреннего словаря MCP: сборка контекста
+    сама перепривязывает его к своим серверам (``rebind``)."""
+    import time
+
+    cache = ToolsCache(os_backend=None)
+    servers = {"srv": {"transport": "stdio", "command": "x"}}
+    cache.rebind(_cfg(servers))
+    cache._data = {"mcp_srv_tool": {"tool": {}, "metadata": {}}}
+    cache._cache_key = cache._make_cache_key(servers)
+    cache._fetched_at = time.time()
+    assert cache._is_valid(cache._make_cache_key(servers), ttl=3600) is True
+
+
 def test_changed_servers_invalidate_even_with_a_shared_cache():
     """Сменился набор серверов — кэш обязан сходить в дискавери заново."""
     import time

@@ -119,7 +119,7 @@ executor = AgentExecutor(
 from gc_core.thread_store import ThreadSession
 
 session = await ThreadSession.afrom_config(
-    config_dict=flat_config(cfg),  # gc_core.config.flat_config
+    settings=cfg,  # LoadedSettings / AppConfig
     system_id="cli",
     thread_id="t1",
     store=MyStore(),

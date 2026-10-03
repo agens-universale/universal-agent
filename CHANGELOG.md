@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Breaking — типизированные настройки вместо плоского `config_dict`
+
+- Конфиг загружается в неизменяемые pydantic-модели: `gc_core.config.load_settings(path, profile_override=...)` → `LoadedSettings(settings: AppConfig, runtime: RuntimeEnv, provenance, profile_meta)`. Плоского словаря больше нет: удалены `load_config`, `load_config_ex`, `flatten_app_config`, `flat_config` и поле `RunContext.config_dict`.
+- SDK: `AsyncAgent.create(settings)` и `acreate_run_context(settings)` принимают `LoadedSettings`/`AppConfig`; словарь — `TypeError`. Правка — новым объектом: `loaded.with_overrides({"agent.max_steps": 5})`, `override_settings(app_cfg, {...})`. Чтение — `ctx.settings` / `ctx.runtime` (`gc_core.settings.settings_of`/`runtime_of`).
+- `gc-cli config` и `gc-ua config`: `explain` (значение и источник каждой настройки — файл, профиль, managed, `${ENV}`, CLI; секреты замаскированы), `validate` (проверка без запуска агента), `schema` (JSON Schema).
+- `${ENV:VAR}`/`${FILE:path}` строгие: незаданный источник — ошибка при старте с файлом и ключом; необязательное значение — `${ENV:VAR:-умолчание}`.
+- Лишний ключ в YAML — уведомление (файл, ключ, подсказка «возможно, …») вместо отказа загрузки; в `--param` — по-прежнему ошибка. `config_version` и реестр миграций; межполевые проверки.
+- Метаданные полей (`secret`, `worker_only`, `expert`, `restart`) — рядом с полями модели; токены — `SecretStr`, `repr` настроек секретов не показывает.
+- `models.<alias>.backend` больше не принимает `api_mode`, `stream`, `send_tool_strict`, `openai_strict_tools_schema` — на уровне модели они никогда не применялись (теперь уведомление).
+- Гвард команд защищает `security.protected_paths.extra`; каталоги `security.write_guard.extra_paths` (разрешённые для записи) идут обычной модерацией команд.
+- `logging.propagate` из YAML теперь действует. TUI `/config` показывает настройки документом. Перечитка конфига в TUI атомарна.
+- Тестам: `gc_testkit.settings.make_settings` / `fake_ctx`, `gc_testkit.helpers.tool_ctx.tool_settings`, `gc_testkit.tui_support.tui_settings`.
+
 ### Feature — нативный Temporal backend
 
 - Добавлен опциональный пакет `gc-ua-temporalio`: штатные `AgentExecutor` и `ThreadSession` работают через workflow, а обращения к модели, внешние эффекты инструментов и операции хранилища выполняются в activities. Локальное исполнение остаётся режимом по умолчанию.

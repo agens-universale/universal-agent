@@ -168,7 +168,7 @@ class MyTool(AbstractSimpleTool):
 Прежняя третья ступень диспетчера (синхронный `__call__` → `asyncio.to_thread`)
 убрана. Она сторожила возможность, которой нет: зарегистрировать свой
 Python-класс-тул извне нельзя — `build_tools_data` собирает набор из
-`config_dict`, параметра у `acreate_run_context` нет, механизма плагинов нет.
+настроек, параметра у `acreate_run_context` нет, механизма плагинов нет.
 Точка расширения для чужих тулов — **MCP**, и она асинхронна насквозь.
 
 **Ограничение снято.** Раньше здесь стояло: у `FsBackend` есть асинхронные
@@ -354,11 +354,10 @@ logging:
 
 ```python
 from gc_core.backends.factory import resolve_os_backend
-from gc_core.config import flat_config
+from gc_core.tools.connect_mcp.registry import ToolsCache
 
-view = flat_config(cfg)  # плоский вид только для чтения — для этих двух API
-backend = resolve_os_backend(view)  # harbor: + environment=…, loop=…
-cache = ToolsCache(view, os_backend=backend)
+backend = resolve_os_backend(cfg)  # harbor: + environment=…, loop=…
+cache = ToolsCache(os_backend=backend)
 a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
 a2 = await AsyncAgent.create(
     cfg, tools_cache=cache, os_backend=backend

@@ -696,17 +696,20 @@ level: default     # уровень по умолчанию: light | default | m
 
 ## Переопределение настроек из CLI
 
-Любой параметр из `config.yml` (или новый, которого там нет) можно переопределить при запуске через дополнительные аргументы командной строки.
+Любую настройку можно переопределить при запуске дополнительными аргументами
+командной строки — прежним плоским именем (`--max_steps`) или путём настройки
+(`--agent.max_steps`).
 
-- Значения из CLI **всегда имеют приоритет** над значениями из `config.yml`.
-- Поддерживаются следующие формы:
-  - `--param value`
-  - `--param=value`
-  - `--flag` (без значения, в конфиг уйдёт `true`)
-- Значения автоматически приводятся к типам с помощью `yaml.safe_load`, поэтому:
-  - `--max_steps 50` → `config_dict["max_steps"] == 50` (число),
-  - `--verbose true` → `config_dict["verbose"] == True` (булево),
-  - `--client_name "my_client"` → `config_dict["client_name"] == "my_client"` (строка).
+- Значения из CLI **всегда имеют приоритет** над файлами и профилем; в
+  `config explain` их источник — слой `cli`.
+- Поддерживаются формы `--param value`, `--param=value` и `--flag` (без
+  значения — `true`).
+- Значение приводится к типу через `yaml.safe_load` и проходит ту же
+  валидацию, что и файл: `--max_steps 50` → `agent.max_steps == 50`,
+  `--verbose true` → `agent.verbose is True`, `--client_name "my_client"` →
+  `agent.client_name == "my_client"`.
+- В отличие от файла, **неизвестное имя или негодное значение — ошибка**
+  сразу при старте: опечатка в команде не должна молча ничего не менять.
 
 **Примеры:**
 
@@ -724,18 +727,8 @@ level: default     # уровень по умолчанию: light | default | m
   ```bash
   gc-cli -q "..." --agent_md_path "my path" --max_steps 50
   ```
-  В рантайме будет использовано:
-  - `config_dict["agent_md_path"] == "my path"`,
-  - `config_dict["max_steps"] == 50`,
-  даже если в `config.yml` заданы другие значения.
-
-- Добавить новый параметр, которого нет в `config.yml`:
-  ```bash
-  gc-cli -q "..." --my_custom_flag true --extra_param "some value"
-  ```
-  В `config_dict` появятся:
-  - `config_dict["my_custom_flag"] == True`,
-  - `config_dict["extra_param"] == "some value"`.
+  В рантайме будет использовано `paths.agent_md_path == "my path"` и
+  `agent.max_steps == 50`, даже если в `config.yml` заданы другие значения.
 
 ### Профиль и уровень: `--profile`, `--level`
 
