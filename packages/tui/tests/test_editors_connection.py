@@ -76,6 +76,30 @@ async def test_submit_valid_pair():
         ed.query_one("#conn-token", Input).value = "sk-NEW"
         url, header, error, _proxy = ed.submit()
         assert url == "https://new/v1/chat/completions"
+        assert header == "sk-NEW"
+        assert error is None
+
+
+async def test_submit_writes_bearer_when_field_shows_bearer():
+    """Проба подставила Bearer в поле — submit пишет его as-is."""
+    from gc_tui.editors.connection import ConnectionEditor
+
+    ed = ConnectionEditor(
+        url_current="http://old/v1/chat/completions", auth_header=None
+    )
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://new/v1/chat/completions"
+        ed.move(1)
+        await pilot.pause()
+        ed.query_one("#conn-token", Input).value = "sk-NEW"
+        assert ed.apply_accepted_auth("Bearer sk-NEW") is True
+        assert ed.query_one("#conn-token", Input).value == "Bearer sk-NEW"
+        url, header, error, _proxy = ed.submit()
+        assert url == "https://new/v1/chat/completions"
         assert header == "Bearer sk-NEW"
         assert error is None
 
@@ -455,7 +479,7 @@ async def test_arrow_keeps_walking_the_preset_list_while_it_has_rows():
         assert ed.query_one("#conn-url", Input).has_focus
 
 
-async def test_create_mode_typed_token_becomes_bearer_header():
+async def test_create_mode_typed_token_saved_as_is():
     from gc_tui.editors.connection import ConnectionEditor
 
     ed = ConnectionEditor(url_current="", auth_header=None, create_mode=True)
@@ -467,7 +491,7 @@ async def test_create_mode_typed_token_becomes_bearer_header():
         ed.query_one("#conn-token", Input).value = "sk-NEW"
         url, header, error, _proxy = ed.submit()
         assert error is None
-        assert header == "Bearer sk-NEW"
+        assert header == "sk-NEW"
 
 
 async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():

@@ -484,6 +484,7 @@ def test_probe_connection_accepts_the_other_token_shape():
     )
     assert calls == [None, "sk-live", "Bearer sk-live"]
     assert result.auth_state == "accepted"
+    assert result.accepted_auth == "Bearer sk-live"
 
     calls, fake = scripted("sk-live")
     result = probe_connection(
@@ -495,6 +496,7 @@ def test_probe_connection_accepts_the_other_token_shape():
     )
     assert calls == [None, "Bearer sk-live", "sk-live"]
     assert result.auth_state == "accepted"
+    assert result.accepted_auth == "sk-live"
 
     calls, fake = scripted("Bearer sk-live")
     result = probe_connection(
@@ -506,6 +508,7 @@ def test_probe_connection_accepts_the_other_token_shape():
     )
     assert calls == [None, "Bearer sk-live"]
     assert result.auth_state == "accepted"
+    assert result.accepted_auth == "Bearer sk-live"
 
 
 def test_probe_connection_skips_probing_when_server_needs_no_token():

@@ -75,6 +75,7 @@ from gc_tui.widgets.paste_input import PasteInput
 _CLS_ONB_HINT_ONB_DYN = "onb-hint onb-dyn"
 _CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP = "onb-hint onb-dyn set-group-gap"
 _SEL_MEF_NOAUTH = "#mef-noauth"
+_SEL_MEF_TOKEN = "#mef-token"
 _SEL_MEF_URL = "#mef-url"
 
 
@@ -248,18 +249,23 @@ def _fetch_models_trying_auth(fetch, url: str, auth: str | None, **kwargs):
 
     Пустой ответ первой формы не кэшируется (`make_cached_fetch` пишет только
     непустой список), поэтому вторая форма не залипает на чужом промахе.
-    Успех первой формы вторую не вызывает."""
+    Успех первой формы вторую не вызывает.
+
+    Пустой список — успешный ответ сервера: если вторая форма упала исключением,
+    сохраняем ``[]``, а не ``None`` (иначе UI путает «моделей нет» и «сбой»)."""
     from gc_core.onboarding import authorization_attempts
 
     attempts = authorization_attempts(auth) or [auth]
     models = None
     for header in attempts:
         try:
-            models = fetch(url, header, **kwargs)
+            result = fetch(url, header, **kwargs)
         except Exception:
-            models = None
-        if models:
-            return models
+            continue
+        if result:
+            return result
+        if result is not None:
+            models = result
     return models
 
 
@@ -1001,7 +1007,7 @@ class ModelEntryForm(Vertical):
         Общая пара замораживает его по другой причине (§4): решать про токен нечего, он
         придёт вместе с адресом, — а набранный над общим адресом токен был бы ровно
         запрещённой половиной."""
-        inp = self.query_one("#mef-token", Input)
+        inp = self.query_one(_SEL_MEF_TOKEN, Input)
         inp.disabled = self._no_auth or not self.own_connection()
         if self._no_auth:
             inp.value = ""
@@ -1219,7 +1225,7 @@ class ModelEntryForm(Vertical):
         просьба УДАЛИТЬ ключ, и на записи без него это была бы правка из ничего
         (форма показала бы «изменено» там, где менять нечего)."""
         write_field(self.query_one(_SEL_MEF_URL, Input), "")
-        write_field(self.query_one("#mef-token", Input), "")
+        write_field(self.query_one(_SEL_MEF_TOKEN, Input), "")
         self._no_auth = False
         self._token_cleared = self._token_current is not None
         self.query_one(_SEL_MEF_NOAUTH, Static).update(self._noauth_text())
@@ -1491,9 +1497,9 @@ class ModelEntryForm(Vertical):
             return self._inherited_auth() or None
         token_raw = self._field_value("mef-token")
         if token_raw:
-            return onboarding.authorization_header(token_raw)
+            return token_raw  # сырой — probe/fetch сами перебирают формы
         if self._own_token_active():
-            return onboarding.authorization_header(self._token_current)
+            return self._token_current
         return None
 
     def _current_token_raw(self) -> str | None:
@@ -1576,7 +1582,26 @@ class ModelEntryForm(Vertical):
     def _on_probe(self, result, gen: int) -> None:
         if gen != self._probe_gen or not self.is_mounted:
             return
+        if result.auth_state == "accepted":
+            self.apply_accepted_auth(result.accepted_auth)
         self._set_probe_line(connection_line_text(result))
+
+    def apply_accepted_auth(self, accepted: str | None) -> bool:
+        """После пробы: если сервер принял Bearer, а в поле голый ключ — показать Bearer."""
+        if not accepted or self._no_auth:
+            return False
+        try:
+            inp = self.query_one(_SEL_MEF_TOKEN, Input)
+        except NoMatches:
+            return False
+        raw = inp.value.strip()
+        if not raw or accepted == raw:
+            return False
+        if accepted not in onboarding.authorization_attempts(raw):
+            return False
+        write_field(inp, accepted)
+        self._token_cleared = False
+        return True
 
     def _set_probe_line(self, text: Text) -> None:
         for w in self.query("#mef-probe-line"):
@@ -1786,7 +1811,15 @@ class ModelEntryForm(Vertical):
             ):  # не «оставить прежнее ""», а изменение
                 fields["token"] = ""
         elif values["token"]:
-            fields["token"] = values["token"]
+            # В конфиг — ровно то, что в поле (проба могла подставить Bearer).
+            # Пишем Authorization as-is и снимаем token: иначе ModelEntry снова
+            # обернул бы голый ключ в Bearer при отправке.
+            fields["token"] = None
+            backend = dict(self._backend0)
+            headers = dict(backend.get("chat_completion_headers") or {})
+            headers["Authorization"] = values["token"]
+            backend["chat_completion_headers"] = headers
+            fields["backend"] = backend
         elif self._token_cleared:
             # Ctrl+U: свой токен снят — ключ УДАЛЯЕТСЯ (`None` — контракт писателя),
             # и запись возвращается к общему токену «Подключения». Именно удаление, а

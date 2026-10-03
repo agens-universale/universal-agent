@@ -543,7 +543,11 @@ class ConnectionEditor(Vertical):
 
     def submit(self) -> tuple[str | None, str | None, str | None, str | None]:
         """(url|None, header|None, error|None, proxy|None). None-значение = не менять.
-        proxy возвращается даже при ошибке (settings screen пишет его отдельно)."""
+        proxy возвращается даже при ошибке (settings screen пишет его отдельно).
+
+        Токен из поля уходит в Authorization as-is: проба сама подставляет в поле
+        принятую форму (голый ключ или ``Bearer …``), submit ничего не дописывает.
+        """
         url, _auth_idx, token, proxy = self.peek()
         # адрес
         out_url: str | None = None
@@ -563,7 +567,7 @@ class ConnectionEditor(Vertical):
             if active != 1:
                 header = ""  # снять действующую авторизацию
         elif token:
-            header = onboarding.authorization_header(token)
+            header = token  # as-is — форма уже в поле (проба / ручной ввод)
         elif self._token_cleared:
             header = ""  # Ctrl+U: стереть сохранённый токен
         elif active == 1 and not self.create_mode:
@@ -577,3 +581,22 @@ class ConnectionEditor(Vertical):
         # active in (0, None), поле пусто → ничего не менять (header None)
         out_proxy: str | None = None if proxy == self._initial_proxy else proxy
         return out_url, header, None, out_proxy
+
+    def apply_accepted_auth(self, accepted: str | None) -> bool:
+        """После пробы: если сервер принял Bearer, а в поле голый ключ — показать Bearer.
+
+        Пишет через ``write_field`` (без Input.Changed). ``True`` — поле обновили."""
+        if not accepted:
+            return False
+        try:
+            inp = self.query_one(_SEL_CONN_TOKEN, Input)
+        except NoMatches:
+            return False
+        raw = inp.value.strip()
+        if not raw or accepted == raw:
+            return False
+        if accepted not in onboarding.authorization_attempts(raw):
+            return False
+        write_field(inp, accepted)
+        self._token_cleared = False
+        return True

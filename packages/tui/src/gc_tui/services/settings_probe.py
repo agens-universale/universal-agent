@@ -68,6 +68,9 @@ class ProbeResult:
     # оба отвечает 400, но валидному говорит «Invalid model name» (дошёл до
     # проверки модели), а мусорному «No connected db.» (застрял на поиске ключа).
     body_signature: str = ""
+    # Форма Authorization, которую сервер принял (`authorization_attempts`).
+    # None — токен не принимали / auth не интерпретировался. Пишется в конфиг as-is.
+    accepted_auth: Optional[str] = None
 
     @property
     def reachable(self) -> bool:
@@ -398,6 +401,7 @@ def probe_connection(
     has_token = bool(attempts)
     control = run(endpoint, None, verify, model, config_proxy=config_proxy)
     with_token = canary = None
+    tried_variant: Optional[str] = None
     if (
         control.verdict == "rejected"
         and control.http_status == 401
@@ -407,6 +411,7 @@ def probe_connection(
             with_token = run(
                 endpoint, variant, verify, model, config_proxy=config_proxy
             )
+            tried_variant = variant
             status = with_token.http_status
             if status == 401 and index + 1 < len(attempts):
                 continue
@@ -424,4 +429,7 @@ def probe_connection(
                     config_proxy=config_proxy,
                 )
             break
-    return interpret_auth(control, with_token, has_token, canary=canary)
+    result = interpret_auth(control, with_token, has_token, canary=canary)
+    if result.auth_state == "accepted" and tried_variant is not None:
+        return replace(result, accepted_auth=tried_variant)
+    return result
