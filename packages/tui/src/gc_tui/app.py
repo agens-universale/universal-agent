@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import threading
 import uuid
-from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, List, NamedTuple, Optional
@@ -36,12 +35,15 @@ from gc_tui.services.voice_notices import voice_notices
 
 _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings → Обновление"
 
-# Ключи схемы, применяемые только на старте приложения (спека §3.2): перечитка
-# конфига или сессионный профиль их не меняют — процесс работает на значениях
-# старта (`_restart_pins`), а человеку уходит notice «вступит со следующего запуска».
-# Список — флаг ``restart`` в схеме (``gc_meta(restart=True)``), порядок — порядок
-# полей схемы. dotted-имя — из схемы AppConfig (для notice); справа — плоский ключ
-# config_dict (`flatten_app_config`, src/config.py), по которому идёт сравнение.
+# Ключи схемы с флагом ``restart`` (``gc_meta(restart=True)``, спека §3.2). Перечитка
+# конфига и сессионный профиль их НЕ замораживают: новое значение попадает в
+# действующие настройки сразу — каталог тредов окна (`_threads_dir`) перечитка
+# переводит немедленно, executor берёт новые пути при следующей пересборке (логгер
+# рана — при её создании). Notice `boot_frozen_pending` при смене значения сохранён
+# в прежней редакции («вступит в силу со следующего запуска») — как предупреждение,
+# что часть уже открытого (живой ран, его лог) остаётся на прежнем пути.
+# Порядок — порядок полей схемы. dotted-имя — из схемы AppConfig (для notice);
+# справа — плоский ключ config_dict (`flatten_app_config`), по которому идёт сравнение.
 BOOT_FROZEN_KEYS = tuple(
     path for path, meta in leaf_meta().items() if meta.restart
 )
@@ -152,34 +154,6 @@ def _release_runner(runner) -> None:
         release()
 
 
-def _restart_only_paths() -> tuple:
-    """Листья схемы, применяемые только при старте (`BOOT_FROZEN_KEYS` — флаг
-    `restart` в метаданных поля). Запись словаря (`*`) живьём не привязывается."""
-    return tuple(p for p in BOOT_FROZEN_KEYS if "*" not in p)
-
-
-def _restart_values(source) -> dict:
-    """`{dotted: значение}` restart-only листьев из `LoadedSettings`/`AppConfig`
-    или плоского словаря. `None` — значение ещё не резолвлено (частичный
-    словарь теста): такой лист не попадает — привязывать нечего."""
-    if source is None:
-        return {}
-    out: dict = {}
-    for dotted in _restart_only_paths():
-        if isinstance(source, Mapping):
-            key = _BOOT_FROZEN_FLAT.get(dotted)
-            value = source.get(key) if key is not None else None
-        else:
-            value = getattr(source, "settings", source)
-            for part in dotted.split("."):
-                value = getattr(value, part, None)
-                if value is None:
-                    break
-        if value is not None:
-            out[dotted] = value
-    return out
-
-
 def _same_effective_key(cached_key: tuple, key: tuple) -> bool:
     """Ключ кэша действующих настроек: база — по ИДЕНТИЧНОСТИ (ключ держит сам
     объект, а не `id()`: освобождённый id переиспользуется, и чужая база
@@ -203,11 +177,7 @@ class _ReloadPlan:
         tuple
     ]  # пере-мерж сессионного профиля под новую базу
     mtime_set: dict
-    restart_pins: dict
     threads_dir: Optional[str]
-    requested_restart: (
-        dict  # restart-only значения, которые просит новый конфиг
-    )
     notices: tuple  # что снято санацией (уходит в /notices после применения)
     profile_dropped: bool
     activated_profile: Optional[tuple]  # (имя, LoadedSettings) для notice §3.5
@@ -218,7 +188,6 @@ class _ConfigSnapshot(NamedTuple):
 
     settings: object
     overrides: dict
-    pins: dict
     mtime_set: dict
     profile_cache: Optional[tuple]
     effective: Optional[tuple]
@@ -344,14 +313,6 @@ class TuiApp(App):
         # Поколение состояния: растёт на каждой перечитке. Читатель, собравший
         # кэш по снимку ДО неё, не затирает им уже применённый новый.
         self._config_generation = 0
-        # Restart-only значения, привязанные к ЭТОМУ процессу (спека §3.2, флаг
-        # `restart` схемы): перечитка и сессионный профиль их не меняют —
-        # действующие настройки держат эти значения, пока окно живо, а смена
-        # в файле — notice «со следующего запуска». Неизвестное на старте
-        # значение (частичный словарь теста) привязывается первой перечиткой.
-        self._restart_pins: dict = _restart_values(
-            settings if settings is not None else self._config
-        )
         # Окно-словарь: (снимок словаря, LoadedSettings) — см. `_flat_as_settings`.
         self._flat_settings_cache: list = []
         # Профиль, выбранный флагом запуска `--profile` (`""` — «без профиля»), либо
@@ -762,9 +723,10 @@ class TuiApp(App):
         есть, — не только базового); реальное изменение набора (не только базового
         файла) сбрасывает предохранитель моделей (починка мёртвой модели не должна
         пережить починку — «сброс: изменение конфиг-набора»); сессионный выбор
-        профиля, ставший битым под новой базой, — санация (§9.4); restart-only
-        ключи (флаг `restart` схемы), которые новый конфиг просит сменить, — не
-        применяются до перезапуска, только notice (§3.2).
+        профиля, ставший битым под новой базой, — санация (§9.4); ключи с флагом
+        `restart` (BOOT_FROZEN_KEYS), разошедшиеся между старой и новой
+        эффективной базой, — notice (§3.2). Применяются они при этом сразу:
+        `_threads_dir` — новый каталог, executor — новые пути на пересборке.
 
         База собирается под флагом запуска `--profile` (`_profile_override`) — тем
         же оверрайдом, что и на старте: перечитывание без него молча возвращало
@@ -776,7 +738,13 @@ class TuiApp(App):
         движением `_commit_reload`. Сбой на любом шаге сборки — окно целиком на
         прежнем состоянии (исключение уходит вызывающему: `_reload_config_or_notice`
         превращает его в notice `config_reload_failed`)."""
-        old_requested = self._requested_restart_values()
+        try:
+            old_effective = self.effective_config()
+        except ValueError:
+            # Сессионный слой не проходит схему уже сейчас (мета треда старой
+            # версии) — его снимет `_plan_reload`; для сравнения restart-ключей
+            # хватит базы: сессия путей не задаёт (`SESSION_KEYS`).
+            old_effective = self._config or {}
         old_mtime_set = self._config_mtime_set
         old_source = self._profile_source
         old_overrides = dict(self._session_overrides)
@@ -799,7 +767,7 @@ class TuiApp(App):
                 name, loaded.profile_meta, loaded
             )
         self._notice_profile_source_change(old_source)
-        self._notice_boot_frozen_diff(old_requested, plan.requested_restart)
+        self._notice_boot_frozen_diff(old_effective, self.effective_config())
         self._notify_screen_config_changed()
 
     def _plan_reload(self) -> _ReloadPlan:
@@ -809,8 +777,8 @@ class TuiApp(App):
         мтайм-набор ДЕЙСТВУЮЩИМ именем (сессионный оверрайд, если он пережил
         санацию, иначе новый указатель: `meta.mtime_set` base-only загрузки не
         включает кандидатные пути сессионно выбранного профиля — ревью Task 11) →
-        restart-only привязки → сессионный слой (не проходит проверку под новой
-        базой — снять с notice) → действующие настройки."""
+        сессионный слой (не проходит проверку под новой базой — снять с notice) →
+        действующие настройки → каталог тредов новой базы."""
         from gc_core.config import apply_cli_overrides
         from gc_core.thread_store import resolve_threads_dir
 
@@ -819,7 +787,6 @@ class TuiApp(App):
         )
         snap = self._config_snapshot()
         overrides = dict(snap.overrides)
-        pins = dict(snap.pins)
         notices: list = []
         profile_dropped = False
         activated = None
@@ -850,36 +817,23 @@ class TuiApp(App):
             if remerged is not None
             else None
         )
-        requested = _restart_values(session_base)
-        for dotted, value in requested.items():
-            pins.setdefault(dotted, value)  # первая известная — привязка
         try:
-            effective = self._build_effective_entry(
-                session_base, overrides, pins
-            )
+            effective = self._build_effective_entry(session_base, overrides)
         except ValueError:
             overrides, dropped = self._drop_invalid_session_keys(
                 session_base, overrides
             )
             notices.extend(dropped)
-            effective = self._build_effective_entry(
-                session_base, overrides, pins
-            )
-        threads_dir = self._threads_dir
-        if not threads_dir:
-            # Каталог тредов ещё не привязан (окно без него) — привязываем
-            # к действующему значению; привязанный не трогаем (restart-only).
-            threads_dir = resolve_threads_dir(effective[2])
+            effective = self._build_effective_entry(session_base, overrides)
+        config = _flat(base)
         return _ReloadPlan(
             settings=base,
-            config=_flat(base),
+            config=config,
             session_overrides=overrides,
             effective=effective,
             profile_cache=profile_cache,
             mtime_set=mtime_set,
-            restart_pins=pins,
-            threads_dir=threads_dir,
-            requested_restart=requested,
+            threads_dir=resolve_threads_dir(config),
             notices=tuple(notices),
             profile_dropped=profile_dropped,
             activated_profile=activated,
@@ -897,7 +851,6 @@ class TuiApp(App):
             self._session_profile_cache = plan.profile_cache
             self._effective_cache = plan.effective
             self._config_mtime_set = plan.mtime_set
-            self._restart_pins = plan.restart_pins
             self._threads_dir = plan.threads_dir
 
     def _config_snapshot(self) -> _ConfigSnapshot:
@@ -906,23 +859,14 @@ class TuiApp(App):
             return _ConfigSnapshot(
                 settings=self._settings,
                 overrides=dict(self._session_overrides),
-                pins=dict(self._restart_pins),
                 mtime_set=dict(self._config_mtime_set or {}),
                 profile_cache=self._session_profile_cache,
                 effective=self._effective_cache,
                 generation=self._config_generation,
             )
 
-    def _requested_restart_values(self) -> dict:
-        """Restart-only значения, которые ПРОСИТ текущий конфиг окна (база или
-        пере-мерж сессионного профиля — без привязок процесса). Сессионный слой
-        их не задаёт: `SESSION_KEYS` — белый список без путей."""
-        if self._settings is not None:
-            return _restart_values(self._session_base_settings())
-        return _restart_values(self._session_base_config())
-
     @staticmethod
-    def _effective_key(base, overrides: dict, pins: dict) -> tuple:
+    def _effective_key(base, overrides: dict) -> tuple:
         from gc_tui.session_settings import SESSION_KEYS
 
         layer = tuple(
@@ -932,20 +876,14 @@ class TuiApp(App):
                 if k != "profile" and k in SESSION_KEYS
             )
         )
-        return (base, layer, tuple(sorted(pins.items())))
+        return (base, layer)
 
     @classmethod
-    def _build_effective_entry(
-        cls, base, overrides: dict, pins: dict
-    ) -> tuple:
-        """(ключ, LoadedSettings, плоский вид): база + сессионный слой +
-        restart-only привязки процесса (слой `runtime`). `ValueError` — слой не
-        проходит проверку схемы."""
-        key = cls._effective_key(base, overrides, pins)
+    def _build_effective_entry(cls, base, overrides: dict) -> tuple:
+        """(ключ, LoadedSettings, плоский вид): база + сессионный слой.
+        `ValueError` — слой не проходит проверку схемы."""
+        key = cls._effective_key(base, overrides)
         loaded = base.with_overrides(dict(key[1]), layer="session")
-        current = _restart_values(loaded)
-        held = {p: v for p, v in pins.items() if current.get(p) != v}
-        loaded = loaded.with_overrides(held, layer="runtime")
         return (key, loaded, _flat(loaded))
 
     @staticmethod
@@ -1108,8 +1046,7 @@ class TuiApp(App):
 
         `profile` — особый ключ (спека §9.1): база не всегда `self._config` —
         сессия могла выбрать другой профиль, и тогда база — его пере-мерж
-        (`_session_base_config`, закэшированный). Restart-only значения —
-        привязанные к процессу (`_restart_pins`), а не просимые конфигом."""
+        (`_session_base_config`, закэшированный)."""
         entry = self._effective_entry()
         if entry is not None:
             return entry[2]
@@ -1117,10 +1054,6 @@ class TuiApp(App):
 
         cfg = dict(self._session_base_config())
         apply_overrides(cfg, self._session_overrides)
-        for dotted, value in self._restart_pins.items():
-            key = _BOOT_FROZEN_FLAT.get(dotted)
-            if key is not None:
-                cfg[key] = value
         return cfg
 
     def effective_settings(self):
@@ -1143,11 +1076,11 @@ class TuiApp(App):
         if snap.settings is None:
             return None
         base = self._session_base_settings(snap)
-        key = self._effective_key(base, snap.overrides, snap.pins)
+        key = self._effective_key(base, snap.overrides)
         cached = snap.effective
         if cached is not None and _same_effective_key(cached[0], key):
             return cached
-        entry = self._build_effective_entry(base, snap.overrides, snap.pins)
+        entry = self._build_effective_entry(base, snap.overrides)
         with self._config_lock:
             if self._config_generation == snap.generation:
                 self._effective_cache = entry
@@ -1343,11 +1276,9 @@ class TuiApp(App):
         base_name = self.base_settings().runtime.active_profile or None
         if name and name != base_name:
             self.probe_profile_assembly(name)
-        old_requested = self._requested_restart_values()
+        old_effective = self.effective_config()
         self.apply_session_override("profile", name)
-        self._notice_boot_frozen_diff(
-            old_requested, self._requested_restart_values()
-        )
+        self._notice_boot_frozen_diff(old_effective, self.effective_config())
         self._notify_screen_config_changed()
         runner = self.active_runner
         live = runner is not None and runner.is_running()
@@ -1400,22 +1331,23 @@ class TuiApp(App):
             )
         )
 
-    def _notice_boot_frozen_diff(self, old: dict, new: dict) -> None:
-        """Спека §3.2: конфиг попросил сменить restart-only значение (флаг
-        `restart` схемы) — перечитка/сессионный профиль его не применяют: окно
-        держит привязанное к процессу (`_restart_pins`), новое — со следующего
-        запуска. Notice, не молчание. `old`/`new` — `_restart_values` того, что
-        просил конфиг до и после.
+    def _notice_boot_frozen_diff(self, old_cfg: dict, new_cfg: dict) -> None:
+        """Спека §3.2: ключи с флагом `restart` разошлись между старой и новой
+        эффективной базой при пересборке. Значение уже действует (перечитка
+        переводит `_threads_dir`, executor берёт новые пути на пересборке), но
+        живой ран и его лог остаются на прежних — notice, не молчание. Текст
+        notice — прежний («вступит в силу со следующего запуска»).
 
-        Молчим, если старое значение неизвестно (None — конфиг ещё не резолвил
-        умолчание: свежий `TuiApp` в тестах с частичным словарём) и если новое
-        совпадает с действующим (вернули прежнее — перезапускать нечего)."""
+        Сравниваем, только если старое значение реально известно (не None): `None`
+        типично значит «конфиг ещё не резолвил значение по умолчанию» (например,
+        свежесозданный `TuiApp` в тестах с частичным словарём) — это не смена
+        значения пользователем, шуметь не о чем."""
         changed = [
             dotted
-            for dotted in _restart_only_paths()
-            if old.get(dotted) is not None
-            and new.get(dotted) != old.get(dotted)
-            and new.get(dotted) != self._restart_pins.get(dotted)
+            for dotted in BOOT_FROZEN_KEYS
+            if old_cfg.get(_BOOT_FROZEN_FLAT[dotted]) is not None
+            and old_cfg.get(_BOOT_FROZEN_FLAT[dotted])
+            != new_cfg.get(_BOOT_FROZEN_FLAT[dotted])
         ]
         if not changed:
             return

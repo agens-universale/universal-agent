@@ -601,7 +601,6 @@ _STATE_ATTRS = (
     "_session_profile_cache",
     "_effective_cache",
     "_config_mtime_set",
-    "_restart_pins",
     "_threads_dir",
     "_config_generation",
     "_profile_source",
@@ -767,35 +766,35 @@ def test_reload_drops_session_override_invalid_under_new_base(_typed_app):
     assert len(dropped) == 1 and '"level"' in dropped[0].message
 
 
-def test_restart_only_change_is_held_until_restart(_typed_app, tmp_path):
-    """`paths.threads_data_path` — restart-only (флаг схемы): перечитка его не
-    применяет. Каталог тредов окна и тот, куда пишет агент (действующие
-    настройки), остаются прежними — без раздвоения истории; база окна
-    (то, что правит /settings) показывает записанное; notice — один раз."""
+def test_restart_flagged_path_change_applies_with_notice(_typed_app, tmp_path):
+    """`paths.threads_data_path` (флаг `restart` схемы) перечитка применяет
+    сразу: каталог тредов окна и действующие настройки (по ним executor
+    соберётся заново) — новые; notice `boot_frozen_pending` в прежней
+    редакции. Повторная перечитка без смены пути — без повторного notice."""
     from gc_core.runtime_notices import collect_runtime_notices
 
     app, cfg_file = _typed_app
-    old_dir = app._threads_dir
     new_dir = str(tmp_path / "elsewhere")
     _rewrite(cfg_file, threads=new_dir)
 
     app.reload_config()
 
-    assert app._threads_dir == old_dir
+    assert app._threads_dir == new_dir
     effective = app.effective_settings()
-    assert effective.settings.paths.threads_data_path == old_dir
-    assert app.effective_config()["threads_data_path"] == old_dir
-    assert _url(effective) == "http://y/v2"  # остальное применено
-    assert app._config["threads_data_path"] == new_dir
+    assert effective.settings.paths.threads_data_path == new_dir
+    assert app.effective_config()["threads_data_path"] == new_dir
+    assert _url(effective) == "http://y/v2"
     frozen = [
         n for n in collect_runtime_notices() if n.code == "boot_frozen_pending"
     ]
     assert len(frozen) == 1
-    assert "paths.threads_data_path" in frozen[0].message
+    assert frozen[0].message == (
+        "paths.threads_data_path — вступит в силу со следующего запуска"
+    )
 
     _rewrite(cfg_file, url="http://z/v3", threads=new_dir)
-    app.reload_config()  # то же ожидание — повторно не шумим
-    assert app._threads_dir == old_dir
+    app.reload_config()
+    assert app._threads_dir == new_dir
     assert (
         len(
             [
@@ -824,11 +823,11 @@ def test_reader_during_reload_sees_one_consistent_snapshot(
     release = threading.Event()
     real_build = app_mod.TuiApp._build_effective_entry.__func__
 
-    def gated(cls, base, overrides, pins):
+    def gated(cls, base, overrides):
         if threading.current_thread().name == "reader":
             entered.set()
             release.wait(5)
-        return real_build(cls, base, overrides, pins)
+        return real_build(cls, base, overrides)
 
     monkeypatch.setattr(
         app_mod.TuiApp, "_build_effective_entry", classmethod(gated)
