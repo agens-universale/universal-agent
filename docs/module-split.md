@@ -51,7 +51,7 @@ universal-agent/
     src/gc_cli/                  # cli.py, arg_parser.py, onboarding_wizard.py
   packages/tui/
     pyproject.toml               # gc-tui   → gc-core, gc-mcp
-    src/gc_tui/                  # экраны, редакторы, diff_tui, голос
+    src/gc_tui/                  # экраны, редакторы, голос
   packages/server/
     pyproject.toml               # gc-server → gc-core, gc-mcp
     src/gc_server/               # server.py, rest_api/, swarm/
@@ -101,9 +101,9 @@ uv tool install "gc-cli @ git+URL#subdirectory=packages/cli"    # как инс�
 
 | Пакет | Модулей | Что внутри |
 |---|---|---|
-| `gc_core` | 287 | 45 имён верхнего уровня: конфиг, тулы, память, безопасность, MCP-клиент |
+| `gc_core` | 287 | 45 имён верхнего уровня: конфиг, тулы, память, безопасность, MCP-клиент, журнал правок (`agent_edits`, переехал из `gc_tui/diff_tui`) |
 | `gc_cli` | 4 | `cli`, `arg_parser`, `onboarding_wizard` |
-| `gc_tui` | 137 | экраны, редакторы, `diff_tui`, `voice`, `voice_runtime` |
+| `gc_tui` | 137 | экраны, редакторы, `voice`, `voice_runtime` |
 | `gc_server` | 15 | `server`, `server_cleanup_threads`, `rest_api`, `swarm` |
 | `recommended_mcp` | 14 | рецепты и `runtime/`: cli, установка, автозапуск daemon'ов |
 

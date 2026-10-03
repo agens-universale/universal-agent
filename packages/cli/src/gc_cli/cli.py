@@ -3,6 +3,7 @@ import sys
 from typing import Any
 
 from gc_core import config_sync, onboarding
+from gc_core.agent_edits.ctx import RUN_MODE_CLI
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config import (
     _bootstrap_user_config,
@@ -404,7 +405,11 @@ async def _run_init_agents_md() -> int:
     from gc_core.instructions.init_agents_md import build_init_prompt
     from gc_core.security.confirm_port import confirm_available
 
-    loaded = load_settings(arg_parser.run_args.config)
+    # Тот же режим запуска, что у основного входа: правило одно для всех
+    # контекстов gc-cli (запись журнала правок — `agent_edits.record.cli`).
+    loaded = load_settings(arg_parser.run_args.config).with_runtime(
+        run_mode=RUN_MODE_CLI
+    )
     auth_connector = build_auth_connector(loaded)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
     # create_run_context морозил бы его на всё MCP-дискавери — замер на
@@ -602,6 +607,9 @@ async def arun_cli() -> int:
         # старте (`_cli_updates` резолвит строго), а не traceback.
         print(f"[gc] {exc}", file=sys.stderr)
         return 1
+    # Режим запуска для ядра: от него зависит запись журнала правок
+    # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
+    loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)
     # Легаси-форс (спека §2): --model/--completions_url поверх непустого реестра
     # отключает резолв уровней/алиасов на этот запуск, профиль-слой остаётся в силе.
     force_legacy = cli_forces_legacy_model(loaded)

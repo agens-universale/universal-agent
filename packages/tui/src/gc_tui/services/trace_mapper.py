@@ -7,6 +7,7 @@ import re
 from typing import Any, Optional
 
 from gc_tui.models import TraceEvent
+from gc_tui.services.path_display import truncate_path
 from gc_tui.services.tool_identity import tool_id
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
@@ -116,6 +117,15 @@ def collect_skipped_call_ids(messages) -> set:
     return ids
 
 
+# Лимит текста технической врезки (Ж1 батча 4) — см. комментарий у среза ниже.
+# Величина — со смоука 5 (З3): при 120 весь бюджет уходил вступлению отказа
+# схемы («Wrong arguments for `X`: Arguments for tool 'X' do not match its
+# schema. Details:»), и причина отказа на экран не попадала вовсе. Строка ленты
+# переносится по ширине, поэтому бюджет здесь — страховка от патологии, а не
+# ширина строки: тот же вывод, что и у пути с текстом ошибки инструмента.
+_TECH_TEXT_LIMIT = 240
+
+
 def map_message(
     msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] = None
 ) -> Optional[TraceEvent]:
@@ -160,7 +170,18 @@ def map_message(
                 and "</technical>" in stripped
             ):
                 m = _TECHNICAL_TAG_RE.search(stripped)
-                inner_text = (m.group(1).strip() if m else stripped)[:120]
+                # Текст врезки режется по границе слова (Ж1 батча 4): жёсткий
+                # срез рвал сообщение посреди слова («path='<roo») — тот же
+                # дефект, что батч 2 закрыл в сводке результата инструмента,
+                # только эта ветка мимо той правки прошла. Переводы строк
+                # схлопываем в пробелы — как в plain-ветке `_summarize_output`:
+                # врезка занимает одну строку ленты, а «\n» границей слова
+                # не считается, и обрез откатывался к концу вступления, выбрасывая
+                # причину отказа (смоук 5, З3).
+                inner_text = _truncate_word_boundary(
+                    (m.group(1).strip() if m else stripped).replace("\n", " "),
+                    _TECH_TEXT_LIMIT,
+                )
                 tech_type = ""
                 if m:
                     tag_m = re.search(r'type="([^"]+)"', stripped)
@@ -180,7 +201,7 @@ def map_message(
                     )
                 if tech_type == "dialog_summary":
                     # Суммаризация — видимый маркер + блок очищенной сводки.
-                    # Берём ПОЛНЫЙ inner (не обрезанный [:120]).
+                    # Берём ПОЛНЫЙ inner (не обрезанный по _TECH_TEXT_LIMIT).
                     full_inner = m.group(1) if m else stripped
                     return TraceEvent(
                         no=no,
@@ -493,6 +514,37 @@ def _extract_ask_human_response(output: Any) -> Optional[str]:
     return stripped
 
 
+# Аргумент с таким именем — путь (Е6 батча 3): показывается всегда; свёртка
+# `<N chars>` — только для содержимого.
+_PATH_KEYS = frozenset(
+    {"path", "file", "file_path", "dir", "directory", "cwd", "src", "dst"}
+)
+
+# Путь показывается ЦЕЛИКОМ (Ж2 батча 4): строка ленты переносится по ширине,
+# как это уже происходит с длинным текстом ошибки, и фиксированный бюджет
+# прятал каталог и начало имени там, где на экране хватало места. Потолок —
+# страховка от патологии (глубокое дерево, генерированные имена), не бюджет.
+# Величина — со смоука 5: обрезка сегментная и имя файла держит при любом
+# потолке, платят за него только промежуточные каталоги. 100 оставляет корень,
+# первый каталог и имя, укладывая строку вызова в две строки ленты; 160 отдавал
+# третью строку за один каталог сверху.
+_PATH_LIMIT = 100
+
+
+def _path_preview(value: str) -> str:
+    """Путь под потолком — целиком, за потолком — со схлопнутой серединой.
+
+    Режем именно `truncate_path`, а НЕ прозаическим `_truncate_word_boundary`:
+    пробел в пути — не граница слова, а часть имени каталога (`C:\\Program
+    Files`, `C:\\Users\\Имя Фамилия`, `OneDrive - Company`). Прозаическое
+    правило на таком пути отрезало бы всё после первого же пробела, и от
+    длинного пути осталось бы `'C:\\Program…'` — без каталога и без имени файла.
+    `truncate_path` схлопывает середину и всегда сохраняет имя файла — ровно то,
+    ради чего путь и показывают в строке вызова.
+    """
+    return repr(truncate_path(value, _PATH_LIMIT))
+
+
 def _scalar_preview(v: Any) -> str:
     if isinstance(v, str):
         if len(v) > 60:
@@ -550,21 +602,30 @@ def _arg_summary(name: str, args: dict) -> str:
         return ", ".join(pairs)
     if name in ("read_file", "list_files"):
         p = args.get("path")
-        return f"path={p!r}" if isinstance(p, str) else ""
+        return f"path={_path_preview(p)}" if isinstance(p, str) else ""
     if name in ("write_to_file", "append_to_file"):
         p = args.get("path")
         c = args.get("content", "")
         clen = len(c) if isinstance(c, str) else 0
         return (
-            f"path={p!r}, content=<{clen} chars>" if isinstance(p, str) else ""
+            f"path={_path_preview(p)}, content=<{clen} chars>"
+            if isinstance(p, str)
+            else ""
         )
     if name == "search_and_replace":
+        # Имена — как в схеме тула (`search`/`replace`), а не `old`/`new`:
+        # схема запрещает лишние ключи, поэтому по старым именам подпись
+        # ВСЕГДА показывала `<0 chars>` — при любом вызове.
         p = args.get("path")
-        o = args.get("old", "")
-        n = args.get("new", "")
+        o = args.get("search", "")
+        n = args.get("replace", "")
+        path_shown = (
+            _path_preview(p) if isinstance(p, str) else _scalar_preview(p)
+        )
         return (
-            f"path={p!r}, old=<{len(o) if isinstance(o, str) else 0} chars>, "
-            f"new=<{len(n) if isinstance(n, str) else 0} chars>"
+            f"path={path_shown}, "
+            f"search=<{len(o) if isinstance(o, str) else 0} chars>, "
+            f"replace=<{len(n) if isinstance(n, str) else 0} chars>"
         )
     if name == "search_files":
         q = args.get("query") or args.get("pattern")
@@ -585,7 +646,12 @@ def _arg_summary(name: str, args: dict) -> str:
     # default: name + 1-3 short scalars
     pairs = []
     for k, v in list(args.items())[:3]:
-        pairs.append(f"{k}={_scalar_preview(v)}")
+        shown = (
+            _path_preview(v)
+            if (k in _PATH_KEYS and isinstance(v, str))
+            else _scalar_preview(v)
+        )
+        pairs.append(f"{k}={shown}")
     return ", ".join(pairs)
 
 
@@ -603,6 +669,31 @@ def _looks_like_error(output: Any) -> bool:
     return bool(data.get("error"))
 
 
+def _truncate_word_boundary(text: str, limit: int) -> str:
+    """Обрезать ПРОЗУ до `limit` символов, не разрывая слово посередине.
+
+    Режем по последнему пробелу в пределах лимита и добавляем «…» — иначе
+    длинный вывод/ошибка обрывались бы буквально на полуслове (живой баг:
+    `path='<roo` вместо честного `path='<root>…`). Если пробела в пределах
+    лимита нет вовсе (одно длинное «слово») — режем по limit как есть, но «…»
+    всё равно добавляем: обрыв должен быть явным, а не выглядеть завершённым
+    текстом.
+
+    Правило «резать по пробелу» верно ТОЛЬКО для прозы — сводки результата,
+    текста ошибки, технической врезки. Структурированную строку, где пробел не
+    граница слова, оно калечит: у пути после раннего пробела (`C:\\Program
+    Files\\…`) отрезается всё, включая имя файла. Путь режет `_path_preview`
+    через `path_display.truncate_path`; третьему вызывающему со структурой, а не
+    прозой, сюда тоже нельзя."""
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    boundary = cut.rfind(" ")
+    if boundary > 0:
+        cut = cut[:boundary]
+    return cut.rstrip() + "…"
+
+
 def _summarize_output(output: Any, *, error: bool) -> str:
     if not isinstance(output, str):
         return ""
@@ -613,7 +704,7 @@ def _summarize_output(output: Any, *, error: bool) -> str:
     data = unwrap_tool_output_dict(output)
     if data is None:
         # output вообще не JSON — просто короткий plain fallback.
-        return output.replace("\n", " ")[:80]
+        return _truncate_word_boundary(output.replace("\n", " "), 80)
     if not isinstance(data, dict):
         return str(data)[:80]
 
@@ -643,7 +734,7 @@ def _summarize_output(output: Any, *, error: bool) -> str:
             # Плоский код ошибки (напр. internal_tool_error) сам по себе ничего
             # не сообщает, а человекочитаемый текст лежит рядом в "message".
             err = data["message"]
-        return str(err)[:160]
+        return _truncate_word_boundary(str(err), 160)
 
     bits: list[str] = []
     # Порядок важен — сначала более конкретные ключи.
@@ -684,8 +775,8 @@ def _map_function_event(
     msg: dict, *, no: int, ts: str, mid: Optional[str]
 ) -> Optional[TraceEvent]:
     typ = msg.get("type")
-    name = msg.get("name") if isinstance(msg.get("name"), str) else None
-    name = tool_id(name)
+    wire_name = msg.get("name") if isinstance(msg.get("name"), str) else None
+    name = tool_id(wire_name)
     call_id = (
         msg.get("call_id") if isinstance(msg.get("call_id"), str) else None
     )
@@ -703,6 +794,7 @@ def _map_function_event(
             message_id=mid,
             call_id=call_id,
             tool_name=name,
+            wire_name=wire_name,
         )
 
     if typ == "function_call_output":

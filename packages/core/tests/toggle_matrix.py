@@ -639,6 +639,10 @@ NOT_IN_MATRIX = {
     # test_summary_token_trigger.py и test_context_meter_threshold.py.
     "summary.chat_completions_summary_trigger_tokens": "новый рычаг; эталон develop его не содержит, покрытие в test_summary_token_trigger",
     "summary.chat_completions_summary_turn_end_trigger_tokens": "новый рычаг; эталон develop его не содержит, покрытие в test_summary_token_trigger",
+    # Порог напоминания чек-листа. Числился непрочитанным и потому не сверялся
+    # с матрицей; эталон develop случаев с ним не содержит. Сам рычаг покрыт
+    # test_todo_config.py и test_todo_reminder.py.
+    "todo.reminder_steps": "эталон develop его не содержит, покрытие в test_todo_config и test_todo_reminder",
     # --- приехало с develop при вливании 09.09.2026 (PR #97, #99, #100) -------
     #
     # Оба ключа меняют ФОРМУ вывода, а не путь исполнения: preview-края режут
@@ -743,6 +747,9 @@ NOT_IN_MATRIX = {
     # Только TUI: матрица гоняет CLI-прогон.
     "tui.stream": "только TUI",
     "tui.text_answer_mode": "только TUI",
+    "acp.text_answer_mode": "только ACP",
+    "acp.finish_gate_mode": "только ACP",
+    "acp.todo_reminder_steps": "только ACP",
     "tui.finish_gate_mode": "только TUI",
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",
@@ -750,10 +757,49 @@ NOT_IN_MATRIX = {
     "tui.bang_shell.max_output_lines": "только TUI",
     "tui.file_view.max_file_bytes": "только TUI",
     "tui.file_view.page_lines": "только TUI",
-    "diff_tui.cache_max_orig": "только TUI",
-    "diff_tui.preview_context_lines": "только TUI",
-    "diff_tui.full_file_max_lines": "только TUI",
-    "diff_tui.max_diff_chars": "только TUI",
+    # --- секция agent_edits: правки агента вне проекта (журнал, снимки, откат) ---
+    #
+    # Ветка переименовала `cache_max_orig` в `snapshots_max_files`, убрала
+    # `preview_context_lines` и `full_file_max_lines` (см. `config_modules.compat`)
+    # и завела шесть новых ключей. Критерий тот же, что у блоков выше: ключ
+    # попадает сюда, если его переключение не меняет НИ ОДНОГО сравниваемого
+    # поля — ответа, `data_*.jsonl`, отобранных полей meta, числа обращений к
+    # бэкенду, текста отказа.
+    #
+    # Журнал правок — ОТДЕЛЬНЫЙ канал записи: записи уходят в
+    # `edits_<system>_<tid>.jsonl`, базы отката — в `<launch_root>/.gc/agent_edits`,
+    # а сравниваемый дамп читает только `data_*.jsonl`. Вдобавок сценарий
+    # матрицы (калькулятор, финализатор, вердикт судьи) не правит ни одного
+    # файла: писатели канала — fs-тулы и шелл-делта — на нём не просыпаются.
+    "agent_edits.snapshots_max_files": "потолок вытеснения снимков в .gc/agent_edits; сценарий не правит файлы, покрыт agent_edits/test_snapshots",
+    "agent_edits.hunk_context_lines": "контекст хэнков в записи журнала; там же, покрыт agent_edits/test_deltas",
+    "agent_edits.max_diff_source_bytes": "порог, выше которого дифф не считается и снимок не снимается; там же",
+    "agent_edits.max_diff_chars": "потолок текста хэнков в записи журнала; там же (раньше числился «только TUI» — ветка увела читателей в ядро)",
+    # `shell_tracking` — единственный из секции, который ДЕЙСТВИТЕЛЬНО стоит на
+    # пути, переехавшем на корутины: он гасит `ShellDelta.begin` внутри
+    # `TrackingFsBackend._atrack_shell_delta`, то есть ровно вокруг запуска
+    # команды. Исключается не поэтому, а по факту сверки: сценарий матрицы
+    # команд не запускает вовсе — `exec_calculator` считает выражение в
+    # процессе и до бэкенда не доходит, — и обёртка ни в одном случае в ветку с
+    # делтой не входит. Даже войди она, писать ей некуда: канал кладёт записи в
+    # `edits_*.jsonl` и снимки, а сверяются ответ, `data_*.jsonl`, meta, число
+    # обращений к бэкенду и отказ. Асинхронность самой обёртки покрыта
+    # `agent_edits/test_tracking_async_exec.py` и `test_tracking_probe_off_loop.py`,
+    # сам переключатель — `test_shell_delta.py::test_shell_tracking_false_writes_nothing`.
+    "agent_edits.shell_tracking": "гейт шелл-делты; сценарий матрицы не запускает ни одной команды",
+    # Показ, а не запись: эти три читает только `gc_tui.screens.main`. Матрица
+    # гоняет CLI-прогон, до ленты TUI он не доходит. Покрытие — наборы TUI
+    # `test_trace_diff_block.py`, `test_trace_diff_replay.py`,
+    # `test_turn_summary_segment.py`.
+    "agent_edits.trace_inline_max_lines": "только TUI: свёртка инлайн-диффа в ленте",
+    "agent_edits.replay_expanded_turns": "только TUI: окно развёрнутых ходов при открытии треда",
+    "agent_edits.turn_summary_in_status": "только TUI: сводка правок в строке-итоге хода",
+    # Запись журнала правок по режиму запуска: пишет отдельный канал (журнал и
+    # снимки), сравниваемый дамп его не читает, а сценарий матрицы файлов не
+    # правит. Покрыто agent_edits/test_ctx и test_run_context_wraps_backend.
+    "agent_edits.record.tui": "запись журнала правок в TUI; покрыто agent_edits/test_ctx",
+    "agent_edits.record.cli": "запись журнала правок в gc-cli; там же",
+    "agent_edits.record.server": "запись журнала правок на сервере; там же",
     # --- единственный случай матрицы задавал значение, невыразимое схемой ----
     #
     # См. UNREPRESENTABLE: эталон develop снят правкой плоского словаря в обход

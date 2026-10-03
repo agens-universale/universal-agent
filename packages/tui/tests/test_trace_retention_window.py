@@ -629,3 +629,67 @@ async def test_preserved_id_outside_window_stays_light(tmp_path):
         assert "child_kept" not in {
             r.call_id for r in scr.query(ToolCallRow) if r._nested
         }
+
+
+class _OneRecordLookup:
+    """Журнал правок из одной записи — то, что читает инлайн-дифф ленты."""
+
+    def __init__(self, record):
+        self._record = record
+
+    def by_call_id(self, call_id):
+        return self._record if call_id == self._record.call_id else None
+
+    def turn_ids(self):
+        return [self._record.turn_id]
+
+
+@pytest.mark.asyncio
+async def test_edit_block_survives_retention_outside_window(tmp_path):
+    """Правка в сегменте вне окна: payload облегчён, блок правки — на месте.
+
+    Блок ищет запись журнала по `call_id`, а retention оставляет в
+    облегчённом событии именно идентичность вызова. Потеряй лёгкий payload
+    `call_id` — старые правки молча пропали бы из ленты."""
+    pytest.importorskip("textual")
+    from gc_core.agent_edits.journal import EditRecord
+    from gc_tui.app import TuiApp
+    from gc_tui.widgets.diff_block import DiffBlock
+
+    record = EditRecord(
+        path="old.py",
+        turn_id="t0",
+        ts=1.0,
+        call_id="call_edit_old",
+        op="edit",
+        hunks="--- \n+++ \n@@ -1 +1 @@\n-a\n+b\n",
+        add=1,
+        del_=1,
+        before_sha256=None,
+        after_sha256=None,
+        flags=[],
+    )
+    segments = _three_segments()
+    segments[0]["messages"] += [
+        _call(
+            "fs_write_file",
+            "call_edit_old",
+            {"path": "old.py", "content": _HEAVY},
+        ),
+        _output("call_edit_old", '{"ok": true}'),
+    ]
+    app = TuiApp(
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
+    )
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr._store = _SidecarStore(_sidecar())
+        scr._edits_lookup_for_thread = lambda: _OneRecordLookup(record)
+        scr._render_segments(segments)
+        await pilot.pause()
+
+        _assert_tool_light(_event(scr, "call_edit_old", "call"))
+        blocks = [b for b in scr.query(DiffBlock) if b._record is record]
+        assert len(blocks) == 1, "блок правки вне окна retention пропал"

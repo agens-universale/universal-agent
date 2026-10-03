@@ -15,6 +15,7 @@ dependencies = [
     "gc-tui==0.3.1",
     "gc-server==0.3.1",
     "gc-mcp==0.3.1",
+    "gc-acp==0.3.1",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,7 @@ gc-serve = "gc_server.server:serve"
 gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 gc-voice = "gc_tui.voice_runtime.cli:main"
+gc-acp = "gc_acp.main:main"
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
@@ -87,6 +89,7 @@ gc-cli = { workspace = true }
 gc-tui = { workspace = true }
 gc-server = { workspace = true }
 gc-mcp = { workspace = true }
+gc-acp = { workspace = true }
 
 gc-testkit = { workspace = true }
 gc-ua-temporalio = { workspace = true }
@@ -103,6 +106,7 @@ testpaths = [
     "packages/server/tests",
     "packages/tui/tests",
     "packages/temporalio/tests",
+    "packages/acp/tests",
 ]
 asyncio_mode = "auto"
 
@@ -185,6 +189,7 @@ paths = [
     "packages/mcp/src",
     "packages/server/src",
     "packages/temporalio/src",
+    "packages/acp/src",
     "packages/core/assets/skills",
     "scripts",
     "integrations",

@@ -7,6 +7,7 @@ from data_subagents_*.jsonl on disk — no in-memory detail cache.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
@@ -36,6 +37,36 @@ def clear_thread_identity(ctx: Any) -> None:
     ctx.threads_dir = None
     ctx.system_id = None
     ctx.thread_id = None
+
+
+def mint_turn_id() -> str:
+    """Новый идентификатор хода (12 hex-символов).
+
+    В durable-исполнении (Temporal workflow) id выдаёт среда исполнения
+    (``supplied_id``): ``uuid4`` там недетерминирован и запрещён песочницей.
+    """
+    from gc_core.execution.environment import supplied_id
+
+    supplied = supplied_id("turn")
+    if supplied is not None:
+        return supplied.rsplit("_", 1)[-1][:12]
+    return uuid.uuid4().hex[:12]
+
+
+def bind_turn_identity(ctx: Any, turn_id: str) -> None:
+    """Записать turn identity на ctx (новый прогон run())."""
+    ctx.turn_id = turn_id
+
+
+def clear_turn_identity(ctx: Any) -> None:
+    """Снять turn identity."""
+    ctx.turn_id = None
+
+
+def current_turn_id(ctx: Any) -> Optional[str]:
+    """Текущий turn_id, если забинжен."""
+    turn_id = getattr(ctx, "turn_id", None)
+    return turn_id if isinstance(turn_id, str) else None
 
 
 def resolve_sidecar_identity(ctx: Any) -> Optional[SidecarIdentity]:
@@ -133,6 +164,10 @@ __all__ = [
     "SidecarIdentity",
     "apersist_subagent_trace",
     "bind_thread_identity",
+    "bind_turn_identity",
     "clear_thread_identity",
+    "clear_turn_identity",
+    "current_turn_id",
+    "mint_turn_id",
     "resolve_sidecar_identity",
 ]

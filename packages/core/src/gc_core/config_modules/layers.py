@@ -11,6 +11,7 @@
 импортах внутри функций, то есть до первой естественной правки.
 """
 
+import copy
 import os
 from pathlib import Path
 from typing import Any, Dict, NamedTuple, Optional
@@ -20,7 +21,7 @@ from pydantic import ValidationError
 
 from gc_core.config_modules import env_vars
 from gc_core.config_modules import env_vars as mcp_paths
-from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.compat import apply_compat, manual_edit_fact
 from gc_core.config_modules.env_interpolation import (
     _FILE_MARKER,
     resolve_env_only,
@@ -168,6 +169,41 @@ def _candidate_profile_ref(
     return None
 
 
+def _compat_layer(
+    doc: Dict[str, Any],
+    source: Any,
+    notices: list[str],
+    *,
+    synced_by_cli: bool = False,
+) -> Dict[str, Any]:
+    """Compat для слоя — до склейки, на копии документа. Для ВСЕХ слоёв, база тоже.
+
+    Compat, применённый к уже склеенному конфигу, не знает, из какого слоя
+    пришёл ключ: переименованная секция, заданная старым именем в проектном
+    слое и новым в пользовательском, проигрывала бы пользовательскому, и
+    настройка проекта молча терялась. База — не исключение: переименуй только
+    верхние слои, и старое имя базы столкнётся после склейки с новым сверху —
+    общий проход отбросит его целиком (`chat_completions.llm` базы терял бы
+    всё, что проект не перекрыл). Приведённые к новым именам слои склеиваются
+    честно — выше лежит, выше и побеждает; проход после склейки остаётся
+    страховкой и на таких слоях ничего не находит.
+
+    Копия — потому что документ может прийти от вызывающего (кандидат из формы
+    настроек), и молча переписать его имена было бы сюрпризом. Факты — с путём
+    файла, как у профилей: иначе непонятно, в каком из документов ключ.
+
+    ``synced_by_cli`` — файл, который обновляет ``gc-cli --sync-config``
+    (только пользовательский config.yml); про остальные уведомление советует
+    править ключ вручную.
+    """
+    doc = copy.deepcopy(doc)
+    for fact in apply_compat(doc):
+        if not synced_by_cli:
+            fact = manual_edit_fact(fact)
+        notices.append(f"{source}: {fact}")
+    return doc
+
+
 def _overlay_layer(
     raw_config: Dict[str, Any],
     layer_path,
@@ -176,12 +212,13 @@ def _overlay_layer(
     subject: str,
     *,
     require_file: bool,
+    notices: list[str],
     layer: str = "",
     unresolved: Optional[list] = None,
-    notices: Optional[list] = None,
 ) -> tuple[Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
-    """Наложить файловый слой; ``(merged, слой, слой до ${ENV})``.
+    """Наложить файловый слой (managed/project); ``(merged, слой, слой до ${ENV})``.
 
+    Compat — на копии слоя до склейки (`_compat_layer`, факты с путём файла).
     `unresolved` — строгий режим `${ENV:…}`/`${FILE:…}` (см. `load_settings`):
     неразрешённые ссылки слоя копятся туда, а правило пары для такого слоя не
     спрашивается — его вердикт по подставленным пустым строкам был бы следствием,
@@ -199,6 +236,7 @@ def _overlay_layer(
         if cand is not _UNSET
         else _readable_layer_document(layer_path, subject)
     )
+    layer_raw = _compat_layer(layer_raw, layer_path, notices)
     before_env = layer_raw
     start = len(unresolved) if unresolved is not None else 0
     layer_raw = resolve_env_placeholders(
@@ -248,6 +286,10 @@ def _overlay_profile(
             layer=f"profile:{pointer}",
         )
     )
+    # Загруженный с диска документ compat уже прошёл (`load_profile_document`),
+    # кандидат из формы — нет; повторный проход идемпотентен.
+    profile_raw = _compat_layer(profile_raw, ref.path, notices)
+    # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
     return deep_merge(raw_config, profile_raw), ref, profile_raw
 
 
@@ -310,6 +352,9 @@ def _merge_layers(
     экономии этого самого чтения."""
     base_path = Path(path)
     notices = notices if notices is not None else []
+    raw_config = _compat_layer(
+        raw_config, base_path, notices, synced_by_cli=True
+    )
 
     _candidates = {
         Path(p).resolve(): doc for p, doc in (candidates or {}).items()
@@ -427,9 +472,10 @@ def _raw_from_text(
     text: str, subject: str = _CONFIG_FILENAME
 ) -> Dict[str, Any]:
     """Текст → документ → ${ENV:VAR} → миграция формата (`config_version`).
-    Отдельный шаг, потому что стековая фаза 2 накладывает слои на СЫРОЙ документ
-    и зовёт compat один раз на итог мержа — ровно как загрузчик; склеенный с ним
-    `_app_config_from_text` compat применил бы к слою поодиночке.
+    Отдельный шаг, без compat: стековая фаза 2 накладывает слои на СЫРОЙ
+    документ, а compat каждого слоя делает `_merge_layers` (`_compat_layer`) —
+    ровно как загрузчик. Проход compat после склейки остаётся страховкой и на
+    приведённых слоях ничего не находит.
 
     `${ENV:…}` здесь мягкий (незаданная → пусто + warning), а не строгий, как у
     `load_settings`: отсюда судят ЗАПИСЬ (pre-write валидация, стек следующего
@@ -669,9 +715,12 @@ def prospective_registry(
                 layers = _merge_layers(
                     base_raw, str(base_path), profile_override=""
                 )
-                merged = deep_merge(
-                    layers.config, _raw_from_text(text, subject)
+                # Текст профиля — такой же слой, как в `_merge_layers`: compat до
+                # склейки, иначе старое имя в нём проиграло бы новому в базе.
+                profile_raw = _compat_layer(
+                    _raw_from_text(text, subject), subject, []
                 )
+                merged = deep_merge(layers.config, profile_raw)
             cfg = _app_config_from_raw(merged)
             return cfg.models, cfg.slots
         except (OSError, ValueError):

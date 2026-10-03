@@ -130,12 +130,32 @@ tui:
     # null / omit = авто по высоте экрана; число = фиксированный шаг PgUp/PgDn.
     # page_lines: null
 
-# Diff-TUI: visual review/approve/undo правок агента (не параметры fs return_diff).
-diff_tui:
-  cache_max_orig: 500          # LRU лимит .orig в cache-mode
-  preview_context_lines: 50    # контекст в TUI visual diff / trace-preview
-  full_file_max_lines: 300     # порог «весь файл» vs preview (adaptive)
-  max_diff_chars: 100000       # усечение больших visual diff (0 = без лимита)
+# Канал IDE через Agent Client Protocol (gc-acp). Не влияет на TUI/CLI/server:
+# канальные дефолты копируются в runtime в apply_acp_runtime_defaults.
+acp:
+  # deny | judge | allow — в IDE по умолчанию allow (обсуждение без tool-call нормально)
+  text_answer_mode: allow
+  # on | off | smart — в IDE обычно off (человек сам сверяет ответ). "off" в кавычках!
+  finish_gate_mode: "off"
+  # Каждые N шагов без session_todo — technical reminder. 0 = выкл (дефолт IDE).
+  todo_reminder_steps: 0
+
+# Правки агента: запись в журнал и показ на экране /diff (не параметры fs return_diff).
+agent_edits:
+  snapshots_max_files: 500     # лимит снимков «до правки» в .gc/agent_edits (LRU; треды с живым журналом не вытесняются)
+  max_diff_chars: 100000       # усечение больших диффов (0 = без лимита)
+  hunk_context_lines: 3        # строк контекста в хэнках журнальных диффов
+  max_diff_source_bytes: 2000000  # порог размера файла: свыше — дифф не считается, снапшот не снимается
+  shell_tracking: true         # трекинг правок, сделанных shell-командами
+  trace_inline_max_lines: 30   # ЭКРАННЫХ рядов диффа в ленте до свёртки
+  replay_expanded_turns: 20    # сколько последних ходов разворачивать при открытии треда (0 — все)
+  turn_summary_in_status: true # сводка правок в статусной строке хода
+  # Где вести журнал правок (дифф в ленте, сводка хода, экран /diff) — по режиму запуска.
+  # tui: false выключает все три; в gc-cli и на сервере журнал по умолчанию не пишется.
+  record:
+    tui: true
+    cli: false
+    server: false
 
 # Обновление агента (спека D)
 update:

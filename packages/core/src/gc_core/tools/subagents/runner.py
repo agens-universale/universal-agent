@@ -82,7 +82,10 @@ from gc_core.tools.subagents.runner_preparation import (
 from gc_core.tools.subagents.sidecar import (
     apersist_subagent_trace,
     bind_thread_identity,
+    bind_turn_identity,
     clear_thread_identity,
+    clear_turn_identity,
+    current_turn_id,
 )
 from gc_core.turn_boundary import begin_turn
 from gc_core.usage.account import CATEGORY_SUBAGENT as USAGE_CATEGORY_SUBAGENT
@@ -1424,6 +1427,13 @@ class SubagentRunner:
             )
         else:
             clear_thread_identity(child_ctx)
+        # Turn identity: ход ребёнок не открывает — его правки принадлежат ходу
+        # родителя (спека диффов §5), иначе журнал получил бы пустой turn_id.
+        parent_turn_id = current_turn_id(self._ctx)
+        if parent_turn_id is not None:
+            bind_turn_identity(child_ctx, parent_turn_id)
+        else:
+            clear_turn_identity(child_ctx)
         # HITL: тот же confirm-баннер родителя + имя субагента для метки via.
         child_ctx.tui_confirm = getattr(self._ctx, "tui_confirm", None)
         child_ctx.permission_store = getattr(

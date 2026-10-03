@@ -1,0 +1,36 @@
+# Локальный манифест MCP — только то, что нужно тебе.
+#
+# 1. Скопируй в config.local.yml (файл в .gitignore):
+#      cp recommended_mcp/config.local.example.yml recommended_mcp/config.local.yml
+# 2. Установи (MCP → <gc_data>/recommended_mcp/venv, отдельно от gc-cli):
+#      gc-mcp-install --config recommended_mcp/config.local.yml
+#
+# Пути path: и install.source: — относительно каталога recommended_mcp/,
+# не относительно этого файла.
+mcps:
+  - name: office
+    path: ./office
+    install:
+      type: source
+      source: ../external/office-mcp
+    # Агент спавнит office-mcp по stdio сам.
+    # См. recommended_mcp/office/agent_config.snippet.yml
+
+  - name: science
+    path: ./science
+    install:
+      type: source
+      source: ../external/science-mcp
+    run:
+      type: command
+      command: science-mcp
+      args: ["--transport", "http"]
+    # gc-cli -a …  или  python recommended_mcp/run.py --config recommended_mcp/config.local.yml
+    # См. recommended_mcp/science/agent_config.snippet.yml
+
+  - name: duckduckgo_search
+    path: ./duckduckgo_search
+    install:
+      type: pypi
+      package: ddgs-mcp==0.1.0
+    # Агент спавнит ddgs-mcp по stdio сам.

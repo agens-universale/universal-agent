@@ -189,6 +189,7 @@ def test_snapshot_contains_no_worker_only_or_secret_field():
         "subagent_tools_allow",
         "subagent_tools_stop",
         "os_backend",
+        "run_mode",
     }
     # Исходные настройки не тронуты.
     assert loaded.settings.agent_auth.model_dump() == {"token": "SECRET_AUTH"}

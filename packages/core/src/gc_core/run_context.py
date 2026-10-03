@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
@@ -293,8 +293,9 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     - Логгер создаётся заново для каждого запуска (своё имя файла логов).
     - ``os_backend`` собирается фабрикой по ``runtime.os_backend`` (default: local).
       Для ``harbor`` нужны ``environment`` и ``loop``; тесты могут передать ``os_backend=``.
-    - ``is_tui=True`` только помечает контекст; diff-журнал включает сам TUI
-      (``gc_tui.diff_tui.tracking.attach_to_context``) — ядро о нём не знает.
+    - Свой LocalFsBackend → ``TrackingFsBackend`` (журнал правок) там, где
+      запись включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
+      по конфигу); библиотечный вызов без режима запуска не оборачивается.
     - ``level_provider`` — источник активного уровня для ``model_router`` (спека §6.4).
       CLI/server не передают его → константный провайдер из ``settings.level``.
       TUI (сессионный слой) передаёт живой callable. run_context не импортирует tui —
@@ -457,9 +458,9 @@ class _RunContextPrep:
     mcp_session_owner: str
     #: Вызывающий передал СВОЙ бэкенд (а не положился на фабрику).
     #:
-    #: Нужен на шаге досборки: TUI оборачивает локальный бэкенд в
-    #: ``TrackingFsBackend`` (diff-журнал) только тогда, когда бэкенд собрали
-    #: мы сами. Чужой не трогаем — вызывающий знает, что подсунул.
+    #: Нужен на шаге досборки: при включённой записи правок ядро оборачивает
+    #: локальный бэкенд в ``TrackingFsBackend`` только тогда, когда бэкенд
+    #: собрали мы сами. Чужой не трогаем — вызывающий знает, что подсунул.
     #:
     #: Флагом, а не самим бэкендом: после ``resolve_os_backend`` отличить
     #: «передали свой» от «собрали дефолтный» уже нечем, и в первой редакции
@@ -651,13 +652,39 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         tool_effect=tool_effect,
     )
     ctx = assemble_run_context(prepared, bindings)
-    # ``is_tui`` контекст только ПОМЕЧАЕТ. Обёртку в ``TrackingFsBackend``
-    # (diff-журнал) ставит сам TUI — ``gc_tui.diff_tui.tracking.attach_to_context``,
-    # его зовёт ``TuiApp``. Здесь стоял лениво-импортируемый вызов
-    # ``wrap_local_for_tui``: это была ЕДИНСТВЕННАЯ зависимость ``gc_core`` от
-    # фронтенда, и 27.08.2026 её сняли разделением на пакеты. Вливание веток
-    # вернуло её — а вместе с ней и вторую обёртку поверх первой, потому что
-    # TUI к этому моменту уже оборачивает сам.
+    # ``TrackingFsBackend`` ставится ЗДЕСЬ — в том режиме, которому запись
+    # правок включена (``agent_edits.record``: TUI по умолчанию, CLI и сервер —
+    # по конфигу). Где запись выключена, обёртки нет вовсе: она зовёт
+    # ``git status`` до и после каждой команды, а журнал там никто не смотрит.
+    # Живёт обёртка в ``gc_core.agent_edits.tracking``, то есть зависимости
+    # ядра от фронтенда тут нет (страж ``tests/test_core_does_not_import_frontends``).
+    #
+    # Фронтенд свою обёртку ставить НЕ ДОЛЖЕН. Прежде её ставил сам TUI
+    # (``gc_tui.diff_tui.tracking.attach_to_context``), и при слиянии веток
+    # это уже приводило ко второй обёртке поверх первой — каждая правка
+    # уходила в журнал дважды. Точка установки ровно одна, и она здесь.
+    #
+    # Флаг, а не ``os_backend is None``: после ``resolve_os_backend`` параметр
+    # уже не отличает «передали свой» от «собрали дефолтный» (см. докстринг
+    # ``backend_was_overridden``), и сравнение с ним делало условие вечно
+    # ложным, а обёртку — мёртвым кодом.
+    from gc_core.agent_edits.ctx import recording_enabled
+
+    if not prep.backend_was_overridden and recording_enabled(ctx):
+        from gc_core.agent_edits.tracking import wrap_local_for_tracking
+
+        wrapped = wrap_local_for_tracking(backend, ctx)
+        if wrapped is not backend:
+            ctx.os_backend = wrapped
+            # Подменяем бэкенд в готовой рабочей области, а не собираем её
+            # заново: обёртка делегирует внутрь всё, чем область себя измеряет
+            # (`default_cwd`, `isabs`, `is_sandbox`), поэтому корень, оболочка и
+            # имя ОС у неё те же. Пересборка стоила бы ВТОРОЙ пробы записи в
+            # корень проекта (`resolve_root_writable` → реальная запись на
+            # диск) на каждом старте — при том что докстринг области обещает
+            # ровно одну.
+            ctx.workspace = replace(ctx.workspace, backend=wrapped)
+
     run_logger.debug(
         "Created RunContext (run_id=%s, logging_path=%s, os_backend=%s, workspace_root=%s)",
         effective_run_id,

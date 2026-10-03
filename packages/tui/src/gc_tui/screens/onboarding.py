@@ -19,10 +19,18 @@ from textual.screen import Screen
 from textual.widgets import Static
 
 from gc_tui import branding
-from gc_tui.form_frame import cap_frame_height, reveal
+from gc_tui.form_frame import (
+    FOOTER_SCROLL,
+    body_scrollable,
+    cap_frame_height,
+    reveal,
+    reveal_focus,
+    scroll_body,
+)
 from gc_tui.palette import ACCENT, DEEP_DIM, DIM, INK, OK, WARN
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
+_SEL_ONB_SCROLL = "#onb-scroll"
 _CLS_SELECTED = " selected"
 _SEL_ONB_BODY = "#onb-body"
 
@@ -266,9 +274,11 @@ class OnboardingScreen(Screen):
                 yield Static(
                     self._title_text(), id="header-left", markup=False
                 )
-            scroll = VerticalScroll(id="onb-scroll")
-            scroll.can_focus = False
-            with scroll:
+            # Фокус у области прокрутки не отнимаем (Р17): на нём держится
+            # клавиатурная прокрутка. Свои клавиши шаг забирает раньше — `on_key`
+            # предка отрабатывает ДО проверки биндингов, — контейнеру достаётся
+            # только незанятое (PgUp/PgDn, Home/End).
+            with VerticalScroll(id="onb-scroll"):
                 with Vertical(id="onb-frame"):
                     yield Static(
                         branding.logo_text(), id="onb-logo", markup=False
@@ -470,7 +480,7 @@ class OnboardingScreen(Screen):
             voice=_VOICE_SUMMARY_LABELS.get(self._voice_choice, ""),
         )
 
-    def _footer_text(self) -> str:
+    def _footer_base(self) -> str:
         step = self._step_id()
         if step == STEP_CONFIRM:
             return "Enter — подтвердить и завершить настройку  ·  PgUp — назад  ·  Esc — выход"
@@ -562,6 +572,22 @@ class OnboardingScreen(Screen):
             parts.insert(1, tab)  # клавиша курсора — рядом с ↑↓, а не в хвосте
         return "  ·  ".join(parts)
 
+    def _footer_text(self) -> str:
+        # Клавиша прокрутки называется, только пока карточка не влезает в кадр
+        # (наша правка поверх канона develop: подсказка не врёт про то, чего нет).
+        base = self._footer_base()
+        return (
+            base + FOOTER_SCROLL
+            if body_scrollable(self, _SEL_ONB_SCROLL)
+            else base
+        )
+
+    def _sync_footer(self) -> None:
+        try:
+            self.query_one("#onb-footer", Static).update(self._footer_text())
+        except Exception:
+            pass
+
     def _connection_editor(self):
         """Редактор шага «Подключение» или None. Отдельный доступ нужен футеру: тот
         считается и из `compose`, где тела шага ещё нет вовсе."""
@@ -647,18 +673,24 @@ class OnboardingScreen(Screen):
 
     def on_mount(self) -> None:
         self._mount_step_body()
-        self.call_after_refresh(cap_frame_height, self, "#onb-scroll")
+        self.call_after_refresh(cap_frame_height, self, _SEL_ONB_SCROLL)
 
     def on_resize(self, event: events.Resize) -> None:
         # Потолок рамки зависит только от высоты окна и хрома — пересчитывается на
         # ресайз, а не на каждый кадр шага (см. form_frame).
-        cap_frame_height(self, "#onb-scroll")
+        cap_frame_height(self, _SEL_ONB_SCROLL)
+        # Влезет ли карточка, видно только ПОСЛЕ раскладки — от этого зависит,
+        # называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
 
     def _mount_step_body(self) -> None:
         """Смонтировать виджеты текущего шага в #onb-frame (после #onb-body)."""
         # Снять фокус ДО remove: detached focused-виджет рвёт Screen._binding_chain
         # (идёт через focused.ancestors_with_self) — priority PgUp перестаёт находиться.
         self.set_focus(None)
+        # Влезет ли карточка, видно только ПОСЛЕ раскладки — а от этого
+        # зависит, называть ли клавишу прокрутки.
+        self.call_after_refresh(self._sync_footer)
         for w in self.query(".onb-dyn"):
             w.remove()
         body = self.query_one("#onb-frame", Vertical)
@@ -2115,6 +2147,11 @@ class OnboardingScreen(Screen):
             self._refresh_footer()
 
     def on_key(self, event: events.Key) -> None:
+        if event.key in ("up", "down"):
+            # Кадр едет за курсором шага; PgUp тут занят возвратом назад, а
+            # Home/End внутри поля принадлежат тексту — без этого вернуть кадр
+            # к логотипу и сводке было нечем.
+            reveal_focus(self)
         step = self._step_id()
         if event.key == "ctrl+u" and step == STEP_CONNECTION:
             # Очистка сохранённого токена — та же клавиша, что в /settings.
@@ -2189,7 +2226,10 @@ class OnboardingScreen(Screen):
                 if _ed is not None and _ed.reload_presets():
                     event.stop()
                     self._refresh_footer()  # клавиши теперь про список
-                return
+                    return
+            if event.key == "ctrl+down":
+                # Списку клавиша не понадобилась — она прокручивает тело.
+                self._scroll_body_key(event)
             return
         if event.key in ("ctrl+at", "ctrl+space", "ctrl+@"):
             # Развод §2 спеки 2026-08-06: клавиша больше не спрашивает список поля
@@ -2357,3 +2397,14 @@ class OnboardingScreen(Screen):
                 self._commit()
             else:
                 self._advance()
+            return
+        # Запасной вариант, ПОСЛЕ всех претендентов, — как в /settings: Ctrl+↓
+        # раскрывает список поля под курсором, и перехват сверху отнял бы у него
+        # клавишу; Ctrl+↓ без списка прокручивает тело там же, в ветке Alt+↓.
+        if event.key == "ctrl+up":
+            self._scroll_body_key(event)
+
+    def _scroll_body_key(self, event: events.Key) -> None:
+        """`Ctrl+↑`/`Ctrl+↓` — прокрутка тела шага страницами (обещана футером)."""
+        event.stop()
+        scroll_body(self, _SEL_ONB_SCROLL, -1 if event.key == "ctrl+up" else 1)

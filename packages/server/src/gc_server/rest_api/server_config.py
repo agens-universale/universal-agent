@@ -3,6 +3,7 @@ import os
 from typing import Any, Dict
 
 import yaml
+from gc_core.agent_edits.ctx import RUN_MODE_SERVER
 from gc_core.bundled_assets import bundled_root, repo_root
 from gc_core.config import (
     apply_cli_overrides,
@@ -224,7 +225,9 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
         loaded = apply_cli_overrides(loaded, extra_overrides=overrides)
     # Прежний `setdefault("limit_project_metadata", True)` ничего не менял:
     # плоский словарь всегда уже содержал ключ. Поведение сохранено.
-    return loaded
+    # Режим запуска для ядра: от него зависит запись журнала правок
+    # (`agent_edits.record.server`, по умолчанию выключена).
+    return loaded.with_runtime(run_mode=RUN_MODE_SERVER)
 
 
 __all__ = [

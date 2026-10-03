@@ -540,7 +540,7 @@ Update version string:
         )
         if isinstance(loaded, LoadError):
             return fail(message=loaded.message, error=loaded.error)
-        content, encoding_used = loaded
+        content, encoding_used, raw = loaded
         original_search = search
         resolved = resolve_edit_line_endings(content, search, replace)
         search = resolved.search
@@ -655,6 +655,19 @@ Update version string:
                 suggestions_total=0,
                 error=write_error[1],
             )
+
+        from gc_core.agent_edits.recorder import (
+            record_edit,  # nested: cycle with thread_store
+        )
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=raw,
+            new_bytes=out_bytes,
+            op="edit",
+            call_id=self._call_id,
+        )
 
         content_sha256 = sha256_hex_of_bytes(out_bytes)
         return _result(

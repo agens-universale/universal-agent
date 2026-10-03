@@ -359,7 +359,7 @@ class SessionsScreen(Screen):
         self._reload()
 
     def action_filter_select_all(self) -> None:
-        """Ctrl+A в поле фильтра: выделить весь текст (не approve диффов)."""
+        """Ctrl+A в поле фильтра: выделить весь текст (не git add на экране правок)."""
         try:
             inp = self.query_one("#sessions-filter", Input)
         except Exception:

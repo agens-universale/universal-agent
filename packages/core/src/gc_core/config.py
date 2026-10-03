@@ -1,3 +1,4 @@
+import copy
 import os
 import shutil
 import sys
@@ -149,7 +150,7 @@ def resolve_base_config_path(config_path: Optional[str] = None) -> str:
 
 def _cli_updates(
     extra_overrides: Dict[str, Any],
-) -> tuple[Dict[str, Any], Optional[str]]:
+) -> tuple[Dict[str, Any], Optional[str], list[str]]:
     """``--param`` → точечные пути настроек; ``trace_id`` — не настройка, а рантайм.
 
     Плоские имена прежнего ``config_dict`` (``max_steps``) переводятся по таблице,
@@ -158,7 +159,12 @@ def _cli_updates(
     ``${ENV:…}``/``${FILE:…}`` — строго, как у файлов при старте: незаданная
     обязательная переменная → ``UnresolvedPlaceholdersError`` (``ValueError``) с
     ключом ``--<param>``, а не тихая пустая строка.
+
+    Перекрытия (``--ключ`` CLI, ``agent_overrides`` сервера) ложатся мимо compat
+    загрузки, поэтому проходят его здесь: переименованный ключ иначе оседал бы
+    мёртвым. Третье значение — факты compat для стартовых уведомлений.
     """
+    from gc_core.config_modules.compat import map_legacy_path
     from gc_core.config_modules.flat_keys import setting_path
 
     resolved = resolve_env_placeholders_strict(
@@ -170,9 +176,44 @@ def _cli_updates(
         validate_registry_pairs(
             {"models": resolved["models"]}, source="--models"
         )
-    return {
-        setting_path(key): value for key, value in resolved.items()
-    }, trace_id
+    updates: Dict[str, Any] = {}
+    facts: list[str] = []
+    for key, value in resolved.items():
+        path = setting_path(key)
+        mapped = map_legacy_path(path)
+        if mapped is None:
+            facts.append(f"перекрытие: {key} устарел и игнорируется")
+            continue
+        if mapped != path and not isinstance(value, dict):
+            # Секцию-словарь проведёт compat ниже — со своими фактами.
+            facts.append(f"перекрытие: {key} переименован в {mapped}")
+        if isinstance(value, dict):
+            # Внутри секции могут быть старые листья (`diff_tui.cache_max_orig`).
+            document: Dict[str, Any] = {}
+            _set_nested(document, path, copy.deepcopy(value))
+            facts.extend(
+                f"перекрытие: {fact}" for fact in apply_compat(document)
+            )
+            value = _get_nested(document, mapped)
+            if value is None:
+                continue
+        updates[mapped] = value
+    return updates, trace_id, facts
+
+
+def _set_nested(document: Dict[str, Any], dotted: str, value: Any) -> None:
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        document = document.setdefault(part, {})
+    document[parts[-1]] = value
+
+
+def _get_nested(document: Dict[str, Any], dotted: str) -> Any:
+    for part in dotted.split("."):
+        if not isinstance(document, dict) or part not in document:
+            return None
+        document = document[part]
+    return document
 
 
 def apply_cli_overrides(
@@ -198,7 +239,9 @@ def apply_cli_overrides(
         validate_read_guard_mode,
     )
 
-    updates, param_trace_id = _cli_updates(dict(extra_overrides or {}))
+    updates, param_trace_id, override_facts = _cli_updates(
+        dict(extra_overrides or {})
+    )
     write_guard = False if no_write_guard else write_guard_enabled
     read_guard = False if no_read_guard else read_guard_enabled
     if write_guard is not None:
@@ -222,6 +265,10 @@ def apply_cli_overrides(
     normalized = normalize_trace_id(
         raw_trace if raw_trace is not None else loaded.runtime.trace_id
     )
+    if override_facts:
+        loaded = loaded.with_runtime(
+            notices=(*loaded.runtime.notices, *override_facts)
+        )
     return loaded.with_runtime(trace_id=normalized or None)
 
 

@@ -442,7 +442,7 @@ class ApplyFileEdits(AbstractSimpleTool):
         )
         if isinstance(loaded, LoadError):
             return fail(message=loaded.message, error=loaded.error)
-        original, encoding_used = loaded
+        original, encoding_used, raw = loaded
 
         batch = self._apply_edit_batch(edits, original)
         edit_results = batch.edit_results
@@ -552,6 +552,19 @@ class ApplyFileEdits(AbstractSimpleTool):
                 diff_truncated=diff_truncated,
                 error=write_error[1],
             )
+
+        from gc_core.agent_edits.recorder import (
+            record_edit,  # nested: cycle with thread_store
+        )
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=raw,
+            new_bytes=out_bytes,
+            op="edit",
+            call_id=self._call_id,
+        )
 
         content_sha256 = sha256_hex_of_bytes(out_bytes)
         return _result(

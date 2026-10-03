@@ -24,6 +24,7 @@ _RUNTIME_FLAT = {
     "subagent_tools_allow": "subagent_tools_allow",
     "subagent_tools_stop": "subagent_tools_stop",
     "os_backend": "os_backend",
+    "run_mode": "run_mode",
 }
 #: Вычисляемые плоские ключи: в настройки не переносятся.
 _COMPUTED_FLAT = {
@@ -170,4 +171,32 @@ def fake_ctx(
     return SimpleNamespace(**attrs)
 
 
-__all__ = ["fake_ctx", "make_settings", "settings_from_flat"]
+def update_ctx(
+    ctx: Any, config: Optional[Mapping[str, Any]] = None, **dotted: Any
+) -> None:
+    """Правка настроек готового тестового контекста — вместо ``ctx.config_dict[k] = v``.
+
+    Ключи — как у :func:`make_settings` (плоские имена и пути через точку),
+    рантайм-ключи (``launch_root``, ``run_mode``…) уходят в ``RuntimeEnv``.
+    Значение-словарь сливается с текущей секцией: незаданные листья остаются
+    прежними. Негодное значение — ``ValidationError``.
+    """
+    from gc_core.config_modules.flat_keys import setting_path
+
+    runtime: dict[str, Any] = {}
+    updates: dict[str, Any] = {}
+    for key, value in {**dict(config or {}), **dotted}.items():
+        if key in _RUNTIME_FLAT:
+            runtime[_RUNTIME_FLAT[key]] = value
+        else:
+            updates[setting_path(key)] = value
+    loaded = LoadedSettings(settings=ctx.settings, runtime=ctx.runtime)
+    if updates:
+        loaded = loaded.with_overrides(updates, layer="test")
+    if runtime:
+        loaded = loaded.with_runtime(**runtime)
+    ctx.settings = loaded.settings
+    ctx.runtime = loaded.runtime
+
+
+__all__ = ["fake_ctx", "make_settings", "settings_from_flat", "update_ctx"]

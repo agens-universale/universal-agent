@@ -39,7 +39,8 @@ from gc_core.settings import default_settings, override_settings
 
 cfg = default_settings(**{"agent.model": "my-model", "agent.max_steps": 20})
 strict = override_settings(cfg, {"security.command_moderation.mode": "deny"})
-loaded = config.with_overrides({"agent.max_steps": 5})  # слой "cli" в происхождении
+# слой "cli" в происхождении
+loaded = config.with_overrides({"agent.max_steps": 5})
 ```
 
 Недопустимое значение или неизвестный ключ — `ValidationError` сразу, а не

@@ -1666,10 +1666,6 @@ class TuiApp(App):
                 await aclose_clients()
 
         ctx = asyncio.run(_abuild_ctx())
-        # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
-        from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
-
-        _attach_diff(ctx, loaded)
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
         from gc_core.tools.subagents.progress import QueueSubagentProgressSink

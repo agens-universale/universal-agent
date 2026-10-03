@@ -109,6 +109,7 @@ _RUNTIME_PUBLIC = frozenset(
         "subagent_tools_allow",
         "subagent_tools_stop",
         "os_backend",
+        "run_mode",
     }
 )
 _RUNTIME_WORKER_ONLY = frozenset(
@@ -249,6 +250,8 @@ def public_runtime(runtime: RuntimeEnv) -> dict[str, Any]:
         output[name] = _json_value(value, f"runtime.{name}")
     if output.get("os_backend") not in (None, "local", "harbor"):
         raise PublicConfigError("Invalid public backend kind")
+    if output.get("run_mode") not in (None, "tui", "cli", "server"):
+        raise PublicConfigError("Invalid public run mode")
     return output
 
 

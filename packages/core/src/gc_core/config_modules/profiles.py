@@ -17,7 +17,7 @@ from typing import Literal, Optional
 import yaml
 from pydantic import ValidationError
 
-from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.compat import apply_compat, manual_edit_fact
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders,
     tag_layer,
@@ -290,7 +290,7 @@ def load_profile_document(
     # notices, с путём файла: иначе непонятно, в каком из документов ключ.
     for fact in apply_compat(raw):
         if notices is not None:
-            notices.append(f"{path}: {fact}")
+            notices.append(f"{path}: {manual_edit_fact(fact)}")
     if unresolved is not None and len(unresolved) > start:
         return raw
     # Пары «адрес+токен» — по СЫРОМУ документу и ДО схемы: слои сливаются позже,

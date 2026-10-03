@@ -12,10 +12,12 @@ import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
+from gc_core.agent_edits.snapshots import purge_thread_snapshots
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
 from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution_workspace import launch_root_from_config
 from gc_core.intent_log.user_turn import (
     append_user_ask_deduped,
     append_user_asks_from_messages,
@@ -64,7 +66,9 @@ from gc_core.tools.subagents.active_scope import (
 from gc_core.tools.subagents.selection import subagents_enabled
 from gc_core.tools.subagents.sidecar import (
     bind_thread_identity,
+    bind_turn_identity,
     clear_thread_identity,
+    mint_turn_id,
 )
 from gc_core.trace_id import trace_id_from_config
 from gc_core.usage.account import UsageAccount
@@ -293,6 +297,18 @@ class AgentExecutor:
             from gc_core.thread_store_async import athread_store
 
             await athread_store(_reset_store).areset(system_id, thread_id)
+            # Снимки баз — не забота хранилища: тем же ``reset`` ходит
+            # запасной путь компакции, где сносить базы отката нельзя.
+            # Пользовательский сброс знает, что чистит, и чистит здесь.
+            # Вне цикла событий: снимков у долгого треда тысячи, и снос
+            # каталога прямо в корутине подвешивал бы старт нового треда.
+            await asyncio.to_thread(
+                purge_thread_snapshots,
+                resolve_threads_dir(self._ctx),
+                system_id,
+                thread_id,
+                launch_root=launch_root_from_config(self._ctx),
+            )
         thread_session = await ThreadSession.afrom_config(
             settings=self._ctx,
             system_id=system_id,
@@ -870,6 +886,9 @@ class AgentExecutor:
             logger=logger,
         )
         self._thread_session = thread_session
+        # Turn identity: свежий id на каждый run(), независимо от треда — без
+        # него нечем будет пометить записи журнала правок текущего хода.
+        bind_turn_identity(self._ctx, mint_turn_id())
         is_cli_mode = system_id == "cli"
 
         # Снять протухшие runtime-индикаторы одним атомарным store batch,

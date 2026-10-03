@@ -220,9 +220,11 @@ async def test_copy_block_request_wins_race_with_pending_select_copy(
 
 @pytest.mark.asyncio
 async def test_clipboard_payload_appends_diff_cite(tmp_path, monkeypatch):
-    """С DiffViewerScreen в буфер уходит суффикс [diff: path]."""
+    """С вьюера изменений в буфер уходит суффикс [diff: path]."""
+    from gc_core.agent_edits.deltas import FileEntry
     from gc_tui.app import TuiApp
-    from gc_tui.screens.diff import DiffViewerScreen
+    from gc_tui.screens.diff import DiffFileViewer
+    from gc_tui.services.edits_view import SOURCE_SESSION, EditsView
 
     app = TuiApp(
         threads_dir=str(tmp_path),
@@ -230,14 +232,23 @@ async def test_clipboard_payload_appends_diff_cite(tmp_path, monkeypatch):
         settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
-        viewer = DiffViewerScreen(
-            title="дифф · M · src/x.py",
-            content="+hello\n",
+        view = EditsView(
+            str(tmp_path / "threads"), "cli", "th1", str(tmp_path), None
+        )
+        entry = FileEntry(
             path="src/x.py",
-            on_approve=lambda: None,
-            on_undo=lambda: None,
-            on_approve_all=lambda: None,
-            on_undo_all=lambda: None,
+            add=1,
+            del_=0,
+            kind="modified",
+            exact=False,
+            countable=True,
+            by_shell=True,
+            external=False,
+            revertable=False,
+            last_ts=1.0,
+        )
+        viewer = DiffFileViewer(
+            view=view, source=SOURCE_SESSION, files=[entry], index=0
         )
         await pilot.app.push_screen(viewer)
         await pilot.pause()

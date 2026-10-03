@@ -9,6 +9,7 @@ from gc_core.utils.file_text import (
     sha256_hex_of_bytes,
     try_encode_text_bytes,
 )
+from gc_core.utils.fs_size_limits import fs_mutate_max_bytes
 from gc_core.utils.tool_report_paths import tool_report_abspath
 
 
@@ -199,6 +200,32 @@ Usage:
             return {"type": "mkdir_failed", "message": str(e)}
         return None
 
+    async def _journal_old_bytes(
+        self, path: str, exists: bool
+    ) -> bytes | None:
+        """Контент до перезаписи — для журнала правок.
+
+        Тул нигде больше его не читает, а без него запись о перезаписи
+        выглядит как создание файла (нет baseline-снапшота, весь файл в дифф
+        как добавленный). Читаем только когда запись правок реально ведётся и
+        файл в пределах капа мутирующих тулов — собственного гейта по размеру
+        у этого тула нет.
+        """
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            is_recording,
+        )
+
+        if not exists or not is_recording(self._ctx):
+            return None
+        try:
+            if await self._backend.getsize(path) <= fs_mutate_max_bytes(
+                self._settings_source
+            ):
+                return await self._backend.read_bytes(path)
+        except Exception:
+            return None
+        return None
+
     @enforce_write_guard(path_arg="path", operation="write")
     async def acall(
         self,
@@ -260,6 +287,12 @@ Usage:
                     error={"type": "backup_failed", "message": str(e)},
                 )
 
+        from gc_core.agent_edits.recorder import (  # nested: cycle with thread_store
+            record_edit,
+        )
+
+        old_bytes = await self._journal_old_bytes(path, exists)
+
         try:
             out_bytes, encode_err = try_encode_text_bytes(
                 normalized, encoding_used
@@ -282,6 +315,15 @@ Usage:
                 backup_path=backup_path,
                 error={"type": "write_failed", "message": str(e)},
             )
+
+        await record_edit(
+            self._ctx,
+            abs_path=path,
+            old_bytes=old_bytes,
+            new_bytes=out_bytes,
+            op="write" if exists else "create",
+            call_id=self._call_id,
+        )
 
         return self._result(
             ok=True,

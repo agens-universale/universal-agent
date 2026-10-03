@@ -28,7 +28,11 @@ FLAT_TO_PATH: dict[str, str] = {
     "command_moderation": "security.command_moderation",
     "completions_url": "backend.completions_url",
     "console_trace": "logging.console_trace",
-    "diff_tui": "diff_tui",
+    "diff_tui": "diff_tui",  # прежнее имя agent_edits — переносит compat
+    "agent_edits": "agent_edits",
+    "acp_text_answer_mode": "acp.text_answer_mode",
+    "acp_finish_gate_mode": "acp.finish_gate_mode",
+    "acp_todo_reminder_steps": "acp.todo_reminder_steps",
     "disable_skills": "agent.disable_skills",
     "download": "security.download",
     "enable_project_memory_notice": "project_memory.enable_project_memory_notice",

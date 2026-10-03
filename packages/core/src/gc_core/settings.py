@@ -48,6 +48,10 @@ class RuntimeEnv:
     subagent_tools_stop: tuple[str, ...] = ()
     #: Вид OS-бэкенда, выбранный встраивающим (``local``/``harbor``); None — local.
     os_backend: Optional[str] = None
+    #: Режим запуска, объявленный фронтендом: ``tui``/``cli``/``server`` (от него
+    #: зависит запись журнала правок, ``agent_edits.record``); None — ядро как
+    #: библиотека.
+    run_mode: Optional[str] = None
 
     def with_values(self, **values: Any) -> RuntimeEnv:
         return replace(self, **values)

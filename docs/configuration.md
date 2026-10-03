@@ -68,8 +68,23 @@
   - `tui.text_answer_mode` (`deny | judge | allow`, по умолчанию `judge`) — как поступать
     с текстовым ответом агента без вызова инструмента:
     `deny` — всегда bounce (как CLI), `judge` — intent_guard решает, `allow` — принять текст.
+    Только TUI копирует это в рабочий ключ `text_answer_mode`.
+  - `acp.text_answer_mode` (`deny | judge | allow`, по умолчанию `allow`) — то же для
+    канала `gc-acp` (IDE). По умолчанию проза разрешена без судьи.
+  - `acp.finish_gate_mode` (`on | off | smart`, по умолчанию `off`) — судья на
+    `turn_finish` в ACP; в IDE человек сам видит ответ и сверяет с интентом.
+  - `acp.todo_reminder_steps` (число, по умолчанию `0`) — technical reminder про
+    `session_todo`; `0` = выкл. В IDE-чате иначе легко толкает к реализации вопреки обсуждению.
+  - Канал ACP также подставляет bundled special instructions
+    (`chat_completions_acp_special_instructions.md`: discussion ≠ implementation).
+    Пример профиля — `packages/acp/profiles/acp.yml`.
   - `tui.file_view.enabled` / `max_file_bytes` / `page_lines` (`null` = авто по высоте)
     — постраничный просмотр `/view` в TUI (см. [tui.md](tui.md#просмотр-файла-view)).
+- **Правки агента**: секция `agent_edits` — журнал правок, снимки для отката, дифф в ленте
+  и экран изменений. Журнал ведётся по режиму запуска: `agent_edits.record.tui` (по умолчанию
+  `true`), `record.cli` и `record.server` (по умолчанию `false` — включите, чтобы правки из
+  `gc-cli` или сервера попадали в журнал треда). Все ключи — в
+  [tui.md](tui.md#конфигурация-tui).
 - **Обновление**: секция `update` управляет самообновлением агента:
   - `update.check` (`auto | off`, по умолчанию `auto`) — проверять ли при запуске, вышла ли
     новая версия. Вердикт виден в TUI (`/settings` → Обновление) и по `gc-cli --check-update`.

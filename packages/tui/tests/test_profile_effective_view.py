@@ -443,7 +443,13 @@ async def test_del_on_an_inherited_row_refuses_instead_of_reporting_success(
 def _footer(scr) -> str:
     from textual.widgets import Static as _Static
 
-    return str(scr.query_one("#set-footer", _Static).render())
+    # Хвост подсказки прокрутки снимаем: он зависит от того, влезло ли
+    # содержимое в окно теста, и к предмету этих сверок не относится.
+    from gc_tui.form_frame import FOOTER_SCROLL
+
+    return str(scr.query_one("#set-footer", _Static).render()).replace(
+        FOOTER_SCROLL, ""
+    )
 
 
 def _confirm_banner(ed) -> str:
@@ -1821,3 +1827,35 @@ async def test_writing_a_literal_token_into_a_base_profile_stays_quiet(
         await _write_literal_token_entry(pilot, scr)
         assert "сохранена" in _flash(scr)
         assert "литеральный токен" not in _notice(scr), _notice(scr)
+
+
+async def test_ctrl_arrows_scroll_the_open_profile_when_the_editor_does_not_take_them(
+    tmp_path, monkeypatch
+):
+    """В под-виде открытого профиля `Ctrl+↑/↓` прокручивают тело — футер это обещает.
+
+    Под-вид держит клавиатуру целиком, и клавиша, которую не взял редактор
+    реестра, обрывалась молча: «Ctrl+↑/↓ — прокрутка» в футере была неправдой, а
+    `Ctrl+↓` вдобавок всплывал к приложению неостановленным."""
+    from gc_tui.form_frame import FOOTER_SCROLL
+    from textual.widgets import Static as _Static
+
+    async with _profile_view(tmp_path, monkeypatch, size=(100, 12)) as (
+        pilot,
+        scr,
+        _ed,
+    ):
+        scroll = scr.query_one("#set-scroll")
+        assert scroll.max_scroll_y > 0, "предусловие: есть что прокручивать"
+        assert FOOTER_SCROLL.strip() in str(
+            scr.query_one("#set-footer", _Static).render()
+        )
+        for _ in range(4):
+            await pilot.press("ctrl+up")
+            await pilot.pause()
+        top = scroll.scroll_offset.y
+        await pilot.press("ctrl+down")
+        await pilot.pause()
+        await pilot.pause()
+        assert scroll.scroll_offset.y > top
+        assert scr._profiles_open == "work"  # из под-вида не вышли

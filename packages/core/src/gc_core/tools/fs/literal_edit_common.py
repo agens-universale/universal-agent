@@ -122,7 +122,9 @@ async def load_text_source(
     encoding: str | None,
     expected_file_sha256: str | None,
 ):
-    """(text, encoding_used) либо LoadError с готовыми message/error.
+    """(text, encoding_used, raw) либо LoadError с готовыми message/error.
+
+    ``raw`` — прочитанные байты как есть: журнал правок берёт их базой «было».
 
     ``tool`` — сам тул (AbstractSimpleTool): ``tool._backend`` читается внутри
     ``try`` при каждом обращении, как и раньше в методе тула, — ошибка свойства
@@ -160,7 +162,7 @@ async def load_text_source(
     )
     if stale_error is not None:
         return LoadError(stale_error["message"], stale_error)
-    return decoded.text or "", decoded.encoding_used
+    return decoded.text or "", decoded.encoding_used, raw
 
 
 async def encode_and_write(
