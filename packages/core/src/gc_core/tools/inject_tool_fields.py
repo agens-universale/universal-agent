@@ -18,9 +18,9 @@ from gc_core.tools.schema_optional import (
 logger = logging.getLogger(__name__)
 
 
-def resolve_inject_tool_fields(config_dict: Any) -> Dict[str, str]:
+def resolve_inject_tool_fields(settings: Any) -> Dict[str, str]:
     """Нормализовать ``agent.inject_tool_fields`` из настроек."""
-    raw = settings_of(config_dict).agent.inject_tool_fields
+    raw = settings_of(settings).agent.inject_tool_fields
     result: Dict[str, str] = {}
     for key, value in raw.items():
         if not isinstance(key, str):

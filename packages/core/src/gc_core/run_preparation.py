@@ -18,9 +18,9 @@ class PromptPreparationRequest:
     verbose: bool = False
 
     @classmethod
-    def from_config(cls, config: Any, *, verbose: bool):
-        """``config`` — всё, что принимает ``settings_of``."""
-        settings = settings_of(config)
+    def from_config(cls, settings: Any, *, verbose: bool):
+        """``settings`` — всё, что принимает ``settings_of`` (контекст, настройки)."""
+        settings = settings_of(settings)
 
         def path(value):
             return value if isinstance(value, str) and value.strip() else None

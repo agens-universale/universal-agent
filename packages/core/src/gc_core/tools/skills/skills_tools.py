@@ -154,7 +154,12 @@ class RunSkillScriptTool:
     ) -> None:
         self._registry = registry
         self._ctx = kwargs.get("ctx")
-        self._config_dict = kwargs.get("config_dict") or {}
+        #: Явные настройки (всё, что принимает ``settings_of``); иначе — из ctx.
+        self._settings = kwargs.get("settings")
+
+    @property
+    def _settings_source(self) -> Any:
+        return self._settings if self._settings is not None else self._ctx
 
     @parse_json_object_argument(
         source_arg="args",
@@ -194,7 +199,7 @@ class RunSkillScriptTool:
             exec_result = await aexec_port(backend).aexec_argv(
                 run_argv,
                 stdin=stdin,
-                timeout=exec_timeout_from_config_dict(self._config_dict),
+                timeout=exec_timeout_from_config_dict(self._settings_source),
             )
             stdout = as_captured_stream(
                 getattr(exec_result, "stdout_stream", None)
@@ -215,7 +220,7 @@ class RunSkillScriptTool:
                     stdout,
                     stderr,
                     exec_output_preview_edge_chars_from_config_dict(
-                        self._config_dict
+                        self._settings_source
                     ),
                 )
             )

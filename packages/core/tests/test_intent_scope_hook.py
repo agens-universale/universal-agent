@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 
 import pytest
 from gc_core.config_modules.intent_scope import (
@@ -20,6 +19,7 @@ from gc_core.intent_scope.hook import (
 )
 from gc_core.states import State
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _make_state() -> State:
@@ -41,8 +41,8 @@ def _ctx(
     tools: dict[str, IntentScopeToolConfig] | None = None,
     fallback: bool = False,
 ):
-    return SimpleNamespace(
-        config_dict={"backend_api_mode": backend},
+    return fake_ctx(
+        {"backend_api_mode": backend},
         intent_scope=IntentScopeConfig(
             tools=tools or {},
             fallback_raw_on_llm_error=fallback,
@@ -84,8 +84,8 @@ def test_hook_skipped_without_intent_scope_on_ctx():
             tool_name="turn_ask_human",
             tool_output_raw='{"response":"hi"}',
             state=state,
-            ctx=SimpleNamespace(
-                config_dict={"backend_api_mode": "chat_completions"},
+            ctx=fake_ctx(
+                {"backend_api_mode": "chat_completions"},
                 logger=None,
             ),
         )

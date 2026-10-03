@@ -11,7 +11,6 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.runtime_notices import (
@@ -21,10 +20,11 @@ from gc_core.runtime_notices import (
 from gc_core.states import SharedStateData, State
 from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
-def _snapshot(raw: dict) -> dict:
-    return flatten_app_config(AppConfig.model_validate(raw))
+def _snapshot(raw: dict) -> AppConfig:
+    return AppConfig.model_validate(raw)
 
 
 def _router(raw: dict, *, level: str = "default") -> ModelRouter:
@@ -61,11 +61,9 @@ def _service_state(**overrides) -> SimpleNamespace:
     return SimpleNamespace(**base)
 
 
-def _service_ctx(
-    router: ModelRouter, *, is_tui: bool = False
-) -> SimpleNamespace:
-    return SimpleNamespace(
-        config_dict={
+def _service_ctx(router: ModelRouter, *, is_tui: bool = False):
+    return fake_ctx(
+        {
             "completions_url": "http://backend.local/v1/chat/completions",
             "backend_request_timeout_sec": 600,
             "backend_api_mode": "chat_completions",
@@ -308,8 +306,8 @@ def test_finish_gate_guard_double_failure_is_fail_open_error(monkeypatch):
         },
         level="default",
     )
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "completions_url": "http://backend.local/v1/chat/completions",
             "backend_request_timeout_sec": 600,
             "backend_api_mode": "chat_completions",
@@ -360,8 +358,8 @@ async def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
         },
         level="default",
     )
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "completions_url": "http://backend.local/v1/chat/completions",
             "backend_request_timeout_sec": 600,
             "backend_api_mode": "chat_completions",
@@ -420,8 +418,8 @@ def test_main_trace_trips_breaker_and_raises_honest_error_with_hint(
         {"models": {"glm-local": {}}, "slots": {"default": "glm-local"}},
         level="default",
     )
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         model_router=router,
         auth_connector=None,
         logger=None,
@@ -458,8 +456,8 @@ def test_begin_turn_main_trace_open_active_alias_raises_honest_class2(
         level="default",
     )
     router.breaker.trip("glm-local", "5xx после ретраев")
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         model_router=router,
         auth_connector=None,
         logger=None,
@@ -482,8 +480,8 @@ def test_begin_turn_main_trace_legacy_is_plain_passthrough():
     from gc_core import processing_responses as pr
 
     router = _router({}, level="default")  # registry_empty → легаси
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         model_router=router,
         auth_connector=None,
         logger=None,
@@ -551,8 +549,8 @@ def test_main_trace_open_alias_fails_instantly_without_transport(monkeypatch):
         level="default",
     )
     router.breaker.trip("glm-local", "5xx после ретраев")
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         model_router=router,
         auth_connector=None,
         logger=None,
@@ -578,8 +576,8 @@ def test_main_trace_legacy_breaker_not_tracked_error_unchanged(monkeypatch):
     from gc_core import processing_responses as pr
 
     router = _router({}, level="default")  # models пуст → registry_empty
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         model_router=router,
         auth_connector=None,
         logger=None,
@@ -606,8 +604,8 @@ def test_main_trace_context_overflow_not_treated_as_unavailable(monkeypatch):
         {"models": {"glm-local": {}}, "slots": {"default": "glm-local"}},
         level="default",
     )
-    ctx = SimpleNamespace(
-        config_dict={},
+    ctx = fake_ctx(
+        {},
         model_router=router,
         auth_connector=None,
         logger=None,
@@ -665,9 +663,13 @@ def _subagent_ctx(cfg, router):
 
 
 def _subagent_cfg(tmp_path, raw):
-    cfg = _snapshot(raw)
-    cfg.update(
+    """Настройки родителя субагента: реестр ``raw`` + правки прогона; гарды —
+    как у ``local_ctx`` (не настроенные тестом выключены)."""
+    from gc_testkit.helpers.tool_ctx import tool_settings
+
+    return tool_settings(
         {
+            **raw,
             "use_local_subagents": True,
             "backend_api_mode": "chat_completions",
             "subagent_max_steps": 30,
@@ -677,7 +679,6 @@ def _subagent_cfg(tmp_path, raw):
             "logs_dump_dir": str(tmp_path),
         }
     )
-    return cfg
 
 
 async def test_subagent_first_call_failure_restarts_on_active_model(tmp_path):

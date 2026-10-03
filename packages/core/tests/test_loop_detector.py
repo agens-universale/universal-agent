@@ -23,6 +23,7 @@ from gc_core.loop_detector.detector import (
     resolve_thresholds,
 )
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 from helpers.turn_finish_apply import stub_turn_finish_apply
 
 
@@ -61,14 +62,10 @@ def _entry(consecutive: int, in_window: int, *, injected=("reason",)):
 
 
 def _ctx(tools_data, *, enabled=True, inject_tool_fields=None):
-    config_dict = {"loop_detector": {"enabled": enabled}}
+    config = {"loop_detector": {"enabled": enabled}}
     if inject_tool_fields is not None:
-        config_dict["inject_tool_fields"] = inject_tool_fields
-    return SimpleNamespace(
-        config_dict=config_dict,
-        tools_data=tools_data,
-        logger=None,
-    )
+        config["inject_tool_fields"] = inject_tool_fields
+    return fake_ctx(config, tools_data=tools_data, logger=None)
 
 
 def test_fingerprint_strips_reason_and_keeps_paging_and_path_literal():
@@ -314,8 +311,11 @@ def test_disabled_config_does_not_record_or_notice():
     observe(state, ctx, "fs_read_file", args)
     assert flush(state) is None
     assert state.loop_detector_window == []
-    assert is_enabled({"loop_detector": {"enabled": False}}) is False
-    assert is_enabled({}) is True
+    assert (
+        is_enabled(make_settings({"loop_detector": {"enabled": False}}))
+        is False
+    )
+    assert is_enabled(make_settings()) is True
 
 
 def test_flush_one_notice_for_several_hits():
@@ -402,7 +402,9 @@ async def test_mcp_tools_data_has_no_loop_warn_by_default(monkeypatch):
         ),
     )
     tools_data, _status = await aget_mcp_tools_data_for_config(
-        {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}}
+        make_settings(
+            {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}}
+        )
     )
     assert LOOP_WARN_KEY not in tools_data["mcp_srv_search"]
     assert resolve_thresholds(tools_data, "mcp_srv_search") is None
@@ -424,29 +426,33 @@ async def test_mcp_loop_control_tools_all_and_list(monkeypatch):
         as_coro(lambda *_a, **_k: (registry, {"srv": {}})),
     )
     listed, _ = await aget_mcp_tools_data_for_config(
-        {
-            "mcp-servers": {
-                "srv": {
-                    "transport": "stdio",
-                    "command": "x",
-                    "loop_control_tools": ["search"],
+        make_settings(
+            {
+                "mcp-servers": {
+                    "srv": {
+                        "transport": "stdio",
+                        "command": "x",
+                        "loop_control_tools": ["search"],
+                    }
                 }
             }
-        }
+        )
     )
     assert listed["mcp_srv_search"][LOOP_WARN_KEY] == GENERIC_PROFILE
     assert LOOP_WARN_KEY not in listed["mcp_srv_poll"]
 
     all_tools, _ = await aget_mcp_tools_data_for_config(
-        {
-            "mcp-servers": {
-                "srv": {
-                    "transport": "stdio",
-                    "command": "x",
-                    "loop_control_tools": "all",
+        make_settings(
+            {
+                "mcp-servers": {
+                    "srv": {
+                        "transport": "stdio",
+                        "command": "x",
+                        "loop_control_tools": "all",
+                    }
                 }
             }
-        }
+        )
     )
     assert all_tools["mcp_srv_search"][LOOP_WARN_KEY] == GENERIC_PROFILE
     assert all_tools["mcp_srv_poll"][LOOP_WARN_KEY] == GENERIC_PROFILE
@@ -490,7 +496,7 @@ def test_resolve_thresholds_reads_only_tools_data_key():
 def test_builtin_registry_copies_loop_warn_key():
     from gc_core.tools.registry import get_builtin_tools_data
 
-    tools = get_builtin_tools_data({})
+    tools = get_builtin_tools_data(make_settings())
     assert tools["fs_read_file"][LOOP_WARN_KEY] == READ_PROFILE
     assert tools["session_think"][LOOP_WARN_KEY] == GENERIC_PROFILE
     assert LOOP_WARN_KEY not in tools["fs_write_file"]
@@ -535,8 +541,8 @@ def _ptc_state(**extra):
 
 
 def _ptc_ctx(tools_data, *, enabled=True):
-    return SimpleNamespace(
-        config_dict={"loop_detector": {"enabled": enabled}},
+    return fake_ctx(
+        {"loop_detector": {"enabled": enabled}},
         tools_data=tools_data,
         logger=None,
         run_id="run",
@@ -656,8 +662,8 @@ def test_run_agent_check_stop_clears_window():
         arun_agent(
             [{"role": "user", "content": "hi"}],
             state,
-            SimpleNamespace(
-                config_dict={
+            fake_ctx(
+                {
                     "backend_api_mode": "chat_completions",
                     "console_trace": False,
                     "no_tool_call_max_count": 50,
@@ -773,7 +779,7 @@ def test_compaction_clears_loop_window():
             confirm_rules={},
         ),
     )
-    ctx = SimpleNamespace(config_dict={"summary_params": {}}, logger=None)
+    ctx = fake_ctx({"summary_params": {}}, logger=None)
 
     def _fake_summarize(**_kwargs):
         return {
@@ -864,8 +870,8 @@ def test_accepted_turn_finish_clears_window(monkeypatch):
                 }
             ],
             state,
-            SimpleNamespace(
-                config_dict={
+            fake_ctx(
+                {
                     "backend_api_mode": "chat_completions",
                     "strict_turn_finish_validation": True,
                     "finish_gate_max_iterations": 10,
@@ -901,8 +907,8 @@ def test_accepted_text_response_clears_window():
         arun_agent(
             [{"role": "assistant", "type": "message", "content": "готово"}],
             state,
-            SimpleNamespace(
-                config_dict={
+            fake_ctx(
+                {
                     "backend_api_mode": "chat_completions",
                     "text_answer_mode": "allow",
                     "console_trace": False,
@@ -1012,8 +1018,8 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
     )
     state.backend_api_mode = "chat_completions"
     state.loop_detector_window = ["fp"]
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "backend_api_mode": "chat_completions",
             "strict_turn_finish_validation": True,
             "finish_gate_max_iterations": 10,

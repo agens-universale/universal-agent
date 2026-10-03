@@ -102,7 +102,7 @@ def _report_daemon_ready(name: str, server_cfg: Any) -> None:
 
 
 def ensure_daemons_for_agent(
-    config_dict: dict[str, Any],
+    settings: Any,
     *,
     manifest_path=None,
     disable_hint: str = _DEFAULT_DISABLE_HINT,
@@ -110,17 +110,20 @@ def ensure_daemons_for_agent(
     """
     Поднять command-daemon'ы из манифеста, если они нужны включённым MCP в config агента.
 
+    ``settings`` — настройки агента: всё, что принимает ``settings_of``
+    (контекст, ``LoadedSettings``, ``AppConfig``).
+
     Идемпотентно: уже живые процессы не дублируются.
     Возвращает супервизор — в shutdown_managed() гасятся только процессы,
     запущенные в этом вызове.
     """
-    path = manifest_path or resolve_agent_manifest_path(config_dict)
+    path = manifest_path or resolve_agent_manifest_path(settings)
     if path is None:
         return RunSupervisor()
 
     recommended_root = recipe_root()
     manifest = load_manifest(path)
-    servers = settings_of(config_dict).mcp.servers
+    servers = settings_of(settings).mcp.servers
     supervisor = RunSupervisor()
 
     for entry in manifest:

@@ -236,7 +236,7 @@ def _warn(
 
 
 def discover_subagent_definitions(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     builtin_names: Sequence[str] | set[str],
     logger: Optional[logging.Logger] = None,
@@ -254,9 +254,13 @@ def discover_subagent_definitions(
 
     Всё деградирует до варнинга: один битый файл не должен лишать оператора
     остальных.
+
+    ``settings`` — всё, что принимает ``settings_of``; ``None`` — папки нет.
     """
     raw_dir = (
-        settings_of(config_dict).agent.subagents_dir if config_dict else None
+        settings_of(settings).agent.subagents_dir
+        if settings is not None
+        else None
     )
     base_dir = str(raw_dir).strip() if raw_dir is not None else ""
     if not base_dir:
@@ -351,10 +355,11 @@ def discover_subagent_definitions(
     return list(taken.values())
 
 
-def resolve_max_count(config_dict: Dict[str, Any]) -> int:
+def resolve_max_count(settings: Any) -> int:
+    """``agent.subagents_max_count`` настроек (всё, что принимает ``settings_of``)."""
     raw = (
-        settings_of(config_dict).agent.subagents_max_count
-        if config_dict
+        settings_of(settings).agent.subagents_max_count
+        if settings is not None
         else DEFAULT_MAX_COUNT
     )
     try:

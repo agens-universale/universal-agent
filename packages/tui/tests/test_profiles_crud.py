@@ -12,6 +12,7 @@ Enter открывает редактор профиля (Task 6, `test_profile_
 профиль, выбранный в этой сессии» впервые достижим из UI.
 """
 
+from gc_testkit.tui_support import as_settings, tui_settings
 from pathlib import Path
 
 import pytest
@@ -70,7 +71,7 @@ def _mk_screen(config=None, config_path=None, on_apply=None):
     from gc_tui.screens.settings import SettingsScreen
 
     return SettingsScreen(
-        config=config or {},
+        settings=as_settings(config or {}),
         config_path=str(config_path) if config_path else None,
         on_apply=on_apply or (lambda: None),
         probe_fn=_fake_probe,
@@ -140,7 +141,7 @@ async def test_create_writes_the_blank_skeleton_into_the_base_root(
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -165,7 +166,7 @@ async def test_created_file_is_valid_by_the_profile_schema(
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -190,7 +191,7 @@ async def test_create_puts_the_cursor_on_the_new_row(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "aaa.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -232,7 +233,7 @@ async def test_create_refuses_bad_names(tmp_path, monkeypatch, name, expected):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -259,7 +260,7 @@ async def test_create_refuses_on_the_package_template(tmp_path, monkeypatch):
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, Path(_default_config_path()))
         await pilot.press("n")
@@ -287,7 +288,7 @@ async def test_rename_moves_the_file_and_follows_the_pointer_of_the_active(
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -320,7 +321,7 @@ async def test_rename_puts_the_cursor_on_the_renamed_row(
     _write(tmp_path / "base" / "profiles" / "aaa.yml", _PROFILE_BODY)
     _write(tmp_path / "base" / "profiles" / "mmm.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "aaa")
@@ -348,7 +349,7 @@ async def test_rename_of_an_inactive_profile_leaves_the_pointer_alone(
     _write(tmp_path / "base" / "profiles" / "other.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="other")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -373,7 +374,7 @@ async def test_rename_to_the_same_name_is_a_quiet_cancel(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -401,7 +402,7 @@ async def test_rename_and_delete_are_noop_on_service_rows(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         for kind in ("none",):
@@ -433,7 +434,7 @@ async def test_delete_asks_before_removing_and_esc_cancels(
         tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -469,7 +470,7 @@ async def test_delete_backs_the_file_up_and_names_the_path(
         tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -511,7 +512,7 @@ async def test_delete_keeps_only_the_last_backups(tmp_path, monkeypatch):
             backups_dir / f"home.yml.bak-2026010{i % 10}-00000{i % 10}"
         ).write_text("x", encoding="utf-8")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -543,7 +544,7 @@ async def test_delete_of_the_active_profile_clears_the_pointer(
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -562,12 +563,14 @@ async def test_delete_of_the_active_profile_clears_the_pointer(
 
 
 def _app_for_session(tmp_path, base_cfg):
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_tui import app as app_mod
 
-    cfg, _meta = load_config_ex(str(base_cfg))
+    cfg = load_settings(str(base_cfg))
     app = app_mod.TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=cfg,
     )
     app.set_config_path(str(base_cfg))
     return app
@@ -656,7 +659,7 @@ async def test_space_activates_the_profile(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -680,7 +683,7 @@ async def test_enter_on_a_profile_row_opens_instead_of_activating(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -705,7 +708,7 @@ async def test_space_on_the_none_row_deactivates(tmp_path, monkeypatch):
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "none")
@@ -732,7 +735,7 @@ async def test_letters_and_space_go_into_the_name_field(tmp_path, monkeypatch):
         tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -762,7 +765,7 @@ async def test_esc_cancels_the_name_input_without_leaving_the_section(
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -796,7 +799,7 @@ async def test_footer_names_the_v1_keys_on_a_profile_row(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -825,7 +828,7 @@ async def test_add_row_footer_names_creating_and_nothing_below_it(
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         footer = _footer(scr)
@@ -850,7 +853,7 @@ async def test_name_input_footer_is_positional(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -885,14 +888,13 @@ def _two_layer_setup(tmp_path, monkeypatch):
     return base_cfg, project_dir
 
 
-def _loads_outside_project(tmp_path, base_cfg, monkeypatch) -> dict:
+def _loads_outside_project(tmp_path, base_cfg, monkeypatch):
     """Запуск ВНЕ проекта: проектного оверлея нет, действует базовый указатель.
     Он же — точка отказа §3.1: нерезолвимое имя роняет старт с ValueError."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     monkeypatch.chdir(tmp_path)
-    cfg, _meta = load_config_ex(str(base_cfg))
-    return cfg
+    return load_settings(str(base_cfg))
 
 
 async def test_delete_clears_the_pointer_in_every_file_layer(
@@ -906,7 +908,7 @@ async def test_delete_clears_the_pointer_in_every_file_layer(
     base_cfg, _project_dir = _two_layer_setup(tmp_path, monkeypatch)
 
     cfg = dict(_base_dict(), profile="corp")  # merged: победил проектный слой
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -919,9 +921,9 @@ async def test_delete_clears_the_pointer_in_every_file_layer(
         await pilot.pause()
 
     assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
-    assert _loads_outside_project(tmp_path, base_cfg, monkeypatch).get(
-        "profile"
-    ) in ("", None)
+    assert _loads_outside_project(
+        tmp_path, base_cfg, monkeypatch
+    ).runtime.active_profile in ("", None)
 
 
 async def test_rename_moves_the_pointer_in_every_file_layer(
@@ -934,7 +936,7 @@ async def test_rename_moves_the_pointer_in_every_file_layer(
     base_cfg, _project_dir = _two_layer_setup(tmp_path, monkeypatch)
 
     cfg = dict(_base_dict(), profile="corp")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -944,7 +946,9 @@ async def test_rename_moves_the_pointer_in_every_file_layer(
 
     assert 'profile: "job"' in base_cfg.read_text(encoding="utf-8")
     assert (
-        _loads_outside_project(tmp_path, base_cfg, monkeypatch).get("profile")
+        _loads_outside_project(
+            tmp_path, base_cfg, monkeypatch
+        ).runtime.active_profile
         == "job"
     )
 
@@ -985,7 +989,7 @@ async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_
     )
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "none")
@@ -1003,8 +1007,8 @@ async def test_deactivating_via_the_project_layer_is_refused_when_it_breaks_the_
     # живой откат: файл проектного слоя — ровно тот же, что и до попытки записи
     assert project_cfg.read_text(encoding="utf-8") == 'profile: "work"\n'
     # и следующий холодный старт (внутри проекта — оверлей действует) всё ещё грузится
-    loaded, _meta = config_mod.load_config_ex(str(base_cfg))
-    assert loaded.get("profile") == "work"
+    loaded = config_mod.load_settings(str(base_cfg))
+    assert loaded.runtime.active_profile == "work"
 
 
 async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_the_stack(
@@ -1041,7 +1045,7 @@ async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_
     assert not project_cfg.exists()
 
     cfg = dict(_base_dict())  # без активного профиля
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1064,7 +1068,7 @@ async def test_activating_a_brand_new_project_profile_is_refused_when_it_breaks_
     # (тот указатель — из так и не созданного файла — реально подставил бы
     # `work`, и стек уже пытался бы резолвить `ghost`).
     with pytest.raises(ValueError, match=r"slots\.default.*≥2") as excinfo:
-        config_mod.load_config_ex(str(base_cfg))
+        config_mod.load_settings(str(base_cfg))
     assert "ghost" not in str(excinfo.value)
 
 
@@ -1094,7 +1098,9 @@ async def test_renaming_the_active_profile_succeeds_when_the_base_needs_its_slot
         tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n'
     )
 
-    app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
+    app = app_mod.TuiApp(
+        settings=tui_settings(dict(_base_dict(), profile="work"))
+    )
     async with app.run_test() as pilot:
         scr = await _profiles_screen(
             pilot, app, base_cfg, config=dict(_base_dict(), profile="work")
@@ -1139,7 +1145,9 @@ async def test_renaming_a_profile_with_a_broken_slot_still_shows_the_wrapped_ref
         'slots:\n  default: "ghost"\n',
     )
 
-    app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
+    app = app_mod.TuiApp(
+        settings=tui_settings(dict(_base_dict(), profile="work"))
+    )
     async with app.run_test() as pilot:
         scr = await _profiles_screen(
             pilot, app, base_cfg, config=dict(_base_dict(), profile="work")
@@ -1183,7 +1191,9 @@ async def test_deleting_the_sole_slot_provider_shows_the_wrapped_refusal(
         tmp_path / "base" / "profiles" / "work.yml", 'slots:\n  default: "a"\n'
     )
 
-    app = app_mod.TuiApp(config=dict(_base_dict(), profile="work"))
+    app = app_mod.TuiApp(
+        settings=tui_settings(dict(_base_dict(), profile="work"))
+    )
     async with app.run_test() as pilot:
         scr = await _profiles_screen(
             pilot, app, base_cfg, config=dict(_base_dict(), profile="work")
@@ -1226,7 +1236,7 @@ async def test_rollback_that_also_fails_does_not_promise_a_retry(
         'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         scr._rollback_profile_pointers(
@@ -1262,7 +1272,7 @@ async def test_stuck_rollback_sends_to_the_profiles_section_not_models(
         'models:\n  a:\n    model: "x"\n  b:\n    model: "y"\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         scr._rollback_profile_pointers(
@@ -1315,7 +1325,7 @@ async def test_failed_delete_move_rolls_the_pointer_back_in_the_file(
     monkeypatch.setattr(shutil, "move", _boom)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1360,7 +1370,7 @@ async def test_failed_rename_move_rolls_the_pointer_back_in_the_file(
     monkeypatch.setattr(pathlib.Path, "rename", _boom)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1403,7 +1413,7 @@ async def test_failed_delete_rolls_the_pointer_back_in_every_layer(
     monkeypatch.setattr(shutil, "move", _boom)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1445,7 +1455,7 @@ async def test_rename_rewrites_a_pointer_written_as_an_env_ref(
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1477,7 +1487,7 @@ async def test_delete_snaps_a_pointer_written_as_an_env_ref(
     broken = _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1596,7 +1606,7 @@ async def test_delete_flash_names_the_twin_that_surfaced(
         tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1635,7 +1645,7 @@ async def test_delete_refuses_on_the_package_template_before_the_banner(
     )
     _write(tmp_path / "pkg-profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, template)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -1658,7 +1668,7 @@ async def test_refusal_names_the_action_that_did_not_happen(
     project_dir.mkdir()
     monkeypatch.chdir(project_dir)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, Path(_default_config_path()))
         await pilot.press("n")
@@ -1685,7 +1695,7 @@ async def test_two_deletes_in_the_same_second_keep_both_backups(
     profiles = tmp_path / "base" / "profiles"
     monkeypatch.setattr("time.strftime", lambda *_a, **_k: "20260811-000000")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         for body in ("models: {}\n", "slots: {}\n"):
@@ -1735,7 +1745,7 @@ async def test_delete_refuses_at_the_door_when_a_pointer_layer_is_read_only(
 
     base_cfg = _readonly_base_layer(tmp_path, monkeypatch)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1758,7 +1768,7 @@ async def test_rename_refuses_at_the_door_when_a_pointer_layer_is_read_only(
 
     base_cfg = _readonly_base_layer(tmp_path, monkeypatch)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -1830,7 +1840,7 @@ async def test_rename_reports_a_file_error_as_a_file_error(
     unlock = _lock_against_writing(base_cfg)
     try:
         _assert_pointer_write_fails_with_oserror(base_cfg)
-        app = app_mod.TuiApp(config=_base_dict())
+        app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
         async with app.run_test() as pilot:
             scr = await _profiles_screen(pilot, app, base_cfg)
             await _put_cursor(pilot, scr, "profile", "work")
@@ -1865,7 +1875,7 @@ async def test_delete_reports_a_file_error_as_a_file_error(
     unlock = _lock_against_writing(base_cfg)
     try:
         _assert_pointer_write_fails_with_oserror(base_cfg)
-        app = app_mod.TuiApp(config=_base_dict())
+        app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
         async with app.run_test() as pilot:
             scr = await _profiles_screen(pilot, app, base_cfg)
             await _put_cursor(pilot, scr, "profile", "work")
@@ -1899,7 +1909,7 @@ async def test_rename_of_a_pointerless_profile_promises_nothing(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "solo.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "solo")
@@ -1924,7 +1934,7 @@ async def test_delete_of_a_pointerless_profile_promises_nothing(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "solo.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "solo")
@@ -1954,7 +1964,7 @@ async def test_delete_of_the_active_profile_still_promises_the_next_turn(
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="home")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -1993,7 +2003,7 @@ async def test_delete_of_the_active_twin_says_the_choice_is_dropped_not_the_shad
     )
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2041,7 +2051,7 @@ async def test_delete_banner_names_the_managed_pointer_it_will_not_touch(
     _write(tmp_path / "base" / "profiles" / "free.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "free")
@@ -2076,7 +2086,7 @@ async def test_rename_prompt_names_the_managed_pointer_it_will_not_touch(
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2110,7 +2120,7 @@ async def test_pinned_elsewhere_reads_the_pass_cache_not_the_disk_again(
     _write(tmp_path / "base" / "profiles" / "work.yml", _PROFILE_BODY)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         reads: list = []
@@ -2146,16 +2156,14 @@ async def test_pinned_elsewhere_reads_the_pass_cache_not_the_disk_again(
 
 
 def _app_with_flag(tmp_path, base_cfg, profile_override):
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_tui import app as app_mod
 
-    cfg, _meta = load_config_ex(
-        str(base_cfg), profile_override=profile_override
-    )
+    cfg = load_settings(str(base_cfg), profile_override=profile_override)
     app = app_mod.TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config=cfg,
+        settings=cfg,
         profile_override=profile_override,
     )
     app.set_config_path(str(base_cfg))
@@ -2180,14 +2188,16 @@ async def test_activation_under_the_profile_flag_names_the_launch_profile(
             pilot,
             app,
             base_cfg,
-            config=app._config,
+            config=app.base_settings(),
             on_apply=app.reload_config,
         )
         await _put_cursor(pilot, scr, "profile", "corp")
         await pilot.press("space")
         await pilot.pause()
         flash = _flash(scr)
-        assert app._config["profile"] == "work"  # запуск остался на флаге
+        assert (
+            app.base_settings().runtime.active_profile == "work"
+        )  # запуск остался на флаге
 
     assert 'profile: "corp"' in base_cfg.read_text(encoding="utf-8")
     assert "текущий запуск остаётся на «work» (флаг --profile)" in flash
@@ -2211,14 +2221,14 @@ async def test_activation_under_an_empty_profile_flag_says_the_launch_stays_bare
             pilot,
             app,
             base_cfg,
-            config=app._config,
+            config=app.base_settings(),
             on_apply=app.reload_config,
         )
         await _put_cursor(pilot, scr, "profile", "work")
         await pilot.press("space")
         await pilot.pause()
         flash = _flash(scr)
-        assert app._config["profile"] == ""
+        assert app.base_settings().runtime.active_profile == ""
 
     assert 'profile: "work"' in base_cfg.read_text(encoding="utf-8")
     assert 'текущий запуск остаётся без профиля (флаг --profile "")' in flash
@@ -2244,7 +2254,7 @@ async def test_rename_of_the_flag_profile_moves_the_flag_with_it(
             pilot,
             app,
             base_cfg,
-            config=app._config,
+            config=app.base_settings(),
             on_apply=app.reload_config,
         )
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2254,7 +2264,7 @@ async def test_rename_of_the_flag_profile_moves_the_flag_with_it(
         flash = _flash(scr)
 
         assert app._profile_override == "job"
-        assert app._config["profile"] == "job"
+        assert app.base_settings().runtime.active_profile == "job"
         assert "profile_flag_stale" not in [
             n.code for n in collect_runtime_notices()
         ]
@@ -2285,7 +2295,7 @@ async def test_delete_of_the_flag_profile_clears_the_flag(
             pilot,
             app,
             base_cfg,
-            config=app._config,
+            config=app.base_settings(),
             on_apply=app.reload_config,
         )
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2297,7 +2307,7 @@ async def test_delete_of_the_flag_profile_clears_the_flag(
         flash = _flash(scr)
 
         assert app._profile_override == ""
-        assert (app._config.get("profile") or None) is None
+        assert (app.base_settings().runtime.active_profile or None) is None
         assert "profile_flag_stale" not in [
             n.code for n in collect_runtime_notices()
         ]
@@ -2333,7 +2343,7 @@ async def test_delete_of_the_flag_profile_with_a_surfaced_twin_names_the_origina
             pilot,
             app,
             base_cfg,
-            config=app._config,
+            config=app.base_settings(),
             on_apply=app.reload_config,
         )
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2424,7 +2434,7 @@ async def test_rename_into_a_name_differing_only_in_case_is_refused(
         "# ВТОРОЙ\n" + _PROFILE_BODY,
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "testprof2")
@@ -2457,7 +2467,7 @@ async def test_create_with_a_name_differing_only_in_case_is_refused(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "testprof1.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await pilot.press("n")
@@ -2484,7 +2494,7 @@ async def test_renaming_a_profile_to_its_own_name_in_another_case_still_works(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "testprof1.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "testprof1")
@@ -2544,7 +2554,7 @@ async def test_renaming_onto_a_file_discovery_does_not_see_is_refused_before_poi
     calls = _spy_repoint(monkeypatch)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2581,7 +2591,7 @@ async def test_renaming_onto_a_directory_namesake_is_refused_before_pointers(
     calls = _spy_repoint(monkeypatch)
 
     cfg = dict(_base_dict(), profile="work")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2615,7 +2625,7 @@ async def test_name_prompt_hides_the_hint_about_the_row_under_cursor(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "home")
@@ -2659,7 +2669,7 @@ async def test_renaming_reports_a_clean_refusal_when_the_profile_file_vanishes_m
 
     monkeypatch.setattr(pathlib.Path, "read_text", _flaky_read_text)
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -2715,7 +2725,7 @@ async def test_activating_an_unreadable_profile_is_refused_and_names_the_file(
         'slots:\n  default: "a"\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg)
         await _put_cursor(pilot, scr, "profile", "broken-enc")
@@ -2740,7 +2750,7 @@ async def test_activating_an_unreadable_profile_is_refused_and_names_the_file(
     assert (
         base_cfg.read_text(encoding="utf-8") == before
     )  # указатель никуда не уехал
-    config_mod.load_config_ex(str(base_cfg))  # следующий старт по-прежнему жив
+    config_mod.load_settings(str(base_cfg))  # следующий старт по-прежнему жив
 
 
 async def test_deactivating_an_already_unreadable_profile_still_works(
@@ -2764,7 +2774,7 @@ async def test_deactivating_an_already_unreadable_profile_still_works(
     )
 
     cfg = dict(_base_dict(), profile="broken-enc")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "none")
@@ -2795,7 +2805,7 @@ async def test_deleting_an_already_unreadable_profile_still_works(
     )
 
     cfg = dict(_base_dict(), profile="broken-enc")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "broken-enc")
@@ -2831,7 +2841,7 @@ async def test_creating_a_profile_beside_an_unreadable_one_is_untouched(
     )
 
     cfg = dict(_base_dict(), profile="broken-enc")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "add")
@@ -2869,7 +2879,7 @@ async def test_renaming_an_unreadable_profile_is_refused_and_names_the_file(
     )
 
     cfg = dict(_base_dict(), profile="broken-enc")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
         await _put_cursor(pilot, scr, "profile", "broken-enc")

@@ -71,7 +71,7 @@ async def test_real_session_commits_history_and_meta_in_one_call(tmp_path):
     store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     message = {"id": "u1", "role": "user", "content": "Сохрани результат"}
     requests.clear()
@@ -95,7 +95,7 @@ async def test_session_recomputes_after_ui_patch_without_losing_fields(
     store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     store._call(
         update_tui_meta, str(tmp_path), "cli", "native", {"title": "Название"}
@@ -118,7 +118,7 @@ async def test_failed_commit_does_not_advance_session(tmp_path, monkeypatch):
     store = DurableFileThreadStore(str(tmp_path))
     proxy, _ = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     before = deepcopy(
         (session.meta, session.history_messages, session.known_message_keys)
@@ -148,7 +148,7 @@ async def test_concurrent_history_writer_is_not_silently_adopted(tmp_path):
     store = DurableFileThreadStore(str(tmp_path))
     proxy, _ = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     store.append_messages(
         "cli", "native", [{"id": "other", "role": "user", "content": "Чужой"}]
@@ -167,7 +167,7 @@ async def test_compaction_uses_native_session_and_one_commit(tmp_path):
     store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     await session.apersist_batch(
         [{"id": "u1", "role": "user", "content": "Длинная история"}],
@@ -204,7 +204,7 @@ async def test_own_metadata_ack_avoids_conflict_and_keeps_pending_meta(
     store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     message = {"id": "u1", "role": "user", "content": "Task"}
     await session.apersist_batch([message], previous_response_id="r1")
@@ -241,7 +241,7 @@ async def test_external_metadata_is_not_covered_by_own_ack(
     store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     if external_first:
         store._call(
@@ -287,7 +287,7 @@ async def test_history_change_with_same_max_seq_cannot_be_acknowledged(
     store = DurableFileThreadStore(str(tmp_path))
     proxy, requests = proxy_for(store)
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     await session.apersist_batch(
         [{"id": "original", "role": "user", "content": "Task"}],
@@ -332,7 +332,7 @@ async def test_session_rejects_ack_with_changed_fence(
 
     proxy, _ = proxy_for(DurableFileThreadStore(str(tmp_path)))
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="cli", thread_id="native", store=proxy
+        settings=None, system_id="cli", thread_id="native", store=proxy
     )
     snapshot = session._store_snapshot
     receipt = ThreadStoreReceipt(

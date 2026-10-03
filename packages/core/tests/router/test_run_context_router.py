@@ -7,27 +7,27 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core import run_context as rc
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import ModelRouter
 from gc_core.states import State
 from gc_core.turn_boundary import begin_turn
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 @pytest.fixture
-def minimal_config_dict(monkeypatch):
+def minimal_settings(monkeypatch):
     monkeypatch.setattr(
         rc,
         "abuild_tools_data",
         as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
-    return {"model": "M", "level": "max", "save_logs": False}
+    return make_settings({"model": "M", "level": "max", "save_logs": False})
 
 
-def _snapshot(raw: dict) -> dict:
-    """Реальный снимок config_dict — через настоящий flatten_app_config, не мок."""
-    return flatten_app_config(AppConfig.model_validate(raw))
+def _snapshot(raw: dict) -> AppConfig:
+    """Настоящие провалидированные настройки (``AppConfig``), не мок."""
+    return AppConfig.model_validate(raw)
 
 
 def _make_state(model: str = "unused-legacy-default") -> State:
@@ -47,19 +47,19 @@ def _make_state(model: str = "unused-legacy-default") -> State:
 
 
 async def test_create_run_context_without_level_provider_reads_config_level(
-    minimal_config_dict,
+    minimal_settings,
 ):
-    ctx = await rc.acreate_run_context(minimal_config_dict)
+    ctx = await rc.acreate_run_context(minimal_settings)
     assert isinstance(ctx.model_router, ModelRouter)
     assert ctx.model_router.active_level() == "max"
 
 
 async def test_create_run_context_with_level_provider_uses_callable(
-    minimal_config_dict,
+    minimal_settings,
 ):
     level = {"value": "light"}
     ctx = await rc.acreate_run_context(
-        minimal_config_dict, level_provider=lambda: level["value"]
+        minimal_settings, level_provider=lambda: level["value"]
     )
     assert ctx.model_router.active_level() == "light"
     level["value"] = "default"
@@ -69,28 +69,28 @@ async def test_create_run_context_with_level_provider_uses_callable(
 
 
 async def test_create_run_context_model_router_resolves_legacy_main(
-    minimal_config_dict,
+    minimal_settings,
 ):
-    ctx = await rc.acreate_run_context(minimal_config_dict)
+    ctx = await rc.acreate_run_context(minimal_settings)
     resolved = ctx.model_router.resolve("main")
     assert resolved.model == "M"
 
 
 async def test_create_run_context_force_legacy_propagates_to_router(
-    minimal_config_dict,
+    minimal_settings,
 ):
     """Task 10: `--model` при непустом реестре -> `force_legacy=True` доезжает от
     CLI до ModelRouter через create_run_context (спека §2)."""
-    ctx = await rc.acreate_run_context(minimal_config_dict, force_legacy=True)
+    ctx = await rc.acreate_run_context(minimal_settings, force_legacy=True)
     resolved = ctx.model_router.resolve("main")
     assert resolved.model == "M"
     assert resolved.source == "легаси-форс --model"
 
 
 async def test_create_run_context_default_force_legacy_is_false(
-    minimal_config_dict,
+    minimal_settings,
 ):
-    ctx = await rc.acreate_run_context(minimal_config_dict)
+    ctx = await rc.acreate_run_context(minimal_settings)
     resolved = ctx.model_router.resolve("main")
     assert resolved.source == "легаси"
 
@@ -99,9 +99,9 @@ async def test_create_run_context_default_force_legacy_is_false(
 
 
 def test_begin_turn_sets_default_model_from_router_resolve_main(
-    minimal_config_dict,
+    minimal_settings,
 ):
-    router = ModelRouter(minimal_config_dict, level_provider=lambda: "max")
+    router = ModelRouter(minimal_settings, level_provider=lambda: "max")
     ctx = SimpleNamespace(model_router=router)
     state = _make_state()
 
@@ -113,7 +113,7 @@ def test_begin_turn_sets_default_model_from_router_resolve_main(
 def test_begin_turn_is_noop_without_model_router():
     """Легаси-совместимость: ctx без model_router (тестовые двойники) не должен падать —
     default_model остаётся тем, что уже стоит на state."""
-    ctx = SimpleNamespace(config_dict={"model": "X"})
+    ctx = fake_ctx({"model": "X"})
     state = _make_state()
 
     begin_turn(state, ctx)

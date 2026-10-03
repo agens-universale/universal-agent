@@ -6,6 +6,7 @@ from gc_core import config, onboarding
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules import env_vars
 from gc_core.model_router import ModelRouter
+from gc_testkit.settings import make_settings
 
 
 def _default_yaml() -> dict:
@@ -14,7 +15,7 @@ def _default_yaml() -> dict:
     )
 
 
-def _isolated_default(tmp_path, monkeypatch) -> dict:
+def _isolated_default(tmp_path, monkeypatch):
     """config.default.yml реальным загрузчиком, изолировав машинный и project-local overlay."""
     monkeypatch.setattr(
         env_vars,
@@ -26,7 +27,7 @@ def _isolated_default(tmp_path, monkeypatch) -> dict:
             "cache": tmp_path / "c",
         },
     )
-    return config.load_config(str(bundled_root() / "config.default.yml"))
+    return config.load_settings(str(bundled_root() / "config.default.yml"))
 
 
 # --- базовый детект -------------------------------------------------------
@@ -38,22 +39,26 @@ def test_default_config_is_unconfigured(tmp_path, monkeypatch):
 
 
 def test_configured_when_url_token_model_set():
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is False
 
 
 def test_unconfigured_if_token_still_placeholder():
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is True
 
 
@@ -61,23 +66,27 @@ def test_unconfigured_if_token_still_placeholder():
 
 
 def test_agent_auth_satisfies_auth_without_token():
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "model": "gigacode_agent_v1.6_rc",
-        "agent_auth": {"auth_endpoint": "https://auth.local/token"},
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "model": "gigacode_agent_v1.6_rc",
+            "agent_auth": {"auth_endpoint": "https://auth.local/token"},
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is False
 
 
 def test_agent_auth_set_drops_token_from_guide():
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "model": "gigacode_agent_v1.6_rc",
-        "agent_auth": {"auth_endpoint": "https://auth.local/token"},
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "model": "gigacode_agent_v1.6_rc",
+            "agent_auth": {"auth_endpoint": "https://auth.local/token"},
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+        }
+    )
     text = onboarding.setup_guide("/home/u/.gc/config.yml", cfg)
     assert "Authorization" not in text
     assert "настроен" in text
@@ -88,11 +97,13 @@ def test_no_token_and_no_complete_agent_auth_is_configured():
     плейсхолдера → конфиг настроен. Локальный прокси / эндпоинт без auth сам ставит
     авторизацию; гейт ловит только незаполненный сентинел, а не намеренное отсутствие.
     `agent_auth: {}` — то, во что config.py:277 разворачивает отсутствие секции."""
-    cfg = {
-        "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
-        "model": "MiniMaxAI/MiniMax-M2.7",
-        "agent_auth": {},
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+            "model": "MiniMaxAI/MiniMax-M2.7",
+            "agent_auth": {},
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is False
 
 
@@ -102,12 +113,14 @@ def test_no_token_and_no_complete_agent_auth_is_configured():
 def test_registry_closes_model_requirement():
     """Спека §11: непустой merged-реестр — рабочая модель, легаси-плейсхолдер
     `agent.model` при нём не блокирует (мастер его и не пишет с волны B)."""
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"model": "google/gemini-2.5-flash"}},
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is False
 
 
@@ -116,34 +129,40 @@ def test_registry_does_not_close_endpoint_requirement():
     `backend` (решение 10), поэтому плейсхолдерный endpoint при живом реестре —
     это «нечем работать», а не «настроено». Иначе мастер отчитывался бы «✓ Готово»,
     а следующий старт больше не предложил бы настройку."""
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"model": "google/gemini-2.5-flash"}},
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is True
 
 
 def test_registry_does_not_close_auth_requirement():
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"model": "google/gemini-2.5-flash"}},
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is True
 
 
 def test_flat_model_without_endpoint_is_unconfigured():
     """Тот же страж в плоском мире — симметрия детекта (§11)."""
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": "qwen3-coder",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": "qwen3-coder",
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is True
 
 
@@ -152,42 +171,46 @@ def test_self_sufficient_registry_closes_endpoint_and_auth_in_chat_completions()
     адрес и токен, плоский backend остался шаблонным. В `chat_completions` он
     полностью рабочий (Router отдаёт url и заголовок из записи) — предлагать мастер
     при каждом старте было бы ложной тревогой."""
-    cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {
-            "flash": {
-                "model": "g",
-                "url": "https://x/v1",
-                "authorization_header": "Bearer sk",
-            }
-        },
-    }
+    cfg = make_settings(
+        {
+            "backend_api_mode": "chat_completions",
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {
+                "flash": {
+                    "model": "g",
+                    "url": "https://x/v1",
+                    "authorization_header": "Bearer sk",
+                }
+            },
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is False
 
 
 def test_self_sufficient_registry_does_not_close_endpoint_in_responses():
     """Тот же конфиг в `responses`: per-model `url`/`token` там мертвы (§4), запрос
     ушёл бы на плоский плейсхолдер — «не настроено»."""
-    cfg = {
-        "backend_api_mode": "responses",
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {
-            "flash": {
-                "model": "g",
-                "url": "https://x/v1",
-                "authorization_header": "Bearer sk",
-            }
-        },
-    }
+    cfg = make_settings(
+        {
+            "backend_api_mode": "responses",
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {
+                "flash": {
+                    "model": "g",
+                    "url": "https://x/v1",
+                    "authorization_header": "Bearer sk",
+                }
+            },
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is True
 
 
@@ -195,22 +218,24 @@ def test_registry_with_one_entry_without_url_does_not_close_endpoint():
     """Проверка по ВСЕМ записям, а не по резолвнутой: намеренно грубее — засчитываем
     «настроено», только когда самодостаточны все, тогда ошибиться в опасную сторону
     (объявить готовым конфиг, который уйдёт на `your-backend:PORT`) невозможно."""
-    cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {
-            "flash": {
-                "model": "g",
-                "url": "https://x/v1",
-                "authorization_header": "Bearer sk",
+    cfg = make_settings(
+        {
+            "backend_api_mode": "chat_completions",
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "naked": {"model": "n"},  # наследует всё от плоского backend
-        },
-    }
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {
+                "flash": {
+                    "model": "g",
+                    "url": "https://x/v1",
+                    "authorization_header": "Bearer sk",
+                },
+                "naked": {"model": "n"},  # наследует всё от плоского backend
+            },
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is True
 
 
@@ -228,8 +253,9 @@ def test_registry_with_own_url_but_no_token_is_rejected():
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "g", "url": "https://x/v1"}},
     }
+    # Отказ — уже на сборке настроек: до детекта такой конфиг не доходит.
     with pytest.raises(ValidationError, match="задан свой адрес"):
-        onboarding.is_unconfigured(cfg)
+        onboarding.is_unconfigured(make_settings(cfg))
 
 
 def test_registry_of_local_servers_without_auth_closes_auth():
@@ -238,27 +264,27 @@ def test_registry_of_local_servers_without_auth_closes_auth():
     `authorization_header` пустой, поэтому проверка по truthiness объявила бы
     полностью настроенный локальный сетап незаполненным шаблоном и гнала бы человека
     в мастер на каждом старте."""
-    cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {
-            "glm-local": {
-                "model": "g",
-                "url": "http://127.0.0.1:8014/v1",
-                "authorization_header": "",
-            }
-        },
-    }
+    cfg = make_settings(
+        {
+            "backend_api_mode": "chat_completions",
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {
+                "glm-local": {
+                    "model": "g",
+                    "url": "http://127.0.0.1:8014/v1",
+                    "authorization_header": "",
+                }
+            },
+        }
+    )
     assert onboarding.is_unconfigured(cfg) is False
 
 
-def _loaded_with_registry(
-    tmp_path, monkeypatch, extra: str, replace=()
-) -> dict:
+def _loaded_with_registry(tmp_path, monkeypatch, extra: str, replace=()):
     """config.yml из пакетного шаблона + `extra` в хвосте, прочитанный НАСТОЯЩИМ
     загрузчиком (слои изолированы).
 
@@ -282,7 +308,7 @@ def _loaded_with_registry(
         text = text.replace(old, new)
     path = tmp_path / "config.yml"
     path.write_text(text + extra, encoding="utf-8")
-    return config.load_config(str(path))
+    return config.load_settings(str(path))
 
 
 def test_registry_entry_in_backend_form_closes_endpoint_and_auth(
@@ -351,12 +377,14 @@ slots:
 def test_setup_guide_on_registry_config_does_not_demand_model():
     """Рабочий реестровый конфиг: гайд не требует `agent.model` (иначе `--init-config`
     без TTY и стоп-гайд `gc-ua` печатали бы «не заполнено» настроенному человеку)."""
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"model": "google/gemini-2.5-flash"}},
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+        }
+    )
     text = onboarding.setup_guide("/p", cfg)
     assert "agent.model" not in text
     assert "настроен" in text
@@ -365,14 +393,16 @@ def test_setup_guide_on_registry_config_does_not_demand_model():
 def test_setup_guide_preset_note_is_about_flat_key_only():
     """Ремарка «модель по умолчанию уже задана» — про ПЛОСКИЙ ключ: при реестре с
     плейсхолдером она печатала бы «agent.model = <ВПИШИТЕ_МОДЕЛЬ>»."""
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-        "models": {"flash": {"model": "google/gemini-2.5-flash"}},
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+            "models": {"flash": {"model": "google/gemini-2.5-flash"}},
+        }
+    )
     text = onboarding.setup_guide("/p", cfg)
     assert onboarding.MODEL_SENTINEL not in text
     assert "Модель по умолчанию уже задана" not in text
@@ -382,23 +412,27 @@ def test_setup_guide_preset_note_is_about_flat_key_only():
 
 
 def test_model_sentinel_is_pending():
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": onboarding.MODEL_SENTINEL,
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": onboarding.MODEL_SENTINEL,
+        }
+    )
     text = onboarding.setup_guide("/p", cfg)
     assert "agent.model" in text
 
 
 def test_filled_model_not_in_guide():
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     text = onboarding.setup_guide("/p", cfg)
     assert "имя модели" not in text  # модель не в списке полей к заполнению
 
@@ -407,26 +441,30 @@ def test_filled_model_not_in_guide():
 
 
 def test_setup_guide_notes_preset_model_when_pending():
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     text = onboarding.setup_guide("/p", cfg)
     assert "Модель по умолчанию уже задана" in text
     assert "gigacode_agent_v1.6_rc" in text
 
 
 def test_setup_guide_no_preset_model_note_when_model_pending():
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+        }
+    )
     text = onboarding.setup_guide("/p", cfg)
     assert "Модель по умолчанию уже задана" not in text
     assert "имя модели" in text  # модель в списке pending
@@ -436,11 +474,13 @@ def test_setup_guide_no_preset_model_note_when_model_pending():
 
 
 def test_setup_guide_positive_when_all_covered():
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     text = onboarding.setup_guide("/home/u/.gc/config.yml", cfg)
     assert "настроен" in text
     assert "можно запускать" in text
@@ -466,12 +506,14 @@ def test_setup_guide_on_the_without_profile_stage_does_not_say_ready():
     можно запускать», хотя следующий старт (с профилем) упадёт. На
     деградировавшей ступени гайд обязан сказать правду: поля заполнены, но
     профиль сломан, запуск с ним не поднимется; без него — `--profile ""`."""
-    cfg = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": "gigacode_agent_v1.6_rc",
-        "profile": "",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": "gigacode_agent_v1.6_rc",
+            "profile": "",
+        }
+    )
     text = onboarding.setup_guide(
         "/p",
         cfg,
@@ -497,13 +539,15 @@ def test_setup_guide_notes_the_degradation_next_to_the_pending_fields():
     """Та же правда, когда поля не заполнены: на ступени шаблона перечислены поля
     ШАБЛОНА, а не файла человека, — об этом сказано; на ступени без профиля —
     что профиль сломан и запуск с ним не поднимется."""
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+        }
+    )
     on_template = onboarding.setup_guide(
         "/p", cfg, repair=_degraded(cfg, onboarding.REPAIR_STAGE_TEMPLATE)
     )
@@ -531,18 +575,22 @@ def test_setup_guide_names_a_nameless_dropped_profile_without_empty_quotes():
     человек читает про профиль с пустым именем и ищет несуществующий файл.
     У соседа по модулю (`_repair_message`) охрана есть, тексты гайда обязаны
     вести себя так же."""
-    ready = {
-        "completions_url": "https://real/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer real-token"},
-        "model": "gigacode_agent_v1.6_rc",
-    }
-    pending = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": onboarding.MODEL_SENTINEL,
-    }
+    ready = make_settings(
+        {
+            "completions_url": "https://real/v1/chat/completions",
+            "chat_completion_headers": {"Authorization": "Bearer real-token"},
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
+    pending = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": onboarding.MODEL_SENTINEL,
+        }
+    )
     for cfg in (ready, pending):
         text = onboarding.setup_guide(
             "/p",
@@ -615,13 +663,15 @@ def test_setup_guide_shows_a_relative_path_as_absolute(tmp_path, monkeypatch):
 
 def test_setup_guide_offers_init_config_helper_with_program():
     """pending-подсказка называет команду помощника с именем бинаря (program)."""
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     assert "gc-cli --init-config" in onboarding.setup_guide(
         "/p", cfg, program="gc-cli"
     )
@@ -632,13 +682,15 @@ def test_setup_guide_offers_init_config_helper_with_program():
 
 def test_setup_guide_marks_config_created_when_just_created():
     """just_created=True → явно сообщает о создании файла; False → «Конфигурация:»."""
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     created = onboarding.setup_guide("/p", cfg, just_created=True)
     assert "Создан файл конфигурации" in created
     existing = onboarding.setup_guide("/p", cfg, just_created=False)
@@ -647,13 +699,15 @@ def test_setup_guide_marks_config_created_when_just_created():
 
 
 def _pending_cfg():
-    return {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    return make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
 
 
 def test_setup_guide_mentions_gc_mcp(monkeypatch):
@@ -1009,7 +1063,7 @@ def test_write_wizard_values_result_resolves_in_both_api_modes(
             cfg_path.read_text(encoding="utf-8"), "backend.api_mode", api_mode
         )
         cfg_path.write_text(text, encoding="utf-8")
-        cfg = config.load_config(str(cfg_path))
+        cfg = config.load_settings(str(cfg_path))
         assert onboarding.is_unconfigured(cfg) is False
         resolved = ModelRouter(cfg, level_provider=lambda: "default").resolve(
             "main"
@@ -1270,67 +1324,81 @@ def test_write_wizard_values_reuses_an_existing_alias_named_by_a_human(
 def test_effective_model_reads_registry_not_the_flat_key():
     """Волна B пишет реестр, а плоский ключ остаётся значением ШАБЛОНА: на
     настроенном конфиге по нему мастер видел бы чужую модель."""
-    cfg = {
-        "models": {"fast": {"model": "qwen/qwen3-8b"}},
-        "slots": {"default": "fast"},
-        "model": "MiniMax-M2.7",
-    }
+    cfg = make_settings(
+        {
+            "models": {"fast": {"model": "qwen/qwen3-8b"}},
+            "slots": {"default": "fast"},
+            "model": "MiniMax-M2.7",
+        }
+    )
     assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
 
 
 def test_effective_model_resolves_single_entry_without_a_slot():
     """Реестр из одной записи резолвится без явного слота — так же, как в рантайме."""
-    cfg = {
-        "models": {"fast": {"model": "qwen/qwen3-8b"}},
-        "slots": {},
-        "model": "MiniMax-M2.7",
-    }
+    cfg = make_settings(
+        {
+            "models": {"fast": {"model": "qwen/qwen3-8b"}},
+            "slots": {},
+            "model": "MiniMax-M2.7",
+        }
+    )
     assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
 
 
 def test_effective_model_falls_back_to_the_legacy_key():
-    cfg = {"models": {}, "slots": {}, "model": "vllm/Qwen3-Coder"}
+    cfg = make_settings(
+        {"models": {}, "slots": {}, "model": "vllm/Qwen3-Coder"}
+    )
     assert onboarding.effective_model(cfg) == "vllm/Qwen3-Coder"
 
 
 def test_effective_model_survives_a_slot_pointing_nowhere():
     """Резолв бросает ValueError на битом слоте — мастер обязан открываться на
     любом конфиге, поэтому падение переходит в фоллбэк, а не наружу."""
-    cfg = {
-        "models": {"fast": {"model": "qwen/qwen3-8b"}},
-        "slots": {"default": "нет-такой"},
-        "model": "vllm/Qwen3-Coder",
-    }
+    cfg = make_settings(
+        {
+            "models": {"fast": {"model": "qwen/qwen3-8b"}},
+            "slots": {"default": "нет-такой"},
+            "model": "vllm/Qwen3-Coder",
+        }
+    )
     assert onboarding.effective_model(cfg) == "vllm/Qwen3-Coder"
 
 
 def test_effective_model_is_empty_on_the_template_sentinel():
-    cfg = {"models": {}, "slots": {}, "model": onboarding.MODEL_SENTINEL}
+    cfg = make_settings(
+        {"models": {}, "slots": {}, "model": onboarding.MODEL_SENTINEL}
+    )
     assert onboarding.effective_model(cfg) == ""
 
 
 def test_assigned_level_model_reports_only_explicit_slots():
     """Незаданный `max` работает моделью `default`, но «назначен» он не был:
     написать против него её имя значило бы закрепить выдуманное."""
-    cfg = {
-        "models": {
-            "fast": {"model": "qwen/qwen3-8b"},
-            "brain": {"model": "qwen/qwen3-235b"},
-        },
-        "slots": {"default": "brain", "light": "fast"},
-    }
+    cfg = make_settings(
+        {
+            "models": {
+                "fast": {"model": "qwen/qwen3-8b"},
+                "brain": {"model": "qwen/qwen3-235b"},
+            },
+            "slots": {"default": "brain", "light": "fast"},
+        }
+    )
     assert onboarding.assigned_level_model(cfg, "light") == "qwen/qwen3-8b"
     assert onboarding.assigned_level_model(cfg, "max") == ""
 
 
 def test_assigned_level_model_falls_back_to_the_alias_itself():
     """Запись без ключа `model` — законна: id равен имени записи (спека §4)."""
-    cfg = {"models": {"gigacode": {}}, "slots": {"light": "gigacode"}}
+    cfg = make_settings(
+        {"models": {"gigacode": {}}, "slots": {"light": "gigacode"}}
+    )
     assert onboarding.assigned_level_model(cfg, "light") == "gigacode"
 
 
 def test_assigned_level_model_survives_a_broken_slot():
-    cfg = {"models": {}, "slots": {"light": "нет-такой"}}
+    cfg = make_settings({"models": {}, "slots": {"light": "нет-такой"}})
     assert onboarding.assigned_level_model(cfg, "light") == "нет-такой"
 
 
@@ -1341,14 +1409,16 @@ def test_model_step_current_speaks_about_the_default_slot_not_the_active_level()
     """Шаг задаёт слот `default` — и «сейчас» говорит про него. `effective_model`
     резолвит АКТИВНЫЙ уровень: при `level: max` строка показывала модель max с
     именем записи слота default, а галочка в списке вставала не на ту строку."""
-    cfg = {
-        "models": {
-            "fast": {"model": "qwen/qwen3-8b"},
-            "brain": {"model": "qwen/qwen3-235b"},
-        },
-        "slots": {"default": "fast", "max": "brain"},
-        "level": "max",
-    }
+    cfg = make_settings(
+        {
+            "models": {
+                "fast": {"model": "qwen/qwen3-8b"},
+                "brain": {"model": "qwen/qwen3-235b"},
+            },
+            "slots": {"default": "fast", "max": "brain"},
+            "level": "max",
+        }
+    )
     assert onboarding.model_step_current(cfg) == "qwen/qwen3-8b"
 
 
@@ -1357,13 +1427,15 @@ def test_model_step_current_keeps_the_model_of_a_config_without_slots():
     жил в отброшенном профиле — живой стенд чинилки): резолв там от уровня не
     зависит, и «сейчас» обязана назвать модель — иначе строка пропадает у всех
     конфигов до волны B."""
-    flat = {"model": "gigacode_agent_v1.6_rc", "level": "max"}
+    flat = make_settings({"model": "gigacode_agent_v1.6_rc", "level": "max"})
     assert onboarding.model_step_current(flat) == "gigacode_agent_v1.6_rc"
-    registry = {
-        "models": {"fast": {"model": "qwen/qwen3-8b"}},
-        "slots": {},
-        "level": "max",
-    }
+    registry = make_settings(
+        {
+            "models": {"fast": {"model": "qwen/qwen3-8b"}},
+            "slots": {},
+            "level": "max",
+        }
+    )
     assert onboarding.model_step_current(registry) == "qwen/qwen3-8b"
 
 
@@ -1371,11 +1443,13 @@ def test_model_step_current_is_empty_when_only_another_level_is_assigned():
     """Слоты есть, но `default` среди них нет: агент работает моделью `max` по
     матрице фоллбэков, однако назвать её «сейчас» на шаге про `default` значило бы
     сказать «слот задан» там, где он не задан, — и ответ зависел бы от `level`."""
-    cfg = {
-        "models": {"brain": {"model": "qwen/qwen3-235b"}},
-        "slots": {"max": "brain"},
-        "level": "max",
-    }
+    cfg = make_settings(
+        {
+            "models": {"brain": {"model": "qwen/qwen3-235b"}},
+            "slots": {"max": "brain"},
+            "level": "max",
+        }
+    )
     assert onboarding.model_step_current(cfg) == ""
 
 
@@ -1386,11 +1460,13 @@ def test_model_step_display_names_the_fallback_when_default_is_unset():
     которой default работает СЕЙЧАС по фоллбэку, с подписью об источнике, — и
     предвыбор ведётся к ней: проход насквозь означает «оставить как есть».
     Обход матрицы фиксирован от default и от активного `level` не зависит."""
-    cfg = {
-        "models": {"slim": {"model": "vendor/slim"}},
-        "slots": {"light": "slim"},
-        "level": "light",
-    }
+    cfg = make_settings(
+        {
+            "models": {"slim": {"model": "vendor/slim"}},
+            "slots": {"light": "slim"},
+            "level": "light",
+        }
+    )
     assert onboarding.model_step_display(cfg) == (
         "vendor/slim",
         "(default не задан — работает light)",
@@ -1400,17 +1476,19 @@ def test_model_step_display_names_the_fallback_when_default_is_unset():
 def test_model_step_display_is_plain_when_the_default_slot_is_assigned():
     """Слот задан — подписи нет: строка «сейчас» как раньше (тесты «default
     задан» не меняются)."""
-    cfg = {
-        "models": {"fast": {"model": "qwen/qwen3-8b"}},
-        "slots": {"default": "fast"},
-    }
+    cfg = make_settings(
+        {
+            "models": {"fast": {"model": "qwen/qwen3-8b"}},
+            "slots": {"default": "fast"},
+        }
+    )
     assert onboarding.model_step_display(cfg) == ("qwen/qwen3-8b", "")
 
 
 def test_model_step_display_keeps_the_slotless_config_behaviour():
     """Ни одного слота — прежнее правило `model_step_current` (легаси/одна запись
     реестра), без подписи: там резолв от уровня не зависит."""
-    flat = {"model": "gigacode_agent_v1.6_rc", "level": "max"}
+    flat = make_settings({"model": "gigacode_agent_v1.6_rc", "level": "max"})
     assert onboarding.model_step_display(flat) == (
         "gigacode_agent_v1.6_rc",
         "",

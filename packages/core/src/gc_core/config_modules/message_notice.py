@@ -56,42 +56,42 @@ def normalize_tool_usage_notice_rules(
 
 
 def tool_usage_notice_rules_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> list[ToolUsageNoticeRule]:
     """Правила notice из ``tool_usage_notice`` настроек (нормализованные).
 
-    ``config_dict`` — всё, что принимает ``settings_of``.
+    ``settings`` — всё, что принимает ``settings_of``.
     """
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
     return normalize_tool_usage_notice_rules(
-        list(settings_of(config_dict).tool_usage_notice)
+        list(settings_of(settings).tool_usage_notice)
     )
 
 
-def _stopped_tools(config_dict: Any) -> set[str]:
+def _stopped_tools(settings: Any) -> set[str]:
     from gc_core.settings import settings_of
 
     return {
         item.strip()
-        for item in settings_of(config_dict).agent.stop_tools
+        for item in settings_of(settings).agent.stop_tools
         if item.strip()
     }
 
 
 def active_tool_usage_notice_rules(
-    config_dict: Any,
+    settings: Any,
 ) -> list[ToolUsageNoticeRule]:
-    stopped = _stopped_tools(config_dict)
+    stopped = _stopped_tools(settings)
     return [
         rule
-        for rule in tool_usage_notice_rules_from_config_dict(config_dict)
+        for rule in tool_usage_notice_rules_from_config_dict(settings)
         if rule.tool_name not in stopped
     ]
 
 
 def tool_usage_notice_policy_enabled(
-    config_dict: Any,
+    settings: Any,
 ) -> bool:
-    return bool(active_tool_usage_notice_rules(config_dict))
+    return bool(active_tool_usage_notice_rules(settings))

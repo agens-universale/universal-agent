@@ -1,7 +1,6 @@
 """Native resource owner lifecycle: one task owns live MCP/background resources."""
 
 import asyncio
-from types import SimpleNamespace
 
 import pytest
 from gc_core.execution.contracts import (
@@ -13,6 +12,7 @@ from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.execution.tool_effects import arguments_digest
 from gc_core.mcp_session_owner import current_owner
+from gc_testkit.settings import fake_ctx
 
 
 async def no_close():
@@ -38,8 +38,7 @@ def context(callback):
         async def acall(self, **arguments):
             return await callback(arguments)
 
-    return SimpleNamespace(
-        config_dict={},
+    return fake_ctx(
         tools_data={
             "test_resource": {
                 "tool_fabric": Tool,
@@ -195,7 +194,7 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
     async def bootstrap():
         ctx = local_ctx(config)
         ctx.tools_data, _ = await aget_mcp_tools_data_for_config(
-            config, os_backend=ctx.os_backend
+            ctx, os_backend=ctx.os_backend
         )
         registry.update(ctx.tools_data)
         return ctx

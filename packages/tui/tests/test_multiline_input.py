@@ -1,5 +1,6 @@
 """Multi-line input: Ctrl+J / Shift+Enter / Ctrl+Enter / shift+\\r insert newline; Enter submits."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -10,7 +11,9 @@ async def test_ctrl_j_inserts_newline(tmp_path):
     from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         ta = pilot.app.query_one("#cmdinput", CommandTextArea)
@@ -35,7 +38,9 @@ async def test_modified_enter_inserts_newline(tmp_path, key):
     from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         ta = pilot.app.query_one("#cmdinput", CommandTextArea)
@@ -57,7 +62,9 @@ async def test_alt_backspace_deletes_word_left(tmp_path):
     from gc_tui.widgets.command_input import CommandTextArea
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         ta = pilot.app.query_one("#cmdinput", CommandTextArea)
@@ -117,7 +124,9 @@ async def test_enter_submits_multiline(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:

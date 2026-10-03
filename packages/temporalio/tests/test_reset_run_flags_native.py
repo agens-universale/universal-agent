@@ -47,7 +47,7 @@ async def test_remote_batch_reads_latest_meta_and_acknowledges_one_commit(
         "store", call, capabilities=("reset_run_flags",)
     )
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="s", thread_id="t", store=proxy
+        settings=None, system_id="s", thread_id="t", store=proxy
     )
     store.save_meta(
         "s",

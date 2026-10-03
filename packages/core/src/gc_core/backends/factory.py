@@ -1,4 +1,4 @@
-"""Resolve ``FsBackend`` from config and runtime dependencies."""
+"""Resolve ``FsBackend`` from settings and runtime dependencies."""
 
 from __future__ import annotations
 
@@ -13,12 +13,13 @@ from gc_core.settings import runtime_of, settings_of
 _SUPPORTED = frozenset({"local", "harbor"})
 
 
-def parse_os_backend_kind(config_dict: dict) -> str:
+def parse_os_backend_kind(settings: Any) -> str:
     """Return normalized ``os_backend`` kind (``local`` or ``harbor``).
 
     Вид бэкенда выбирает встраивающий: ``RuntimeEnv.os_backend`` (None — local).
+    ``settings`` — всё, что принимает ``runtime_of`` (контекст, ``LoadedSettings``).
     """
-    raw = runtime_of(config_dict).os_backend or "local"
+    raw = runtime_of(settings).os_backend or "local"
     if not isinstance(raw, str) or not raw.strip():
         kind = "local"
     else:
@@ -31,7 +32,7 @@ def parse_os_backend_kind(config_dict: dict) -> str:
 
 
 def resolve_os_backend(
-    config_dict: dict,
+    settings: Any,
     *,
     environment: Optional[Any] = None,
     loop: Optional[asyncio.AbstractEventLoop] = None,
@@ -40,15 +41,16 @@ def resolve_os_backend(
     """Build the physical I/O backend for a run.
 
     ``override`` wins (tests) and keeps its own ``exec_output_capture_max_chars``.
-    ``harbor`` requires ``environment`` and ``loop``.
+    ``harbor`` requires ``environment`` and ``loop``. ``settings`` — anything
+    ``settings_of``/``runtime_of`` accept (context, ``LoadedSettings``).
     """
     if override is not None:
         return override
 
-    agent = settings_of(config_dict).agent
+    agent = settings_of(settings).agent
     # Нормализацию (None → дефолт, нечисло и < 0 — ошибка) делает схема.
     cap = agent.exec_output_capture_max_chars
-    kind = parse_os_backend_kind(config_dict)
+    kind = parse_os_backend_kind(settings)
     if kind == "local":
         return LocalFsBackend(exec_output_capture_max_chars=cap)
 

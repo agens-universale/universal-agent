@@ -570,7 +570,7 @@ async def _arequest_backend_canonical_once(
             sanitized_messages,
             chat_state,
             max_tokens=max_tokens,
-            config_dict=settings,
+            settings=settings,
             resolved=resolved,
         )
 

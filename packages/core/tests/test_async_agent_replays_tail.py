@@ -20,22 +20,24 @@ import types
 
 import pytest
 from gc_core.aio import AsyncAgent
-from gc_core.settings import settings_from_flat
+from gc_testkit.settings import make_settings
 
 #: Потолок ожидания в тестах: зависший ход — красный тест, а не вечный набор.
 _BOUND_SEC = 5.0
 
 
 def _cfg(tmp_path):
-    return {
-        "save_logs": False,  # без каталога логов: умолчание модели — писать
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
-    }
+    return make_settings(
+        {
+            "save_logs": False,  # без каталога логов: умолчание модели — писать
+            "threads_data_path": str(tmp_path),
+            "backend_api_mode": "chat_completions",
+            "completions_url": "http://test",
+            "model": "x",
+            "max_steps": 1,
+            "system_prompt_id": "v1",
+        }
+    )
 
 
 def _msg(text: str) -> dict:
@@ -77,7 +79,7 @@ def env(monkeypatch):
 
 async def _agent(tmp_path, env) -> AsyncAgent:
     """Агент, у которого записывается, в каком треде и как идёт каждый ход."""
-    agent = await AsyncAgent.create(settings_from_flat(_cfg(tmp_path)))
+    agent = await AsyncAgent.create(_cfg(tmp_path))
     arun = agent.executor.arun
 
     async def _recording_arun(messages, **kw):

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 from gc_core.config_modules.stored_outputs import (
     get_tool_output_inline_max_chars,
@@ -30,11 +30,13 @@ def maybe_store_and_wrap_tool_output(
     call_id: str,
     tool_name: str,
     state: State,
-    config: Dict[str, Any],
+    settings: Any,
     logger: Optional[logging.Logger] = None,
 ) -> str:
+    """Длинный output — в stored-envelope. ``settings`` — всё, что принимает
+    ``settings_of`` (контекст, настройки)."""
     log = logger if isinstance(logger, logging.Logger) else _fallback_logger
-    inline_limit = get_tool_output_inline_max_chars(config)
+    inline_limit = get_tool_output_inline_max_chars(settings)
     if tool_name == "skills_load":
         inline_limit = max(inline_limit, 40000)
     if state.tool_call_outputs_store.is_disabled():

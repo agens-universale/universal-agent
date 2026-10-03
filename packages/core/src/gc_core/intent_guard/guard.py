@@ -23,24 +23,27 @@ _DEFAULT_FINISH_GATE_MAIN = 10
 _DEFAULT_FINISH_GATE_SUB = 3
 
 
-def judge_available(cfg: Any) -> bool:
+def judge_available(settings: Any) -> bool:
     """Доступна ли машинерия судейства (finish-gate validator) — инфраструктурное
     условие: только ``backend.api_mode == "chat_completions"``. БЕЗ пользовательских
     ручек (``strict_turn_finish_validation`` — ручка finish-gate, сюда не входит).
 
-    ``cfg`` — настройки (``AppConfig``) или то, что знает ``settings_of``; ``None`` —
-    судейства нет."""
-    if cfg is None:
+    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
+    ``AppConfig``); ``None`` — судейства нет."""
+    if settings is None:
         return False
     return (
-        str(settings_of(cfg).backend.api_mode or "").strip().lower()
+        str(settings_of(settings).backend.api_mode or "").strip().lower()
         == "chat_completions"
     )
 
 
-def resolve_finish_gate_max_rejections(cfg: Any, state: Any) -> int:
-    """Макс. число reject за turn/run (§10); всегда >= 1."""
-    agent = settings_of(cfg).agent if cfg is not None else None
+def resolve_finish_gate_max_rejections(settings: Any, state: Any) -> int:
+    """Макс. число reject за turn/run (§10); всегда >= 1.
+
+    ``settings`` — то, что принимает ``settings_of``; ``None`` — умолчания.
+    """
+    agent = settings_of(settings).agent if settings is not None else None
     is_main = getattr(state, "parent_state_id", None) is None
     key = (
         "finish_gate_max_iterations"
@@ -97,9 +100,9 @@ def _finish_gate_skip_reason(
     return "disabled"
 
 
-def _finish_gate_digest_chars(state: Any, cfg: Any) -> int:
+def _finish_gate_digest_chars(state: Any, settings: Any) -> int:
     try:
-        digest = build_finish_gate_trace_digest(state=state, cfg=cfg)
+        digest = build_finish_gate_trace_digest(state=state, settings=settings)
         return len(digest.trace_digest_text or "")
     except Exception:
         return 0

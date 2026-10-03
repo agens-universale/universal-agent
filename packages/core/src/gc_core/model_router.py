@@ -1,7 +1,7 @@
 """ModelRouter — единственный владелец вопроса «какой моделью идёт этот вызов».
 
 Router читает секции `models`/`slots`/`assign` из снимка настроек (``settings_of``:
-``AppConfig``, контекст или переходный плоский ``config_dict``), зафиксированного
+``AppConfig``, ``LoadedSettings`` или контекст), зафиксированного
 при сборке executor, и активный уровень — через
 инжектируемый `level_provider`: сессионный слой живёт вне Router (`/level` меняет его
 без пересборки executor).
@@ -131,7 +131,7 @@ class ModelRouter:
 
     def __init__(
         self,
-        config_snapshot: dict,
+        settings: Any,
         level_provider: Callable[[], str],
         breaker: CircuitBreaker | None = None,
         force_legacy: bool = False,
@@ -142,12 +142,14 @@ class ModelRouter:
         субагента, спека §7 п.4). Консультируется ТОЛЬКО когда `_lookup_binding`
         вернул None — явные привязки (и уровнем, и алиасом, §5.2: индирекция
         через слоты/реестр) резолвятся как обычно, override их не перекрывает.
-        `None` (по умолчанию) — прежнее поведение (level_provider → слот)."""
+        `None` (по умолчанию) — прежнее поведение (level_provider → слот).
+
+        ``settings`` — снимок настроек: всё, что принимает ``settings_of``
+        (``AppConfig``, ``LoadedSettings``, контекст); ``None`` — умолчания."""
         from gc_core.config import _serialize_model_entry
 
-        # Снимок фиксируется типизированным: клон (`with_override`) берёт его же,
-        # без повторного разбора плоского вида.
-        self._settings = settings_of(config_snapshot or {})
+        # Снимок фиксируется типизированным: клон (`with_override`) берёт его же.
+        self._settings = settings_of(settings)
         self._level_provider = level_provider
         self.breaker = breaker if breaker is not None else CircuitBreaker()
         self._force_legacy = force_legacy

@@ -64,8 +64,8 @@ def _make_ctx_state_messages(stream: bool):
         "backend_request_timeout_sec": 600,
         "x_cl_id": "test-cl-id",
     }
-    ctx = SimpleNamespace(
-        config_dict=cfg,
+    ctx = fake_ctx(
+        cfg,
         on_stream_delta=None,
         logger=logging.getLogger("test"),
         auth_connector=None,
@@ -83,6 +83,7 @@ def _make_ctx_state_messages(stream: bool):
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 @pytest.fixture

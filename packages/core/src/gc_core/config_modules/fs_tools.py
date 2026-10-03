@@ -88,13 +88,13 @@ class FsFindInFilesConfig(BaseModel):
 
 
 def parse_find_in_files_config(
-    config_dict: Any = None,
+    settings: Any = None,
 ) -> FsFindInFilesConfig:
     """``fs_tools.find_in_files`` настроек (всё, что принимает ``settings_of``)."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return settings_of(config_dict).fs_tools.find_in_files
+    return settings_of(settings).fs_tools.find_in_files
 
 
 class FsFindFilesByNameConfig(BaseModel):
@@ -131,12 +131,12 @@ class FsFindFilesByNameConfig(BaseModel):
 
 
 def parse_find_files_by_name_config(
-    config_dict: Any = None,
+    settings: Any = None,
 ) -> FsFindFilesByNameConfig:
     """``fs_tools.find_files_by_name`` настроек (всё, что принимает ``settings_of``)."""
     from gc_core.settings import settings_of
 
-    return settings_of(config_dict).fs_tools.find_files_by_name
+    return settings_of(settings).fs_tools.find_files_by_name
 
 
 class FsToolsConfig(BaseModel):

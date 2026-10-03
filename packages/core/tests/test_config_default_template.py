@@ -11,7 +11,7 @@ A2 — полнота шаблона: каждый листовой путь с�
 from pathlib import Path
 
 import yaml
-from gc_core.config import _default_config_path, flatten_app_config
+from gc_core.config import _default_config_path
 from gc_core.config_modules.field_meta import meta_for
 from gc_core.config_modules.model_sections_validation import (
     validate_model_sections,
@@ -126,7 +126,7 @@ def test_default_template_with_live_profile_anchor_stays_legacy():
     assert raw["level"] == "default"
 
     router = ModelRouter(
-        flatten_app_config(AppConfig.model_validate(raw)),
+        AppConfig.model_validate(raw),
         level_provider=lambda: raw["level"],
     )
     assert router.registry_empty() is True

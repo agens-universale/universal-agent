@@ -1,7 +1,7 @@
-"""TDD: strip_tags_projection normalize + load_config → snapshot for callers."""
+"""TDD: strip_tags_projection normalize + load_settings → snapshot for callers."""
 
 import yaml
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.config_modules.strip_tags_projection import (
     StripTagsProjectionConfig,
     normalize_strip_tags_projection_config,
@@ -9,6 +9,7 @@ from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
 from gc_core.message_projection import project_text_for_model
+from gc_testkit.settings import make_settings
 
 _SAMPLE = "<think>t</think><redacted_thinking>r</redacted_thinking>ok"
 
@@ -40,17 +41,17 @@ def test_normalize_strip_think_default_true():
 
 
 def test_persist_reasoning_content_default_false():
-    assert persist_reasoning_content_from_config({}) is False
+    assert persist_reasoning_content_from_config(make_settings()) is False
     assert persist_reasoning_content_from_config(None) is False
     assert (
         persist_reasoning_content_from_config(
-            {"strip_tags_projection": {"strip_think": True}}
+            make_settings({"strip_tags_projection": {"strip_think": True}})
         )
         is False
     )
     assert (
         persist_reasoning_content_from_config(
-            {"strip_tags_projection": {"strip_think": False}}
+            make_settings({"strip_tags_projection": {"strip_think": False}})
         )
         is True
     )
@@ -84,8 +85,8 @@ def test_load_config_exposes_strip_tags_for_callers(tmp_path):
         encoding="utf-8",
     )
 
-    loaded = load_config(str(cfg_path))
-    assert loaded["strip_tags_projection"]["tags"] == ["redacted_thinking"]
+    loaded = load_settings(str(cfg_path))
+    assert loaded.settings.strip_tags_projection.tags == ["redacted_thinking"]
     tags = projection_tags_from_config(loaded)
     assert persist_reasoning_content_from_config(loaded) is False
     assert project_text_for_model(_SAMPLE, tags=tags, strip_think=True) == "ok"
@@ -98,8 +99,8 @@ def test_load_config_empty_tags_strips_only_think(tmp_path):
         encoding="utf-8",
     )
 
-    loaded = load_config(str(cfg_path))
-    assert loaded["strip_tags_projection"]["strip_think"] is True
+    loaded = load_settings(str(cfg_path))
+    assert loaded.settings.strip_tags_projection.strip_think is True
     tags = projection_tags_from_config(loaded)
     assert persist_reasoning_content_from_config(loaded) is False
     assert project_text_for_model(_SAMPLE, tags=tags, strip_think=True) == (
@@ -119,8 +120,8 @@ def test_load_config_strip_think_false_is_persist_only_not_prose(tmp_path):
         encoding="utf-8",
     )
 
-    loaded = load_config(str(cfg_path))
-    assert loaded["strip_tags_projection"]["strip_think"] is False
+    loaded = load_settings(str(cfg_path))
+    assert loaded.settings.strip_tags_projection.strip_think is False
     assert persist_reasoning_content_from_config(loaded) is True
     tags = projection_tags_from_config(loaded)
     # Проза derived-sink'ов всегда без ``<think>``; флаг — только persist канона.
@@ -144,7 +145,7 @@ def test_load_config_strip_think_false_think_in_tags_strips_prose(tmp_path):
         encoding="utf-8",
     )
 
-    loaded = load_config(str(cfg_path))
+    loaded = load_settings(str(cfg_path))
     tags = projection_tags_from_config(loaded)
     assert persist_reasoning_content_from_config(loaded) is True
     assert project_text_for_model(_SAMPLE, tags=tags, strip_think=True) == (

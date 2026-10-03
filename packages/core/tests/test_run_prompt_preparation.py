@@ -1,7 +1,6 @@
 """Prepared prompts preserve local semantics without workflow-side file reads."""
 
 from dataclasses import asdict
-from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -12,6 +11,7 @@ from gc_core.run_preparation import (
     PromptPreparationRequest,
     load_run_prompts,
 )
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def test_local_prompt_files_and_steering_keep_existing_order(tmp_path):
@@ -20,11 +20,13 @@ def test_local_prompt_files_and_steering_keep_existing_order(tmp_path):
     system.write_text("  system rules\n", encoding="utf-8")
     special.write_text("  client rules\n", encoding="utf-8")
     request = PromptPreparationRequest.from_config(
-        {
-            "chat_completions_system_prompt_path": str(system),
-            "chat_completions_special_instructions_path": f" {special} ",
-            "model_steering": "  be concise  ",
-        },
+        make_settings(
+            {
+                "chat_completions_system_prompt_path": str(system),
+                "chat_completions_special_instructions_path": f" {special} ",
+                "model_steering": "  be concise  ",
+            }
+        ),
         verbose=False,
     )
 
@@ -93,9 +95,7 @@ async def test_executor_uses_prepared_prompts_without_local_io(monkeypatch):
             "Authorization": "Bearer credential-not-to-be-sent"
         },
     }
-    executor = AgentExecutor(
-        SimpleNamespace(config_dict=config, prompt_loader=loader)
-    )
+    executor = AgentExecutor(fake_ctx(config, prompt_loader=loader))
 
     def forbidden(*_args, **_kwargs):
         raise AssertionError(
@@ -125,8 +125,8 @@ async def test_injected_loader_error_never_falls_back_to_local_files():
         raise failure
 
     executor = AgentExecutor(
-        SimpleNamespace(
-            config_dict={"chat_completions_system_prompt_path": "/missing"},
+        fake_ctx(
+            {"chat_completions_system_prompt_path": "/missing"},
             prompt_loader=loader,
         )
     )
@@ -145,7 +145,9 @@ async def test_sdk_context_accepts_prompt_loader(tmp_path, monkeypatch):
         return PreparedPrompts("provided system")
 
     ctx = await acreate_run_context(
-        {"save_logs": False, "backend_api_mode": "chat_completions"},
+        make_settings(
+            {"save_logs": False, "backend_api_mode": "chat_completions"}
+        ),
         prompt_loader=loader,
     )
     executor = AgentExecutor(ctx)
@@ -163,12 +165,8 @@ async def test_model_steering_reader_matches_local_and_prepared_port(steering):
     async def loader(request):
         return load_run_prompts(request)
 
-    local = AgentExecutor(
-        SimpleNamespace(config_dict=config, prompt_loader=None)
-    )
-    prepared = AgentExecutor(
-        SimpleNamespace(config_dict=config, prompt_loader=loader)
-    )
+    local = AgentExecutor(fake_ctx(config, prompt_loader=None))
+    prepared = AgentExecutor(fake_ctx(config, prompt_loader=loader))
     expected = (
         None,
         "### Model steering\nbe concise" if steering.strip() else None,

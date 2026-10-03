@@ -1,7 +1,7 @@
-from types import SimpleNamespace
-
 import pytest
+from gc_core.context_preparation import settings_from_snapshot
 from gc_core.model_router import ModelRouter
+from gc_testkit.settings import fake_ctx, make_settings
 from gc_ua_temporalio.native_model_routing import (
     materialize_router_identity,
     public_router_identity,
@@ -10,25 +10,27 @@ from gc_ua_temporalio.public_config import public_config_snapshot
 
 
 def context():
-    config = {
-        "models": {
-            "active": {
-                "model": "good",
-                "url": "https://active.example/v1",
-                "authorization_header": "Bearer secret-active",
+    loaded = make_settings(
+        {
+            "models": {
+                "active": {
+                    "model": "good",
+                    "url": "https://active.example/v1",
+                    "token": "secret-active",
+                },
+                "pin": {
+                    "model": "dead",
+                    "url": "https://pin.example/v1",
+                    "token": "secret-pin",
+                },
             },
-            "pin": {
-                "model": "dead",
-                "url": "https://pin.example/v1",
-                "authorization_header": "Bearer secret-pin",
-            },
-        },
-        "slots": {"default": "active"},
-        "assign": {"subagents": {"subagent_worker": "pin"}},
-    }
-    parent = ModelRouter(config, level_provider=lambda: "default")
-    return SimpleNamespace(
-        config_dict=config,
+            "slots": {"default": "active"},
+            "assign": {"subagents": {"subagent_worker": "pin"}},
+        }
+    )
+    parent = ModelRouter(loaded, level_provider=lambda: "default")
+    return fake_ctx(
+        loaded=loaded,
         model_router=parent.with_override(
             parent.resolve("subagent:subagent_worker")
         ),
@@ -37,8 +39,11 @@ def context():
 
 def test_current_child_fallback_identity_materializes_only_worker_transport():
     ctx = context()
-    public = public_config_snapshot(ctx.config_dict).config_dict
-    parent = ModelRouter(public, level_provider=lambda: "default")
+    public = public_config_snapshot(ctx)
+    parent = ModelRouter(
+        settings_from_snapshot(public.settings, public.runtime),
+        level_provider=lambda: "default",
+    )
     child = parent.with_override(parent.resolve("subagent:subagent_worker"))
     child = child.with_override(parent.resolve("main"))
     identity = public_router_identity(child)

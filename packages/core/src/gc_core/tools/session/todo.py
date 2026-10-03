@@ -43,9 +43,7 @@ class SessionTodo(AbstractSimpleTool):
     tool_name = SESSION_TODO_TOOL_NAME
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": SESSION_TODO_TOOL_NAME,
@@ -99,9 +97,7 @@ class SessionTodo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: session_todo
 Tool description: Structured checklist of the CURRENT task (plan + progress). Each call fully replaces the list; empty list clears it. Statuses: pending | in_progress | completed.
 

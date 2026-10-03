@@ -12,6 +12,7 @@ from types import SimpleNamespace
 import pytest
 from gc_core.utils.logging_module import create_run_logger
 from gc_server.rest_api.agent_execution_registry import AgentRunRegistry
+from gc_testkit.settings import make_settings
 
 
 class _Executor:
@@ -31,7 +32,7 @@ class _FailingExecutor(_Executor):
 @pytest.mark.parametrize("executor_cls", [_Executor, _FailingExecutor])
 async def test_finished_run_releases_its_logger(tmp_path, executor_cls):
     logger, _, _ = create_run_logger(
-        {"logs_dump_dir": str(tmp_path), "save_logs": True},
+        make_settings({"logs_dump_dir": str(tmp_path), "save_logs": True}),
         run_id=f"srv-{executor_cls.__name__}",
     )
     registry = AgentRunRegistry()

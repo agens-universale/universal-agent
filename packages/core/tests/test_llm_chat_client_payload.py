@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _cfg(**overrides):
@@ -49,8 +50,8 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(
 
     state = SimpleNamespace(default_model="m")
 
-    ctx_no_raw = SimpleNamespace(
-        config_dict=_cfg(),
+    ctx_no_raw = fake_ctx(
+        _cfg(),
         logger=_Log(),
     )
     run_coro(
@@ -67,8 +68,8 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(
     raw_entries = [(f, a) for (f, a) in logs if "text-only raw response" in f]
     assert len(raw_entries) == 0
 
-    ctx_raw = SimpleNamespace(
-        config_dict=_cfg(logging_params={"full_log_backend": True}),
+    ctx_raw = fake_ctx(
+        _cfg(logging_params={"full_log_backend": True}),
         logger=_Log(),
     )
     run_coro(
@@ -94,8 +95,8 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
 ):
     captured = _patch_policy(monkeypatch)
 
-    ctx = SimpleNamespace(
-        config_dict=_cfg(
+    ctx = fake_ctx(
+        _cfg(
             chat_completion_kwargs={
                 "temperature": 0.3,
                 "model": "must_not_override",
@@ -129,8 +130,8 @@ def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(
 ):
     captured = _patch_policy(monkeypatch)
 
-    ctx = SimpleNamespace(
-        config_dict=_cfg(use_max_tokens_param=True),
+    ctx = fake_ctx(
+        _cfg(use_max_tokens_param=True),
         logger=None,
     )
     state = SimpleNamespace(default_model="test-model")
@@ -154,8 +155,8 @@ def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
     # этот text-only клиент не использует инструменты, ключ tools не отправляем.
     captured = _patch_policy(monkeypatch)
 
-    ctx = SimpleNamespace(
-        config_dict=_cfg(),
+    ctx = fake_ctx(
+        _cfg(),
         logger=None,
     )
     state = SimpleNamespace(default_model="test-model")
@@ -175,7 +176,7 @@ def test_request_chat_completion_text_omits_empty_tools(monkeypatch):
 
 def test_request_chat_completion_text_does_not_salvage_reasoning(monkeypatch):
     captured = _patch_policy(monkeypatch)
-    ctx = SimpleNamespace(config_dict=_cfg(), logger=None)
+    ctx = fake_ctx(_cfg(), logger=None)
     state = SimpleNamespace(default_model="test-model")
     run_coro(
         llm_chat_client.arequest_chat_completion_text(

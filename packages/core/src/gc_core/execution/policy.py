@@ -409,7 +409,7 @@ class ExecutionPolicy:
                 call_id=rem["call_id"],
                 tool_name=rem_name,
                 state=state,
-                config=getattr(ctx, "config_dict", {}) or {},
+                settings=ctx,
                 logger=getattr(ctx, "logger", None),
             )
             outputs.append(
@@ -705,7 +705,7 @@ class ExecutionPolicy:
         # мусор между шагами. Default on для CLI/TUI, off для server; явный
         # gc.force_collect в конфиге перекрывает default.
         if self.bindings.gc_force_collect_enabled(
-            getattr(ctx, "config_dict", {}) or {},
+            ctx,
             is_tui=bool(getattr(ctx, "is_tui", False)),
             is_cli_mode=bool(getattr(ctx, "is_cli_mode", False)),
         ):
@@ -751,7 +751,7 @@ class ExecutionPolicy:
             call_id=m["call_id"],
             tool_name=tool_name,
             state=state,
-            config=getattr(ctx, "config_dict", {}) or {},
+            settings=ctx,
             logger=getattr(ctx, "logger", None),
         )
         if tool_name != self.bindings.FINISH_TOOL_NAME:

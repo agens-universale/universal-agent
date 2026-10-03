@@ -389,7 +389,7 @@ async def arun_summary_compaction(
     """
     logger = logger_from_ctx(ctx)
     thread_id = getattr(state, "thread_id", None)
-    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    tags = projection_tags_from_config(ctx)
     full_messages = without_system_messages(getattr(state, "messages", []))
     trigger_volume = calc_history_chars_for_trigger(
         full_messages, tags=tags, strip_think=True
@@ -543,7 +543,7 @@ async def amaybe_run_summary_compaction(
     thread_id = getattr(state, "thread_id", None)
     if summary_trigger_chars <= 0 and summary_trigger_tokens <= 0:
         return False
-    tags = projection_tags_from_config(getattr(ctx, "config_dict", None))
+    tags = projection_tags_from_config(ctx)
     hits = exceeded_summary_triggers(
         state=state,
         summary_trigger_chars=summary_trigger_chars,

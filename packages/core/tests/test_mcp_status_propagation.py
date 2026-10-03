@@ -1,4 +1,5 @@
 from gc_core import tools as tools_pkg
+from gc_testkit.settings import make_settings
 
 
 async def test_get_mcp_tools_data_returns_status(monkeypatch):
@@ -44,11 +45,13 @@ async def test_get_mcp_tools_data_returns_status(monkeypatch):
         cache_cls.aget_tools.__globals__, "_abuild_tools_registry", fake_build
     )
     tools_data, status = await aget_mcp_tools_data_for_config(
-        {
-            "mcp-servers": {
-                "office": {"transport": "stdio", "command": "office-mcp"}
+        make_settings(
+            {
+                "mcp-servers": {
+                    "office": {"transport": "stdio", "command": "office-mcp"}
+                }
             }
-        }
+        )
     )
     assert status["office"]["status"] == "failed"
     # Текст — из подмены, а не из настоящего провала запуска процесса.
@@ -76,7 +79,9 @@ async def test_build_tools_data_returns_mcp_status(monkeypatch):
 
     monkeypatch.setattr(_at, "aget_mcp_tools_data_for_config", fake_mcp)
     result = await tools_pkg.abuild_tools_data(
-        {"mcp-servers": {"x": {"transport": "stdio", "command": "x"}}}
+        make_settings(
+            {"mcp-servers": {"x": {"transport": "stdio", "command": "x"}}}
+        )
     )
     assert len(result) == 4
     assert result[3]["x"]["status"] == "connected"

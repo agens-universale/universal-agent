@@ -278,11 +278,13 @@ async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
         "max_steps": 15,
         "strict_turn_finish_validation": False,
         "text_answer_mode": "deny",
-        "intent_scope": {"enabled": False},
+        # Intent-scope выключен: ключа ``enabled`` в схеме нет, активность —
+        # непустой ``intent_scope.tools``.
+        "intent_scope.tools": {},
+        "tui_stream": streaming,
         **scenario.get("config", {}),
     }
     cfg = parity_config(workspace, monkeypatch, **config)
-    cfg["tui_stream"] = streaming
     for turn in scenario["turns"]:
         for tool in turn["choices"][0]["message"].get("tool_calls", []):
             function = tool["function"]
@@ -300,7 +302,8 @@ async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
     deltas = []
     human_questions = []
     if streaming:
-        cfg["stream"] = True
+        # Стрим включает явный ``tui.stream`` (выше); ``backend.stream`` после
+        # сборки контекста настроек уже не меняет.
         ctx.on_stream_delta = lambda kind, text: deltas.append([kind, text])
 
     async def ask(question):

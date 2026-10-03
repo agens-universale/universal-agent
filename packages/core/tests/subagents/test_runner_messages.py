@@ -1,11 +1,10 @@
 """Tests for SubagentRunner._build_initial_messages."""
 
-from types import SimpleNamespace
-
 import pytest
 from gc_core.intent_log.user_turn import init_subagent_open_turn
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state(system_prompt=None):
@@ -37,9 +36,9 @@ def _make_config(**overrides):
     return cfg
 
 
-def _make_ctx(config_dict=None):
-    return SimpleNamespace(
-        config_dict=config_dict or _make_config(),
+def _make_ctx(config=None):
+    return fake_ctx(
+        config or _make_config(),
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -60,7 +59,7 @@ class TestBuildInitialMessages:
         prompt = "You are a helpful assistant.\n<specific_role>default</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("Expert planner")
         messages = runner._build_initial_messages(
             child, "Expert planner", _user_msg("Do the task")
@@ -75,7 +74,7 @@ class TestBuildInitialMessages:
         prompt = "You are a helpful assistant.\n<specific_role>default</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("Expert planner")
         messages = runner._build_initial_messages(
             child, "Expert planner", _user_msg("Do the task")
@@ -88,7 +87,7 @@ class TestBuildInitialMessages:
         prompt = "System prompt\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("role")
         messages = runner._build_initial_messages(
             child, "role", _user_msg("Implement feature X")
@@ -102,7 +101,7 @@ class TestBuildInitialMessages:
     async def test_without_system_prompt_starts_with_user(self):
         orch = _make_orchestrator_state(system_prompt=None)
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("role")
         messages = runner._build_initial_messages(
             child, "role", _user_msg("Do the task")
@@ -118,7 +117,7 @@ class TestBuildInitialMessages:
     async def test_empty_system_prompt_starts_with_user(self):
         orch = _make_orchestrator_state(system_prompt="   ")
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("role")
         messages = runner._build_initial_messages(
             child, "role", _user_msg("task text")
@@ -133,7 +132,7 @@ class TestBuildInitialMessages:
         prompt = "System\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("role")
         messages = runner._build_initial_messages(
             child, "role", _user_msg("task")
@@ -151,7 +150,7 @@ class TestBuildInitialMessages:
         prompt = "System prompt\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("role")
         messages = runner._build_initial_messages(
             child, "role", _user_msg("task")
@@ -166,7 +165,7 @@ class TestBuildInitialMessages:
         prompt = "System prompt\n<specific_role>x</specific_role>"
         orch = _make_orchestrator_state(system_prompt=prompt)
         cfg = _make_config()
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("role")
         user_message = _user_msg("Implement feature X")
         runner._build_initial_messages(child, "role", user_message)

@@ -25,13 +25,13 @@ def default_voice_endpoint_presets() -> list[EndpointPreset]:
     return list(DEFAULT_VOICE_ENDPOINT_PRESETS)
 
 
-def voice_endpoint_presets_from_config(cfg: Any) -> list[EndpointPreset]:
+def voice_endpoint_presets_from_config(settings: Any) -> list[EndpointPreset]:
     """Пресеты ``voice_endpoint_presets`` настроек (всё, что принимает
     ``settings_of``); пустой список — кодовый дефолт (контракт
     endpoint_presets_from_config, дословно)."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return list(settings_of(cfg).voice_endpoint_presets) or (
+    return list(settings_of(settings).voice_endpoint_presets) or (
         default_voice_endpoint_presets()
     )

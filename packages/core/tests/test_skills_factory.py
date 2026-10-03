@@ -4,6 +4,7 @@ import pytest
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.tools.skills.registry import get_skills_registry
+from gc_testkit.settings import make_settings
 
 
 def _write_skill(root: Path, skill_id: str, description: str) -> None:
@@ -28,7 +29,7 @@ async def test_factory_three_layer_when_no_path(
     isolated_env_empty_layers, tmp_path
 ):
     """Без skills_data_path в config → three-layer registry, видит system-скиллы."""
-    reg = get_skills_registry({})
+    reg = get_skills_registry(make_settings({}))
     items = await reg.list_skills()
     # System-слой реальный (<repo>/skills/) — содержит как минимум один встроенный скилл.
     assert len(items) >= 1
@@ -39,7 +40,7 @@ async def test_factory_three_layer_when_no_path(
 async def test_factory_three_layer_when_config_is_none(
     isolated_env_empty_layers,
 ):
-    """config_dict=None работает так же, как пустой dict."""
+    """settings=None работает так же, как пустые настройки."""
     reg = get_skills_registry(None)
     items = await reg.list_skills()
     assert all(s["source"] in ("system", "user", "project") for s in items)
@@ -56,7 +57,7 @@ async def test_factory_single_source_when_path_set(monkeypatch, tmp_path):
     monkeypatch.setattr(env_vars, "env", fake)
     monkeypatch.chdir(tmp_path)
 
-    reg = get_skills_registry({"skills_data_path": str(custom)})
+    reg = get_skills_registry(make_settings({"skills_data_path": str(custom)}))
     items = await reg.list_skills()
     assert len(items) == 1
     assert items[0]["id"] == "lonely-skill"
@@ -89,7 +90,7 @@ async def test_factory_single_source_loads_packs(monkeypatch, tmp_path):
     monkeypatch.setattr(env_vars, "env", fake)
     monkeypatch.chdir(tmp_path)
 
-    reg = get_skills_registry({"skills_data_path": str(custom)})
+    reg = get_skills_registry(make_settings({"skills_data_path": str(custom)}))
     items = await reg.list_skills()
     ids = {it["id"] for it in items}
     assert "lonely-skill" in ids
@@ -105,7 +106,7 @@ async def test_factory_empty_skills_data_path_falls_back_to_three_layer(
     monkeypatch.setattr(env_vars, "env", fake)
     monkeypatch.chdir(tmp_path)
 
-    reg = get_skills_registry({"skills_data_path": ""})
+    reg = get_skills_registry(make_settings({"skills_data_path": ""}))
     items = await reg.list_skills()
     # System-слой реальный, в three-layer режиме виден.
     assert any(s["source"] == "system" for s in items)

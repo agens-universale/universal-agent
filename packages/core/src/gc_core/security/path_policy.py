@@ -16,7 +16,6 @@ from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.settings import (
     AppConfig,
     LoadedSettings,
-    is_explicit,
     runtime_of,
     settings_of,
 )
@@ -171,7 +170,7 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
     source = _settings_source(self_obj, ctx, kwargs)
     settings = settings_of(source)
     runtime = runtime_of(source)
-    legacy = _is_flat_source(source)
+    security = settings.security
     project_data = getattr(state, "initial_project_data", None)
     launch_root = (
         runtime.launch_root
@@ -179,52 +178,28 @@ def resolve_tool_context(*args: Any, **kwargs: Any) -> ToolSecurityContext:
         or (project_data or {}).get("projectDir")
         or os.getcwd()
     )
-    # Runtime-fallback при отсутствии ключа — OFF. На нормальном пути настройки
-    # несут write_guard/url_policy/command_moderation из pydantic (secure-by-default:
-    # enabled=True, mode=ask), поэтому эти fallback'и достижимы лишь в обход
-    # load_config (bespoke/тест-словари без блока), а не в проде.
     return ToolSecurityContext(
         launch_root=str(launch_root),
         write_guard=WriteGuardConfig(
-            enabled=bool(
-                _setting_or(
-                    settings, legacy, "security.write_guard.enabled", False
-                )
-            ),
-            mode=str(
-                _setting_or(
-                    settings, legacy, "security.write_guard.mode", "deny"
-                )
-            )
-            .strip()
-            .lower(),
-            extra_paths=list(settings.security.write_guard.extra_paths or []),
+            enabled=bool(security.write_guard.enabled),
+            mode=str(security.write_guard.mode).strip().lower(),
+            extra_paths=list(security.write_guard.extra_paths or []),
         ),
-        command_moderation_mode=str(
-            _setting_or(
-                settings, legacy, "security.command_moderation.mode", "allow"
-            )
-        )
+        command_moderation_mode=str(security.command_moderation.mode)
         .strip()
         .lower(),
         allowed_command_examples=list(
-            settings.security.command_moderation.allowed_command_examples or []
+            security.command_moderation.allowed_command_examples or []
         ),
         denied_command_examples=list(
-            settings.security.command_moderation.denied_command_examples or []
+            security.command_moderation.denied_command_examples or []
         ),
         url_allowed_schemes=list(
-            settings.security.url_policy.allowed_schemes or ["http", "https"]
+            security.url_policy.allowed_schemes or ["http", "https"]
         ),
-        url_blacklist=list(settings.security.url_policy.url_blacklist or []),
-        url_policy_enabled=bool(
-            _setting_or(settings, legacy, "security.url_policy.enabled", False)
-        ),
-        url_policy_mode=str(
-            _setting_or(settings, legacy, "security.url_policy.mode", "deny")
-        )
-        .strip()
-        .lower(),
+        url_blacklist=list(security.url_policy.url_blacklist or []),
+        url_policy_enabled=bool(security.url_policy.enabled),
+        url_policy_mode=str(security.url_policy.mode).strip().lower(),
         ctx=ctx,
         state=state,
         logger=logger,
@@ -245,7 +220,7 @@ def _protected_write_block(
         protection_enabled,
     )
 
-    if not protection_enabled(_settings_source(None, context.ctx, {})):
+    if not protection_enabled(_settings_source(None, context.ctx)):
         return None
     if callable(getattr(context.ctx, "guard_probe", None)):
         facts = yield probe_step(
@@ -543,10 +518,9 @@ def audit_policy_decision(
     # Внутрь payload, а не в extra=: событие сериализуется в текст сообщения,
     # поэтому только так аудит-объект остаётся самодостаточным. В jsonl фильтр
     # логгера дополнительно ставит trace_id верхним полем записи.
-    runtime = runtime_of(
-        _settings_source(None, getattr(context, "ctx", None), {})
+    trace_id = trace_id_from_config(
+        _settings_source(None, getattr(context, "ctx", None))
     )
-    trace_id = trace_id_from_config({"trace_id": runtime.trace_id})
     if trace_id:
         event["trace_id"] = trace_id
     try:
@@ -558,48 +532,41 @@ def audit_policy_decision(
         return
 
 
-def _settings_source(self_obj: Any, ctx: Any, kwargs: dict[str, Any]) -> Any:
-    """Откуда гарду читать настройки — порядок прежний.
-
-    Явный ``config_dict=`` вызова, затем ctx (типизированные ``settings``, иначе
-    его плоский ``config_dict``), затем ``self._config_dict`` тула. Ничего нет —
-    пустой словарь: все гарды на runtime-fallback'ах (как раньше).
-    """
-    explicit = kwargs.get("config_dict")
-    if isinstance(explicit, dict):
-        return explicit
-    if isinstance(getattr(ctx, "settings", None), (AppConfig, LoadedSettings)):
-        return ctx
-    ctx_config = getattr(ctx, "config_dict", None)
-    if isinstance(ctx_config, dict):
-        return ctx_config
-    self_config = getattr(self_obj, "_config_dict", None)
-    if isinstance(self_config, dict):
-        return self_config
-    return {}
-
-
-def _is_flat_source(source: Any) -> bool:
-    """Источник — плоский словарь (переходно: тесты и bespoke-конфиги)."""
-    return isinstance(source, Mapping)
-
-
-def _setting_or(
-    settings: AppConfig, legacy: bool, dotted: str, fallback: Any
+def _settings_source(
+    self_obj: Any, ctx: Any, kwargs: Mapping[str, Any] | None = None
 ) -> Any:
-    """Значение настройки по пути ``dotted``.
+    """Откуда гарду читать настройки (то, что принимает ``settings_of``).
 
-    Переходно, пока жив плоский вид: в словаре без этого ключа прежний код брал
-    свой runtime-fallback (``.get(key, fallback)``), а не дефолт модели. Явность
-    поля сохраняет эту разницу; у типизированных настроек — всегда значение
-    модели. Уходит вместе с плоским ``config_dict``.
+    Контекст рана с типизированными ``settings``, иначе явные ``settings=``
+    тула (``self._settings``), иначе контекст тула (``self._ctx``). Ничего
+    нет — ``None``: ``settings_of(None)`` даёт умолчания модели, а они
+    secure-by-default (гарды включены). Аргументы вызова (``kwargs``) — это
+    аргументы модели, источником настроек они не бывают; параметр оставлен
+    ради прежней сигнатуры.
     """
-    if legacy and not is_explicit(settings, dotted):
-        return fallback
-    value: Any = settings
-    for name in dotted.split("."):
-        value = getattr(value, name)
-    return value
+    del kwargs
+    if _has_settings(ctx):
+        return ctx
+    explicit = getattr(self_obj, "_settings", None)
+    if explicit is not None:
+        return explicit
+    tool_ctx = getattr(self_obj, "_ctx", None)
+    if _has_settings(tool_ctx):
+        return tool_ctx
+    return None
+
+
+def _has_settings(ctx: Any) -> bool:
+    """Несёт ли ctx настройки рана.
+
+    Переходно: и контекст с одним плоским ``config_dict`` (тесты, ещё не
+    перешедшие на ``fake_ctx``) — ``settings_of`` читает его строго, без
+    прежних runtime-fallback'ов «нет блока — гард выключен». Ветка уходит
+    вместе с плоским видом; при ``GC_STRICT_SETTINGS=1`` такой ctx — ошибка.
+    """
+    if isinstance(getattr(ctx, "settings", None), (AppConfig, LoadedSettings)):
+        return True
+    return isinstance(getattr(ctx, "config_dict", None), Mapping)
 
 
 def _guard_path_argument(func, args, kwargs, path_arg, path_extractor):

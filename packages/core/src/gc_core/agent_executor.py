@@ -294,7 +294,7 @@ class AgentExecutor:
 
             await athread_store(_reset_store).areset(system_id, thread_id)
         thread_session = await ThreadSession.afrom_config(
-            config_dict=self._ctx,
+            settings=self._ctx,
             system_id=system_id,
             thread_id=thread_id,
             # Хранилище встраивающего, если он его передал. None — файловое
@@ -415,7 +415,7 @@ class AgentExecutor:
             "agentsmd_override": settings.tui.agentsmd_override,
             "thread_id": thread_id,
             "shared": thread_shared,
-            "workspace_config": self._ctx.config_dict,
+            "workspace_config": self._ctx,
             "logger": logger,
             "workspace": getattr(self._ctx, "workspace", None),
         }

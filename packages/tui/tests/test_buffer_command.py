@@ -9,6 +9,7 @@ SPEC 2026-07-25 §3.1 B5/B10:
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -54,7 +55,9 @@ async def test_action_buffer_opens_screen(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
@@ -72,7 +75,9 @@ async def test_action_buffer_noop_if_already_open(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
@@ -94,7 +99,9 @@ async def test_action_buffer_no_session_notify(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen._active_task_id = None
@@ -110,7 +117,9 @@ async def test_dispatch_command_buffer(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
@@ -132,7 +141,9 @@ async def test_push_session_buffer_from_diff_screen(tmp_path):
     from gc_tui.screens.diff import DiffViewerScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
@@ -172,7 +183,9 @@ async def test_buffer_ctrl_a_selects_all(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="первая\nвторая\nтретья")
@@ -203,7 +216,9 @@ async def test_save_strips_whitespace_only_to_empty(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
@@ -229,7 +244,9 @@ async def test_save_preserves_real_text_with_strip_edges(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")

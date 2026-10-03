@@ -140,19 +140,19 @@ def intent_scope_tool_store_flags(
 
 
 def intent_scope_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> IntentScopeConfig:
-    """``IntentScopeConfig`` настроек (``config_dict`` — всё, что принимает ``settings_of``)."""
+    """``IntentScopeConfig`` настроек (``settings`` — всё, что принимает ``settings_of``)."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return settings_of(config_dict).intent_scope
+    return settings_of(settings).intent_scope
 
 
 def backend_allows_intent_scope_hook(
-    config_dict: Any,
+    settings: Any,
 ) -> bool:
     from gc_core.settings import settings_of
 
-    raw_mode = str(settings_of(config_dict).backend.api_mode).strip().lower()
+    raw_mode = str(settings_of(settings).backend.api_mode).strip().lower()
     return raw_mode == "chat_completions"

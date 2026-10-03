@@ -20,6 +20,7 @@ MCP-серверов, переживание между тестами.
 from typing import Any, Dict
 
 from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_testkit.settings import make_settings
 
 
 def _cfg(servers: Dict[str, Any]) -> Dict[str, Any]:
@@ -125,5 +126,7 @@ async def test_default_is_unchanged_behaviour():
         aget_mcp_tools_data_for_config,
     )
 
-    tools, status = await aget_mcp_tools_data_for_config({"mcp-servers": {}})
+    tools, status = await aget_mcp_tools_data_for_config(
+        make_settings({"mcp-servers": {}})
+    )
     assert tools == {} and status == {}

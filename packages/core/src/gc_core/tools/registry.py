@@ -1,5 +1,5 @@
 import copy
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, copy_loop_warn
 from gc_core.settings import settings_of
@@ -37,17 +37,15 @@ except ModuleNotFoundError:
     from gc_core.tools.exec.simple_fetch_url import FetchUrl
 
 
-def _tool_entry(
-    tool_cls: type, config_dict: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
+def _tool_entry(tool_cls: type, settings: Any = None) -> Dict[str, Any]:
     # Deep-copy: inject_tool_fields / strict schema mutate the spec in place.
     # Several tools return a shared class-level parameters dict from
     # tool_description(); without a copy the second build_tools_data() in the
     # same process sees the field already present, skips inject, leaves
     # injected_fields empty, and strip_injected_tool_args never removes it
     # (TypeError: unexpected keyword argument 'reason').
-    spec = tool_cls.tool_description(config_dict)
-    description = tool_cls.prompt_description(config_dict)
+    spec = tool_cls.tool_description(settings)
+    description = tool_cls.prompt_description(settings)
     entry: Dict[str, Any] = {
         "tool_fabric": tool_cls,
         "spec": copy.deepcopy(spec),
@@ -60,80 +58,80 @@ def _tool_entry(
 
 
 def _fs_registry(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     return {
-        "fs_write_file": _tool_entry(WriteToFile, config_dict),
-        "fs_append_file": _tool_entry(AppendToFile, config_dict),
-        "fs_apply_file_edits": _tool_entry(ApplyFileEdits, config_dict),
-        "fs_read_file": _tool_entry(ReadFile, config_dict),
-        "fs_file_info": _tool_entry(FileInfo, config_dict),
-        "fs_list_files": _tool_entry(ListFiles, config_dict),
-        "fs_find_files_by_name": _tool_entry(FindFilesByName, config_dict),
-        "fs_find_in_files": _tool_entry(FindInFiles, config_dict),
-        "fs_search_and_replace": _tool_entry(SearchAndReplace, config_dict),
-        "fs_save_base64_file": _tool_entry(SaveBase64File, config_dict),
+        "fs_write_file": _tool_entry(WriteToFile, settings),
+        "fs_append_file": _tool_entry(AppendToFile, settings),
+        "fs_apply_file_edits": _tool_entry(ApplyFileEdits, settings),
+        "fs_read_file": _tool_entry(ReadFile, settings),
+        "fs_file_info": _tool_entry(FileInfo, settings),
+        "fs_list_files": _tool_entry(ListFiles, settings),
+        "fs_find_files_by_name": _tool_entry(FindFilesByName, settings),
+        "fs_find_in_files": _tool_entry(FindInFiles, settings),
+        "fs_search_and_replace": _tool_entry(SearchAndReplace, settings),
+        "fs_save_base64_file": _tool_entry(SaveBase64File, settings),
     }
 
 
 def _exec_registry(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     return {
-        "exec_command": _tool_entry(ExecuteCommand, config_dict),
-        "exec_calculator": _tool_entry(Calculator, config_dict),
-        "exec_sleep": _tool_entry(Sleep, config_dict),
-        "exec_python": _tool_entry(RunPythonCode, config_dict),
-        "exec_fetch_url": _tool_entry(FetchUrl, config_dict),
-        "download_file": _tool_entry(DownloadFile, config_dict),
+        "exec_command": _tool_entry(ExecuteCommand, settings),
+        "exec_calculator": _tool_entry(Calculator, settings),
+        "exec_sleep": _tool_entry(Sleep, settings),
+        "exec_python": _tool_entry(RunPythonCode, settings),
+        "exec_fetch_url": _tool_entry(FetchUrl, settings),
+        "download_file": _tool_entry(DownloadFile, settings),
     }
 
 
 def _turn_registry(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     return {
-        "turn_ask_human": _tool_entry(AskHuman, config_dict),
-        "turn_intermediate_reply": _tool_entry(IntermediateReply, config_dict),
-        "turn_finish": _tool_entry(SubmitSolution, config_dict),
+        "turn_ask_human": _tool_entry(AskHuman, settings),
+        "turn_intermediate_reply": _tool_entry(IntermediateReply, settings),
+        "turn_finish": _tool_entry(SubmitSolution, settings),
     }
 
 
 def _session_registry(
-    config_dict: Dict[str, Any],
+    settings: Any,
 ) -> Dict[str, Dict[str, Any]]:
     registry: Dict[str, Dict[str, Any]] = {
-        "session_think": _tool_entry(Think, config_dict),
+        "session_think": _tool_entry(Think, settings),
         "session_read_stored_tool_output": _tool_entry(
-            ReadStoredToolOutput, config_dict
+            ReadStoredToolOutput, settings
         ),
-        "session_memory": _tool_entry(WorkingMemory, config_dict),
-        "session_todo": _tool_entry(SessionTodo, config_dict),
+        "session_memory": _tool_entry(WorkingMemory, settings),
+        "session_todo": _tool_entry(SessionTodo, settings),
     }
 
-    backend_mode = settings_of(config_dict).backend.api_mode.strip().lower()
+    backend_mode = settings_of(settings).backend.api_mode.strip().lower()
     if backend_mode == "chat_completions":
         registry["session_read_user_intent_log"] = _tool_entry(
-            ReadUserIntentLog, config_dict
+            ReadUserIntentLog, settings
         )
-        registry["session_compact"] = _tool_entry(SessionCompact, config_dict)
+        registry["session_compact"] = _tool_entry(SessionCompact, settings)
 
     return registry
 
 
 def _project_registry(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     return {
-        "project_memory": _tool_entry(ProjectMemory, config_dict),
+        "project_memory": _tool_entry(ProjectMemory, settings),
     }
 
 
 def _apply_stop_tools(
     tools_data: Dict[str, Dict[str, Any]],
-    config_dict: Any,
+    settings: Any,
 ) -> Dict[str, Dict[str, Any]]:
-    stop_tools_cfg = settings_of(config_dict).agent.stop_tools
+    stop_tools_cfg = settings_of(settings).agent.stop_tools
     stop_tools = {
         tool_name.strip()
         for tool_name in stop_tools_cfg
@@ -150,29 +148,29 @@ def _apply_stop_tools(
 
 
 def _collect_builtin_registry(
-    config_dict: Dict[str, Any],
+    settings: Any,
 ) -> Dict[str, Dict[str, Any]]:
     """Все встроенные tools_data ДО применения stop_tools."""
     tools_data: Dict[str, Dict[str, Any]] = {}
-    tools_data.update(_fs_registry(config_dict))
-    tools_data.update(_exec_registry(config_dict))
-    tools_data.update(_turn_registry(config_dict))
-    tools_data.update(_session_registry(config_dict))
-    tools_data.update(_project_registry(config_dict))
+    tools_data.update(_fs_registry(settings))
+    tools_data.update(_exec_registry(settings))
+    tools_data.update(_turn_registry(settings))
+    tools_data.update(_session_registry(settings))
+    tools_data.update(_project_registry(settings))
     return tools_data
 
 
-def all_builtin_tool_names(config_dict: Dict[str, Any]) -> set[str]:
+def all_builtin_tool_names(settings: Any) -> set[str]:
     """Имена всех встроенных тулов (до stop_tools).
 
     Для валидации stop_tools этого мало: скиллы и MCP живут в слитом реестре.
     Полный каталог — ``registered_tool_names`` после ``build_tools_data``.
     """
-    return set(_collect_builtin_registry(config_dict).keys())
+    return set(_collect_builtin_registry(settings).keys())
 
 
 def get_builtin_tools_data(
-    config_dict: Dict[str, Any],
+    settings: Any,
 ) -> Dict[str, Dict[str, Any]]:
     """
     Собрать словарь builtin tools в формате tools_data.
@@ -183,9 +181,7 @@ def get_builtin_tools_data(
     повторным проходом по слитому набору. Прямые вызывающие по-прежнему
     получают builtin уже без ``stop_tools``.
     """
-    return _apply_stop_tools(
-        _collect_builtin_registry(config_dict), config_dict
-    )
+    return _apply_stop_tools(_collect_builtin_registry(settings), settings)
 
 
 __all__ = [

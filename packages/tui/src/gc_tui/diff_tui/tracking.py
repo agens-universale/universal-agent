@@ -87,8 +87,11 @@ def wrap_local_for_tui(inner: Any, ctx: Any) -> Any:
     return TrackingFsBackend(inner, ctx)
 
 
-def attach_to_context(ctx: Any, config_dict: dict) -> None:
+def attach_to_context(ctx: Any, settings: Any) -> None:
     """Включить diff-журнал на готовом контексте: обернуть backend и пересобрать workspace.
+
+    `settings` — настройки рана (всё, что принимает `runtime_of`): из них корень
+    workspace.
 
     Живёт здесь, а не в ядре. До 27.08.2026 эти три действия делал сам
     `gc_core.run_context.create_run_context` под `if is_tui`, и ради них ядро
@@ -105,7 +108,7 @@ def attach_to_context(ctx: Any, config_dict: dict) -> None:
     if wrapped is ctx.os_backend:
         return
     ctx.os_backend = wrapped
-    ctx.workspace = build_execution_workspace(wrapped, config_dict)
+    ctx.workspace = build_execution_workspace(wrapped, settings)
 
 
 class TrackingFsBackend:

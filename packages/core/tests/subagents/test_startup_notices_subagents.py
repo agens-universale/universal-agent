@@ -5,6 +5,7 @@
 """
 
 from gc_core.startup_notices import collect_startup_notices
+from gc_testkit.settings import make_settings
 
 
 def _write(d, filename, body):
@@ -16,7 +17,9 @@ def _valid(name):
 
 
 def _notices(cfg):
-    return collect_startup_notices(cfg, set(), None, is_tui=True)
+    return collect_startup_notices(
+        make_settings(cfg), set(), None, is_tui=True
+    )
 
 
 def _codes(cfg):
@@ -133,25 +136,38 @@ class TestResilience:
         def _boom(*_a, **_kw):
             raise RuntimeError("дискавери сломался")
 
+        # Уведомления собирает дискавери реестра (``subagent_diagnostics`` →
+        # ``_discover``) — роняем именно его.
         monkeypatch.setattr(
-            "gc_core.tools.subagents.registry.resolve_subagent_definitions",
+            "gc_core.tools.subagents.registry._discover",
             _boom,
         )
+        _write(tmp_path, "bad.md", "без фронтматтера")
         assert (
             mod.collect_startup_notices(
-                {"subagents_dir": str(tmp_path)}, set(), None, is_tui=True
+                make_settings({"subagents_dir": str(tmp_path)}),
+                set(),
+                None,
+                is_tui=True,
             )
             == []
         )
 
-    def test_discovery_is_memoized_not_repeated(self, tmp_path):
-        # Коллектор зовёт дискавери на старте; повтор не должен читать диск снова.
-        _write(tmp_path, "a.md", _valid("alpha"))
-        cfg = {"subagents_dir": str(tmp_path)}
-        _notices(cfg)
-        (tmp_path / "b.md").write_text(_valid("beta"), encoding="utf-8")
+    def test_run_context_keeps_discovery_diagnostics(self, tmp_path):
+        # Дискавери на контексте рана запоминается вместе с диагностикой:
+        # повтор не читает диск снова.
         from gc_core.tools.subagents.registry import (
             resolve_subagent_definitions,
+            subagent_diagnostics,
         )
+        from gc_testkit.settings import fake_ctx
 
-        assert list(resolve_subagent_definitions(cfg)) == ["subagent_alpha"]
+        _write(tmp_path, "a.md", _valid("alpha"))
+        _write(tmp_path, "bad.md", "без фронтматтера")
+        ctx = fake_ctx({"subagents_dir": str(tmp_path)})
+        resolve_subagent_definitions(ctx)
+        (tmp_path / "b.md").write_text(_valid("beta"), encoding="utf-8")
+
+        assert list(resolve_subagent_definitions(ctx)) == ["subagent_alpha"]
+        assert subagent_diagnostics(ctx) == list(ctx.subagent_diagnostics)
+        assert subagent_diagnostics(ctx)

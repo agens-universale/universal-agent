@@ -2,6 +2,7 @@
 заново. Если состав pending не менялся и CTA уже последний в трейсе — повтор
 не нужен (смок 2026-08-02: четыре одинаковых блока подряд)."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -36,7 +37,7 @@ async def test_second_identical_cta_is_not_mounted():
     """Второй ход подряд с тем же составом диффов не добавляет вторую строку."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(config={"model": "m"})
+    app = TuiApp(settings=tui_settings({"model": "m"}))
     async with app.run_test(size=(120, 30)) as pilot:
         scr = app.screen_stack[0]
         scr._diff_service_for_preview = lambda: _FakeDiffService(
@@ -55,7 +56,7 @@ async def test_cta_returns_after_other_output():
     """Между ходами что-то вывелось — напоминание внизу снова уместно."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(config={"model": "m"})
+    app = TuiApp(settings=tui_settings({"model": "m"}))
     async with app.run_test(size=(120, 30)) as pilot:
         scr = app.screen_stack[0]
         scr._diff_service_for_preview = lambda: _FakeDiffService(
@@ -80,7 +81,7 @@ async def test_changed_diff_set_mounts_again():
     """Состав диффов изменился — это новая информация, показываем."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(config={"model": "m"})
+    app = TuiApp(settings=tui_settings({"model": "m"}))
     async with app.run_test(size=(120, 30)) as pilot:
         scr = app.screen_stack[0]
         scr._diff_service_for_preview = lambda: _FakeDiffService(
@@ -153,7 +154,9 @@ async def test_cta_shows_after_fast_turn_error_same_tick(tmp_path):
     tid = "cta0000000000000000000000000001a"
     _write_empty_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -212,7 +215,9 @@ async def test_wipe_restore_shows_cta_at_zero_counter(tmp_path):
     tid = "cta0000000000000000000000000002a"
     _write_empty_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

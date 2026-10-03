@@ -6,7 +6,11 @@ from copy import deepcopy
 # Load these deterministic core modules during sandbox initialization, rather
 # than on the first late-bound store/tool dispatch in a workflow task.
 from gc_core import thread_store_async as _thread_store_async  # noqa: F401
-from gc_core.context_preparation import RunContextBindings
+from gc_core.config_modules.root import AppConfig
+from gc_core.context_preparation import (
+    RunContextBindings,
+    settings_from_snapshot,
+)
 from gc_core.execution import tool_effects as _tool_effects  # noqa: F401
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.intent_guard import (
@@ -20,6 +24,7 @@ from gc_core.tools.skills.skills_tools import get_skills_tools_data
 
 from gc_ua_temporalio.native_child_preparation import (
     prepared_subagent_factories,
+    seed_prepared_subagent_definitions,
 )
 
 # Import actual tool classes during workflow loading. Prepared worker metadata
@@ -27,7 +32,7 @@ from gc_ua_temporalio.native_child_preparation import (
 _BUILTIN_TOOL_TYPES = {
     name: entry["tool_fabric"]
     for name, entry in get_builtin_tools_data(
-        {"backend_api_mode": "chat_completions"}
+        AppConfig.model_validate({"backend": {"api_mode": "chat_completions"}})
     ).items()
 }
 
@@ -45,7 +50,10 @@ def assemble_native_context(
     prepared, *, operations, store, logger, human_request
 ):
     resources = ExternalResources()
-    config = prepared.context.config_dict
+    # Тот же снимок, из которого `assemble_run_context` соберёт настройки ctx.
+    loaded = settings_from_snapshot(
+        prepared.context.settings, prepared.context.runtime
+    )
     candidates = {
         name: {"tool_fabric": cls} for name, cls in _BUILTIN_TOOL_TYPES.items()
     }
@@ -66,7 +74,7 @@ def assemble_native_context(
             "tool_fabric": candidates[name]["tool_fabric"],
         }
     router = ModelRouter(
-        config, level_provider=lambda: config.get("level") or "default"
+        loaded, level_provider=lambda: loaded.settings.level or "default"
     )
     operations.router = router
     ctx = assemble_run_context(
@@ -95,6 +103,7 @@ def assemble_native_context(
         ),
     )
 
+    seed_prepared_subagent_definitions(ctx, prepared.subagent_definitions)
     operations.router_provider = lambda: ctx.model_router
     # Шаги хода защищены историей workflow: допустим persist: turn.
     ctx.durable_execution = True

@@ -28,10 +28,11 @@ class PostUpdateScreen(Screen):
     # апгрейда, до того как юзер дошёл до сессии. Гейт — TuiApp.check_action.
     BLOCKS_GLOBAL_NAV = True
 
-    def __init__(self, *, upgrade, config: dict, config_path: str) -> None:
+    def __init__(self, *, upgrade, settings, config_path: str) -> None:
         super().__init__()
         self._upgrade = upgrade
-        self._config = config
+        # Настройки окна (`LoadedSettings`): из них — подъём голоса после обновления.
+        self._settings = settings
         self._config_path = config_path
 
         from gc_core import config_sync as _config_sync
@@ -249,7 +250,7 @@ class PostUpdateScreen(Screen):
                 from gc_tui.services import voice_setup
 
                 try:
-                    ok = voice_setup.update_local(self._config, echo=print)
+                    ok = voice_setup.update_local(self._settings, echo=print)
                     print(f"[{'ok' if ok else 'fail'}] голосовой движок")
                 except Exception as exc:
                     print(f"[fail] голосовой движок: {exc}")

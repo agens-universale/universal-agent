@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -16,6 +15,7 @@ from gc_core.tools import (
     is_internal_tool_error_output,
     is_unknown_tool_output,
 )
+from gc_testkit.settings import fake_ctx
 
 
 def _tools_data(
@@ -160,9 +160,8 @@ class TestApplyToolInternalError:
             required=["path", "pattern"],
         )
         logger = logging.getLogger("test_internal_tool_error.apply")
-        ctx = SimpleNamespace(
+        ctx = fake_ctx(
             tools_data=tools,
-            config_dict={},
             logger=logger,
         )
 
@@ -221,7 +220,7 @@ class TestApplyToolInternalError:
             required=["path", "pattern"],
         )
         logger = logging.getLogger("test_internal_tool_error.aapply")
-        ctx = SimpleNamespace(tools_data=tools, config_dict={}, logger=logger)
+        ctx = fake_ctx(tools_data=tools, logger=logger)
 
         with caplog.at_level(logging.ERROR, logger=logger.name):
             raw = await aapply_tool(

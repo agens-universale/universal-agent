@@ -70,23 +70,23 @@ def trace_id_slug(value: str) -> str:
     return "".join(chars)[:MAX_TRACE_SLUG_LEN]
 
 
-def trace_id_from_config(config_dict: Any) -> str:
+def trace_id_from_config(settings: Any) -> str:
     """trace_id вызова (``RuntimeEnv.trace_id``); "" означает отсутствие.
 
-    ``config_dict`` — всё, что принимает ``settings_of``/``runtime_of``: контекст,
-    ``LoadedSettings`` или (переходно) плоский словарь. Единственный разрешённый
+    ``settings`` — всё, что принимает ``settings_of``/``runtime_of``: контекст
+    или ``LoadedSettings`` (у ``AppConfig`` рантайма нет). Единственный разрешённый
     способ чтения: пустая строка обязана трактоваться как отсутствие.
     """
     # Ленивый импорт: модуль грузится очень рано (см. docstring модуля).
     from gc_core.settings import runtime_of
 
-    raw = runtime_of(config_dict).trace_id
+    raw = runtime_of(settings).trace_id
     if raw is None:
         return ""
     return str(raw).strip()
 
 
-def trace_header_name(config_dict: Any, default: str) -> str:
+def trace_header_name(settings: Any, default: str) -> str:
     """Имя заголовка для trace_id: ``agent.trace_id_header_name`` или ``default``.
 
     Дефолты разные по назначению: для бэкенда модели — ``x_trace_id``, для MCP —
@@ -94,12 +94,12 @@ def trace_header_name(config_dict: Any, default: str) -> str:
     """
     from gc_core.settings import settings_of
 
-    raw = settings_of(config_dict).agent.trace_id_header_name
+    raw = settings_of(settings).agent.trace_id_header_name
     name = str(raw).strip() if raw is not None else ""
     return name or default
 
 
-def model_trace_header_enabled(config_dict: Any) -> bool:
+def model_trace_header_enabled(settings: Any) -> bool:
     """Разрешена ли отправка trace_id в заголовке к бэкенду модели.
 
     ``agent.trace_header_enabled``, по умолчанию False: рассылка трейса наружу —
@@ -109,4 +109,4 @@ def model_trace_header_enabled(config_dict: Any) -> bool:
     """
     from gc_core.settings import settings_of
 
-    return bool(settings_of(config_dict).agent.trace_header_enabled)
+    return bool(settings_of(settings).agent.trace_header_enabled)

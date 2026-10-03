@@ -21,6 +21,7 @@ import threading
 
 import pytest
 from gc_testkit.paths import REPO
+from gc_testkit.settings import make_settings
 
 _CFG = {
     "stop_tools": [],
@@ -49,7 +50,7 @@ async def test_build_does_not_spawn_threads():
             await asyncio.sleep(0.002)
 
     w = asyncio.create_task(watch())
-    ctx = await acreate_run_context(dict(_CFG))
+    ctx = await acreate_run_context(make_settings(_CFG))
     stop.set()
     await w
 
@@ -71,7 +72,7 @@ async def test_loop_stays_free_during_build(monkeypatch):
     import gc_core.tools.connect_mcp.agent_tools as agent_tools
     from gc_core.run_context import acreate_run_context
 
-    async def _slow(config_dict, on_progress=None, **_kw):  # noqa: ARG001 - callback contract
+    async def _slow(settings, on_progress=None, **_kw):  # noqa: ARG001 - callback contract
         await asyncio.sleep(0.2)
         return {}, {}
 
@@ -79,10 +80,14 @@ async def test_loop_stays_free_during_build(monkeypatch):
 
     from gc_testkit import LoopPulse, quiet_gc_for_loop_timing
 
-    cfg = dict(_CFG)
-    cfg["mcp-servers"] = {
-        "srv": {"transport": "stream_http", "url": "http://x"}
-    }
+    cfg = make_settings(
+        {
+            **_CFG,
+            "mcp-servers": {
+                "srv": {"transport": "stream_http", "url": "http://x"}
+            },
+        }
+    )
     # Сборщик глушится на окне: порог абсолютный, а пауза поколения 2 на куче
     # полного набора (180–220 мс) — почти весь бюджет в 0,25 с, и тест судил
     # бы её, а не сборку.

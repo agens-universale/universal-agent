@@ -215,7 +215,7 @@ async def avalidate_final_report_vs_user_intent(
     if trace_digest is None:
         trace_digest = build_finish_gate_trace_digest(
             state=state,
-            cfg=settings,
+            settings=settings,
         )
 
     guard_prompt_path = (

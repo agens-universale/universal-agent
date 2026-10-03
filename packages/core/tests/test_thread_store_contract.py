@@ -29,6 +29,7 @@ import pytest
 from gc_core.thread_store_file import FileThreadStore
 from gc_core.thread_store_types import SubagentTraceRecord, ThreadState
 from gc_testkit.memory_thread_store import MemoryThreadStore
+from gc_testkit.settings import make_settings
 from gc_testkit.thread_store_conformance import (
     BEHAVIOUR_CHECKS,
     CONTRACT_METHODS,
@@ -245,17 +246,19 @@ async def test_store_reaches_the_context_and_session(tmp_path):
 
     store = MemoryThreadStore()
     ctx = await acreate_run_context(
-        {
-            "stop_tools": [],
-            "backend_api_mode": "chat_completions",
-            "save_logs": False,
-        },
+        make_settings(
+            {
+                "stop_tools": [],
+                "backend_api_mode": "chat_completions",
+                "save_logs": False,
+            }
+        ),
         thread_store=store,
     )
     assert ctx.thread_store is store, "контекст не донёс хранилище"
 
     session = await ThreadSession.afrom_config(
-        config_dict=ctx.config_dict,
+        settings=ctx,
         system_id=SYS,
         thread_id=TID,
         store=getattr(ctx, "thread_store", None),
@@ -276,7 +279,9 @@ async def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
 
     store = MemoryThreadStore()
     session = await ThreadSession.afrom_config(
-        config_dict={"threads_data_path": str(tmp_path / "threads")},
+        settings=make_settings(
+            {"threads_data_path": str(tmp_path / "threads")}
+        ),
         system_id=SYS,
         thread_id=TID,
         store=store,

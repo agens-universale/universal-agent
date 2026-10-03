@@ -6,7 +6,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import gc_tui as tui_pkg
-from gc_core.config import flat_config
 
 
 def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
@@ -42,12 +41,14 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
 
     from gc_core.config_modules.profiles import ProfileMeta
 
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         "gc_core.config.load_settings",
-        lambda _path=None, **_kw: settings_from_flat(
-            {"threads_data_path": str(tmp_path / "threads")},
+        lambda _path=None, **_kw: replace(
+            make_settings({"threads_data_path": str(tmp_path / "threads")}),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
@@ -99,7 +100,7 @@ def test_tui_main_snapshots_launch_root(tmp_path, monkeypatch):
     assert rc == 0
     expected = str(tmp_path.resolve())
     assert captured["settings"].runtime.launch_root == expected
-    assert flat_config(captured["settings"])["launch_root"] == expected
+    assert captured["settings"].runtime.launch_root == expected
 
 
 def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
@@ -140,12 +141,14 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
 
     from gc_core.config_modules.profiles import ProfileMeta
 
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         "gc_core.config.load_settings",
-        lambda _path=None, **_kw: settings_from_flat(
-            {"threads_data_path": str(tmp_path / "threads")},
+        lambda _path=None, **_kw: replace(
+            make_settings({"threads_data_path": str(tmp_path / "threads")}),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
@@ -195,7 +198,5 @@ def test_tui_main_launch_root_not_live_cwd(tmp_path, monkeypatch):
 
     assert tui_pkg.main([]) == 0
     assert captured["settings"].runtime.launch_root == str(start.resolve())
-    assert flat_config(captured["settings"])["launch_root"] == str(
-        start.resolve()
-    )
+    assert captured["settings"].runtime.launch_root == str(start.resolve())
     assert Path.cwd().resolve() == other.resolve()

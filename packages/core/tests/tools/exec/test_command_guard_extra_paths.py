@@ -8,18 +8,15 @@
 """
 
 import json
-import types
 
 from gc_core.tools.exec.execute_command import ExecuteCommand
-from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.helpers.tool_ctx import local_ctx, with_local_ctx
 
 
 def _ctx(tmp_path, **security):
     cfg = {"launch_root": str(tmp_path), "write_guard": {"enabled": False}}
     cfg.update(security)
-    return types.SimpleNamespace(
-        config_dict=cfg, is_tui=False, tui_confirm=None, logger=None
-    )
+    return local_ctx(cfg, is_tui=False, tui_confirm=None, logger=None)
 
 
 def _run(tmp_path, monkeypatch, command, ctx):

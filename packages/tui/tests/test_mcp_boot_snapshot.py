@@ -1,6 +1,7 @@
 """/mcp показывает результат boot-дискавери сразу (warm-on-start выставляет
 app._mcp_snapshot), а не ждёт первого сообщения."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 from gc_testkit import as_coro
 
@@ -11,7 +12,9 @@ async def test_mcp_screen_prefers_boot_snapshot(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -33,7 +36,9 @@ async def test_mcp_screen_snapshot_none_without_boot_or_task(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -48,15 +53,17 @@ def test_build_real_executor_stores_mcp_snapshot(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "mcp-servers": {
-                "office": {
-                    "transport": "stdio",
-                    "command": "x",
-                    "description": "Doc reader",
+        settings=tui_settings(
+            {
+                "mcp-servers": {
+                    "office": {
+                        "transport": "stdio",
+                        "command": "x",
+                        "description": "Doc reader",
+                    }
                 }
             }
-        },
+        ),
     )
 
     class _Ctx:

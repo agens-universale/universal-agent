@@ -24,6 +24,7 @@ import uuid
 
 import pytest
 from gc_core import run_context
+from gc_testkit.settings import make_settings
 
 pytestmark = pytest.mark.skipif(
     os.name != "posix",
@@ -63,29 +64,31 @@ for line in sys.stdin:
 """
 
 
-def _config(tmp_path, *, hang: bool) -> dict:
+def _config(tmp_path, *, hang: bool):
     script = tmp_path / "mcp_server.py"
     script.write_text(_SERVER, encoding="utf-8")
-    return {
-        "stop_tools": [],
-        "backend_api_mode": "chat_completions",
-        "save_logs": True,
-        "console_trace": False,
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "mcp-servers": {
-            _SERVER_NAME: {
-                "transport": "stdio",
-                "command": sys.executable,
-                "args": [str(script)],
-                "persistent_session": True,
-                "env": {
-                    "GC_TEST_PID_FILE": str(tmp_path / "server.pid"),
-                    "GC_TEST_ASKED": str(tmp_path / "asked"),
-                    "GC_TEST_HANG_ON_LIST": "1" if hang else "0",
+    return make_settings(
+        {
+            "stop_tools": [],
+            "backend_api_mode": "chat_completions",
+            "save_logs": True,
+            "console_trace": False,
+            "logs_dump_dir": str(tmp_path / "logs"),
+            "mcp-servers": {
+                _SERVER_NAME: {
+                    "transport": "stdio",
+                    "command": sys.executable,
+                    "args": [str(script)],
+                    "persistent_session": True,
+                    "env": {
+                        "GC_TEST_PID_FILE": str(tmp_path / "server.pid"),
+                        "GC_TEST_ASKED": str(tmp_path / "asked"),
+                        "GC_TEST_HANG_ON_LIST": "1" if hang else "0",
+                    },
                 },
             },
-        },
-    }
+        }
+    )
 
 
 def _run_id() -> str:

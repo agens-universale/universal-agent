@@ -46,7 +46,7 @@ SERVICE_NAME = "speaches"
 _VOICE_READY_TIMEOUT_SEC = 90.0
 
 
-def url_is_ours(config_dict: dict[str, Any], port: int) -> bool:
+def url_is_ours(settings: Any, port: int) -> bool:
     """Публичный гейт автостарта: voice.url в конфиге указывает на наш локальный
     сервис. Единственный владелец этой проверки — использовать и из TUI.
 
@@ -56,9 +56,13 @@ def url_is_ours(config_dict: dict[str, Any], port: int) -> bool:
     машины), а `http://localhost.чужой-домен.com:8735/…` — своим, и агент брался
     поднимать локальный сервис под удалённый хост.
 
-    `config_dict` — то, что даёт `settings_of`: настройки окна или (переходно)
-    плоский словарь."""
-    url = str(settings_of(config_dict).voice.url or "")
+    `settings` — всё, что принимает `settings_of`: настройки окна, контекст,
+    `AppConfig`."""
+    return voice_url_is_ours(str(settings_of(settings).voice.url or ""), port)
+
+
+def voice_url_is_ours(url: str, port: int) -> bool:
+    """`url_is_ours` для голого адреса (поле формы, ещё не ставшее настройкой)."""
     if not is_loopback(url):
         return False
     try:
@@ -72,7 +76,7 @@ def _preheat_bg(state) -> None:
 
 
 def ensure_voice_service(
-    config_dict: dict[str, Any],
+    settings: Any,
     *,
     supervisor_factory=RunSupervisor,
     preheat_async: bool = True,
@@ -80,9 +84,10 @@ def ensure_voice_service(
     """Поднять локальный voice-сервис, если он установлен и сконфигурирован.
 
     True — сервис доступен (жил или поднят), lease взят, прогрев запущен.
-    False — гейт не прошёл (не наша конфигурация) или подъём не удался."""
+    False — гейт не прошёл (не наша конфигурация) или подъём не удался.
+    `settings` — всё, что принимает `settings_of`."""
     state = load_state()
-    if state is None or not url_is_ours(config_dict, state.port):
+    if state is None or not url_is_ours(settings, state.port):
         return False
     if not port_alive(state):
         supervisor = supervisor_factory(pids_dir=voice_pids_dir())

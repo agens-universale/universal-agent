@@ -1,5 +1,6 @@
 """TraceScreen счётчик _events_since_last_user_send + _last_user_send_text для cancel-with-undo."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -153,7 +154,9 @@ async def test_cancel_with_undo_removes_pending_record(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -208,7 +211,9 @@ async def test_cancel_with_undo_removes_orphan_from_thread(tmp_path):
             self._running = False
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -272,7 +277,9 @@ async def test_cancel_with_undo_no_stream_reset_flicker(tmp_path):
             self._running = False
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -329,7 +336,9 @@ async def test_orphan_cleanup_deferred_while_thread_busy(tmp_path):
             return self._running
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

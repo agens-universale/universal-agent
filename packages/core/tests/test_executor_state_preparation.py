@@ -1,12 +1,12 @@
 """The native executor consumes prepared inputs, with local creation unchanged."""
 
 from dataclasses import asdict
-from types import SimpleNamespace
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
 from gc_core.run_context import acreate_run_context
 from gc_core.state_preparation import PreparedState
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 async def build_state(executor):
@@ -24,8 +24,8 @@ async def build_state(executor):
 
 
 def context(preparer):
-    return SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        {
             "model": "test-model",
             "max_steps": 10,
             "system_prompt_id": "test-prompt",
@@ -105,13 +105,15 @@ async def test_sdk_passes_state_preparer_to_native_executor(
     async def prepare(_request):
         return PreparedState("recorded-state", {}, "")
 
-    cfg = {
-        "save_logs": False,
-        "backend_api_mode": "chat_completions",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "max_steps": 10,
-    }
+    cfg = make_settings(
+        {
+            "save_logs": False,
+            "backend_api_mode": "chat_completions",
+            "model": "test-model",
+            "system_prompt_id": "test-prompt",
+            "max_steps": 10,
+        }
+    )
     ctx = await acreate_run_context(cfg, state_preparer=prepare)
     state, _rendered = await build_state(AgentExecutor(ctx))
 

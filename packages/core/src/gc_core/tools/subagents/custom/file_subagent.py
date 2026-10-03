@@ -136,7 +136,7 @@ class FileDefinedSubagent(AbstractSubagent):
         reason: str = "",
         **_kwargs: Any,
     ) -> FileDefinedSubagent:
-        # Прочие kwargs (model, config_dict, runtime_notices_enabled) раннер
+        # Прочие kwargs (model, runtime_notices_enabled) раннер
         # передаёт всем сабагентам одинаково; файловому они не нужны — модель
         # наследуется от родителя, а LLM-вызова при создании у него нет.
         return cls(definition, task, reason=reason)

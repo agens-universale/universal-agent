@@ -1,5 +1,6 @@
 """Интеракция карточек /mcp: фокус ↑↓, toggle Enter/Space/клик (spec 2026-06-10)."""
 
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 SNAP = {
@@ -25,9 +26,11 @@ async def _open(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"mcp-servers": {}}),
     )
-    scr = McpScreen(config={}, tools_snapshot=dict(SNAP))
+    scr = McpScreen(settings=as_settings({}), tools_snapshot=dict(SNAP))
     return app, scr
 
 
@@ -128,9 +131,11 @@ async def test_keys_on_empty_screen_do_not_crash(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"mcp-servers": {}}),
     )
-    scr = McpScreen(config={}, tools_snapshot={})
+    scr = McpScreen(settings=as_settings({}), tools_snapshot={})
     async with app.run_test() as pilot:
         await app.push_screen(scr)
         await pilot.pause()

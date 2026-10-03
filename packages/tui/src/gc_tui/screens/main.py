@@ -629,15 +629,14 @@ class TraceScreen(Screen):
         """Действующая модель СЛЕДУЮЩЕГО хода из Router (спека §12.2), не
         плоский ключ `cfg["model"]`: должна отражать активный уровень/профиль
         сразу после /level или /profiles, до пересборки executor (Router
-        витрин строится от `effective_config()` на каждый вызов, §6.4).
+        витрин строится от `effective_settings()` на каждый вызов, §6.4).
 
         Легаси-плейсхолдер шаблона (Task 14) — не имя модели, показывать нечего."""
         from gc_core.onboarding import MODEL_SENTINEL
 
         display_router = getattr(self.app, "display_router", None)
         if not callable(display_router):
-            cfg = getattr(self.app, "_config", None) or {}
-            model = cfg.get("model")
+            model = self.app.base_settings().settings.agent.model
             return model if model and model != MODEL_SENTINEL else "?"
         # check_breaker=False: витрина показывает модель честно даже при открытом
         # активном алиасе (спека §12.2) — иначе футер молча замирал бы (§8).
@@ -717,7 +716,7 @@ class TraceScreen(Screen):
         что применится ПОСЛЕ хода, или `None` — переход не нужен (хода нет,
         будущая модель совпадает с фактической). Каждый резолв недёшев: имя
         профиля глобит оба корня профилей (диск), цвет/модель строят Router
-        витрин от `effective_config()` — лесенка усечения в
+        витрин от `effective_settings()` — лесенка усечения в
         `_compose_footer_right` обязана получить снимок готовым, не резолвить
         заново на каждой ступени."""
         profile = self._footer_profile_name()
@@ -1277,12 +1276,12 @@ class TraceScreen(Screen):
         """voice-секция + прокси агента: у голоса своего поля прокси нет, а в облако
         он ходит по тем же правилам, что backend (копия — оригинал не трогаем).
 
-        Читаем из ЕДИНОЙ точки (`effective_config`), как витрины и сборка executor:
-        база `app._config` не знает про сессионный слой, и профиль, выбранный на
+        Читаем из ЕДИНОЙ точки (`effective_settings`), как витрины и сборка executor:
+        база окна не знает про сессионный слой, и профиль, выбранный на
         сессию, со своей секцией `voice` до диктовки бы не доехал."""
         from gc_core.config_modules.field_meta import plain_dump
 
-        settings = self.app.current_settings().settings
+        settings = self.app.effective_settings().settings
         # Сырой токен: транскрайбер шлёт его в заголовке Authorization.
         voice = plain_dump(settings.voice)
         voice.setdefault("proxy", settings.backend.proxy)
@@ -1376,7 +1375,7 @@ class TraceScreen(Screen):
             from gc_tui.services.voice_setup import status_cheap
 
             # единая точка, как в _voice_config
-            return status_cheap(self.app.current_settings()).mode == "local"
+            return status_cheap(self.app.effective_settings()).mode == "local"
         except Exception:
             return False
 
@@ -1415,7 +1414,9 @@ class TraceScreen(Screen):
         """Поднять батарейку фоном. Запись не начинаем сами: холодный старт долгий, и
         человек за это время успевает уйти — зовём его обратно тостом."""
         self._voice_service_pending = True
-        cfg = self.app.current_settings()  # единая точка, как в _voice_config
+        cfg = (
+            self.app.effective_settings()
+        )  # единая точка, как в _voice_config
 
         def _work() -> None:
             from gc_tui.voice_runtime.autostart import ensure_voice_service
@@ -5256,7 +5257,7 @@ class TraceScreen(Screen):
                 skill_is_available,
             )
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             prefix.append(await build_skill_delivery(pending_skill, reg))
             patch["skills"] = [pending_skill]
             self._pending_skill_marker = (
@@ -5309,7 +5310,7 @@ class TraceScreen(Screen):
         self.app.reload_config_if_changed()  # свежесть глобала — только на пути Settings (дизайн 2026-07-21 §4)
         self.app.push_screen(
             SettingsScreen(
-                config=self.app.screen_config(),
+                settings=self.app.base_settings(),
                 config_path=getattr(self.app, "_config_path", None),
                 on_apply=self.app.reload_config,
             )
@@ -5328,7 +5329,7 @@ class TraceScreen(Screen):
             profile_path = str(ref.path)
         self.app.push_screen(
             ConfigScreen(
-                config=self.app.effective_config(),
+                settings=self.app.effective_settings(),
                 config_path=getattr(self.app, "_config_path", None),
                 project_local=getattr(self.app, "_config_project_local", None),
                 profile_source=profile_source,
@@ -5362,7 +5363,7 @@ class TraceScreen(Screen):
 
         self.app.push_screen(
             McpScreen(
-                config=self.app.screen_config(),
+                settings=self.app.base_settings(),
                 tools_snapshot=self._mcp_screen_snapshot(),
             )
         )
@@ -5383,7 +5384,7 @@ class TraceScreen(Screen):
         self.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=cfg,
                 on_undo_feedback=self._on_diff_undo_feedback,
                 on_ui_ack=self._on_diff_ui_ack,
                 threads_dir=threads_dir,
@@ -5480,12 +5481,10 @@ class TraceScreen(Screen):
             projection_tags_from_config,
         )
 
-        effective = getattr(self.app, "effective_config", None)
-        if callable(effective):
-            cfg = effective() or {}
-        else:
-            cfg = getattr(self.app, "_config", None) or {}
-        return projection_tags_from_config(cfg), True
+        return (
+            projection_tags_from_config(self.app.effective_settings()),
+            True,
+        )
 
     def _append_technical_to_thread(self, msg: dict) -> None:
         tid = self._active_task_id or getattr(
@@ -5863,7 +5862,7 @@ class TraceScreen(Screen):
                 skill_is_available,
             )
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             loaded = await skill_is_available(skill_id, reg)
             msg = {
                 "role": "user",
@@ -6258,7 +6257,7 @@ class TraceScreen(Screen):
             self.app.push_screen(
                 SkillsScreen(
                     skills=await self._load_skills_safe(),
-                    config=self.app.screen_config(),
+                    settings=self.app.base_settings(),
                 )
             )
             return
@@ -6478,7 +6477,7 @@ class TraceScreen(Screen):
         try:
             from gc_core.tools.skills.registry import get_skills_registry
 
-            reg = get_skills_registry(getattr(self.app, "_config", None) or {})
+            reg = get_skills_registry(self.app.base_settings())
             # include_all=True — показываем и внутренние скиллы паков, не только bootstrap.
             return await reg.list_skills(include_all=True)
         except Exception as exc:
@@ -6596,7 +6595,7 @@ class TraceScreen(Screen):
 
         runner = self.app.active_runner
         ah = self.app.tui_state.ask_human_state
-        active_profile = self.app.current_settings().runtime.active_profile
+        active_profile = self.app.effective_settings().runtime.active_profile
         router = self.app.display_router()
         # check_breaker=False: /status показывает модель честно даже при открытом
         # активном алиасе (спека §12.2); недоступность отражаем отдельным флагом.

@@ -6,10 +6,11 @@ with workflow.unsafe.imports_passed_through():
     import pydantic  # noqa: F401
 
 from gc_core.agent_executor import AgentExecutor
+from gc_core.config_modules.root import AppConfig
 from gc_core.tools.registry import get_builtin_tools_data
 
 # Deliberately execute registration in the sandbox, not just import its symbol.
-BUILTINS = get_builtin_tools_data({})
+BUILTINS = get_builtin_tools_data(AppConfig())
 
 
 @workflow.defn

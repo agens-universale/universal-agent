@@ -221,18 +221,25 @@ def check_reset_advances_generation(store: Any) -> None:
 
 
 def check_session_roundtrip_and_compaction(store: Any) -> None:
+    from gc_core.settings import AppConfig
     from gc_core.thread_store import ThreadSession
 
     async def scenario():
         session = await ThreadSession.afrom_config(
-            config_dict={}, system_id=SYS, thread_id=THREAD, store=store
+            settings=AppConfig(),
+            system_id=SYS,
+            thread_id=THREAD,
+            store=store,
         )
         first = [{"id": "m1", "role": "user", "content": "first"}]
         second = [{"id": "m2", "role": "assistant", "content": "second"}]
         await session.apersist_batch(first, previous_response_id=None)
         await session.apersist_batch(first + second, previous_response_id=None)
         reloaded = await ThreadSession.afrom_config(
-            config_dict={}, system_id=SYS, thread_id=THREAD, store=store
+            settings=AppConfig(),
+            system_id=SYS,
+            thread_id=THREAD,
+            store=store,
         )
         ids = [m.get("id") for m in reloaded.history_messages]
         if ids != ["m1", "m2"]:

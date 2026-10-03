@@ -7,6 +7,7 @@ import pytest
 from gc_core.config_modules.env_interpolation import (
     UnresolvedPlaceholdersError,
 )
+from gc_core.context_preparation import settings_from_snapshot
 from gc_ua_temporalio.native_contracts import NativeCall
 from gc_ua_temporalio.native_provider import NativeWorkerConfig
 from gc_ua_temporalio.native_worker import build_native_runtime
@@ -58,13 +59,20 @@ async def test_native_file_interpolates_credentials_before_validation_and_keeps_
             "test", "v1", "owner", "prepare", {"store_id": "files"}
         )
         ctx = await provider(call)
-        assert ctx.config_dict["completions_url"] == endpoint
+        assert ctx.settings.backend.completions_url == endpoint
         prepared = await native._prepare(call, ctx)
         encoded = json.dumps(asdict(prepared))
         assert secret not in encoded
         assert endpoint not in encoded
         assert "Authorization" not in encoded
         assert prepared.model_transport_configured
+        # Снимок истории собирается обратно в настройки — без адреса и токена.
+        rebuilt = settings_from_snapshot(
+            prepared.context.settings, prepared.context.runtime
+        ).settings
+        assert rebuilt.backend.completions_url == ""
+        assert rebuilt.backend.chat_completion_headers == {}
+        assert rebuilt.agent.use_local_subagents is False
     finally:
         await provider.aclose()
     assert path.read_bytes() == original

@@ -6,6 +6,7 @@ from gc_core.intent_scope.append import append_final_answer_to_current
 from gc_core.intent_scope.final_answer import amaybe_record_final_answer_intent
 from gc_core.intent_scope.summarizer import asummarize_final_answer_line
 from gc_testkit import run_coro
+from gc_testkit.settings import make_settings
 
 
 def test_summarize_empty_returns_empty():
@@ -52,7 +53,9 @@ class _FakeState:
 class _FakeCtx:
     def __init__(self, scope, backend="chat_completions"):
         self.intent_scope = scope
-        self.config_dict = {"backend_api_mode": backend}
+        loaded = make_settings({"backend_api_mode": backend})
+        self.settings = loaded.settings
+        self.runtime = loaded.runtime
         self.logger = logging.getLogger("test.final_answer")
 
 

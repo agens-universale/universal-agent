@@ -6,6 +6,7 @@ from unittest.mock import patch
 from gc_core import run_summary_coordinator as run_summary_coordinator_module
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state():
@@ -45,8 +46,8 @@ def _make_config(trigger=100):
 
 
 def _make_ctx(cfg):
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -61,7 +62,7 @@ class TestRunnerSummary:
     async def test_passes_summary_hook_to_run_agent(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         captured = {}
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -84,7 +85,7 @@ class TestRunnerSummary:
     async def test_runs_pre_backend_summary_check(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=10)
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         calls = []
 
         def fake_run_summary_compaction(**kwargs):
@@ -127,7 +128,7 @@ class TestRunnerSummary:
     async def test_summary_disabled_when_trigger_zero(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         captured = {}
 
         def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -150,7 +151,7 @@ class TestRunnerSummary:
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
         cfg["summary_params"]["chat_completions_summary_trigger_tokens"] = 1000
-        runner = SubagentRunner(_make_ctx(cfg), orch, cfg)
+        runner = SubagentRunner(_make_ctx(cfg), orch)
         captured = {}
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):

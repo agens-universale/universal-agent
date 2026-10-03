@@ -47,7 +47,7 @@ def _without_last_turn_finish_call(
 def build_finish_gate_trace_digest(
     *,
     state: Any,
-    cfg: Any = None,
+    settings: Any = None,
     exclude_pending_turn_finish: bool = True,
 ) -> FinishGateTraceDigest:
     """
@@ -66,9 +66,9 @@ def build_finish_gate_trace_digest(
     if exclude_pending_turn_finish:
         history_messages = _without_last_turn_finish_call(history_messages)
 
-    # cfg — настройки или то, что знает settings_of (ctx, плоский словарь);
-    # None — дефолты модели.
-    settings = settings_of(cfg)
+    # settings — то, что принимает settings_of (ctx, LoadedSettings,
+    # AppConfig); None — дефолты модели.
+    settings = settings_of(settings)
     limits = {
         "max_dialogue_chars": int(settings.quality_gate.max_dialogue_chars),
         "max_message_chars": int(settings.quality_gate.max_message_chars),

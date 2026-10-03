@@ -215,11 +215,11 @@ def _dedupe_ordered_abs_paths(paths: List[str]) -> List[str]:
     return out
 
 
-def _extra_write_roots(config_dict: Optional[Dict[str, Any]]) -> List[str]:
+def _extra_write_roots(settings: Any) -> List[str]:
     """``security.write_guard.extra_paths``; без конфига — пусто."""
-    if config_dict is None:
+    if settings is None:
         return []
-    extra = settings_of(config_dict).security.write_guard.extra_paths
+    extra = settings_of(settings).security.write_guard.extra_paths
     return [str(x) for x in (extra or []) if x is not None and str(x).strip()]
 
 
@@ -237,21 +237,21 @@ def os_label() -> str:
 def _coerce_workspace(
     workspace: Optional[Any],
     backend: Optional[Any],
-    workspace_config: Optional[Dict[str, Any]],
+    settings: Any,
 ) -> Any:
     """Build an ExecutionWorkspace; ignore non-sandbox backends (host I/O wins)."""
     if workspace is not None:
         return workspace
     if backend is not None and getattr(backend, "is_sandbox", False):
-        return build_execution_workspace(backend, workspace_config)
+        return build_execution_workspace(backend, settings)
     # Lazy: avoids tools → security → project_data import cycle.
     from gc_core.backends.local import LocalFsBackend
 
-    return build_execution_workspace(LocalFsBackend(), workspace_config)
+    return build_execution_workspace(LocalFsBackend(), settings)
 
 
 async def get_project_data(
-    workspace_config: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
     workspace: Optional[Any] = None,
     backend: Optional[Any] = None,
 ) -> Dict[str, str]:
@@ -268,8 +268,9 @@ async def get_project_data(
       "projectDirListing": "folder/\nfolder/file1\nfile2..."
     }
 
-    workspace_config: optional CLI/server config snapshot (launch_root, project_root,
-    write_guard.extra_paths) used for projectDir / allowed writes.
+    settings: optional run settings — anything ``settings_of``/``runtime_of`` accept
+    (context, ``LoadedSettings``): runtime launch_root/project_root and
+    ``security.write_guard.extra_paths`` drive projectDir / allowed writes.
 
     workspace: optional ExecutionWorkspace assembled by RunContext.
     backend: deprecated compat — sandbox backends are coerced into a workspace.
@@ -277,7 +278,7 @@ async def get_project_data(
     ``allowed_write_paths`` lists only directories where a probe file can be created and removed
     (same meaning on Linux, macOS, and Windows); non-writable roots are omitted.
     """
-    ws = _coerce_workspace(workspace, backend, workspace_config)
+    ws = _coerce_workspace(workspace, backend, settings)
     project_dir = ws.root
     be = ws.backend
     current_date = datetime.now().strftime("%Y-%m-%d")
@@ -317,7 +318,7 @@ async def get_project_data(
             project_dir_listing = ""
 
     allowed_roots = _dedupe_ordered_abs_paths(
-        [project_dir, *_extra_write_roots(workspace_config)]
+        [project_dir, *_extra_write_roots(settings)]
     )
     writable_roots = [p for p in allowed_roots if _dir_writable_probe(p)]
     return {

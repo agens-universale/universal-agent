@@ -122,9 +122,7 @@ class AskHuman(AbstractSimpleTool):
     """
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_ask_human",
@@ -148,9 +146,7 @@ class AskHuman(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         # Legacy channel (tools_descr); not wired to API today — reserved for a future
         # tool_help-style meta-tool. Agent-facing spec: tool_description + result hint.
         description = """Tool name: turn_ask_human

@@ -11,9 +11,7 @@ from typing import TYPE_CHECKING, List, NamedTuple, Optional
 if TYPE_CHECKING:
     from gc_core.model_router import ModelRouter
 
-from gc_core.config import flat_config as _flat
 from gc_core.config_modules.field_meta import leaf_meta
-from gc_core.config_modules.flat_keys import FLAT_TO_PATH
 from gc_core.runtime_notices import (
     collect_runtime_notices,
     collect_unread_runtime_notices,
@@ -21,6 +19,7 @@ from gc_core.runtime_notices import (
     register_runtime_notices_listener,
     unregister_runtime_notices_listener,
 )
+from gc_core.settings import AppConfig, LoadedSettings, settings_of
 from gc_core.startup_notices import Notice, collect_startup_notices
 from gc_core.tools.registry import all_builtin_tool_names
 from textual.app import App
@@ -42,20 +41,25 @@ _AUTO_UPDATE_NOTICE = "Доступна новая версия — /settings �
 # рана — при её создании). Notice `boot_frozen_pending` при смене значения сохранён
 # в прежней редакции («вступит в силу со следующего запуска») — как предупреждение,
 # что часть уже открытого (живой ран, его лог) остаётся на прежнем пути.
-# Порядок — порядок полей схемы. dotted-имя — из схемы AppConfig (для notice);
-# справа — плоский ключ config_dict (`flatten_app_config`), по которому идёт сравнение.
+# Порядок — порядок полей схемы; путь через точку — из схемы AppConfig, по нему
+# же и сравниваются значения настроек.
 BOOT_FROZEN_KEYS = tuple(
     path for path, meta in leaf_meta().items() if meta.restart
 )
-_BOOT_FROZEN_FLAT = {
-    path: flat
-    for flat, path in FLAT_TO_PATH.items()
-    if path in BOOT_FROZEN_KEYS
-}
+
+
+def _setting_at(settings, dotted: str):
+    """Значение поля настроек по пути через точку (None — поля нет)."""
+    current = settings_of(settings)
+    for name in dotted.split("."):
+        current = getattr(current, name, None)
+        if current is None:
+            return None
+    return current
 
 
 def _maybe_auto_check(
-    config: dict,
+    settings,
     state: dict,
     now: float,
     installed_commit,
@@ -78,7 +82,8 @@ def _maybe_auto_check(
        ходить незачем). Сеть недоступна → вердикт `unknown`.
 
     Сеть/UI/время/персист — только через инъекцию (`check`, `record_result`, `on_available`,
-    `on_result`), поэтому функция зовётся из фонового воркер-треда, не с UI-потока."""
+    `on_result`), поэтому функция зовётся из фонового воркер-треда, не с UI-потока.
+    `settings` — настройки окна (всё, что принимает `settings_of`)."""
     from gc_core.updater.check import (
         CheckResult,
         auto_check_enabled,
@@ -91,7 +96,7 @@ def _maybe_auto_check(
         return  # dev/неизвестный источник — обновлений нет
     if update_available_from_state(state, installed_commit):
         on_available(False)  # персист-вердикт: строка без toast
-    if not auto_check_enabled(config):
+    if not auto_check_enabled(settings):
         return
     try:
         result = check(resolved)
@@ -112,7 +117,7 @@ def _maybe_auto_check(
 
 
 def _run_auto_check_safely(
-    config: dict,
+    settings,
     state: dict,
     now: float,
     installed_commit,
@@ -131,7 +136,7 @@ def _run_auto_check_safely(
     приложение — поэтому глотаем всё здесь."""
     try:
         _maybe_auto_check(
-            config,
+            settings,
             state,
             now,
             installed_commit,
@@ -167,12 +172,9 @@ class _ReloadPlan:
     применения (`TuiApp._plan_reload`). Применение (`_commit_reload`) — только
     присваивания, сбоить там нечему: перечитка либо меняет всё, либо ничего."""
 
-    settings: object  # новая база окна (LoadedSettings)
-    config: dict  # её плоский вид
+    settings: LoadedSettings  # новая база окна
     session_overrides: dict  # сессионный слой после санации под новую базу
-    effective: (
-        tuple  # (ключ, LoadedSettings, плоский вид) — кэш effective_settings
-    )
+    effective: tuple  # (ключ, LoadedSettings) — кэш effective_settings
     profile_cache: Optional[
         tuple
     ]  # пере-мерж сессионного профиля под новую базу
@@ -287,22 +289,26 @@ class TuiApp(App):
         *,
         threads_dir: Optional[str] = None,
         system: str = "cli",
-        config: Optional[dict] = None,
-        settings=None,
+        settings: Optional[LoadedSettings] = None,
         profile_override: Optional[str] = None,
     ) -> None:
         super().__init__()
         self._threads_dir = threads_dir
         self._system = system
-        # База окна — `LoadedSettings` (файлы + CLI + рантайм TUI), `_config` — её
-        # плоский вид только для чтения. Переходно окно собирается и плоским
-        # словарём (тесты): тогда `_settings` нет и слой сессии ложится на словарь.
-        self._settings = settings
-        self._config = (
-            _flat(settings) if settings is not None else (config or {})
-        )
-        # (ключ, LoadedSettings, плоский вид): effective_config() зовётся каждый
-        # кадр, а наложение сессии — это валидация модели.
+        # База окна — `LoadedSettings` (файлы + CLI + рантайм TUI). Без настроек
+        # (встраивание, тесты) — умолчания схемы.
+        if settings is None:
+            settings = LoadedSettings(settings=AppConfig())
+        elif isinstance(settings, AppConfig):
+            settings = LoadedSettings(settings=settings)
+        elif not isinstance(settings, LoadedSettings):
+            raise TypeError(
+                "TuiApp ждёт настройки (LoadedSettings или AppConfig), а не "
+                f"{type(settings).__name__}"
+            )
+        self._settings: LoadedSettings = settings
+        # (ключ, LoadedSettings): действующие настройки читаются каждый кадр, а
+        # наложение сессии — это валидация модели.
         self._effective_cache = None
         # Замок состояния конфига: перечитка (UI-поток) подменяет базу, сессионный
         # слой, кэши и снимки ОДНИМ присваиванием под ним, а сборка раннера
@@ -313,8 +319,6 @@ class TuiApp(App):
         # Поколение состояния: растёт на каждой перечитке. Читатель, собравший
         # кэш по снимку ДО неё, не затирает им уже применённый новый.
         self._config_generation = 0
-        # Окно-словарь: (снимок словаря, LoadedSettings) — см. `_flat_as_settings`.
-        self._flat_settings_cache: list = []
         # Профиль, выбранный флагом запуска `--profile` (`""` — «без профиля»), либо
         # None — флага не было. Тот же оверрайд, что main() отдал загрузчику на
         # старте: каждое перечитывание (`reload_config`) обязано отдавать его снова,
@@ -325,11 +329,11 @@ class TuiApp(App):
         # запуска — свойство ЭТОГО процесса (`gc-ua --profile ""` не имеет права
         # прилипнуть к треду и обходить уже починенный профиль на следующем старте).
         # Выбор из приложения (`/profiles`) остаётся сильнее: он ложится поверх
-        # базы, собранной под флагом (`_session_base_config`).
+        # базы, собранной под флагом (`_session_base_settings`).
         self._profile_override = profile_override
         # Сессионные переопределения конфига (спека 2026-07-20-session-scoped-settings):
-        # база — self._config (файл), это — то, что переключено в текущем треде.
-        # Хранятся по dotted-именам; накладываются в effective_config().
+        # база — self._settings (файлы), это — то, что переключено в текущем треде.
+        # Хранятся по dotted-именам; накладываются в effective_settings().
         self._session_overrides: dict = {}
         self._executor_factory = (
             None  # callable returning an executor; for tests
@@ -370,12 +374,12 @@ class TuiApp(App):
         )
         # Мтайм-набор активного указателя (спека §3.3): база/managed/проектный конфиг +
         # оба кандидатных пути активного профиля. Расширение прежнего одиночного
-        # _config_mtime — тот же снимок, что строит load_config_ex, но снятый дёшево
+        # _config_mtime — тот же снимок, что строит загрузчик, но снятый дёшево
         # (без парсинга) там, где полная загрузка не нужна (set_config_path).
         self._config_mtime_set: dict = {}
         # Кэш пере-мержа сессионного профиля (спека §9.1): (ключ, cfg). Ключ — снимок
-        # mtime-набора + имя оверрайда; effective_config() зовётся каждый кадр и не
-        # должен гонять load_config_ex, пока ни файлы, ни выбор не изменились.
+        # mtime-набора + имя оверрайда; effective_settings() зовётся каждый кадр и не
+        # должен гонять загрузчик, пока ни файлы, ни выбор не изменились.
         self._session_profile_cache = None
         # Профили, уже отдавшие notice активации в этой сессии (спека §3.5) — не спамить
         # повторно при каждом пере-мерже одного и того же выбора.
@@ -495,7 +499,7 @@ class TuiApp(App):
         from gc_core import app_version, upgrade_gate
         from gc_core.updater.check import check_for_update, record_check_result
 
-        config = self._config or {}
+        settings = self._settings
         state = upgrade_gate.read_state()
         src = app_version.install_source()
         installed = src.commit if src else None
@@ -534,7 +538,7 @@ class TuiApp(App):
         def _work() -> None:
             try:
                 _run_auto_check_safely(
-                    config,
+                    settings,
                     state,
                     time.time(),
                     installed,
@@ -566,7 +570,7 @@ class TuiApp(App):
 
         return self._onboarding_mode == "review" or (
             self._onboarding_mode == "auto"
-            and onboarding.is_unconfigured(self._config or {})
+            and onboarding.is_unconfigured(self._settings)
         )
 
     def get_default_screen(self) -> Screen:
@@ -574,7 +578,7 @@ class TuiApp(App):
 
         if self._needs_onboarding():
             return OnboardingScreen(
-                config=self._config or {},
+                settings=self._settings,
                 config_path=self._onboarding_config_path,
                 review_all=self._onboarding_mode == "review",
                 on_commit=self._finish_onboarding,
@@ -601,14 +605,14 @@ class TuiApp(App):
         self.push_screen(
             PostUpdateScreen(
                 upgrade=self._upgrade_info,
-                config=self._config or {},
+                settings=self._settings,
                 config_path=self._config_path,
             )
         )
 
     def set_config_path(self, path: Optional[str]) -> None:
         """Единая точка присвоения `_config_path`: путь + снимок мтайм-набора (спека
-        §3.3) одним движением. Вызывать ровно тогда, когда self._config уже фактически
+        §3.3) одним движением. Вызывать ровно тогда, когда база окна уже фактически
         соответствует файлу по этому пути (main() — конфиг только что загружен
         из него; финал онбординга — следом сразу идёт reload_config()).
 
@@ -640,7 +644,7 @@ class TuiApp(App):
         (effective), а не только за пойнтером из файла — иначе правка файла
         сессионно выбранного профиля никогда не всплывёт в
         `reload_config_if_changed` (ревью Task 11: до этой правки набор всегда
-        брал имя только из `self._config["profile"]`, игнорируя сессионный
+        брал имя только из профиля базы окна, игнорируя сессионный
         выбор — редактирование выбранного в сессии профиля было невидимо
         бессрочно)."""
         override = self._session_overrides.get("profile")
@@ -739,12 +743,12 @@ class TuiApp(App):
         прежнем состоянии (исключение уходит вызывающему: `_reload_config_or_notice`
         превращает его в notice `config_reload_failed`)."""
         try:
-            old_effective = self.effective_config()
+            old_effective = self.effective_settings()
         except ValueError:
             # Сессионный слой не проходит схему уже сейчас (мета треда старой
             # версии) — его снимет `_plan_reload`; для сравнения restart-ключей
             # хватит базы: сессия путей не задаёт (`SESSION_KEYS`).
-            old_effective = self._config or {}
+            old_effective = self._settings
         old_mtime_set = self._config_mtime_set
         old_source = self._profile_source
         old_overrides = dict(self._session_overrides)
@@ -767,7 +771,7 @@ class TuiApp(App):
                 name, loaded.profile_meta, loaded
             )
         self._notice_profile_source_change(old_source)
-        self._notice_boot_frozen_diff(old_effective, self.effective_config())
+        self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notify_screen_config_changed()
 
     def _plan_reload(self) -> _ReloadPlan:
@@ -825,15 +829,13 @@ class TuiApp(App):
             )
             notices.extend(dropped)
             effective = self._build_effective_entry(session_base, overrides)
-        config = _flat(base)
         return _ReloadPlan(
             settings=base,
-            config=config,
             session_overrides=overrides,
             effective=effective,
             profile_cache=profile_cache,
             mtime_set=mtime_set,
-            threads_dir=resolve_threads_dir(config),
+            threads_dir=resolve_threads_dir(base),
             notices=tuple(notices),
             profile_dropped=profile_dropped,
             activated_profile=activated,
@@ -846,7 +848,6 @@ class TuiApp(App):
         with self._config_lock:
             self._config_generation += 1
             self._settings = plan.settings
-            self._config = plan.config
             self._session_overrides = plan.session_overrides
             self._session_profile_cache = plan.profile_cache
             self._effective_cache = plan.effective
@@ -880,11 +881,11 @@ class TuiApp(App):
 
     @classmethod
     def _build_effective_entry(cls, base, overrides: dict) -> tuple:
-        """(ключ, LoadedSettings, плоский вид): база + сессионный слой.
+        """(ключ, LoadedSettings): база + сессионный слой.
         `ValueError` — слой не проходит проверку схемы."""
         key = cls._effective_key(base, overrides)
         loaded = base.with_overrides(dict(key[1]), layer="session")
-        return (key, loaded, _flat(loaded))
+        return (key, loaded)
 
     @staticmethod
     def _drop_invalid_session_keys(base, overrides: dict) -> tuple:
@@ -921,11 +922,7 @@ class TuiApp(App):
         /diff перестаёт работать, а периметр path_policy уходит со снапшота."""
         from gc_tui.runtime_config import apply_tui_runtime
 
-        previous = (
-            self._settings.runtime.launch_root if self._settings else None
-        )
-        if previous is None:
-            previous = self.base_settings().runtime.launch_root
+        previous = self._settings.runtime.launch_root
         return apply_tui_runtime(loaded, launch_root=previous)
 
     def _notify_screen_config_changed(self) -> None:
@@ -985,96 +982,41 @@ class TuiApp(App):
                 )
             )
 
-    def screen_config(self) -> dict:
-        """Единая точка доступа к базе для ОТКРЫТИЯ экранов (/config, /mcp, /diff,
-        /skills, /settings — и вход в секцию /settings): отдаёт актуальную базу
-        БЕЗ автоперечитки. Свежесть config.yml нужна только там, где он
-        редактируется (Settings), и вызывается ЯВНО на пути его открытия
-        (main._cmd_settings, settings._sync_config_from_app) — иначе два окна
-        правили бы файл вслепую (дизайн 2026-07-21 §4).
+    def base_settings(self) -> LoadedSettings:
+        """База окна (`LoadedSettings`) без сессионного слоя — то, что правит
+        /settings и что получают экраны при ОТКРЫТИИ (/config, /mcp, /diff,
+        /skills, /settings — и вход в секцию /settings), БЕЗ автоперечитки.
+        Свежесть config.yml нужна только там, где он редактируется (Settings), и
+        вызывается ЯВНО на пути его открытия (main._cmd_settings,
+        settings._sync_config_from_app) — иначе два окна правили бы файл вслепую
+        (дизайн 2026-07-21 §4).
 
-        НЕ для рендера — effective_config() (база + сессионные переопределения)
-        зовётся на каждый кадр; здесь — только выдача базы при открытии экрана."""
-        return self._config or {}
+        НЕ для рендера — effective_settings() (база + сессионные
+        переопределения) зовётся на каждый кадр; здесь — только база."""
+        return self._settings
 
-    def current_settings(self):
-        """Действующие настройки окна (`LoadedSettings`: база + сессия) — точка
-        типизированного чтения для экранов, сервисов и виджетов.
-
-        Окно, собранное плоским словарём (переходно, тесты), отдаёт его строгую
-        конвертацию; результат кэшируется по содержимому — витрины зовут это
-        каждый кадр, а конвертация — валидация модели."""
-        loaded = self.effective_settings()
-        if loaded is not None:
-            return loaded
-        return self._flat_as_settings(self.effective_config())
-
-    def base_settings(self):
-        """Типизированный двойник `screen_config()`: база окна без сессионного
-        слоя (то, что правит /settings и что открывают экраны)."""
-        if self._settings is not None:
-            return self._settings
-        return self._flat_as_settings(self._config or {})
-
-    def _flat_as_settings(self, flat: dict):
-        """Плоский словарь окна-словаря → `LoadedSettings`, с кэшем по значению:
-        тесты подменяют `app._config` целиком и правят его на месте, поэтому
-        ключ — копия содержимого, а не id."""
-        import copy
-
-        from gc_core.settings import settings_from_flat
-
-        cache = self._flat_settings_cache
-        for snapshot, loaded in cache:
-            if snapshot == flat:
-                return loaded
-        loaded = settings_from_flat(flat)
-        try:
-            snapshot = copy.deepcopy(dict(flat))
-        except Exception:
-            return loaded
-        # Два слота: база и действующий вид чередуются в одном кадре.
-        self._flat_settings_cache = [(snapshot, loaded)] + cache[:1]
-        return loaded
-
-    def effective_config(self) -> dict:
-        """Конфиг, который видят и UI, и агент: база + сессионные переопределения.
+    def effective_settings(self) -> LoadedSettings:
+        """Действующие настройки окна: база + сессионные переопределения — то,
+        что видят и UI, и агент.
 
         Единая точка чтения: витрины (палитра, секция настроек) и сборка
-        executor обязаны брать конфиг отсюда, а не из `self._config` — иначе
-        переключённое в сессии значение не доедет.
+        executor обязаны брать настройки отсюда, а не из базы — иначе
+        переключённое в сессии значение не доедет. `profile` — особый ключ
+        (спека §9.1): база не всегда `base_settings()` — сессия могла выбрать
+        другой профиль, и тогда база — его пере-сборка (`_session_base_settings`,
+        закэшированная).
 
-        `profile` — особый ключ (спека §9.1): база не всегда `self._config` —
-        сессия могла выбрать другой профиль, и тогда база — его пере-мерж
-        (`_session_base_config`, закэшированный)."""
-        entry = self._effective_entry()
-        if entry is not None:
-            return entry[2]
-        from gc_tui.session_settings import apply_overrides
-
-        cfg = dict(self._session_base_config())
-        apply_overrides(cfg, self._session_overrides)
-        return cfg
-
-    def effective_settings(self):
-        """`LoadedSettings` окна с сессионным слоем — то, на чём собирается агент.
         Неизменяемый объект из ОДНОГО снимка состояния: worker-поток, собирающий
         раннер во время перечитки, получает либо прежние настройки целиком, либо
-        новые целиком.
+        новые целиком."""
+        return self._effective_entry()[1]
 
-        None — окно собрано плоским словарём (переходно, тесты): тогда
-        действующий конфиг — только `effective_config()`."""
-        entry = self._effective_entry()
-        return None if entry is None else entry[1]
-
-    def _effective_entry(self) -> Optional[tuple]:
-        """(ключ, LoadedSettings, плоский вид) по согласованному снимку. Сборка —
-        вне замка (пере-мерж профиля ходит на диск и пишет notice, а мост notice
-        на UI-поток под замком был бы взаимоблокировкой с перечиткой); кэш
+    def _effective_entry(self) -> tuple:
+        """(ключ, LoadedSettings) по согласованному снимку. Сборка — вне замка
+        (пере-мерж профиля ходит на диск и пишет notice, а мост notice на
+        UI-поток под замком был бы взаимоблокировкой с перечиткой); кэш
         пишется, только если состояние за это время не перечитали."""
         snap = self._config_snapshot()
-        if snap.settings is None:
-            return None
         base = self._session_base_settings(snap)
         key = self._effective_key(base, snap.overrides)
         cached = snap.effective
@@ -1087,8 +1029,12 @@ class TuiApp(App):
         return entry
 
     def _session_base_settings(self, snap: Optional[_ConfigSnapshot] = None):
-        """Типизированный двойник `_session_base_config`: база окна либо её
-        пере-сборка под выбранным в сессии профилем."""
+        """База для effective_settings(): база окна, либо, если сессия выбрала
+        ДРУГОЙ профиль (§9.1), — пере-сборка базы под ним
+        (`_profile_remerge_settings`, закэшированная по мтайм-набору+имени —
+        рендер не должен гонять загрузчик каждый кадр). override "" —
+        сессионное снятие (§9.1, ревизия 2026-07-28): база задаёт профиль,
+        сессия работает чистым конфигом — пере-сборка БЕЗ профиля."""
         if snap is None:
             snap = self._config_snapshot()
         override_name = snap.overrides.get("profile")
@@ -1097,26 +1043,15 @@ class TuiApp(App):
             return snap.settings
         return self._profile_remerge_settings(override_name, snap)
 
-    def _session_base_config(self) -> dict:
-        """База для effective_config(): `self._config`, либо, если сессия выбрала
-        ДРУГОЙ профиль (§9.1), — пере-смерженная под ним база (`_profile_remerge`,
-        закэшированная по мтайм-набору+имени — рендер не должен гонять
-        load_config_ex каждый кадр)."""
-        if self._settings is not None:
-            return _flat(self._session_base_settings())
-        override_name = self._session_overrides.get("profile")
-        base_name = (self._config or {}).get("profile") or None
-        if override_name is None or override_name == (base_name or ""):
-            return self._config or {}
-        # override "" = сессионное снятие (§9.1, ревизия 2026-07-28): база задаёт
-        # профиль, сессия работает чистым конфигом — пере-мерж БЕЗ профиля.
-        return self._profile_remerge(override_name)
-
-    def _profile_remerge(self, name: str) -> dict:
-        """Пере-прогон `load_config_ex(profile_override=name)` — то же, что делает
-        CLI `--profile` (спека §9.1). Кэш-ключ — (мтайм-набор, имя): любое реальное
-        изменение файлов ИЛИ смена сессионного выбора инвалидирует кэш; иначе то же
-        имя при том же наборе отдаётся из кэша без похода на диск.
+    def _profile_remerge_settings(
+        self, name: str, snap: Optional[_ConfigSnapshot] = None
+    ):
+        """Пере-прогон загрузки с `profile_override=name` — то же, что делает
+        CLI `--profile` (спека §9.1). Кэш-ключ — (мтайм-набор, имя): любое
+        реальное изменение файлов ИЛИ смена сессионного выбора инвалидирует
+        кэш; иначе то же имя при том же наборе отдаётся из кэша без похода на
+        диск. Кэш читается из снимка `snap` и пишется, только если окно за время
+        сборки не перечитали (перечитка уже положила свой пере-мерж).
 
         Битый профиль (файл исчез/невалиден под ногами между санацией и этим
         вызовом — редкая гонка: `_active_profile_name_for_mtime` заводит его в
@@ -1128,15 +1063,6 @@ class TuiApp(App):
         (кэшируем фоллбэк под тем же ключом — повтор с тем же ключом отдаётся из
         кэша без повторного notice; смена набора/имени — новый шанс и новый
         notice, если всё ещё битый)."""
-        loaded = self._profile_remerge_settings(name)
-        return _flat(loaded) if loaded is not None else (self._config or {})
-
-    def _profile_remerge_settings(
-        self, name: str, snap: Optional[_ConfigSnapshot] = None
-    ):
-        """Пере-сборка настроек под профилем сессии (см. `_profile_remerge`).
-        Кэш читается из снимка `snap` и пишется, только если окно за время
-        сборки не перечитали (перечитка уже положила свой пере-мерж)."""
         if snap is None:
             snap = self._config_snapshot()
         key = (frozenset(snap.mtime_set.items()), name)
@@ -1173,8 +1099,7 @@ class TuiApp(App):
         """Спека §3.5: первая активация ПРОЕКТНОГО профиля в сессии — notice с
         файлом и урлами моделей: файл приезжает с клоном репозитория и уводит
         запросы на свои адреса — пользователь должен видеть это сам, не только в
-        логах провайдера. `cfg` — настройки собранного стека (`LoadedSettings`;
-        переходно и плоский словарь)."""
+        логах провайдера. `cfg` — настройки собранного стека (`LoadedSettings`)."""
         ref = meta.ref
         if (
             ref is None
@@ -1205,7 +1130,7 @@ class TuiApp(App):
         пересборка + сброс предохранителя. Санация приравнена к смене профиля.
 
         Ветка «выбран конфигом» (файл базового указателя исчез/невалиден) сюда
-        не относится — её покрывает reload_config_if_changed: load_config_ex
+        не относится — её покрывает reload_config_if_changed: загрузчик
         бросает исключение, окно остаётся на прежней базе + notice
         `config_reload_failed` (существующий канон, без изменений).
 
@@ -1276,9 +1201,9 @@ class TuiApp(App):
         base_name = self.base_settings().runtime.active_profile or None
         if name and name != base_name:
             self.probe_profile_assembly(name)
-        old_effective = self.effective_config()
+        old_effective = self.effective_settings()
         self.apply_session_override("profile", name)
-        self._notice_boot_frozen_diff(old_effective, self.effective_config())
+        self._notice_boot_frozen_diff(old_effective, self.effective_settings())
         self._notify_screen_config_changed()
         runner = self.active_runner
         live = runner is not None and runner.is_running()
@@ -1331,7 +1256,9 @@ class TuiApp(App):
             )
         )
 
-    def _notice_boot_frozen_diff(self, old_cfg: dict, new_cfg: dict) -> None:
+    def _notice_boot_frozen_diff(
+        self, old: LoadedSettings, new: LoadedSettings
+    ) -> None:
         """Спека §3.2: ключи с флагом `restart` разошлись между старой и новой
         эффективной базой при пересборке. Значение уже действует (перечитка
         переводит `_threads_dir`, executor берёт новые пути на пересборке), но
@@ -1339,15 +1266,14 @@ class TuiApp(App):
         notice — прежний («вступит в силу со следующего запуска»).
 
         Сравниваем, только если старое значение реально известно (не None): `None`
-        типично значит «конфиг ещё не резолвил значение по умолчанию» (например,
-        свежесозданный `TuiApp` в тестах с частичным словарём) — это не смена
+        типично значит «настройки ещё не резолвили значение по умолчанию»
+        (например, свежесозданный `TuiApp` в тестах без путей) — это не смена
         значения пользователем, шуметь не о чем."""
         changed = [
             dotted
             for dotted in BOOT_FROZEN_KEYS
-            if old_cfg.get(_BOOT_FROZEN_FLAT[dotted]) is not None
-            and old_cfg.get(_BOOT_FROZEN_FLAT[dotted])
-            != new_cfg.get(_BOOT_FROZEN_FLAT[dotted])
+            if _setting_at(old, dotted) is not None
+            and _setting_at(old, dotted) != _setting_at(new, dotted)
         ]
         if not changed:
             return
@@ -1379,7 +1305,7 @@ class TuiApp(App):
 
     def _level_provider(self) -> str:
         """Активный уровень для `ModelRouter` (спека §6.4): читает сессионный слой
-        напрямую, БЕЗ `effective_config()`/`apply_overrides` — `/level` переключается
+        напрямую, БЕЗ `effective_settings()` — `/level` переключается
         без `invalidate_runner` (единственный тоггл с таким свойством), и это
         единственный потребитель, обязанный видеть смену немедленно, без
         пересборки executor."""
@@ -1390,39 +1316,36 @@ class TuiApp(App):
     def active_profile_ref(self):
         """`ProfileRef` действующего (эффективного, сессионно-осознанного) профиля
         или `None` — витрины `/config`/`/status` (спека §12.3a) хотят не только
-        имя, но и корень/путь файла, а `effective_config()` отдаёт только имя.
+        имя, но и корень/путь файла, а `effective_settings()` знает только имя.
         Единая точка резолва — `config_modules.profiles.find_active_ref`."""
         import os
         from pathlib import Path
 
         from gc_core.config_modules.profiles import find_active_ref
 
-        name = self.current_settings().runtime.active_profile or None
+        name = self.effective_settings().runtime.active_profile or None
         return find_active_ref(
             name, Path(os.getcwd()), Path(self._config_path or "")
         )
 
     def display_router(self) -> ModelRouter:
         """Дешёвый Router для витрин (палитра `/level`/`/profiles`, футер — спека
-        §12.1/§12.2): резолвит из `effective_config()` БЕЗ сборки executor —
+        §12.1/§12.2): резолвит из `effective_settings()` БЕЗ сборки executor —
         `resolve()`/`resolve_level()` не ходят в транспорт, только читают снимок
         конфига в памяти. Не путать с `ctx.model_router` активного рана — тот
         собран из снимка на момент СБОРКИ executor (может быть stale между
         пересборками); витрины обязаны видеть смену уровня/профиля сразу
-        (§6.4), поэтому строят свой Router от текущего effective_config()
+        (§6.4), поэтому строят свой Router от текущих effective_settings()
         на каждый вызов, а не читают executor."""
         from gc_core.config import cli_forces_legacy_model
         from gc_core.model_router import ModelRouter
 
-        cfg = self.effective_config()
         loaded = self.effective_settings()
         return ModelRouter(
-            cfg,
+            loaded,
             level_provider=self._level_provider,
             breaker=self._circuit_breaker,
-            force_legacy=cli_forces_legacy_model(
-                loaded if loaded is not None else cfg
-            ),
+            force_legacy=cli_forces_legacy_model(loaded),
         )
 
     def persist_circuit_breaker(self) -> None:
@@ -1489,7 +1412,7 @@ class TuiApp(App):
 
         Не записалось (каталог тредов недоступен, диск полон, отвалившийся сетевой
         путь) — откатываем: вызывающий показывает «✗ не сохранено» и оставляет на
-        экране прежнее значение, поэтому effective_config() обязан отдавать ровно
+        экране прежнее значение, поэтому effective_settings() обязан отдавать ровно
         его, иначе следующий ход агента пойдёт в необъявленном пользователю режиме."""
         prev = dict(self._session_overrides)
         self.set_session_override(dotted, value)
@@ -1689,14 +1612,8 @@ class TuiApp(App):
 
         # Своё у TUI поверх действующих настроек: промпт-ассеты, адаптивный bounce
         # текстового ответа и режим судьи /gate (CLI/server/swarm их не ставят).
-        loaded = self.effective_settings()
-        if loaded is not None:
-            loaded = tui_agent_settings(loaded)
-            cfg = _flat(loaded)
-        else:
-            cfg = tui_agent_settings(dict(self.effective_config()))
-            loaded = cfg
-        auth = build_auth_connector(cfg)
+        loaded = tui_agent_settings(self.effective_settings())
+        auth = build_auth_connector(loaded)
         progress = McpProgress()
         progress.begin(list(settings_of(loaded).mcp.servers))
         self._mcp_progress = progress
@@ -1752,7 +1669,7 @@ class TuiApp(App):
         # diff-журнал (F3): ядро контекст только строит, включает журнал TUI.
         from gc_tui.diff_tui.tracking import attach_to_context as _attach_diff
 
-        _attach_diff(ctx, cfg)
+        _attach_diff(ctx, loaded)
         self._session_log_path = ctx.logging_path
         # Live nested progress субагентов: очередь на app, копия на ctx → child.
         from gc_core.tools.subagents.progress import QueueSubagentProgressSink
@@ -1764,7 +1681,7 @@ class TuiApp(App):
         from gc_core.tools.mcp_snapshot import build_mcp_tools_snapshot
 
         self._mcp_snapshot = build_mcp_tools_snapshot(
-            cfg, ctx.tools_data, ctx.mcp_status
+            loaded, ctx.tools_data, ctx.mcp_status
         )
         self._mcp_status = ctx.mcp_status
         self._registered_tool_names = getattr(
@@ -1834,11 +1751,10 @@ class TuiApp(App):
         """Стартовые уведомления — единая сборка для полного списка и для бейджей."""
         from gc_core.settings import is_explicit
 
-        cfg = self._config or {}
         loaded = self.base_settings()
         return collect_startup_notices(
-            cfg,
-            all_builtin_tool_names(cfg),
+            loaded,
+            all_builtin_tool_names(loaded),
             self._mcp_status,
             is_tui=True,
             known_tool_names=getattr(self, "_registered_tool_names", None),

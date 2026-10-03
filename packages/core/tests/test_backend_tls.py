@@ -11,9 +11,9 @@ def test_backend_config_tls_fields():
     assert BackendConfig(use_ssl=False).use_ssl is False
 
 
-def test_config_dict_maps_backend_tls(tmp_path):
+def test_settings_map_backend_tls(tmp_path):
     import yaml
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     p = tmp_path / "config.yml"
     p.write_text(
@@ -29,25 +29,25 @@ def test_config_dict_maps_backend_tls(tmp_path):
         ),
         encoding="utf-8",
     )
-    cfg = load_config(str(p))
-    assert cfg["use_ssl"] == "/ca.pem"
-    assert cfg["cert_path"] == "/c.crt"
-    assert cfg["key_path"] == "/k.key"
+    cfg = load_settings(str(p)).settings
+    assert cfg.backend.use_ssl == "/ca.pem"
+    assert cfg.backend.cert_path == "/c.crt"
+    assert cfg.backend.key_path == "/k.key"
 
 
 def test_backend_config_default_use_ssl_bool_maps(tmp_path):
     import yaml
-    from gc_core.config import load_config
+    from gc_core.config import load_settings
 
     p = tmp_path / "config.yml"
     p.write_text(
         yaml.safe_dump({"backend": {"api_mode": "chat_completions"}}),
         encoding="utf-8",
     )
-    cfg = load_config(str(p))
-    assert cfg["use_ssl"] is True
-    assert cfg["cert_path"] is None
-    assert cfg["key_path"] is None
+    cfg = load_settings(str(p)).settings
+    assert cfg.backend.use_ssl is True
+    assert cfg.backend.cert_path is None
+    assert cfg.backend.key_path is None
 
 
 def test_get_backend_client_cert():
@@ -139,7 +139,7 @@ def test_backend_cert_defaults_none_backward_compat(monkeypatch):
 
 def test_mcp_use_ssl_alias_unified():
     """MCP verify_ssl принимает унифицированные ключи use-ssl/use_ssl (как backend),
-    а также verify-ssl (обратная совместимость); в config_dict дампится verify-ssl."""
+    а также verify-ssl (обратная совместимость); в дамп модели идёт verify-ssl."""
     from gc_core.config_modules.mcp import McpServerConfig
 
     for key in ("use-ssl", "use_ssl", "verify-ssl", "verify_ssl"):

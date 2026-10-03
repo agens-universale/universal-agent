@@ -155,7 +155,7 @@ def _materialize_runtime_config(
          через resolve_base_config_path, либо явный swarm.host_config_path).
       2. Project overlay — <cwd>/.gc/config.yml относительно CWD сервера,
          если файл существует и отличается от base. Симметрично с тем, как
-         load_config делает layered loading для обычного CLI'я.
+         load_settings делает layered loading для обычного CLI'я.
       3. SWARM_* env vars — paths.{agent_md_path, threads_data_path,
          skills_data_path}. Параллель с config_modules.common.apply_swarm_env_overrides
          для raw YAML.
@@ -193,8 +193,8 @@ def _materialize_runtime_config(
     raw: Dict[str, Any] = base
 
     # === Слой 2: project overlay <cwd>/.gc/config.yml ===
-    # Симметрично с load_config()'s layered loading. CWD — серверский, тот же,
-    # что увидит load_config() при старте webhook'а. Защитный check
+    # Симметрично с load_settings()'s layered loading. CWD — серверский, тот же,
+    # что увидит load_settings() при старте webhook'а. Защитный check
     # `project_path != host_config_path` обходит самомерж когда base file
     # лежит в <cwd>/.gc/ (это бывает, если сервер запущен из проектной директории).
     try:
@@ -252,7 +252,7 @@ def _resolve_host_config_path(swarm_cfg: Dict[str, Any]) -> Optional[str]:
 
     Приоритет:
       1. swarm_cfg["host_config_path"] (если задан явно).
-      2. config.resolve_base_config_path() (та же логика что у load_config).
+      2. config.resolve_base_config_path() (та же логика что у load_settings).
     """
     explicit = swarm_cfg.get("host_config_path")
     if isinstance(explicit, str) and explicit.strip():

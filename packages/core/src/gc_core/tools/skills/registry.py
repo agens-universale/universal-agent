@@ -805,12 +805,15 @@ class SkillsRegistry:
 
 
 def get_skills_registry(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
     *,
     backend: FsBackend | None = None,
 ) -> SkillsRegistry:
     """
     Фабрика реестра скиллов.
+
+    ``settings`` — всё, что принимает ``settings_of`` (контекст, ``LoadedSettings``,
+    ``AppConfig``); ``None`` — без настроек (трёхслойный режим, ничего не отключено).
 
     Поведение:
     - Если в настройках непустой ``paths.skills_data_path`` — single-source режим:
@@ -824,15 +827,13 @@ def get_skills_registry(
     """
     skills_root: Optional[str] = None
     disable_skills: List[str] = []
-    if config_dict is not None:
-        settings = settings_of(config_dict)
-        path = (settings.paths.skills_data_path or "").strip()
+    if settings is not None:
+        app = settings_of(settings)
+        path = (app.paths.skills_data_path or "").strip()
         if path:
             skills_root = path
         disable_skills = [
-            item.strip()
-            for item in settings.agent.disable_skills
-            if item.strip()
+            item.strip() for item in app.agent.disable_skills if item.strip()
         ]
 
     if skills_root is not None:

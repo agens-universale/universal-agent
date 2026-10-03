@@ -1,4 +1,4 @@
-"""server.py грузит конфиг НА ИМПОРТЕ (module-level SERVER_CONFIG/BASE_AGENT_CONFIG) —
+"""server.py грузит конфиг НА ИМПОРТЕ (module-level SERVER_CONFIG/BASE_AGENT_SETTINGS) —
 сломанный конфиг не должен ронять импорт голым traceback'ом, а должен дать
 понятный SystemExit, тем же приёмом, что config_modules/env_vars.py уже
 применяет к битым GC_*-переменным окружения.

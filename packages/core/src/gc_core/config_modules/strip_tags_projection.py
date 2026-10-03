@@ -53,26 +53,26 @@ def normalize_strip_tags_projection_config(
     return cfg.result()
 
 
-def _section_from_config(config: object) -> StripTagsProjectionConfig:
+def _section_from_config(settings: object) -> StripTagsProjectionConfig:
     """Секция ``strip_tags_projection`` из всего, что принимает ``settings_of``."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return settings_of(config).strip_tags_projection
+    return settings_of(settings).strip_tags_projection
 
 
-def projection_tags_from_config(config: object) -> tuple[str, ...]:
+def projection_tags_from_config(settings: object) -> tuple[str, ...]:
     """Extra-теги прозы. Persist-флаг ``strip_think`` сюда не входит."""
-    return tuple(_section_from_config(config).tags)
+    return tuple(_section_from_config(settings).tags)
 
 
-def persist_reasoning_content_from_config(config: object) -> bool:
+def persist_reasoning_content_from_config(settings: object) -> bool:
     """Класть ли ``reasoning_content`` на канонический item в ``state.messages``.
 
     Единственный потребитель — ``get_output_list`` / вход в канон.
     YAML ``strip_think: false`` = persist True.
     """
-    return not _section_from_config(config).strip_think
+    return not _section_from_config(settings).strip_think
 
 
 def _clean_tag_name(item: object) -> str | None:

@@ -139,7 +139,7 @@ def test_compaction_archive_and_sidecar_receipts(tmp_path):
 async def test_real_thread_session_uses_sqlite_capability(tmp_path):
     store = SQLiteThreadStore(tmp_path / "s.sqlite")
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="s", thread_id="t", store=store
+        settings=None, system_id="s", thread_id="t", store=store
     )
     await session.apersist_batch(
         [{"id": "m1", "role": "user", "content": "hello"}],

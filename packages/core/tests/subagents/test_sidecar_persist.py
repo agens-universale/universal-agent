@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from gc_core.thread_store import read_subagent_trace
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _async_noop(fn):
@@ -30,8 +31,8 @@ def _state(*, steps=3, max_steps=50):
 
 
 def _child_ctx(tmp_path, *, sink=None):
-    return SimpleNamespace(
-        config_dict={},
+    return fake_ctx(
+        {},
         run_id="run_c1",
         parent_call_id="call_sub_1",
         subagent_progress_sink=sink,
@@ -104,8 +105,8 @@ class TestSidecarPersistCallResult:
 
     def test_no_persist_without_thread_identity(self, tmp_path, monkeypatch):
         pr = _patch_process(monkeypatch)
-        ctx = SimpleNamespace(
-            config_dict={},
+        ctx = fake_ctx(
+            {},
             run_id="run_c1",
             parent_call_id="call_sub_1",
             subagent_progress_sink=None,

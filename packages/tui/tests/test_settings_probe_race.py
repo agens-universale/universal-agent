@@ -7,6 +7,7 @@ _start_draft_probe, что и Enter/Tab, и обе делят счётчик п�
 а у неё в on_done висит сохранение. Итог без фикса: Enter нажат, файл не
 изменился, молча (гонка предсуществующая, унаследована из develop 444bb20b)."""
 
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -38,11 +39,11 @@ async def test_enter_before_autoprobe_still_saves(tmp_path):
     from gc_tui.screens.settings import SettingsScreen
 
     cfg_file = _write_cfg(tmp_path)
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
         app.push_screen(
             SettingsScreen(
-                config=_cfg(),
+                settings=as_settings(_cfg()),
                 config_path=str(cfg_file),
                 on_apply=lambda: None,
                 probe_fn=_fake_probe(_probe_ok_fast()),
@@ -76,7 +77,7 @@ async def test_user_probe_cancels_pending_autoprobe():
     таймер уже отработавшим — тест проверяет факт постановки, а не гонку."""
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
         app.push_screen(_mk_screen())
         await pilot.pause()
@@ -127,11 +128,11 @@ async def test_autoprobe_survives_enter_absorbed_by_presets(tmp_path):
     # а тесту нужен именно раскрытый, чтобы Enter был им поглощён. Раньше сюда годился
     # пресетный адрес, но заполненное поле список больше не поднимает.
     cfg_file = _write_cfg(tmp_path, url='""')
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
         app.push_screen(
             SettingsScreen(
-                config=_cfg(),
+                settings=as_settings(_cfg()),
                 config_path=str(cfg_file),
                 on_apply=lambda: None,
                 probe_fn=_fake_probe(_probe_ok_fast()),
@@ -183,7 +184,7 @@ async def test_reentering_connection_stops_previous_autoprobe_timer():
     перед вторым входом."""
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
         app.push_screen(_mk_screen())
         await pilot.pause()
@@ -413,10 +414,12 @@ async def test_leaving_field_without_address_keeps_pending_autoprobe(tmp_path):
 
     calls = []
     cfg_file = _write_cfg(tmp_path, url='""')
-    app = app_mod.TuiApp(config={})  # ни поля, ни действующего адреса
+    app = app_mod.TuiApp(
+        settings=tui_settings({})
+    )  # ни поля, ни действующего адреса
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={},
+            settings=as_settings({}),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=recording_probe(calls),

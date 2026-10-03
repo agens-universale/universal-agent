@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 from gc_testkit.paths import HARBOR
+from gc_testkit.settings import make_settings
 
 PROFILES = HARBOR / "profiles"
 
@@ -46,7 +47,9 @@ def _build(gc_cli_config):
         logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg
     )
     c = a._build_config()
-    return c, parse_summary_trigger_chars(c)
+    # Адаптер отдаёт плоский конфиг для gc-cli в контейнере; читатель порога
+    # принимает только настройки — переводим строго, как сделал бы загрузчик.
+    return c, parse_summary_trigger_chars(make_settings(c))
 
 
 EXPECT = {

@@ -1,12 +1,12 @@
 """Tests for apply_tool subagent dispatch logic."""
 
 import json
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 from gc_core.states import SharedStateData, State
 from gc_core.tools import WrongFunctionArgumentsException, aapply_tool
+from gc_testkit.settings import fake_ctx
 
 
 def _make_state():
@@ -34,8 +34,8 @@ def _make_ctx(tools_data, use_local=True):
         "model": "test-model",
         "system_prompt_id": "test-prompt",
     }
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         tools_data=tools_data,
         auth_connector=None,
         logger=None,
@@ -83,7 +83,7 @@ class TestSubagentDispatch:
                 run_agent_func=run_agent_func,
             )
 
-        MockRunner.assert_called_once_with(ctx, state, ctx.config_dict)
+        MockRunner.assert_called_once_with(ctx, state, ctx)
         instance.arun.assert_called_once_with(
             "subagent_worker",
             {"task": "do something", "reason": "test"},
@@ -160,14 +160,15 @@ class TestSubagentDispatch:
         )
         assert result == "read: /tmp/test.txt"
 
-    async def test_regular_tool_receives_ctx_and_config_dict(self):
+    async def test_regular_tool_receives_ctx(self):
         """
-        Regression: apply_tool must propagate ctx and config_dict to tool_fabric
-        kwargs so that security decorators (read_guard, root_box, url_policy,
-        command_moderation) resolve policy via self._ctx.config_dict. Without
-        this, the decorators see empty config_dict and treat the layer as not
+        Regression: apply_tool must propagate ctx to tool_fabric kwargs so that
+        security decorators (read_guard, root_box, url_policy,
+        command_moderation) resolve policy via self._ctx settings. Without
+        this, the decorators see no settings and treat the layer as not
         configured — a bug that previously caused ~49 silent-allow FAILs in
-        rootbox_test_cases_100_v1 (run_20260520T074244Z).
+        rootbox_test_cases_100_v1 (run_20260520T074244Z). Плоский
+        ``config_dict`` тулу больше не передаётся: настройки — только из ctx.
         """
         captured = {}
 
@@ -203,7 +204,7 @@ class TestSubagentDispatch:
         )
 
         assert captured["kwargs"].get("ctx") is ctx
-        assert captured["kwargs"].get("config_dict") is ctx.config_dict
+        assert "config_dict" not in captured["kwargs"]
 
     async def test_subagent_with_local_disabled_gives_no_such_tool(self):
         """When use_local_subagents=False, subagent tool_name is unknown."""

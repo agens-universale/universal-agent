@@ -19,6 +19,7 @@ import time
 
 import pytest
 from gc_core.backends.async_protocol import aexec_port
+from gc_testkit.settings import fake_ctx
 
 
 class _SlowSyncBackend:
@@ -131,6 +132,15 @@ async def test_search_warms_the_probes_off_loop(monkeypatch, tmp_path):
 
     tool = FindInFiles.__new__(FindInFiles)
     object.__setattr__(tool, "_backend_override", _Backend())
+    # Тест про прогрев, не про политику: read_guard выключен явно (без
+    # контекста гарды берут умолчания модели — включены).
+    object.__setattr__(
+        tool,
+        "_ctx",
+        fake_ctx(
+            {"launch_root": str(tmp_path), "read_guard": {"enabled": False}}
+        ),
+    )
     monkeypatch.setattr(
         type(tool), "_backend", property(lambda self: self._backend_override)
     )

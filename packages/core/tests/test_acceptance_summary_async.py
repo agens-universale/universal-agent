@@ -27,7 +27,6 @@ import time
 
 import pytest
 from gc_core.aio import AsyncAgent
-from gc_core.settings import settings_from_flat
 from gc_testkit import LoopPulse
 from parity_harness import (
     ScriptedBackend,
@@ -37,6 +36,7 @@ from parity_harness import (
     install_many,
     judge_accept,
     parity_config,
+    with_flat_overrides,
 )
 
 
@@ -108,11 +108,15 @@ def slow_script() -> ScriptedBackend:
 def compacting_config(tmp_path, monkeypatch, **overrides):
     """Конфиг, при котором компакция гарантированно срабатывает."""
     cfg = parity_config(tmp_path, monkeypatch, **overrides)
-    params = dict(cfg.get("summary_params") or {})
-    params["chat_completions_summary_trigger_chars"] = 200
-    params["chat_completions_summary_turn_end_trigger_chars"] = 120
-    cfg["summary_params"] = params
-    return cfg
+    # Правка поверх загруженного — как прежде в плоском виде: производные
+    # значения загрузки (``incremental_batch_chars``) не пересчитываются.
+    return with_flat_overrides(
+        cfg,
+        {
+            "summary_params.chat_completions_summary_trigger_chars": 200,
+            "summary_params.chat_completions_summary_turn_end_trigger_chars": 120,
+        },
+    )
 
 
 def thread_dump(cfg, system_id, thread_id):
@@ -154,7 +158,7 @@ async def test_compaction_creates_no_threads(tmp_path, monkeypatch):
 
     async def run_and_snapshot(cfg, tid):
         install(monkeypatch, script())
-        async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+        async with await AsyncAgent.create(cfg) as agent:
             await agent.run("сделай что-нибудь", thread_id=tid)
         # Демон-потоки сходят не мгновенно — даём им время.
         for _ in range(20):
@@ -304,9 +308,9 @@ async def test_loop_stays_responsive_during_compaction(tmp_path, monkeypatch):
     # не ловит ни одной. Отношение сравнивало бы «с паузой» против «без паузы».
     from gc_testkit import quiet_gc_for_loop_timing
 
-    # Типизированные настройки — до окна замера: валидация конфига не часть
-    # сборки агента.
-    settings = settings_from_flat(cfg)
+    # Типизированные настройки собраны (и провалидированы) ``parity_config``
+    # до окна замера: валидация конфига не часть сборки агента.
+    settings = cfg
     with quiet_gc_for_loop_timing():
         async with LoopPulse() as baseline:
             await asyncio.sleep(0.3)
@@ -352,8 +356,8 @@ async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
     cfg_b = compacting_config(tmp_path / "b", monkeypatch, model="агент-б")
     install_many(monkeypatch, {"агент-а": script(), "агент-б": script()})
 
-    a = await AsyncAgent.create(settings_from_flat(cfg_a))
-    b = await AsyncAgent.create(settings_from_flat(cfg_b))
+    a = await AsyncAgent.create(cfg_a)
+    b = await AsyncAgent.create(cfg_b)
     try:
         answers = await asyncio.gather(
             a.run("первый", thread_id="t-s3-a"),
@@ -374,7 +378,7 @@ async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
         (cfg_a, "t-s3-a", "t-s3-b"),
         (cfg_b, "t-s3-b", "t-s3-a"),
     ):
-        root = Path(cfg["threads_data_path"])
+        root = Path(cfg.settings.paths.threads_data_path)
         archives = [p.name for p in root.glob("*__pre_summary__*")]
         assert archives, f"{tid}: архив компакции не создан"
         assert not any(other in name for name in archives), (
@@ -400,7 +404,7 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
     # этого теста при собственной работе около 0,8 с. Отношение мерило долю
     # пауз, попавших в каждую фазу, а не сериализацию компакцией.
     with quiet_gc_for_loop_timing():
-        solo = await AsyncAgent.create(settings_from_flat(solo_cfg))
+        solo = await AsyncAgent.create(solo_cfg)
         started = time.monotonic()
         try:
             await solo.run("один", thread_id="t-s4-solo")
@@ -413,8 +417,8 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
         install_many(
             monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()}
         )
-        a = await AsyncAgent.create(settings_from_flat(cfg_a))
-        b = await AsyncAgent.create(settings_from_flat(cfg_b))
+        a = await AsyncAgent.create(cfg_a)
+        b = await AsyncAgent.create(cfg_b)
         started = time.monotonic()
         try:
             await asyncio.gather(
@@ -451,7 +455,7 @@ async def test_message_arriving_during_compaction_is_not_lost(
     cfg = compacting_config(tmp_path, monkeypatch)
     install(monkeypatch, script())
 
-    async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+    async with await AsyncAgent.create(cfg) as agent:
         await agent.run("первый вопрос", thread_id="t-s7")
         assert was_compacted(cfg, "sdk", "t-s7"), "компакция не сработала"
 
@@ -461,7 +465,7 @@ async def test_message_arriving_during_compaction_is_not_lost(
     # и сценарий кончался бы раньше, чем проверяемое свойство.
     plain_cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, script())
-    async with await AsyncAgent.create(settings_from_flat(plain_cfg)) as agent:
+    async with await AsyncAgent.create(plain_cfg) as agent:
         await agent.run("вопрос после компакции", thread_id="t-s7")
 
     dump = json.dumps(thread_dump(cfg, "sdk", "t-s7"), ensure_ascii=False)
@@ -503,7 +507,7 @@ async def test_cancelled_compaction_leaves_the_thread_readable(
     monkeypatch.setattr(rsc, "arun_summary_compaction", slow_compaction)
     install(monkeypatch, script())
 
-    agent = await AsyncAgent.create(settings_from_flat(cfg))
+    agent = await AsyncAgent.create(cfg)
     try:
         task = asyncio.create_task(
             agent.run("сделай что-нибудь", thread_id="t-s8")
@@ -519,7 +523,7 @@ async def test_cancelled_compaction_leaves_the_thread_readable(
     from gc_core.thread_store import ThreadSession
 
     session = await ThreadSession.afrom_config(
-        config_dict=cfg,
+        settings=cfg,
         system_id="sdk",
         thread_id="t-s8",
     )

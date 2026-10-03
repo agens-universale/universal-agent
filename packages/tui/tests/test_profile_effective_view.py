@@ -10,6 +10,7 @@
 экрана: тот собран с уже активным профилем, и тень стала бы гибридной.
 """
 
+from gc_testkit.tui_support import tui_settings
 from contextlib import asynccontextmanager
 
 import pytest
@@ -196,7 +197,7 @@ async def _profile_view(
     _write(profile_file, PROFILE_SKELETON if profile is None else profile)
 
     config = _screen_config(file_view=file_view)
-    app = app_mod.TuiApp(config=config)
+    app = app_mod.TuiApp(settings=tui_settings(config))
     async with app.run_test(**({"size": size} if size else {})) as pilot:
         scr = await _profiles_screen(pilot, app, base_cfg, config=config)
         await _put_cursor(pilot, scr, "profile", "work")
@@ -592,7 +593,7 @@ async def test_removal_from_an_inactive_profile_is_judged_on_its_own_stack(
         tmp_path, monkeypatch, base=base, profile=profile
     ) as (pilot, scr, ed):
         assert (
-            scr._config.get("profile") or None
+            scr._settings.runtime.active_profile or None
         ) != "work"  # предпосылка: не активен
         _cursor_to(ed, "entry", alias="x")
         await pilot.press("delete")
@@ -1363,21 +1364,17 @@ async def test_opening_a_profile_does_not_rebind_the_projection_pipeline(
     """Открытый профиль показывают, а не активируют: собрать его стек нужно, но
     эффективный конфиг сессии обязан остаться прежним.
 
-    `_open_profile_config` зовёт `load_config_ex`. Проекция больше не глобальна,
-    но проба чужого профиля всё равно не должна менять `effective_config` —
+    `_open_profile_config` зовёт `load_settings`. Проекция больше не глобальна,
+    но проба чужого профиля всё равно не должна менять `effective_settings` —
     иначе исходящий трейс и derived-sink'и начали бы читать чужие tags /
     strip_think до следующего `reload_config`."""
     profile = 'strip_tags_projection:\n  tags: ["scratchpad"]\n'
     async with _profile_view(
         tmp_path, monkeypatch, profile=profile, base=_BASE_ONE_MODEL
     ) as (_p, scr, _ed):
-        before = dict(
-            scr.app.effective_config().get("strip_tags_projection") or {}
-        )
+        before = scr.app.effective_settings().settings.strip_tags_projection.model_dump()
         scr._open_profile_config("work")
-        after = dict(
-            scr.app.effective_config().get("strip_tags_projection") or {}
-        )
+        after = scr.app.effective_settings().settings.strip_tags_projection.model_dump()
         assert after == before
         assert after.get("tags") != ["scratchpad"]
 

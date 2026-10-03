@@ -108,16 +108,16 @@ def sanitize_system_id(system_id: str) -> str:
     return s
 
 
-def resolve_threads_dir(config_dict: Any) -> str:
+def resolve_threads_dir(settings: Any) -> str:
     """
     Определить директорию для хранения тредов.
 
-    ``config_dict`` — всё, что принимает ``settings_of``. Контракт:
+    ``settings`` — всё, что принимает ``settings_of``. Контракт:
     ``paths.threads_data_path`` должен быть АБСОЛЮТНЫМ путём, заполненным
     config_modules.root.resolve_paths(). Пустое значение означает, что
     resolve_paths() не вызывался — это ошибка интеграции.
     """
-    path_cfg = settings_of(config_dict).paths.threads_data_path
+    path_cfg = settings_of(settings).paths.threads_data_path
     if not isinstance(path_cfg, str) or len(path_cfg.strip()) == 0:
         raise ValueError(
             "threads_data_path пуст; config_modules.root.resolve_paths() должен был его заполнить"
@@ -860,12 +860,15 @@ class ThreadSession:
     async def afrom_config(
         cls,
         *,
-        config_dict: Dict[str, Any],
+        settings: Any,
         system_id: str,
         thread_id: str,
         store: Any = None,
     ) -> "ThreadSession":
         """Загрузить тред. ``store`` не передан — файловое хранилище, как раньше.
+
+        ``settings`` — всё, что принимает ``settings_of`` (контекст, настройки);
+        ``None`` — умолчания модели.
 
         ЕДИНСТВЕННАЯ форма. Параметр ``store`` — точка подмены для
         встраивающего: своя реализация (например поверх базы) передаётся сюда,
@@ -881,7 +884,7 @@ class ThreadSession:
 
         sys_norm = sanitize_system_id(system_id)
         normalized_thread_id = validate_thread_id(thread_id)
-        store, threads_dir = cls._resolve_store(config_dict, store)
+        store, threads_dir = cls._resolve_store(settings, store)
 
         port = athread_store(store)
         from copy import deepcopy
@@ -903,7 +906,7 @@ class ThreadSession:
             meta, state = deepcopy(snapshot.meta), snapshot.state
         cls._check_store_owner(port, snapshot)
         session = cls._build(
-            config_dict=config_dict,
+            settings=settings,
             threads_dir=threads_dir,
             store=store,
             sys_norm=sys_norm,
@@ -915,7 +918,7 @@ class ThreadSession:
         session._store_snapshot = snapshot
         session._defer_persist = (
             capability is not None
-            and settings_of(config_dict).thread_store.persist == "turn"
+            and settings_of(settings).thread_store.persist == "turn"
         )
         return session
 
@@ -951,9 +954,7 @@ class ThreadSession:
             )
 
     @staticmethod
-    def _resolve_store(
-        config_dict: Dict[str, Any], store: Any
-    ) -> "tuple[Any, str]":
+    def _resolve_store(settings: Any, store: Any) -> "tuple[Any, str]":
         """Хранилище и каталог. Чистая часть, общая для sync и async."""
         if store is not None:
             return store, getattr(store, "threads_dir", "")
@@ -963,7 +964,7 @@ class ThreadSession:
         # обязан его настраивать. Поймано гейтом на in-memory хранилище.
         from gc_core.thread_store_file import FileThreadStore
 
-        threads_dir = resolve_threads_dir(config_dict)
+        threads_dir = resolve_threads_dir(settings)
         store = FileThreadStore(threads_dir)
         store.ensure_ready()
         return store, threads_dir
@@ -972,7 +973,7 @@ class ThreadSession:
     def _build(
         cls,
         *,
-        config_dict: Dict[str, Any],
+        settings: Any,
         threads_dir: str,
         store: Any,
         sys_norm: str,
@@ -992,7 +993,7 @@ class ThreadSession:
         backend_api_mode = str(backend_api_mode_raw).strip().lower()
         if backend_api_mode not in {"responses", "chat_completions"}:
             backend_api_mode = "responses"
-        tags = projection_tags_from_config(config_dict)
+        tags = projection_tags_from_config(settings)
 
         return cls(
             threads_dir=threads_dir,

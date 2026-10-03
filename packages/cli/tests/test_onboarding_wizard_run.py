@@ -1,6 +1,7 @@
 import yaml
 from gc_cli import onboarding_wizard as wz
 from gc_core import onboarding, onboarding_config_writer
+from gc_testkit.settings import make_settings
 
 
 class _FakeMcp:
@@ -39,19 +40,23 @@ def test_run_writes_fields_installs_selected_and_returns_configured(
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": "https://x/v1",
-            "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-            "model": "gigacode_agent_v1.6_rc",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": "https://x/v1",
+                "chat_completion_headers": {"Authorization": "Bearer sk-1"},
+                "model": "gigacode_agent_v1.6_rc",
+            }
+        ),
     )
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     mcp = _FakeMcp()
     # endpoint, auth-меню «1» (ввести токен), токен, MCP-меню «2» (выбрать), номера «1,3»
     io = _io(["https://x/v1", "1", "sk-1", "2", "1,3"])
@@ -77,19 +82,23 @@ def test_run_returns_false_when_still_pending(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": onboarding.URL_SENTINEL,  # так и не задан
-            "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-            "model": "gigacode_agent_v1.6_rc",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": onboarding.URL_SENTINEL,  # так и не задан
+                "chat_completion_headers": {"Authorization": "Bearer sk-1"},
+                "model": "gigacode_agent_v1.6_rc",
+            }
+        ),
     )
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
-            "Authorization": onboarding.TOKEN_SENTINEL
-        },
-        "model": "gigacode_agent_v1.6_rc",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {
+                "Authorization": onboarding.TOKEN_SENTINEL
+            },
+            "model": "gigacode_agent_v1.6_rc",
+        }
+    )
     # endpoint пропущен (Enter), auth-меню «1» (ввести токен), токен, MCP пропустить «3»
     io = _io(["", "1", "sk-1", "3"])
     assert (
@@ -110,24 +119,28 @@ def test_run_without_mcp_skips_mcp(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": "https://x/v1",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": "https://x/v1",
+                "chat_completion_headers": {"Authorization": "Bearer sk"},
+                "model": "m",
+            }
+        ),
     )
     it = iter(["", "1", "sk"])  # endpoint skip, auth "1" token, token
     io = wz.WizardIO(reader=lambda p, s: next(it), printer=lambda m: None)
     # mcp не передаём → шаг MCP не должен вызваться (нет исключения от отсутствующего mcp)
     assert (
         wz.run(
-            {
-                "completions_url": "http://your-backend:PORT/v1/chat/completions",
-                "chat_completion_headers": {
-                    "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
-                },
-                "model": "m",
-            },
+            make_settings(
+                {
+                    "completions_url": "http://your-backend:PORT/v1/chat/completions",
+                    "chat_completion_headers": {
+                        "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+                    },
+                    "model": "m",
+                }
+            ),
             cfg_file,
             review_all=False,
             io=io,
@@ -164,10 +177,10 @@ def test_run_writes_registry_entry_and_flat_connection(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file))
+        wz, "_reload_config", lambda: cfg_mod.load_settings(str(cfg_file))
     )
 
-    starting = cfg_mod.load_config(str(cfg_file))
+    starting = cfg_mod.load_settings(str(cfg_file))
     # адрес, auth-меню «1» (токен), токен, модель (списка нет → ручной ввод)
     io = _io(
         ["https://x/v1/chat/completions", "1", "sk-1", "qwen/qwen3-coder"]
@@ -186,7 +199,8 @@ def test_run_writes_registry_entry_and_flat_connection(tmp_path, monkeypatch):
     assert raw["slots"]["default"] == "qwen3-coder"
     assert raw["agent"]["model"] == onboarding.MODEL_SENTINEL
     assert (
-        onboarding.is_unconfigured(cfg_mod.load_config(str(cfg_file))) is False
+        onboarding.is_unconfigured(cfg_mod.load_settings(str(cfg_file)))
+        is False
     )
 
 
@@ -220,7 +234,7 @@ def test_run_with_registry_but_skipped_endpoint_stays_unconfigured(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file))
+        wz, "_reload_config", lambda: cfg_mod.load_settings(str(cfg_file))
     )
 
     printed = []
@@ -230,7 +244,7 @@ def test_run_with_registry_but_skipped_endpoint_stays_unconfigured(
     io = wz.WizardIO(reader=lambda p, s: next(it), printer=printed.append)
     assert (
         wz.run(
-            cfg_mod.load_config(str(cfg_file)),
+            cfg_mod.load_settings(str(cfg_file)),
             cfg_file,
             review_all=False,
             io=io,
@@ -293,7 +307,9 @@ def test_run_reports_reload_failure_instead_of_crashing_after_all_answers(
         reader=lambda p, s: next(answers, ""), printer=printed.append
     )
 
-    result = wz.run({}, cfg_file, review_all=True, io=io, mcp=None)
+    result = wz.run(
+        make_settings(), cfg_file, review_all=True, io=io, mcp=None
+    )
 
     assert result is False
     # Файл действительно НЕ тронут — патч был отклонён валидацией до записи.
@@ -415,11 +431,13 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer real"},
-            "model": "m",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": onboarding.URL_SENTINEL,
+                "chat_completion_headers": {"Authorization": "Bearer real"},
+                "model": "m",
+            }
+        ),
     )
 
     printed = []
@@ -428,11 +446,13 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     io = wz.WizardIO(
         reader=lambda p, s: "https://x/v1", printer=lambda m: printed.append(m)
     )
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": "Bearer real"},
-        "model": "m",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {"Authorization": "Bearer real"},
+            "model": "m",
+        }
+    )
     wz.run(cfg, cfg_file, review_all=False, io=io)
 
     # run() не бросает; printer получает сообщение об ошибке
@@ -465,22 +485,26 @@ def test_run_reports_an_oserror_without_traceback(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer real"},
-            "model": "m",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": onboarding.URL_SENTINEL,
+                "chat_completion_headers": {"Authorization": "Bearer real"},
+                "model": "m",
+            }
+        ),
     )
 
     printed = []
     io = wz.WizardIO(
         reader=lambda p, s: "https://x/v1", printer=lambda m: printed.append(m)
     )
-    cfg = {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {"Authorization": "Bearer real"},
-        "model": "m",
-    }
+    cfg = make_settings(
+        {
+            "completions_url": onboarding.URL_SENTINEL,
+            "chat_completion_headers": {"Authorization": "Bearer real"},
+            "model": "m",
+        }
+    )
     wz.run(cfg, cfg_file, review_all=False, io=io)
 
     output = "\n".join(printed)
@@ -521,7 +545,7 @@ def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        wz, "_reload_config", lambda: cfg_mod.load_config(str(cfg_file))
+        wz, "_reload_config", lambda: cfg_mod.load_settings(str(cfg_file))
     )
 
     def failing_write_values(*args, **kwargs):
@@ -537,7 +561,7 @@ def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
     )
     io = wz.WizardIO(reader=lambda p, s: next(it), printer=printed.append)
     wz.run(
-        cfg_mod.load_config(str(cfg_file)),
+        cfg_mod.load_settings(str(cfg_file)),
         cfg_file,
         review_all=False,
         io=io,
@@ -555,13 +579,15 @@ def test_run_does_not_claim_an_untouched_config_after_the_registry_landed(
 def test_summary_reports_all_three_levels_from_the_fresh_config():
     """Итог читается из конфига, а не из введённого: человеку важно состояние
     файла, а не история его ответов."""
-    cfg = {
-        "models": {
-            "fast": {"model": "qwen/qwen3-8b"},
-            "brain": {"model": "qwen/qwen3-235b"},
-        },
-        "slots": {"default": "brain", "light": "fast"},
-    }
+    cfg = make_settings(
+        {
+            "models": {
+                "fast": {"model": "qwen/qwen3-8b"},
+                "brain": {"model": "qwen/qwen3-235b"},
+            },
+            "slots": {"default": "brain", "light": "fast"},
+        }
+    )
     lines = wz._summary_lines(cfg)
     assert lines == [
         "    модель       qwen/qwen3-235b  (имя записи «brain»)",
@@ -573,7 +599,9 @@ def test_summary_reports_all_three_levels_from_the_fresh_config():
 def test_summary_of_an_empty_registry_says_nothing_is_set():
     # Плоский `agent.model` в загруженном конфиге есть всегда; «пусто» —
     # плейсхолдер шаблона.
-    assert wz._summary_lines({"model": onboarding.MODEL_SENTINEL}) == [
+    assert wz._summary_lines(
+        make_settings({"model": onboarding.MODEL_SENTINEL})
+    ) == [
         "    модель       не задан",
         "    light        не задан",
         "    max          не задан",
@@ -588,7 +616,9 @@ def test_summary_shows_the_resolved_model_when_the_default_slot_is_unset():
     строка `default` врёт про конфиг, который прекрасно работает. Источник
     здесь не назвать — ни `light`, ни `max` слота не имеют вовсе, обход
     матрицы `LEVEL_FALLBACK` не находит ничего, и выдумывать нельзя."""
-    cfg = {"models": {"only": {"model": "vendor/only"}}, "slots": {}}
+    cfg = make_settings(
+        {"models": {"only": {"model": "vendor/only"}}, "slots": {}}
+    )
     lines = wz._summary_lines(cfg)
     assert lines[0] == "    модель       vendor/only  (default не задан)"
 
@@ -597,10 +627,12 @@ def test_summary_names_the_source_when_default_falls_back_to_a_level():
     """Без `slots.default` строка «модель» раньше показывала модель уровня
     `max` и отличалась от назначенной только отсутствием скобки — подсказка
     была слишком тихой, владелец её не заметил сразу и переспросил."""
-    cfg = {
-        "models": {"fast": {"model": "qwen/qwen3-8b"}},
-        "slots": {"max": "fast"},
-    }
+    cfg = make_settings(
+        {
+            "models": {"fast": {"model": "qwen/qwen3-8b"}},
+            "slots": {"max": "fast"},
+        }
+    )
     lines = wz._summary_lines(cfg)
     assert (
         lines[0]
@@ -613,14 +645,16 @@ def test_summary_fallback_model_is_the_one_of_the_level_it_names():
     резолвом АКТИВНОГО уровня конфига, а подпись — обходом матрицы от default.
     При `level: light` с заданными обоими уровнями строка показывала модель light
     с подписью «работает max». Модель берётся из слота названного уровня."""
-    cfg = {
-        "models": {
-            "fast": {"model": "qwen/qwen3-8b"},
-            "brain": {"model": "qwen/qwen3-235b"},
-        },
-        "slots": {"light": "fast", "max": "brain"},
-        "level": "light",
-    }
+    cfg = make_settings(
+        {
+            "models": {
+                "fast": {"model": "qwen/qwen3-8b"},
+                "brain": {"model": "qwen/qwen3-235b"},
+            },
+            "slots": {"light": "fast", "max": "brain"},
+            "level": "light",
+        }
+    )
     lines = wz._summary_lines(cfg)
     assert (
         lines[0]

@@ -19,6 +19,7 @@ from gc_core.tools import aapply_tool, aapply_tool_result
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.utils.generate_message_id import generate_msg_id_sha256
 from gc_core.utils.llm_chat_client import arequest_chat_completion_text
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def state():
@@ -53,8 +54,9 @@ async def test_result_does_not_mutate_live_state_and_legacy_api_matches(
     name, args, field
 ):
     before = state()
-    ctx = SimpleNamespace(
-        config_dict={}, tools_data=get_builtin_tools_data({})
+    settings = make_settings()
+    ctx = fake_ctx(
+        loaded=settings, tools_data=get_builtin_tools_data(settings)
     )
     original = before.to_execution_snapshot()
     result = await aapply_tool_result(name, args, ctx=ctx, state=before)
@@ -166,8 +168,6 @@ async def test_persistence_failure_is_not_swallowed_or_bounced():
         await pr.arun_agent(
             [{"id": "u", "role": "user", "content": "hi"}],
             value,
-            SimpleNamespace(
-                config_dict={"backend_api_mode": "chat_completions"}
-            ),
+            fake_ctx({"backend_api_mode": "chat_completions"}),
             persist_messages_callback=persist,
         )

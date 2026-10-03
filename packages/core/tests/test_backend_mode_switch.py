@@ -6,10 +6,17 @@ import tempfile
 import types
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_testkit.paths import module_dir
+from gc_testkit.settings import fake_ctx, make_settings
+
+
+def _switch_mode(ctx, config_dict: dict, mode: str) -> None:
+    """Сменить режим бэкенда между ходами — новые настройки контекста."""
+    config_dict["backend_api_mode"] = mode
+    loaded = make_settings(config_dict)
+    ctx.settings, ctx.runtime = loaded.settings, loaded.runtime
 
 
 def _restore_tools_and_dependents() -> None:
@@ -223,8 +230,8 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                     # этот тест про маршрутизацию режима бэкенда, не про summarize.
                     "limit_trace_summary": False,
                 }
-                ctx = SimpleNamespace(
-                    config_dict=config_dict,
+                ctx = fake_ctx(
+                    config_dict,
                     auth_connector=None,
                     logger=logging.getLogger("test_backend_mode_switch"),
                     logging_path=os.path.join(tmp_dir, "test.log"),
@@ -277,7 +284,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertIn("step limit", result_step_1)
 
-                    config_dict["backend_api_mode"] = "chat_completions"
+                    _switch_mode(ctx, config_dict, "chat_completions")
                     result_step_2 = await executor.arun(
                         ["step two"],
                         thread_id=thread_id,
@@ -286,7 +293,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertIn("step limit", result_step_2)
 
-                    threads_dir = resolve_threads_dir(config_dict)
+                    threads_dir = resolve_threads_dir(ctx)
                     meta_after_chat = load_thread_meta(
                         threads_dir, "cli", thread_id
                     )
@@ -301,7 +308,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                         "SYSTEM PROMPT FOR CHAT COMPLETIONS",
                     )
 
-                    config_dict["backend_api_mode"] = "responses"
+                    _switch_mode(ctx, config_dict, "responses")
                     result_step_3 = await executor.arun(
                         ["step three"],
                         thread_id=thread_id,
@@ -336,7 +343,7 @@ class BackendModeSwitchTest(unittest.IsolatedAsyncioTestCase):
                         )
                     )
 
-                    threads_dir = resolve_threads_dir(config_dict)
+                    threads_dir = resolve_threads_dir(ctx)
                     meta = load_thread_meta(threads_dir, "cli", thread_id)
                     self.assertEqual(meta.get("backend_api_mode"), "responses")
                     self.assertEqual(

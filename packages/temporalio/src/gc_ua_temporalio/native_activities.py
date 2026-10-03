@@ -190,17 +190,18 @@ class NativeActivities:
         )
 
         store = self.stores[call.data["store_id"]]
-        public = self.public_config(ctx.config_dict)
-        config = getattr(public, "config_dict", public)
+        public = self.public_config(ctx)
         prompts_request = PromptPreparationRequest.from_config(
-            config, verbose=bool(settings_of(ctx).agent.verbose)
+            ctx, verbose=bool(settings_of(ctx).agent.verbose)
         )
         prompts = await asyncio.to_thread(
             load_run_prompts, prompts_request, logger=ctx.logger
         )
         return NativePreparedContext(
-            context=PreparedRunContext.from_context(ctx, config_dict=config),
-            subagent_definitions=resolve_subagent_definitions(ctx.config_dict),
+            context=PreparedRunContext.from_context(
+                ctx, settings=public.settings, runtime=public.runtime
+            ),
+            subagent_definitions=resolve_subagent_definitions(ctx),
             tool_metadata={
                 name: {
                     **{
@@ -248,7 +249,7 @@ class NativeActivities:
 
         request = value_to_type(StatePreparationRequest, call.data)
         return await prepare_state(
-            workspace_config=ctx.config_dict,
+            workspace_config=ctx,
             workspace=ctx.workspace,
             os_backend=ctx.os_backend,
             logger=ctx.logger,
@@ -411,7 +412,7 @@ class NativeActivities:
 
         def evaluate():
             return [
-                evaluate_guard_probe(request, config_dict=ctx.config_dict)
+                evaluate_guard_probe(request, settings=ctx)
                 for request in requests
             ]
 

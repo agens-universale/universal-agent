@@ -5,6 +5,7 @@ from gc_core.config_modules.pricing import (
     pricing_from_config_dict,
     resolve_model_tariff,
 )
+from gc_testkit.settings import make_settings
 
 
 def _pricing(**kw) -> dict:
@@ -130,8 +131,10 @@ def test_no_toplevel_no_model_returns_none():
 
 def test_pricing_from_config_dict_defaults():
     assert pricing_from_config_dict(None).enabled is False
-    assert pricing_from_config_dict({}).currency == DEFAULT_CURRENCY
-    parsed = pricing_from_config_dict({"pricing": _pricing()})
+    assert (
+        pricing_from_config_dict(make_settings()).currency == DEFAULT_CURRENCY
+    )
+    parsed = pricing_from_config_dict(make_settings({"pricing": _pricing()}))
     assert parsed.enabled is True
     assert "MiniMaxAI/MiniMax-M2.7" in parsed.models
 

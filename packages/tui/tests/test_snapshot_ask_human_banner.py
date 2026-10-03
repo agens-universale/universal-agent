@@ -1,5 +1,6 @@
 """ask_human banner — каноничный вид (§3.4)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -35,7 +36,9 @@ def test_ask_human_banner_snapshot(snap_compare, tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "CodeAgent", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+        ),
     )
     app._executor_factory = lambda: fake
     # Fix D: без живого runner-а recovery-блок снял бы banner. Здесь мы

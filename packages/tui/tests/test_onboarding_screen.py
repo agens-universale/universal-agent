@@ -1,3 +1,5 @@
+from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 
@@ -22,6 +24,7 @@ def _screen(**over):
         # В загруженном конфиге `agent.model` есть всегда; словарь теста без
         # него означает шаблон — плейсхолдер, а не умолчание схемы.
         kw["config"] = {**kw["config"], "model": cfg["model"]}
+    kw["settings"] = as_settings(kw.pop("config"))
     return OnboardingScreen(**kw)
 
 
@@ -198,7 +201,9 @@ async def test_connection_step_mounts_one_editor_with_three_fields(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -221,7 +226,9 @@ async def test_connection_step_walks_three_fields_with_arrows(tmp_path):
     cfg_path = _write_conn_cfg(
         tmp_path, url="https://custom.example/v1/chat/completions"
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config_path=str(cfg_path),
@@ -271,7 +278,9 @@ async def test_connection_address_restored_on_return(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -303,7 +312,9 @@ async def test_connection_token_placeholder_shows_masked_on_return(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -340,7 +351,9 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -395,7 +408,9 @@ async def test_final_summary_shows_mcp_row_none_selected(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -420,7 +435,9 @@ async def test_final_summary_hides_template_sentinels(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = (
             _screen()
@@ -443,7 +460,9 @@ async def test_final_summary_glyph_only_for_filled_rows(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()  # адрес — плейсхолдер шаблона → «—»
         await pilot.app.push_screen(scr)
@@ -481,7 +500,9 @@ async def test_final_summary_shows_a_level_assigned_in_the_config(tmp_path):
         "models": {"fast": {"model": "qwen/qwen3-8b"}},
         "slots": {"light": "fast"},
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config=cfg)
         await pilot.app.push_screen(scr)
@@ -513,7 +534,9 @@ async def test_final_summary_unset_level_says_so_and_gates_the_glyph(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()  # реестра нет вовсе — оба уровня не заданы
         await pilot.app.push_screen(scr)
@@ -539,7 +562,9 @@ async def test_final_summary_shows_mcp_when_selected(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -566,7 +591,9 @@ async def test_final_summary_notice_combines_mcp_and_voice(
         "gc_tui.voice_runtime.state.voice_state_path",
         lambda: tmp_path / "voice_data" / "state.json",
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -591,7 +618,9 @@ async def test_final_summary_notice_voice_only(tmp_path, monkeypatch):
         "gc_tui.voice_runtime.state.voice_state_path",
         lambda: tmp_path / "voice_data" / "state.json",
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -623,7 +652,9 @@ async def test_mcp_installed_marked_and_not_toggleable(tmp_path):
 
     from gc_tui.screens.onboarding import STEP_MCP
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(mcp=_McpInstalled())
         await pilot.app.push_screen(scr)
@@ -648,7 +679,9 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -695,7 +728,9 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     from gc_tui.editors.connection import _PRESET_HINT_EMPTY
     from gc_tui.editors.field_list import LIST_CLOSED_HINT
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -738,7 +773,9 @@ async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(
 
     own_url = "https://my-own-host.internal/v1"
     cfg_path = _write_conn_cfg(tmp_path, url=own_url)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config_path=str(cfg_path),
@@ -778,7 +815,9 @@ async def test_wizard_connection_footer_names_alt_down_only_on_the_url_field(
     from gc_tui.app import TuiApp
     from textual.widgets import Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()  # адрес пустой — список раскрыт сам
         await pilot.app.push_screen(scr)
@@ -808,7 +847,9 @@ async def test_connection_invalid_address_shows_error_valid_advances(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -841,7 +882,9 @@ async def test_connection_no_token_writes_empty_auth(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -869,7 +912,9 @@ async def test_connection_step_advances_with_one_enter_no_mark_needed(
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -893,7 +938,9 @@ async def test_connection_token_becomes_bearer_header(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -922,7 +969,9 @@ async def test_model_step_receives_proxy_from_connection_step(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -950,7 +999,9 @@ async def test_model_list_marks_and_pick(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     fake = lambda *a, **k: [
         ModelInfo("Qwen", tool_capable=True),
         ModelInfo("Flash", tool_capable=False),
@@ -991,7 +1042,9 @@ async def test_model_manual_fallback(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: None)  # список не получен
         await pilot.app.push_screen(scr)
@@ -1025,7 +1078,9 @@ async def test_connection_footer_always_says_next_no_mark_state(tmp_path):
     from gc_tui.app import TuiApp
     from textual.widgets import Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1045,7 +1100,9 @@ async def test_connection_proxy_submitted(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1069,7 +1126,9 @@ async def test_connection_proxy_restored_on_return(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1118,7 +1177,9 @@ async def test_connection_proxy_not_cleared_on_revisit_without_retyping(
         proxy="http://real-corp-proxy:8080",
         model="m",
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -1155,7 +1216,9 @@ async def test_connection_proxy_explicit_clear_survives_revisit(tmp_path):
         proxy="http://OLD-proxy:8080",
         model="m",
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -1193,7 +1256,9 @@ async def test_connection_space_in_token_field_types_normally(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1221,7 +1286,9 @@ async def test_connection_auto_probe_runs_on_leaving_token_field(tmp_path):
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -1259,7 +1326,9 @@ async def test_connection_auto_probe_preserves_ca_path(tmp_path):
         seen.append(verify)
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = _screen(config={"use_ssl": "/corp/root.pem"}, probe=probe)
         await pilot.app.push_screen(screen)
@@ -1289,7 +1358,9 @@ async def test_connection_preset_pick_triggers_auto_probe(tmp_path):
     def fake_probe(endpoint, auth, verify, model, *, config_proxy=None):
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -1321,7 +1392,9 @@ async def test_onboarding_model_step_pgup_goes_back_with_filter(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             fetch=lambda *a, **k: [
@@ -1367,7 +1440,9 @@ async def test_onboarding_model_step_filter_and_pick(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             fetch=lambda *a, **k: [
@@ -1428,7 +1503,9 @@ async def test_filter_fragment_does_not_become_the_model(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config={
@@ -1485,7 +1562,9 @@ async def test_double_enter_on_invalid_address_keeps_single_probe_line(
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1513,7 +1592,9 @@ async def test_double_enter_on_empty_address_keeps_single_probe_line(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1538,7 +1619,9 @@ async def test_pagedown_advances_connection_step(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1564,7 +1647,9 @@ async def test_pagedown_keeps_validation_of_connection_step(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1605,7 +1690,9 @@ async def test_pagedown_advances_from_mcp_step(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gc_tui.voice_runtime.state.voice_state_path", _fake_state_path
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1632,7 +1719,9 @@ async def test_pagedown_does_not_commit_on_confirm_step(tmp_path, monkeypatch):
     monkeypatch.setattr(
         w, "write_values", lambda path, vals, **kw: written.append(vals) or []
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1651,7 +1740,9 @@ async def test_pgup_from_confirm_returns_to_mcp_step(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM, STEP_VOICE
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -1672,7 +1763,9 @@ async def test_model_enter_marks_then_advances(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.model import ModelEditor
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             fetch=lambda *a, **k: [
@@ -1717,7 +1810,9 @@ async def test_model_footer_and_pagedown(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)]
@@ -1756,7 +1851,9 @@ async def test_model_manual_row_two_beat(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             fetch=lambda *a, **k: [ModelInfo("Qwen", tool_capable=True)]
@@ -1798,7 +1895,9 @@ async def test_model_footer_follows_filter_reselect(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Input, Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config={
@@ -1847,7 +1946,9 @@ async def test_model_footer_says_next_when_no_list(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Input, Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(fetch=lambda *a, **k: None)
         await pilot.app.push_screen(scr)
@@ -1888,7 +1989,9 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
     from gc_tui.editors.model import ModelEditor
     from textual.widgets import Static
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config={
@@ -1925,7 +2028,9 @@ async def test_mcp_space_toggles(tmp_path):
     from gc_tui.screens.onboarding import STEP_MCP, STEP_VOICE
     from test_onboarding_voice_step import FakeVoice
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(voice=FakeVoice())
         await pilot.app.push_screen(scr)
@@ -1948,15 +2053,17 @@ async def test_summary_line_fills_as_steps_complete(tmp_path):
     from textual.widgets import Static
 
     app = app_mod.TuiApp(
-        config={
-            "completions_url": "",
-            "chat_completion_headers": {},
-            "model": "",
-        }
+        settings=tui_settings(
+            {
+                "completions_url": "",
+                "chat_completion_headers": {},
+                "model": "",
+            }
+        )
     )
     async with app.run_test() as pilot:
         scr = OnboardingScreen(
-            config=app._config,
+            settings=app.base_settings(),
             config_path=str(tmp_path / "c.yml"),
             review_all=True,
             on_commit=lambda: None,
@@ -1995,7 +2102,9 @@ async def test_final_commit_writes_and_calls_on_commit(tmp_path):
     installed = []
     mcp = _FakeMcp()
     mcp.install = lambda name=None: installed.append(name) or 0
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             on_commit=lambda: committed.append(True),
@@ -2083,7 +2192,9 @@ async def test_review_on_registry_config_keeps_the_configured_model(tmp_path):
     cfg_path, cfg = _registry_cfg(
         tmp_path, "openai/gpt-5.6-terra", alias="gpt-5.6-terra"
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -2162,7 +2273,9 @@ async def test_model_step_passthrough_keeps_the_fallback_when_default_is_unset(
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg = _resolved_conn_cfg(cfg_path)
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -2246,7 +2359,9 @@ async def test_model_step_marks_the_default_slot_not_the_active_level(
     from gc_tui.screens.onboarding import STEP_MODEL
 
     cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -2290,7 +2405,9 @@ async def test_confirm_row_of_the_default_slot_ignores_the_active_level(
     from gc_tui.screens.onboarding import STEP_CONFIRM
 
     cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
@@ -2342,7 +2459,9 @@ async def test_confirm_summary_shows_the_fallback_model_when_default_is_unset(
     cfg = _resolved_conn_cfg(cfg_path)
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
     cfg["level"] = "max"
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
@@ -2384,11 +2503,13 @@ async def test_both_wizards_take_the_current_model_of_the_step_from_one_place(
 
     printed: list = []
     io = wz.WizardIO(reader=lambda p, secret: "", printer=printed.append)
-    wz._collect_model(io, {}, {}, fetch=lambda *a, **k: None)
+    wz._collect_model(io, make_settings(), {}, fetch=lambda *a, **k: None)
     assert any(sentinel in line for line in printed)
 
     cfg_path, cfg = _two_level_cfg(tmp_path, level="max")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
@@ -2435,7 +2556,9 @@ async def test_env_refs_survive_untouched_connection_step(
         cfg["completions_url"]
         == "https://real-server.example/v1/chat/completions"
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
@@ -2477,7 +2600,9 @@ async def test_env_ref_token_survives_when_var_unset(tmp_path, monkeypatch):
     assert (
         cfg["chat_completion_headers"]["Authorization"] == "Bearer "
     )  # резолв в пустоту
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
@@ -2510,7 +2635,9 @@ async def test_connection_new_token_replaces_env_ref(tmp_path, monkeypatch):
         model="m",
     )
     cfg = _resolved_conn_cfg(cfg_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(review_all=True, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
@@ -2553,7 +2680,9 @@ async def test_env_ref_token_survives_in_auto_mode(tmp_path, monkeypatch):
     )  # model не передан — остаётся реальным
     # значением шаблона, не сентинелом
     cfg = _resolved_conn_cfg(cfg_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(review_all=False, config_path=str(cfg_path), config=cfg)
         await pilot.app.push_screen(scr)
@@ -2595,7 +2724,9 @@ async def test_auto_probe_resolves_env_ref_in_address(tmp_path, monkeypatch):
         seen["endpoint"] = endpoint
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -2632,7 +2763,9 @@ async def test_auto_probe_resolution_does_not_leak_into_field_or_file(
         seen["endpoint"] = endpoint
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -2684,7 +2817,9 @@ async def test_auto_probe_uses_effective_token_when_field_untouched(tmp_path):
             )
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -2727,7 +2862,9 @@ async def test_auto_probe_resolves_env_ref_token_when_field_untouched(
             )
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -2764,7 +2901,9 @@ async def test_auto_probe_reports_missing_env_var_instead_of_probing(
 
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -2816,7 +2955,9 @@ async def test_ctrl_u_clears_the_saved_token_and_probes_without_it(tmp_path):
             )
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -2859,7 +3000,9 @@ async def test_ctrl_space_reprobes_the_connection_step(tmp_path):
         calls.append(endpoint)
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -2903,7 +3046,9 @@ async def test_alt_down_on_the_model_step_reloads_the_list(tmp_path):
             return None  # сервер лежал
         return [ModelInfo("glm-5.2-fp8", tool_capable=True)]
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config={
@@ -2951,7 +3096,9 @@ async def test_ctrl_space_on_the_model_step_does_nothing(tmp_path):
     def fetch(*a, **k):
         return [ModelInfo("glm-5.2-fp8", tool_capable=True)]
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config={
@@ -3000,7 +3147,9 @@ async def test_ctrl_space_on_an_empty_address_says_what_is_missing(tmp_path):
         calls.append(endpoint)
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -3046,7 +3195,9 @@ async def test_ctrl_space_on_an_env_reference_still_probes(
         calls.append(endpoint)
         return ProbeResult("ok", 200, None, 5, "доступен")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(config_path=str(cfg_path), config=cfg, probe=fake_probe)
         await pilot.app.push_screen(scr)
@@ -3088,7 +3239,9 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(
             return base  # что сервер отдавал сначала
         return base + [ModelInfo("deepseek-v3-base", tool_capable=True)]
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             config={
@@ -3153,7 +3306,9 @@ async def test_model_step_on_placeholder_address_behaves_as_on_empty_one(
         dialed.append(endpoint)
         return [ModelInfo("glm-5.2-fp8", tool_capable=True)]
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(fetch=fetch)
         await pilot.app.push_screen(scr)
@@ -3190,7 +3345,9 @@ async def test_probe_verdict_is_pulled_into_frame_on_every_update(
     monkeypatch.setattr(
         onb, "reveal", lambda w: revealed.append(w), raising=False
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -3244,7 +3401,9 @@ async def test_levels_step_skipped_writes_nothing(tmp_path):
     cfg_path, scr = _levels_screen(
         tmp_path, on_commit=lambda: committed.append(True)
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3281,7 +3440,9 @@ async def test_levels_step_fills_light_and_max(tmp_path):
     cfg_path, scr = _levels_screen(
         tmp_path, on_commit=lambda: committed.append(True)
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3347,7 +3508,9 @@ async def test_level_form_escape_returns_to_the_list_without_setting(tmp_path):
     from gc_tui.screens.onboarding import STEP_LEVELS
 
     _cfg_path, scr = _levels_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3397,7 +3560,9 @@ async def test_model_step_names_the_level_it_fills(tmp_path):
     scr = _screen(
         fetch=lambda *a, **k: [ModelInfo("Flash", tool_capable=True)]
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3417,7 +3582,9 @@ async def test_levels_continue_row_leaves_the_step_on_enter(tmp_path):
     from gc_tui.screens.onboarding import STEP_LEVELS, STEP_MCP
 
     cfg_path, scr = _levels_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3443,7 +3610,9 @@ async def test_levels_cursor_cycles_through_three_rows(tmp_path):
     from gc_tui.screens.onboarding import STEP_LEVELS
 
     cfg_path, scr = _levels_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3467,7 +3636,9 @@ async def test_levels_footer_follows_the_row_under_the_cursor(tmp_path):
     from textual.widgets import Static
 
     cfg_path, scr = _levels_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3494,7 +3665,9 @@ async def test_levels_footer_promises_the_keys_that_work(tmp_path):
     from textual.widgets import Static
 
     _cfg_path, scr = _levels_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3560,7 +3733,9 @@ async def test_full_pass_through_both_new_steps_writes_valid_config(
             ModelInfo("Heavy", tool_capable=True),
         ],
     )
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3635,7 +3810,9 @@ async def test_leaving_the_level_form_does_not_survive_the_step(tmp_path):
     from gc_tui.screens.onboarding import STEP_LEVELS, STEP_MCP
 
     _cfg_path, scr = _levels_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3695,7 +3872,9 @@ async def test_layer_note_in_the_wizard_carries_the_settings_address(
 
     monkeypatch.chdir(tmp_path)
     _cfg_path, scr = _active_profile_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3719,7 +3898,9 @@ async def test_no_active_profile_shows_no_warning_plaque(
     monkeypatch.chdir(tmp_path)
     cfg_path = _profiles_cfg(tmp_path, "home", "work")
     scr = _screen(config_path=str(cfg_path))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3851,7 +4032,9 @@ async def test_layer_note_shows_on_every_step_for_an_active_profile(
 
     monkeypatch.chdir(tmp_path)
     _cfg_path, scr = _active_profile_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3884,7 +4067,9 @@ async def test_degraded_config_note_shows_on_every_step(tmp_path, monkeypatch):
     message = 'config.yml не читается с профилем "work" (алиас "strong" не найден) — профиль снят на этот запуск'
     cfg_path = _profiles_cfg(tmp_path, "work")
     scr = _screen(config_path=str(cfg_path), degraded_note=message)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3906,7 +4091,9 @@ async def test_healthy_load_shows_no_degradation_note(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     cfg_path = _profiles_cfg(tmp_path, "work")
     scr = _screen(config_path=str(cfg_path))
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -3927,7 +4114,9 @@ async def test_confirm_shows_the_profile_layer_values(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     # конфиг слоя: url https://h/…, model profile-layer-model
     _cfg_path, scr = _active_profile_screen(tmp_path)
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -4055,7 +4244,9 @@ async def test_wizard_ctrl_u_on_token_clears_saved_token(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
         ed.move(1)  # лента курсора: адрес → токен
@@ -4072,7 +4263,9 @@ async def test_wizard_ctrl_u_on_address_field_leaves_token_alone(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
         await pilot.press("ctrl+u")  # курсор на адресе (позиция 0)
@@ -4090,7 +4283,9 @@ async def test_wizard_arrows_without_edits_do_not_reprobe(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
         calls = _count_probes(scr)
@@ -4113,7 +4308,9 @@ async def test_wizard_reprobes_after_token_cleared(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr, ed = await _conn_step(pilot, tmp_path)
         calls = _count_probes(scr)
@@ -4154,7 +4351,9 @@ async def test_review_levels_step_shows_the_levels_already_assigned(tmp_path):
     raw = yaml.safe_load(cfg_path.read_text(encoding="utf-8")) or {}
     cfg["models"], cfg["slots"] = raw.get("models"), raw.get("slots")
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -4207,7 +4406,9 @@ async def test_commit_does_not_claim_an_untouched_config_after_the_registry_land
         lambda *a, **kw: (_ for _ in ()).throw(ValueError("схема не валидна")),
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -4257,7 +4458,9 @@ async def test_commit_reports_an_oserror_instead_of_crashing(
         lambda *a, **kw: (_ for _ in ()).throw(OSError("нет прав на файл")),
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -4316,7 +4519,9 @@ async def test_commit_names_the_deactivation_when_only_the_pointer_landed(
         onboarding_config_writer, "write_values", refusing_flat_write
     )
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(
             review_all=True,
@@ -4379,7 +4584,7 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(
     )
 
     printed: list = []
-    monkeypatch.setattr(wz, "_reload_config", dict)
+    monkeypatch.setattr(wz, "_reload_config", make_settings)
     # Ридер отвечает URL только на ПЕРВЫЙ вопрос (адрес), дальше — Enter.
     # Константа здесь не годится: шаг выбора модели трактует непустой
     # несовпадающий ответ как новый запрос (см. `_ask_as_is`), и мастер честно
@@ -4396,17 +4601,21 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(
     # Незаполненные адрес и модель — плейсхолдеры шаблона (в загруженном
     # конфиге оба ключа есть всегда).
     wz.run(
-        {
-            "completions_url": onboarding.URL_SENTINEL,
-            "model": onboarding.MODEL_SENTINEL,
-        },
+        make_settings(
+            {
+                "completions_url": onboarding.URL_SENTINEL,
+                "model": onboarding.MODEL_SENTINEL,
+            }
+        ),
         tmp_path / "nowhere.yml",
         review_all=False,
         io=wz.WizardIO(reader=_reader, printer=printed.append),
     )
     assert any(sentinel in line for line in printed)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()
         await pilot.app.push_screen(scr)
@@ -4429,7 +4638,9 @@ async def test_confirm_step_warns_that_the_profile_will_be_deactivated(
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(deactivate_profile=True)
         await pilot.app.push_screen(scr)
@@ -4450,7 +4661,9 @@ async def test_confirm_step_says_nothing_about_the_profile_on_a_healthy_config(
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import STEP_CONFIRM
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen()  # признак не передан — ступень не «без профиля»
         await pilot.app.push_screen(scr)
@@ -4487,7 +4700,9 @@ async def test_confirm_commits_the_deactivation_along_with_the_settings(
     profile_file = tmp_path / "profiles" / "work.yml"
     profile_file.parent.mkdir(parents=True, exist_ok=True)
     profile_file.write_text('slots:\n  default: "strong"\n', encoding="utf-8")
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -4524,9 +4739,9 @@ async def test_both_wizards_take_the_deactivation_warning_from_one_place(
     monkeypatch.setattr(_of, "PROFILE_DEACTIVATION_WARNING", sentinel)
 
     printed: list = []
-    monkeypatch.setattr(wz, "_reload_config", dict)
+    monkeypatch.setattr(wz, "_reload_config", make_settings)
     wz.run(
-        {},
+        make_settings({}),
         tmp_path / "nowhere.yml",
         review_all=False,
         io=wz.WizardIO(reader=lambda p, s: "", printer=printed.append),
@@ -4534,7 +4749,9 @@ async def test_both_wizards_take_the_deactivation_warning_from_one_place(
     )
     assert any(sentinel in line for line in printed)
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         scr = _screen(deactivate_profile=True)
         await pilot.app.push_screen(scr)

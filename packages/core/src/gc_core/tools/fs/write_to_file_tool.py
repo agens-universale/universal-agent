@@ -1,6 +1,6 @@
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -62,7 +62,7 @@ def _normalize_newlines(content: str, newline: str) -> str:
 
 class WriteToFile(AbstractSimpleTool):
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         description = {
             "type": "function",
             "name": "fs_write_file",
@@ -127,7 +127,7 @@ class WriteToFile(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_write_file
 Tool description: Writes a file to the local filesystem.
 Input schema: {"type": "object", "properties": {"path": {"type": "string", "description": "The absolute path of the file to write to (must be absolute, not relative)."}, "content": {"type": "string", "description": "The complete content to write to the file."}, "make_dirs": {"type": "boolean", "description": "If true, create any missing parent folders before writing. Default false."}}, "required": ["path", "content"], "additionalProperties": false}

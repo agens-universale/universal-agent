@@ -85,18 +85,18 @@ class ChatCompletionsConfig(BaseModel):
 
 
 def auxiliary_llm_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> ChatCompletionsLlmConfig:
     """Typed aux-профиль: ``chat_completions.auxiliary_llm`` настроек.
 
-    ``config_dict`` — всё, что принимает ``settings_of``. Плоские
+    ``settings`` — всё, что принимает ``settings_of``. Плоские
     ``auxiliary_llm_params`` и ``chat_completions_params.auxiliary_llm`` ведут в
     одно поле модели (лист перекрывает секцию — прежний приоритет слоёв).
     """
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return settings_of(config_dict).chat_completions.auxiliary_llm
+    return settings_of(settings).chat_completions.auxiliary_llm
 
 
 def subagent_role_max_tokens_from_ctx(ctx: Any) -> int:

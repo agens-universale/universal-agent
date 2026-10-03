@@ -13,7 +13,6 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.config import (
     build_auth_connector,
     cli_forces_legacy_model,
-    flat_config,
 )
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store import (
@@ -71,13 +70,12 @@ except ImportError as e:
 try:
     # Обе функции читают конфиг на импорте модуля: сломанный config_server.yml
     # (load_server_config сам не защищён — голый open/yaml.safe_load) или
-    # сломанный агентский config.yml (build_agent_config_for_server → load_config)
+    # сломанный агентский config.yml (build_agent_settings_for_server → load_settings)
     # иначе роняли бы импорт server голым traceback'ом ещё до старта uvicorn —
     # тот же приём, что config_modules/env_vars.py уже применяет к битым
     # GC_*-переменным окружения.
     SERVER_CONFIG: Dict[str, Any] = load_server_config()
     BASE_AGENT_SETTINGS = build_agent_settings_for_server(SERVER_CONFIG)
-    BASE_AGENT_CONFIG: Dict[str, Any] = flat_config(BASE_AGENT_SETTINGS)
 except (ValueError, OSError, yaml.YAMLError) as exc:
     raise SystemExit(
         f"[gc] сервер не стартовал: конфиг не загружается ({exc})"
@@ -106,7 +104,7 @@ temporal_registry = configure_temporal(app, SERVER_CONFIG)
 register_cleanup_threads_on_startup(
     app,
     server_config=SERVER_CONFIG,
-    base_agent_config=BASE_AGENT_CONFIG,
+    base_agent_settings=BASE_AGENT_SETTINGS,
     logger=logger,
 )
 
@@ -575,8 +573,7 @@ async def events_webhook(request: Request):
             if trace_id
             else BASE_AGENT_SETTINGS
         )
-        config_dict = flat_config(loaded)
-        auth_connector = build_auth_connector(config_dict)
+        auth_connector = build_auth_connector(loaded)
         # Легаси-форс (спека §2): agent_overrides.model/completions_url поверх
         # непустого реестра моделей — тот же контракт, что CLI --model
         # (agent_overrides перекрывают config.yml так же, как CLI-аргументы).
@@ -657,7 +654,7 @@ async def get_thread_logs(system: str, task_id: str):
         )
 
     try:
-        threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
+        threads_dir = resolve_threads_dir(BASE_AGENT_SETTINGS)
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -713,7 +710,7 @@ async def get_all_thread_logs():
     а также удобно построить UI "журнала".
     """
     try:
-        threads_dir = resolve_threads_dir(BASE_AGENT_CONFIG)
+        threads_dir = resolve_threads_dir(BASE_AGENT_SETTINGS)
     except Exception as e:
         raise HTTPException(
             status_code=500,

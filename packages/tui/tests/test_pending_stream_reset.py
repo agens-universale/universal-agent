@@ -1,5 +1,6 @@
 """Pending-реплика × stream_reset (компакция треда во время бегущего run)."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 import threading
 from pathlib import Path
@@ -70,7 +71,9 @@ async def test_pending_record_survives_stream_reset(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     fake = _Fake()
     app._executor_factory = lambda: fake

@@ -4,18 +4,19 @@ from gc_core.tools.exec.run_python_code import RunPythonCode
 from gc_core.tools.fs.apply_file_edits import ApplyFileEdits
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.settings import make_settings
 
 
 async def test_harbor_pack_off_by_default():
     cfg = {"backend_api_mode": "chat_completions"}
-    tools_data, _, _, _ = await abuild_tools_data(cfg)
+    tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
     assert tools_data["fs_read_file"]["tool_fabric"] is ReadFile
     assert "download_file" in tools_data
 
 
 async def test_harbor_flag_keeps_base_tools_and_drops_download_file():
     cfg = {"backend_api_mode": "chat_completions", "os_backend": "harbor"}
-    tools_data, _, _, _ = await abuild_tools_data(cfg)
+    tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
     assert tools_data["fs_read_file"]["tool_fabric"] is ReadFile
     assert tools_data["fs_write_file"]["tool_fabric"] is WriteToFile
     assert tools_data["fs_apply_file_edits"]["tool_fabric"] is ApplyFileEdits

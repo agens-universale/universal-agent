@@ -69,9 +69,7 @@ class FileInfo(AbstractSimpleTool):
     max_hash_bytes = DEFAULT_MAX_HASH_BYTES
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "fs_file_info",
@@ -95,9 +93,7 @@ class FileInfo(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return (
             "Tool name: fs_file_info\n"
             "Cheap read-only metadata before editing a file.\n"

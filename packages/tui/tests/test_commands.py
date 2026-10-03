@@ -1,5 +1,6 @@
 """Реестр команд: метаданные, lookup, closest-match (§4)."""
 
+from gc_testkit.tui_support import tui_settings
 from gc_tui.commands import (
     Command,
     CommandRegistry,
@@ -304,7 +305,7 @@ async def test_f6_opens_settings_with_input_focused():
     from gc_tui.app import TuiApp
     from gc_tui.screens.settings import SettingsScreen
 
-    app = TuiApp(config={})
+    app = TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         app.screen.query_one("#cmdinput").focus()
         await pilot.pause()

@@ -150,7 +150,11 @@ async def test_tool_backend_resolution():
 
     from gc_core.tools.fs.read_file import ReadFile
 
-    cfg = {"backend_api_mode": "chat_completions", "save_logs": False}
+    from gc_testkit.settings import make_settings
+
+    cfg = make_settings(
+        {"backend_api_mode": "chat_completions", "save_logs": False}
+    )
     ctx = await acreate_run_context(cfg)
     t = CallableTool(ReadFile(ctx=ctx))
     assert isinstance(t._backend, LocalFsBackend)

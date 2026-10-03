@@ -8,7 +8,7 @@ import os
 import sys
 import weakref
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
     from gc_core.backends.protocol import FsBackend
@@ -117,9 +117,7 @@ def discover_backend_cwd(backend: FsBackend) -> str:
     return "/"
 
 
-async def aprime_backend_cwd(
-    backend: Any, config: Optional[Dict[str, Any]] = None
-) -> None:
+async def aprime_backend_cwd(backend: Any, settings: Any = None) -> None:
     """Узнать рабочий каталог окружения до сборки рабочей области.
 
     Песочнице рабочий каталог надо спросить у самого окружения, а это сеть —
@@ -141,6 +139,9 @@ async def aprime_backend_cwd(
     Шестой пункт заменяет прежний молчаливый откат к ``/``. Цена ошибки
     несимметрична: лишний отказ сборки виден сразу, а корень ``/`` уводит весь
     прогон работать не там, и замечают это по странным путям в ответах.
+
+    ``settings`` — всё, что принимает ``runtime_of`` (контекст, ``LoadedSettings``);
+    корень берётся из его рантайма.
     """
     default_cwd = getattr(backend, "default_cwd", None)
     if callable(default_cwd) and default_cwd():
@@ -158,7 +159,7 @@ async def aprime_backend_cwd(
         except Exception as exc:  # окружение может быть недоступно
             reasons.append(f"aprime_default_cwd: {type(exc).__name__}")
 
-    if _config_root_raw(config):
+    if _config_root_raw(settings):
         # Корень назван явно — он и победит в `resolve_execution_root`.
         return
 
@@ -205,10 +206,18 @@ async def aprime_backend_cwd(
     )
 
 
-def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
-    if not isinstance(config, dict):
+def _config_root_raw(settings: Any) -> Optional[str]:
+    """Явный корень рантайма (``launch_root``, иначе ``project_root``).
+
+    ``settings`` — всё, что принимает ``runtime_of``; ``None`` — корня нет.
+    """
+    if settings is None:
         return None
-    raw = config.get("launch_root") or config.get("project_root")
+    # Ленивый импорт: settings → config_modules → … → этот модуль.
+    from gc_core.settings import runtime_of
+
+    runtime = runtime_of(settings)
+    raw = runtime.launch_root or runtime.project_root
     if raw is None:
         return None
     text = str(raw).strip()
@@ -217,10 +226,13 @@ def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
 
 def resolve_execution_root(
     backend: FsBackend,
-    config: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
 ) -> str:
-    """Resolve project root in execution-environment coordinates."""
-    raw = _config_root_raw(config)
+    """Resolve project root in execution-environment coordinates.
+
+    ``settings`` — anything ``runtime_of`` accepts (context, ``LoadedSettings``).
+    """
+    raw = _config_root_raw(settings)
     if getattr(backend, "is_sandbox", False):
         if raw:
             # Already in container coordinates — do not host-abspath.
@@ -276,10 +288,14 @@ def resolve_root_writable(backend: FsBackend, root: str) -> bool:
 
 def build_execution_workspace(
     backend: FsBackend,
-    config: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
 ) -> ExecutionWorkspace:
-    """Assemble workspace once (typically in ``create_run_context``)."""
-    root = resolve_execution_root(backend, config)
+    """Assemble workspace once (typically in ``create_run_context``).
+
+    ``settings`` — anything ``runtime_of`` accepts; the root comes from its
+    runtime (``launch_root``/``project_root``).
+    """
+    root = resolve_execution_root(backend, settings)
     return ExecutionWorkspace(
         root=root,
         backend=backend,

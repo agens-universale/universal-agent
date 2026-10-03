@@ -23,6 +23,7 @@ from gc_core.tools.subagents.runner_preparation import (
     resolve_prepared_subagent,
 )
 from gc_core.usage.account import CATEGORY_MAIN
+from gc_testkit.settings import make_settings
 
 
 def _state():
@@ -41,12 +42,14 @@ def _state():
 
 class Preparation:
     def __init__(self):
-        self.config = {"subagent_max_steps": 5}
+        # Настройки ребёнка, подготовленные исполнителем заранее.
+        self.config = make_settings({"subagent_max_steps": 5})
         self.child_ctx = SimpleNamespace(
             run_id="child-run",
             logger=None,
             model_router=None,
-            config_dict=self.config,
+            settings=self.config.settings,
+            runtime=self.config.runtime,
             tools_data={},
             operations=object(),
         )
@@ -165,9 +168,7 @@ async def test_prepared_runner_preserves_shared_state_usage_and_input(
 
 
 async def test_native_missing_preparation_cannot_fall_back_to_filesystem():
-    runner = SubagentRunner(
-        SimpleNamespace(tool_effect=object()), _state(), {}
-    )
+    runner = SubagentRunner(SimpleNamespace(tool_effect=object()), _state())
     with pytest.raises(RuntimeError, match="explicit preparation"):
         await runner.arun("subagent_worker", {"task": "work"}, _forbid)
 

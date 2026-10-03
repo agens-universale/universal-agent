@@ -1,7 +1,6 @@
 """Тесты summarize.summary_logging."""
 
 import json
-from types import SimpleNamespace
 
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
@@ -15,6 +14,7 @@ from gc_core.summarize.summary_logging import (
     resolve_summary_trace_path,
     trigger_reason_label,
 )
+from gc_testkit.settings import fake_ctx
 
 
 def test_summary_slice_fallback_logs_warning():
@@ -105,22 +105,16 @@ def test_cli_prints_full_summary_texts(capsys):
 
 def test_resolve_summary_trace_path_prefers_ctx(tmp_path):
     custom = tmp_path / "custom_trace.jsonl"
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
+        {"save_logs": True, "logs_dump_dir": str(tmp_path / "ignored")},
         summary_trace_path=str(custom),
-        config_dict={
-            "save_logs": True,
-            "logs_dump_dir": str(tmp_path / "ignored"),
-        },
     )
     assert resolve_summary_trace_path(ctx) == str(custom)
 
 
 async def test_append_summary_trace_record_writes_jsonl(tmp_path):
     trace_file = tmp_path / "trace.jsonl"
-    ctx = SimpleNamespace(
-        summary_trace_path=str(trace_file),
-        config_dict={},
-    )
+    ctx = fake_ctx(summary_trace_path=str(trace_file))
     await aappend_summary_trace_record(
         ctx,
         trigger_reason="turn_end",
@@ -135,7 +129,7 @@ async def test_append_summary_trace_record_writes_jsonl(tmp_path):
 
 async def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
     trace_file = tmp_path / "summary_trace_main_abc.jsonl"
-    ctx = SimpleNamespace(summary_trace_path=str(trace_file), config_dict={})
+    ctx = fake_ctx(summary_trace_path=str(trace_file))
 
     await aappend_summary_trace_record(
         ctx,
@@ -150,10 +144,7 @@ async def test_append_summary_trace_record_absent_trace_adds_no_key(tmp_path):
 
 async def test_append_summary_trace_record_writes_trace_id(tmp_path):
     trace_file = tmp_path / "summary_trace_main_abc.jsonl"
-    ctx = SimpleNamespace(
-        summary_trace_path=str(trace_file),
-        config_dict={"trace_id": "wf-42"},
-    )
+    ctx = fake_ctx({"trace_id": "wf-42"}, summary_trace_path=str(trace_file))
 
     await aappend_summary_trace_record(
         ctx,

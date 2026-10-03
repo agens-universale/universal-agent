@@ -19,7 +19,9 @@ from gc_core.tools.subagents.registry import SUBAGENT_CLASSES
 
 @dataclass(frozen=True)
 class PreparedChildState:
-    config_dict: dict[str, Any]
+    #: Настройки ребёнка — всё, что принимает ``settings_of`` (локально —
+    #: ``LoadedSettings``). Имя поля прежнее: его знает durable-исполнитель.
+    config_dict: Any
     tools_spec: list[dict[str, Any]]
     tools_description: list[Any]
     system_prompt: str | None
@@ -52,7 +54,9 @@ class SubagentPreparation(Protocol):
 
     def resolve_subagent(self, tool_name: str) -> Any: ...
 
-    def build_child_config(self, runner: Any) -> dict[str, Any]: ...
+    def build_child_config(self, runner: Any) -> Any:
+        """Настройки ребёнка: всё, что принимает ``settings_of``."""
+        ...
 
     async def build_child_context(
         self, runner: Any, tool_name: str

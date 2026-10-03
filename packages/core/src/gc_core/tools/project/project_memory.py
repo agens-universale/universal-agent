@@ -90,9 +90,7 @@ class ProjectMemory(AbstractSimpleTool):
         self._baseline_updated = False
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "project_memory",
@@ -133,9 +131,7 @@ class ProjectMemory(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: project_memory
 Tool description: Persistent project-scoped markdown memory. Survives CLI restarts.
 Use read when Project Info reports long memory and conventions or durable facts may matter.

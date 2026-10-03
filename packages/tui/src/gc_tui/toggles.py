@@ -9,13 +9,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
 
+from gc_core.settings import runtime_of, settings_of
 from rich.text import Text
 
 from gc_tui import palette as _pal
 from gc_tui.session_settings import (
     SESSION_KEYS,
-    effective_finish_gate_mode,
-    effective_text_answer_mode,
     finish_gate_mode_of,
     text_answer_mode_of,
 )
@@ -25,36 +24,19 @@ _TUI_FINISH_GATE_MODE = "tui.finish_gate_mode"
 _TUI_TEXT_ANSWER_MODE = "tui.text_answer_mode"
 
 
-def apply_finish_gate_mode(cfg: Dict[str, Any]) -> None:
-    """TUI-wiring: спроецировать эффективный режим /gate в runtime-ключи судьи.
-
-    Зовётся ТОЛЬКО из TUI-сборки конфига (tui/app.py::_build_real_executor):
-    CLI/server/swarm не зовут — у них глобальный agent.strict_turn_finish_validation
-    как был, и ключа finish_gate_smart нет вовсе. strict остаётся булевым
-    (mode != "off" → судья потенциально включён), smart — отдельным runtime-ключом
-    (спека §3): guard читает finish_gate_smart + State.turn_tool_calls."""
-    mode = effective_finish_gate_mode(cfg)
-    cfg["strict_turn_finish_validation"] = mode != "off"
-    cfg["finish_gate_smart"] = mode == "smart"
-
-
 def tui_agent_settings(loaded):
     """Настройки агента TUI поверх действующих: промпт-ассеты, адаптивный bounce
     текстового ответа (`tui.text_answer_mode`) и проекция режима /gate.
 
-    Принимает `LoadedSettings` и отдаёт новый; переходно — плоский словарь,
-    который правится на месте и возвращается (окна, собранные словарём)."""
+    Принимает `LoadedSettings` и отдаёт новый. Проекция /gate — только здесь:
+    CLI/server/swarm её не делают, у них глобальный
+    `agent.strict_turn_finish_validation` как был и `finish_gate_smart` нет вовсе.
+    strict остаётся булевым (mode != "off" → судья потенциально включён), smart —
+    отдельным рантайм-сигналом (спека §3): guard читает `finish_gate_smart` +
+    `State.turn_tool_calls`."""
     from gc_tui.services.prompt_assets import tui_special_instructions_path
 
     instructions = tui_special_instructions_path()
-    if isinstance(loaded, dict):
-        loaded["console_trace"] = False
-        loaded["chat_completions_special_instructions_path"] = instructions
-        loaded["text_answer_mode"] = loaded.get(
-            "tui_text_answer_mode", "judge"
-        )
-        apply_finish_gate_mode(loaded)
-        return loaded
     mode = finish_gate_mode_of(loaded.settings)
     return loaded.with_overrides(
         {
@@ -90,10 +72,11 @@ def resolve_preset(values: Dict[str, str]) -> str:
     return PRESET_CUSTOM
 
 
-def resolve_rigor_state(cfg: Dict[str, Any]) -> str:
-    """Резолв /rigor от ЭФФЕКТИВНЫХ значений пары в cfg (то же правило коллизии,
-    что у витрины — через SESSION_KEYS[k].effective_value). state-callable /rigor."""
-    values = {k: SESSION_KEYS[k].effective_value(cfg) for k in RIGOR_KEYS}
+def resolve_rigor_state(settings: Any) -> str:
+    """Резолв /rigor от ЭФФЕКТИВНЫХ значений пары в настройках (то же правило
+    коллизии, что у витрины — через SESSION_KEYS[k].effective_value).
+    state-callable /rigor; `settings` — всё, что принимает `settings_of`."""
+    values = {k: SESSION_KEYS[k].effective_value(settings) for k in RIGOR_KEYS}
     return resolve_preset(values)
 
 
@@ -139,7 +122,8 @@ class ToggleSpec:
     снимком executor)."""
 
     values: Tuple[ToggleValue, ...]
-    state: Callable[[Dict[str, Any]], str]
+    # Читатель действующего значения: настройки окна (`LoadedSettings`).
+    state: Callable[[Any], str]
     label: str
     summary: str
     dotted: str = ""
@@ -235,15 +219,35 @@ def profile_values(app: Any) -> Tuple[ToggleValue, ...]:
     )
 
 
-def _profile_slots_summary(cfg: Dict[str, Any]) -> str:
-    slots = cfg.get("slots") or {}
-    models = cfg.get("models") or {}
+def _model_names(models: Any) -> Dict[str, str]:
+    """Алиас → провайдерский id модели: записи реестра настроек (модели) либо
+    сырого документа файла профиля (словари)."""
+    names: Dict[str, str] = {}
+    for alias, entry in (models or {}).items():
+        model = (
+            entry.get("model")
+            if isinstance(entry, dict)
+            else getattr(entry, "model", None)
+        )
+        names[alias] = str(model or "")
+    return names
+
+
+def _settings_slots(settings: Any) -> Dict[str, Any]:
+    """Слоты уровней из настроек — словарём, как в документе профиля."""
+    return settings_of(settings).slots.model_dump()
+
+
+def _profile_slots_summary(
+    slots: Dict[str, Any], models: Dict[str, str]
+) -> str:
+    """«light m1 · default m2»: уровни со слотом, чей алиас есть в реестре
+    (`models` — алиас → id модели, см. `_model_names`)."""
     pairs = []
-    for level, alias in slots.items():
-        entry = models.get(alias)
-        if entry is None:
+    for level, alias in (slots or {}).items():
+        if alias not in models:
             continue
-        pairs.append((level, f"{level} {entry.get('model') or alias}"))
+        pairs.append((level, f"{level} {models[alias] or alias}"))
     pairs.sort(key=lambda pair: _LEVEL_ORDER.get(pair[0], 99))
     return " · ".join(text for _, text in pairs)
 
@@ -257,8 +261,7 @@ def _profile_mcp_rebuild_note(app: Any, value: str) -> str:
     # Битый или нечитаемый файл (человек правит руками) даёт пустой документ:
     # предупреждение о MCP просто не покажется.
     raw = _profile_file_doc(app, value)
-    # Во ВХОДНОМ документе секция называется `mcp: servers:` — плоский `mcp-servers`
-    # существует только в снимке flatten_app_config (config.py), а литеральный
+    # Во ВХОДНОМ документе секция называется `mcp: servers:` — литеральный
     # верхнеуровневый `mcp-servers:` схема профиля отвергает (docs/configuration.md).
     mcp = raw.get("mcp") if isinstance(raw, dict) else None
     servers = mcp.get("servers") if isinstance(mcp, dict) else None
@@ -278,10 +281,12 @@ def profile_value_hint(app: Any, value: str) -> str:
         if not names:
             return _PROFILE_EMPTY_HINT
         return f"не выбран · доступно: {', '.join(names)} · Enter — открыть список"
-    cfg = _effective_cfg(app)
+    settings = _effective_settings(app)
     ref = _discovered_profiles(app).get(value)
     parts = []
-    summary = _profile_slots_summary(cfg)
+    summary = _profile_slots_summary(
+        _settings_slots(settings), _model_names(settings_of(settings).models)
+    )
     if summary:
         parts.append(summary)
     if ref is not None:
@@ -348,7 +353,7 @@ def _cached_assembly_error(app: Any, name: str) -> str:
     хоть один файл сборки этого профиля — общий кэш для витрины списка
     (`profile_picker_options`, один проход на открытие) И хинта подвала
     (`profile_picker_hint`): какая из них первой спросила про имя, та и платит
-    единственную полную сборку (`probe_profile_assembly` → `load_config_ex`,
+    единственную полную сборку (`probe_profile_assembly` → `load_settings`,
     ~6 мс), вторая берёт готовый ответ. Без этого хинт пересобирал конфиг
     заново на каждый highlight и на каждый тик поллинга главного экрана
     (`ArgPicker.desired_height`, 0.25 с) — 4 раза в секунду на UI-потоке, пока
@@ -393,10 +398,8 @@ def profile_picker_options(app: Any) -> Tuple[Tuple[str, str, str], ...]:
     без общего кэша с этим провайдером он звал бы пробу заново 4 раза в
     секунду, пока список просто открыт."""
     refs = _discovered_profiles(app)
-    effective = str(_effective_cfg(app).get("profile") or "")
-    base_pointer = str(
-        (getattr(app, "_config", None) or {}).get("profile") or ""
-    )
+    effective = runtime_of(_effective_settings(app)).active_profile or ""
+    base_pointer = runtime_of(_global_settings(app)).active_profile or ""
     none_status = _PROFILE_ACTIVE_STATUS if not effective else ""
     options = [(PROFILE_NONE_VALUE, "работать чистым конфигом", none_status)]
     for name in sorted(refs):
@@ -446,8 +449,14 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     doc = _profile_file_doc(app, name)
     # Модели для подписи слота: из файла профиля, с фоллбэком на эффективный
     # реестр (профиль может ссылаться на алиасы нижних слоёв).
-    effective_models = _effective_cfg(app).get("models") or {}
-    merged_models = {**effective_models, **(doc.get("models") or {})}
+    effective_models = _model_names(
+        settings_of(_effective_settings(app)).models
+    )
+    doc_models = doc.get("models")
+    merged_models = {
+        **effective_models,
+        **_model_names(doc_models if isinstance(doc_models, dict) else {}),
+    }
     parts = []
     # Статус строки говорит ЧТО («✗ не применится»), подсказка — ПОЧЕМУ. Причина
     # идёт ПЕРВОЙ и целиком: текст ядра самодостаточен («<путь>: …»), а рядом с
@@ -455,8 +464,9 @@ def profile_picker_hint(app: Any, value: Any) -> str:
     reason = _cached_assembly_error(app, name)
     if reason:
         parts.append(reason)
+    doc_slots = doc.get("slots")
     summary = _profile_slots_summary(
-        {"slots": doc.get("slots") or {}, "models": merged_models}
+        doc_slots if isinstance(doc_slots, dict) else {}, merged_models
     )
     if summary:
         parts.append(summary)
@@ -510,7 +520,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
             ToggleValue("default", "", _pal.RUN_COLOR),
             ToggleValue("max", "", _pal.ACCENT),
         ),
-        state=lambda cfg: str(cfg.get("level") or "default"),
+        state=lambda settings: str(settings_of(settings).level or "default"),
         label="уровень модели",
         summary="от лёгкой до максимальной сложности задачи",
         group="level",
@@ -523,7 +533,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
         dotted="profile",
         values=(),
         values_provider=profile_values,
-        state=lambda cfg: str(cfg.get("profile") or ""),
+        state=lambda settings: str(runtime_of(settings).active_profile or ""),
         label="профили",
         summary="переключаемые наборы настроек",
         group="models",
@@ -576,7 +586,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
                 _pal.ACCENT,
             ),
         ),
-        state=effective_finish_gate_mode,
+        state=finish_gate_mode_of,
         label="самопроверка выполнения задачи",
         summary="закрыт ли запрос",
         palette_default=False,
@@ -600,7 +610,7 @@ TOGGLES: Dict[str, ToggleSpec] = {
                 _pal.ACCENT,
             ),
         ),
-        state=effective_text_answer_mode,
+        state=text_answer_mode_of,
         label="формат ответа",
         summary="допустим ли текст как финал хода",
         palette_default=False,
@@ -731,23 +741,18 @@ def padded_track(
 
 def toggle_state(app: Any, name: str) -> str:
     """Текущее эффективное значение тоггла `name` (`gate` — через правило
-    коллизии, `answers` — сырое значение). Источник — эффективный конфиг
-    (база + сессионные переопределения), не `app._config`."""
-    getter = getattr(app, "effective_config", None)
-    cfg = (
-        getter() if callable(getter) else (getattr(app, "_config", None) or {})
-    )
-    return TOGGLES[name].state(cfg)
+    коллизии, `answers` — сырое значение). Источник — действующие настройки
+    (база + сессионные переопределения), не база окна."""
+    return TOGGLES[name].state(_effective_settings(app))
 
 
 def toggle_state_base(app: Any, name: str) -> str:
-    """Глобальное (файловое) значение тоггла `name`: из `app._config` БЕЗ
+    """Глобальное (файловое) значение тоггла `name`: из базы окна БЕЗ
     сессионных переопределений — то, что правит секция Settings (в отличие от
     `toggle_state`, отдающего эффективное = база + сессия). Читается тем же
     правилом коллизии (`TOGGLES[name].state`), что и эффективное, — иначе
     строка секции и оверрайд-пометка разошлись бы правилами."""
-    base = getattr(app, "_config", None) or {}
-    return TOGGLES[name].state(base)
+    return TOGGLES[name].state(_global_settings(app))
 
 
 def owning_preset_name(toggle_name: str) -> Optional[str]:
@@ -813,13 +818,14 @@ def apply_toggle(app: Any, name: str, value: str) -> str:
     return toggle_state(app, name)
 
 
-def _global_cfg(app: Any) -> Dict[str, Any]:
-    return getattr(app, "_config", None) or {}
+def _global_settings(app: Any) -> Any:
+    """База окна (`LoadedSettings`) — то, что правит секция Settings."""
+    return app.base_settings()
 
 
-def _effective_cfg(app: Any) -> Dict[str, Any]:
-    getter = getattr(app, "effective_config", None)
-    return getter() if callable(getter) else _global_cfg(app)
+def _effective_settings(app: Any) -> Any:
+    """Действующие настройки окна (`LoadedSettings`): база + сессия."""
+    return app.effective_settings()
 
 
 def next_toggle_value(app: Any, name: str, direction: int) -> str:
@@ -852,7 +858,7 @@ def preset_track_extra(app: Any, name: str) -> Any:
     spec = TOGGLES[name]
     if not spec.preset_keys:
         return None
-    return spec.state(_effective_cfg(app)) == PRESET_CUSTOM
+    return spec.state(_effective_settings(app)) == PRESET_CUSTOM
 
 
 def preset_custom_hint(
@@ -872,9 +878,13 @@ def preset_custom_hint(
     значения и рамка ВСЕГДА от базового конфига, независимо от сессионных
     оверрайдов пары (те уже показаны отдельным хвостом «в текущей сессии»)."""
     spec = TOGGLES[name]
-    cfg = _global_cfg(app) if scope == "global" else _effective_cfg(app)
-    x = SESSION_KEYS[spec.preset_keys[0]].effective_value(cfg)
-    y = SESSION_KEYS[spec.preset_keys[1]].effective_value(cfg)
+    settings = (
+        _global_settings(app)
+        if scope == "global"
+        else _effective_settings(app)
+    )
+    x = SESSION_KEYS[spec.preset_keys[0]].effective_value(settings)
+    y = SESSION_KEYS[spec.preset_keys[1]].effective_value(settings)
     if scope != "global":
         overrides = getattr(app, "_session_overrides", None) or {}
         if any(k in overrides for k in spec.preset_keys):

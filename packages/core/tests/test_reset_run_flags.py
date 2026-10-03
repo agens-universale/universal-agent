@@ -65,7 +65,7 @@ async def test_batch_matches_original_flags_and_tui(
 async def test_external_write_between_open_and_batch_is_preserved(tmp_path):
     store = DurableFileThreadStore(str(tmp_path))
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="s", thread_id="t", store=store
+        settings=None, system_id="s", thread_id="t", store=store
     )
     store.save_meta(
         "s",

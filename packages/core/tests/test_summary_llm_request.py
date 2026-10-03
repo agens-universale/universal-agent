@@ -4,6 +4,7 @@ import pytest
 from gc_core.summarize import llm as summary_llm
 from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def test_auxiliary_llm_completion_kwargs_matches_auxiliary_llm():
@@ -50,12 +51,11 @@ def test_request_summary_text_uses_ctx_auxiliary_llm(monkeypatch):
         summary_llm, "arequest_chat_completion_text", _fake_request
     )
 
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         auxiliary_llm=SimpleNamespace(
             max_tokens=7777,
             completion_kwargs={"reasoning_effort": "none"},
         ),
-        config_dict={},
         logger=None,
     )
     out = run_coro(
@@ -84,12 +84,11 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
         summary_llm, "arequest_chat_completion_text", _fake_request
     )
 
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,
             completion_kwargs={"reasoning_effort": "none"},
         ),
-        config_dict={},
     )
     run_coro(
         summary_llm.arequest_summary_text(
@@ -111,7 +110,7 @@ def test_request_summary_text_requires_auxiliary_llm_on_ctx():
     with pytest.raises(RuntimeError, match="auxiliary_llm"):
         run_coro(
             summary_llm.arequest_summary_text(
-                ctx=SimpleNamespace(config_dict={}),
+                ctx=fake_ctx(),
                 state=SimpleNamespace(default_model="m"),
                 messages=[{"role": "user", "content": "hi"}],
                 request_label="summary_batch_1",
@@ -160,8 +159,8 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
         as_coro(lambda _s, _c, resolved=None: {}),
     )
 
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "completions_url": "http://example.test/v1/chat/completions",
             "backend_request_timeout_sec": 600,
             "chat_completion_kwargs": {

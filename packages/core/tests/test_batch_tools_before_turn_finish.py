@@ -18,6 +18,7 @@ from gc_core.processing_responses import (
 from gc_core.states import State
 from gc_core.tools.turn.submit_solution import SubmitSolution
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _async_noop(fn):
@@ -46,8 +47,7 @@ def _state(**extra):
 
 
 def _ctx(tools_data=None):
-    return SimpleNamespace(
-        config_dict={},
+    return fake_ctx(
         run_id="run",
         subagent_progress_sink=None,
         logger=None,
@@ -386,8 +386,8 @@ def _agent_ctx(**overrides):
         "no_tool_call_max_count": 5,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=None,
         auth_connector=None,
     )

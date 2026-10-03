@@ -71,27 +71,27 @@ def normalize_project_memory_config(
 
 
 def project_memory_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> ProjectMemoryConfig:
-    """``ProjectMemoryConfig`` настроек (``config_dict`` — всё, что принимает ``settings_of``)."""
+    """``ProjectMemoryConfig`` настроек (``settings`` — всё, что принимает ``settings_of``)."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return settings_of(config_dict).project_memory
+    return settings_of(settings).project_memory
 
 
 def project_memory_limits_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> dict[str, int]:
-    cfg = project_memory_from_config_dict(config_dict)
+    cfg = project_memory_from_config_dict(settings)
     return {
         "max_chars": cfg.max_chars,
         "max_append_chars": cfg.max_append_chars,
     }
 
 
-def project_memory_notice_enabled(config_dict: Any) -> bool:
+def project_memory_notice_enabled(settings: Any) -> bool:
     """Project memory exists/changed hints: только явный флаг в ``project_memory``."""
     return project_memory_from_config_dict(
-        config_dict
+        settings
     ).enable_project_memory_notice

@@ -291,6 +291,12 @@ def _loaded_of(source: Any) -> LoadedSettings:
     )
     if flat is None:
         return LoadedSettings(settings=AppConfig())
+    if os.environ.get("GC_STRICT_SETTINGS") == "1":
+        # Репетиция финала переходного периода: плоский словарь — ошибка.
+        raise TypeError(
+            "ожидались настройки (контекст, LoadedSettings, AppConfig), а не "
+            f"плоский словарь: {type(source).__name__}"
+        )
     # Переходно (тесты с плоским словарём): строгая конвертация, кэш при
     # неизменяемом виде.
     from gc_core.config_modules.frozen import FrozenConfigDict, derived_cache

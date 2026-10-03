@@ -1,5 +1,6 @@
 """'/status' дампит meta + runtime активной задачи в Viewer."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -64,7 +65,9 @@ async def test_status_with_active_task_opens_viewer_with_meta_and_runtime(
     tid = "st1"
     _write_task(tmp_path, tid)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -90,7 +93,9 @@ async def test_status_without_active_task_shows_idle(tmp_path):
     from gc_tui.screens.viewer import ViewerScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -111,7 +116,9 @@ async def test_status_dash_dash_raw_accepted_no_crash(tmp_path):
     from gc_tui.screens.viewer import ViewerScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

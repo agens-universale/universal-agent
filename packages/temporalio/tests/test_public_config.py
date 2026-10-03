@@ -1,160 +1,260 @@
-"""Public workflow policy is explicit, complete and free of transport secrets."""
+"""Публичный снимок настроек: вложенный дамп AppConfig без закрытых полей.
 
+Закрытые поля — по метаданным схемы (``worker_only``/``secret``) плюс адрес
+записи реестра моделей; снимок собирается обратно в те же настройки.
+"""
+
+import dataclasses
 import json
-from copy import deepcopy
 from dataclasses import asdict
 
 import pytest
-from gc_core.config import flatten_app_config
+from gc_core.config_modules.field_meta import leaf_meta
 from gc_core.config_modules.root import AppConfig
+from gc_core.context_preparation import settings_from_snapshot
 from gc_core.model_router import ModelRouter
+from gc_core.settings import (
+    LoadedSettings,
+    RuntimeEnv,
+    _alias_path,
+    is_explicit,
+)
 from gc_ua_temporalio.public_config import (
-    PUBLIC_POLICY_SCHEMA,
-    WORKER_ONLY_FIELDS,
     PublicConfigError,
+    is_private_path,
     public_config_snapshot,
-)
-from pydantic import BaseModel
-
-
-def json_value(value):
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, list):
-        return [json_value(item) for item in value]
-    if isinstance(value, dict):
-        return {key: json_value(item) for key, item in value.items()}
-    return value
-
-
-# Список до переезда в метаданные схемы (gc_meta(worker_only=True)): производный
-# набор обязан совпадать с ним дословно — переезд не меняет политику снимка.
-_WORKER_ONLY_FIELDS_BEFORE_META = frozenset(
-    [
-        "_subagent_definitions_cache",
-        "_subagent_diagnostics",
-        "agent_auth",
-        "auth_connector",
-        "backend_connection",
-        "cert_path",
-        "chat_completion_headers",
-        "client_name",
-        "compat_notices",
-        "completions_url",
-        "endpoint_presets",
-        "env",
-        "environment",
-        "harbor_exec_init",
-        "headers",
-        "key_path",
-        "mcp-meta",
-        "mcp-servers",
-        "os_backend_client",
-        "proxy",
-        "tools_cache",
-        "trace_header_enabled",
-        "trace_id_header_name",
-        "tui_bang_shell",
-        "tui_file_view",
-        "update",
-        "use_ssl",
-        "voice",
-        "voice_endpoint_presets",
-        "voice_overridden_by_managed",
-        "x_cl_id",
-    ]
+    settings_exclude_spec,
 )
 
+#: Каждое закрытое поле задано значением с меткой SECRET — метка не должна
+#: дойти до снимка ни в каком виде.
+RICH = {
+    "backend": {
+        "completions_url": "https://user:SECRET_ENDPOINT@private.ru/SECRET_PATH",
+        "chat_completion_headers": {"Authorization": "SECRET_HEADER"},
+        "use_ssl": False,
+        "cert_path": "/SECRET/cert.pem",
+        "key_path": "/SECRET/key.pem",
+        "proxy": "https://SECRET_PROXY@host",
+        "chat_completion_kwargs": {"temperature": 0.2},
+    },
+    "agent": {
+        "client_name": "SECRET_CLIENT",
+        "x_cl_id": "SECRET_CL_ID",
+        "trace_id_header_name": "X-SECRET-TRACE",
+        "trace_header_enabled": True,
+        "harbor_exec_init": "export TOKEN=SECRET_SHELL",
+        "max_steps": 7,
+        "use_local_subagents": ["searcher"],
+    },
+    "mcp": {
+        "servers": {
+            "x": {
+                "transport": "stdio",
+                "command": "SECRET_COMMAND",
+                "env": {"TOKEN": "SECRET_MCP"},
+            }
+        },
+        "meta": {"recommended-mcp-manifest": "/SECRET/manifest"},
+    },
+    "tui": {
+        "bang_shell": {"max_output_lines": 7},
+        "file_view": {"max_file_bytes": 7},
+    },
+    "voice": {"url": "https://SECRET_VOICE", "token": "SECRET_VOICE"},
+    "update": {"extra_args": ["--SECRET"]},
+    "agent_auth": {"token": "SECRET_AUTH"},
+    "level": "max",
+    "models": {
+        "fast": {
+            "model": "provider-fast",
+            "backend": {
+                "completions_url": "https://SECRET_FAST.invalid/fast",
+                "chat_completion_headers": {"Authorization": "SECRET_FAST"},
+                "key_path": "/SECRET/fast.key",
+                "chat_completions_max_tokens": 1234,
+            },
+        },
+        "large": {
+            "model": "provider-large",
+            "url": "https://private.ru/SECRET_LARGE",
+            "token": "SECRET_LARGE",
+            "pricing": {"input": 2, "output": 3},
+            "backend": {
+                "proxy": "http://SECRET_LARGE_PROXY",
+                "use_ssl": False,
+                "chat_completion_kwargs": {"temperature": 0.2},
+            },
+        },
+    },
+    "slots": {"light": "fast", "default": "fast", "max": "large"},
+    "assign": {
+        "command_judge": "fast",
+        "subagents": {"searcher": "large"},
+    },
+}
 
-def test_worker_only_fields_derived_from_schema_metadata_match_previous_list():
-    assert WORKER_ONLY_FIELDS == _WORKER_ONLY_FIELDS_BEFORE_META
+RUNTIME = RuntimeEnv(
+    config_path="/SECRET/config.yml",
+    config_dir="/SECRET",
+    active_profile="work",
+    notices=("SECRET_NOTICE",),
+    voice_overridden_by_managed="SECRET_VOICE_FIELD",
+    launch_root="/workspace",
+    project_root="/workspace",
+    trace_id="trace-1",
+    subagent_tools_allow=("fs_read_file",),
+    subagent_tools_stop=("exec_command",),
+    os_backend="harbor",
+)
 
 
-def test_every_real_flatten_field_is_explicitly_classified_and_policy_preserved():
-    config = flatten_app_config(AppConfig())
-    snapshot = public_config_snapshot(config)
-    assert set(config) <= set(PUBLIC_POLICY_SCHEMA) | WORKER_ONLY_FIELDS | {
-        "models"
-    }
-    for key in set(config) & set(PUBLIC_POLICY_SCHEMA):
-        assert snapshot.config_dict[key] == json_value(config[key]), key
-    json.dumps(asdict(snapshot), allow_nan=False)
-
-
-def test_worker_only_connections_and_handles_never_enter_public_snapshot():
-    config = flatten_app_config(AppConfig())
-    config.update(
-        {
-            "completions_url": "https://user:SECRET_ENDPOINT@private.ru/SECRET_PATH?token=SECRET_QUERY",
-            "chat_completion_headers": {"Authorization": "SECRET_HEADER"},
-            "agent_auth": {"token": "SECRET_AUTH"},
-            "mcp-servers": {"x": {"env": {"TOKEN": "SECRET_MCP"}}},
-            "harbor_exec_init": "export TOKEN=SECRET_SHELL",
-            "environment": object(),
-            "auth_connector": object(),
-            "voice": {"token": "SECRET_VOICE"},
-            "proxy": "https://SECRET_PROXY@host",
-        }
+def rich():
+    return LoadedSettings(
+        settings=AppConfig.model_validate(RICH), runtime=RUNTIME
     )
-    snapshot = public_config_snapshot(config)
-    serialized = json.dumps(asdict(snapshot))
+
+
+def _values_at(document, keys):
+    """Значения документа по пути ключей; ``*`` — любая запись словаря."""
+    if not keys:
+        return [document]
+    if not isinstance(document, dict):
+        return []
+    head, *rest = keys
+    if head == "*":
+        return [
+            value
+            for item in document.values()
+            for value in _values_at(item, rest)
+        ]
+    return _values_at(document[head], rest) if head in document else []
+
+
+def _private_leaves():
+    return [
+        path for path in leaf_meta() if is_private_path(tuple(path.split(".")))
+    ]
+
+
+def test_private_paths_are_exactly_schema_metadata_plus_model_address():
+    expected = {
+        path
+        for path, meta in leaf_meta().items()
+        if meta.worker_only or meta.secret
+    } | {"models.*.url"}
+    assert set(_private_leaves()) == expected
+    # Секрет без worker_only (models.*.token) в снимок тоже не идёт.
+    assert "models.*.token" in expected
+
+
+def test_snapshot_contains_no_worker_only_or_secret_field():
+    loaded = rich()
+    full = loaded.settings.model_dump(mode="json", by_alias=True)
+    snapshot = public_config_snapshot(loaded)
+    present, in_source = [], set()
+    for path in _private_leaves():
+        keys = _alias_path(AppConfig, path.split("."))
+        if any(_values_at(full, keys)):
+            in_source.add(path)
+        if _values_at(snapshot.settings, keys):
+            present.append(path)
+    assert present == []
+    # Проверка не пустая: закрытые поля в исходных настройках заданы.
+    assert {
+        "backend.proxy",
+        "backend.chat_completion_headers",
+        "agent.harbor_exec_init",
+        "mcp.servers.*.env",
+        "voice.token",
+        "agent_auth",
+        "models.*.url",
+        "models.*.token",
+        "models.*.backend.completions_url",
+        "models.*.backend.proxy",
+    } <= in_source
+    serialized = json.dumps(asdict(snapshot), allow_nan=False)
     assert "SECRET" not in serialized
     assert "private.ru" not in serialized
-    assert "worker://" not in serialized
-    assert snapshot.model_transport_configured is True
-    assert snapshot.provider_currency == "₽"
-    assert snapshot.model_provider_currencies == {}
-    assert "completions_url" not in snapshot.config_dict
-    assert "mcp-servers" not in snapshot.config_dict
-    assert config["agent_auth"]["token"] == "SECRET_AUTH"
+    assert "agent_auth" not in snapshot.settings
+    assert "mcp" not in snapshot.settings
+    assert set(snapshot.runtime) == {
+        "active_profile",
+        "launch_root",
+        "project_root",
+        "trace_id",
+        "is_tui",
+        "text_answer_mode",
+        "finish_gate_smart",
+        "subagent_tools_allow",
+        "subagent_tools_stop",
+        "os_backend",
+    }
+    # Исходные настройки не тронуты.
+    assert loaded.settings.agent_auth.model_dump() == {"token": "SECRET_AUTH"}
 
 
-def test_routing_identity_assignments_overrides_and_limits_survive_without_url():
-    config = flatten_app_config(AppConfig())
-    config.update(
-        {
-            "level": "max",
-            "completions_url": "https://secret.invalid/v1",
-            "models": {
-                # Подключение записи — парой (§3): у fast в форме backend,
-                # у large — url + token.
-                "fast": {
-                    "model": "provider-fast",
-                    "url": None,
-                    "authorization_header": None,
-                    "pricing": None,
-                    "backend_overrides": {
-                        "completions_url": "https://secret.invalid/fast",
-                        "chat_completion_headers": {"Authorization": "SECRET"},
-                        "chat_completions_max_tokens": 1234,
-                    },
-                },
-                "large": {
-                    "model": "provider-large",
-                    "url": "https://private.ru/SECRET",
-                    "authorization_header": "Bearer SECRET",
-                    "pricing": {"input": 2, "output": 3},
-                    "backend_overrides": {
-                        "chat_completion_kwargs": {"temperature": 0.2},
-                    },
-                },
-            },
-            "slots": {"light": "fast", "default": "fast", "max": "large"},
-            "assign": {
-                "command_judge": "fast",
-                "subagents": {"searcher": "large"},
-            },
-            "use_local_subagents": ["searcher"],
-        }
+def test_snapshot_round_trips_into_app_config_and_runtime():
+    loaded = rich()
+    snapshot = public_config_snapshot(loaded)
+    rebuilt = settings_from_snapshot(
+        json.loads(json.dumps(snapshot.settings)),
+        json.loads(json.dumps(snapshot.runtime)),
     )
-    original = deepcopy(config)
-    public = public_config_snapshot(config)
-    assert config == original
-    assert public.provider_currency == "$"
+    assert isinstance(rebuilt.settings, AppConfig)
+    # Публичная часть совпадает до значения, включая явность полей.
+    spec = settings_exclude_spec()
+    dump = {
+        "mode": "json",
+        "by_alias": True,
+        "exclude_unset": True,
+        "exclude": spec,
+    }
+    assert rebuilt.settings.model_dump(**dump) == loaded.settings.model_dump(
+        **dump
+    )
+    assert is_explicit(rebuilt.settings, "agent.max_steps")
+    assert not is_explicit(rebuilt.settings, "agent.max_tool_calls")
+    assert rebuilt.settings.agent.max_steps == 7
+    assert rebuilt.settings.backend.completions_url == ""
+    assert rebuilt.settings.models["large"].url is None
+    assert rebuilt.settings.models["large"].token is None
+    assert rebuilt.runtime == dataclasses.replace(
+        RUNTIME,
+        config_path=None,
+        config_dir=None,
+        notices=(),
+        voice_overridden_by_managed=None,
+    )
+    # Снимок снимка — те же настройки (признаки транспорта — только у воркера).
+    again = public_config_snapshot(rebuilt)
+    assert (again.settings, again.runtime) == (
+        snapshot.settings,
+        snapshot.runtime,
+    )
+
+
+def test_default_settings_round_trip_and_transport_flags():
+    snapshot = public_config_snapshot(AppConfig())
+    assert snapshot.settings == {}
+    assert snapshot.model_transport_configured is False
+    assert snapshot.provider_currency == "$"
+    assert snapshot.model_provider_currencies == {}
+    rebuilt = settings_from_snapshot(snapshot.settings, snapshot.runtime)
+    assert rebuilt.settings == AppConfig()
+    assert rebuilt.runtime == RuntimeEnv()
+
+
+def test_routing_identity_and_currencies_survive_without_transport():
+    loaded = rich()
+    public = public_config_snapshot(loaded)
+    assert public.model_transport_configured is True
+    assert public.provider_currency == "₽"
     assert public.model_provider_currencies == {"fast": "$", "large": "₽"}
-    worker_router = ModelRouter(config, level_provider=lambda: "max")
+    worker_router = ModelRouter(loaded, level_provider=lambda: "max")
     public_router = ModelRouter(
-        public.config_dict, level_provider=lambda: "max"
+        settings_from_snapshot(public.settings, public.runtime),
+        level_provider=lambda: "max",
     )
     for consumer in ("main", "command_judge", "subagent:searcher"):
         worker, workflow = (
@@ -167,75 +267,99 @@ def test_routing_identity_assignments_overrides_and_limits_survive_without_url()
             worker.source,
         )
         assert not workflow.url and not workflow.authorization
-    assert (
-        public.config_dict["models"]["fast"]["backend_overrides"][
-            "chat_completions_max_tokens"
-        ]
-        == 1234
-    )
-    assert public.config_dict["use_local_subagents"] == ["searcher"]
-    assert "SECRET" not in json.dumps(asdict(public))
+        assert workflow.tariff == worker.tariff
+    assert public_router.resolve("main").backend_overrides == {
+        "chat_completion_kwargs": {"temperature": 0.2}
+    }
+    assert public_router.resolve("command_judge").backend_overrides == {
+        "chat_completions_max_tokens": 1234
+    }
+    assert public.settings["agent"]["use_local_subagents"] == ["searcher"]
 
 
 @pytest.mark.parametrize(
     "overlay",
     [
-        {"unknown_credentials": "SECRET"},
-        {"read_guard": {"enabled": True, "new_auth": "SECRET"}},
-        {"chat_completion_kwargs": {"api_key": "SECRET"}},
+        {"backend": {"chat_completion_kwargs": {"api_key": "SECRET"}}},
         {
-            "auxiliary_llm_params": {
-                "completion_kwargs": {"headers": {"Authorization": "SECRET"}}
+            "chat_completions": {
+                "auxiliary_llm": {
+                    "completion_kwargs": {
+                        "headers": {"Authorization": "SECRET"}
+                    }
+                }
             }
         },
-        {"models": {"m": {"model": "x", "new_password": "SECRET"}}},
         {
             "models": {
                 "m": {
                     "model": "x",
-                    "backend_overrides": {"new_password": "SECRET"},
+                    "backend": {
+                        "chat_completion_kwargs": {"new_password": "SECRET"}
+                    },
                 }
             }
         },
-        {"os_backend": object()},
+        {
+            "backend": {
+                "chat_completion_kwargs": {
+                    "reasoning": {"effort": "low", "token": "SECRET"}
+                }
+            }
+        },
     ],
 )
-def test_unknown_and_unsafe_extensions_fail_without_value_in_exception(
+def test_unknown_provider_parameters_fail_without_value_in_exception(
     overlay,
 ):
     with pytest.raises(PublicConfigError) as error:
-        public_config_snapshot(overlay)
+        public_config_snapshot(AppConfig.model_validate(overlay))
     assert "SECRET" not in str(error.value)
 
 
-def test_core_policy_nested_fields_and_aux_provider_parameters_are_preserved():
-    config = {
-        "intent_scope_params": {
-            "tools": {"mcp_x": {"record": "raw", "store_arguments": False}}
+def test_known_provider_parameters_are_preserved():
+    kwargs = {
+        "temperature": 0.3,
+        "stop": ["END"],
+        "thinking": {"type": "enabled", "budget_tokens": 32},
+        "response_format": {
+            "type": "json_schema",
+            "json_schema": {"name": "x", "schema": {"type": "object"}},
         },
-        "inject_tool_fields": {"reason": "Explain why"},
-        "tool_usage_notice_params": [
-            {
-                "tool_name": "session_memory",
-                "step_messages_count": 8,
-                "notice_message": "Remember",
-            }
-        ],
-        "auxiliary_llm_params": {
-            "judge_max_tokens": 123,
-            "completion_kwargs": {
-                "thinking": {"type": "enabled", "budget_tokens": 32}
-            },
-        },
-        "protected_paths": {"enabled": False},
-        "os_backend": "harbor",
-        "launch_root": "/workspace",
-        "project_root": "/workspace",
-        "level": "light",
     }
-    snapshot = public_config_snapshot(config)
-    assert snapshot.config_dict == config
-    snapshot.config_dict["intent_scope_params"]["tools"]["mcp_x"]["record"] = (
-        "none"
+    settings = AppConfig.model_validate(
+        {
+            "backend": {"chat_completion_kwargs": kwargs},
+            "chat_completions": {
+                "auxiliary_llm": {
+                    "judge_max_tokens": 123,
+                    "completion_kwargs": {"thinking": kwargs["thinking"]},
+                }
+            },
+        }
     )
-    assert config["intent_scope_params"]["tools"]["mcp_x"]["record"] == "raw"
+    snapshot = public_config_snapshot(settings)
+    assert snapshot.settings["backend"]["chat_completion_kwargs"] == kwargs
+    aux = snapshot.settings["chat_completions"]["auxiliary_llm"]
+    assert aux == {
+        "judge_max_tokens": 123,
+        "completion_kwargs": {"thinking": kwargs["thinking"]},
+    }
+
+
+def test_runtime_fields_require_classification_and_backend_kind():
+    @dataclasses.dataclass(frozen=True)
+    class NewRuntime(RuntimeEnv):
+        new_secret_handle: str = "SECRET"
+
+    with pytest.raises(PublicConfigError) as error:
+        public_config_snapshot(
+            LoadedSettings(settings=AppConfig(), runtime=NewRuntime())
+        )
+    assert "SECRET" not in str(error.value)
+    with pytest.raises(PublicConfigError):
+        public_config_snapshot(
+            LoadedSettings(
+                settings=AppConfig(), runtime=RuntimeEnv(os_backend="custom")
+            )
+        )

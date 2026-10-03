@@ -1,7 +1,7 @@
 import ast
 import json
 import operator
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gc_core.loop_detector.constants import READ_PROFILE, loop_warn_on_repeat
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -134,7 +134,7 @@ class Calculator(AbstractSimpleTool):
         )
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         description = {
             "type": "function",
             "name": "exec_calculator",
@@ -165,7 +165,7 @@ class Calculator(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = f"""Tool name: exec_calculator
 Tool description: Evaluates an arithmetic expression (int/float literals + operators) and returns a JSON string. This is NOT Python — no sandbox, no builtins, no function calls, no names, no attribute access, no subscripts, no containers.
 Input schema: {{"type": "object", "properties": {{"expression": {{"type": "string", "description": "Arithmetic expression (int/float literals and operators only)."}}}}, "required": ["expression"], "additionalProperties": false}}

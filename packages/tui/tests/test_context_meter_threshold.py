@@ -1,5 +1,6 @@
 """_context_meter нормирует бар на ЖЁСТКИЙ порог (summary_trigger), а не turn-end."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 import re
 
@@ -62,7 +63,7 @@ async def test_meter_uses_hard_threshold_not_turn_end(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config=_cfg(trigger=10_000_000, turn_end=1),
+        settings=tui_settings(_cfg(trigger=10_000_000, turn_end=1)),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -85,7 +86,7 @@ async def test_meter_falls_back_to_turn_end_when_no_hard_threshold(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config=_cfg(trigger=0, turn_end=10_000_000),
+        settings=tui_settings(_cfg(trigger=0, turn_end=10_000_000)),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -130,7 +131,7 @@ async def test_meter_uses_saved_prompt_tokens_without_tail(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config=_cfg_tokens(trigger=1000, turn_end=1),
+        settings=tui_settings(_cfg_tokens(trigger=1000, turn_end=1)),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -149,7 +150,9 @@ async def test_meter_falls_back_to_chars_without_saved_tokens(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config=_cfg_tokens(trigger=1000, turn_end=1, chars=1000, chars_end=1),
+        settings=tui_settings(
+            _cfg_tokens(trigger=1000, turn_end=1, chars=1000, chars_end=1)
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -177,7 +180,7 @@ async def test_meter_token_mid_turn_not_replaced_by_turn_end(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config=_cfg_tokens(trigger=10_000_000, turn_end=1),
+        settings=tui_settings(_cfg_tokens(trigger=10_000_000, turn_end=1)),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

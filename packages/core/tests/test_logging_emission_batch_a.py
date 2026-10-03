@@ -17,6 +17,7 @@ from gc_core.tools.turn.intermediate_reply import IntermediateReply
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import as_coro
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import make_settings
 
 
 def _jsonl_cfg(tmp_path, **extra):
@@ -27,7 +28,7 @@ def _jsonl_cfg(tmp_path, **extra):
         "logging_format": "jsonl",
     }
     cfg.update(extra)
-    return cfg
+    return make_settings(cfg)
 
 
 def _read_events(path):

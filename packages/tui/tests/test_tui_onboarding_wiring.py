@@ -39,13 +39,15 @@ def _patch_entry_prereqs(
     # Patch config functions used in main()
     from gc_core import config as cfg_mod
     from gc_core.config_modules.profiles import ProfileMeta
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         cfg_mod,
         "load_settings",
-        lambda path=None, **kw: settings_from_flat(
-            config_dict,
+        lambda path=None, **kw: replace(
+            make_settings(config_dict),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )

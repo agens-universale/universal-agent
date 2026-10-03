@@ -3,7 +3,6 @@ import json
 import logging
 import sys
 import types
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -16,6 +15,7 @@ from gc_testkit.intent_fixtures import (
     seed_state_intent,
 )
 from gc_testkit.paths import module_dir
+from gc_testkit.settings import fake_ctx
 
 
 async def _anoop(*_a, **_k):
@@ -144,8 +144,8 @@ def _make_ctx(**overrides):
         "strict_turn_finish_validation": False,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=logging.getLogger("test_context_baseline"),
         auth_connector=None,
     )

@@ -5,6 +5,7 @@ get_runner() на UI-потоке больше не вызывает _build_real
 Регрессия: при включённых mcp-servers Enter в сессии замораживал event-loop
 Textual, пока _build_tools_registry опрашивал серверы (retry+timeout)."""
 
+from gc_testkit.tui_support import tui_settings
 import threading
 import time
 
@@ -90,7 +91,9 @@ async def test_warm_builds_executor_off_ui_thread(tmp_path):
 
     built = []
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: (
         built.append(threading.current_thread().name) or _FakeExecutor()

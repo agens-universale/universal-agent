@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 from gc_core.run_context import acreate_run_context
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import make_settings
 
 CUSTOM_MARKER = "User-defined role"
 BASE_MARKER = "Runtime contract"
@@ -37,8 +38,8 @@ async def _runner(tmp_path, **extra):
         "subagents_dir": _agents(tmp_path),
     }
     cfg.update(extra)
-    ctx = await acreate_run_context(cfg)
-    return SubagentRunner(ctx, SimpleNamespace(default_model="m"), cfg)
+    ctx = await acreate_run_context(make_settings(cfg))
+    return SubagentRunner(ctx, SimpleNamespace(default_model="m"))
 
 
 def _prompt_for(runner, tool_name):

@@ -4,6 +4,7 @@ Verify that TuiApp shows OnboardingScreen when _onboarding_mode is set,
 and TraceScreen otherwise.
 """
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 # Marker: these tests require the textual extra (dev-tui).
@@ -27,7 +28,9 @@ async def test_unconfigured_app_shows_onboarding(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
         "model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "auto"  # выставляется в tui/__init__.py
 
     async with app.run_test() as pilot:
@@ -53,7 +56,9 @@ async def test_configured_app_no_onboarding(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     # _onboarding_mode stays None by default
 
     async with app.run_test() as pilot:
@@ -79,7 +84,9 @@ async def test_review_mode_shows_onboarding_review_all(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "review"
     app._onboarding_config_path = tmp_path / "config.yml"
 
@@ -113,13 +120,15 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
         "model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         cfg_mod,
         "load_settings",
-        lambda p=None, **kw: settings_from_flat(
-            configured,
+        lambda p=None, **kw: replace(
+            make_settings(configured),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
@@ -133,7 +142,9 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
         "model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=unconf)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(unconf)
+    )
     app._onboarding_mode = "auto"
     app._onboarding_config_path = str(tmp_path / "config.yml")
 
@@ -171,13 +182,15 @@ async def test_finish_onboarding_review_switches_to_main(
         "model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         cfg_mod,
         "load_settings",
-        lambda p=None, **kw: settings_from_flat(
-            configured,
+        lambda p=None, **kw: replace(
+            make_settings(configured),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
@@ -187,7 +200,9 @@ async def test_finish_onboarding_review_switches_to_main(
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config=dict(configured)
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings(dict(configured)),
     )
     app._onboarding_mode = "review"
     app._onboarding_config_path = str(tmp_path / "config.yml")
@@ -227,7 +242,9 @@ async def test_onboarding_is_modal_for_help_and_notices(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
         "model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "auto"
 
     async with app.run_test() as pilot:
@@ -263,7 +280,9 @@ async def test_review_mode_forwards_the_deactivation_flag(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "review"
     app._onboarding_config_path = tmp_path / "config.yml"
     app._onboarding_deactivate_profile = True
@@ -287,7 +306,9 @@ async def test_onboarding_does_not_deactivate_by_default(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
         "model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "auto"
 
     async with app.run_test() as pilot:
@@ -310,7 +331,9 @@ async def test_review_mode_forwards_the_degradation_message(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "review"
     app._onboarding_config_path = tmp_path / "config.yml"
     app._onboarding_degraded = 'config.yml не читается с профилем "work"'
@@ -334,7 +357,9 @@ async def test_onboarding_has_no_degradation_message_by_default(tmp_path):
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
         "model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "auto"
 
     async with app.run_test() as pilot:
@@ -371,7 +396,9 @@ async def test_finish_onboarding_survives_a_config_that_stopped_loading(
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
         "model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._onboarding_mode = "auto"
     app._onboarding_config_path = str(cfg_file)
 

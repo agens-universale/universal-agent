@@ -11,11 +11,11 @@ Each test drives real code with a jsonl-mode per-run logger from
 
 import json
 import tempfile
-from types import SimpleNamespace
 from unittest.mock import patch
 
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _make_logger(tmp_path, level="debug"):
@@ -26,7 +26,9 @@ def _make_logger(tmp_path, level="debug"):
         "console_trace": False,
         "logs_dump_dir": str(tmp_path),
     }
-    logger, path, _ = create_run_logger(cfg, run_id="t", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        make_settings(cfg), run_id="t", agent_kind="main"
+    )
     return logger, path
 
 
@@ -149,8 +151,8 @@ def test_log_path_event_emitted_at_end_of_run(tmp_path):
             async def list_skills(self):
                 return []
 
-        ctx = SimpleNamespace(
-            config_dict={
+        ctx = fake_ctx(
+            {
                 "verbose": False,
                 "model": "CodeChat",
                 "max_steps": 0,

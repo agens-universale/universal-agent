@@ -38,7 +38,7 @@ def _parse_unknown_args(args: List[str]) -> Dict[str, Any]:
     --param=value
     --flag
 
-    Возвращает словарь переопределений для config_dict.
+    Возвращает словарь переопределений настроек (плоские имена или пути).
     """
     overrides: Dict[str, Any] = {}
     i = 0

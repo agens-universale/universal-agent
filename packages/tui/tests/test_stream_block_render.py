@@ -5,6 +5,7 @@ sink → poll-тик → смонтирован StreamBlock с ожидаемы�
 каноничная assistant-строка → блока нет, sink сброшен.
 """
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -79,11 +80,13 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "answer",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -139,11 +142,13 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "answer",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -182,11 +187,13 @@ async def test_stream_block_cleared_when_run_not_running(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "answer",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -226,11 +233,13 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer_reasoning",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "answer_reasoning",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -298,11 +307,13 @@ async def test_reasoning_block_cleared_when_tool_row_renders(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer_reasoning",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "answer_reasoning",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -353,7 +364,9 @@ async def test_no_reasoning_block_in_validating_phase(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"model": "M", "backend_api_mode": "chat_completions"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -390,11 +403,13 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "minimal",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "minimal",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -434,11 +449,13 @@ async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer_reasoning",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "answer_reasoning",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -476,11 +493,13 @@ async def test_show_reasoning_line_false_hides_reasoning_block(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={
-            "model": "M",
-            "backend_api_mode": "chat_completions",
-            "tui_stream_display": "answer",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "backend_api_mode": "chat_completions",
+                "tui_stream_display": "answer",
+            }
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

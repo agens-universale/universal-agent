@@ -170,7 +170,7 @@ class OnboardingScreen(Screen):
 
     def __init__(
         self,
-        config,
+        settings,
         config_path,
         *,
         review_all,
@@ -183,7 +183,9 @@ class OnboardingScreen(Screen):
         degraded_note=None,
     ) -> None:
         super().__init__()
-        self._config = config
+        # Настройки запуска (`LoadedSettings`, резолвнутые): витрины мастера.
+        # Правка и запись идут сырыми значениями файла (`_raw_values`).
+        self._settings = settings
         self._config_path = config_path
         # Лестница загрузки приземлилась на ступень «без профиля»: конфиг собрался
         # только потому, что профиль сняли на этот запуск, и финал обязан снять
@@ -322,13 +324,15 @@ class OnboardingScreen(Screen):
         Общий текст политики — факт без адреса (его печатает и gc-cli); адрес
         действия дописывает поверхность, и только профильному вердикту: экран
         «Настройки · Профили» правит профиль, а не чужой слой реестра."""
-        config = self._config or {}
+        settings = self._settings
         # Профиль, который финал деактивирует, перекрыть выбор уже не сможет — и
         # плашка о нём противоречила бы предупреждению о деактивации строкой ниже.
         note = onboarding.overriding_layer_note(
-            config, self._config_path, ignore_profile=self._deactivate_profile
+            settings,
+            self._config_path,
+            ignore_profile=self._deactivate_profile,
         )
-        if note and runtime_of(config).active_profile:
+        if note and runtime_of(settings).active_profile:
             note += self._NOTE_SETTINGS_TAIL
         return note
 
@@ -398,11 +402,11 @@ class OnboardingScreen(Screen):
         читатель этого метода, `_shown_values`, обязан называть ТО ЖЕ САМОЕ, иначе
         сводка и лента подтверждения одного экрана говорят «—» там, где шаг рядом
         уже назвал модель."""
-        return onboarding.model_step_display(self._config or {})[0]
+        return onboarding.model_step_display(self._settings)[0]
 
     def _assigned_level_model(self, level: str) -> str:
         """Модель, явно назначенная уровню (`onboarding.assigned_level_model`)."""
-        return onboarding.assigned_level_model(self._config or {}, level)
+        return onboarding.assigned_level_model(self._settings, level)
 
     def _level_value(self, level: str) -> str:
         """Что показать против уровня: набранное в этом прогоне мастера, иначе —
@@ -422,7 +426,7 @@ class OnboardingScreen(Screen):
         активного уровня: обе витрины называют её именем СЛОТА («модель default:»
         на подтверждении, «модель:» в ленте рядом с ним), и при `level: max` на одном
         экране стояли «модель default: <модель max>» и «модель max: <она же>». Слой
-        профиля от этого никуда не девается — читается тот же `self._config`."""
+        профиля от этого никуда не девается — читаются те же `self._settings`."""
         backend = self._cfg_settings().backend
         return {
             "completions_url": backend.completions_url or None,
@@ -433,9 +437,9 @@ class OnboardingScreen(Screen):
         }
 
     def _cfg_settings(self):
-        """Типизированный вид конфига мастера (`self._config` — резолвнутый
-        конфиг запуска)."""
-        return settings_of(self._config or {})
+        """Типизированный вид конфига мастера (`self._settings` — резолвнутые
+        настройки запуска)."""
+        return settings_of(self._settings)
 
     def _summary_text(self) -> str:
         from gc_tui.services.onboarding_summary import summary_line
@@ -666,7 +670,7 @@ class OnboardingScreen(Screen):
 
             from gc_tui.editors.connection import ConnectionEditor
 
-            # Поля показывают СЫРОЕ значение файла, не self._config (он уже резолвнут
+            # Поля показывают СЫРОЕ значение файла, не self._settings (они уже резолвнуты
             # ${ENV:...}/${FILE:...}) — см. _raw_conn.
             raw = self._raw_conn()
             cur = self._values.get("completions_url")
@@ -685,7 +689,7 @@ class OnboardingScreen(Screen):
                 auth_header=auth,
                 proxy_current=proxy_cur or "",
                 create_mode=True,
-                presets=endpoint_presets_from_config(self._config or {}),
+                presets=endpoint_presets_from_config(self._settings),
             )
             body.mount(ed)
             body.mount(
@@ -712,7 +716,7 @@ class OnboardingScreen(Screen):
             # а не к первой модели сервера; подпись об источнике — строкой-хинтом
             # (в строку списка её не вставить — слово «текущая» рисует редактор).
             cfg_model, fallback_note = onboarding.model_step_display(
-                self._config or {}
+                self._settings
             )
             if fallback_note:
                 body.mount(
@@ -733,7 +737,7 @@ class OnboardingScreen(Screen):
                 on_loaded=self._refresh_footer,
                 active=self._values.get("model") or cfg_model,
                 # Набранное на шаге «Подключение» (self._values["proxy"]),
-                # фолбэк — резолвнутый self._config (см. _effective_proxy):
+                # фолбэк — резолвнутые self._settings (см. _effective_proxy):
                 # без него запрос за списком в корп-сети с обязательным
                 # прокси идёт мимо него, и «список не получен» здесь
                 # противоречит «✓ … · N моделей» с шага «Подключение».
@@ -932,7 +936,7 @@ class OnboardingScreen(Screen):
         (прошедшее структурную валидацию адреса) уезжает обратно в файл при коммите и
         подменяет там ссылку ${ENV:...}/${FILE:...} её раскрытым значением — секрет
         открытым текстом в файле, который коммитят (поля префилятся СЫРЫМ значением
-        файла, см. _raw_conn/_mount_step_body, а не self._config).
+        файла, см. _raw_conn/_mount_step_body, а не self._settings).
 
         Токен-поле — исключение из этой механики: create_mode не показывает переключатель
         «без авторизации» (Task 8), и пустое поле там неоднозначно само по себе — это либо
@@ -1306,7 +1310,7 @@ class OnboardingScreen(Screen):
             return
         self._voice_prefilled = True
         try:
-            snap = self._voice_setup.status_cheap(self._config or {})
+            snap = self._voice_setup.status_cheap(self._settings)
         except Exception:
             return  # состояние недоступно — ведём себя как раньше
         mode = getattr(snap, "mode", "off")
@@ -1330,7 +1334,7 @@ class OnboardingScreen(Screen):
 
     def _voice_raw_cloud(self) -> dict:
         """voice-секция СЫРОГО config.yml (канон /settings, `SettingsScreen._voice_raw_cloud`):
-        self._config слит с managed-слоем и с уже раскрытыми ${ENV:...} — для полей
+        self._settings слиты с managed-слоем и с уже раскрытыми ${ENV:...} — для полей
         «Своего endpoint» не годится. Иначе managed-заглушка локальной батарейки
         (`voice.token: "local"`, см. voice_runtime.wire) читалась бы как сохранённый
         облачный секрет, а ${ENV:...}-ссылка на коммите запекалась бы в файл литералом."""
@@ -1342,8 +1346,8 @@ class OnboardingScreen(Screen):
 
     def _raw_conn(self) -> dict:
         """Сырые (нерезолвнутые) значения полей шага «Подключение» ИЗ ФАЙЛА — тот же
-        приём, что `SettingsScreen._read_raw` / `_voice_raw_cloud` выше: self._config
-        уже резолвнут (${ENV:...}/${FILE:...} подставлены), и показать или записать
+        приём, что `SettingsScreen._read_raw` / `_voice_raw_cloud` выше: self._settings
+        уже резолвнуты (${ENV:...}/${FILE:...} подставлены), и показать или записать
         его значение обратно в файл значит подменить ссылку на переменную её значением —
         секрет открытым текстом в файле, который коммитят."""
         return self._raw_values("completions_url", "Authorization", "proxy")
@@ -1425,9 +1429,7 @@ class OnboardingScreen(Screen):
                 # Пресеты СТТ-адресов (спека 2026-08-05 §3) — тот же
                 # источник, что у /settings: дефолты (OpenAI/Groq/
                 # Mistral) или кастомизация из config.yml.
-                url_presets=voice_endpoint_presets_from_config(
-                    self._config or {}
-                ),
+                url_presets=voice_endpoint_presets_from_config(self._settings),
             )
         )
 
@@ -1784,7 +1786,7 @@ class OnboardingScreen(Screen):
 
         Токен-поле на нетронутом шаге принципиально пустое (секрет живёт только
         под маской placeholder, см. _mount_step_body) — фолбэк на действующий
-        токен из self._config, тот же приём, что у соседнего шага «Модель»."""
+        токен из self._settings, тот же приём, что у соседнего шага «Модель»."""
         ed = self._connection_editor()
         if ed is None:
             return

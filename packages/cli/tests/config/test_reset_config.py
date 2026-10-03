@@ -11,6 +11,7 @@ from pathlib import Path
 
 from gc_core import config_sync, onboarding
 from gc_core import onboarding_config_writer as ocw
+from gc_testkit.settings import make_settings
 
 # --- config_sync.reset_config: бэкап + содержимое = шаблон + профили пережили ---
 
@@ -208,7 +209,7 @@ def test_is_unconfigured_true_when_everything_placeholder():
         },
         "model": onboarding.MODEL_SENTINEL,
     }
-    assert onboarding.is_unconfigured(config) is True
+    assert onboarding.is_unconfigured(make_settings(config)) is True
 
 
 def test_is_unconfigured_false_when_registry_covers_model_placeholder():
@@ -220,7 +221,7 @@ def test_is_unconfigured_false_when_registry_covers_model_placeholder():
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "flash-model"}},
     }
-    assert onboarding.is_unconfigured(config) is False
+    assert onboarding.is_unconfigured(make_settings(config)) is False
 
 
 def test_is_unconfigured_true_when_registry_but_endpoint_placeholder():
@@ -235,7 +236,7 @@ def test_is_unconfigured_true_when_registry_but_endpoint_placeholder():
         "model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "flash-model"}},
     }
-    assert onboarding.is_unconfigured(config) is True
+    assert onboarding.is_unconfigured(make_settings(config)) is True
 
 
 def test_is_unconfigured_false_when_legacy_fields_filled():
@@ -244,7 +245,7 @@ def test_is_unconfigured_false_when_legacy_fields_filled():
         "chat_completion_headers": {"Authorization": "Bearer sk-1"},
         "model": "real-model",
     }
-    assert onboarding.is_unconfigured(config) is False
+    assert onboarding.is_unconfigured(make_settings(config)) is False
 
 
 def test_is_unconfigured_true_when_empty_models_dict():
@@ -257,7 +258,7 @@ def test_is_unconfigured_true_when_empty_models_dict():
         "model": onboarding.MODEL_SENTINEL,
         "models": {},
     }
-    assert onboarding.is_unconfigured(config) is True
+    assert onboarding.is_unconfigured(make_settings(config)) is True
 
 
 # --- onboarding_config_writer.ensure_pointer_anchor: вставка + идемпотентность ---

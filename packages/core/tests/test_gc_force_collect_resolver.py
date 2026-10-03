@@ -8,29 +8,37 @@ C3 — режимная: CLI/TUI да, server нет. Ключа ``gc.force_coll
 
 from gc_core.config_modules.gc import gc_force_collect_enabled
 from gc_core.settings import default_settings
+from gc_testkit.settings import make_settings
 
 
 class TestDefaultByMode:
     def test_cli_mode_default_on(self):
-        assert gc_force_collect_enabled({}, is_cli_mode=True) is True
+        assert (
+            gc_force_collect_enabled(make_settings(), is_cli_mode=True) is True
+        )
 
     def test_tui_default_on(self):
-        assert gc_force_collect_enabled({}, is_tui=True) is True
+        assert gc_force_collect_enabled(make_settings(), is_tui=True) is True
 
     def test_server_default_off(self):
         assert (
-            gc_force_collect_enabled({}, is_tui=False, is_cli_mode=False)
+            gc_force_collect_enabled(
+                make_settings(), is_tui=False, is_cli_mode=False
+            )
             is False
         )
 
     def test_cli_and_tui_both_on(self):
         assert (
-            gc_force_collect_enabled({}, is_tui=True, is_cli_mode=True) is True
+            gc_force_collect_enabled(
+                make_settings(), is_tui=True, is_cli_mode=True
+            )
+            is True
         )
 
 
 class TestEdgeCases:
-    def test_none_config_dict(self):
+    def test_none_settings(self):
         assert gc_force_collect_enabled(None, is_cli_mode=True) is True
         assert (
             gc_force_collect_enabled(None, is_tui=False, is_cli_mode=False)

@@ -4,11 +4,11 @@ import importlib
 import json
 import sys
 import types
-from types import SimpleNamespace
 
 from gc_core.states import State
 from gc_testkit import run_coro
 from gc_testkit.paths import module_dir
+from gc_testkit.settings import fake_ctx
 
 
 def _make_state(max_steps=2):
@@ -112,8 +112,8 @@ def _make_ctx(**overrides):
         "limit_trace_summary": False,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=logging.getLogger("test_terminal_outcome"),
         auth_connector=None,
     )

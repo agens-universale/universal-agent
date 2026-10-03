@@ -1,6 +1,7 @@
 """На фокусе строки события [N]-префикс НЕ появляется (убран — дёргал ленту и
 мешал выделению; фокус показывается фоном :focus)."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -34,7 +35,9 @@ async def test_event_number_not_shown_on_focus(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

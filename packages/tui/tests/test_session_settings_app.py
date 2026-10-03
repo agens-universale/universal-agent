@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -9,23 +10,27 @@ def _app(tmp_path):
     return TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        config={
-            "model": "M",
-            "tui_finish_gate_mode": "on",
-            "tui_text_answer_mode": "judge",
-        },
+        settings=tui_settings(
+            {
+                "model": "M",
+                "tui_finish_gate_mode": "on",
+                "tui_text_answer_mode": "judge",
+            }
+        ),
     )
 
 
-def test_effective_config_applies_overrides(tmp_path):
+def test_effective_settings_applies_overrides(tmp_path):
     app = _app(tmp_path)
-    assert app.effective_config()["tui_finish_gate_mode"] == "on"
+    assert app.effective_settings().settings.tui.finish_gate_mode == "on"
     app.set_session_override("tui.finish_gate_mode", "off")
-    eff = app.effective_config()
-    assert eff["tui_finish_gate_mode"] == "off"
-    assert eff["tui_finish_gate_mode_explicit"] is True
+    eff = app.effective_settings()
+    assert eff.settings.tui.finish_gate_mode == "off"
+    from gc_core.settings import is_explicit
+
+    assert is_explicit(eff.settings, "tui.finish_gate_mode")
     # база не мутирована — переопределения отдельно
-    assert app._config["tui_finish_gate_mode"] == "on"
+    assert app.base_settings().settings.tui.finish_gate_mode == "on"
 
 
 def test_overrides_survive_config_reload(tmp_path, monkeypatch):
@@ -43,12 +48,14 @@ def test_overrides_survive_config_reload(tmp_path, monkeypatch):
     }
     from gc_core.config_modules.profiles import ProfileMeta
 
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         "gc_core.config.load_settings",
-        lambda *_a, **_k: settings_from_flat(
-            fresh,
+        lambda *_a, **_k: replace(
+            make_settings(fresh),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
@@ -58,9 +65,9 @@ def test_overrides_survive_config_reload(tmp_path, monkeypatch):
     app.reload_config()
 
     assert (
-        app._config["model"] == "fresh-model"
+        app.base_settings().settings.agent.model == "fresh-model"
     )  # база реально перечиталась мокнутым load_settings
-    assert app.effective_config()["tui_text_answer_mode"] == "allow"
+    assert app.effective_settings().settings.tui.text_answer_mode == "allow"
 
 
 def test_overrides_survive_reload_if_changed(tmp_path):
@@ -73,7 +80,9 @@ def test_overrides_survive_reload_if_changed(tmp_path):
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text('tui:\n  finish_gate_mode: "on"\n', encoding="utf-8")
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings({}),
     )
     app._config_path = str(cfg_file)
     app.reload_config()  # база + снимок mtime установлены
@@ -88,10 +97,12 @@ def test_overrides_survive_reload_if_changed(tmp_path):
 
     app.reload_config_if_changed()
 
-    eff = app.effective_config()
-    assert eff["tui_finish_gate_mode"] == "off"  # база реально перечиталась
+    eff = app.effective_settings()
     assert (
-        eff["tui_text_answer_mode"] == "allow"
+        eff.settings.tui.finish_gate_mode == "off"
+    )  # база реально перечиталась
+    assert (
+        eff.settings.tui.text_answer_mode == "allow"
     )  # сессия пережила перечитывание
 
 
@@ -101,11 +112,13 @@ def test_load_session_overrides_replaces_whole_set(tmp_path):
     app = _app(tmp_path)
     app.set_session_override("tui.finish_gate_mode", "off")
     app.load_session_overrides({"tui.text_answer_mode": "deny"})
-    eff = app.effective_config()
-    assert eff["tui_text_answer_mode"] == "deny"
-    assert eff["tui_finish_gate_mode"] == "on"  # прежнее переопределение снято
+    eff = app.effective_settings()
+    assert eff.settings.tui.text_answer_mode == "deny"
+    assert (
+        eff.settings.tui.finish_gate_mode == "on"
+    )  # прежнее переопределение снято
     app.load_session_overrides({})
-    assert app.effective_config()["tui_text_answer_mode"] == "judge"
+    assert app.effective_settings().settings.tui.text_answer_mode == "judge"
 
 
 def test_apply_toggle_writes_session_not_config_file(tmp_path):
@@ -162,8 +175,9 @@ def test_apply_toggle_rolls_back_when_meta_write_fails(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         apply_toggle(app, "gate", "off")
 
-    assert toggle_state(app, "gate") == "smart"  # объявлено «не сохранено»
-    assert app.effective_config()["tui_finish_gate_mode"] == "on"
+    # объявлено «не сохранено»: действует прежнее — явное "on" базы
+    assert toggle_state(app, "gate") == "on"
+    assert app.effective_settings().settings.tui.finish_gate_mode == "on"
     assert toggle_state(app, "answers") == "allow"  # чужое значение не снесено
 
 
@@ -191,8 +205,8 @@ def test_effective_gate_matrix_global_x_override(
 ):
     """Матрица (глобал × сессионный оверрайд) эффективного /gate (дизайн
     2026-07-21 §2, гейт §9): без оверрайда действует глобал; с оверрайдом —
-    оверрайд. Ключ присутствует в файле → tui_finish_gate_mode_explicit=True
-    (config.py: model_fields_set), поэтому глобальный «off» реально действует."""
+    оверрайд. Ключ присутствует в файле → поле задано явно (`is_explicit`,
+    model_fields_set), поэтому глобальный «off» реально действует."""
     from gc_tui.app import TuiApp
     from gc_tui.toggles import toggle_state
 
@@ -201,7 +215,9 @@ def test_effective_gate_matrix_global_x_override(
         f'tui:\n  finish_gate_mode: "{global_val}"\n', encoding="utf-8"
     )
     app = TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config={}
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings({}),
     )
     app._config_path = str(cfg_file)
     app.reload_config()
@@ -222,9 +238,9 @@ def test_apply_session_overrides_applies_pair(tmp_path):
             "tui.text_answer_mode": "judge",
         }
     )
-    eff = app.effective_config()
-    assert eff["tui_finish_gate_mode"] == "smart"
-    assert eff["tui_text_answer_mode"] == "judge"
+    eff = app.effective_settings()
+    assert eff.settings.tui.finish_gate_mode == "smart"
+    assert eff.settings.tui.text_answer_mode == "judge"
     store = FileTaskStore(threads_dir=str(tmp_path / "threads"), system="cli")
     saved = read_from_meta(store.get_task_meta("t1"))
     assert saved == {

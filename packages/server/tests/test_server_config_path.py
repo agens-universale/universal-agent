@@ -1,13 +1,13 @@
 import logging
 import os
 
-from gc_core.config import cli_forces_legacy_model, flat_config
+from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
 from gc_core.model_router import ModelRouter
-from gc_core.settings import settings_from_flat
 from gc_server.rest_api import server_config
 from gc_server.rest_api.server_config import load_server_config
+from gc_testkit.settings import make_settings
 
 
 def test_server_config_path_from_env_vars(monkeypatch, tmp_path):
@@ -92,7 +92,7 @@ def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
     monkeypatch.setattr(
         server_config,
         "load_settings",
-        lambda: settings_from_flat(
+        lambda: make_settings(
             {
                 "models": {"flash": {}},
                 "slots": {"default": "flash"},
@@ -105,13 +105,12 @@ def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
     loaded = server_config.build_agent_settings_for_server(
         {"agent_overrides": {"model": "forced-model"}}
     )
-    cfg = flat_config(loaded)
 
     # agent_overrides видны легаси-форсу как заданные из CLI.
     assert loaded.provenance.source("agent.model").layer == "cli"
     assert cli_forces_legacy_model(loaded) is True
     router = ModelRouter(
-        cfg, level_provider=lambda: "default", force_legacy=True
+        loaded, level_provider=lambda: "default", force_legacy=True
     )
     resolved = router.resolve("main")
     assert resolved.alias is None
@@ -123,7 +122,7 @@ def test_agent_overrides_without_model_is_not_forced(monkeypatch):
     monkeypatch.setattr(
         server_config,
         "load_settings",
-        lambda: settings_from_flat(
+        lambda: make_settings(
             {"models": {"flash": {}}, "slots": {"default": "flash"}}
         ),
     )
@@ -140,25 +139,25 @@ def test_agent_overrides_other_keys_still_applied(monkeypatch):
     monkeypatch.setattr(
         server_config,
         "load_settings",
-        lambda: settings_from_flat({"model": "m"}),
+        lambda: make_settings({"model": "m"}),
     )
 
-    cfg = server_config.build_agent_config_for_server(
+    settings = server_config.build_agent_settings_for_server(
         {"agent_overrides": {"stop_tools": ["write_to_file"], "max_steps": 7}}
-    )
+    ).settings
 
-    assert cfg["stop_tools"] == ["write_to_file"]
-    assert cfg["max_steps"] == 7
+    assert settings.agent.stop_tools == ["write_to_file"]
+    assert settings.agent.max_steps == 7
 
 
 def _agent_md(server_agentmd_path, cfg_path):
-    """cfg["agent_md_path"] для заданной пары «значение поля, путь конфига»."""
-    return server_config.build_agent_config_for_server(
+    """``paths.agent_md_path`` для заданной пары «значение поля, путь конфига»."""
+    return server_config.build_agent_settings_for_server(
         {
             "config_path": str(cfg_path),
             "agent": {"server_agentmd_path": server_agentmd_path},
         }
-    )["agent_md_path"]
+    ).settings.paths.agent_md_path
 
 
 def test_relative_agent_md_is_found_next_to_the_config(tmp_path):

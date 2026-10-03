@@ -14,15 +14,15 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, List
 
 from gc_core.settings import runtime_of, settings_of
 from gc_core.startup_notices import Notice
 
 
-def _extras(config_dict: Dict[str, Any]) -> List[Notice]:
+def _extras(settings: Any) -> List[Notice]:
     """Перекрытие managed-слоем и битая установка. Зовётся в конце `voice_notices`."""
-    overridden = runtime_of(config_dict).voice_overridden_by_managed
+    overridden = runtime_of(settings).voice_overridden_by_managed
     extra: List[Notice] = []
     if overridden:
         extra.append(
@@ -52,18 +52,18 @@ def _extras(config_dict: Dict[str, Any]) -> List[Notice]:
     return extra
 
 
-def voice_notices(config_dict: Dict[str, Any]) -> List[Notice]:
+def voice_notices(settings: Any) -> List[Notice]:
     """Конфиг-проблемы голосового ввода. Пустая секция — не замечание.
 
-    `config_dict` — настройки окна (`LoadedSettings`): признак перекрытия
-    managed-слоем живёт в их рантайме, плоский словарь его не переносит."""
+    `settings` — настройки окна (`LoadedSettings`): признак перекрытия
+    managed-слоем живёт в их рантайме."""
     from gc_core.config_modules.field_meta import plain_dump
     from gc_core.config_modules.voice import (
         voice_enabled,
         voice_section_filled,
     )
 
-    voice = plain_dump(settings_of(config_dict).voice)
+    voice = plain_dump(settings_of(settings).voice)
     if not voice_section_filled(voice):
         return []
     if not voice_enabled(voice):
@@ -95,4 +95,4 @@ def voice_notices(config_dict: Dict[str, Any]) -> List[Notice]:
     # аудио-стек на месте: раньше отсутствие sounddevice возвращало свой Notice и
     # перекрывало их: машина без libportaudio2 — ровно та, где полусломанная локальная
     # установка вероятнее всего, а человек о ней не узнавал.
-    return notices + _extras(config_dict)
+    return notices + _extras(settings)

@@ -6,15 +6,16 @@
 """
 
 from gc_core.startup_notices import collect_startup_notices
+from gc_testkit.settings import make_settings
 from gc_tui.services.voice_notices import voice_notices
 
 
 def _overridden(cfg):
     """Настройки с признаком перекрытия managed-слоем: он живёт в рантайме
     загрузки, плоский словарь его не переносит."""
-    from gc_core.settings import settings_from_flat
+    from gc_testkit.settings import make_settings
 
-    return settings_from_flat(cfg).with_runtime(
+    return make_settings(cfg).with_runtime(
         voice_overridden_by_managed="https://api.groq.com/x"
     )
 
@@ -22,7 +23,11 @@ def _overridden(cfg):
 def _collect(voice):
     cfg = {"voice": voice}
     return collect_startup_notices(
-        cfg, set(), None, is_tui=True, extra=voice_notices(cfg)
+        make_settings(cfg),
+        set(),
+        None,
+        is_tui=True,
+        extra=voice_notices(make_settings(cfg)),
     )
 
 
@@ -72,7 +77,11 @@ def test_missing_sounddevice_does_not_hide_the_other_voice_notices(
         },
     }
     notices = collect_startup_notices(
-        cfg, set(), None, is_tui=True, extra=voice_notices(_overridden(cfg))
+        make_settings(cfg),
+        set(),
+        None,
+        is_tui=True,
+        extra=voice_notices(_overridden(cfg)),
     )
     codes = [n.code for n in notices]
     assert "voice_no_sounddevice" in codes
@@ -130,13 +139,15 @@ def test_core_alone_collects_no_voice_notices(monkeypatch):
     monkeypatch.setattr("gc_tui.voice.recorder.available", lambda: False)
     assert (
         collect_startup_notices(
-            {
-                "voice": {
-                    "provider": "openai",
-                    "url": "https://x",
-                    "token": "t",
+            make_settings(
+                {
+                    "voice": {
+                        "provider": "openai",
+                        "url": "https://x",
+                        "token": "t",
+                    }
                 }
-            },
+            ),
             set(),
             None,
             is_tui=True,
@@ -156,7 +167,11 @@ def test_voice_overridden_notice(monkeypatch):
         },
     }
     notices = collect_startup_notices(
-        cfg, set(), None, is_tui=True, extra=voice_notices(_overridden(cfg))
+        make_settings(cfg),
+        set(),
+        None,
+        is_tui=True,
+        extra=voice_notices(_overridden(cfg)),
     )
     codes = [n.code for n in notices]
     assert "voice_overridden" in codes
@@ -186,6 +201,10 @@ def test_voice_install_broken_notice(monkeypatch):
         }
     }
     notices = collect_startup_notices(
-        cfg, set(), None, is_tui=True, extra=voice_notices(cfg)
+        make_settings(cfg),
+        set(),
+        None,
+        is_tui=True,
+        extra=voice_notices(make_settings(cfg)),
     )
     assert "voice_install_broken" in [n.code for n in notices]

@@ -4,6 +4,7 @@
 предыдущего треда оставались в #trace, новый дорисовывался поверх).
 """
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -96,7 +97,9 @@ async def test_switch_session_clears_previous_trace(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(threads_dir), system="cli", config={"model": "M"}
+        threads_dir=str(threads_dir),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = app.screen

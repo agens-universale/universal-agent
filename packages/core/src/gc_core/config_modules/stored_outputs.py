@@ -26,23 +26,23 @@ def normalize_tool_output_limits(
     return inline, entries
 
 
-def _agent_limits(config: Any) -> Tuple[int, int]:
+def _agent_limits(settings: Any) -> Tuple[int, int]:
     """(inline, entries) из ``agent`` настроек — всё, что принимает ``settings_of``."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    agent = settings_of(config).agent
+    agent = settings_of(settings).agent
     return normalize_tool_output_limits(
         agent.tool_output_inline_max_chars,
         agent.stored_tool_outputs_max_entries,
     )
 
 
-def get_tool_output_inline_max_chars(config: Any) -> int:
-    inline, _ = _agent_limits(config)
+def get_tool_output_inline_max_chars(settings: Any) -> int:
+    inline, _ = _agent_limits(settings)
     return inline
 
 
-def get_stored_tool_outputs_max_entries(config: Any) -> int:
-    _, entries = _agent_limits(config)
+def get_stored_tool_outputs_max_entries(settings: Any) -> int:
+    _, entries = _agent_limits(settings)
     return entries

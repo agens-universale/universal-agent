@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import uuid
 
 import pytest
@@ -29,7 +30,11 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
 
     threads = tmp_path / "threads"
     threads.mkdir()
-    app = TuiApp(threads_dir=str(threads), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(threads),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         tid = uuid.uuid4().hex
@@ -100,7 +105,11 @@ async def test_parent_ask_human_answer_still_tracks_pending(tmp_path):
 
     threads = tmp_path / "threads"
     threads.mkdir()
-    app = TuiApp(threads_dir=str(threads), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(threads),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         tid = uuid.uuid4().hex

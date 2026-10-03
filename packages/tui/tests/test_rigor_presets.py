@@ -57,28 +57,23 @@ def test_resolve_preset_names_and_custom():
 
 
 def test_resolve_rigor_state_reads_effective_pair():
+    from gc_testkit.settings import make_settings
     from gc_tui.toggles import PRESET_CUSTOM, resolve_rigor_state
 
     # medium: explicit smart + judge
-    cfg = {
-        "tui_finish_gate_mode": "smart",
-        "tui_finish_gate_mode_explicit": True,
-        "tui_text_answer_mode": "judge",
-    }
+    cfg = make_settings(
+        {"tui_finish_gate_mode": "smart", "tui_text_answer_mode": "judge"}
+    )
     assert resolve_rigor_state(cfg) == "medium"
     # нестандартная сессионная пара on+allow → custom
-    cfg2 = {
-        "tui_finish_gate_mode": "on",
-        "tui_finish_gate_mode_explicit": True,
-        "tui_text_answer_mode": "allow",
-    }
+    cfg2 = make_settings(
+        {"tui_finish_gate_mode": "on", "tui_text_answer_mode": "allow"}
+    )
     assert resolve_rigor_state(cfg2) == PRESET_CUSTOM
     # дефолты (нет ключей) → smart + judge → medium
-    assert resolve_rigor_state({}) == "medium"
+    assert resolve_rigor_state(make_settings()) == "medium"
     # low через явный off + allow
-    cfg3 = {
-        "tui_finish_gate_mode": "off",
-        "tui_finish_gate_mode_explicit": True,
-        "tui_text_answer_mode": "allow",
-    }
+    cfg3 = make_settings(
+        {"tui_finish_gate_mode": "off", "tui_text_answer_mode": "allow"}
+    )
     assert resolve_rigor_state(cfg3) == "low"

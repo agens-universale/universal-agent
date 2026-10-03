@@ -13,6 +13,7 @@ import types
 
 import pytest
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 # ---------------------------------------------------------------------------
 # C1: run_summary_coordinator
@@ -165,15 +166,17 @@ class TestC1TurnEndCompact:
 
 class TestC2AgentExecutorFinally:
     def _make_cfg(self, tmp_path):
-        return {
-            "threads_data_path": str(tmp_path),
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://test",
-            "model": "x",
-            "max_steps": 1,
-            "system_prompt_id": "v1",
-            "save_logs": False,
-        }
+        return make_settings(
+            {
+                "threads_data_path": str(tmp_path),
+                "backend_api_mode": "chat_completions",
+                "completions_url": "http://test",
+                "model": "x",
+                "max_steps": 1,
+                "system_prompt_id": "v1",
+                "save_logs": False,
+            }
+        )
 
     async def test_collect_called_in_finally(self, monkeypatch, tmp_path):
         """gc.collect вызывается в finally AgentExecutor.run после close_all.
@@ -249,7 +252,7 @@ class TestC3ProcessingResponses:
     """C3: gc.collect перед return tools_outputs, под флагом gc.force_collect."""
 
     def _run_process_tool_calls(
-        self, monkeypatch, *, config_dict, is_tui=False, is_cli_mode=False
+        self, monkeypatch, *, config, is_tui=False, is_cli_mode=False
     ):
         """Вызывает process_tool_calls с замоканным бэкендом и собирает
         флаг был ли вызван gc.collect."""
@@ -264,8 +267,8 @@ class TestC3ProcessingResponses:
             return [{"role": "assistant", "content": "ok"}], "rid", {}
 
         monkeypatch.setattr(pr, "_arequest_backend_canonical", _abackend_stub)
-        ctx = types.SimpleNamespace(
-            config_dict=config_dict,
+        ctx = fake_ctx(
+            config,
             is_tui=is_tui,
             is_cli_mode=is_cli_mode,
         )
@@ -292,16 +295,16 @@ class TestC3ProcessingResponses:
 
     def test_collect_default_on_for_cli(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(
-            monkeypatch, config_dict={}, is_cli_mode=True
+            monkeypatch, config={}, is_cli_mode=True
         )
         assert len(gc_calls) == 1, "default on для CLI"
 
     def test_collect_default_on_for_tui(self, monkeypatch):
         gc_calls = self._run_process_tool_calls(
-            monkeypatch, config_dict={}, is_tui=True
+            monkeypatch, config={}, is_tui=True
         )
         assert len(gc_calls) == 1, "default on для TUI"
 
     def test_no_collect_default_off_for_server(self, monkeypatch):
-        gc_calls = self._run_process_tool_calls(monkeypatch, config_dict={})
+        gc_calls = self._run_process_tool_calls(monkeypatch, config={})
         assert gc_calls == [], "default off для server"

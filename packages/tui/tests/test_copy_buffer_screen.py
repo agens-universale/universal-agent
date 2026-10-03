@@ -7,6 +7,7 @@ SPEC 2026-07-25 §3.1 B6/B7/B8: экран буфера сессии; Esc сох
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -35,7 +36,9 @@ async def test_copy_buffer_screen_chrome(tmp_path):
     from textual.widgets import Static
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore()
@@ -66,7 +69,9 @@ async def test_copy_buffer_screen_loads_existing(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый буфер")
@@ -84,7 +89,9 @@ async def test_copy_buffer_screen_no_store_opens_empty(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(CopyBufferScreen(store=None, task_id=None))
@@ -99,7 +106,9 @@ async def test_esc_no_change_no_write(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="не меняли")
@@ -118,7 +127,9 @@ async def test_esc_with_change_saves(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
@@ -140,7 +151,9 @@ async def test_esc_empty_clears_buffer(tmp_path):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="было")
@@ -162,7 +175,9 @@ async def test_save_clamps_to_max(tmp_path):
     from gc_tui.services.copy_buffer import COPY_BUFFER_MAX
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
@@ -186,7 +201,9 @@ async def test_paste_os_first(tmp_path, monkeypatch):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(
@@ -209,7 +226,9 @@ async def test_ctrl_shift_v_binding_pastes(tmp_path, monkeypatch):
     from gc_tui.screens.copy_buffer import BufferTextArea, CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(
@@ -235,7 +254,9 @@ async def test_paste_falls_back_to_internal(tmp_path, monkeypatch):
     from gc_tui.screens.copy_buffer import CopyBufferScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(

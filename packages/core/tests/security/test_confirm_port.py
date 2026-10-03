@@ -3,10 +3,11 @@ import types
 from gc_core.security import confirm_port as cp
 from gc_core.security.confirm_port import confirm_available, request_confirm
 from gc_core.security.permission_store import PermissionStore
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _ctx(**kw):
-    c = types.SimpleNamespace(is_tui=False, config_dict={}, tui_confirm=None)
+    c = fake_ctx(is_tui=False, tui_confirm=None)
     for k, v in kw.items():
         setattr(c, k, v)
     return c
@@ -43,7 +44,9 @@ def test_cli_disabled_when_ask_human_in_stop_tools(monkeypatch):
     monkeypatch.setattr(
         "sys.stdin", types.SimpleNamespace(isatty=lambda: True)
     )
-    ctx = _ctx(config_dict={"stop_tools": ["turn_ask_human"]})
+    ctx = _ctx(
+        settings=make_settings({"stop_tools": ["turn_ask_human"]}).settings
+    )
     assert confirm_available(ctx) is False
 
 
@@ -55,10 +58,9 @@ def _tui_ctx(choice, store=None):
         calls["n"] += 1
         return choice
 
-    ctx = types.SimpleNamespace(
+    ctx = fake_ctx(
         is_tui=True,
         tui_confirm=tui_confirm,
-        config_dict={},
         permission_store=store,
     )
     return ctx, calls
@@ -149,7 +151,7 @@ def test_headless_fail_closed_without_tty(monkeypatch):
         cp.sys, "stdin", types.SimpleNamespace(isatty=lambda: False)
     )
     store = PermissionStore()
-    ctx = types.SimpleNamespace(config_dict={}, permission_store=store)
+    ctx = fake_ctx(permission_store=store)
     assert (
         cp.request_confirm(
             title="t",

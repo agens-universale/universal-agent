@@ -1,7 +1,6 @@
 """Finish gate для subagent: assignment в scope, не CLI user оркестратора."""
 
 import logging
-from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +10,7 @@ from gc_core.intent_guard.validation_result import ValidationResult
 from gc_core.intent_log.user_turn import init_subagent_open_turn
 from gc_core.states import SharedStateData, State
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state():
@@ -46,8 +46,8 @@ def _make_config():
 
 
 def _make_ctx(cfg):
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         auth_connector=None,
         logger=logging.getLogger("test_subagent_finish_gate"),
     )

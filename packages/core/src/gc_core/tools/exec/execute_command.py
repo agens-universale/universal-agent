@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 from gc_core.backends.async_protocol import aexec_port
 from gc_core.config_modules.agent import (
@@ -56,12 +56,12 @@ class ExecuteCommand(AbstractSimpleTool):
     Tool to execute a CLI command on the system and return its output.
     """
 
-    # Fallback when config_dict has no exec_timeout_sec (tests / partial wiring).
+    # Fallback when settings have no exec_timeout_sec (tests / partial wiring).
     timeout = DEFAULT_EXEC_TIMEOUT_SEC
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def tool_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = {
             "type": "function",
             "name": "exec_command",
@@ -134,8 +134,8 @@ class ExecuteCommand(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
-        timeout_default = exec_timeout_from_config_dict(config_dict)
+    def prompt_description(cls, settings: Any = None):
+        timeout_default = exec_timeout_from_config_dict(settings)
         description = (
             """Tool name: exec_command
 Tool description: Run a shell command synchronously; returns JSON with exit_code, stdout, stderr.
@@ -213,7 +213,7 @@ Important Usage Rules:
             stdout=as_captured_stream(stdout),
             stderr=as_captured_stream(stderr),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
-                self._config_dict
+                self._settings_source
             ),
             error=error,
             head_fields={"command": command, "cwd": cwd},
@@ -298,7 +298,7 @@ Important Usage Rules:
             )
 
         if timeout is None:
-            timeout = exec_timeout_from_config_dict(self._config_dict)
+            timeout = exec_timeout_from_config_dict(self._settings_source)
         if not isinstance(timeout, int) or timeout <= 0:
             return reject({"type": "invalid_argument", "field": "timeout"})
 
@@ -465,7 +465,7 @@ Important Usage Rules:
             stdout=as_captured_stream(""),
             stderr=as_captured_stream(""),
             preview_edge_chars=exec_output_preview_edge_chars_from_config_dict(
-                self._config_dict
+                self._settings_source
             ),
             error=None,
             head_fields={

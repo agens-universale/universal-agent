@@ -1,6 +1,5 @@
-from types import SimpleNamespace
-
 from gc_core.utils.connect_backend import build_call_headers
+from gc_testkit.settings import fake_ctx
 
 
 class _StateStub:
@@ -17,7 +16,7 @@ def _ctx(**cfg):
         "trace_header_enabled": True,
     }
     base.update(cfg)
-    return SimpleNamespace(config_dict=base, auth_connector=None)
+    return fake_ctx(base, auth_connector=None)
 
 
 class TestOldHeaderRemoved:
@@ -72,8 +71,8 @@ class TestModelHeaderGate:
     """Отправка трейса в модель — opt-in через agent.trace_header_enabled."""
 
     def test_no_header_without_the_flag(self):
-        ctx = SimpleNamespace(
-            config_dict={
+        ctx = fake_ctx(
+            {
                 "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "trace_id": "wf-42",

@@ -13,7 +13,7 @@ from gc_core.execution.contracts import (
     ToolResult,
 )
 from gc_core.execution.reducers import apply_state_delta, tool_state_view
-from gc_core.settings import AppConfig, LoadedSettings, runtime_of, settings_of
+from gc_core.settings import LoadedSettings, runtime_of, settings_of
 from gc_core.tools.arguments_validation import (
     WrongFunctionArgumentsException,
     annotate_output_with_dropped_arguments,
@@ -121,11 +121,14 @@ def _warn_unknown_filter_names(
 
 def apply_subagent_tools_filter(
     tools_data: Dict[str, Dict[str, Any]],
-    config_dict: Any,
+    settings: Any,
     *,
     logger: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
     """Сузить набор тулов дочернего рана по allow/stop из определения сабагента.
+
+    ``settings`` — всё, что принимает ``runtime_of`` (контекст, ``LoadedSettings``):
+    allow/stop живут в рантайме ребёнка.
 
     Точка применения — здесь, а не в раннере: детские тулы собираются в двух
     местах (``_build_child_state`` и ``_build_child_ctx``), оба зовут
@@ -138,7 +141,7 @@ def apply_subagent_tools_filter(
     раньше: служебное ядро возвращается только если оно ещё есть во входящем
     наборе, снятое им не восстанавливаем.
     """
-    runtime = runtime_of(config_dict)
+    runtime = runtime_of(settings)
     allow_raw = runtime.subagent_tools_allow
     stop_raw = runtime.subagent_tools_stop
     allow = set(allow_raw) if allow_raw is not None else None
@@ -168,7 +171,7 @@ def apply_subagent_tools_filter(
 
 
 def _collect_local_tools_data(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     os_backend: FsBackend | None,
     skills_registry: SkillsRegistry | None,
@@ -181,12 +184,12 @@ def _collect_local_tools_data(
     """
     tools_data: Dict[str, Dict[str, Any]] = {}
 
-    builtin_tools_data = get_builtin_tools_data(config_dict)
+    builtin_tools_data = get_builtin_tools_data(settings)
     for k, v in builtin_tools_data.items():
         tools_data[k] = v
 
     registry = skills_registry or get_skills_registry(
-        config_dict, backend=os_backend
+        settings, backend=os_backend
     )
     skills_tools_data = get_skills_tools_data(registry)
     for k, v in skills_tools_data.items():
@@ -195,7 +198,7 @@ def _collect_local_tools_data(
 
 
 async def abuild_tools_data(
-    config_dict: Dict[str, Any],
+    settings: Any,
     on_progress=None,
     *,
     os_backend: FsBackend | None = None,
@@ -209,20 +212,23 @@ async def abuild_tools_data(
     Дискавери — 99.7% времени сборки (866–1405 мс против 2.4–6.9 мс на всё
     остальное), и только она здесь асинхронна. Остальные источники — builtin,
     скиллы, субагенты — это словари в памяти.
+
+    ``settings`` — настройки рана: всё, что принимает ``settings_of``/``runtime_of``
+    (контекст, ``LoadedSettings``, ``AppConfig``).
     """
     from gc_core.tools.connect_mcp.agent_tools import (
         aget_mcp_tools_data_for_config,
     )
 
     tools_data = _collect_local_tools_data(
-        config_dict, os_backend=os_backend, skills_registry=skills_registry
+        settings, os_backend=os_backend, skills_registry=skills_registry
     )
     # `os_backend` обязателен: без него `runs_in_agent_runtime` считает любой
     # MCP-сервер «своим», и `execute_on: os_backend` молча исполнялся на хосте,
     # мимо песочницы. develop передаёт его здесь же; при переводе аргумент
     # потерялся.
     mcp_tools_data, mcp_status = await aget_mcp_tools_data_for_config(
-        config_dict,
+        settings,
         on_progress,
         tools_cache=tools_cache,
         os_backend=os_backend,
@@ -231,7 +237,7 @@ async def abuild_tools_data(
         tools_data,
         mcp_tools_data,
         mcp_status,
-        config_dict,
+        settings,
         logger=logger,
         registered_names=registered_names,
     )
@@ -260,7 +266,7 @@ def _finish_tools_data(
     tools_data: Dict[str, Dict[str, Any]],
     mcp_tools_data: Dict[str, Dict[str, Any]],
     mcp_status: dict,
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     logger: Any,
     registered_names: Optional[list] = None,
@@ -274,25 +280,25 @@ def _finish_tools_data(
         tools_data[k] = v
 
     # Настройки — один раз и до реестра субагентов: фильтры и спеки ниже
-    # читают их отсюда, а не конвертируют config_dict заново.
+    # читают их отсюда.
     loaded = LoadedSettings(
-        settings=settings_of(config_dict), runtime=runtime_of(config_dict)
+        settings=settings_of(settings), runtime=runtime_of(settings)
     )
-    settings = loaded.settings
-    backend_mode = settings.backend.api_mode.strip().lower()
+    app = loaded.settings
+    backend_mode = app.backend.api_mode.strip().lower()
     if (
-        subagents_enabled(settings.agent.use_local_subagents)
+        subagents_enabled(app.agent.use_local_subagents)
         and backend_mode == "chat_completions"
     ):
         from gc_core.tools.subagents.registry import get_subagents_tools_data
 
         # Реестр уже применил список из use_local_subagents к кастомным;
         # встроенные семь доступны всегда, пока фича включена.
-        subagent_tools = get_subagents_tools_data(config_dict, logger=logger)
+        subagent_tools = get_subagents_tools_data(settings, logger=logger)
         for k, v in subagent_tools.items():
             tools_data[k] = v
 
-    if parse_os_backend_kind(config_dict) == "harbor":
+    if parse_os_backend_kind(loaded) == "harbor":
         # Host-only: writes to local disk; not available in harbor/sandbox mode.
         tools_data.pop("download_file", None)
 
@@ -308,8 +314,8 @@ def _finish_tools_data(
     # при создании RunContext, когда logger ещё не привязан к контексту.
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
 
-    openai_strict = settings.backend.openai_strict_tools_schema
-    send_tool_strict = settings.backend.send_tool_strict
+    openai_strict = app.backend.openai_strict_tools_schema
+    send_tool_strict = app.backend.send_tool_strict
     inject_tool_fields = resolve_inject_tool_fields(loaded)
 
     # Бэкенд требует parameters.required — нормализуем все spec'и
@@ -388,25 +394,20 @@ def tool_arguments_valid(
     return True
 
 
-def _config_dict_for_call(
+def _settings_source_for_call(
     ctx: Optional[Any], kwargs: Dict[str, Any]
-) -> Dict[str, Any]:
-    if ctx is not None and hasattr(ctx, "config_dict"):
-        cfg = ctx.config_dict or {}
-    else:
-        cfg = kwargs.get("config_dict")
-    return cfg if isinstance(cfg, dict) else {}
+) -> Any:
+    """Источник настроек вызова (то, что принимает ``settings_of``).
 
-
-def _settings_for_call(
-    ctx: Optional[Any], config_dict: Dict[str, Any]
-) -> AppConfig:
-    """Типизированные настройки вызова: из ``ctx.settings``, иначе из плоского вида."""
-    if ctx is not None and isinstance(
-        getattr(ctx, "settings", None), (AppConfig, LoadedSettings)
-    ):
-        return settings_of(ctx)
-    return settings_of(config_dict)
+    Контекст рана; явные ``settings=`` вызова — только когда контекста нет или
+    у него нет своих настроек (прямые вызовы ``apply_tool`` в тестах/утилитах).
+    """
+    explicit = kwargs.get("settings")
+    if ctx is None:
+        return explicit
+    if explicit is not None and getattr(ctx, "settings", None) is None:
+        return explicit
+    return ctx
 
 
 def _logger_for_call(
@@ -424,7 +425,7 @@ def _prepare_subagent_call(
     arguments: str | Dict[str, Any],
     tools_data_: Dict[str, Dict[str, Any]],
     ctx: Optional[Any],
-    config_dict: Dict[str, Any],
+    settings: Any,
     kwargs: Dict[str, Any],
 ) -> "tuple[Any, Dict[str, Any], list[str]] | str":
     from gc_core.tools.subagents.runner import SubagentRunner
@@ -453,7 +454,7 @@ def _prepare_subagent_call(
         parsed_args,
         injected_fields=entry.get("injected_fields") or [],
     )
-    runner = SubagentRunner(ctx, orchestrator_state, config_dict)
+    runner = SubagentRunner(ctx, orchestrator_state, settings)
     return (
         _SubagentTool(
             runner,
@@ -495,8 +496,8 @@ def _prepare_tool_call(
         tools_data_ = ctx.tools_data
 
     # Настройки server subagents
-    config_dict = _config_dict_for_call(ctx, kwargs)
-    settings = _settings_for_call(ctx, config_dict)
+    source = _settings_source_for_call(ctx, kwargs)
+    settings = settings_of(source)
     use_server_subagents = settings.agent.use_server_subagents
     server_tool_prefix = settings.agent.server_tool_prefix
 
@@ -511,10 +512,10 @@ def _prepare_tool_call(
     # Отдельная сверка со списком не нужна: реестр уже отдаёт только разрешённых
     # кастомных, поэтому is_subagent_tool на отфильтрованном вернёт False.
     if subagents_enabled(local_subagents_cfg) and is_subagent_tool(
-        tool_name, config_dict
+        tool_name, source
     ):
         return _prepare_subagent_call(
-            tool_name, arguments, tools_data_, ctx, config_dict, kwargs
+            tool_name, arguments, tools_data_, ctx, source, kwargs
         )
 
     # Определяем, каким логгером пользоваться: контекстный или модульный.
@@ -551,15 +552,12 @@ def _prepare_tool_call(
         injected_fields=entry.get("injected_fields") or [],
     )
 
-    # Пробрасываем ctx/config_dict в kwargs тула: AbstractSimpleTool.__init__
-    # читает их через kwargs.get(...), и security‑декораторы (root_box,
-    # read_guard, url_policy, command_moderation) резолвят политику через
-    # self._ctx.config_dict. Без этого декораторы получают пустой
-    # config_dict и считают security‑слой не сконфигурированным.
+    # Пробрасываем ctx в kwargs тула: AbstractSimpleTool.__init__ читает его
+    # через kwargs.get(...), и тул вместе с security‑декораторами (root_box,
+    # read_guard, url_policy, command_moderation) берёт настройки рана из
+    # self._ctx. Явные ``settings=`` вызова (если были) уходят туда же.
     fabric_kwargs = dict(kwargs)
     fabric_kwargs.setdefault("ctx", ctx)
-    if config_dict:
-        fabric_kwargs.setdefault("config_dict", config_dict)
     tool = tool_fabric(**fabric_kwargs)
     return tool, arguments, dropped_unknown
 
@@ -624,7 +622,7 @@ async def _aapply_tool_text(
     Раньше здесь было три ступени: ``acall``, корутинный ``__call__`` и, как
     запасной путь, ``asyncio.to_thread`` для синхронного тула. Третья ступень
     существовала «ради встраивающих», но зарегистрировать свой Python-класс-тул
-    извне нельзя вовсе: ``build_tools_data`` собирает набор из ``config_dict``,
+    извне нельзя вовсе: ``build_tools_data`` собирает набор из настроек,
     параметра для чужих тулов у ``create_run_context`` нет, механизма плагинов
     нет. Точка расширения — MCP, и она асинхронна насквозь.
 

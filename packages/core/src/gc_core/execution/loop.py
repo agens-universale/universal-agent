@@ -85,12 +85,9 @@ class AgentLoop:
         self.run_logger = (
             getattr(ctx, "logger", None) or self.bindings._fallback_logger
         )
-        # Плоский вид — только для привязок, которые пока читают его сами
-        # (strip_tags_projection, human_console_enabled).
-        self.cfg = getattr(ctx, "config_dict", {}) or {}
         agent_cfg = settings_of(ctx).agent
-        self.proj_tags = self.bindings.projection_tags_from_config(self.cfg)
-        self.console_human = self.bindings.human_console_enabled(self.cfg)
+        self.proj_tags = self.bindings.projection_tags_from_config(ctx)
+        self.console_human = self.bindings.human_console_enabled(ctx)
         self.max_tool_errors = agent_cfg.no_tool_call_max_count
         self.session_token_limit = agent_cfg.session_token_limit
         self.max_tool_calls_limit = agent_cfg.max_tool_calls

@@ -1,6 +1,7 @@
 """Навигация по экранам: без задвоения (F1/F4), F5/F3 — с главного и notices,
 F4 (уведомления) — с любого экрана, F1 (справка) — с любого, кроме самой справки."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -16,7 +17,7 @@ async def test_f4_notices_opens_once_no_stack(tmp_path):
     from gc_tui.screens.notices import NoticesScreen
 
     async with TuiApp(
-        threads_dir=str(tmp_path), config={"model": "M"}
+        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
     ).run_test() as pilot:
         await pilot.press("f4")
         await pilot.pause()
@@ -40,7 +41,7 @@ async def test_f1_help_opens_once_no_stack(tmp_path):
     from gc_tui.screens.help import HelpScreen
 
     async with TuiApp(
-        threads_dir=str(tmp_path), config={"model": "M"}
+        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
     ).run_test() as pilot:
         await pilot.press("f1")
         await pilot.pause()
@@ -59,7 +60,7 @@ async def test_f4_notices_opens_from_subscreen(tmp_path):
     from gc_tui.screens.notices import NoticesScreen
 
     async with TuiApp(
-        threads_dir=str(tmp_path), config={"model": "M"}
+        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
     ).run_test() as pilot:
         await pilot.app.screen._handle_command("mcp")
         await pilot.pause()
@@ -79,7 +80,7 @@ async def test_f1_help_reachable_from_subscreen(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     async with TuiApp(
-        threads_dir=str(tmp_path), config={"model": "M"}
+        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
     ).run_test() as pilot:
         await pilot.app.screen._handle_command("mcp")
         await pilot.pause()
@@ -100,7 +101,7 @@ async def test_f5_f3_reachable_from_notices(tmp_path):
 
     cfg = {"model": "M", "launch_root": str(tmp_path)}
     async with TuiApp(
-        threads_dir=str(tmp_path), config=cfg
+        threads_dir=str(tmp_path), settings=tui_settings(cfg)
     ).run_test() as pilot:
         await pilot.press("f4")
         await pilot.pause()
@@ -127,7 +128,7 @@ async def test_config_is_terminal_f3_noop(tmp_path):
     from gc_tui.screens.diff import DiffScreen
 
     async with TuiApp(
-        threads_dir=str(tmp_path), config={"model": "M"}
+        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
     ).run_test() as pilot:
         await pilot.app.screen._handle_command("config")
         await pilot.pause()

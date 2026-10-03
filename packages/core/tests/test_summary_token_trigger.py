@@ -27,6 +27,7 @@ from gc_core.thread_store import (
 )
 from gc_core.usage.account import UsageAccount
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _user(text: str, msg_id: str) -> dict:
@@ -101,7 +102,7 @@ def test_both_exceeded_is_one_compaction_and_log_names_both(
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", _capture)
     coord = RunSummaryCoordinator(
-        ctx=SimpleNamespace(config_dict={}),
+        ctx=fake_ctx(),
         state=state,
         thread_session=None,
         summary_trigger_chars=10,
@@ -118,13 +119,15 @@ def test_both_exceeded_is_one_compaction_and_log_names_both(
     from gc_core.utils.logging_module import create_run_logger
 
     logger, path, _ = create_run_logger(
-        {
-            "logs_dump_dir": str(tmp_path),
-            "save_logs": True,
-            "console_trace": False,
-            "logging_format": "jsonl",
-            "log_level": "info",
-        },
+        make_settings(
+            {
+                "logs_dump_dir": str(tmp_path),
+                "save_logs": True,
+                "console_trace": False,
+                "logging_format": "jsonl",
+                "log_level": "info",
+            }
+        ),
         run_id="t",
         agent_kind="main",
     )
@@ -159,7 +162,7 @@ def test_pre_run_tokens_only_stops_after_one_pass(monkeypatch):
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", _keep_number)
     coord = RunSummaryCoordinator(
-        ctx=SimpleNamespace(config_dict={}),
+        ctx=fake_ctx(),
         state=state,
         thread_session=None,
         summary_trigger_chars=0,
@@ -183,7 +186,7 @@ def test_pre_run_chars_keep_going_after_token_number_is_forgotten(monkeypatch):
 
     monkeypatch.setattr(rsc, "arun_summary_compaction", _clear_tokens)
     coord = RunSummaryCoordinator(
-        ctx=SimpleNamespace(config_dict={}),
+        ctx=fake_ctx(),
         state=state,
         thread_session=None,
         summary_trigger_chars=1,
@@ -304,7 +307,7 @@ async def test_compact_writes_null_prompt_fields_to_meta():
             },
         )
         session = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -343,7 +346,7 @@ def _loop_state(*messages):
 
 def _coordinator(state, logger, *, chars=0, tokens=0):
     return RunSummaryCoordinator(
-        ctx=SimpleNamespace(config_dict={}),
+        ctx=fake_ctx(),
         state=state,
         thread_session=None,
         summary_trigger_chars=chars,

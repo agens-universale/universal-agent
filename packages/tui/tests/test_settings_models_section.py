@@ -7,6 +7,7 @@
 цель — базовый config.yml, показывается ФАЙЛОВОЕ состояние цели (решение 6 плана).
 """
 
+from gc_testkit.tui_support import tui_settings
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -132,7 +133,7 @@ async def _section(
 
     cfg_file = _write_cfg(tmp_path, body, model=model)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     with mock.patch.object(
         model_picker,
         "fetch_models",
@@ -418,7 +419,7 @@ async def test_the_base_section_asks_about_the_default_when_a_profile_holds_mode
     профиля, а у основной секции её нет вовсе — вопрос не задавался там, где запись
     без слота невозможна, и человек упирался в тупик (предложить слот секции было
     негде). Ответ уходит ОДНОЙ транзакцией, после которой конфиг грузится."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     project = tmp_path / "project"
     project.mkdir()
@@ -454,7 +455,7 @@ async def test_the_base_section_asks_about_the_default_when_a_profile_holds_mode
         doc = _doc(cfg_file)
         assert doc["models"]["gc"]["model"] == "anthropic/claude-opus"
         assert doc["slots"]["default"] == "gc"
-        load_config_ex(str(cfg_file))  # merged резолвится — тупика нет
+        load_settings(str(cfg_file))  # merged резолвится — тупика нет
 
 
 async def test_the_add_row_opens_the_creation_form(tmp_path):
@@ -577,7 +578,7 @@ async def test_entry_without_any_address_is_shown_as_problematic(tmp_path):
     )
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(config={"model": "test-model"})
+    app = app_mod.TuiApp(settings=tui_settings({"model": "test-model"}))
     async with app.run_test() as pilot:
         scr = _mk_screen(
             config={"model": "test-model"}, config_path=str(cfg_file)
@@ -2649,7 +2650,7 @@ async def test_a_dead_entry_dims_its_level_pointer_too(tmp_path):
     )
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(config={"model": "test-model"})
+    app = app_mod.TuiApp(settings=tui_settings({"model": "test-model"}))
     async with app.run_test() as pilot:
         scr = _mk_screen(
             config={"model": "test-model"}, config_path=str(cfg_file)
@@ -2777,10 +2778,10 @@ async def test_empty_state_does_not_claim_levels_are_off_under_a_profile_registr
     monkeypatch.chdir(tmp_path)
     from gc_core import config as config_mod
 
-    cfg, _meta = config_mod.load_config_ex(str(cfg_file))
-    assert cfg.get("models") or {}, "предпосылка: реестр приходит из профиля"
+    cfg = config_mod.load_settings(str(cfg_file))
+    assert cfg.settings.models, "предпосылка: реестр приходит из профиля"
 
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=cfg)
     async with app.run_test() as pilot:
         scr = _mk_screen(config=cfg, config_path=str(cfg_file))
         app.push_screen(scr)
@@ -2814,7 +2815,7 @@ async def _section_over_layers(
 ):
     """Секция «Модели» на настоящем стеке слоёв: база в `tmp_path`, проектный
     `.gc/config.yml` в рабочем каталоге, managed-файл в подменённом `GC_HOME`.
-    Конфиг экрана — настоящий `load_config_ex` (слои смержены, как у приложения),
+    Конфиг экрана — настоящий `load_settings` (слои смержены, как у приложения),
     `on_apply` — заглушка: снимок конфига приложения после записи НЕ обновляется,
     ровно как в зазоре между перестройкой секции и перечиткой конфига."""
     from unittest import mock
@@ -2841,8 +2842,8 @@ async def _section_over_layers(
     cfg_file = _write_cfg(tmp_path, body)
     from gc_core import config as config_mod
 
-    cfg, _meta = config_mod.load_config_ex(str(cfg_file))
-    app = app_mod.TuiApp(config=cfg)
+    cfg = config_mod.load_settings(str(cfg_file))
+    app = app_mod.TuiApp(settings=cfg)
     with mock.patch.object(
         model_picker,
         "fetch_models",
@@ -2868,7 +2869,7 @@ async def test_empty_state_names_the_project_layer_that_carries_the_registry(
     async with _section_over_layers(
         tmp_path, monkeypatch, project=_PROJECT_REGISTRY
     ) as (_pilot, scr, _cfg_file):
-        assert scr._config.get("models") or {}, (
+        assert scr._settings.settings.models or {}, (
             "предпосылка: реестр приходит из проекта"
         )
         text = _texts(scr)
@@ -2884,7 +2885,7 @@ async def test_empty_state_names_the_managed_file_that_carries_the_registry(
     async with _section_over_layers(
         tmp_path, monkeypatch, managed=_PROJECT_REGISTRY
     ) as (_pilot, scr, _cfg_file):
-        assert scr._config.get("models") or {}, (
+        assert scr._settings.settings.models or {}, (
             "предпосылка: реестр приходит из managed"
         )
         text = _texts(scr)
@@ -2907,7 +2908,7 @@ async def test_removing_the_last_base_entry_without_a_profile_returns_the_legacy
         scr,
         cfg_file,
     ):
-        assert set(scr._config.get("models") or {}) == {
+        assert set(scr._settings.settings.models or {}) == {
             "a"
         }  # снимок приложения: запись ещё есть
         ed = _editor(scr)
@@ -3044,7 +3045,7 @@ async def test_registry_origin_reads_the_stack_once_per_ui_pass(
 
     cfg_file = _write_cfg(tmp_path)
     cfg = _loaded(cfg_file)
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=cfg, config_path=str(cfg_file))
         app.push_screen(scr)

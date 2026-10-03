@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from gc_core import processing_responses as pr
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.execution.contracts import ExecutionFailure, ModelResult
 from gc_core.execution.finish_reason import is_context_overflow_error
@@ -18,6 +17,7 @@ from gc_core.usage.account import UsageAccount
 from gc_core.usage.context import record_usage
 from gc_core.utils import llm_chat_client as llm
 from gc_core.utils.backend_errors import EmbeddedChoiceError
+from gc_testkit.settings import fake_ctx
 
 
 def _state():
@@ -43,8 +43,8 @@ def _state():
 
 
 def _ctx(with_port, **config):
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "completions_url": "https://model.test/v1/chat/completions",
             "backend_request_timeout_sec": 600,
             "backend_api_mode": "chat_completions",
@@ -292,14 +292,12 @@ async def test_responses_items_and_agent_metadata_survive_the_boundary(
 async def test_aux_router_fallback_stays_in_the_native_provider_handler(
     monkeypatch, with_port
 ):
-    config = flatten_app_config(
-        AppConfig.model_validate(
-            {
-                "models": {"judge": {}, "active": {}},
-                "slots": {"default": "active"},
-                "assign": {"finish_gate": "judge"},
-            }
-        )
+    config = AppConfig.model_validate(
+        {
+            "models": {"judge": {}, "active": {}},
+            "slots": {"default": "active"},
+            "assign": {"finish_gate": "judge"},
+        }
     )
     router = ModelRouter(config, level_provider=lambda: "default")
     models = []

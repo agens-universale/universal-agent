@@ -5,7 +5,7 @@ import sys
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import cli
-from gc_core.settings import settings_from_flat
+from gc_testkit.settings import make_settings
 
 
 def _stub_repair_load(monkeypatch, config):
@@ -18,7 +18,7 @@ def _stub_repair_load(monkeypatch, config):
         onboarding,
         "load_config_for_repair",
         lambda: onboarding.RepairLoad(
-            config, None, onboarding.REPAIR_STAGE_FULL, None
+            make_settings(config), None, onboarding.REPAIR_STAGE_FULL, None
         ),
     )
 
@@ -133,7 +133,7 @@ def test_main_no_auto_wizard(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         cli,
         "load_settings",
-        lambda *a, **k: settings_from_flat(
+        lambda *a, **k: make_settings(
             {"completions_url": "http://your-backend:PORT/v1/chat/completions"}
         ),
     )
@@ -187,7 +187,7 @@ def test_unconfigured_with_structured_format_exits_1(
     monkeypatch.setattr(
         cli,
         "load_settings",
-        lambda *a, **k: settings_from_flat(
+        lambda *a, **k: make_settings(
             {"completions_url": "http://your-backend:PORT/v1/chat/completions"}
         ),
     )

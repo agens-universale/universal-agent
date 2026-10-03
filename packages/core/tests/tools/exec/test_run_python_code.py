@@ -23,7 +23,7 @@ def test_run_python_validation_and_truncation():
     assert json.loads(tool(code=""))["error"]["field"] == "code"
     trunc_tool = with_local_ctx(
         RunPythonCode,
-        config_dict={
+        {
             "exec_output_capture_max_chars": 10,
             "exec_output_preview_edge_chars": 5,
         },
@@ -98,9 +98,7 @@ def test_run_python_default_cwd_is_launch_root(tmp_path, monkeypatch):
     monkeypatch.chdir(work)
     project = tmp_path / "project"
     project.mkdir()
-    tool = with_local_ctx(
-        RunPythonCode, config_dict=_allow_config(str(project))
-    )
+    tool = with_local_ctx(RunPythonCode, _allow_config(str(project)))
     marker = project / "from_root.txt"
     r = json.loads(
         tool(
@@ -118,7 +116,7 @@ def test_run_python_cwd_invalid_returns_allowed_paths(tmp_path):
     extra.mkdir()
     tool = with_local_ctx(
         RunPythonCode,
-        config_dict={
+        {
             "launch_root": str(workspace),
             "command_moderation": {"mode": "allow"},
             "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
@@ -148,7 +146,7 @@ def test_run_python_cwd_invalid_omits_non_writable_launch_root(tmp_path):
         extra.mkdir()
         tool = with_local_ctx(
             RunPythonCode,
-            config_dict={
+            {
                 "launch_root": str(ro_launch),
                 "command_moderation": {"mode": "allow"},
                 "write_guard": {"enabled": True, "extra_paths": [str(extra)]},

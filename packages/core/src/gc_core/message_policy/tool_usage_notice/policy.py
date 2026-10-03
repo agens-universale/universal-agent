@@ -154,14 +154,14 @@ def get_thread_memory_registers_from_shared(shared: Any) -> dict[str, str]:
 
 
 def active_tool_usage_notice_rules(
-    config_dict: Any,
+    settings: Any,
 ) -> list[ToolUsageNoticeRule]:
     """Правила ``tool_usage_notice`` без тулов из ``agent.stop_tools``.
 
-    ``config_dict`` — настройки (``AppConfig``) или то, что знает ``settings_of``.
-    Правила уже нормализованы при загрузке настроек.
+    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
+    ``AppConfig``). Правила уже нормализованы при загрузке настроек.
     """
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     stopped = {
         str(item).strip()
         for item in settings.agent.stop_tools
@@ -175,11 +175,14 @@ def active_tool_usage_notice_rules(
 
 
 def subagent_thread_memory_bootstrap_text(
-    config_dict: Any,
+    settings: Any,
     registers: dict[str, str] | None,
 ) -> str | None:
-    """Текст one-shot bootstrap для subagent при старте; без meta/state side effects."""
-    if not active_tool_usage_notice_rules(config_dict):
+    """Текст one-shot bootstrap для subagent при старте; без meta/state side effects.
+
+    ``settings`` — то, что принимает ``settings_of``.
+    """
+    if not active_tool_usage_notice_rules(settings):
         return None
     return build_subagent_thread_memory_bootstrap_message(registers)
 

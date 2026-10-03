@@ -1,5 +1,6 @@
 """Ctrl+V (action_paste) и правый клик вставляют из системного буфера."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -12,7 +13,9 @@ async def test_action_paste_inserts_from_os_clipboard(tmp_path, monkeypatch):
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "из буфера")
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -33,7 +36,9 @@ async def test_right_click_pastes_from_os_clipboard(tmp_path, monkeypatch):
     monkeypatch.setattr(os_ops, "read_clipboard", lambda: "правый клик")
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

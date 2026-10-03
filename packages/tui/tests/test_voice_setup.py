@@ -1,6 +1,7 @@
 # tests/tui/test_voice_setup.py
 """Фасад voice_setup: снапшот статуса, маршрутизация слоёв, probe."""
 
+from gc_testkit.settings import make_settings
 import pytest
 
 # Захват ДО фикстур. Autouse `_no_network_model_fetch` из conftest (приехала с
@@ -35,7 +36,7 @@ def test_status_local(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
     s = vs.status_snapshot(
-        _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
+        make_settings(_cfg("http://127.0.0.1:8735/v1/audio/transcriptions"))
     )
     assert s == vs.VoiceStatus(
         installed=True,
@@ -65,13 +66,15 @@ def test_status_carries_the_available_version(monkeypatch):
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
     monkeypatch.setattr(vs, "_load_state", lambda: ST_OLD)
     s = vs.status_snapshot(
-        _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
+        make_settings(_cfg("http://127.0.0.1:8735/v1/audio/transcriptions"))
     )
     assert s.available_version == SPEACHES_PIN
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     assert (
         vs.status_snapshot(
-            _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
+            make_settings(
+                _cfg("http://127.0.0.1:8735/v1/audio/transcriptions")
+            )
         ).available_version
         is None
     )
@@ -79,19 +82,21 @@ def test_status_carries_the_available_version(monkeypatch):
 
 def test_status_cloud(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: None)
-    s = vs.status_snapshot(_cfg("https://api.example/v1/audio/transcriptions"))
+    s = vs.status_snapshot(
+        make_settings(_cfg("https://api.example/v1/audio/transcriptions"))
+    )
     assert s.mode == "cloud" and not s.installed and s.port is None
 
 
 def test_status_off(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: None)
-    assert vs.status_snapshot({"voice": {}}).mode == "off"
+    assert vs.status_snapshot(make_settings({"voice": {}})).mode == "off"
 
 
 def test_status_installed_with_empty_url_is_off(monkeypatch):
     monkeypatch.setattr(vs, "_load_state", lambda: ST)
     monkeypatch.setattr(vs, "_port_alive", lambda st: True)
-    s = vs.status_snapshot(_cfg())
+    s = vs.status_snapshot(make_settings(_cfg()))
     assert s.mode == "off" and s.installed is True
 
 
@@ -158,17 +163,23 @@ def test_wire_local_keeps_language_from_managed(monkeypatch):
     }
 
 
-def test_local_language_falls_back_to_effective_config(monkeypatch):
+def test_local_language_falls_back_to_effective_settings(monkeypatch):
     """Переезд в облако сносит managed-секцию целиком (wire_cloud делает unwire) —
     язык там больше не лежит. Возврат в локальный режим не имеет права молча
     сбросить его на дефолт: берём из ДЕЙСТВУЮЩЕГО конфига."""
     monkeypatch.setattr(vs, "_managed_language", lambda default="ru": "")
-    assert vs.local_language({"voice": {"language": "en"}}) == "en"
-    assert vs.local_language({"voice": {}}) == "ru"  # нигде нет — дефолт схемы
+    assert (
+        vs.local_language(make_settings({"voice": {"language": "en"}})) == "en"
+    )
+    assert (
+        vs.local_language(make_settings({"voice": {}})) == "ru"
+    )  # нигде нет — дефолт схемы
     assert vs.local_language() == "ru"
     # managed жив — он и владелец: конфиг его не перебивает
     monkeypatch.setattr(vs, "_managed_language", lambda default="ru": "de")
-    assert vs.local_language({"voice": {"language": "en"}}) == "de"
+    assert (
+        vs.local_language(make_settings({"voice": {"language": "en"}})) == "de"
+    )
 
 
 def test_switch_to_local_carries_language_through_the_cloud_trip(monkeypatch):
@@ -197,10 +208,10 @@ def test_switch_to_local_carries_language_through_the_cloud_trip(monkeypatch):
         "wh",
         language="en",
     )
-    resolved = {
-        "voice": {"language": written["voice.language"]}
-    }  # так его видит load_config
-    vs.switch_to_local(config=resolved)
+    resolved = make_settings(
+        **{"voice.language": written["voice.language"]}
+    )  # так его видят настройки после перечитки
+    vs.switch_to_local(settings=resolved)
     assert wired["language"] == "en"
 
 
@@ -437,7 +448,9 @@ def test_status_cheap_never_touches_the_network(monkeypatch, tmp_path):
     monkeypatch.setattr(socket, "create_connection", _boom)
     monkeypatch.setattr(vs, "_load_state", lambda: None)
     s = vs.status_cheap(
-        {"voice": {"url": "https://s.x/v1/audio/transcriptions"}}
+        make_settings(
+            {"voice": {"url": "https://s.x/v1/audio/transcriptions"}}
+        )
     )
     assert s.mode == "cloud" and s.installed is False
 
@@ -445,7 +458,9 @@ def test_status_cheap_never_touches_the_network(monkeypatch, tmp_path):
     monkeypatch.setattr(vs, "_load_state", lambda: state)
     monkeypatch.setattr(vs, "_available_update", lambda st: None)
     s = vs.status_cheap(
-        {"voice": {"url": "https://s.x/v1/audio/transcriptions"}}
+        make_settings(
+            {"voice": {"url": "https://s.x/v1/audio/transcriptions"}}
+        )
     )
     assert s.installed is True
     assert s.service_alive is None  # живость не мерялась — её приносит воркер

@@ -153,7 +153,7 @@ class ReadFile(AbstractSimpleTool):
         return None
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         description = {
             "type": "function",
             "name": "fs_read_file",
@@ -196,7 +196,7 @@ class ReadFile(AbstractSimpleTool):
         return description
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_read_file
 Tool description: Read a text file. Without offset/limit the line range is the whole file. Always includes full-file sha256.
 Input schema: {
@@ -285,7 +285,7 @@ Usage:
                 file_size_bytes=None,
             )
 
-        max_bytes = fs_read_max_bytes(self._config_dict)
+        max_bytes = fs_read_max_bytes(self._settings_source)
         if file_size_bytes is None and await self._backend.exists(path):
             return self._error_result(
                 path=path,

@@ -23,9 +23,9 @@ from unittest.mock import AsyncMock, patch
 # runs deterministically under any pytest invocation.
 sys.argv = ["gc-cli", "-q", "x"]
 
-from gc_core.settings import settings_from_flat
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _make_logger(tmp_path, level="info"):
@@ -36,7 +36,9 @@ def _make_logger(tmp_path, level="info"):
         "console_trace": False,
         "logs_dump_dir": str(tmp_path),
     }
-    logger, path, _ = create_run_logger(cfg, run_id="t", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        make_settings(cfg), run_id="t", agent_kind="main"
+    )
     return logger, path
 
 
@@ -100,8 +102,8 @@ class _SkillsRegistryStub:
 
 
 def _base_ctx(logger, logging_path, thread_dir):
-    return SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        {
             "verbose": False,
             "model": "CodeChat",
             "max_steps": 0,
@@ -210,7 +212,7 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
     logger, logging_path = _make_logger(tmp_path)
     ctx = SimpleNamespace(logger=logger)
 
-    fake_config_dict = {"console_trace": True}
+    fake_config = {"console_trace": True}
 
     with (
         patch.object(cli_module, "_ensure_project_gc_dir"),
@@ -240,7 +242,7 @@ def test_final_answer_event_is_top_level_event_field(tmp_path):
         patch.object(
             cli_module,
             "load_settings",
-            lambda *_a, **_k: settings_from_flat(fake_config_dict),
+            lambda *_a, **_k: make_settings(fake_config),
         ),
         patch.object(
             cli_module, "apply_cli_overrides", lambda loaded, **_kw: loaded

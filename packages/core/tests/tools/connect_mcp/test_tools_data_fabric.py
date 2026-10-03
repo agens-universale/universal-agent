@@ -17,6 +17,7 @@ from gc_core.tools.connect_mcp.agent_tools import (
     MCPToolWrapper,
     aget_mcp_tools_data_for_config,
 )
+from gc_testkit.settings import make_settings
 
 _TOOL_NAME = "mcp_srv_echo"
 _REGISTRY = {
@@ -60,7 +61,7 @@ class _SandboxBackend:
 async def test_fabric_from_public_entry_builds_a_wrapper():
     """Главная проверка: фабрика из tools_data вызывается и отдаёт обёртку."""
     tools_data, status = await aget_mcp_tools_data_for_config(
-        _CONFIG, tools_cache=_FakeCache()
+        make_settings(_CONFIG), tools_cache=_FakeCache()
     )
 
     assert _TOOL_NAME in tools_data, tools_data
@@ -80,7 +81,7 @@ async def test_fabric_carries_os_backend_to_the_wrapper():
     """
     backend = _SandboxBackend()
     tools_data, _ = await aget_mcp_tools_data_for_config(
-        _CONFIG, tools_cache=_FakeCache(), os_backend=backend
+        make_settings(_CONFIG), tools_cache=_FakeCache(), os_backend=backend
     )
 
     tool = tools_data[_TOOL_NAME]["tool_fabric"]()
@@ -100,7 +101,7 @@ async def test_acall_passes_os_backend_down_to_the_client(monkeypatch):
 
     backend = _SandboxBackend()
     tools_data, _ = await aget_mcp_tools_data_for_config(
-        _CONFIG, tools_cache=_FakeCache(), os_backend=backend
+        make_settings(_CONFIG), tools_cache=_FakeCache(), os_backend=backend
     )
     out = await tools_data[_TOOL_NAME]["tool_fabric"]().acall()
 

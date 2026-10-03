@@ -4,6 +4,7 @@ from gc_core.states import SharedStateData, State
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_core.tools.session.todo import SessionTodo
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import make_settings
 
 
 def _state() -> State:
@@ -98,10 +99,14 @@ def test_no_state_is_error():
 
 def test_registered_in_both_backend_modes():
     for mode in ("responses", "chat_completions"):
-        tools = get_builtin_tools_data({"backend_api_mode": mode})
+        tools = get_builtin_tools_data(
+            make_settings({"backend_api_mode": mode})
+        )
         assert "session_todo" in tools, mode
 
 
 def test_respects_stop_tools():
-    tools = get_builtin_tools_data({"stop_tools": ["session_todo"]})
+    tools = get_builtin_tools_data(
+        make_settings({"stop_tools": ["session_todo"]})
+    )
     assert "session_todo" not in tools

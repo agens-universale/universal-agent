@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -46,7 +47,7 @@ async def test_section_renders_rows_and_manual_block():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=FakeManager(_rows()))
         await app.mount(ed)
@@ -67,7 +68,7 @@ async def test_section_frame_hugs_content():
     from gc_tui import app as app_mod
     from gc_tui.editors.mcp_section import McpSectionEditor
 
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=FakeManager(_rows()))
         await app.mount(ed)
@@ -86,7 +87,7 @@ async def test_section_worker_fills_statuses():
         "office": McpState(True, "0.3.1", None),
         "playwright": McpState(False, None, None),
     }
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=FakeManager(_rows(), states))
         await app.mount(ed)
@@ -114,7 +115,7 @@ async def test_toggle_unwires_connected():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -131,7 +132,7 @@ async def test_toggle_wires_installed_disabled():
 
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -148,7 +149,7 @@ async def test_toggle_noop_when_not_installed():
 
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(False, None, None)})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -182,7 +183,7 @@ async def test_enter_installs_not_installed():
 
     rows = [McpRow("playwright", wired=False, manual=False)]
     mgr = FakeManager(rows, {"playwright": McpState(False, None, None)})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -206,7 +207,7 @@ async def test_ctrl_d_confirm_then_remove():
 
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -230,7 +231,7 @@ async def test_ctrl_d_on_not_installed_is_noop():
 
     rows = [McpRow("playwright", wired=False, manual=False)]
     mgr = FakeManager(rows, {"playwright": McpState(False, None, None)})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -265,7 +266,7 @@ async def test_ctrl_d_esc_cancels_without_remove():
 
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -293,7 +294,7 @@ async def test_action_rows_visibility():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -321,7 +322,7 @@ async def test_move_reaches_action_rows():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -358,7 +359,7 @@ async def test_selected_class_follows_cursor():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -387,7 +388,7 @@ async def test_selected_class_follows_action_cursor():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -422,7 +423,7 @@ async def test_action_rows_updated_in_place_on_move():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -456,7 +457,7 @@ async def test_run_action_installs_missing():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -491,7 +492,7 @@ async def test_run_action_updates_all():
             "ddg": McpState(True, "0.1.0", "0.2.0"),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -537,7 +538,7 @@ async def test_update_all_row_shows_for_connected_without_updates():
             "ddg": McpState(True, "0.1.0", None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -573,7 +574,7 @@ async def test_ctrl_u_updates_current():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -599,7 +600,7 @@ async def test_ctrl_u_noop_on_not_installed_and_action_row():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -630,7 +631,7 @@ async def test_reload_keeps_cursor_after_action_row_op():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -659,7 +660,7 @@ async def test_confirm_gate_blocks_other_actions():
             "playwright": McpState(False, None, None),
         },
     )
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)
@@ -696,7 +697,7 @@ async def test_mcp_row_shows_description(monkeypatch):
         def state(self, n):
             return McpState(installed=False, version=None, update=None)
 
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=_Mgr())
         await app.mount(ed)
@@ -736,7 +737,7 @@ async def test_mcp_descriptions_align_across_statuses():
         def state(self, n):
             return states[n]
 
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=_Mgr())
         ed._states = states
@@ -755,7 +756,7 @@ async def test_enter_noop_when_already_installed():
 
     rows = [McpRow("computer", wired=False, manual=False)]
     mgr = FakeManager(rows, {"computer": McpState(True, "0.2.0", None)})
-    app = app_mod.TuiApp(config={})
+    app = app_mod.TuiApp(settings=tui_settings({}))
     async with app.run_test() as pilot:
         ed = McpSectionEditor(manager=mgr)
         await app.mount(ed)

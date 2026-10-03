@@ -1,5 +1,6 @@
 """Аргумент команды — остаток строки дословно (бэкслэши/пробелы целы)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -9,7 +10,9 @@ async def test_arg_preserves_backslashes_and_spaces(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         # Прямой вызов диспетчера — фокус на парсинге остатка строки,

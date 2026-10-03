@@ -20,6 +20,7 @@ from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import meta_intent_log, user_ask_records
+from gc_testkit.settings import fake_ctx
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -44,18 +45,20 @@ def _patch_memory_patch_empty(monkeypatch):
     )
 
 
-def _ctx(trigger_chars: int = 120000):
+def _ctx(
+    trigger_chars: int = 120000, max_accumulated_summary_chars: int = 20000
+):
     incremental_batch_chars = (
         int(trigger_chars * 1.4) if trigger_chars > 0 else 0
     )
-    return types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        {
             "model": "test-model",
             "completions_url": "http://example.test/v1/chat/completions",
             "summary_params": {
                 "chat_completions_summary_trigger_chars": trigger_chars,
                 "incremental_batch_chars": incremental_batch_chars,
-                "max_accumulated_summary_chars": 20000,
+                "max_accumulated_summary_chars": max_accumulated_summary_chars,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
@@ -598,8 +601,7 @@ def test_accumulated_summary_is_compressed_when_limit_exceeded(monkeypatch):
     _patch_chat_completion(monkeypatch, _fake_request)
     _patch_memory_patch_empty(monkeypatch)
 
-    ctx = _ctx(trigger_chars=4500)
-    ctx.config_dict["summary_params"]["max_accumulated_summary_chars"] = 50
+    ctx = _ctx(trigger_chars=4500, max_accumulated_summary_chars=50)
     result = run_coro(
         asummarize_dialog_via_chat_completions(
             ctx=ctx,

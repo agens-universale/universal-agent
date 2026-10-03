@@ -24,9 +24,12 @@ active_guard_checks: ContextVar[list[GuardProbeCheck] | None] = ContextVar(
 def evaluate_guard_probe(
     request: GuardProbeRequest,
     *,
-    config_dict: dict[str, Any],
+    settings: Any,
 ) -> GuardProbeResult:
     """Evaluate host facts with existing policy helpers on the effect worker.
+
+    ``settings`` — то, что принимает ``settings_of``: контекст рана,
+    ``LoadedSettings`` или ``AppConfig``.
 
     Only policy violations become data. Infrastructure failures propagate;
     the workflow must never interpret an unavailable probe as permission.
@@ -55,7 +58,7 @@ def evaluate_guard_probe(
             path = check_write_path_allowed(
                 request.value,
                 request.cwd,
-                _write_guard_extra_paths(config_dict),
+                _write_guard_extra_paths(settings),
                 base_dir=request.cwd,
                 operation=request.operation or "write",
             )
@@ -63,12 +66,12 @@ def evaluate_guard_probe(
         except WriteGuardViolation as exc:
             result = replace(result, violation=exc.error)
     elif request.kind == "read_path":
-        skills_root = _resolve_skills_root(config_dict)
+        skills_root = _resolve_skills_root(settings)
         try:
             path = check_read_path_allowed(
                 request.value,
                 launch_root=request.cwd,
-                cfg=parse_read_guard_config(config_dict),
+                cfg=parse_read_guard_config(settings),
                 extra_allowed_paths=[skills_root] if skills_root else None,
             )
             result = replace(result, canonical_path=str(path))
@@ -101,11 +104,11 @@ def evaluate_guard_probe(
             protected_decision=scan_command_for_protected(
                 request.value,
                 cwd=request.cwd,
-                extra=protected_extra_paths(config_dict) or None,
+                extra=protected_extra_paths(settings) or None,
             ),
         )
     elif request.kind == "download_destination":
-        result = _download_destination(request, config_dict)
+        result = _download_destination(request, settings)
     elif request.kind == "command_prompts":
         from gc_core.security.command_moderation import (
             load_command_judge_prompt,
@@ -129,10 +132,10 @@ def evaluate_guard_probe(
     return replace(result, facts_digest=digest)
 
 
-def _write_guard_extra_paths(config_dict: Any) -> list[str]:
+def _write_guard_extra_paths(settings: Any) -> list[str]:
     from gc_core.settings import settings_of
 
-    return list(settings_of(config_dict).security.write_guard.extra_paths)
+    return list(settings_of(settings).security.write_guard.extra_paths)
 
 
 def _command_host(request):
@@ -153,18 +156,18 @@ def _command_host(request):
     )
 
 
-def _download_destination(request, config_dict):
+def _download_destination(request, settings):
     from gc_core.tools.exec.download_file import DownloadFile
 
-    tool = DownloadFile(config_dict=config_dict)
+    tool = DownloadFile(settings=settings)
     validated = tool._validate_filename(request.value)
     if isinstance(validated, dict):
         return GuardProbeResult(data={"error": validated})
     filename, extension = validated
-    settings = tool._resolve_download_settings(request.cwd)
-    if isinstance(settings, dict):
-        return GuardProbeResult(data={"error": settings})
-    root, max_bytes = settings
+    resolved = tool._resolve_download_settings(request.cwd)
+    if isinstance(resolved, dict):
+        return GuardProbeResult(data={"error": resolved})
+    root, max_bytes = resolved
     return GuardProbeResult(
         canonical_path=os.path.join(root, filename),
         data={

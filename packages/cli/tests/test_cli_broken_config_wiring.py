@@ -20,6 +20,7 @@ import pytest
 sys.argv = ["gc-cli", "-q", "x"]
 
 from gc_cli import cli
+from gc_core.settings import settings_of
 
 
 def _make_layer_unreadable(path, request):
@@ -234,7 +235,10 @@ def test_run_init_reaches_wizard_on_broken_config_interactive(
     # onboarding_wizard/setup_guide узнают «не настроено».
     from gc_core import onboarding
 
-    assert seen["cfg"].get("completions_url") == onboarding.URL_SENTINEL
+    assert (
+        settings_of(seen["cfg"]).backend.completions_url
+        == onboarding.URL_SENTINEL
+    )
 
 
 def test_run_init_passive_guide_on_broken_config_non_interactive(
@@ -420,15 +424,15 @@ def test_run_init_keeps_user_connection_when_only_profile_is_broken(
     )
 
     assert cli._run_init() == 0
-    cfg = seen["cfg"]
+    settings = settings_of(seen["cfg"])
     assert (
-        cfg.get("completions_url")
+        settings.backend.completions_url
         == "https://openrouter.ai/api/v1/chat/completions"
     )
-    assert (cfg.get("chat_completion_headers") or {}).get(
+    assert (settings.backend.chat_completion_headers or {}).get(
         "Authorization"
     ) == "Bearer sk-user-token"
-    assert list(cfg.get("models") or {}) == ["fast"]
+    assert list(settings.models or {}) == ["fast"]
 
 
 def test_run_init_tells_which_layer_was_dropped(monkeypatch, tmp_path, capsys):

@@ -1,6 +1,7 @@
 """Per-field детект pending_field_keys для визарда."""
 
 from gc_core import onboarding
+from gc_testkit.settings import make_settings
 
 
 def test_stock_defaults_pending_endpoint_and_token_not_model():
@@ -11,7 +12,7 @@ def test_stock_defaults_pending_endpoint_and_token_not_model():
         },
         "model": "gigacode_agent_v1.6_rc",
     }
-    assert onboarding.pending_field_keys(cfg) == {
+    assert onboarding.pending_field_keys(make_settings(cfg)) == {
         "completions_url",
         "Authorization",
     }
@@ -23,7 +24,7 @@ def test_all_set_returns_empty():
         "chat_completion_headers": {"Authorization": "Bearer sk-1"},
         "model": "qwen3-coder",
     }
-    assert onboarding.pending_field_keys(cfg) == set()
+    assert onboarding.pending_field_keys(make_settings(cfg)) == set()
 
 
 def test_agent_auth_covers_token():
@@ -35,4 +36,6 @@ def test_agent_auth_covers_token():
         "model": "m",
         "agent_auth": {"auth_endpoint": "https://auth"},
     }
-    assert "Authorization" not in onboarding.pending_field_keys(cfg)
+    assert "Authorization" not in onboarding.pending_field_keys(
+        make_settings(cfg)
+    )

@@ -147,10 +147,8 @@ class FindInFiles(AbstractSimpleTool):
     )
 
     @classmethod
-    def _param_schema(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        cfg = parse_find_in_files_config(config_dict)
+    def _param_schema(cls, settings: Any = None) -> Dict[str, Any]:
+        cfg = parse_find_in_files_config(settings)
         dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return {
             "type": "object",
@@ -233,11 +231,9 @@ class FindInFiles(AbstractSimpleTool):
         }
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
-        cfg = parse_find_in_files_config(config_dict)
+        cfg = parse_find_in_files_config(settings)
         dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return {
             "type": "function",
@@ -265,16 +261,14 @@ class FindInFiles(AbstractSimpleTool):
                 "was read from the host — narrow path/file_pattern."
             ),
             # Fresh dict: callers (inject_tool_fields) mutate parameters in place.
-            "parameters": cls._param_schema(config_dict),
+            "parameters": cls._param_schema(settings),
             "strict": True,
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         skip = hard_exclude_dir_names_for_prompt()
-        cfg = parse_find_in_files_config(config_dict)
+        cfg = parse_find_in_files_config(settings)
         dlim, mtot = int(cfg.default_limit), int(cfg.max_total_matches)
         return (
             "Tool name: fs_find_in_files\n"

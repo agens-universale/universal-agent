@@ -43,7 +43,7 @@ async def acompact_thread(
         return False
     system_id = system or "cli"
     thread_session = await ThreadSession.afrom_config(
-        config_dict=ctx,
+        settings=ctx,
         system_id=system_id,
         thread_id=thread_id,
         # Хранилище встраивающего, если он его передал.
@@ -67,7 +67,7 @@ async def acompact_thread(
         use_server_subagents=settings.agent.use_server_subagents,
         thread_id=thread_id,
         shared=thread_shared,
-        workspace_config=ctx.config_dict,
+        workspace_config=ctx,
     )
     state.backend_api_mode = "chat_completions"
     state.usage = UsageAccount.from_meta(meta.get("token_usage"))

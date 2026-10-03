@@ -5,18 +5,26 @@ import asyncio
 import yaml
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import WALK_OUTPUT_MAX_CHARS
-from gc_core.config import load_config
+from gc_core.config import load_settings
 from gc_core.config_modules.agent import walk_output_max_chars_from_config_dict
+from gc_testkit.settings import make_settings
 
 
 def test_walk_ceiling_accessor_defaults_and_parses():
-    assert walk_output_max_chars_from_config_dict({}) == WALK_OUTPUT_MAX_CHARS
     assert (
-        walk_output_max_chars_from_config_dict({"walk_output_max_chars": -5})
+        walk_output_max_chars_from_config_dict(make_settings())
         == WALK_OUTPUT_MAX_CHARS
     )
     assert (
-        walk_output_max_chars_from_config_dict({"walk_output_max_chars": 1000})
+        walk_output_max_chars_from_config_dict(
+            make_settings({"walk_output_max_chars": -5})
+        )
+        == WALK_OUTPUT_MAX_CHARS
+    )
+    assert (
+        walk_output_max_chars_from_config_dict(
+            make_settings({"walk_output_max_chars": 1000})
+        )
         == 1000
     )
 
@@ -25,7 +33,9 @@ def test_factory_passes_walk_ceiling_to_harbor():
     loop = asyncio.new_event_loop()
     try:
         backend = resolve_os_backend(
-            {"os_backend": "harbor", "walk_output_max_chars": 1234},
+            make_settings(
+                {"os_backend": "harbor", "walk_output_max_chars": 1234}
+            ),
             environment=object(),
             loop=loop,
         )
@@ -34,7 +44,7 @@ def test_factory_passes_walk_ceiling_to_harbor():
         loop.close()
 
 
-def test_flat_config_carries_walk_ceiling(tmp_path):
+def test_loaded_settings_carry_walk_ceiling(tmp_path):
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
         yaml.dump(
@@ -47,8 +57,8 @@ def test_flat_config_carries_walk_ceiling(tmp_path):
         ),
         encoding="utf-8",
     )
-    cfg = load_config(str(cfg_path))
-    assert cfg["walk_output_max_chars"] == 777
+    loaded = load_settings(str(cfg_path))
+    assert walk_output_max_chars_from_config_dict(loaded) == 777
 
 
 def test_demo_config_documents_the_walk_ceiling():

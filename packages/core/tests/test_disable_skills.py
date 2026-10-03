@@ -11,6 +11,7 @@ Covers four cases (spec section 7, step 7):
 import pytest
 from gc_core.config_modules.merge import deep_merge
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
+from gc_testkit.settings import make_settings
 
 
 async def test_disable_skills_empty_list_keeps_all_skills() -> None:
@@ -71,7 +72,7 @@ def test_disable_skills_overlay_concat_and_dedup() -> None:
 
 async def test_get_skills_registry_reads_disable_from_config_dict() -> None:
     config_dict = {"disable_skills": ["computer-use"]}
-    reg = get_skills_registry(config_dict)
+    reg = get_skills_registry(make_settings(config_dict))
     cat = await reg.skill_catalog()
     assert "computer-use" not in cat.canonical_ids
     assert "topic-research" in cat.canonical_ids
@@ -81,7 +82,7 @@ async def test_get_skills_registry_reads_pack_disable_from_config_dict() -> (
     None
 ):
     config_dict = {"disable_skills": ["science-article-creator"]}
-    reg = get_skills_registry(config_dict)
+    reg = get_skills_registry(make_settings(config_dict))
     cat = await reg.skill_catalog()
     # The new science pack must not be visible when listed in disable_skills.
     assert "science-article-creator" not in cat.pack_bootstrap

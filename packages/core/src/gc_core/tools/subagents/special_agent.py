@@ -1,4 +1,4 @@
-from typing import Any, Dict
+from typing import Any
 
 from gc_core.config_modules.chat_completions import (
     subagent_role_max_tokens_from_ctx,
@@ -175,10 +175,9 @@ class SpecialAgent(AbstractSubagent):
         task: str,
         model: str,
         reason: str = "",
-        config_dict: Dict[str, Any] | None = None,
         **kwargs,
     ):
-        # config_dict/runtime_notices_enabled: не используются больше здесь — роль
+        # runtime_notices_enabled: не используется больше здесь — роль
         # резолвится позже через finalize_role(ctx, state) (у ребёнка есть router/
         # сетевые параметры); принимаются для совместимости единого вызова
         # SubagentRunner._run_internal (тот же create_instance(**extra) для всех субагентов).

@@ -72,7 +72,7 @@ def _stopped(settings: AppConfig) -> bool:
 def apply_todo_reminder(
     messages: list[dict[str, Any]],
     state: Any,
-    config_dict: Any,
+    settings: Any,
     *,
     step_messages: list[dict[str, Any]],
     available_tools: set[str] | None = None,
@@ -85,9 +85,10 @@ def apply_todo_reminder(
     видит только глобальный ``stop_tools``, а набор сужается ещё и файлом
     сабагента / harbor / неподнявшимся MCP.
 
-    ``config_dict`` — настройки (``AppConfig``) или то, что знает ``settings_of``.
+    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
+    ``AppConfig``).
     """
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     steps_limit = max(0, int(settings.todo.reminder_steps))
     if steps_limit <= 0 or _stopped(settings):
         return messages

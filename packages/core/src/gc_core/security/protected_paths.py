@@ -7,11 +7,7 @@ from typing import Any
 
 from gc_core.config_modules.env_vars import gc_paths, project_gc_dir
 from gc_core.instructions.layers import instruction_file_paths
-from gc_core.security.path_policy import (
-    _is_flat_source,
-    _setting_or,
-    is_within_root,
-)
+from gc_core.security.path_policy import is_within_root
 from gc_core.settings import settings_of
 
 
@@ -73,10 +69,9 @@ def protected_extra_paths(source: Any) -> list[str]:
     Это ЗАПРЕТНЫЕ пути («нельзя читать/писать агенту»), а не разрешённые:
     ``write_guard.extra_paths`` — их противоположность (дополнительные каталоги
     для записи), и в набор защищённых им не место. ``~`` раскрывается здесь —
-    ``protected_paths`` берёт только ``abspath``.
+    ``protected_paths`` берёт только ``abspath``. ``source`` — то, что
+    принимает ``settings_of``.
     """
-    from gc_core.settings import settings_of
-
     return [
         os.path.expanduser(raw)
         for raw in settings_of(source).security.protected_paths.extra
@@ -84,17 +79,15 @@ def protected_extra_paths(source: Any) -> list[str]:
     ]
 
 
-def protection_enabled(config_dict: Any) -> bool:
-    """Включена ли floor-защита системных путей (по умолчанию — да).
+def protection_enabled(settings: Any) -> bool:
+    """Включена ли floor-защита системных путей — всегда да.
 
-    Выключает её только явный ``security.protected_paths.enabled: false`` в
-    плоском словаре (так его передаёт temporal-воркер; тесты). Типизированные
-    настройки сюда прежде не доходили — ``flatten_app_config`` секцию не
-    проецирует, — поэтому для них защита включена всегда, как и было.
+    ``security.protected_paths.enabled`` сейчас не действует (см.
+    docs/configuration.md): до гардов этот флаг не доходил никогда — плоский
+    вид настроек секцию не проецировал, — и значение ``false`` защиту не
+    снимает. ``settings`` (то, что принимает ``settings_of``) оставлен ради
+    сигнатуры: включать флаг — отдельное решение, а не побочный эффект
+    перехода на типизированные настройки.
     """
-    if not _is_flat_source(config_dict):
-        return True
-    settings = settings_of(config_dict)
-    return bool(
-        _setting_or(settings, True, "security.protected_paths.enabled", True)
-    )
+    del settings
+    return True

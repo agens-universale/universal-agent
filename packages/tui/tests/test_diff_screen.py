@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import as_settings, tui_settings
 from pathlib import Path
 
 import pytest
@@ -70,7 +71,9 @@ async def test_diff_command_opens_screen(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
         await pilot.app.screen._handle_command("diff")
@@ -87,10 +90,14 @@ async def test_diff_screen_lists_pending_and_approve(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -173,10 +180,14 @@ async def test_diff_screen_hybrid_shows_i_marker(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -198,10 +209,14 @@ async def test_diff_screen_undo_restores(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     target = launch_root / "src" / "foo.py"
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -220,12 +235,14 @@ async def test_diff_screen_enter_opens_viewer(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -252,10 +269,14 @@ async def test_diff_viewer_approve_closes_and_clears(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -281,12 +302,14 @@ async def test_diff_viewer_undo_restores(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     target = launch_root / "src" / "foo.py"
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -310,10 +333,14 @@ async def test_diff_screen_ru_layout_approve(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -335,12 +362,14 @@ async def test_diff_viewer_ru_layout_undo(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     target = launch_root / "src" / "foo.py"
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -373,10 +402,14 @@ async def test_diff_viewer_caps_ф_approves_one_not_all(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -414,10 +447,14 @@ async def test_diff_screen_ctrl_a_approves_all(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -437,10 +474,14 @@ async def test_diff_screen_undo_shows_status(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -461,11 +502,13 @@ async def test_diff_screen_approve_shows_status(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
             launch_root=str(launch_root),
-            config=cfg,
+            settings=as_settings(cfg),
             on_ui_ack=pilot.app.screen._on_diff_ui_ack,
             **_diff_kwargs(tmp_path),
         )
@@ -494,11 +537,13 @@ async def test_diff_screen_undo_shows_trace_ack(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
             launch_root=str(launch_root),
-            config=cfg,
+            settings=as_settings(cfg),
             on_ui_ack=pilot.app.screen._on_diff_ui_ack,
             **_diff_kwargs(tmp_path),
         )
@@ -527,7 +572,9 @@ async def test_trace_mounts_pending_cta(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
         pilot.app.screen.attach_active_task("t1")
@@ -552,7 +599,9 @@ async def test_flush_cta_survives_after_clear_trace(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = pilot.app.screen
         assert isinstance(scr, TraceScreen)
@@ -591,7 +640,9 @@ async def test_cta_shows_when_pending(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = pilot.app.screen
         assert isinstance(scr, TraceScreen)
@@ -624,10 +675,14 @@ async def test_diff_viewer_created_shows_file_content(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -658,10 +713,14 @@ async def test_diff_viewer_undo_created_deletes_file(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -698,7 +757,9 @@ async def test_trace_ctrl_a_selects_input_not_approve(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
         inp = pilot.app.screen.query_one("#cmdinput", CommandTextArea)
@@ -711,7 +772,7 @@ async def test_trace_ctrl_a_selects_input_not_approve(tmp_path, launch_root):
         from gc_tui.screens.diff import _service_from_config
 
         kw = _diff_kwargs(tmp_path)
-        svc = _service_from_config(str(launch_root), cfg, **kw)
+        svc = _service_from_config(str(launch_root), as_settings(cfg), **kw)
         assert len(svc.list_entries(pending_only=True)) >= 2
 
 
@@ -726,7 +787,9 @@ async def test_f3_opens_diff(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     cfg["launch_root"] = str(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         assert isinstance(pilot.app.screen, TraceScreen)
         await pilot.press("f3")
@@ -749,12 +812,14 @@ async def test_diff_screen_esc_returns(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -778,12 +843,14 @@ async def test_diff_viewer_footer_has_f_hint(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -805,12 +872,14 @@ async def test_f_pushes_full_viewer_and_not_again(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -842,12 +911,14 @@ async def test_esc_from_full_returns_to_adaptive(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -876,10 +947,14 @@ async def test_full_viewer_approve_closes_stack(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -908,12 +983,14 @@ async def test_full_viewer_undo_restores(tmp_path, launch_root):
     cfg = _cfg(launch_root)
     target = launch_root / "src" / "foo.py"
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -946,10 +1023,14 @@ async def test_full_viewer_ctrl_a_approves_all(tmp_path, launch_root):
 
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         scr = DiffScreen(
-            launch_root=str(launch_root), config=cfg, **_diff_kwargs(tmp_path)
+            launch_root=str(launch_root),
+            settings=as_settings(cfg),
+            **_diff_kwargs(tmp_path),
         )
         await pilot.app.push_screen(scr)
         await pilot.pause()
@@ -974,12 +1055,14 @@ async def test_f_ru_layout_alias(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )
@@ -1004,12 +1087,14 @@ async def test_full_viewer_header_marks_full(tmp_path, launch_root):
     _seed_pending(launch_root, str(tmp_path / "threads"))
     cfg = _cfg(launch_root)
     async with TuiApp(
-        threads_dir=str(tmp_path / "threads"), system="cli", config=cfg
+        threads_dir=str(tmp_path / "threads"),
+        system="cli",
+        settings=tui_settings(cfg),
     ).run_test() as pilot:
         await pilot.app.push_screen(
             DiffScreen(
                 launch_root=str(launch_root),
-                config=cfg,
+                settings=as_settings(cfg),
                 **_diff_kwargs(tmp_path),
             )
         )

@@ -1,5 +1,6 @@
 """reload_config: перечитка конфига + сброс кэшированного runner (спека B, B3)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 pytest.importorskip("textual")
@@ -20,7 +21,7 @@ def _mk_app(tmp_path):
     cfg_file.write_text(
         'backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8"
     )
-    app = app_mod.TuiApp(config={"completions_url": "old"})
+    app = app_mod.TuiApp(settings=tui_settings({"completions_url": "old"}))
     app._config_path = str(cfg_file)
     return app
 
@@ -38,7 +39,7 @@ def test_reload_config_rereads_and_resets_idle_runner(tmp_path):
     app = _mk_app(tmp_path)
     app.active_runner = _FakeRunner(running=False)
     app.reload_config()
-    assert app._config["completions_url"] == "http://x/v1"
+    assert _url(app.base_settings()) == "http://x/v1"
     assert (
         app.active_runner is None
     )  # следующий submit соберёт свежий executor
@@ -99,7 +100,9 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
     from gc_core import config as cfg_mod
     from gc_core import thread_store as ts_mod
     from gc_core.config_modules.profiles import ProfileMeta
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
     from gc_tui.app import TuiApp
     from gc_tui.runtime_config import apply_tui_runtime
 
@@ -113,7 +116,9 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
     monkeypatch.setattr(
         cfg_mod,
         "load_settings",
-        lambda p=None, **kw: settings_from_flat(on_disk, profile_meta=meta),
+        lambda p=None, **kw: replace(
+            make_settings(on_disk), profile_meta=meta
+        ),
     )
     monkeypatch.setattr(cfg_mod, "apply_cli_overrides", lambda d, **kw: d)
     monkeypatch.setattr(
@@ -122,7 +127,7 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
 
     # как собирает tui/__init__: снапшот cwd на старте + рантайм TUI
     started = apply_tui_runtime(
-        settings_from_flat(on_disk, profile_meta=meta),
+        replace(make_settings(on_disk), profile_meta=meta),
         launch_root="D:/proj/snapshot-at-start",
     )
 
@@ -130,9 +135,8 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
     async with app.run_test() as pilot:
         await pilot.pause()
         app.reload_config()
-        assert app._config["launch_root"] == "D:/proj/snapshot-at-start"
         assert app._settings.runtime.launch_root == "D:/proj/snapshot-at-start"
-        assert app._config["console_trace"] is False
+        assert app._settings.settings.logging.console_trace is False
 
 
 # --- reload_config_if_changed: гейт свежести по mtime (два окна, один файл) ---
@@ -141,9 +145,9 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
 def test_reload_config_if_changed_noop_without_config_path():
     """_config_path не задан (типично для тестов/раннего старта) — тихий
     no-op, ни чтения, ни падения."""
-    app = app_mod.TuiApp(config={"completions_url": "old"})
+    app = app_mod.TuiApp(settings=tui_settings({"completions_url": "old"}))
     app.reload_config_if_changed()
-    assert app._config["completions_url"] == "old"
+    assert _url(app.base_settings()) == "old"
 
 
 def test_reload_config_if_changed_first_check_after_startup_is_noop(
@@ -160,7 +164,9 @@ def test_reload_config_if_changed_first_check_after_startup_is_noop(
     cfg_file.write_text(
         'backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8"
     )
-    app = app_mod.TuiApp(config={"completions_url": "http://x/v1"})
+    app = app_mod.TuiApp(
+        settings=tui_settings({"completions_url": "http://x/v1"})
+    )
     app.set_config_path(
         str(cfg_file)
     )  # ровно то, что делает main() сразу после конструктора
@@ -168,7 +174,7 @@ def test_reload_config_if_changed_first_check_after_startup_is_noop(
 
     calls = {"load": 0, "invalidate": 0}
     monkeypatch.setattr(
-        "gc_core.config.load_config",
+        "gc_core.config.load_settings",
         lambda *_a, **_k: calls.__setitem__("load", calls["load"] + 1) or {},
     )
     orig_invalidate = app.invalidate_runner
@@ -188,14 +194,14 @@ def test_reload_config_if_changed_skips_when_file_untouched(
     tmp_path, monkeypatch
 ):
     """Файл не менялся с последнего известного снимка mtime — НИЧЕГО не
-    происходит: ни load_config, ни invalidate_runner (I1 — пересборка
+    происходит: ни load_settings, ни invalidate_runner (I1 — пересборка
     раннера тянет MCP-дискавери и держит юзера на старте хода)."""
     app = _mk_app(tmp_path)
     app.reload_config()  # устанавливает базовый снимок mtime
 
     calls = {"load": 0, "invalidate": 0}
     monkeypatch.setattr(
-        "gc_core.config.load_config",
+        "gc_core.config.load_settings",
         lambda *_a, **_k: calls.__setitem__("load", calls["load"] + 1) or {},
     )
     orig_invalidate = app.invalidate_runner
@@ -209,7 +215,7 @@ def test_reload_config_if_changed_skips_when_file_untouched(
     app.reload_config_if_changed()
 
     assert calls == {"load": 0, "invalidate": 0}
-    assert app._config["completions_url"] == "http://x/v1"
+    assert _url(app.base_settings()) == "http://x/v1"
 
 
 def test_reload_config_if_changed_reloads_when_file_changed(tmp_path):
@@ -227,7 +233,7 @@ def test_reload_config_if_changed_reloads_when_file_changed(tmp_path):
 
     app.reload_config_if_changed()
 
-    assert app._config["completions_url"] == "http://y/v2"
+    assert _url(app.base_settings()) == "http://y/v2"
     assert app.active_runner is None  # инвалидация реально произошла
 
 
@@ -240,7 +246,7 @@ def test_reload_config_if_changed_keeps_old_base_on_broken_file(tmp_path):
 
     app = _mk_app(tmp_path)
     app.reload_config()
-    good_config = dict(app._config)
+    good_config = app.base_settings()
 
     cfg_path = tmp_path / "config.yml"
     cfg_path.write_text(
@@ -250,7 +256,7 @@ def test_reload_config_if_changed_keeps_old_base_on_broken_file(tmp_path):
 
     app.reload_config_if_changed()  # не должно бросить исключение
 
-    assert app._config == good_config
+    assert app.base_settings() is good_config
     assert [n.code for n in collect_runtime_notices()] == [
         "config_reload_failed"
     ]
@@ -268,7 +274,7 @@ def test_reload_config_if_changed_own_write_does_not_retrigger(
 
     calls = {"load": 0}
     monkeypatch.setattr(
-        "gc_core.config.load_config",
+        "gc_core.config.load_settings",
         lambda *_a, **_k: calls.__setitem__("load", calls["load"] + 1) or {},
     )
 
@@ -309,9 +315,7 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     seen_cfg = {}
 
     async def _fake_acreate_run_context(loaded, **kw):
-        from gc_core.config import flat_config
-
-        seen_cfg.update(flat_config(loaded))
+        seen_cfg["completions_url"] = _url(loaded)
         return _Ctx()
 
     monkeypatch.setattr(
@@ -369,10 +373,10 @@ def _app_started_with(cfg_file, profile_override):
     """Приложение, как его собирает main(): конфиг загружен С флагом, путь связан."""
     from gc_core import config as cfg_mod
 
-    cfg, _meta = cfg_mod.load_config_ex(
+    loaded = cfg_mod.load_settings(
         str(cfg_file), profile_override=profile_override
     )
-    app = app_mod.TuiApp(config=cfg, profile_override=profile_override)
+    app = app_mod.TuiApp(settings=loaded, profile_override=profile_override)
     app.set_config_path(str(cfg_file))
     return app
 
@@ -385,12 +389,12 @@ def test_reload_config_keeps_the_profile_flag_that_bypasses_a_broken_pointer(
     `slots.default: ghost`, и окно упиралось бы в профиль, который флаг обошёл."""
     cfg_file, _profiles = _profile_stack
     app = _app_started_with(cfg_file, "")
-    assert app._config["profile"] == ""
+    assert app.base_settings().runtime.active_profile == ""
 
     app.reload_config()  # без флага здесь ValueError
 
-    assert app._config["profile"] == ""
-    assert app.effective_config()["profile"] == ""
+    assert app.base_settings().runtime.active_profile == ""
+    assert app.effective_settings().runtime.active_profile == ""
 
 
 def test_reload_config_keeps_the_profile_named_by_the_flag(_profile_stack):
@@ -403,8 +407,8 @@ def test_reload_config_keeps_the_profile_named_by_the_flag(_profile_stack):
 
     app.reload_config()
 
-    assert app._config["profile"] == "corp"
-    assert "corp" in app._config["models"]
+    assert app.base_settings().runtime.active_profile == "corp"
+    assert "corp" in app.base_settings().settings.models
     # Мтайм-набор следит за файлом профиля флага, а не за указателем файла.
     assert any("corp.yml" in path for path in app._config_mtime_set)
 
@@ -422,8 +426,12 @@ def test_session_choice_still_wins_over_the_profile_flag(_profile_stack):
 
     app.reload_config()
 
-    assert app._config["profile"] == "corp"  # база окна — по флагу
-    assert app.effective_config()["profile"] == ""  # действует выбор сессии
+    assert (
+        app.base_settings().runtime.active_profile == "corp"
+    )  # база окна — по флагу
+    assert (
+        app.effective_settings().runtime.active_profile == ""
+    )  # действует выбор сессии
 
 
 _CORP = 'models:\n  corp:\n    model: "corp-m"\nslots:\n  default: "corp"\n'
@@ -466,7 +474,9 @@ def test_a_vanished_flag_profile_keeps_the_flag_and_the_previous_base(
     app.reload_config_if_changed()  # профиля флага больше нет
 
     assert app._profile_override == "corp"
-    assert app._config["profile"] == "corp"  # база — прежняя, не подменённая
+    assert (
+        app.base_settings().runtime.active_profile == "corp"
+    )  # база — прежняя, не подменённая
     notices = [
         n
         for n in collect_runtime_notices()
@@ -481,7 +491,7 @@ def test_a_vanished_flag_profile_keeps_the_flag_and_the_previous_base(
     app.reload_config_if_changed()  # вернули файл — окно чинится само
 
     assert app._profile_override == "corp"
-    assert "corp" in app._config["models"]
+    assert "corp" in app.base_settings().settings.models
 
 
 def test_a_broken_write_race_on_the_flag_profile_does_not_lose_the_flag(
@@ -502,7 +512,9 @@ def test_a_broken_write_race_on_the_flag_profile_does_not_lose_the_flag(
     app.reload_config_if_changed()
 
     assert app._profile_override == "corp"
-    assert app._config["profile"] == "corp"  # и профиль не подменён базой
+    assert (
+        app.base_settings().runtime.active_profile == "corp"
+    )  # и профиль не подменён базой
     corp.write_text(  # запись дописана
         'models:\n  corp:\n    model: "corp-m"\n  extra:\n    model: "x"\nslots:\n  default: "corp"\n',
         encoding="utf-8",
@@ -510,7 +522,7 @@ def test_a_broken_write_race_on_the_flag_profile_does_not_lose_the_flag(
     _bump_mtime(corp, seconds=10.0)
     app.reload_config_if_changed()
 
-    assert "extra" in app._config["models"]
+    assert "extra" in app.base_settings().settings.models
 
 
 def test_a_bug_inside_the_loader_is_not_relabelled_as_a_stale_profile(
@@ -540,11 +552,11 @@ def test_a_bug_inside_the_loader_is_not_relabelled_as_a_stale_profile(
         app.reload_config()
 
 
-# --- screen_config: единая точка получения базы для ОТКРЫТИЯ экрана ---
+# --- base_settings: единая точка получения базы для ОТКРЫТИЯ экрана ---
 
 
-def test_screen_config_does_not_reload_when_file_changed(tmp_path):
-    """screen_config() больше НЕ гоняет гейт свежести (дизайн 2026-07-21 §4):
+def test_base_settings_does_not_reload_when_file_changed(tmp_path):
+    """base_settings() НЕ гоняет гейт свежести (дизайн 2026-07-21 §4):
     отдаёт текущую базу как есть. Перечитку по mtime вызывают явно только на
     пути Settings (main._cmd_settings / settings._sync_config_from_app)."""
     app = _mk_app(tmp_path)
@@ -557,14 +569,14 @@ def test_screen_config_does_not_reload_when_file_changed(tmp_path):
     )
     _bump_mtime(cfg_path)
 
-    cfg = app.screen_config()
+    cfg = app.base_settings()
 
-    assert cfg["completions_url"] == "http://x/v1"  # база не перечитана
+    assert _url(cfg) == "http://x/v1"  # база не перечитана
     assert app.active_runner is not None  # раннер не тронут
 
 
-def test_screen_config_noop_when_file_untouched(tmp_path, monkeypatch):
-    """Файл не менялся — screen_config() не перечитывает и не инвалидирует
+def test_base_settings_noop_when_file_untouched(tmp_path, monkeypatch):
+    """Файл не менялся — base_settings() не перечитывает и не инвалидирует
     раннер (I1: пересборка раннера тянет MCP-дискавери и держит пользователя на
     старте хода)."""
     app = _mk_app(tmp_path)
@@ -572,7 +584,7 @@ def test_screen_config_noop_when_file_untouched(tmp_path, monkeypatch):
 
     calls = {"load": 0, "invalidate": 0}
     monkeypatch.setattr(
-        "gc_core.config.load_config",
+        "gc_core.config.load_settings",
         lambda *_a, **_k: calls.__setitem__("load", calls["load"] + 1) or {},
     )
     orig_invalidate = app.invalidate_runner
@@ -583,7 +595,7 @@ def test_screen_config_noop_when_file_untouched(tmp_path, monkeypatch):
 
     app.invalidate_runner = counting_invalidate
 
-    app.screen_config()
+    app.base_settings()
 
     assert calls == {"load": 0, "invalidate": 0}
 
@@ -596,7 +608,6 @@ def test_screen_config_noop_when_file_untouched(tmp_path, monkeypatch):
 
 _STATE_ATTRS = (
     "_settings",
-    "_config",
     "_session_overrides",
     "_session_profile_cache",
     "_effective_cache",
@@ -656,9 +667,7 @@ def _typed_app(tmp_path, monkeypatch):
 
 
 def _url(loaded):
-    from gc_core.config import flat_config
-
-    return flat_config(loaded)["completions_url"]
+    return loaded.settings.backend.completions_url
 
 
 def _rewrite(cfg_file, url="http://y/v2", threads=None):
@@ -673,13 +682,13 @@ def _rewrite(cfg_file, url="http://y/v2", threads=None):
 
 @pytest.mark.parametrize(
     "step",
-    ["_mtime_set_for", "_build_effective_entry", "_flat"],
+    ["_mtime_set_for", "_build_effective_entry", "resolve_threads_dir"],
 )
 def test_reload_failing_after_base_load_changes_nothing(
     _typed_app, monkeypatch, step
 ):
     """Сбой на шаге ПОСЛЕ загрузки базы: прежняя перечитка успевала подменить
-    `_settings`/`_config`/кэши до санации и снимка мтайма — окно оставалось
+    `_settings`/кэши до санации и снимка мтайма — окно оставалось
     наполовину на новой базе. Теперь — ни одного изменённого поля, раннер не
     тронут, notice `config_reload_failed`."""
     from gc_core.runtime_notices import collect_runtime_notices
@@ -694,8 +703,8 @@ def test_reload_failing_after_base_load_changes_nothing(
     def boom(*_a, **_k):
         raise RuntimeError("сбой посреди перечитки")
 
-    if step == "_flat":
-        monkeypatch.setattr(app_mod, "_flat", boom)
+    if step == "resolve_threads_dir":
+        monkeypatch.setattr("gc_core.thread_store.resolve_threads_dir", boom)
     elif step == "_build_effective_entry":
         monkeypatch.setattr(app_mod.TuiApp, step, classmethod(boom))
     else:
@@ -782,7 +791,6 @@ def test_restart_flagged_path_change_applies_with_notice(_typed_app, tmp_path):
     assert app._threads_dir == new_dir
     effective = app.effective_settings()
     assert effective.settings.paths.threads_data_path == new_dir
-    assert app.effective_config()["threads_data_path"] == new_dir
     assert _url(effective) == "http://y/v2"
     frozen = [
         n for n in collect_runtime_notices() if n.code == "boot_frozen_pending"

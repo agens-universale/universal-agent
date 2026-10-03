@@ -530,8 +530,7 @@ async def asummarize_dialog_via_chat_completions(
             ``num_batches`` — число батчей LLM;
             ``trace`` — структура с шагами, промптами и результатами для отладки.
     """
-    cfg = getattr(ctx, "config_dict", {}) or {}
-    tags = projection_tags_from_config(cfg)
+    tags = projection_tags_from_config(ctx)
     # История для summarizer / memory patch всегда без ``<think>`` в прозе.
     # Persist ``reasoning_content`` — только канон ``state.messages``.
     strip_think = True

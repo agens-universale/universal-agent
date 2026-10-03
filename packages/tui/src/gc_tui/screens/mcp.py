@@ -128,7 +128,7 @@ class ServerCard(Static):
 
 class McpScreen(Screen):
     def __init__(
-        self, *, config: dict | None = None, tools_snapshot: dict | None = None
+        self, *, settings=None, tools_snapshot: dict | None = None
     ) -> None:
         super().__init__()
         self._snapshot = tools_snapshot  # {server: {status,reason,description,tools}} | None

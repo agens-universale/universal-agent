@@ -1,5 +1,4 @@
 import pytest
-from gc_core.config import flatten_app_config
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import (
     CONSUMERS,
@@ -9,10 +8,9 @@ from gc_core.model_router import (
 )
 
 
-def _snapshot(raw: dict) -> dict:
-    """Реальный снимок config_dict — через настоящий flatten_app_config, не мок."""
-    app_cfg = AppConfig.model_validate(raw)
-    return flatten_app_config(app_cfg)
+def _snapshot(raw: dict) -> AppConfig:
+    """Настоящие провалидированные настройки (``AppConfig``), не мок."""
+    return AppConfig.model_validate(raw)
 
 
 def _router(

@@ -101,7 +101,7 @@ def test_tui_proceeds_when_configured(tmp_path, monkeypatch):
         "    Authorization: Bearer real-token\n",
         encoding="utf-8",
     )
-    cfg = config.load_config(None)
+    cfg = config.load_settings(None)
     from gc_core import onboarding
 
     assert onboarding.is_unconfigured(cfg) is False

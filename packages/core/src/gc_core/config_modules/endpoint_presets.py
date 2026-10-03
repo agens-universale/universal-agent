@@ -45,12 +45,12 @@ def default_endpoint_presets() -> list[EndpointPreset]:
     return list(DEFAULT_ENDPOINT_PRESETS)
 
 
-def endpoint_presets_from_config(cfg: Any) -> list[EndpointPreset]:
+def endpoint_presets_from_config(settings: Any) -> list[EndpointPreset]:
     """Пресеты ``endpoint_presets`` настроек (всё, что принимает ``settings_of``);
     пустой список — кодовый дефолт."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return list(settings_of(cfg).endpoint_presets) or (
+    return list(settings_of(settings).endpoint_presets) or (
         default_endpoint_presets()
     )

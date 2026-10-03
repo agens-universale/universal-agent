@@ -8,6 +8,7 @@ from types import SimpleNamespace
 
 import pytest
 from gc_core import processing_responses as pr
+from gc_testkit.settings import fake_ctx
 
 DIRTY_THINK = "<think>длинное рассуждение агента</think>"
 USER_LITERAL_THINK = "цитата <think>не стрипать</think>"
@@ -67,8 +68,8 @@ def make_ctx_state(*, history: list[dict] | None = None):
         "use_retry": False,
         "x_cl_id": "test-cl-id",
     }
-    ctx = SimpleNamespace(
-        config_dict=cfg,
+    ctx = fake_ctx(
+        cfg,
         on_stream_delta=None,
         logger=logging.getLogger("test_projection_integration"),
         auth_connector=None,

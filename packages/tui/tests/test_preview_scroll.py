@@ -6,6 +6,7 @@
 до высоты контента → max_scroll_y=0 → ни скроллбара, ни прокрутки. Дефолт #trace
 должен оставаться 1fr; auto — только на TraceScreen."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -28,7 +29,9 @@ async def test_preview_trace_scrolls_when_overflow(tmp_path):
     ]
     segments = [{"messages": msgs, "index": 0, "compacted_by": None}]
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test(size=(80, 24)) as pilot:
         screen = PreviewScreen(
@@ -64,7 +67,9 @@ async def test_main_trace_still_follows_content(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "M", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"model": "M", "backend_api_mode": "chat_completions"}
+        ),
     )
     async with app.run_test(
         size=(80, 40)

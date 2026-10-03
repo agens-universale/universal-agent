@@ -61,11 +61,9 @@ class FindFilesByName(AbstractSimpleTool):
     effect_is_read_only = True
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         skip = hard_exclude_dir_names_for_prompt()
-        _cfg = parse_find_files_by_name_config(config_dict)
+        _cfg = parse_find_files_by_name_config(settings)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return {
             "type": "function",
@@ -135,11 +133,9 @@ class FindFilesByName(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         skip = hard_exclude_dir_names_for_prompt()
-        _cfg = parse_find_files_by_name_config(config_dict)
+        _cfg = parse_find_files_by_name_config(settings)
         _dmm, _hmm = _cfg.default_max_matches, _cfg.hard_max_matches
         return (
             "Tool name: fs_find_files_by_name\n"

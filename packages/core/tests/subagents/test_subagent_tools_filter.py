@@ -7,6 +7,7 @@ from gc_core.tools import (
     SUBAGENT_TOOLS_STOP_KEY,
     apply_subagent_tools_filter,
 )
+from gc_testkit.settings import make_settings
 
 REQUIRED = (
     "turn_finish",
@@ -36,22 +37,24 @@ BASE = _tools_data(
 class TestAbsence:
     def test_no_keys_changes_nothing(self):
         # Регрессия: главный агент не должен пострадать от появления фильтра.
-        assert apply_subagent_tools_filter(dict(BASE), {}) == BASE
+        assert apply_subagent_tools_filter(dict(BASE), make_settings()) == BASE
 
     def test_explicit_none_allow_and_empty_stop_change_nothing(self):
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: None, SUBAGENT_TOOLS_STOP_KEY: ()}
-        assert apply_subagent_tools_filter(dict(BASE), cfg) == BASE
+        assert (
+            apply_subagent_tools_filter(dict(BASE), make_settings(cfg)) == BASE
+        )
 
 
 class TestAllowlist:
     def test_keeps_only_listed_plus_core(self):
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", *REQUIRED)}
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert set(out) == {"fs_read_file", *REQUIRED}
 
     def test_mcp_tool_can_be_allowed(self):
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("mcp_jira_search_issues", *REQUIRED)}
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert "mcp_jira_search_issues" in out
         assert "mcp_jira_create_issue" not in out
 
@@ -59,7 +62,7 @@ class TestAllowlist:
 class TestStopList:
     def test_subtracts(self):
         cfg = {SUBAGENT_TOOLS_STOP_KEY: ("exec_python",)}
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert "exec_python" not in out
         assert "exec_command" in out
 
@@ -67,7 +70,7 @@ class TestStopList:
         # Сабагентский stop режет MCP, не только builtin. Глобальный stop_tools
         # делает то же отдельным проходом в build_tools_data.
         cfg = {SUBAGENT_TOOLS_STOP_KEY: ("mcp_jira_create_issue",)}
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert "mcp_jira_create_issue" not in out
         assert "mcp_jira_search_issues" in out
 
@@ -80,7 +83,7 @@ class TestStopList:
             ),
             SUBAGENT_TOOLS_STOP_KEY: ("exec_command",),
         }
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert set(out) == {"fs_read_file", *REQUIRED}
 
 
@@ -88,14 +91,14 @@ class TestCore:
     def test_stop_list_cannot_take_core_away(self):
         # Ядро — гарантия, а не предпочтение: stop_tools его не отбирает.
         cfg = {SUBAGENT_TOOLS_STOP_KEY: REQUIRED}
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         for name in REQUIRED:
             assert name in out
 
     def test_core_arrives_without_being_listed(self):
         # Перечислять ядро в tools не требуется — оно доливается само.
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert set(out) == {"fs_read_file", *REQUIRED}
 
     def test_memory_and_todo_survive_a_narrow_allowlist(self):
@@ -104,7 +107,7 @@ class TestCore:
         текста рождаются из ГЛОБАЛЬНОГО конфига — про `tools` файла они не знают.
         Убрав тулы из ядра, мы вернём «велят вызвать то, чего у тебя нет»."""
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
-        out = apply_subagent_tools_filter(dict(BASE), cfg)
+        out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert "session_memory" in out
         assert "session_todo" in out
 
@@ -113,7 +116,9 @@ class TestCore:
         # восстанавливать нечего.
         data = _tools_data("fs_read_file")
         cfg = {SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file",)}
-        assert set(apply_subagent_tools_filter(data, cfg)) == {"fs_read_file"}
+        assert set(apply_subagent_tools_filter(data, make_settings(cfg))) == {
+            "fs_read_file"
+        }
 
 
 class TestWarnings:
@@ -126,7 +131,7 @@ class TestWarnings:
             )
         }
         with caplog.at_level(logging.WARNING):
-            out = apply_subagent_tools_filter(dict(BASE), cfg)
+            out = apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         assert "fs_read_file" in out
         assert any(
             "subagent_tools_filter_unknown" in r.getMessage()
@@ -143,7 +148,7 @@ class TestWarnings:
             )
         }
         with caplog.at_level(logging.WARNING):
-            apply_subagent_tools_filter(dict(BASE), cfg)
+            apply_subagent_tools_filter(dict(BASE), make_settings(cfg))
         msgs = [r.getMessage() for r in caplog.records]
         assert any("subagent_tools_filter_nested_ignored" in m for m in msgs)
 
@@ -158,7 +163,7 @@ class TestReachesSpec:
             "backend_api_mode": "chat_completions",
             SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", *REQUIRED),
         }
-        _data, spec, _descr, _mcp = await abuild_tools_data(cfg)
+        _data, spec, _descr, _mcp = await abuild_tools_data(make_settings(cfg))
         spec_names = {s.get("name") for s in spec}
         assert "fs_read_file" in spec_names
         assert "exec_command" not in spec_names

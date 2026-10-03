@@ -6,7 +6,6 @@ import yaml
 from gc_core.bundled_assets import bundled_root, repo_root
 from gc_core.config import (
     apply_cli_overrides,
-    flat_config,
     load_settings,
 )
 from gc_core.config_modules.env_interpolation import (
@@ -228,16 +227,8 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
     return loaded
 
 
-def build_agent_config_for_server(
-    server_cfg: Dict[str, Any],
-) -> Dict[str, Any]:
-    """Переходный плоский вид ``build_agent_settings_for_server``."""
-    return flat_config(build_agent_settings_for_server(server_cfg))
-
-
 __all__ = [
     "PROJECT_ROOT",
-    "build_agent_config_for_server",
     "build_agent_settings_for_server",
     "load_server_config",
 ]

@@ -1,5 +1,6 @@
 """trace_render — общие строители виджетов трейса (Spec B / A+)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -469,7 +470,9 @@ async def test_intermediate_reply_row_has_top_margin(tmp_path):
     from textual.containers import VerticalScroll
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

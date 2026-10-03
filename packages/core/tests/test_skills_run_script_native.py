@@ -24,6 +24,7 @@ from gc_core.config_modules.env_vars import EnvVars
 from gc_core.tools.skills.registry import get_skills_registry
 from gc_core.tools.skills.skills_tools import RunSkillScriptTool
 from gc_testkit.helpers.tool_ctx import local_ctx
+from gc_testkit.settings import make_settings
 
 #: Сколько спит скрипт-двойник. Заметно больше шага пульса ниже, чтобы
 #: заморозка loop не могла спрятаться между тиками.
@@ -47,11 +48,11 @@ def skill_with_script(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
-    return get_skills_registry({"skills_data_path": str(root)})
+    return get_skills_registry(make_settings({"skills_data_path": str(root)}))
 
 
 def _tool(registry):
-    return RunSkillScriptTool(registry, ctx=local_ctx(), config_dict={})
+    return RunSkillScriptTool(registry, ctx=local_ctx())
 
 
 async def test_acall_runs_the_script_and_returns_its_output(skill_with_script):

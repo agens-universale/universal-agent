@@ -9,8 +9,6 @@ from gc_core.config import (
     apply_cli_overrides,
     build_auth_connector,
     cli_forces_legacy_model,
-    flat_config,
-    load_config,
     load_settings,
     resolve_config_path,
     user_config_path,
@@ -89,10 +87,11 @@ async def arun(
     )
 
 
-async def _resolve_forced_skill(
-    skill_name: str, config_dict: dict
-) -> str | None:
+async def _resolve_forced_skill(skill_name: str, settings: Any) -> str | None:
     """Resolve the -s/--skill flag deterministically (pack-aware).
+
+    ``settings`` — всё, что принимает ``settings_of`` (контекст,
+    ``LoadedSettings``, ``AppConfig``).
 
     Returns the exact canonical skill id when resolved; the raw name as a
     soft fallback when it can't be resolved (unresolvable / ambiguous, or the
@@ -111,7 +110,7 @@ async def _resolve_forced_skill(
     )
 
     try:
-        catalog = await get_skills_registry(config_dict).skill_catalog()
+        catalog = await get_skills_registry(settings).skill_catalog()
     except Exception as exc:  # surface as warning, not traceback
         print(
             f"warning: не удалось построить каталог скиллов для -s ({exc}); "
@@ -163,7 +162,7 @@ def _run_init() -> int:
             onboarding.explain_broken_config(str(path), exc), file=sys.stderr
         )
         return 1
-    config_dict = loaded.config
+    settings = loaded.config
     if loaded.message:
         # Мастер gc-cli плоский, экран не занимает — stderr человек видит.
         print(f"[gc] {loaded.message}", file=sys.stderr)
@@ -171,7 +170,7 @@ def _run_init() -> int:
         from gc_cli import onboarding_wizard
 
         configured = onboarding_wizard.run(
-            config_dict,
+            settings,
             path,
             review_all=True,
             io=onboarding_wizard.default_io(),  # без mcp — gc-cli не ставит MCP
@@ -194,7 +193,7 @@ def _run_init() -> int:
         print(
             onboarding.setup_guide(
                 str(path),
-                config_dict,
+                settings,
                 just_created=just_created,
                 repair=loaded,
             ),
@@ -381,9 +380,9 @@ def _run_update() -> int:
     """
     src = _updater_source_or_hint()
     if src is not None:
-        config_dict = load_config(arg_parser.run_args.config)
+        loaded = load_settings(arg_parser.run_args.config)
         command = updater_runner.build_install_command(
-            src, updater_check.extra_args(config_dict)
+            src, updater_check.extra_args(loaded)
         )
         updater_runner.spawn_detached_update(
             command, parent_pid=os.getpid(), restart_cmd=None
@@ -406,8 +405,7 @@ async def _run_init_agents_md() -> int:
     from gc_core.security.confirm_port import confirm_available
 
     loaded = load_settings(arg_parser.run_args.config)
-    config_dict = flat_config(loaded)
-    auth_connector = build_auth_connector(config_dict)
+    auth_connector = build_auth_connector(loaded)
     # Асинхронная сборка: мы уже внутри работающего loop. Синхронный
     # create_run_context морозил бы его на всё MCP-дискавери — замер на
     # зависшем сервере с дедлайном 2 с: 2.01 с заморозки и 9 тиков хартбита
@@ -474,10 +472,11 @@ def _load_structured_format() -> tuple[str | None, int | None]:
 
 
 def _print_agent_response(
-    response: Any, config_dict: dict, ctx: RunContext
+    response: Any, settings: Any, ctx: RunContext
 ) -> None:
+    """``settings`` — всё, что принимает ``settings_of``."""
     formatted = format_json_for_display(response)
-    if human_console_enabled(config_dict) and formatted:
+    if human_console_enabled(settings) and formatted:
         print(formatted)
     if formatted:
         ctx.logger.info(
@@ -490,7 +489,7 @@ async def _emit_structured_if_requested(
     *,
     format_text: str | None,
     response: Any,
-    config_dict: dict,
+    settings: Any,
     ctx: RunContext,
     executor: AgentExecutor,
 ) -> int | None:
@@ -498,7 +497,7 @@ async def _emit_structured_if_requested(
         return None
     return await aemit_structured_result(
         response=response,
-        config_dict=config_dict,
+        settings=settings,
         ctx=ctx,
         state=executor.get_state(),
         terminal_outcome=executor.last_terminal_outcome,
@@ -508,7 +507,7 @@ async def _emit_structured_if_requested(
 
 def _unconfigured_setup_exit(
     config_arg: str | None,
-    config_dict: dict,
+    settings: Any,
     *,
     just_created: bool,
     format_text: str | None,
@@ -519,12 +518,13 @@ def _unconfigured_setup_exit(
     С ``--structured-output-format`` код 1: пустой stdout и 0 скрипт
     принял бы за ответ. Без флага код 0, подсказка остаётся в stderr.
     Вынесено из ``arun_cli``: вложенная ветка поднимала S3776 выше 15.
+    ``settings`` — всё, что принимает ``settings_of``.
     """
-    if config_arg is not None or not onboarding.is_unconfigured(config_dict):
+    if config_arg is not None or not onboarding.is_unconfigured(settings):
         return None
     print(
         onboarding.setup_guide(
-            str(user_config_path()), config_dict, just_created=just_created
+            str(user_config_path()), settings, just_created=just_created
         ),
         file=sys.stderr,
     )
@@ -612,7 +612,6 @@ async def arun_cli() -> int:
                 "--model: уровни отключены на этот запуск (легаси-форс)",
             )
         )
-    config_dict = flat_config(loaded)
     from gc_core import upgrade_gate
 
     _upgrade_info = upgrade_gate.detect_upgrade()
@@ -621,7 +620,7 @@ async def arun_cli() -> int:
     # При неполном конфиге на дефолтном пути — пассивный текстовый хинт и выход.
     setup_exit = _unconfigured_setup_exit(
         config_arg,
-        config_dict,
+        loaded,
         just_created=just_created,
         format_text=format_text,
     )
@@ -632,16 +631,16 @@ async def arun_cli() -> int:
     # notice «агент обновлён» (ревью Task 4).
     upgrade_gate.mark_current_run()
     forced_skill_id = await _resolve_forced_skill(
-        arg_parser.run_args.skill, config_dict
+        arg_parser.run_args.skill, loaded
     )
 
-    auth_connector = build_auth_connector(config_dict)
+    auth_connector = build_auth_connector(loaded)
     auto_mcp = getattr(arg_parser.run_args, "auto_mcp", False)
     if auto_mcp:
         # У gc-cli автозапуск opt-in: выключается тем, что `-a` не передан.
         # Флага `--no-auto-mcp` здесь нет — он живёт только у gc-ua.
         ensure_mcp_daemons(
-            config_dict,
+            loaded,
             disable_hint="отключить автозапуск: запустите без `-a`",
         )
     # Асинхронная сборка: мы внутри asyncio.run(arun_cli()), и синхронный
@@ -665,8 +664,8 @@ async def arun_cli() -> int:
     from gc_core.tools.registry import all_builtin_tool_names
 
     _notices = collect_startup_notices(
-        config_dict,
-        all_builtin_tool_names(config_dict),
+        loaded,
+        all_builtin_tool_names(loaded),
         getattr(ctx, "mcp_status", None),
         is_tui=False,
         known_tool_names=getattr(ctx, "registered_tool_names", None),
@@ -711,7 +710,7 @@ async def arun_cli() -> int:
         structured_exit = await _emit_structured_if_requested(
             format_text=format_text,
             response=response,
-            config_dict=config_dict,
+            settings=loaded,
             ctx=ctx,
             executor=executor,
         )
@@ -733,7 +732,7 @@ async def arun_cli() -> int:
                 shutdown_mcp_daemons()
     if structured_exit is not None:
         return structured_exit
-    _print_agent_response(response, config_dict, ctx)
+    _print_agent_response(response, loaded, ctx)
     return 0
 
 

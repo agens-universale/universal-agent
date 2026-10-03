@@ -1,5 +1,5 @@
 """Backend smart (спека §3): судья при >=1 вызове инструмента за ход.
-Счётчик — State.turn_tool_calls; проекция — apply_finish_gate_mode;
+Счётчик — State.turn_tool_calls; проекция — tui_agent_settings;
 чтение — FinishGateGuard.enabled. CLI/server ключ finish_gate_smart не ставят."""
 
 from types import SimpleNamespace
@@ -56,43 +56,39 @@ def test_state_counter_starts_zero_and_resets_on_flush():
 
 
 def test_apply_finish_gate_mode_projects_smart():
-    from gc_tui.toggles import apply_finish_gate_mode
+    from gc_testkit.settings import make_settings
+    from gc_tui.toggles import tui_agent_settings
 
-    cfg = {
-        "tui_finish_gate_mode": "smart",
-        "tui_finish_gate_mode_explicit": True,
-    }
-    apply_finish_gate_mode(cfg)
+    loaded = tui_agent_settings(
+        make_settings({"tui_finish_gate_mode": "smart"})
+    )
     assert (
-        cfg["strict_turn_finish_validation"] is True
+        loaded.settings.agent.strict_turn_finish_validation is True
     )  # судья потенциально включён
-    assert cfg["finish_gate_smart"] is True
+    assert loaded.runtime.finish_gate_smart is True
 
 
 def test_apply_finish_gate_mode_on_off_unchanged():
-    from gc_tui.toggles import apply_finish_gate_mode
+    from gc_testkit.settings import make_settings
+    from gc_tui.toggles import tui_agent_settings
 
-    on = {"tui_finish_gate_mode": "on", "tui_finish_gate_mode_explicit": True}
-    apply_finish_gate_mode(on)
+    on = tui_agent_settings(make_settings({"tui_finish_gate_mode": "on"}))
     assert (
-        on["strict_turn_finish_validation"] is True
-        and on["finish_gate_smart"] is False
+        on.settings.agent.strict_turn_finish_validation is True
+        and on.runtime.finish_gate_smart is False
     )
-    off = {
-        "tui_finish_gate_mode": "off",
-        "tui_finish_gate_mode_explicit": True,
-    }
-    apply_finish_gate_mode(off)
+    off = tui_agent_settings(make_settings({"tui_finish_gate_mode": "off"}))
     assert (
-        off["strict_turn_finish_validation"] is False
-        and off["finish_gate_smart"] is False
+        off.settings.agent.strict_turn_finish_validation is False
+        and off.runtime.finish_gate_smart is False
     )
 
 
 def _guard(cfg, turn_tool_calls):
     from gc_core.intent_guard.guard import FinishGateGuard
+    from gc_testkit.settings import fake_ctx
 
-    ctx = SimpleNamespace(config_dict=cfg)
+    ctx = fake_ctx(cfg)
     state = SimpleNamespace(
         parent_state_id=None, turn_tool_calls=turn_tool_calls
     )
@@ -110,7 +106,7 @@ def test_smart_skips_judge_without_tool_calls():
 
 
 def test_cli_server_unaffected_no_smart_key():
-    """CLI/server: apply_finish_gate_mode не зовётся → ключа finish_gate_smart нет →
+    """CLI/server: tui_agent_settings не зовётся → сигнала finish_gate_smart нет →
     guard работает как прежде (strict AND chat_completions), счётчик не читается."""
     cfg = {
         "backend_api_mode": "chat_completions",
@@ -303,8 +299,10 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(
             ]
         return []
 
-    ctx = SimpleNamespace(
-        config_dict={
+    from gc_testkit.settings import fake_ctx
+
+    ctx = fake_ctx(
+        {
             "backend_api_mode": "chat_completions",
             "strict_turn_finish_validation": True,
             "finish_gate_smart": True,

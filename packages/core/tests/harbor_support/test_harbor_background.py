@@ -54,8 +54,7 @@ def loop_in_thread():
 
 def _tool(backend):
     tool = ExecuteCommand.__new__(ExecuteCommand)
-    tool._config_dict = None
-    return bind_os_backend(tool, backend, config_dict={})
+    return bind_os_backend(tool, backend)
 
 
 def test_the_tool_starts_a_background_command_in_harbor(loop_in_thread):

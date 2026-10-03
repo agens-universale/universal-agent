@@ -17,9 +17,9 @@ from gc_core.agent_executor import AgentExecutor
 from gc_core.config_modules.chat_completions import (
     DEFAULT_AUXILIARY_LLM_MAX_TOKENS,
 )
-from gc_core.settings import settings_from_flat
 from gc_core.usage.account import CATEGORY_MAIN, UsageAccount
 from gc_core.usage.context import record_usage
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _parse(argv, monkeypatch):
@@ -319,14 +319,14 @@ async def test_rephrase_transport_error_stays_structured(monkeypatch):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "config_dict",
+    "config",
     [
         {"logging_format": "text", "console_trace": True},
         {"logging_format": "jsonl", "console_trace": False},
     ],
 )
 async def test_emit_prints_text_when_stdout_is_not_jsonl(
-    monkeypatch, capsys, config_dict
+    monkeypatch, capsys, config
 ):
     async def _ok(**_kwargs):
         return '{"n": 4}', "stop"
@@ -338,7 +338,7 @@ async def test_emit_prints_text_when_stdout_is_not_jsonl(
     ctx = _Ctx()
     code = await aemit_structured_result(
         response=_finish(),
-        config_dict=config_dict,
+        settings=make_settings(config),
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -367,7 +367,9 @@ async def test_emit_jsonl_stream_keeps_stdout_free_of_raw_text(
     ctx = _Ctx()
     code = await aemit_structured_result(
         response=_finish(),
-        config_dict={"logging_format": "jsonl", "console_trace": True},
+        settings=make_settings(
+            {"logging_format": "jsonl", "console_trace": True}
+        ),
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -386,7 +388,7 @@ async def test_emit_failure_leaves_stdout_empty(capsys):
     ctx = _Ctx()
     code = await aemit_structured_result(
         response="не итог",
-        config_dict={"logging_format": "text"},
+        settings=make_settings({"logging_format": "text"}),
         ctx=ctx,
         state=object(),
         terminal_outcome="tool_errors",
@@ -425,7 +427,7 @@ async def test_emit_failure_logs_raw_answer_then_rephrase_error(
     raw = _finish()
     code = await aemit_structured_result(
         response=raw,
-        config_dict={"logging_format": "text"},
+        settings=make_settings({"logging_format": "text"}),
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -488,8 +490,8 @@ def _executor_with_open_accounting():
         stop_requested=False,
     )
     logger = _RunLogger()
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "console_trace": True,
             "logging_format": "text",
             "model": "m",
@@ -533,7 +535,7 @@ async def test_rephrase_tokens_are_in_the_snapshot_taken_after_it(
     executor = _executor_with_open_accounting()
     code = await aemit_structured_result(
         response=_finish(),
-        config_dict=executor._ctx.config_dict,
+        settings=executor._ctx,
         ctx=executor._ctx,
         state=executor.get_state(),
         terminal_outcome=None,
@@ -592,7 +594,7 @@ async def test_truncated_rephrase_is_not_printed(monkeypatch, capsys):
     raw = _finish()
     code = await aemit_structured_result(
         response=raw,
-        config_dict=executor._ctx.config_dict,
+        settings=executor._ctx,
         ctx=executor._ctx,
         state=executor.get_state(),
         terminal_outcome=None,
@@ -674,7 +676,7 @@ async def test_meta_write_error_still_shuts_down_mcp(monkeypatch, tmp_path):
         ),
     )
     monkeypatch.setattr(
-        cli, "load_settings", lambda *_a, **_k: settings_from_flat({})
+        cli, "load_settings", lambda *_a, **_k: make_settings()
     )
     monkeypatch.setattr(cli, "apply_cli_overrides", lambda d, **_kw: d)
     monkeypatch.setattr(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 
@@ -20,7 +21,7 @@ async def test_startup_block_collapsed_shows_max_three(tmp_path):
         "stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         notices = (
             pilot.app._startup_notices()
@@ -44,7 +45,7 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
         "stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()
@@ -76,7 +77,7 @@ async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
         "agent_md_path": "/some/agent.md",
     }
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()
@@ -111,7 +112,7 @@ async def test_no_notices_line_when_clean_config(tmp_path):
 
     cfg = {"model": "M"}
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()
@@ -130,7 +131,7 @@ async def test_update_available_line_in_card_teal(tmp_path):
 
     cfg = {"model": "M"}
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()
@@ -159,7 +160,7 @@ async def test_notices_screen_includes_update_available(tmp_path):
 
     cfg = {"model": "M"}
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         await pilot.pause()
         pilot.app._update_available = True
@@ -209,10 +210,10 @@ async def test_auto_check_updates_main_card_when_other_screen_on_top(
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
     cfg = {"model": "M"}
-    app = TuiApp(threads_dir=str(tmp_path / "t"), config=cfg)
+    app = TuiApp(threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config=cfg,
+            settings=as_settings(cfg),
             config_path=str(cfg_file),
             on_apply=lambda: None,
             probe_fn=lambda *a, **k: None,
@@ -250,7 +251,7 @@ async def test_warning_toasts_fire_on_change_then_silent(
     }
 
     t1 = []
-    app1 = TuiApp(threads_dir=str(tmp_path / "t"), config=cfg)
+    app1 = TuiApp(threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg))
     monkeypatch.setattr(
         app1, "notify", lambda msg, **k: t1.append(k.get("severity"))
     )
@@ -263,7 +264,7 @@ async def test_warning_toasts_fire_on_change_then_silent(
     )  # набор сохранён
 
     t2 = []
-    app2 = TuiApp(threads_dir=str(tmp_path / "t"), config=cfg)
+    app2 = TuiApp(threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg))
     monkeypatch.setattr(
         app2, "notify", lambda msg, **k: t2.append(k.get("severity"))
     )
@@ -286,7 +287,7 @@ async def test_card_readiness_always_plain(tmp_path):
         "stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), config=cfg
+        threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
         scr = pilot.app.screen
         await pilot.pause()

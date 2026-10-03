@@ -754,7 +754,7 @@ def test_start_swarm_extended_mount_envs_empty_when_missing(
 
 
 # ---------------------------------------------------------------------------
-# Layered config merge (унификация со server-side load_config)
+# Layered config merge (унификация со server-side load_settings)
 # ---------------------------------------------------------------------------
 
 

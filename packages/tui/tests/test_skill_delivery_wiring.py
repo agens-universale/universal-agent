@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -26,7 +27,9 @@ async def test_consume_pending_prefix_injects_delivery(tmp_path, monkeypatch):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -43,7 +46,9 @@ async def test_consume_pending_prefix_passthrough_without_skill(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -88,7 +93,9 @@ async def test_cmd_use_skill_during_run_injects_delivery(
             added.append(m)
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -142,7 +149,9 @@ async def test_inline_skill_display_stays_clean(tmp_path, monkeypatch):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:

@@ -15,6 +15,7 @@ from gc_testkit.intent_fixtures import (
     meta_intent_log,
     user_ask_records,
 )
+from gc_testkit.settings import fake_ctx, make_settings
 
 TS = "2026-05-30T11:35:08Z"
 
@@ -29,8 +30,8 @@ def _patch_chat_completion(monkeypatch, fake):
 
 
 def _ctx(trigger_chars: int = 1):
-    return types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        {
             "model": "test-model",
             "completions_url": "http://example.test/v1/chat/completions",
             "summary_params": {
@@ -125,7 +126,7 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
             },
         )
         session = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -215,7 +216,7 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
         thread_id = "demo-thread"
         system_id = "cli"
         session = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -232,7 +233,7 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
         )
 
         reloaded = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )

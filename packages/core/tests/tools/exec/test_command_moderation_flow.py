@@ -38,7 +38,7 @@ def test_exec_command_allow_mode_skips_judge(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "allow"))(
+        with_local_ctx(ExecuteCommand, _config(tmp_path, "allow"))(
             command=f'"{sys.executable}" -c "print(123)"'
         )
     )
@@ -55,7 +55,7 @@ def test_exec_command_deny_mode_executes_safe_verdict(tmp_path, monkeypatch):
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
+        with_local_ctx(ExecuteCommand, _config(tmp_path, "deny"))(
             command=f'"{sys.executable}" -c "print(456)"'
         )
     )
@@ -77,7 +77,7 @@ def test_exec_command_deny_mode_blocks_dangerous_verdict(
     )
 
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
+        with_local_ctx(ExecuteCommand, _config(tmp_path, "deny"))(
             command="sudo apt update"
         )
     )
@@ -105,9 +105,7 @@ def test_run_python_code_deny_mode_blocks_dangerous_verdict(
     target = tmp_path / "outside.txt"
     code = f"from pathlib import Path; Path({str(target)!r}).write_text('bad')"
     result = json.loads(
-        with_local_ctx(RunPythonCode, config_dict=_config(tmp_path, "deny"))(
-            code=code
-        )
+        with_local_ctx(RunPythonCode, _config(tmp_path, "deny"))(code=code)
     )
 
     assert result["ok"] is False
@@ -121,7 +119,7 @@ def test_exec_command_ask_mode_executes_when_user_confirms(tmp_path):
     marker = tmp_path / "confirmed.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
-    tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
+    tool = with_local_ctx(ExecuteCommand, _config(tmp_path, "ask"))
     # Форма у тула одна — `acall`; декораторы гвардов теперь на ней.
     original_call = tool.acall.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
@@ -144,7 +142,7 @@ def test_exec_command_ask_mode_cancels_when_user_rejects(tmp_path):
     marker = tmp_path / "cancelled.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'bad\')"'
 
-    tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
+    tool = with_local_ctx(ExecuteCommand, _config(tmp_path, "ask"))
     original_call = tool.acall.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(
         payload_arg="command",
@@ -169,7 +167,7 @@ def test_command_moderation_fail_closed_when_judge_unavailable_in_deny(
 ):
     """Fail-CLOSED в deny: при недоступности судьи выполнение блокируется."""
     result = json.loads(
-        with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "deny"))(
+        with_local_ctx(ExecuteCommand, _config(tmp_path, "deny"))(
             command=f'"{sys.executable}" -c "print(789)"'
         )
     )
@@ -186,7 +184,7 @@ def test_command_moderation_asks_when_judge_unavailable_in_ask(
     marker = tmp_path / "judge_unavailable.txt"
     command = f'"{sys.executable}" -c "from pathlib import Path; Path({str(marker)!r}).write_text(\'ok\')"'
 
-    tool = with_local_ctx(ExecuteCommand, config_dict=_config(tmp_path, "ask"))
+    tool = with_local_ctx(ExecuteCommand, _config(tmp_path, "ask"))
     # Форма у тула одна — `acall`; декораторы гвардов теперь на ней.
     original_call = tool.acall.__wrapped__.__wrapped__
     guarded_call = command_moderation.moderate_command_execution(

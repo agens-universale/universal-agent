@@ -26,10 +26,10 @@ _USD_URL = "https://openrouter.ai/api/v1/chat/completions"
 
 def _cost_label(config: dict, token_usage) -> str | None:
     """Вызов продового `_session_cost_label` с подставленным приложением."""
-    from gc_core.settings import settings_from_flat
+    from gc_testkit.settings import make_settings
     from gc_tui.screens.sessions import SessionsScreen
 
-    loaded = settings_from_flat(config)
+    loaded = make_settings(config)
     holder = SimpleNamespace(app=SimpleNamespace(base_settings=lambda: loaded))
     return SessionsScreen._session_cost_label(
         holder, SimpleNamespace(token_usage=token_usage)

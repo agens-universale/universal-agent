@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from gc_core.thread_store import ThreadSession
 from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 class CountingStore(DurableFileThreadStore):
@@ -19,7 +20,7 @@ class CountingStore(DurableFileThreadStore):
 
 async def _session(store, persist):
     return await ThreadSession.afrom_config(
-        config_dict={"thread_store_persist": persist},
+        settings=make_settings({"thread_store_persist": persist}),
         system_id="cli",
         thread_id="t",
         store=store,
@@ -79,7 +80,7 @@ async def test_compaction_flushes_deferred_steps_first(tmp_path):
 async def test_local_executor_rejects_turn_mode():
     from gc_core.agent_executor import AgentExecutor
 
-    ctx = SimpleNamespace(config_dict={"thread_store_persist": "turn"})
+    ctx = fake_ctx({"thread_store_persist": "turn"})
     with pytest.raises(ValueError, match="durable executor"):
         await AgentExecutor.arun(
             SimpleNamespace(_ctx=ctx, _lock=_NoLock(), _state=None),

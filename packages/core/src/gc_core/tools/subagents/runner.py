@@ -1,5 +1,4 @@
 import asyncio
-import copy
 import json
 import logging
 import os
@@ -67,8 +66,6 @@ from gc_core.summarize.config import (
     summary_mid_turn_enabled,
 )
 from gc_core.tools import (
-    SUBAGENT_TOOLS_ALLOW_KEY,
-    SUBAGENT_TOOLS_STOP_KEY,
     abuild_tools_data,
 )
 from gc_core.tools.skills.registry import get_skills_registry
@@ -121,20 +118,6 @@ def _synthesis_from_summary_event(event: Dict[str, Any]) -> str:
         if isinstance(content, str):
             return content
     return ""
-
-
-# Вложенные узлы config_dict, передаваемые по ссылке при сборке дочернего конфига
-# (спека §7 п.4): заголовки/kwargs backend + реестр моделей Router (models/slots/
-# assign — Router их не мутирует, но `{**self._config}` расшарил бы эти dict'ы с
-# родителем; deepcopy только их, не всего конфига — остальные секции read-only).
-_CHILD_CONFIG_DEEP_COPY_KEYS = (
-    "chat_completion_headers",
-    "chat_completion_kwargs",
-    "auxiliary_llm_params",
-    "models",
-    "slots",
-    "assign",
-)
 
 
 async def _drain_trace_writes(
@@ -191,7 +174,7 @@ class SubagentRunner:
         self,
         ctx: Any,
         orchestrator_state: State,
-        config_dict: Dict[str, Any],
+        settings: Any = None,
         *,
         preparation: Optional[SubagentPreparation] = None,
         input_scope_factory: Optional[Callable] = None,
@@ -210,7 +193,9 @@ class SubagentRunner:
             )
         )
         self._orchestrator_state = orchestrator_state
-        self._config = config_dict
+        #: Настройки родителя (всё, что принимает ``settings_of``) — когда у
+        #: ``ctx`` своих нет (тестовые двойники); иначе источник — сам ``ctx``.
+        self._settings = settings
         self._parent_call_id: str = ""
         # Имя тула текущего вызова: нужно сборке child_config, а до неё
         # доезжают не все методы (у _build_child_state его в сигнатуре нет).
@@ -257,7 +242,7 @@ class SubagentRunner:
         subagent_cls = (
             self._preparation.resolve_subagent(tool_name)
             if self._preparation is not None
-            else get_subagent_class(tool_name, self._config)
+            else get_subagent_class(tool_name, self._parent_source())
         )
         if subagent_cls is None:
             return self._error_response(
@@ -282,12 +267,19 @@ class SubagentRunner:
             getattr(self._ctx, "settings", None), (AppConfig, LoadedSettings)
         )
 
+    def _parent_source(self) -> Any:
+        """Источник настроек родителя: ``ctx`` с настройками, иначе переданные
+        ``settings`` (тестовые двойники ctx), иначе сам ``ctx``.
+
+        Он же — ключ кэша определений сабагентов (``ctx.subagent_definitions``).
+        """
+        if self._parent_has_settings() or self._settings is None:
+            return self._ctx
+        return self._settings
+
     def _parent_settings(self) -> AppConfig:
-        """Настройки родителя: из ``ctx.settings``, иначе (переходно, тестовые
-        двойники ctx) — из переданного плоского вида."""
-        if self._parent_has_settings():
-            return settings_of(self._ctx)
-        return settings_of(self._config)
+        """Настройки родителя (см. ``_parent_source``)."""
+        return settings_of(self._parent_source())
 
     def _parent_runtime(self) -> RuntimeEnv:
         """Рантайм родителя — в паре с ``_parent_settings``."""
@@ -296,7 +288,7 @@ class SubagentRunner:
         runtime = getattr(self._ctx, "runtime", None)
         if isinstance(runtime, RuntimeEnv):
             return runtime
-        return runtime_of(self._config)
+        return runtime_of(self._parent_source())
 
     def _pre_backend_compaction_hook(
         self, child_ctx: Any, child_state: Any
@@ -611,7 +603,6 @@ class SubagentRunner:
             instance = await subagent_cls.create_instance(
                 task=task,
                 model=model,
-                config_dict=self._config,
                 runtime_notices_enabled=bool(
                     getattr(self._ctx, "is_tui", False)
                 ),
@@ -1015,51 +1006,40 @@ class SubagentRunner:
         if checkpoint is not None:
             checkpoint(self._orchestrator_state, self._ctx)
 
-    def _build_child_config(self) -> Dict[str, Any]:
-        """Единственная сборка конфига дочернего рана.
+    def _build_child_config(self) -> Any:
+        """Единственная сборка настроек дочернего рана.
 
         Метод общий для _build_child_state и _build_child_ctx намеренно: раньше
-        словарь собирался в двух местах независимо, и они обязаны были оставаться
-        синхронными — ровно на этом уже разъезжались ctx.trace_id и config_dict.
+        конфиг собирался в двух местах независимо, и они обязаны были оставаться
+        синхронными — ровно на этом уже разъезжались ctx.trace_id и настройки.
 
+        Локально — ``LoadedSettings`` ребёнка: настройки родителя без локальных
+        субагентов и рантайм родителя с областью инструментов из файла
+        сабагента (см. ``_build_child_settings``/``_build_child_runtime``).
         ``stop_tools`` файла ДОПОЛНЯЕТ глобальный ``agent.stop_tools``, а не
         заменяет: глобальный уже вычтен внутри get_builtin_tools_data, а этот
         список применяется поверх, к полному набору (включая mcp_*). Снять
         глобальный запрет из файла сабагента нельзя.
 
-        Узлы из ``_CHILD_CONFIG_DEEP_COPY_KEYS`` (заголовки/kwargs backend +
-        реестр моделей Router — models/slots/assign) копируются deepcopy, а не
-        по ссылке: иначе мутация ребёнка (например, override child-слота в
-        ``_build_child_model_router``) утекла бы в ``self._config`` и оттуда —
-        во все последующие ходы/субагентов сессии.
+        С внешней подготовкой (durable-исполнитель) — то, что отдаёт её
+        ``build_child_config``: всё, что принимает ``settings_of``.
         """
         if self._preparation is not None:
             return self._preparation.build_child_config(self)
-        child_config = {**self._config, "use_local_subagents": False}
-        for key in _CHILD_CONFIG_DEEP_COPY_KEYS:
-            if key in child_config:
-                child_config[key] = copy.deepcopy(child_config[key])
-        scope = self._child_tool_scope()
-        if scope is not None:
-            allow, stop = scope
-            child_config[SUBAGENT_TOOLS_ALLOW_KEY] = (
-                list(allow) if allow is not None else None
-            )
-            child_config[SUBAGENT_TOOLS_STOP_KEY] = list(stop)
-        from gc_core.config_modules.frozen import FrozenConfigDict
-
-        return FrozenConfigDict(child_config)
+        return LoadedSettings(
+            settings=self._build_child_settings(),
+            runtime=self._build_child_runtime(),
+        )
 
     def _child_tool_scope(
         self,
     ) -> Optional[tuple[Optional[tuple[str, ...]], tuple[str, ...]]]:
         """Область инструментов из файла сабагента: ``(allow, stop)``.
 
-        ``None`` — сабагент встроенный, область наследуется от родителя. Один
-        источник и для плоского вида (``_build_child_config``), и для рантайма
-        (``_build_child_runtime``) — иначе они могли бы разъехаться.
+        ``None`` — сабагент встроенный, область наследуется от родителя.
+        Читается рантаймом ребёнка (``_build_child_runtime``).
         """
-        definition = resolve_subagent_definitions(self._config).get(
+        definition = resolve_subagent_definitions(self._parent_source()).get(
             self._active_tool_name
         )
         if definition is None:
@@ -1080,20 +1060,17 @@ class SubagentRunner:
             subagent_tools_allow=allow, subagent_tools_stop=stop
         )
 
-    def _build_child_settings(self) -> Optional[AppConfig]:
-        """Типизированные настройки ребёнка: настройки родителя без локальных
-        субагентов (тот же запрет, что ``use_local_subagents`` в плоском виде).
-        None — родитель собран плоским словарём (переходно)."""
-        if not self._parent_has_settings():
-            return None
+    def _build_child_settings(self) -> AppConfig:
+        """Настройки ребёнка: настройки родителя без локальных субагентов —
+        ребёнку сабагенты не выдаются в принципе (глубина всегда 1)."""
         return override_settings(
-            settings_of(self._ctx),
+            self._parent_settings(),
             {"agent.use_local_subagents": False},
-            config_dir=runtime_of(self._ctx).config_dir,
+            config_dir=self._parent_runtime().config_dir,
         )
 
     def _build_child_model_router(
-        self, tool_name: str, child_config: Dict[str, Any]
+        self, tool_name: str, child_config: Any
     ) -> Optional[ModelRouter]:
         """Свой Router ребёнка (спека §7 п.4): `subagent:<tool_name>` родительского
         Router становится «main» ребёнка и наследуется любым служебным вызовом БЕЗ
@@ -1236,7 +1213,7 @@ class SubagentRunner:
     def _is_custom_subagent(self) -> bool:
         """Задан ли текущий сабагент файлом, а не классом."""
         return self._active_tool_name in resolve_subagent_definitions(
-            self._config
+            self._parent_source()
         )
 
     def _resolve_subagent_system_prompt(self) -> Optional[str]:
@@ -1299,7 +1276,7 @@ class SubagentRunner:
             special_instructions = (
                 merge_special_instructions_with_model_steering(
                     None,
-                    config_dict=self._config,
+                    settings=self._parent_source(),
                 )
             )
             rendered = render_system_prompt(
@@ -1365,10 +1342,18 @@ class SubagentRunner:
             tools_cache=getattr(self._ctx, "tools_cache", None),
         )
 
-        child_runtime = self._build_child_runtime()
+        from gc_core.config import flat_config
+
+        child_loaded = LoadedSettings(
+            settings=settings_of(child_config),
+            runtime=runtime_of(child_config),
+        )
+        child_runtime = child_loaded.runtime
         child_ctx = RunContext(
-            config_dict=child_config,
-            settings=self._build_child_settings(),
+            # Переходно: плоский вид для кода, ещё читающего ctx.config_dict;
+            # уходит вместе с полем RunContext.config_dict.
+            config_dict=flat_config(child_loaded),
+            settings=child_loaded.settings,
             runtime=child_runtime,
             run_id=child_run_id,
             # Рантайм наследуется через child_runtime, но поле ctx собирается
@@ -1394,6 +1379,14 @@ class SubagentRunner:
             # Кэш едет дальше вниз: иначе внуки (субагент субагента) снова
             # платили бы полную дискавери на каждый спавн.
             tools_cache=getattr(self._ctx, "tools_cache", None),
+            # Определения сабагентов родителя (и их диагностика) — ребёнку как
+            # есть: повторный дискавери ему ни к чему.
+            subagent_definitions=getattr(
+                self._ctx, "subagent_definitions", None
+            ),
+            subagent_diagnostics=getattr(
+                self._ctx, "subagent_diagnostics", None
+            ),
         )
         return self._bind_child_context(child_ctx, tool_name)
 

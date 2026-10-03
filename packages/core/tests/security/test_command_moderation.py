@@ -1,6 +1,5 @@
 import json
 import os
-from types import SimpleNamespace
 
 import pytest
 from gc_core.security import command_moderation as command_moderation
@@ -21,6 +20,7 @@ from gc_core.security.command_moderation import (
 )
 from gc_core.security.path_policy import ToolSecurityContext, WriteGuardConfig
 from gc_testkit.paths import ASSETS
+from gc_testkit.settings import fake_ctx
 
 
 class _Logger:
@@ -199,10 +199,12 @@ def test_build_judge_messages_uses_external_prompt_templates():
 
 
 def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
-    config_dict = {
-        "launch_root": str(tmp_path),
-        "command_moderation": {"enabled": True, "mode": "deny"},
-    }
+    ctx = fake_ctx(
+        {
+            "launch_root": str(tmp_path),
+            "command_moderation": {"enabled": True, "mode": "deny"},
+        }
+    )
 
     @moderate_command_execution(
         payload_arg="command",
@@ -216,10 +218,10 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
             }
         ),
     )
-    def run(command: str, config_dict: dict) -> str:
+    def run(command: str, **kwargs) -> str:
         return json.dumps({"ok": True, "command": command})
 
-    result = json.loads(run("sudo apt update", config_dict=config_dict))
+    result = json.loads(run("sudo apt update", ctx=ctx))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -230,18 +232,20 @@ def test_moderate_command_execution_fail_closed_when_judge_unavailable_in_deny(
     tmp_path,
 ):
     """Fail-CLOSED в deny: при недоступности судьи выполнение блокируется."""
-    config_dict = {
-        "launch_root": str(tmp_path),
-        "command_moderation": {"enabled": True, "mode": "deny"},
-    }
+    ctx = fake_ctx(
+        {
+            "launch_root": str(tmp_path),
+            "command_moderation": {"enabled": True, "mode": "deny"},
+        }
+    )
 
     @moderate_command_execution(
         payload_arg="command", tool_name="exec_command"
     )
-    def run(command: str, config_dict: dict) -> str:
+    def run(command: str, **kwargs) -> str:
         return json.dumps({"ok": True, "command": command})
 
-    result = json.loads(run("echo ok", config_dict=config_dict))
+    result = json.loads(run("echo ok", ctx=ctx))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"
@@ -253,8 +257,8 @@ def test_moderate_command_execution_fail_closed_when_judge_unavailable_in_deny(
 
 def test_moderate_command_execution_logs_judge_failure(tmp_path):
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
             "command_moderation": {"enabled": True, "mode": "deny"},
         },
@@ -289,10 +293,12 @@ def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(
     tmp_path, monkeypatch
 ):
     """В ask при недоступности судьи запрашиваем подтверждение у пользователя."""
-    config_dict = {
-        "launch_root": str(tmp_path),
-        "command_moderation": {"enabled": True, "mode": "ask"},
-    }
+    ctx = fake_ctx(
+        {
+            "launch_root": str(tmp_path),
+            "command_moderation": {"enabled": True, "mode": "ask"},
+        }
+    )
     monkeypatch.setattr(
         command_moderation,
         "_ask_user_confirmation",
@@ -302,10 +308,10 @@ def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(
     @moderate_command_execution(
         payload_arg="command", tool_name="exec_command"
     )
-    def run(command: str, config_dict: dict) -> str:
+    def run(command: str, **kwargs) -> str:
         return json.dumps({"ok": True, "command": command})
 
-    result = json.loads(run("echo ok", config_dict=config_dict))
+    result = json.loads(run("echo ok", ctx=ctx))
 
     assert result["ok"] is True
     assert result["command"] == "echo ok"
@@ -313,8 +319,8 @@ def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(
 
 def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
     logger = _Logger()
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
             "command_moderation": {"enabled": True, "mode": "deny"},
         },
@@ -426,10 +432,12 @@ def test_parse_judge_json_logs_regex_fallback(tmp_path):
 
 
 def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
-    config_dict = {
-        "launch_root": str(tmp_path),
-        "command_moderation": {"enabled": True, "mode": "deny"},
-    }
+    ctx = fake_ctx(
+        {
+            "launch_root": str(tmp_path),
+            "command_moderation": {"enabled": True, "mode": "deny"},
+        }
+    )
 
     @moderate_command_execution(
         payload_arg="command",
@@ -440,10 +448,10 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
             )
         ),
     )
-    def run(command: str, config_dict: dict) -> str:
+    def run(command: str, **kwargs) -> str:
         return json.dumps({"ok": True, "command": command})
 
-    result = json.loads(run("echo ok", config_dict=config_dict))
+    result = json.loads(run("echo ok", ctx=ctx))
 
     assert result["ok"] is False
     assert result["error"]["type"] == "unsafe_command_blocked"

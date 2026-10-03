@@ -46,6 +46,7 @@ from parity_harness import (
     parity_config,
     run_thread_dump,
     strip_volatile,
+    with_flat_overrides,
 )
 
 #: Сценарий прогона. Тул, финализатор, вердикт судьи — те же три хода, что в
@@ -85,9 +86,10 @@ SYS, TID = "cli", "t-matrix"
 class Case:
     """Одно положение переключателей.
 
-    ``overrides`` — точечные пути в ПЛОСКОМ словаре конфига
-    (``summary_params.max_message_chars``), потому что вложенные секции там
-    остались словарями, а ``cfg.update()`` затёр бы такую секцию целиком.
+    ``overrides`` — прежние плоские имена и точечные пути внутри секций
+    (``summary_params.max_message_chars``): так случаи записаны в эталоне.
+    В пути настроек их переводит ``parity_harness.with_flat_overrides``; правка
+    заменяет лист, не затирая соседей по секции.
     """
 
     def __init__(
@@ -107,21 +109,6 @@ class Case:
         #: такой ключ либо игнорируется, либо роняет прогон, и случай проверял
         #: бы не то. Путь в ``overrides`` задаётся через ``{work}``.
         self.files = files or {}
-
-
-def _set_dotted(cfg: Dict[str, Any], path: str, value: Any) -> None:
-    """Проставить значение по точечному пути, не затирая соседей по секции."""
-    parts = path.split(".")
-    node: Any = cfg
-    for part in parts[:-1]:
-        nxt = node.get(part)
-        if not isinstance(nxt, dict):
-            nxt = {}
-        else:
-            nxt = dict(nxt)  # копия: секция могла приехать из дефолтов
-        node[part] = nxt
-        node = nxt
-    node[parts[-1]] = value
 
 
 # --- срез B: каждый переключатель поодиночке -------------------------------
@@ -1032,17 +1019,18 @@ async def run_case(
     from gc_core.agent_executor import AgentExecutor
 
     work = tmp_root / case.id.replace("/", "__")
-    cfg = parity_config(work, monkeypatch)
+    base = parity_config(work, monkeypatch)
 
     for rel, content in case.files.items():
         target = work / rel
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
 
+    overrides: Dict[str, Any] = {}
     for path, value in case.overrides.items():
         if isinstance(value, str) and "{work}" in value:
             value = value.format(work=work)
-        _set_dotted(cfg, path, value)
+        overrides[path] = value
 
     backend = install(monkeypatch, ScriptedBackend([*TURNS, *SUMMARY_TAIL]))
     result: Dict[str, Any] = {
@@ -1051,6 +1039,9 @@ async def run_case(
         "note": case.note,
     }
     try:
+        # Правки — внутри try: невыразимое схемой значение (UNREPRESENTABLE)
+        # отказывает на валидации настроек, и отказ — наблюдаемое поведение.
+        cfg = with_flat_overrides(base, overrides)
         _acreate = getattr(_rc, "acreate_run_context", None)
         if _acreate is not None:
             ctx = await _acreate(cfg)
@@ -1081,13 +1072,14 @@ async def run_case(
         result["answer"] = None
         result["error"] = f"{type(exc).__name__}: {exc}"
 
-    result["dump"] = run_thread_dump(cfg, SYS, TID)
+    # Каталог тредов правки не трогают: дамп снимается и после отказа валидации.
+    result["dump"] = run_thread_dump(base, SYS, TID)
     result["backend_calls"] = len(getattr(backend, "calls", []))
 
     try:
         from gc_core.thread_store import load_thread_meta, resolve_threads_dir
 
-        meta = load_thread_meta(resolve_threads_dir(cfg), SYS, TID) or {}
+        meta = load_thread_meta(resolve_threads_dir(base), SYS, TID) or {}
         result["meta"] = strip_volatile(
             {
                 k: v

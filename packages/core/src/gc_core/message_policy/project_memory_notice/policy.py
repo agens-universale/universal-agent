@@ -17,21 +17,20 @@ from gc_core.utils.generate_message_id import (
 )
 
 
-def tool_project_memory_enabled(config_dict: Any) -> bool:
+def tool_project_memory_enabled(settings: Any) -> bool:
     """Тул project_memory не в ``agent.stop_tools``.
 
-    ``config_dict`` здесь и ниже — настройки (``AppConfig``) или то, что знает
-    ``settings_of`` (ctx, плоский словарь).
+    ``settings`` здесь и ниже — то, что принимает ``settings_of`` (ctx,
+    ``LoadedSettings``, ``AppConfig``).
     """
     return (
-        PROJECT_MEMORY_TOOL_NAME
-        not in settings_of(config_dict).agent.stop_tools
+        PROJECT_MEMORY_TOOL_NAME not in settings_of(settings).agent.stop_tools
     )
 
 
-def project_memory_hints_enabled(config_dict: Any) -> bool:
+def project_memory_hints_enabled(settings: Any) -> bool:
     """Exists/changed hints: только явный флаг в ``project_memory`` и живой тул."""
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     return bool(
         settings.project_memory.enable_project_memory_notice
     ) and tool_project_memory_enabled(settings)
@@ -82,12 +81,12 @@ def collect_project_memory_hints(
     state: Any,
     meta: dict[str, Any],
     ctx: Any,
-    config_dict: Any,
+    settings: Any,
     *,
     get_hash_fn: Callable[[Any], str | None] | None = None,
 ) -> list[str]:
     """Exists/changed hints на K-тике; пустой список если tool/mode выключены."""
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     if not project_memory_hints_enabled(settings):
         return []
     if get_hash_fn is None:

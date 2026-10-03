@@ -26,9 +26,9 @@ def _cfg(cap: int = CAP, edge: int = EDGE) -> dict:
     }
 
 
-def _tool(cls, *, state=None, config_dict=None):
+def _tool(cls, *, state=None, config=None):
     return with_local_ctx(
-        cls, state=state, call_id="call-1", config_dict=config_dict or _cfg()
+        cls, state=state, call_id="call-1", config=config or _cfg()
     )
 
 
@@ -113,7 +113,7 @@ def test_streams_are_independent():
 def test_no_hidden_four_thousand_limit():
     """Без max_output_chars=4000: 3500 символов при cap 10000 приходят целиком."""
     r = json.loads(
-        _tool(ExecuteCommand, config_dict=_cfg(cap=10000, edge=100))(
+        _tool(ExecuteCommand, config=_cfg(cap=10000, edge=100))(
             command=_print_command(3500)
         )
     )
@@ -208,10 +208,10 @@ async def test_backend_result_without_stream_structure_still_builds_envelope():
             return None
 
     from gc_testkit.harbor_fakes import bind_os_backend
+    from gc_testkit.helpers.tool_ctx import tool_settings
 
     tool = ExecuteCommand.__new__(ExecuteCommand)
-    tool._config_dict = _cfg()
-    bind_os_backend(tool, _DuckBackend(), config_dict=_cfg())
+    bind_os_backend(tool, _DuckBackend(), settings=tool_settings(_cfg()))
 
     r = json.loads(await tool.acall(command="x"))
     assert r["ok"] is True

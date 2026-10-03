@@ -21,6 +21,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 from contextlib import asynccontextmanager, contextmanager
 from unittest import mock
 
@@ -153,7 +154,7 @@ async def settings_connection(
     # Конфиг приложения — тот же, что у экрана: вход в секцию забирает его у
     # приложения (SettingsScreen._sync_config_from_app), и с пустым конфигом
     # секция осталась бы без адреса.
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config_path=str(cfg_file))
         if probe is not None:
@@ -200,7 +201,7 @@ async def settings_voice_section(
     )
     config_text = CLOUD_CONFIG if mode == "cloud" else "model: m\n"
     with _isolated_voice_data(tmp_path):
-        app = app_mod.TuiApp(config={"voice": {}})
+        app = app_mod.TuiApp(settings=tui_settings({"voice": {}}))
         async with app.run_test() as pilot:
             scr, fake = _mk_screen(tmp_path, status, config_text=config_text)
             fake.probe_result = probe
@@ -256,7 +257,7 @@ async def settings_mcp_section(tmp_path, *, servers=()):
             return 0
 
     cfg_file = _write_cfg(tmp_path)
-    app = app_mod.TuiApp(config=_cfg())
+    app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     with mock.patch.object(mcp_manager_mod, "McpManager", _FakeManager):
         async with app.run_test() as pilot:
             scr = _mk_screen(config_path=str(cfg_file))
@@ -305,7 +306,7 @@ async def wizard_voice_step(
 
     keys = [k for k, _t, _d in _VOICE_OPTIONS]
     with _isolated_voice_data(tmp_path):
-        app = TuiApp(config={"model": "M"})
+        app = TuiApp(settings=tui_settings({"model": "M"}))
         async with app.run_test() as pilot:
             voice = FakeVoice(installed=installed)
             voice.models = models
@@ -344,7 +345,7 @@ async def wizard_connection_step(tmp_path):
         # реальный `voice_setup`, когда его не передали, — снимок «Подключения»
         # зависел бы от того, стоит ли на машине батарейка.
         with _isolated_voice_data(tmp_path):
-            app = TuiApp(config={"model": "M"})
+            app = TuiApp(settings=tui_settings({"model": "M"}))
             async with app.run_test() as pilot:
                 screen = _screen(voice=FakeVoice())
                 await app.push_screen(screen)

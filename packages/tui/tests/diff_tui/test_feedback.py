@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 from gc_core.config_modules import env_vars
 from gc_core.message_policy.user_message_policy import (
@@ -203,7 +204,9 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
             "max_diff_chars": 8000,
         },
     }
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
         await pilot.pause()
@@ -217,7 +220,7 @@ async def test_t15_diff_undo_appends_technical_to_thread(tmp_path, cache_proj):
 
         scr = DiffScreen(
             launch_root=str(cache_proj),
-            config=cfg,
+            settings=as_settings(cfg),
             on_undo_feedback=_capture,
             on_ui_ack=trace._on_diff_ui_ack,
             threads_dir=str(threads_dir),

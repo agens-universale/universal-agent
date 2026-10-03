@@ -9,6 +9,7 @@ import pytest
 from gc_core import run_summary_coordinator as rsc
 from gc_core.run_summary_coordinator import RunSummaryCoordinator
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _minimal_state(*, messages: list):
@@ -21,11 +22,7 @@ def _minimal_state(*, messages: list):
 
 @pytest.fixture
 def ctx_stub():
-    return SimpleNamespace(
-        config_dict={"save_logs": False},
-        summary_trace_path="",
-        logger=None,
-    )
+    return fake_ctx({"save_logs": False}, summary_trace_path="", logger=None)
 
 
 def _patch_save_thread_meta(monkeypatch) -> None:

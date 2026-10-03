@@ -15,17 +15,21 @@
 import importlib
 import types
 
+from gc_testkit.settings import make_settings
+
 
 def _cfg(tmp_path):
-    return {
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
-        "save_logs": False,
-    }
+    return make_settings(
+        {
+            "threads_data_path": str(tmp_path),
+            "backend_api_mode": "chat_completions",
+            "completions_url": "http://test",
+            "model": "x",
+            "max_steps": 1,
+            "system_prompt_id": "v1",
+            "save_logs": False,
+        }
+    )
 
 
 async def _executor(monkeypatch, tmp_path, seen: list):

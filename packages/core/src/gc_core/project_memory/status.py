@@ -38,11 +38,12 @@ _EMPTY_STATUS = (
 def build_project_memory_status_for_cwd(
     cwd: Optional[str] = None,
     *,
-    config_dict: Any = None,
+    settings: Any = None,
 ) -> str:
     """Resolve the project-local memory path and build the status string.
 
-    ``config_dict`` — настройки (``AppConfig``) или то, что знает ``settings_of``.
+    ``settings`` — то, что принимает ``settings_of`` (ctx, ``LoadedSettings``,
+    ``AppConfig``); ``None`` — умолчания.
 
     Callers that have no business knowing where memory lives use this entry
     point — internal file name and directory layout stay encapsulated.
@@ -51,7 +52,7 @@ def build_project_memory_status_for_cwd(
 
     return build_project_memory_status(
         project_gc_dir(cwd) / _FILE_NAME,
-        max_chars=settings_of(config_dict).project_memory.max_chars,
+        max_chars=settings_of(settings).project_memory.max_chars,
     )
 
 
@@ -59,18 +60,19 @@ def attach_status_to_prompt_vars(
     prompt_vars: dict,
     cwd: Optional[str] = None,
     *,
-    config_dict: Any = None,
+    settings: Any = None,
 ) -> None:
     """Add `longMemoryStatus` to the given prompt-variables dict.
 
     Не добавляет статус, если ``project_memory`` в ``stop_tools`` (D36).
+    ``settings`` — то, что принимает ``settings_of``; ``None`` — умолчания.
     """
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     if PROJECT_MEMORY_TOOL_NAME in settings.agent.stop_tools:
         return
     try:
         prompt_vars["longMemoryStatus"] = build_project_memory_status_for_cwd(
-            cwd, config_dict=settings
+            cwd, settings=settings
         )
     except Exception:  # pragma: no cover — memory must never break metadata
         return

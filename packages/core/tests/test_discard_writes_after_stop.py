@@ -1,6 +1,7 @@
 """State.discard_writes_after_stop — флаг для guard перед persist после стопа."""
 
 from gc_core.states import State
+from gc_testkit.settings import make_settings
 
 
 def _make_state() -> State:
@@ -93,15 +94,17 @@ async def test_persist_callback_none_is_noop():
 
 
 def _make_executor_cfg(tmp_path):
-    return {
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
-        "save_logs": False,
-    }
+    return make_settings(
+        {
+            "threads_data_path": str(tmp_path),
+            "backend_api_mode": "chat_completions",
+            "completions_url": "http://test",
+            "model": "x",
+            "max_steps": 1,
+            "system_prompt_id": "v1",
+            "save_logs": False,
+        }
+    )
 
 
 async def test_run_kwarg_sets_state_field(tmp_path, monkeypatch):

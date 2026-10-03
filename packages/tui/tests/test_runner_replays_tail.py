@@ -10,6 +10,7 @@ TUI держит один исполнитель на сессию. Сообще
 окне сноса).
 """
 
+from gc_testkit.settings import make_settings
 import asyncio
 import importlib
 import logging
@@ -57,7 +58,9 @@ def env(monkeypatch, tmp_path):
 
     monkeypatch.setattr(ae, "arun_agent", _loop)
     monkeypatch.setattr(ae, "_aclose_mcp_and_release", _teardown)
-    ctx = asyncio.run(acreate_run_context(_cfg(tmp_path), auth_connector=None))
+    ctx = asyncio.run(
+        acreate_run_context(make_settings(_cfg(tmp_path)), auth_connector=None)
+    )
     executor = ae.AgentExecutor(ctx)
     arun = executor.arun
 

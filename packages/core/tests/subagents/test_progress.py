@@ -16,6 +16,7 @@ from gc_core.tools.subagents.progress import (
 )
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _make_event(**overrides) -> SubagentProgressEvent:
@@ -132,8 +133,8 @@ def _make_ctx(tools_data, *, sink=None):
         "model": "test-model",
         "system_prompt_id": "test-prompt",
     }
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         tools_data=tools_data,
         auth_connector=None,
         logger=None,
@@ -231,7 +232,7 @@ class TestProcessToolCallsForwardsCallId:
         from gc_core.processing_responses import aprocess_tool_calls
 
         state = _make_state()
-        ctx = SimpleNamespace(config_dict={})
+        ctx = fake_ctx()
         seen: dict = {}
 
         async def _fake_apply_tool(**kwargs):
@@ -277,7 +278,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         parent_ctx.tools_spec = []
         parent_ctx.tools_description = []
         parent_ctx.subagent_progress_sink = sink
-        runner = SubagentRunner(parent_ctx, orch, cfg)
+        runner = SubagentRunner(parent_ctx, orch)
         captured: dict = {}
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):
@@ -310,7 +311,7 @@ class TestRunnerWiresSinkOntoChildCtx:
         parent_ctx.tools_data = {}
         parent_ctx.tools_spec = []
         parent_ctx.tools_description = []
-        runner = SubagentRunner(parent_ctx, orch, cfg)
+        runner = SubagentRunner(parent_ctx, orch)
         captured: dict = {}
 
         async def fake_run_agent(messages, child_state, child_ctx, **kwargs):

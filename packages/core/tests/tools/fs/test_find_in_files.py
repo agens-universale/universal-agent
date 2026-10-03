@@ -500,7 +500,7 @@ class TestExcludedDirs:
             }
         }
         data = _call(
-            with_local_ctx(FindInFiles, config_dict=cfg),
+            with_local_ctx(FindInFiles, cfg),
             path=str(tmp_path),
             pattern="target",
             query_mode="text",
@@ -617,7 +617,7 @@ class TestDirectoryLimits:
             },
         )
         data = _call(
-            with_local_ctx(FindInFiles, config_dict=cfg),
+            with_local_ctx(FindInFiles, cfg),
             path=str(tmp_path),
             pattern="x",
             query_mode="text",
@@ -656,7 +656,7 @@ class TestDirectoryLimits:
         }
         _make_tree(tmp_path, {f"f{i}.py": "word\n" for i in range(5)})
         data = _call(
-            with_local_ctx(FindInFiles, config_dict=cfg),
+            with_local_ctx(FindInFiles, cfg),
             path=str(tmp_path),
             pattern=r"\w+",
             query_mode="python-re",
@@ -694,7 +694,7 @@ class TestDirectoryLimits:
             files[f"root{i}.py"] = "x\n"
         _make_tree(tmp_path, files)
         data = _call(
-            with_local_ctx(FindInFiles, config_dict=cfg),
+            with_local_ctx(FindInFiles, cfg),
             path=str(tmp_path),
             pattern="x",
             query_mode="text",
@@ -754,7 +754,7 @@ class TestDirectoryLimits:
         }
         _make_tree(tmp_path, {f"f{i}.py": "def foo\n" for i in range(10)})
         data = _call(
-            with_local_ctx(FindInFiles, config_dict=cfg),
+            with_local_ctx(FindInFiles, cfg),
             path=str(tmp_path),
             pattern=r"def (foo|bar)",
             query_mode="python-re",

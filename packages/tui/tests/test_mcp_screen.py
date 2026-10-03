@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import as_settings, tui_settings
 import pytest
 
 
@@ -62,9 +63,11 @@ async def test_mcp_screen_with_snapshot(tmp_path):
             "tools": [{"name": "search.web", "description": "web"}],
         }
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test() as pilot:
-        scr = McpScreen(config=cfg, tools_snapshot=snap)
+        scr = McpScreen(settings=as_settings(cfg), tools_snapshot=snap)
         await app.push_screen(scr)
         await pilot.pause()
         t = _yaml_of(scr)
@@ -84,9 +87,11 @@ async def test_mcp_screen_no_snapshot_shows_note(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test() as pilot:
-        scr = McpScreen(config=cfg, tools_snapshot=None)
+        scr = McpScreen(settings=as_settings(cfg), tools_snapshot=None)
         await app.push_screen(scr)
         await pilot.pause()
         t = _yaml_of(scr)
@@ -100,10 +105,14 @@ async def test_mcp_screen_empty(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"mcp-servers": {}}),
     )
     async with app.run_test() as pilot:
-        scr = McpScreen(config={"mcp-servers": {}}, tools_snapshot={})
+        scr = McpScreen(
+            settings=as_settings({"mcp-servers": {}}), tools_snapshot={}
+        )
         await app.push_screen(scr)
         await pilot.pause()
         assert "нет MCP-серверов" in _yaml_of(scr)
@@ -117,7 +126,9 @@ async def test_mcp_screen_esc_returns_to_main(tmp_path):
     from gc_tui.screens.main import TraceScreen
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"mcp-servers": {}}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"mcp-servers": {}}),
     )
     async with app.run_test() as pilot:
         await pilot.app.screen._handle_command("mcp")
@@ -138,9 +149,11 @@ async def test_mcp_screen_has_header_and_footer(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     async with app.run_test() as pilot:
-        scr = McpScreen(config=cfg, tools_snapshot=None)
+        scr = McpScreen(settings=as_settings(cfg), tools_snapshot=None)
         await app.push_screen(scr)
         await pilot.pause()
         assert scr.query("#header") and scr.query("#footer")

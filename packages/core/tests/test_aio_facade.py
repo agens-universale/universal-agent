@@ -6,7 +6,6 @@ import time
 
 import pytest
 from gc_core.aio import AsyncAgent
-from gc_core.settings import settings_from_flat
 from parity_harness import (
     ScriptedBackend,
     assistant_tool_call,
@@ -52,7 +51,7 @@ async def test_facade_runs_a_turn(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(_scenario("42")))
 
-    async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+    async with await AsyncAgent.create(cfg) as agent:
         answer = await agent.run("сколько будет 21*2", thread_id="t1")
 
     assert "42" in str(answer)
@@ -97,7 +96,7 @@ async def test_facade_does_not_block_the_loop(tmp_path, monkeypatch):
         while not gaps:
             await asyncio.sleep(0.005)
 
-        async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+        async with await AsyncAgent.create(cfg) as agent:
             await agent.run("привет", thread_id="t1")
         stop.set()
         await beat
@@ -113,8 +112,8 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     install(monkeypatch, ScriptedBackend(_scenario("раз") + _scenario("два")))
 
     before = threading.active_count()
-    a = await AsyncAgent.create(settings_from_flat(cfg_a))
-    b = await AsyncAgent.create(settings_from_flat(cfg_b))
+    a = await AsyncAgent.create(cfg_a)
+    b = await AsyncAgent.create(cfg_b)
     async with a, b:
         r1, r2 = await asyncio.gather(
             a.run("раз", thread_id="t1"),
@@ -148,7 +147,7 @@ async def test_facade_streams_deltas(tmp_path, monkeypatch):
     )
 
     seen = []
-    async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+    async with await AsyncAgent.create(cfg) as agent:
         async for kind, text in agent.stream("привет", thread_id="t1"):
             seen.append((kind, text))
 
@@ -167,7 +166,7 @@ async def test_stream_propagates_run_error(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(_scenario()))
 
-    async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+    async with await AsyncAgent.create(cfg) as agent:
 
         async def _boom(*_a, **_k):
             raise RuntimeError("прогон сломался")
@@ -182,7 +181,7 @@ async def test_stop_is_idempotent(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(_scenario()))
 
-    async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+    async with await AsyncAgent.create(cfg) as agent:
         agent.stop()
         agent.stop()
 
@@ -192,7 +191,7 @@ async def test_send_before_run_is_buffered(tmp_path, monkeypatch):
     cfg = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(_scenario()))
 
-    async with await AsyncAgent.create(settings_from_flat(cfg)) as agent:
+    async with await AsyncAgent.create(cfg) as agent:
         agent.send({"role": "user", "content": "вдогонку"})
 
 

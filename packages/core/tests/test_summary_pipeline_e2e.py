@@ -12,6 +12,7 @@ from gc_core.thread_store import (
 )
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
 from gc_testkit.intent_fixtures import intent_user_ask_texts
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _patch_chat_completion(monkeypatch, fake):
@@ -24,8 +25,8 @@ def _patch_chat_completion(monkeypatch, fake):
 
 
 def _ctx():
-    return types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        {
             "model": "test-model",
             "completions_url": "http://example.test/v1/chat/completions",
             "summary_params": {
@@ -90,7 +91,7 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             start_seq=0,
         )
         session = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -237,7 +238,7 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             start_seq=0,
         )
         session = await ThreadSession.afrom_config(
-            config_dict={"threads_data_path": tmp_dir},
+            settings=make_settings({"threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )

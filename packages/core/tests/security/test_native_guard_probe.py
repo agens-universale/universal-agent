@@ -1,7 +1,5 @@
 """Native guard flows consume worker facts without repeating filesystem I/O."""
 
-from types import SimpleNamespace
-
 import pytest
 from gc_core.security.guard_probe import (
     GuardProbeRequest,
@@ -9,6 +7,7 @@ from gc_core.security.guard_probe import (
 )
 from gc_core.security.path_policy import enforce_write_guard
 from gc_core.security.read_guard import enforce_read_guard
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 @pytest.mark.asyncio
@@ -23,7 +22,7 @@ async def test_native_path_guard_matches_local_without_local_probe_io(
         "read_guard": {"enabled": True, "mode": "deny"},
     }
     path = str(tmp_path / "file.txt")
-    ctx = SimpleNamespace(config_dict=config)
+    ctx = fake_ctx(config=config)
     trace = []
 
     class Tool:
@@ -55,9 +54,7 @@ async def test_native_path_guard_matches_local_without_local_probe_io(
             "write" if operation == "write" else "",
         ),
     ]
-    facts = {
-        r.kind: evaluate_guard_probe(r, config_dict=config) for r in requests
-    }
+    facts = {r.kind: evaluate_guard_probe(r, settings=ctx) for r in requests}
 
     async def probe(request):
         return facts[request.kind]
@@ -86,9 +83,11 @@ async def test_native_path_guard_matches_local_without_local_probe_io(
 def test_probe_rejects_unknown_kind_and_missing_cwd():
     with pytest.raises(ValueError):
         evaluate_guard_probe(
-            GuardProbeRequest("unknown", "t", "x", "/"), config_dict={}
+            GuardProbeRequest("unknown", "t", "x", "/"),
+            settings=make_settings(),
         )
     with pytest.raises(ValueError):
         evaluate_guard_probe(
-            GuardProbeRequest("read_path", "t", "x", ""), config_dict={}
+            GuardProbeRequest("read_path", "t", "x", ""),
+            settings=make_settings(),
         )

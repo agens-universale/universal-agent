@@ -33,7 +33,7 @@ def test_execute_env_timeout_and_truncation(tmp_path):
     assert timeout["ok"] is False and timeout["timed_out"] is True
     trunc_tool = with_local_ctx(
         ExecuteCommand,
-        config_dict={
+        {
             "exec_output_capture_max_chars": 10,
             "exec_output_preview_edge_chars": 5,
         },

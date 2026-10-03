@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 from gc_core.agent_executor import AgentExecutor
-from gc_core.config import flatten_app_config
+from gc_core.settings import LoadedSettings, RuntimeEnv
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store_file import FileThreadStore
 from gc_core.utils.logging_module import release_run_logger
@@ -443,8 +443,10 @@ async def test_actual_http_local_native_parity(
             },
         }
     )
-    local_config = flatten_app_config(config.profiles["test"].core)
-    local_config["launch_root"] = str(tmp_path)
+    local_config = LoadedSettings(
+        settings=config.profiles["test"].core,
+        runtime=RuntimeEnv(launch_root=str(tmp_path)),
+    )
     local_store = FileThreadStore(str(tmp_path / "local_threads"))
     local_ctx = await acreate_run_context(
         local_config, thread_store=local_store

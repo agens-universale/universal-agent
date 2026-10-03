@@ -1,5 +1,6 @@
 """Pending user-reply tracking + reconciliation."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 import threading
 from pathlib import Path
@@ -37,7 +38,9 @@ async def test_send_records_pending_in_meta(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -78,7 +81,9 @@ async def test_pending_widget_mounted_with_pending_state(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -141,7 +146,9 @@ async def test_polling_user_event_promotes_pending(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -204,7 +211,9 @@ async def test_pending_cap_drops_oldest(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     fake = _Fake()
     app._executor_factory = lambda: fake
@@ -270,7 +279,9 @@ async def test_failed_run_marks_pending_widget_and_meta(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -313,7 +324,9 @@ async def test_error_shown_resets_between_runs(tmp_path):
             pass
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -368,7 +381,9 @@ async def test_restart_renders_failed_from_meta(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -418,7 +433,9 @@ async def test_restart_with_only_failed_pendings_no_normalize_write(tmp_path):
     mtime_before = meta_path.stat().st_mtime_ns
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -483,7 +500,9 @@ async def test_mount_failed_skips_delivered_via_attach(tmp_path):
         ),
         encoding="utf-8",
     )
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -542,7 +561,9 @@ async def test_mount_failed_renders_truly_orphaned(tmp_path):
         ),
         encoding="utf-8",
     )
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -636,7 +657,9 @@ async def test_mount_failed_skips_delivered_via_user_messages_log(tmp_path):
         ),
         encoding="utf-8",
     )
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -742,7 +765,9 @@ async def test_mount_failed_skips_delivered_via_user_intent_log(tmp_path):
         ),
         encoding="utf-8",
     )
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -829,7 +854,9 @@ async def test_mount_failed_drops_superseded_by_later_delivered(tmp_path):
         ),
         encoding="utf-8",
     )
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)
@@ -904,7 +931,9 @@ async def test_mount_failed_keeps_latest_failed_after_delivered(tmp_path):
         ),
         encoding="utf-8",
     )
-    app = TuiApp(threads_dir=str(threads_dir), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(threads_dir), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(thread_id)

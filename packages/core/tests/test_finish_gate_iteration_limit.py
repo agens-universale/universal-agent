@@ -11,6 +11,7 @@ from gc_core.intent_guard.guard import (
 )
 from gc_core.intent_guard.validation_result import ValidationResult
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _reject_validation(**_kwargs):
@@ -31,20 +32,22 @@ def _reject_validation(**_kwargs):
 class FinishGateIterationLimitTest(unittest.TestCase):
     def test_subagent_default_limit_is_three(self) -> None:
         sub_state = SimpleNamespace(parent_state_id="orch-1")
-        self.assertEqual(resolve_finish_gate_max_rejections({}, sub_state), 3)
+        self.assertEqual(
+            resolve_finish_gate_max_rejections(make_settings(), sub_state), 3
+        )
 
     def test_zero_config_falls_back_to_ten_not_unlimited(self) -> None:
         main_state = SimpleNamespace(parent_state_id=None)
         self.assertEqual(
             resolve_finish_gate_max_rejections(
-                {"finish_gate_max_iterations": 0}, main_state
+                make_settings({"finish_gate_max_iterations": 0}), main_state
             ),
             10,
         )
 
     def test_third_submit_fail_open_after_two_rejects(self) -> None:
-        ctx = SimpleNamespace(
-            config_dict={
+        ctx = fake_ctx(
+            {
                 "backend_api_mode": "chat_completions",
                 "strict_turn_finish_validation": True,
                 "finish_gate_max_iterations": 2,

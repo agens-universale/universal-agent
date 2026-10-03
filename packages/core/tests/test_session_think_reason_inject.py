@@ -2,10 +2,10 @@
 
 import json
 import sys
-from types import SimpleNamespace
 
 import pytest
 from gc_core.tools import aapply_tool, abuild_tools_data
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 @pytest.fixture(autouse=True)
@@ -43,9 +43,11 @@ def _inject_config(**overrides):
 
 async def test_apply_tool_session_think_reason_only_ok_with_inject():
     """session_think({reason: long text}) with inject → ok; content not lost after strip."""
-    tools_data, _, _, _ = await abuild_tools_data(_inject_config())
-    ctx = SimpleNamespace(
-        config_dict=_inject_config(),
+    tools_data, _, _, _ = await abuild_tools_data(
+        make_settings(_inject_config())
+    )
+    ctx = fake_ctx(
+        _inject_config(),
         tools_data=tools_data,
         logger=None,
     )
@@ -62,9 +64,11 @@ async def test_apply_tool_session_think_reason_only_ok_with_inject():
 
 
 async def test_apply_tool_session_think_explicit_thoughts_unchanged():
-    tools_data, _, _, _ = await abuild_tools_data(_inject_config())
-    ctx = SimpleNamespace(
-        config_dict=_inject_config(),
+    tools_data, _, _, _ = await abuild_tools_data(
+        make_settings(_inject_config())
+    )
+    ctx = fake_ctx(
+        _inject_config(),
         tools_data=tools_data,
         logger=None,
     )
@@ -84,9 +88,11 @@ async def test_apply_tool_session_think_explicit_thoughts_unchanged():
 
 
 async def test_apply_tool_session_think_empty_after_strip_still_fails():
-    tools_data, _, _, _ = await abuild_tools_data(_inject_config())
-    ctx = SimpleNamespace(
-        config_dict=_inject_config(),
+    tools_data, _, _, _ = await abuild_tools_data(
+        make_settings(_inject_config())
+    )
+    ctx = fake_ctx(
+        _inject_config(),
         tools_data=tools_data,
         logger=None,
     )

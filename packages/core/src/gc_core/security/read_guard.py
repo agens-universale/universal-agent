@@ -23,8 +23,6 @@ from gc_core.security.guard_probe import GuardProbeRequest, probe_step
 from gc_core.security.path_policy import (
     _extract_named_value,
     _guard_path_argument,
-    _is_flat_source,
-    _setting_or,
     _settings_source,
     _tool_name,
     audit_policy_decision,
@@ -40,7 +38,7 @@ from gc_core.settings import settings_of
 _GLOB_WILDCARD_MARKERS = {"*", "all"}
 
 
-def _resolve_skills_root(config_dict: Any) -> str | None:
+def _resolve_skills_root(settings: Any) -> str | None:
     """
     Возвращает абсолютный путь до каталога скиллов (где лежат SKILL.md),
     чтобы read_guard мог автоматически разрешать их чтение без явной записи
@@ -52,10 +50,11 @@ def _resolve_skills_root(config_dict: Any) -> str | None:
       - иначе — system root из `tools.skills.registry._system_skills_root`
         (`<project_root>/skills`).
 
-    Импорт ленивый, чтобы избежать циклической зависимости security ↔ tools.
+    ``settings`` — то, что принимает ``settings_of``. Импорт ленивый, чтобы
+    избежать циклической зависимости security ↔ tools.
     """
     # 1. Явный single-source mode.
-    raw = settings_of(config_dict).paths.skills_data_path
+    raw = settings_of(settings).paths.skills_data_path
     if isinstance(raw, str) and raw.strip():
         return os.path.abspath(raw.strip())
     # 2. Three-layer mode → system root (<project_root>/skills).
@@ -103,30 +102,18 @@ class ReadGuardViolation(ValueError):
         super().__init__(reason)
 
 
-def parse_read_guard_config(config_dict: Any) -> ReadGuardConfig:
+def parse_read_guard_config(settings: Any) -> ReadGuardConfig:
     """
     Достаёт read_guard из настроек (``security.read_guard``).
 
-    ``config_dict`` — то, что знает ``settings_of``: ctx с настройками или
-    (переходно) плоский словарь. Runtime-fallback при отсутствии ключей в
-    плоском словаре — OFF (enabled=False). НО на нормальном пути настройки
-    всегда несут read_guard из pydantic (secure-by-default: enabled=True,
-    mode=ask), поэтому этот fallback достижим лишь в bespoke/тест-конфигах в
-    обход load_config. Симметрично write_guard/url_policy
-    (resolve_tool_context) и command_moderation.
+    ``settings`` — то, что принимает ``settings_of``: ctx с настройками,
+    ``LoadedSettings`` или ``AppConfig``. Значения — из модели
+    (secure-by-default: enabled=True, mode=ask).
     """
-    settings = settings_of(config_dict)
-    legacy = _is_flat_source(config_dict)
-    raw = settings.security.read_guard
+    raw = settings_of(settings).security.read_guard
     return ReadGuardConfig(
-        enabled=bool(
-            _setting_or(settings, legacy, "security.read_guard.enabled", False)
-        ),
-        mode=str(
-            _setting_or(settings, legacy, "security.read_guard.mode", "deny")
-        )
-        .strip()
-        .lower(),
+        enabled=bool(raw.enabled),
+        mode=str(raw.mode).strip().lower(),
         allowed_read_roots=list(raw.allowed_read_roots or []),
         allowed_read_paths=list(raw.allowed_read_paths or []),
         denied_read_paths=list(raw.denied_read_paths or []),
@@ -505,8 +492,8 @@ def _read_guard_flow(
 ):
     """Тело декоратора — генератор: `(yield)` — точка вызова самого тула."""
     context = resolve_tool_context(*args, **kwargs)
-    # Только настройки ctx (не явный config_dict вызова и не тул) — как раньше.
-    source = _settings_source(None, getattr(context, "ctx", None), {})
+    # Только настройки ctx (не тул) — как раньше.
+    source = _settings_source(None, getattr(context, "ctx", None))
     cfg = parse_read_guard_config(source)
 
     # Floor carve-out (Spec B §6): runs BEFORE cfg.enabled check so

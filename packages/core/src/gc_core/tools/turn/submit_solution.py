@@ -1,5 +1,5 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from gc_core.intent_guard.finish_output import apply_finish_gate_decision
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
@@ -61,9 +61,7 @@ class SubmitSolution(AbstractSimpleTool):
         return apply_finish_gate_decision(tool_output_json, decision)
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": "turn_finish",
@@ -130,9 +128,7 @@ class SubmitSolution(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return (
             """Tool name: turn_finish
 Tool description: Finalizes turn: yes. Signals that the CURRENT USER TURN is finished and the outcome is ready to hand back to the user.

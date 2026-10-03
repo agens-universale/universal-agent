@@ -13,6 +13,7 @@ from gc_core.summarize.summary_spec import (
 from gc_core.summarize.working_memory_gateway import WorkingMemoryDeltas
 from gc_testkit import run_coro
 from gc_testkit.helpers.summary_sample import valid_summary_xml_for_tests
+from gc_testkit.settings import fake_ctx
 
 
 class CompactionSummarySliceTest(unittest.TestCase):
@@ -77,9 +78,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = types.SimpleNamespace(
-            config_dict={"summary_params": {}}, logger=None
-        )
+        ctx = fake_ctx({"summary_params": {}}, logger=None)
 
         with (
             patch(
@@ -161,9 +160,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = types.SimpleNamespace(
-            config_dict={"summary_params": {}}, logger=None
-        )
+        ctx = fake_ctx({"summary_params": {}}, logger=None)
 
         with (
             patch(

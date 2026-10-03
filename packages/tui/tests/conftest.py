@@ -136,25 +136,21 @@ def _isolate_agent_state(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _bare_app_writes_no_logs(monkeypatch):
-    """Окно, собранное в тесте плоским словарём без ``save_logs`` (или вовсе без
-    конфига), не пишет логи агента.
+    """Окно, собранное в тесте без настроек (``TuiApp()``), не пишет логи агента.
 
-    Раньше «нет ключа ``save_logs``» значило «не писать»; теперь словарь
-    проходит через модель, а её умолчание — писать, причём каталог логов в таком
-    словаре не задан. Тест, которому логи нужны, задаёт ``save_logs`` сам.
+    Умолчание модели — писать, а каталог логов в тесте не задан. Окна с
+    настройками собирают через ``gc_testkit.tui_support.tui_settings``: то же
+    правило («не задал ``save_logs`` — логов нет») живёт там.
     """
+    from gc_testkit.tui_support import tui_settings
     from gc_tui import app as app_mod
 
     original = app_mod.TuiApp.__init__
 
-    def init(self, *args, config=None, settings=None, **kwargs):
-        if settings is None and "save_logs" not in (config or {}):
-            if type(config) is dict:
-                # На месте: тест мог держать свой словарь и править его дальше.
-                config["save_logs"] = False
-            else:
-                config = {**(config or {}), "save_logs": False}
-        original(self, *args, config=config, settings=settings, **kwargs)
+    def init(self, *args, settings=None, **kwargs):
+        if settings is None:
+            settings = tui_settings()
+        original(self, *args, settings=settings, **kwargs)
 
     monkeypatch.setattr(app_mod.TuiApp, "__init__", init)
 

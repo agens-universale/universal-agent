@@ -17,6 +17,7 @@ from gc_core.project_memory.operations import ProjectMemoryReply
 from gc_core.run_context import assemble_run_context
 from gc_core.summarize.summary_logging import aappend_summary_trace_record
 from gc_core.tools.project.project_memory import ProjectMemory
+from gc_testkit.settings import fake_ctx
 
 
 def forbidden(*_args, **_kwargs):
@@ -25,7 +26,11 @@ def forbidden(*_args, **_kwargs):
 
 def test_context_assembly_only_consumes_prepared_values(monkeypatch):
     prepared = PreparedRunContext(
-        config_dict={"model": "test", "backend_api_mode": "chat_completions"},
+        settings={
+            "agent": {"model": "test"},
+            "backend": {"api_mode": "chat_completions"},
+        },
+        runtime={},
         run_id="recorded-run",
         logging_path="/worker/log",
         summary_trace_path="",
@@ -62,6 +67,8 @@ def test_context_assembly_only_consumes_prepared_values(monkeypatch):
     assert ctx.prompt_resource is ctx.thread_store is ctx.os_backend is port
     assert ctx.project_memory_io is ctx.lock_factory is port
     assert ctx.registered_tool_names == {"project_memory"}
+    assert ctx.settings.agent.model == "test"
+    assert ctx.settings.backend.api_mode == "chat_completions"
 
 
 async def test_resource_port_failure_never_falls_back_to_files():
@@ -127,9 +134,7 @@ async def test_project_memory_compaction_is_between_file_phases(monkeypatch):
     monkeypatch.setattr(
         "gc_core.tools.project.project_memory.storage.stat", forbidden
     )
-    ctx = SimpleNamespace(
-        project_gc_dir="/worker/.gc", config_dict={}, project_memory_io=io
-    )
+    ctx = fake_ctx(project_gc_dir="/worker/.gc", project_memory_io=io)
     result = await ProjectMemory(ctx=ctx, state=state).acall("append", "new")
     assert json.loads(result)["ok"]
     assert events == ["prepare", "model", "finish"]
@@ -138,9 +143,8 @@ async def test_project_memory_compaction_is_between_file_phases(monkeypatch):
 
 async def test_failed_project_memory_write_does_not_advance_baseline():
     failure = InfrastructureFailure("write receipt missing")
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         project_gc_dir="/worker/.gc",
-        config_dict={},
         project_memory_io=AsyncMock(side_effect=failure),
     )
     state = SimpleNamespace(project_memory_content_hash="before")

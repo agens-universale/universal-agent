@@ -175,7 +175,7 @@ def _command_guard_flow(
     # `return (yield)` — точка, где вызывается сам тул.
     self_obj = args[0] if args else None
     ctx_obj = kwargs.get("ctx") or getattr(self_obj, "_ctx", None)
-    if not protection_enabled(_settings_source(self_obj, ctx_obj, kwargs)):
+    if not protection_enabled(_settings_source(self_obj, ctx_obj)):
         return (yield)
 
     # Extract the payload (command string or code string).
@@ -199,10 +199,7 @@ def _command_guard_flow(
     # Защищённые пути — из ``security.protected_paths.extra``; каталоги
     # ``write_guard.extra_paths`` разрешены для записи и идут обычной
     # модерацией команд (command_moderation), а не автоматическим запретом.
-    extra = (
-        protected_extra_paths(_settings_source(self_obj, ctx_obj, kwargs))
-        or None
-    )
+    extra = protected_extra_paths(_settings_source(self_obj, ctx_obj)) or None
     if callable(getattr(ctx_obj, "guard_probe", None)):
         facts = yield probe_step(
             ctx_obj,

@@ -13,19 +13,22 @@ import types
 import pytest
 from gc_core.thread_store import load_thread_meta
 from gc_core.usage.account import CATEGORY_MAIN, CATEGORY_STRUCTURED_OUTPUT
+from gc_testkit.settings import make_settings
 
 
 def _cfg(tmp_path):
-    return {
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
-        "trace_id": "trace-1",
-        "save_logs": False,
-    }
+    return make_settings(
+        {
+            "threads_data_path": str(tmp_path),
+            "backend_api_mode": "chat_completions",
+            "completions_url": "http://test",
+            "model": "x",
+            "max_steps": 1,
+            "system_prompt_id": "v1",
+            "trace_id": "trace-1",
+            "save_logs": False,
+        }
+    )
 
 
 def _release_cancel() -> None:

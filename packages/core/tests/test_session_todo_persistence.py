@@ -5,6 +5,7 @@ from gc_core.persistence.schema import (
 from gc_core.persistence.thread_meta_mapper import ThreadMetaMapper
 from gc_core.states import SharedStateData
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 ITEMS = [
     {"content": "Изучить код", "status": "completed"},
@@ -120,9 +121,7 @@ def test_session_todo_survives_compaction_payload():
             session_todo=list(ITEMS),
         ),
     )
-    ctx = types.SimpleNamespace(
-        config_dict={"summary_params": {}}, logger=None
-    )
+    ctx = fake_ctx({"summary_params": {}}, logger=None)
     captured: dict = {}
 
     async def _fake_summarize(**_kw):

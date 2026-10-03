@@ -2,6 +2,7 @@
 схлопнут в компактную метку (exact-match). Покрывает реальный кейс «проза →
 тот же turn_finish/intermediate» — все они мапятся в kind=agent с summary."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -20,7 +21,9 @@ async def test_duplicate_agent_row_collapsed(tmp_path):
     from gc_tui.widgets.trace_row import TraceRow
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -47,7 +50,9 @@ async def test_distinct_agent_rows_both_shown(tmp_path):
     from gc_tui.widgets.trace_row import TraceRow
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

@@ -4,6 +4,8 @@
 и `/status`, онбординг-предупреждение, cold-start notice (§3.5).
 """
 
+from gc_testkit.settings import make_settings
+from gc_testkit.tui_support import as_settings, tui_settings
 from pathlib import Path
 
 import pytest
@@ -53,7 +55,7 @@ def _mk_screen(config=None, config_path=None, on_apply=None):
     from gc_tui.screens.settings import SettingsScreen
 
     return SettingsScreen(
-        config=config or {},
+        settings=as_settings(config or {}),
         config_path=str(config_path) if config_path else None,
         on_apply=on_apply or (lambda: None),
         probe_fn=_fake_probe(),
@@ -90,7 +92,7 @@ async def test_profiles_section_lists_both_roots_with_source(
         "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -126,7 +128,7 @@ async def test_an_unreadable_profile_is_named_once(tmp_path, monkeypatch):
     bad.parent.mkdir(parents=True, exist_ok=True)
     bad.write_bytes("slots:\n  default: x\n".encode("utf-16"))
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -173,7 +175,7 @@ async def test_profiles_section_tie_break_one_row_shadow_in_hint(
         "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -213,7 +215,7 @@ async def test_profiles_section_overlay_suffix_shows_plus_security(
         "security:\n  command_moderation:\n    enabled: true\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -238,7 +240,7 @@ async def test_profiles_section_slot_composition_shown_inline(
         "slots:\n  default: glm\n  light: flash\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -279,7 +281,7 @@ async def test_profiles_section_empty_state_shows_spec_text(
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -320,7 +322,7 @@ async def test_activate_project_profile_writes_project_config_creates_file(
     project_config = project_dir / ".gc" / "config.yml"
     assert not project_config.exists()
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -353,7 +355,7 @@ async def test_activate_base_profile_writes_base_config_without_project_pointer(
         'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -390,7 +392,7 @@ async def test_activate_base_profile_redirects_to_project_when_project_sets_poin
         project_dir / ".gc" / "config.yml", 'profile: "other"\n'
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -426,7 +428,9 @@ async def test_overlay_suffix_is_spaced_off_the_active_marker(
         "voice:\n  url: https://from-profile/v1/audio/transcriptions\n",
     )
 
-    app = app_mod.TuiApp(config={**_base_dict(), "profile": "work"})
+    app = app_mod.TuiApp(
+        settings=tui_settings({**_base_dict(), "profile": "work"})
+    )
     async with app.run_test() as pilot:
         scr = _mk_screen(
             config={**_base_dict(), "profile": "work"}, config_path=base_cfg
@@ -464,7 +468,9 @@ async def test_active_base_profile_selected_by_project_config_shows_marker_and_h
     # его отдал бы реальный load_config_ex после merge проектного слоя).
     _write(project_dir / ".gc" / "config.yml", 'profile: "home"\n')
 
-    app = app_mod.TuiApp(config={**_base_dict(), "profile": "home"})
+    app = app_mod.TuiApp(
+        settings=tui_settings({**_base_dict(), "profile": "home"})
+    )
     async with app.run_test() as pilot:
         scr = _mk_screen(
             config={**_base_dict(), "profile": "home"}, config_path=base_cfg
@@ -503,7 +509,9 @@ async def test_activate_already_active_profile_is_noop_with_notice(
         "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
     )
 
-    app = app_mod.TuiApp(config={**_base_dict(), "profile": "home"})
+    app = app_mod.TuiApp(
+        settings=tui_settings({**_base_dict(), "profile": "home"})
+    )
     async with app.run_test() as pilot:
         scr = _mk_screen(
             config={**_base_dict(), "profile": "home"}, config_path=base_cfg
@@ -534,7 +542,7 @@ async def test_profiles_hint_shows_path_and_activation_target(
         "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -574,7 +582,9 @@ async def test_shadow_hint_shown_when_profile_active(tmp_path, monkeypatch):
     )
 
     app = app_mod.TuiApp(
-        config={**_base_dict(), "profile": "work", "models": {"flash": {}}}
+        settings=tui_settings(
+            {**_base_dict(), "profile": "work", "models": {"flash": {}}}
+        )
     )
     async with app.run_test() as pilot:
         scr = _mk_screen(
@@ -599,15 +609,17 @@ async def test_shadow_hint_shown_for_registry_without_profile(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
     app = app_mod.TuiApp(
-        config={
-            **_base_dict(),
-            "models": {
-                "flash": {
-                    "url": "http://x",
-                    "authorization_header": "Bearer sk",
-                }
-            },
-        }
+        settings=tui_settings(
+            {
+                **_base_dict(),
+                "models": {
+                    "flash": {
+                        "url": "http://x",
+                        "authorization_header": "Bearer sk",
+                    }
+                },
+            }
+        )
     )
     async with app.run_test() as pilot:
         scr = _mk_screen(
@@ -638,7 +650,7 @@ async def test_shadow_hint_absent_in_legacy_mode(tmp_path, monkeypatch):
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -720,7 +732,9 @@ async def test_settings_screen_shows_profile_overlay_label_no_keyerror(
     )
 
     app = app_mod.TuiApp(
-        config={"completions_url": "http://profile/v1", "profile": "work"}
+        settings=tui_settings(
+            {"completions_url": "http://profile/v1", "profile": "work"}
+        )
     )
     async with app.run_test() as pilot:
         scr = _mk_screen(
@@ -788,10 +802,12 @@ async def test_voice_override_line_stands_above_both_modes(
         'voice:\n  url: "http://profile-voice/v1"\n',
     )
 
-    app = app_mod.TuiApp(config={"profile": "work", "voice": {}})
+    app = app_mod.TuiApp(
+        settings=tui_settings({"profile": "work", "voice": {}})
+    )
     async with app.run_test() as pilot:
         scr = SettingsScreen(
-            config={"profile": "work", "voice": {}},
+            settings=as_settings({"profile": "work", "voice": {}}),
             config_path=str(base_cfg),
             on_apply=lambda: None,
             probe_fn=_fake_probe(),
@@ -843,13 +859,15 @@ async def test_config_screen_header_shows_profile_level_model(
     )
 
     app = app_mod.TuiApp(
-        config={
-            "profile": "work",
-            "level": "default",
-            "model": "flash",
-            "models": {"flash": {}},
-            "slots": {"default": "flash"},
-        }
+        settings=tui_settings(
+            {
+                "profile": "work",
+                "level": "default",
+                "model": "flash",
+                "models": {"flash": {}},
+                "slots": {"default": "flash"},
+            }
+        )
     )
     app.set_config_path(str(base_cfg))
     async with app.run_test() as pilot:
@@ -902,12 +920,14 @@ async def test_status_command_includes_profile_level_model(
     )
 
     app = app_mod.TuiApp(
-        config={
-            "profile": "work",
-            "level": "light",
-            "models": {"flash": {}},
-            "slots": {"default": "flash"},
-        }
+        settings=tui_settings(
+            {
+                "profile": "work",
+                "level": "light",
+                "models": {"flash": {}},
+                "slots": {"default": "flash"},
+            }
+        )
     )
     app.set_config_path(str(base_cfg))
     async with app.run_test() as pilot:
@@ -932,7 +952,7 @@ def test_onboarding_note_for_active_profile():
     печатает gc-cli, где экрана «Настройки · Профили» не существует."""
     from gc_core.onboarding import overriding_layer_note
 
-    note = overriding_layer_note({"profile": "work"})
+    note = overriding_layer_note(make_settings({"profile": "work"}))
     assert (
         note == 'действует профиль "work" — он перекроет модельные настройки'
     )
@@ -948,7 +968,12 @@ def test_onboarding_note_absent_for_registry_in_the_edited_file(tmp_path):
         "models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
         encoding="utf-8",
     )
-    assert overriding_layer_note({"models": {"flash": {}}}, str(base)) is None
+    assert (
+        overriding_layer_note(
+            make_settings({"models": {"flash": {}}}), str(base)
+        )
+        is None
+    )
 
 
 def test_onboarding_note_for_registry_from_layer_above_base(
@@ -971,14 +996,16 @@ def test_onboarding_note_for_registry_from_layer_above_base(
     monkeypatch.setattr(
         env_vars, "project_local_config_path", lambda: str(project)
     )
-    note = overriding_layer_note({"models": {"proj": {}}}, str(base))
+    note = overriding_layer_note(
+        make_settings({"models": {"proj": {}}}), str(base)
+    )
     assert note is not None and "перекроет" in note
 
 
 def test_onboarding_note_absent_in_legacy_mode():
     from gc_core.onboarding import overriding_layer_note
 
-    assert overriding_layer_note({"model": "x"}) is None
+    assert overriding_layer_note(make_settings({"model": "x"})) is None
 
 
 def test_setup_guide_includes_profile_note():
@@ -986,11 +1013,13 @@ def test_setup_guide_includes_profile_note():
 
     text = setup_guide(
         "/p/config.yml",
-        {
-            "profile": "work",
-            "model": "x",
-            "completions_url": "http://x",
-        },
+        make_settings(
+            {
+                "profile": "work",
+                "model": "x",
+                "completions_url": "http://x",
+            }
+        ),
         program="gc-ua",
     )
     assert (
@@ -1019,10 +1048,10 @@ async def test_onboarding_screen_shows_warning_when_profile_active(tmp_path):
     from gc_tui import app as app_mod
     from gc_tui.screens.onboarding import OnboardingScreen
 
-    app = app_mod.TuiApp(config={"profile": "work"})
+    app = app_mod.TuiApp(settings=tui_settings({"profile": "work"}))
     async with app.run_test() as pilot:
         scr = OnboardingScreen(
-            config={"profile": "work"},
+            settings=as_settings({"profile": "work"}),
             config_path=str(tmp_path / "config.yml"),
             review_all=True,
             on_commit=lambda: None,
@@ -1048,10 +1077,10 @@ async def test_onboarding_screen_no_warning_for_registry_in_the_edited_file(
         "models:\n  flash:\n    model: g\nslots:\n  default: flash\n",
         encoding="utf-8",
     )
-    app = app_mod.TuiApp(config={"models": {"flash": {}}})
+    app = app_mod.TuiApp(settings=tui_settings({"models": {"flash": {}}}))
     async with app.run_test() as pilot:
         scr = OnboardingScreen(
-            config={"models": {"flash": {}}},
+            settings=as_settings({"models": {"flash": {}}}),
             config_path=str(cfg_path),
             review_all=True,
             on_commit=lambda: None,
@@ -1069,10 +1098,10 @@ async def test_onboarding_screen_no_warning_in_legacy_mode(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.css.query import NoMatches
 
-    app = app_mod.TuiApp(config={"model": "x"})
+    app = app_mod.TuiApp(settings=tui_settings({"model": "x"}))
     async with app.run_test() as pilot:
         scr = OnboardingScreen(
-            config={"model": "x"},
+            settings=as_settings({"model": "x"}),
             config_path=str(tmp_path / "config.yml"),
             review_all=True,
             on_commit=lambda: None,
@@ -1105,15 +1134,14 @@ def test_cold_start_notice_for_project_profile_pointer(tmp_path, monkeypatch):
         tmp_path / "base" / "config.yml", _base_config_text(profile="work")
     )
 
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
-    config_dict, meta = load_config_ex(str(base_cfg))
+    loaded = load_settings(str(base_cfg))
+    meta = loaded.profile_meta
 
     runtime_notices.clear_runtime_notices(listeners=True)
-    app = app_mod.TuiApp(config=config_dict)
-    app._maybe_notice_profile_activation(
-        meta.active_name or "", meta, config_dict
-    )
+    app = app_mod.TuiApp(settings=loaded)
+    app._maybe_notice_profile_activation(meta.active_name or "", meta, loaded)
 
     notices = runtime_notices.collect_runtime_notices()
     assert any(n.code == "project_profile_activated" for n in notices)
@@ -1135,7 +1163,7 @@ async def test_none_row_first_active_marker(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1161,7 +1189,7 @@ async def test_none_row_absent_in_empty_state(tmp_path, monkeypatch):
     monkeypatch.chdir(project_dir)
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1188,7 +1216,7 @@ async def test_deactivate_writes_empty_pointer_to_base_config(
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
     cfg = dict(_base_dict(), profile="home")
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=cfg, config_path=base_cfg)
         app.push_screen(scr)
@@ -1214,7 +1242,7 @@ async def test_deactivate_noop_when_nothing_active(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1236,7 +1264,7 @@ async def test_session_tail_full_form_on_profile_row(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "smoke.yml", "models: {}\n")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     app._session_overrides["profile"] = "smoke"
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
@@ -1277,7 +1305,7 @@ async def test_profiles_section_refuses_to_write_into_packaged_template(
     )
     cfg = dict(_base_dict(), profile="home", level="default")
 
-    app = app_mod.TuiApp(config=dict(cfg))
+    app = app_mod.TuiApp(settings=tui_settings(dict(cfg)))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=cfg, config_path=packaged)
         app.push_screen(scr)
@@ -1329,7 +1357,7 @@ async def test_profiles_render_reads_each_profile_file_once(
         profiles_mod, "profile_display_summary", _counting_summary
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1369,7 +1397,7 @@ async def test_profiles_cursor_survives_row_disappearing_under_it(
         'models:\n  flash:\n    url: http://x\n    token: ""\nslots:\n  default: flash\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1418,7 +1446,7 @@ async def test_profiles_footer_promises_space_not_enter(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1450,7 +1478,7 @@ async def test_profiles_footer_on_none_row_names_deactivation(
 
     cfg = _base_dict()
     cfg["profile"] = "home"
-    app = app_mod.TuiApp(config=cfg)
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=cfg, config_path=base_cfg)
         app.push_screen(scr)
@@ -1477,7 +1505,7 @@ async def test_profiles_footer_on_none_row_is_silent_with_nothing_to_undo(
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1499,7 +1527,7 @@ async def test_space_activates_profile(tmp_path, monkeypatch):
     base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
     _write(tmp_path / "base" / "profiles" / "home.yml", "models: {}\n")
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1532,7 +1560,7 @@ async def test_profiles_section_no_longer_carries_the_level_row(
         "models:\n  glm:\n    url: http://y\nslots:\n  default: glm\n",
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     async with app.run_test() as pilot:
         scr = _mk_screen(config=_base_dict(), config_path=base_cfg)
         app.push_screen(scr)
@@ -1566,14 +1594,14 @@ async def test_none_row_hint_does_not_claim_a_clean_config_under_a_session_choic
         'models:\n  glm:\n    url: http://y\n    token: "sk"\nslots:\n  default: glm\n',
     )
 
-    app = app_mod.TuiApp(config=_base_dict())
+    app = app_mod.TuiApp(settings=tui_settings(_base_dict()))
     app.set_config_path(str(base_cfg))
     app.reload_config()
     async with app.run_test() as pilot:
         # ПОСЛЕ старта: запуск приложения перечитывает набор сессионных ключей и
         # затирает выставленное до него.
         app.set_session_override("profile", "home")
-        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        scr = _mk_screen(config=app.base_settings(), config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
         await _open_profiles(pilot, scr)
@@ -1627,9 +1655,11 @@ async def test_registry_origin_judges_the_launch_stack_not_the_pointer(
     )
 
     app = _app_launched_with(base_cfg, "")
-    assert app._config["profile"] == ""  # стек запуска — без профиля
+    assert (
+        app.base_settings().runtime.active_profile == ""
+    )  # стек запуска — без профиля
     async with app.run_test() as pilot:
-        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        scr = _mk_screen(config=app.base_settings(), config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
 
@@ -1664,7 +1694,7 @@ async def test_registry_origin_sees_the_session_choice(tmp_path, monkeypatch):
         # ПОСЛЕ старта: запуск приложения перечитывает набор сессионных ключей и
         # затирает выставленное до него.
         app.set_session_override("profile", "home")
-        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        scr = _mk_screen(config=app.base_settings(), config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
 
@@ -1693,7 +1723,7 @@ async def test_field_origins_judge_the_launch_stack_not_the_pointer(
 
     app = _app_launched_with(base_cfg, "")
     async with app.run_test() as pilot:
-        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        scr = _mk_screen(config=app.base_settings(), config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
 
@@ -1742,7 +1772,7 @@ async def test_overriding_layer_name_answers_by_files_like_the_write_gate(
 
     app = _app_launched_with(base_cfg, "")
     async with app.run_test() as pilot:
-        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        scr = _mk_screen(config=app.base_settings(), config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
 
@@ -1770,7 +1800,7 @@ async def test_voice_override_text_ignores_a_profile_out_of_the_stack(
 
     app = _app_launched_with(base_cfg, "")
     async with app.run_test() as pilot:
-        scr = _mk_screen(config=app._config, config_path=base_cfg)
+        scr = _mk_screen(config=app.base_settings(), config_path=base_cfg)
         app.push_screen(scr)
         await pilot.pause()
 

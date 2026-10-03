@@ -31,7 +31,7 @@ def test_plain_file_store_has_no_durable_capability(tmp_path):
 
 async def test_local_session_writes_without_service_directory(tmp_path):
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id="cli",
         thread_id="t",
         store=FileThreadStore(str(tmp_path)),
@@ -49,7 +49,7 @@ async def test_local_writer_rejects_thread_owned_by_durable_executor(tmp_path):
     _claim(DurableFileThreadStore(str(tmp_path)))
     with pytest.raises(ThreadStoreOwnershipError):
         await ThreadSession.afrom_config(
-            config_dict={},
+            settings=None,
             system_id="cli",
             thread_id="t",
             store=FileThreadStore(str(tmp_path)),
@@ -67,7 +67,7 @@ async def test_local_writer_continues_after_durable_owner_released(tmp_path):
         ),
     )
     session = await ThreadSession.afrom_config(
-        config_dict={},
+        settings=None,
         system_id="cli",
         thread_id="t",
         store=FileThreadStore(str(tmp_path)),

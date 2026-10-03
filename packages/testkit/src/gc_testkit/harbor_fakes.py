@@ -1,7 +1,7 @@
 """In-memory stand-in for HarborBackend, for differential tool tests."""
 
 import hashlib
-from types import SimpleNamespace
+from collections.abc import Mapping
 
 from gc_core.backends.walk_util import (
     FlatWalkMixin,
@@ -228,27 +228,42 @@ class FakeBackend(FlatWalkMixin):
         raise NotImplementedError
 
 
-def bind_os_backend(tool, backend, *, config_dict=None):
-    """Attach ``backend`` via minimal RunContext-like ``_ctx`` (unit/diff tests)."""
-    from gc_core.execution_workspace import build_execution_workspace
+def bind_os_backend(tool, backend, *, settings=None):
+    """Attach ``backend`` via minimal RunContext-like ``_ctx`` (unit/diff tests).
 
-    cfg = config_dict if config_dict is not None else {}
-    tool._ctx = SimpleNamespace(
-        config_dict=cfg,
+    ``settings`` — настройки рана: всё, что принимает ``settings_of``
+    (``LoadedSettings`` из ``gc_testkit.settings.make_settings``, ``AppConfig``,
+    контекст); ``None`` или словарь-описание теста — через
+    ``gc_testkit.helpers.tool_ctx.tool_settings`` (не настроенные гарды
+    выключены, как и у ``with_local_ctx``).
+    """
+    from gc_core.execution_workspace import build_execution_workspace
+    from gc_core.settings import LoadedSettings, runtime_of, settings_of
+
+    from gc_testkit.helpers.tool_ctx import tool_settings
+    from gc_testkit.settings import fake_ctx
+
+    if settings is None or isinstance(settings, Mapping):
+        loaded = tool_settings(settings)
+    else:
+        loaded = LoadedSettings(
+            settings=settings_of(settings), runtime=runtime_of(settings)
+        )
+    tool._ctx = fake_ctx(
+        loaded=loaded,
         os_backend=backend,
-        workspace=build_execution_workspace(backend, cfg),
+        workspace=build_execution_workspace(backend, loaded),
     )
     # Mirror AbstractSimpleTool.__init__ defaults for attributes accessed by
     # tool methods (e.g. exec tools read self._state / self._call_id).
-    # `self._config_dict` is read directly by fs tools (fs_size_limits) and
-    # by read_file's char-limit lookup; AbstractSimpleTool.__init__ sets it
-    # from kwargs, but tests here build the tool via __new__ (skipping
-    # __init__), so expose it explicitly to avoid AttributeError.
+    # Tests here build the tool via __new__ (skipping __init__); настройки
+    # тул берёт из ``_ctx`` (``_settings_source``), явных ``_settings`` нет.
     if not hasattr(tool, "_state"):
         tool._state = None
     if not hasattr(tool, "_call_id"):
         tool._call_id = None
-    tool._config_dict = cfg
+    if not hasattr(tool, "_settings"):
+        tool._settings = None
     # Тем же адаптером, что и `with_local_ctx`: у тулов форма одна — `acall`,
     # а десятки диффовых тестов зовут привязанный тул как функцию. Обёртка
     # гоняет `acall` своим `asyncio.run` и проксирует всё остальное, поэтому

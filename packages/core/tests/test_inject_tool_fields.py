@@ -2,7 +2,6 @@
 
 import json
 import sys
-from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +12,7 @@ from gc_core.tools.inject_tool_fields import (
     resolve_inject_tool_fields,
     strip_injected_tool_args,
 )
+from gc_testkit.settings import fake_ctx, make_settings
 
 _REASON = "reason"
 _REASON_DESC = (
@@ -73,14 +73,21 @@ def _write_to_file_spec():
 
 class TestResolveInjectToolFields:
     def test_missing_key_no_inject(self):
-        assert resolve_inject_tool_fields({}) == {}
+        assert resolve_inject_tool_fields(make_settings({})) == {}
 
     def test_empty_dict_disables_inject(self):
-        assert resolve_inject_tool_fields({"inject_tool_fields": {}}) == {}
+        assert (
+            resolve_inject_tool_fields(
+                make_settings({"inject_tool_fields": {}})
+            )
+            == {}
+        )
 
     def test_custom_field_from_config(self):
         cfg = {"inject_tool_fields": {"why": "Explain why."}}
-        assert resolve_inject_tool_fields(cfg) == {"why": "Explain why."}
+        assert resolve_inject_tool_fields(make_settings(cfg)) == {
+            "why": "Explain why."
+        }
 
 
 class TestInjectPropertyIntoSpec:
@@ -147,7 +154,7 @@ class TestStripInjectedToolArgs:
 class TestBuildToolsData:
     async def test_disabled_leaves_spec_unchanged(self):
         tools_data, _, _, _ = await abuild_tools_data(
-            _base_config(inject_tool_fields={})
+            make_settings(_base_config(inject_tool_fields={}))
         )
         entry = tools_data["fs_write_file"]
         assert _REASON not in entry["spec"]["parameters"]["properties"]
@@ -155,7 +162,7 @@ class TestBuildToolsData:
 
     async def test_enabled_injects_from_config_dict(self):
         tools_data, _, _, _ = await abuild_tools_data(
-            _base_config(inject_tool_fields=_reason_fields())
+            make_settings(_base_config(inject_tool_fields=_reason_fields()))
         )
         entry = tools_data["fs_write_file"]
         props = entry["spec"]["parameters"]["properties"]
@@ -168,14 +175,16 @@ class TestBuildToolsData:
             use_local_subagents=True,
             backend_api_mode="chat_completions",
         )
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         assert tools_data["subagent_worker"]["injected_fields"] == []
 
     async def test_strict_plus_inject_makes_all_required(self):
         tools_data, _, _, _ = await abuild_tools_data(
-            _base_config(
-                inject_tool_fields=_reason_fields(),
-                openai_strict_tools_schema=True,
+            make_settings(
+                _base_config(
+                    inject_tool_fields=_reason_fields(),
+                    openai_strict_tools_schema=True,
+                )
             )
         )
         params = tools_data["fs_write_file"]["spec"]["parameters"]
@@ -184,8 +193,8 @@ class TestBuildToolsData:
 
 class TestApplyTool:
     def _make_ctx(self, tools_data):
-        return SimpleNamespace(
-            config_dict=_base_config(inject_tool_fields=_reason_fields()),
+        return fake_ctx(
+            _base_config(inject_tool_fields=_reason_fields()),
             tools_data=tools_data,
             logger=None,
         )
@@ -264,7 +273,7 @@ class TestApplyTool:
     async def test_missing_reason_is_accepted(self):
         """Omitted injected reason no longer rejects the call (it is semantically optional)."""
         tools_data, _, _, _ = await abuild_tools_data(
-            _base_config(inject_tool_fields=_reason_fields())
+            make_settings(_base_config(inject_tool_fields=_reason_fields()))
         )
 
         received = {}
@@ -340,8 +349,8 @@ class TestApplyTool:
             },
         }
         apply_injected_fields_to_spec(spec, _reason_fields())
-        ctx = SimpleNamespace(
-            config_dict=_base_config(
+        ctx = fake_ctx(
+            _base_config(
                 inject_tool_fields=_reason_fields(),
                 use_local_subagents=True,
                 backend_api_mode="chat_completions",
@@ -389,7 +398,7 @@ class TestSubagentChildBuild:
     async def test_child_config_inherits_decoration(self):
         parent = _base_config(inject_tool_fields=_reason_fields())
         child = {**parent, "use_local_subagents": False}
-        tools_data, _, _, _ = await abuild_tools_data(child)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(child))
         assert tools_data["fs_read_file"]["injected_fields"] == [_REASON]
 
 
@@ -403,8 +412,8 @@ class TestInjectDoesNotPolluteClassSchema:
         injected_fields empty — apply_tool forwards reason → TypeError.
         """
         cfg = _base_config(inject_tool_fields=_reason_fields())
-        first, _, _, _ = await abuild_tools_data(cfg)
-        second, _, _, _ = await abuild_tools_data(cfg)
+        first, _, _, _ = await abuild_tools_data(make_settings(cfg))
+        second, _, _, _ = await abuild_tools_data(make_settings(cfg))
 
         for name in ("fs_find_in_files", "fs_write_file", "fs_read_file"):
             assert first[name]["injected_fields"] == [_REASON]
@@ -418,9 +427,11 @@ class TestInjectDoesNotPolluteClassSchema:
 
     async def test_second_build_strips_reason_on_apply(self):
         cfg = _base_config(inject_tool_fields=_reason_fields())
-        await abuild_tools_data(cfg)  # first build (pollution attempt)
+        await abuild_tools_data(
+            make_settings(cfg)
+        )  # first build (pollution attempt)
         tools_data, _, _, _ = await abuild_tools_data(
-            cfg
+            make_settings(cfg)
         )  # second — must still strip
 
         received = {}
@@ -445,8 +456,8 @@ class TestInjectDoesNotPolluteClassSchema:
                     "limit": 5,
                 }
             ),
-            ctx=SimpleNamespace(
-                config_dict=cfg,
+            ctx=fake_ctx(
+                cfg,
                 tools_data=tools_data,
                 logger=None,
             ),

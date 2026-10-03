@@ -7,6 +7,7 @@ from gc_core.execution_workspace import (
 )
 from gc_core.utils.project_data import get_project_data
 from gc_core.utils.tool_report_paths import tool_report_abspath
+from gc_testkit.settings import make_settings
 
 
 class _Exec:
@@ -47,7 +48,9 @@ class SandboxBackend:
 
 def test_local_workspace_uses_launch_root(tmp_path):
     be = LocalFsBackend()
-    ws = build_execution_workspace(be, {"launch_root": str(tmp_path)})
+    ws = build_execution_workspace(
+        be, make_settings({"launch_root": str(tmp_path)})
+    )
     assert ws.root == str(tmp_path.resolve())
     assert ws.backend is be
 
@@ -73,7 +76,9 @@ def test_sandbox_workspace_asks_pwd_when_cwd_undeclared():
 
 def test_sandbox_config_root_overrides_pwd():
     be = SandboxBackend(cwd=None, pwd="/app/other")
-    root = resolve_execution_root(be, {"project_root": "/testbed"})
+    root = resolve_execution_root(
+        be, make_settings({"project_root": "/testbed"})
+    )
     assert root == "/testbed"
 
 

@@ -20,6 +20,7 @@ import logging
 
 from gc_core.tools.connect_mcp.agent_tools import _prepare_mcp_tools_data
 from gc_core.tools.connect_mcp.registry import ToolsCache
+from gc_testkit.settings import make_settings
 
 
 class _Sandbox:
@@ -48,7 +49,7 @@ def test_a_foreign_cache_without_a_sandbox_is_reported(caplog):
 
     with caplog.at_level(logging.WARNING):
         _prepare_mcp_tools_data(
-            _cfg(), tools_cache=cache, os_backend=_Sandbox()
+            make_settings(_cfg()), tools_cache=cache, os_backend=_Sandbox()
         )
 
     assert any(
@@ -65,7 +66,7 @@ def test_a_foreign_cache_with_the_sandbox_says_nothing(caplog):
 
     with caplog.at_level(logging.WARNING):
         _prepare_mcp_tools_data(
-            _cfg(), tools_cache=cache, os_backend=_Sandbox()
+            make_settings(_cfg()), tools_cache=cache, os_backend=_Sandbox()
         )
 
     assert not caplog.records, (
@@ -81,7 +82,9 @@ def test_no_sandbox_at_all_says_nothing(caplog):
     cache = ToolsCache(_cfg())
 
     with caplog.at_level(logging.WARNING):
-        _prepare_mcp_tools_data(_cfg(), tools_cache=cache, os_backend=_Host())
+        _prepare_mcp_tools_data(
+            make_settings(_cfg()), tools_cache=cache, os_backend=_Host()
+        )
 
     assert not caplog.records, (
         f"лишний шум: {[r.message for r in caplog.records]}"
@@ -94,7 +97,9 @@ def test_servers_that_do_not_ask_for_the_sandbox_say_nothing(caplog):
 
     with caplog.at_level(logging.WARNING):
         _prepare_mcp_tools_data(
-            _cfg("agent"), tools_cache=cache, os_backend=_Sandbox()
+            make_settings(_cfg("agent")),
+            tools_cache=cache,
+            os_backend=_Sandbox(),
         )
 
     assert not caplog.records, (

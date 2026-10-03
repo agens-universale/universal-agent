@@ -12,6 +12,7 @@ covered separately below for the "no mark_current_run at startup during an
 upgrade" wiring.
 """
 
+from gc_testkit.tui_support import tui_settings
 import sys
 
 import pytest
@@ -48,7 +49,9 @@ async def test_upgrade_info_set_pushes_post_update_screen(
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = str(tmp_path / "config.yml")
     app._upgrade_info = upgrade_gate.UpgradeInfo(
         old_version="0.3.0", new_version="0.4.0"
@@ -79,7 +82,9 @@ async def test_no_upgrade_info_no_post_update_screen(tmp_path, monkeypatch):
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = str(tmp_path / "config.yml")
     # app._upgrade_info stays None (default)
 
@@ -111,13 +116,15 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
         "model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         cfg_mod,
         "load_settings",
-        lambda p=None, **kw: settings_from_flat(
-            configured,
+        lambda p=None, **kw: replace(
+            make_settings(configured),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )
@@ -131,7 +138,9 @@ async def test_onboarding_then_post_update_order(tmp_path, monkeypatch):
         "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
         "model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=unconf)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(unconf)
+    )
     app._onboarding_mode = "auto"
     app._onboarding_config_path = str(tmp_path / "config.yml")
     app._config_path = str(tmp_path / "config.yml")
@@ -170,7 +179,9 @@ async def test_show_post_update_is_idempotent(tmp_path, monkeypatch):
         "chat_completion_headers": {"Authorization": "Bearer sk"},
         "model": "m",
     }
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
     app._config_path = str(tmp_path / "config.yml")
     app._upgrade_info = upgrade_gate.UpgradeInfo(
         old_version="0.3.0", new_version="0.4.0"
@@ -201,13 +212,15 @@ def _patch_entry_prereqs(monkeypatch, tmp_path, config_dict):
     from gc_core import config as cfg_mod
 
     from gc_core.config_modules.profiles import ProfileMeta
-    from gc_core.settings import settings_from_flat
+    from dataclasses import replace
+
+    from gc_testkit.settings import make_settings
 
     monkeypatch.setattr(
         cfg_mod,
         "load_settings",
-        lambda path=None, **kw: settings_from_flat(
-            config_dict,
+        lambda path=None, **kw: replace(
+            make_settings(config_dict),
             profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
         ),
     )

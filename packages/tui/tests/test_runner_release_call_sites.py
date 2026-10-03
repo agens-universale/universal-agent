@@ -11,6 +11,7 @@ runner: логгер прогона живёт в реестре `logging` до 
 * остановка прогона по Esc / Ctrl+C (`TraceScreen._stop_and_replace_runner`).
 """
 
+from gc_testkit.tui_support import tui_settings
 from types import SimpleNamespace
 
 import pytest
@@ -46,7 +47,9 @@ def app(tmp_path):
         "logs_dump_dir": str(tmp_path / "logs"),
         "mcp-servers": {},
     }
-    return TuiApp(threads_dir=str(tmp_path), system="cli", config=cfg)
+    return TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
+    )
 
 
 def test_invalidate_runner_releases_the_idle_runner(app):

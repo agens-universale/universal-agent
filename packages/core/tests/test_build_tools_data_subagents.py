@@ -3,6 +3,7 @@
 import sys
 
 import pytest
+from gc_testkit.settings import make_settings
 
 
 @pytest.fixture(autouse=True)
@@ -43,7 +44,9 @@ class TestSubagentsInBuildToolsData:
         cfg = _base_config(
             use_local_subagents=True, backend_api_mode="chat_completions"
         )
-        tools_data, tools_spec, tools_descr, _ = await abuild_tools_data(cfg)
+        tools_data, tools_spec, tools_descr, _ = await abuild_tools_data(
+            make_settings(cfg)
+        )
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name in tools_data, f"{name} should be in tools_data"
@@ -55,7 +58,7 @@ class TestSubagentsInBuildToolsData:
         cfg = _base_config(
             use_local_subagents=False, backend_api_mode="chat_completions"
         )
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data, (
@@ -69,7 +72,7 @@ class TestSubagentsInBuildToolsData:
         cfg = _base_config(
             use_local_subagents=True, backend_api_mode="responses"
         )
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data, (
@@ -82,7 +85,7 @@ class TestSubagentsInBuildToolsData:
 
         cfg = _base_config(backend_api_mode="chat_completions")
         del cfg["use_local_subagents"]
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             assert name not in tools_data
@@ -94,7 +97,7 @@ class TestSubagentsInBuildToolsData:
         cfg = _base_config(
             use_local_subagents=True, backend_api_mode="chat_completions"
         )
-        tools_data, _, _, _ = await abuild_tools_data(cfg)
+        tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         for name in subagent_names:
             spec = tools_data[name]["spec"]
@@ -112,7 +115,7 @@ class TestSubagentsInBuildToolsData:
         cfg = _base_config(
             use_local_subagents=True, backend_api_mode="chat_completions"
         )
-        _, tools_spec, _, _ = await abuild_tools_data(cfg)
+        _, tools_spec, _, _ = await abuild_tools_data(make_settings(cfg))
         spec_names = {s["name"] for s in tools_spec}
         subagent_names = {cls.agent_name for cls in SUBAGENT_CLASSES}
         assert subagent_names.issubset(spec_names)

@@ -122,9 +122,7 @@ async def test_skills_run_script_long_stdout_is_head_tail_with_preview(
         "exec_output_capture_max_chars": 100,
         "exec_output_preview_edge_chars": 10,
     }
-    tool = RunSkillScriptTool(
-        reg_with_scripts, ctx=local_ctx(cfg), config_dict=cfg
-    )
+    tool = RunSkillScriptTool(reg_with_scripts, ctx=local_ctx(cfg))
     payload = json.loads(
         await tool.acall(skill_id="long-out", script_name="main.py")
     )

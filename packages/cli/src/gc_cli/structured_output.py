@@ -17,13 +17,16 @@ from gc_core.utils.json_text import format_json_for_display
 async def aemit_structured_result(
     *,
     response: Any,
-    config_dict: dict[str, Any],
+    settings: Any,
     ctx: Any,
     state: Any,
     terminal_outcome: str | None,
     format_text: str,
 ) -> int:
     """Напечатать перефраз и записать ``final_answer``. 0 или 1.
+
+    ``settings`` — всё, что принимает ``settings_of`` (контекст,
+    ``LoadedSettings``, ``AppConfig``).
 
     Успешный текст попадает в stdout. Если туда уже пишет jsonl-хендлер,
     сырая строка сломала бы разбор по строкам: хватает события
@@ -47,7 +50,7 @@ async def aemit_structured_result(
         _log_structured_output_failed(logger, exc)
         print(f"[gc] {exc}", file=sys.stderr)
         return 1
-    if not _stdout_is_jsonl_stream(settings_of(config_dict)):
+    if not _stdout_is_jsonl_stream(settings_of(settings)):
         print(rendered)
     _log_final_answer(logger, rendered)
     return 0

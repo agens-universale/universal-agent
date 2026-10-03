@@ -12,7 +12,7 @@
 
 Сегодня этого не происходит: ``aget_mcp_tools_data_for_config`` кладёт в кэш СЫРОЙ набор
 MCP-тулов, а ``apply_subagent_tools_filter`` работает уже над собранным
-``tools_data`` и читает allow/stop из ПЕРЕДАННОГО ``config_dict``
+``tools_data`` и читает allow/stop из ПЕРЕДАННЫХ настроек
 (``tools/__init__.py``: дискавери, потом фильтр). Тест закрепляет этот порядок.
 """
 
@@ -20,7 +20,9 @@ from typing import Any, Dict
 
 import gc_core.tools as tools_pkg
 import pytest
+from gc_core.settings import LoadedSettings
 from gc_core.tools import SUBAGENT_TOOLS_ALLOW_KEY, SUBAGENT_TOOLS_STOP_KEY
+from gc_testkit.settings import make_settings
 
 _MCP_TOOL = "mcp_srv_dangerous"
 
@@ -37,7 +39,7 @@ def shared_discovery(monkeypatch):
         }
     }
 
-    async def fake_get_mcp(config_dict, on_progress=None, **_kw):
+    async def fake_get_mcp(settings, on_progress=None, **_kw):
         calls["n"] += 1
         return (dict(payload), {})
 
@@ -47,14 +49,14 @@ def shared_discovery(monkeypatch):
     return calls
 
 
-def _cfg(**extra: Any) -> Dict[str, Any]:
+def _cfg(**extra: Any) -> LoadedSettings:
     cfg: Dict[str, Any] = {
         "mcp-servers": {"srv": {"transport": "stdio", "command": "x"}},
         "backend_api_mode": "chat_completions",
         "use_local_subagents": False,
     }
     cfg.update(extra)
-    return cfg
+    return make_settings(cfg)
 
 
 async def test_child_stop_list_still_applies_with_a_shared_cache(

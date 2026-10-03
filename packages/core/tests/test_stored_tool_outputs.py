@@ -42,6 +42,7 @@ from gc_core.tools.session.stored_outputs.wrapping import (
     maybe_store_and_wrap_tool_output,
 )
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _assert_pagination_metadata(
@@ -81,7 +82,7 @@ def test_wrap_short_output_returns_original_text():
         call_id="call_1",
         tool_name="some_tool",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     assert res == "abc"
     assert len(state.tool_call_outputs_store) == 0
@@ -98,7 +99,7 @@ def test_wrap_long_output_stores_and_returns_envelope():
         call_id="call_2",
         tool_name="some_tool",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     payload = json.loads(res)
     assert payload["type"] == "stored_tool_output"
@@ -128,7 +129,7 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
         call_id="call_3",
         tool_name="some_tool",
         state=state,
-        config=off_cfg,
+        settings=make_settings(off_cfg),
     )
     assert res_off == "abcdefghij"
 
@@ -141,7 +142,7 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
         call_id="call_4",
         tool_name="session_read_stored_tool_output",
         state=state,
-        config=on_cfg,
+        settings=make_settings(on_cfg),
     )
     assert res_self == '{"tool":"session_read_stored_tool_output"}'
 
@@ -165,7 +166,7 @@ def test_wrap_never_replaces_turn_finish_status_with_stored_envelope():
         call_id="call_finish",
         tool_name="turn_finish",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     assert res == rejected
     assert json.loads(res)["ok"] is False
@@ -194,7 +195,7 @@ def test_wrap_fs_read_file_long_output_goes_to_store():
         call_id="call_read",
         tool_name="fs_read_file",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     payload = json.loads(res)
     assert payload["type"] == "stored_tool_output"
@@ -228,7 +229,7 @@ def test_wrap_fs_read_file_short_line_window_stays_inline():
         call_id="call_window",
         tool_name="fs_read_file",
         state=state,
-        config=cfg,
+        settings=make_settings(cfg),
     )
     assert res == tool_res
     assert json.loads(res)["truncated"] is True
@@ -265,7 +266,8 @@ def test_session_read_stored_tool_output_pagination_and_unicode():
     )
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 2}
+            state=state,
+            settings=make_settings({"tool_output_inline_max_chars": 2}),
         )
     )
     page1 = json.loads(tool(output_ref="ref-1", offset=0, limit=10))
@@ -309,7 +311,8 @@ def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
     # Read r1 through the tool: this must move r1 to MRU.
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"tool_output_inline_max_chars": 5}),
         )
     )
     page = json.loads(tool(output_ref="r1", offset=0, limit=2))
@@ -337,7 +340,8 @@ def test_session_read_stored_tool_output_invalid_and_not_found():
     state = _make_state()
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"tool_output_inline_max_chars": 5}),
         )
     )
     bad = json.loads(tool(output_ref="", offset=0, limit=1))
@@ -356,7 +360,8 @@ def test_session_read_stored_tool_output_not_found_when_store_missing_has_recove
     state = SimpleNamespace()
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="missing", offset=0, limit=1))
@@ -375,7 +380,8 @@ def test_session_read_stored_tool_output_error_paths_have_zero_next_offset():
     state = _make_state()
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"tool_output_inline_max_chars": 5}),
         )
     )
 
@@ -420,7 +426,8 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
 
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="evicted_ref", offset=0, limit=5))
@@ -443,8 +450,8 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
 
 def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
     state = _make_state()
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "tool_output_inline_max_chars": 5,
             "stored_tool_outputs_max_entries": 10,
         }
@@ -547,7 +554,8 @@ def test_feature_off_k_zero_clears_store_and_disables_read():
 
     tool = CallableTool(
         ReadStoredToolOutput(
-            state=state, config_dict={"tool_output_inline_max_chars": 5}
+            state=state,
+            settings=make_settings({"tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="ref-1", offset=0, limit=1))

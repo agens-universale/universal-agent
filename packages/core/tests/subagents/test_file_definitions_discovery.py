@@ -10,6 +10,7 @@ import logging
 from gc_core.tools.subagents.custom.file_definitions import (
     discover_subagent_definitions,
 )
+from gc_testkit.settings import make_settings
 
 BUILTIN = {"subagent_worker", "subagent_coder"}
 
@@ -26,7 +27,7 @@ def _write(tmp_path, filename, name, body="Роль."):
 def _discover(cfg, caplog=None):
     logger = logging.getLogger("test_discovery")
     return discover_subagent_definitions(
-        cfg, builtin_names=BUILTIN, logger=logger
+        make_settings(cfg), builtin_names=BUILTIN, logger=logger
     )
 
 
@@ -146,7 +147,7 @@ class TestWarningsAreLoggable:
         _write(tmp_path, "a_dup.md", "subagent_dup")
         _write(tmp_path, "z_dup.md", "subagent_dup")
         discover_subagent_definitions(
-            {"subagents_dir": str(tmp_path)},
+            make_settings({"subagents_dir": str(tmp_path)}),
             builtin_names=BUILTIN,
             logger=logger,
         )
@@ -163,7 +164,7 @@ class TestWarningsAreLoggable:
         logger = logging.getLogger("test_extra_keys")
         with caplog.at_level(logging.WARNING, logger="test_extra_keys"):
             discover_subagent_definitions(
-                {"subagents_dir": str(tmp_path / "нет")},
+                make_settings({"subagents_dir": str(tmp_path / "нет")}),
                 builtin_names=BUILTIN,
                 logger=logger,
             )

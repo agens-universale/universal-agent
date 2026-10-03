@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from gc_core.utils.logging_module import build_run_log_paths, create_run_logger
+from gc_testkit.settings import make_settings
 
 
 def _close(logger):
@@ -13,7 +14,7 @@ def _close(logger):
 class TestFileNames:
     def test_absent_trace_keeps_current_names(self, tmp_path):
         log_path, summary_path = build_run_log_paths(
-            config_dict={"logs_dump_dir": str(tmp_path)},
+            settings=make_settings({"logs_dump_dir": str(tmp_path)}),
             run_id="abc",
             agent_kind="main",
         )
@@ -22,7 +23,9 @@ class TestFileNames:
 
     def test_empty_trace_keeps_current_names(self, tmp_path):
         log_path, summary_path = build_run_log_paths(
-            config_dict={"logs_dump_dir": str(tmp_path), "trace_id": "  "},
+            settings=make_settings(
+                {"logs_dump_dir": str(tmp_path), "trace_id": "  "}
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -31,7 +34,9 @@ class TestFileNames:
 
     def test_trace_is_prepended_to_run_id_in_both_names(self, tmp_path):
         log_path, summary_path = build_run_log_paths(
-            config_dict={"logs_dump_dir": str(tmp_path), "trace_id": "wf-42"},
+            settings=make_settings(
+                {"logs_dump_dir": str(tmp_path), "trace_id": "wf-42"}
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -40,10 +45,12 @@ class TestFileNames:
 
     def test_unsafe_trace_cannot_escape_logs_dir(self, tmp_path):
         log_path, _ = build_run_log_paths(
-            config_dict={
-                "logs_dump_dir": str(tmp_path),
-                "trace_id": "../../etc/x",
-            },
+            settings=make_settings(
+                {
+                    "logs_dump_dir": str(tmp_path),
+                    "trace_id": "../../etc/x",
+                }
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -54,12 +61,14 @@ class TestFileNames:
 class TestJsonlRecords:
     def test_absent_trace_emits_no_key(self, tmp_path):
         logger, log_path, _ = create_run_logger(
-            config_dict={
-                "logs_dump_dir": str(tmp_path),
-                "save_logs": True,
-                "logging_format": "jsonl",
-                "console_trace": False,
-            },
+            settings=make_settings(
+                {
+                    "logs_dump_dir": str(tmp_path),
+                    "save_logs": True,
+                    "logging_format": "jsonl",
+                    "console_trace": False,
+                }
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -72,13 +81,15 @@ class TestJsonlRecords:
 
     def test_trace_is_stamped_on_every_record(self, tmp_path):
         logger, log_path, _ = create_run_logger(
-            config_dict={
-                "logs_dump_dir": str(tmp_path),
-                "save_logs": True,
-                "logging_format": "jsonl",
-                "console_trace": False,
-                "trace_id": "wf-42",
-            },
+            settings=make_settings(
+                {
+                    "logs_dump_dir": str(tmp_path),
+                    "save_logs": True,
+                    "logging_format": "jsonl",
+                    "console_trace": False,
+                    "trace_id": "wf-42",
+                }
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -90,13 +101,15 @@ class TestJsonlRecords:
 
     def test_raw_value_not_slug_lands_in_record(self, tmp_path):
         logger, log_path, _ = create_run_logger(
-            config_dict={
-                "logs_dump_dir": str(tmp_path),
-                "save_logs": True,
-                "logging_format": "jsonl",
-                "console_trace": False,
-                "trace_id": "wf/123",
-            },
+            settings=make_settings(
+                {
+                    "logs_dump_dir": str(tmp_path),
+                    "save_logs": True,
+                    "logging_format": "jsonl",
+                    "console_trace": False,
+                    "trace_id": "wf/123",
+                }
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -109,13 +122,15 @@ class TestJsonlRecords:
 
     def test_per_call_extra_wins(self, tmp_path):
         logger, log_path, _ = create_run_logger(
-            config_dict={
-                "logs_dump_dir": str(tmp_path),
-                "save_logs": True,
-                "logging_format": "jsonl",
-                "console_trace": False,
-                "trace_id": "wf-42",
-            },
+            settings=make_settings(
+                {
+                    "logs_dump_dir": str(tmp_path),
+                    "save_logs": True,
+                    "logging_format": "jsonl",
+                    "console_trace": False,
+                    "trace_id": "wf-42",
+                }
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -130,7 +145,9 @@ class TestJsonlRecords:
 class TestTextRecords:
     def test_absent_trace_keeps_plain_format(self, tmp_path):
         logger, log_path, _ = create_run_logger(
-            config_dict={"logs_dump_dir": str(tmp_path), "save_logs": True},
+            settings=make_settings(
+                {"logs_dump_dir": str(tmp_path), "save_logs": True}
+            ),
             run_id="abc",
             agent_kind="main",
         )
@@ -142,11 +159,13 @@ class TestTextRecords:
 
     def test_trace_appears_in_text_line(self, tmp_path):
         logger, log_path, _ = create_run_logger(
-            config_dict={
-                "logs_dump_dir": str(tmp_path),
-                "save_logs": True,
-                "trace_id": "wf-42",
-            },
+            settings=make_settings(
+                {
+                    "logs_dump_dir": str(tmp_path),
+                    "save_logs": True,
+                    "trace_id": "wf-42",
+                }
+            ),
             run_id="abc",
             agent_kind="main",
         )

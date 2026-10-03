@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 from gc_core.states import State
 from gc_core.tools import aapply_tool, is_unknown_tool_output
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _async_noop(fn):
@@ -132,7 +132,7 @@ def test_process_tool_calls_updates_unknown_streak(monkeypatch):
     monkeypatch.setattr(pr, "generate_message_id_func", lambda p: f"{p}_x")
 
     state = _make_state()
-    ctx = SimpleNamespace(config_dict={}, logger=None)
+    ctx = fake_ctx(logger=None)
     messages = [
         {
             "type": "function_call",
@@ -189,7 +189,7 @@ def test_process_tool_calls_existing_tool_resets_streak(monkeypatch):
     state = _make_state()
     state.last_unknown_tool_name = "phase1"
     state.unknown_tool_repeat_count = 2
-    ctx = SimpleNamespace(config_dict={}, logger=None)
+    ctx = fake_ctx(logger=None)
     messages = [
         {
             "type": "function_call",
@@ -261,8 +261,8 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
     monkeypatch.setattr(pr, "aprocess_tool_outputs", fake_process_tool_outputs)
 
     state = _make_state(max_steps=50)
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "backend_api_mode": "chat_completions",
             "console_trace": False,
             "no_tool_call_max_count": 50,
@@ -335,8 +335,8 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
     monkeypatch.setattr(pr, "aprocess_tool_outputs", fake_process_tool_outputs)
 
     state = _make_state(max_steps=50)
-    ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        {
             "backend_api_mode": "chat_completions",
             "console_trace": False,
             "no_tool_call_max_count": 2,

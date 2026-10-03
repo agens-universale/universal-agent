@@ -1,7 +1,7 @@
 """`onboarding.explain_broken_config` — человекочитаемое объяснение вместо
-трейсбека, когда `load_config_ex()` не смог собрать конфиг.
+трейсбека, когда `load_settings()` не смог собрать конфиг.
 
-Исключения берутся НАСТОЯЩИЕ (реальный `load_config_ex` на реальном сломанном
+Исключения берутся НАСТОЯЩИЕ (реальный `load_settings` на реальном сломанном
 файле), а не сконструированные вручную — иначе тест проверял бы придуманный
 текст ошибки, а не то, что реально прилетает из загрузчика.
 """
@@ -14,13 +14,13 @@ _BACKEND = 'backend:\n  api_mode: chat_completions\n  completions_url: "http://1
 
 
 def _load_and_catch(base_path: str) -> ValueError:
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
 
     try:
-        load_config_ex(base_path)
+        load_settings(base_path)
     except ValueError as exc:
         return exc
-    pytest.fail("ожидался ValueError от load_config_ex")
+    pytest.fail("ожидался ValueError от load_settings")
 
 
 @pytest.fixture
@@ -140,7 +140,7 @@ def test_profile_override_drives_the_map_and_the_advice(
     строятся по профилю, переданному сессией: файл профиля назван, помечен
     активным ОТ ФЛАГА, совет чинить — в нём, «без профиля» предлагается, а
     откат базы — нет (она ни при чём)."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_core.onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
@@ -151,13 +151,13 @@ def test_profile_override_drives_the_map_and_the_advice(
     profile.write_text("slots:\n  default: strong\n", encoding="utf-8")
 
     try:
-        load_config_ex(str(base), profile_override="broken")
+        load_settings(str(base), profile_override="broken")
     except ValueError as exc:
         text = explain_broken_config(
             str(base), exc, program="gc-ua", profile_override="broken"
         )
     else:
-        pytest.fail("ожидался ValueError от load_config_ex")
+        pytest.fail("ожидался ValueError от load_settings")
 
     assert f"{profile}   (активен: --profile)" in text
     assert f"поправить slots.default в:  {profile}" in text
@@ -174,20 +174,20 @@ def test_profile_override_that_names_no_file_blames_the_flag(
     """Ревью (H1): опечатка в `--profile` — советовали «поправить файл: <база>»
     и откат, которые ни при чём. Имя пришло из флага, и файла с ним нет —
     сказать это прямо; чинить — имя во флаге либо запуск без профиля."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_core.onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
     base.write_text(_BACKEND + "models:\n  flash: {}\n", encoding="utf-8")
 
     try:
-        load_config_ex(str(base), profile_override="wrok")
+        load_settings(str(base), profile_override="wrok")
     except ValueError as exc:
         text = explain_broken_config(
             str(base), exc, program="gc-ua", profile_override="wrok"
         )
     else:
-        pytest.fail("ожидался ValueError от load_config_ex")
+        pytest.fail("ожидался ValueError от load_settings")
 
     assert 'профиль "wrok" не найден' in text
     assert 'профиль "wrok" задан флагом --profile' in text
@@ -208,7 +208,7 @@ def test_schema_error_on_the_pointer_is_not_a_missing_profile(
     файла: ветка про флаг срабатывала по одному лишь факту флага, потому что
     `key_origins` под override выбрасывает ключ `profile` и виновников не
     остаётся."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_core.onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
@@ -221,13 +221,13 @@ def test_schema_error_on_the_pointer_is_not_a_missing_profile(
     profile.write_text("slots:\n  default: flash\n", encoding="utf-8")
 
     try:
-        load_config_ex(str(base), profile_override="work")
+        load_settings(str(base), profile_override="work")
     except ValueError as exc:
         text = explain_broken_config(
             str(base), exc, program="gc-ua", profile_override="work"
         )
     else:
-        pytest.fail("ожидался ValueError от load_config_ex")
+        pytest.fail("ожидался ValueError от load_settings")
 
     assert f"поправить файл:  {base}" in text
     assert "такого профиля нет" not in text
@@ -241,7 +241,7 @@ def test_schema_error_explanation_does_not_leak_the_token(
     `str(ValidationError)` — pydantic-дамп несёт `input_value=<repr записи>`, то
     есть токен из лежащего на диске конфига. Координата и причина обязаны
     остаться (по ним же ищутся виновники), сам секрет — нет."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_core.onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
@@ -260,11 +260,11 @@ def test_schema_error_explanation_does_not_leak_the_token(
     )
 
     try:
-        load_config_ex(str(base))
+        load_settings(str(base))
     except ValueError as exc:
         text = explain_broken_config(str(base), exc, program="gc-ua")
     else:
-        pytest.fail("ожидался ValueError от load_config_ex")
+        pytest.fail("ожидался ValueError от load_settings")
 
     assert "sk-MY-OWN-SECRET" not in text
     assert "input_value" not in text
@@ -277,7 +277,7 @@ def test_empty_profile_override_means_no_profile_at_all(
     """`--profile ""` — профильный слой снят: указатель в файле инертен, и совет
     «запустить без профиля» бессмыслен (человек уже так запустил); карта без
     профиля, откат уместен — сломана сама база."""
-    from gc_core.config import load_config_ex
+    from gc_core.config import load_settings
     from gc_core.onboarding import explain_broken_config
 
     base = tmp_path / "base.yml"
@@ -293,13 +293,13 @@ def test_empty_profile_override_means_no_profile_at_all(
     )
 
     try:
-        load_config_ex(str(base), profile_override="")
+        load_settings(str(base), profile_override="")
     except ValueError as exc:
         text = explain_broken_config(
             str(base), exc, program="gc-ua", profile_override=""
         )
     else:
-        pytest.fail("ожидался ValueError от load_config_ex")
+        pytest.fail("ожидался ValueError от load_settings")
 
     assert f"поправить slots.max в:  {base}" in text
     assert "(активен" not in text

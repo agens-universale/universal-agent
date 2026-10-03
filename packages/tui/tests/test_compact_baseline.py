@@ -1,6 +1,7 @@
 """Poller записывает meta.tui.last_compact_msg_count на завершении сжатия
 (спадающий фронт runtime.summarizing True→False) — baseline для антиспама /compact."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -47,7 +48,9 @@ async def test_summarizing_falling_edge_records_baseline(tmp_path):
     tid = "base0000000000000000000000000001a"
     _write_task(tmp_path, tid, n_messages=2)  # после сжатия в live 2 сообщения
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -68,7 +71,9 @@ async def test_no_record_without_falling_edge(tmp_path):
     tid = "base0000000000000000000000000002a"
     _write_task(tmp_path, tid, n_messages=2)
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

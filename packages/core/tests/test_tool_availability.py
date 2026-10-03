@@ -17,6 +17,7 @@ from gc_core.message_policy.tool_usage_notice.apply import (
     aapply_tool_usage_notice_before_llm,
 )
 from gc_core.states import SharedStateData, State
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 def _state(tools_spec=None) -> State:
@@ -73,9 +74,7 @@ class TestResolver:
 
     def test_unknown_sources_give_none(self):
         # Контракт: «не смогли узнать» ≠ «тулов нет».
-        assert (
-            available_tool_names(None, SimpleNamespace(config_dict={})) is None
-        )
+        assert available_tool_names(None, SimpleNamespace()) is None
         assert (
             available_tool_names(SimpleNamespace(tools_data={}, tools_spec=[]))
             is None
@@ -102,15 +101,15 @@ class TestToolUsageNoticeGate:
         )
 
     async def test_notice_suppressed_when_tool_absent(self):
-        ctx = SimpleNamespace(
-            config_dict=_notice_cfg(),
+        ctx = fake_ctx(
+            _notice_cfg(),
             tools_data={"fs_read_file": {}, "turn_finish": {}},
         )
         assert len(await self._apply(ctx)) == 1
 
     async def test_notice_kept_when_tool_present(self):
-        ctx = SimpleNamespace(
-            config_dict=_notice_cfg(),
+        ctx = fake_ctx(
+            _notice_cfg(),
             tools_data={"fs_read_file": {}, "session_memory": {}},
         )
         out = await self._apply(ctx)
@@ -119,10 +118,7 @@ class TestToolUsageNoticeGate:
 
     async def test_unknown_tool_set_keeps_old_behaviour(self):
         # ctx без тулов (синтетический/тестовый) — гейт не применяется.
-        assert (
-            len(await self._apply(SimpleNamespace(config_dict=_notice_cfg())))
-            == 2
-        )
+        assert len(await self._apply(fake_ctx(_notice_cfg()))) == 2
 
 
 class TestProjectMemoryGate:
@@ -135,11 +131,9 @@ class TestProjectMemoryGate:
             "project_memory_params": {"check_interval_messages": 1},
             "stop_tools": [],
         }
-        absent = SimpleNamespace(
-            config_dict=cfg, tools_data={"fs_read_file": {}}
-        )
-        present = SimpleNamespace(
-            config_dict=cfg,
+        absent = fake_ctx(cfg, tools_data={"fs_read_file": {}})
+        present = fake_ctx(
+            cfg,
             tools_data={"fs_read_file": {}, "project_memory": {}},
         )
         base = [{"role": "user", "content": "hi", "id": "u1"}]
@@ -162,7 +156,9 @@ class TestTodoReminderGate:
         return apply_todo_reminder(
             [],
             state,
-            {"todo_params": {"reminder_steps": 10}, "stop_tools": []},
+            make_settings(
+                {"todo_params": {"reminder_steps": 10}, "stop_tools": []}
+            ),
             step_messages=[],
             available_tools=available,
         )

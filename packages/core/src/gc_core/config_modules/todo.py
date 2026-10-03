@@ -33,9 +33,9 @@ def normalize_todo_config(cfg: TodoConfig) -> TodoConfig:
     return cfg.result()
 
 
-def todo_reminder_steps_from_config(config_dict: Any) -> int:
-    """``todo.reminder_steps`` настроек (``config_dict`` — всё, что принимает ``settings_of``)."""
+def todo_reminder_steps_from_config(settings: Any) -> int:
+    """``todo.reminder_steps`` настроек (``settings`` — всё, что принимает ``settings_of``)."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return max(0, settings_of(config_dict).todo.reminder_steps)
+    return max(0, settings_of(settings).todo.reminder_steps)

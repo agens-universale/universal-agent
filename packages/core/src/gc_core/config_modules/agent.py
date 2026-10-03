@@ -276,56 +276,56 @@ class AgentConfig(BaseModel):
         return text or None
 
 
-def _agent_of(config_dict: Any) -> AgentConfig:
+def _agent_of(settings: Any) -> AgentConfig:
     """Секция ``agent`` из всего, что принимает ``settings_of``."""
     # Ленивый импорт: settings → root → этот модуль.
     from gc_core.settings import settings_of
 
-    return settings_of(config_dict).agent
+    return settings_of(settings).agent
 
 
 def exec_output_preview_edge_chars_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> int:
     """Размер края front-loaded preview (``agent.exec_output_preview_edge_chars``).
 
     ``P <= T`` схема дожимает сама (``clamp_preview_edge_to_capture_tail``);
     здесь — страховка, чтобы preview не продублировал весь capture.
     """
-    agent = _agent_of(config_dict)
+    agent = _agent_of(settings)
     capture = agent.exec_output_capture_max_chars
     return min(agent.exec_output_preview_edge_chars, capture - capture // 2)
 
 
-def exec_timeout_from_config_dict(config_dict: Any) -> int:
+def exec_timeout_from_config_dict(settings: Any) -> int:
     """Дефолтный exec-timeout (``agent.exec_timeout_sec``; схема гарантирует > 0)."""
-    return _agent_of(config_dict).exec_timeout_sec
+    return _agent_of(settings).exec_timeout_sec
 
 
 def exec_output_capture_max_chars_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> int:
     """Потолок captured stdout/stderr на поток (``agent.exec_output_capture_max_chars``)."""
-    return _agent_of(config_dict).exec_output_capture_max_chars
+    return _agent_of(settings).exec_output_capture_max_chars
 
 
 def walk_output_max_chars_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> int:
     """Потолок приватного канала обхода (Harbor walk/listdir)."""
-    n = _agent_of(config_dict).walk_output_max_chars
+    n = _agent_of(settings).walk_output_max_chars
     return n if n > 0 else WALK_OUTPUT_MAX_CHARS
 
 
 def harbor_exec_init_from_config_dict(
-    config_dict: Any,
+    settings: Any,
 ) -> str | None:
     """Optional Harbor model-facing shell init (``agent.harbor_exec_init``)."""
-    return _agent_of(config_dict).harbor_exec_init
+    return _agent_of(settings).harbor_exec_init
 
 
 def resolve_model_steering_text(
-    config_dict: Any,
+    settings: Any,
     model: str | None = None,
 ) -> str | None:
     """Текст model_steering или None, если пусто.
@@ -333,18 +333,18 @@ def resolve_model_steering_text(
     ``model`` зарезервирован для совместимости вызовов; сейчас не используется.
     """
     del model  # API stable; matching by model name may return later
-    return _agent_of(config_dict).model_steering.strip() or None
+    return _agent_of(settings).model_steering.strip() or None
 
 
 def merge_special_instructions_with_model_steering(
     base: str | None,
     *,
-    config_dict: Any = None,
+    settings: Any = None,
     model: str | None = None,
 ) -> str | None:
     """Склеить client special_instructions с model_steering из настроек."""
     return join_special_instructions_with_steering(
-        base, resolve_model_steering_text(config_dict, model=model)
+        base, resolve_model_steering_text(settings, model=model)
     )
 
 

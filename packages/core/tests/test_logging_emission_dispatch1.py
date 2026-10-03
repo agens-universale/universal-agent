@@ -17,6 +17,7 @@ import json
 import pytest
 from gc_core.utils.logging_module import create_run_logger
 from gc_testkit import run_coro
+from gc_testkit.settings import make_settings
 from transport_fakes import install_transport, json_response, stream_response
 
 
@@ -28,7 +29,9 @@ def _make_logger(tmp_path, level="info"):
         "logging_format": "jsonl",
         "log_level": level,
     }
-    logger, path, _ = create_run_logger(cfg, run_id="t", agent_kind="main")
+    logger, path, _ = create_run_logger(
+        make_settings(cfg), run_id="t", agent_kind="main"
+    )
     return logger, path
 
 

@@ -13,6 +13,7 @@ import json
 from gc_core.backends.protocol import ExecResult, bound_exec_result
 from gc_core.tools.exec.run_python_code import RunPythonCode
 from gc_testkit.harbor_fakes import bind_os_backend
+from gc_testkit.helpers.tool_ctx import tool_settings
 
 
 class _RecordingFakeBackend:
@@ -52,11 +53,11 @@ class _RecordingFakeBackend:
         return path in self._dirs
 
 
-def _tool(backend, config_dict=None):
+def _tool(backend, config=None):
     t = RunPythonCode.__new__(RunPythonCode)
-    cfg = config_dict if config_dict is not None else {}
-    t._config_dict = cfg
-    return bind_os_backend(t, backend, config_dict=cfg)
+    # Описание теста — словарь: гарды, не заданные тестом, выключены
+    # (``tool_settings``), как и прежде при плоском словаре.
+    return bind_os_backend(t, backend, settings=tool_settings(config))
 
 
 def test_envelope_shape_matches_base_contract():
@@ -84,7 +85,7 @@ def test_default_timeout_is_schema_default():
 
 def test_default_timeout_flows_from_exec_timeout_sec_config():
     b = _RecordingFakeBackend()
-    _tool(b, config_dict={"exec_timeout_sec": 600})(code="x=1")
+    _tool(b, config={"exec_timeout_sec": 600})(code="x=1")
     assert b.calls[0]["timeout"] == 600
 
 
@@ -106,7 +107,7 @@ def test_truncation():
     env = json.loads(
         _tool(
             _RecordingFakeBackend(stdout="A" * 9000, capture_max_chars=50),
-            config_dict={
+            config={
                 "exec_output_capture_max_chars": 50,
                 "exec_output_preview_edge_chars": 5,
             },

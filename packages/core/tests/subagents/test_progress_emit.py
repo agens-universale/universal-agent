@@ -10,6 +10,7 @@ from gc_core.tools.subagents.progress import (
     SubagentProgressEvent,
 )
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _async_noop(fn):
@@ -48,8 +49,7 @@ def _state(*, steps=3, max_steps=50):
 
 
 def _child_ctx(sink: QueueSubagentProgressSink):
-    return SimpleNamespace(
-        config_dict={},
+    return fake_ctx(
         run_id="child_run_9",
         parent_call_id="parent_fc_1",
         subagent_progress_sink=sink,
@@ -59,8 +59,7 @@ def _child_ctx(sink: QueueSubagentProgressSink):
 
 def _parent_ctx(sink: QueueSubagentProgressSink | None = None):
     """Parent has sink for TUI drain but no parent_call_id — must not emit."""
-    return SimpleNamespace(
-        config_dict={},
+    return fake_ctx(
         run_id="parent_run",
         subagent_progress_sink=sink,
         logger=None,
@@ -145,8 +144,7 @@ class TestEmitToolStartEnd:
 
     def test_child_without_sink_does_not_emit(self, monkeypatch):
         pr = _patch_process(monkeypatch)
-        ctx = SimpleNamespace(
-            config_dict={},
+        ctx = fake_ctx(
             run_id="child_run_9",
             parent_call_id="parent_fc_1",
             subagent_progress_sink=None,

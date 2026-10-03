@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from gc_core.run_context import acreate_run_context
+from gc_testkit.settings import make_settings
 
 
 def _base_config(tmp_path, **extra):
@@ -16,7 +17,7 @@ def _base_config(tmp_path, **extra):
         "launch_root": str(tmp_path),
     }
     cfg.update(extra)
-    return cfg
+    return make_settings(cfg)
 
 
 def _events(log_path):

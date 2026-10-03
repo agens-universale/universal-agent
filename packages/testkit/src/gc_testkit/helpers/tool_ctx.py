@@ -3,18 +3,68 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any, Optional, Type, TypeVar
+from typing import Any, Mapping, Type, TypeVar, Union
 
 from gc_core.config_modules.agent import (
     exec_output_capture_max_chars_from_config_dict,
 )
 from gc_core.execution_workspace import build_execution_workspace
+from gc_core.settings import LoadedSettings, is_explicit
 
 T = TypeVar("T")
 
+#: Гарды, которые тест тулов получает выключенными, если не настроил их сам.
+#:
+#: Поведенческие тесты тулов (запись, чтение, exec, fetch) пишут во временные
+#: каталоги вне ``launch_root`` и не отвечают на подтверждения. Прежде они
+#: собирали контекст плоским словарём, и гард без своего ключа в нём считался
+#: выключенным (runtime-fallback). Настоящие настройки secure-by-default —
+#: здесь тот же прежний смысл задаётся явно. Тест, которому нужен гард,
+#: настраивает его сам (``{"write_guard": {"enabled": True, ...}}``) — заданное
+#: тестом не трогается.
+_UNCONFIGURED_GUARDS: dict[str, Any] = {
+    "security.write_guard.enabled": False,
+    "security.write_guard.mode": "deny",
+    "security.read_guard.enabled": False,
+    "security.read_guard.mode": "deny",
+    "security.url_policy.enabled": False,
+    "security.url_policy.mode": "deny",
+    "security.command_moderation.enabled": False,
+    "security.command_moderation.mode": "allow",
+}
 
-def local_ctx(config_dict: Optional[dict] = None) -> SimpleNamespace:
+ConfigLike = Union[Mapping[str, Any], LoadedSettings, None]
+
+
+def tool_settings(config: ConfigLike = None) -> LoadedSettings:
+    """``LoadedSettings`` для теста тула.
+
+    ``config`` — описание теста (прежние плоские имена и/или пути через точку,
+    как у :func:`gc_testkit.settings.make_settings`) либо готовые
+    ``LoadedSettings`` (берутся как есть). Гарды, не заданные описанием,
+    выключены — см. ``_UNCONFIGURED_GUARDS``.
+    """
+    from gc_testkit.settings import make_settings
+
+    if isinstance(config, LoadedSettings):
+        return config
+    description = dict(config or {})
+    loaded = make_settings(description)
+    missing = {
+        path: value
+        for path, value in _UNCONFIGURED_GUARDS.items()
+        if not is_explicit(loaded.settings, path)
+    }
+    if not missing:
+        return loaded
+    return make_settings({**description, **missing})
+
+
+def local_ctx(config: ConfigLike = None, **attrs: Any) -> SimpleNamespace:
     """Minimal RunContext-like object with LocalFsBackend + workspace.
+
+    Контекст несёт настоящие ``settings``/``runtime`` (см. :func:`tool_settings`);
+    ``attrs`` — дополнительные атрибуты контекста (``logger=…``, ``state=…``).
 
     LocalFsBackend импортируется здесь, а не на уровне модуля: некоторые тесты
     вычищают ``tools.*`` из ``sys.modules`` и переимпортируют пакет — тогда
@@ -22,17 +72,19 @@ def local_ctx(config_dict: Optional[dict] = None) -> SimpleNamespace:
     """
     from gc_core.backends.local import LocalFsBackend
 
-    cfg = dict(config_dict or {})
+    from gc_testkit.settings import fake_ctx
+
+    loaded = tool_settings(config)
     backend = LocalFsBackend(
         exec_output_capture_max_chars=exec_output_capture_max_chars_from_config_dict(
-            cfg
+            loaded
         )
     )
-    return SimpleNamespace(
-        config_dict=cfg,
-        os_backend=backend,
-        workspace=build_execution_workspace(backend, cfg),
+    attrs.setdefault("os_backend", backend)
+    attrs.setdefault(
+        "workspace", build_execution_workspace(attrs["os_backend"], loaded)
     )
+    return fake_ctx(loaded=loaded, **attrs)
 
 
 class CallableTool:
@@ -75,17 +127,21 @@ class CallableTool:
 
 
 def with_local_ctx(
-    tool_cls: Type[T], *, config_dict: Optional[dict] = None, **kwargs: Any
+    tool_cls: Type[T], config: ConfigLike = None, **kwargs: Any
 ) -> T:
-    """Instantiate ``tool_cls`` with a local ctx (and optional config_dict).
+    """Instantiate ``tool_cls`` with a local ctx built from ``config``.
 
+    Настройки тул читает из контекста; явный ``ctx=`` в ``kwargs`` побеждает.
     Возвращает тул, обёрнутый в :class:`CallableTool`: его можно и звать как
     раньше (обёртка сама прогонит ``acall``), и трогать как обычный объект.
     """
-    cfg = config_dict if config_dict is not None else kwargs.get("config_dict")
-    ctx_cfg = cfg if isinstance(cfg, dict) else {}
-    kw = dict(kwargs)
-    if cfg is not None:
-        kw["config_dict"] = cfg
-    kw.setdefault("ctx", local_ctx(ctx_cfg))
-    return CallableTool(tool_cls(**kw))
+    kwargs.setdefault("ctx", local_ctx(config))
+    return CallableTool(tool_cls(**kwargs))
+
+
+__all__ = [
+    "CallableTool",
+    "local_ctx",
+    "tool_settings",
+    "with_local_ctx",
+]

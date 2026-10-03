@@ -1,3 +1,4 @@
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -39,7 +40,9 @@ def test_event_focus_snapshot(snap_compare, tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        config={"model": "CodeAgent", "backend_api_mode": "chat_completions"},
+        settings=tui_settings(
+            {"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+        ),
     )
 
     async def setup(pilot):

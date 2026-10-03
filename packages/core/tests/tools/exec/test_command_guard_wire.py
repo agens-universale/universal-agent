@@ -11,12 +11,11 @@ Covers:
 """
 
 import json
-import types
 
 from gc_core.security import command_guard as cg
 from gc_core.tools.exec.execute_command import ExecuteCommand
 from gc_core.tools.exec.run_python_code import RunPythonCode
-from gc_testkit.helpers.tool_ctx import with_local_ctx
+from gc_testkit.helpers.tool_ctx import local_ctx, with_local_ctx
 
 
 def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
@@ -30,12 +29,7 @@ def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
         cfg["security.protected_paths"] = {"enabled": False}
     if command_moderation:
         cfg["command_moderation"] = {"enabled": True, "mode": "deny"}
-    return types.SimpleNamespace(
-        config_dict=cfg,
-        is_tui=False,
-        tui_confirm=None,
-        logger=None,
-    )
+    return local_ctx(cfg, is_tui=False, tui_confirm=None, logger=None)
 
 
 # ---------------------------------------------------------------------------

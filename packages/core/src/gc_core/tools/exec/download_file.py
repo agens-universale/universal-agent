@@ -15,7 +15,7 @@ from gc_core.security.path_policy import (
     resolve_tool_context,
 )
 from gc_core.security.url_policy import enforce_url_policy
-from gc_core.settings import AppConfig, LoadedSettings, settings_of
+from gc_core.settings import settings_of
 from gc_core.tools.exec.redirect_policy import (
     DEFAULT_MAX_REDIRECTS,
     stream_validating_redirects,
@@ -79,9 +79,7 @@ class DownloadFile(AbstractSimpleTool):
         self._state = state
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         extensions = ", ".join(
             sorted(ext.lstrip(".") for ext in cls.ALLOWED_EXTENSIONS)
         )
@@ -113,9 +111,7 @@ class DownloadFile(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return (
             "Tool name: download_file\n"
             "Tool description: Downloads a document or plain-text file from a URL into the configured download directory.\n\n"
@@ -150,28 +146,9 @@ class DownloadFile(AbstractSimpleTool):
             ensure_ascii=False,
         )
 
-    def _get_config_dict(self) -> Dict[str, Any]:
-        explicit = self._config_dict
-        if isinstance(explicit, dict):
-            return explicit
-        ctx_config = getattr(self._ctx, "config_dict", None)
-        if isinstance(ctx_config, dict):
-            return ctx_config
-        return {}
-
     def _download_config(self) -> DownloadConfig:
-        """Секция ``security.download``: явный config_dict, иначе настройки ctx."""
-        explicit = self._config_dict
-        if isinstance(explicit, dict):
-            return settings_of(explicit).security.download
-        if isinstance(
-            getattr(self._ctx, "settings", None), (AppConfig, LoadedSettings)
-        ):
-            return settings_of(self._ctx).security.download
-        ctx_config = getattr(self._ctx, "config_dict", None)
-        if isinstance(ctx_config, dict):
-            return settings_of(ctx_config).security.download
-        return DownloadConfig()
+        """Секция ``security.download`` настроек тула (явные ``settings=``, иначе ctx)."""
+        return settings_of(self._settings_source).security.download
 
     def _resolve_download_settings(
         self, launch_root: str
@@ -290,7 +267,6 @@ class DownloadFile(AbstractSimpleTool):
             self,
             ctx=self._ctx,
             state=self._state,
-            config_dict=self._get_config_dict(),
         )
         if not context.write_guard.enabled:
             return None
@@ -422,7 +398,6 @@ class DownloadFile(AbstractSimpleTool):
             self,
             ctx=self._ctx,
             state=self._state,
-            config_dict=self._get_config_dict(),
         )
         headers = {
             "User-Agent": self.default_user_agent,
@@ -553,7 +528,6 @@ class DownloadFile(AbstractSimpleTool):
             self,
             ctx=self._ctx,
             state=self._state,
-            config_dict=self._get_config_dict(),
         )
         if use_probe:
             from gc_core.security.guard_probe import (

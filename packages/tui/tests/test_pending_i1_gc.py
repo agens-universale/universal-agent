@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -165,7 +166,9 @@ async def test_stream_reset_gcs_delivered_pending_from_user_ask(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     app._executor_factory = lambda: None
     async with app.run_test() as pilot:

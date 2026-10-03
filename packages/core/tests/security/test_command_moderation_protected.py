@@ -17,6 +17,7 @@ from gc_core.security.command_moderation import (
     decide_command_execution,
     moderate_command_execution,
 )
+from gc_testkit.settings import fake_ctx, make_settings
 
 # ---------------------------------------------------------------------------
 # C1 Часть 2: judge-unavailable → confirm-порт
@@ -158,7 +159,6 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     Ctx передаётся в wrapper через kwarg ctx; resolve_tool_context пробрасывает
     его в ToolSecurityContext.ctx, откуда wrapper берёт его для decide_command_execution.
     """
-    from types import SimpleNamespace
 
     received_ctx: list = []
 
@@ -183,8 +183,8 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
         cm, "_default_judge_client", lambda *a, **k: _judge_is_down
     )
 
-    fake_ctx = SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
             "command_moderation": {"enabled": True, "mode": "deny"},
         },
@@ -197,10 +197,10 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     def run(command: str, ctx=None) -> str:  # noqa: ARG001 - guard reads the named arguments
         return json.dumps({"ok": True})
 
-    result = json.loads(run("echo hello", ctx=fake_ctx))
+    result = json.loads(run("echo hello", ctx=ctx))
 
     assert result["ok"] is True, "confirm-порт должен разрешить выполнение"
-    assert received_ctx and received_ctx[0] is fake_ctx, (
+    assert received_ctx and received_ctx[0] is ctx, (
         "ctx должен быть проброшен в confirm_available"
     )
 
@@ -233,7 +233,7 @@ def test_command_host_probe_includes_real_protected_snapshot(tmp_path):
     request = GuardProbeRequest(
         "command_host", "exec_command", str(tmp_path), str(tmp_path)
     )
-    facts = evaluate_guard_probe(request, config_dict={})
+    facts = evaluate_guard_probe(request, settings=make_settings())
     expected = cm.load_never_touch_paths(str(tmp_path))
     assert expected
     assert facts.data["never_touch_paths"] == expected

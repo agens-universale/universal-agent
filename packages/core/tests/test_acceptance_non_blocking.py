@@ -14,7 +14,6 @@ import time
 
 import pytest
 from gc_core.aio import AsyncAgent
-from gc_core.settings import settings_from_flat
 from gc_testkit.paths import package_src_dirs
 from parity_harness import (
     ScriptedBackend,
@@ -74,7 +73,7 @@ async def test_event_loop_stays_responsive_during_run(tmp_path, monkeypatch):
     """Критерий 1: loop свободен всё время жизни агента — от сборки до закрытия."""
     # Типизированные настройки собираем ДО окна замера: валидация конфига —
     # работа встраивающего, а не сборки агента.
-    settings = settings_from_flat(parity_config(tmp_path, monkeypatch))
+    settings = parity_config(tmp_path, monkeypatch)
     install(monkeypatch, ScriptedBackend(list(TURNS)))
 
     from gc_testkit import (
@@ -122,9 +121,7 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     # замерено 15 пауз на 872 мс в окне пары против одной в окне одиночки, и
     # отношение уезжало к 2× при неперекрываемых 0,09 с собственной работы.
     with quiet_gc_for_loop_timing():
-        async with await AsyncAgent.create(
-            settings_from_flat(cfg_solo)
-        ) as solo:
+        async with await AsyncAgent.create(cfg_solo) as solo:
             started = time.monotonic()
             await solo.run("поспи", thread_id="t1")
             single = time.monotonic() - started
@@ -141,8 +138,8 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
                 "агент-б": ScriptedBackend(list(TURNS)),
             },
         )
-        a = await AsyncAgent.create(settings_from_flat(cfg_a))
-        b = await AsyncAgent.create(settings_from_flat(cfg_b))
+        a = await AsyncAgent.create(cfg_a)
+        b = await AsyncAgent.create(cfg_b)
         started = time.monotonic()
         async with a, b:
             r1, r2 = await asyncio.gather(
@@ -165,20 +162,22 @@ def test_agent_runs_without_importing_frontends(tmp_path):
     script = """
 import asyncio, json, sys
 from gc_core.aio import AsyncAgent
-from gc_core.settings import settings_from_flat
+from gc_core.settings import LoadedSettings, RuntimeEnv, default_settings
 
 async def main():
-    agent = await AsyncAgent.create(settings_from_flat({{
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://acceptance.invalid/v1/chat/completions",
-        "model": "acceptance-model",
-        "threads_data_path": {threads!r},
-        "logs_dump_dir": {logs!r},
-        "save_logs": False,
-        "launch_root": {root!r},
-        "backend_request_timeout_sec": 60,
-        "max_steps": 1,
-    }}))
+    agent = await AsyncAgent.create(LoadedSettings(
+        settings=default_settings(**{{
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://acceptance.invalid/v1/chat/completions",
+            "agent.model": "acceptance-model",
+            "paths.threads_data_path": {threads!r},
+            "paths.logs_dump_dir": {logs!r},
+            "logging.save_logs": False,
+            "backend.request_timeout_sec": 60,
+            "agent.max_steps": 1,
+        }}),
+        runtime=RuntimeEnv(launch_root={root!r}),
+    ))
     await agent.aclose()
 
 try:

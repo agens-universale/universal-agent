@@ -6,14 +6,13 @@ import shutil
 from collections import Counter
 
 import pytest
-from gc_core.config import flatten_app_config
-from gc_core.config_modules import AppConfig
 from gc_core.run_context import acreate_run_context
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_activities import NativeActivities
 from gc_ua_temporalio.native_contracts import NativeRunRequest
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from gc_ua_temporalio.public_config import public_config_snapshot
+from gc_testkit.settings import make_settings
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_ua_temporalio.storage.technical import TechnicalStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
@@ -42,22 +41,23 @@ async def test_native_executor_uses_real_file_session_and_replays(
     monkeypatch.chdir(tmp_path)
     url, requests = provider
     (tmp_path / "example.txt").write_text("file from native workflow")
-    config = {
-        **flatten_app_config(AppConfig()),
-        "model": "scripted",
-        "backend_api_mode": "chat_completions",
-        "completions_url": url,
-        "chat_completion_kwargs": {"stream": False},
-        "system_prompt_id": "native-test",
-        "max_steps": 10,
-        "launch_root": str(tmp_path),
-        "save_logs": False,
-        "console_trace": False,
-        "use_local_subagents": False,
-        "strict_turn_finish_validation": False,
-        "tui_text_answer_mode": "deny",
-        "thread_store_persist": persist,
-    }
+    config = make_settings(
+        {
+            "model": "scripted",
+            "backend_api_mode": "chat_completions",
+            "completions_url": url,
+            "chat_completion_kwargs": {"stream": False},
+            "system_prompt_id": "native-test",
+            "max_steps": 10,
+            "launch_root": str(tmp_path),
+            "save_logs": False,
+            "console_trace": False,
+            "use_local_subagents": False,
+            "strict_turn_finish_validation": False,
+            "tui_text_answer_mode": "deny",
+            "thread_store_persist": persist,
+        }
+    )
     contexts = {}
 
     async def context_provider(call):

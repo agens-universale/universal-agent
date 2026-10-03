@@ -13,6 +13,7 @@ from gc_core.tools.subagents.selection import (
     subagents_allowlist_ordered,
     subagents_enabled,
 )
+from gc_testkit.settings import make_settings
 
 BUILTIN = {
     "subagent_worker",
@@ -110,7 +111,7 @@ class TestIntegration:
     async def _split(self, cfg):
         from gc_core.tools import abuild_tools_data
 
-        data, _spec, _descr, _mcp = await abuild_tools_data(cfg)
+        data, _spec, _descr, _mcp = await abuild_tools_data(make_settings(cfg))
         names = {n for n in data if n.startswith("subagent_")}
         return names & BUILTIN, sorted(names - BUILTIN)
 
@@ -188,13 +189,15 @@ class TestLimitFollowsListOrder:
 
         agents = self._agents(tmp_path, ("alpha", "beta", "gamma"))
         data, _s, _d, _m = await abuild_tools_data(
-            {
-                "launch_root": str(tmp_path),
-                "backend_api_mode": "chat_completions",
-                "use_local_subagents": value,
-                "subagents_dir": agents,
-                "subagents_max_count": limit,
-            }
+            make_settings(
+                {
+                    "launch_root": str(tmp_path),
+                    "backend_api_mode": "chat_completions",
+                    "use_local_subagents": value,
+                    "subagents_dir": agents,
+                    "subagents_max_count": limit,
+                }
+            )
         )
         names = {n for n in data if n.startswith("subagent_")}
         return sorted(names - BUILTIN)
@@ -217,13 +220,15 @@ class TestLimitFollowsListOrder:
 
         agents = self._agents(tmp_path, ("alpha",))
         data, _s, _d, _m = await abuild_tools_data(
-            {
-                "launch_root": str(tmp_path),
-                "backend_api_mode": "chat_completions",
-                "use_local_subagents": True,
-                "subagents_dir": agents,
-                "subagents_max_count": 1,
-            }
+            make_settings(
+                {
+                    "launch_root": str(tmp_path),
+                    "backend_api_mode": "chat_completions",
+                    "use_local_subagents": True,
+                    "subagents_dir": agents,
+                    "subagents_max_count": 1,
+                }
+            )
         )
         names = {n for n in data if n.startswith("subagent_")}
         assert names & BUILTIN == BUILTIN

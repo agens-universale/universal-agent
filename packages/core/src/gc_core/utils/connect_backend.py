@@ -77,14 +77,14 @@ def backend_override_value(
 
 
 def effective_cert_config(
-    config_dict: Dict, resolved: Optional[ResolvedModel]
+    settings: Any, resolved: Optional[ResolvedModel]
 ) -> Dict:
     """``{cert_path, key_path}`` из ``settings.backend`` с наложенными backend_overrides.
 
     Отдельная функция, а не ``backend_override_value`` по ключу: ``get_backend_client_cert``
     читает оба ключа разом из одного словаря (см. utils/ssl_config.py).
-    ``config_dict`` — настройки, контекст или (переходно) плоский вид."""
-    backend = settings_of(config_dict).backend
+    ``settings`` — всё, что принимает ``settings_of`` (контекст, настройки)."""
+    backend = settings_of(settings).backend
     cert = {"cert_path": backend.cert_path, "key_path": backend.key_path}
     if resolved is None:
         return cert
@@ -96,7 +96,7 @@ def effective_cert_config(
 
 
 def resolve_network_params(
-    config_dict: Dict, resolved: Optional[ResolvedModel]
+    settings: Any, resolved: Optional[ResolvedModel]
 ) -> Tuple[bool, Optional[Tuple[str, str]], bool, float, Optional[str], bool]:
     """``(verify, cert, use_retry, timeout_sec, proxy, retry_embedded_choice_errors)`` — эффективные сетевые параметры
     backend-запроса: ``settings.backend`` с наложенным ``resolved.backend_overrides`` поверх
@@ -106,10 +106,10 @@ def resolve_network_params(
     в ``processing_responses.py``) — вызывающий код сам решает, когда ``resolved`` уместен
     (например, в responses-режиме per-model сетевые квирки не применяются, спека §4, — тогда
     вызывающий передаёт ``resolved=None``). ``resolved=None`` → байт-в-байт из ``settings.backend``,
-    как до появления ResolvedModel. ``config_dict`` — настройки, контекст или
-    (переходно) плоский вид.
+    как до появления ResolvedModel. ``settings`` — всё, что принимает
+    ``settings_of`` (контекст, настройки).
     """
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     backend = settings.backend
     verify_override = backend_override_value(resolved, "use_ssl")
     verify = (
@@ -377,7 +377,7 @@ async def arequest_backend_responses(
 ) -> Tuple[Dict, Dict]:
     """Запрос в backend responses API (deprecated-режим), неблокирующий.
 
-    url и verify передаются явно вызывающим кодом (как правило, из ctx.config_dict).
+    url и verify передаются явно вызывающим кодом (как правило, из настроек контекста).
     timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
     config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый запрос.
     """
@@ -734,8 +734,6 @@ def build_call_headers(
     собираются как сегодня.
     """
     settings = settings_of(ctx)
-    # trace_id-хелперы пока читают плоский вид (gc_core/trace_id.py).
-    config_dict = getattr(ctx, "config_dict", {}) or {}
     auth_connector = getattr(ctx, "auth_connector", None)
     backend_mode = str(settings.backend.api_mode).strip().lower()
     resolved_for_headers = (
@@ -781,9 +779,9 @@ def build_call_headers(
     # ветки backend_mode: заголовок нужен в обоих режимах API. Дисциплина пустых
     # значений — как у оверлея выше, а не как у x_cl_id, где отсутствие ключа
     # отправляет литерал "None".
-    trace_id = trace_id_from_config(config_dict)
-    if trace_id and model_trace_header_enabled(config_dict):
-        call_headers[trace_header_name(config_dict, "x_trace_id")] = trace_id
+    trace_id = trace_id_from_config(ctx)
+    if trace_id and model_trace_header_enabled(settings):
+        call_headers[trace_header_name(settings, "x_trace_id")] = trace_id
     return call_headers
 
 
@@ -864,7 +862,7 @@ def _config_value(
 ) -> Any:
     """Per-model override из ResolvedModel, иначе ``settings.backend.<key>``.
 
-    ``backend=None`` — конфига нет (``config_dict=None``): берётся ``default``.
+    ``backend=None`` — конфига нет (``settings=None``): берётся ``default``.
     """
     value = backend_override_value(resolved, key)
     if value is NO_BACKEND_OVERRIDE:
@@ -904,9 +902,11 @@ def create_call_data_completions(
     model: Optional[str] = None,
     *,
     max_tokens: Optional[int] = None,
-    config_dict: Optional[Dict] = None,
+    settings: Any = None,
     resolved: Optional[ResolvedModel] = None,
 ) -> Dict:
+    """Тело запроса chat/completions. ``settings`` — всё, что принимает
+    ``settings_of`` (контекст, настройки); ``None`` — без конфига."""
     state_messages = deepcopy(state.messages) if state is not None else []
     state_tools = deepcopy(state.tools) if state is not None else []
     to_send_messages = _merge_state_messages(state_messages, messages)
@@ -929,8 +929,8 @@ def create_call_data_completions(
     if resolved is not None:
         effective_model = resolved.model
 
-    # Без конфига (config_dict=None) — прежние дефолты вызова, не дефолты модели.
-    cfg = None if config_dict is None else settings_of(config_dict).backend
+    # Без конфига (settings=None) — прежние дефолты вызова, не дефолты модели.
+    cfg = None if settings is None else settings_of(settings).backend
 
     configured_max_tokens = _safe_positive_int(
         _config_value(resolved, cfg, "chat_completions_max_tokens")

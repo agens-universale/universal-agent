@@ -11,6 +11,7 @@
 оборачивает, а TUI оборачивает.
 """
 
+from gc_testkit.settings import make_settings
 from gc_core.backends.local import LocalFsBackend
 from gc_core.run_context import acreate_run_context
 
@@ -21,7 +22,7 @@ async def test_core_leaves_the_backend_alone():
     """Ядро контекст только строит. Не декорация, а инвариант: ядро не знает про diff."""
     from gc_tui.diff_tui.tracking import TrackingFsBackend
 
-    ctx = await acreate_run_context(_CFG, is_tui=True)
+    ctx = await acreate_run_context(make_settings(_CFG), is_tui=True)
 
     assert isinstance(ctx.os_backend, LocalFsBackend)
     assert not isinstance(ctx.os_backend, TrackingFsBackend)
@@ -37,9 +38,9 @@ async def test_attach_wraps_backend_and_rebuilds_workspace():
     """
     from gc_tui.diff_tui.tracking import TrackingFsBackend, attach_to_context
 
-    ctx = await acreate_run_context(_CFG, is_tui=True)
+    ctx = await acreate_run_context(make_settings(_CFG), is_tui=True)
     inner = ctx.os_backend
-    attach_to_context(ctx, _CFG)
+    attach_to_context(ctx, ctx)
 
     assert isinstance(ctx.os_backend, TrackingFsBackend)
     assert ctx.os_backend.inner is inner
@@ -50,10 +51,10 @@ async def test_attach_is_idempotent():
     """Повторный вызов ничего не меняет: обёртка поверх обёртки — потерянный журнал."""
     from gc_tui.diff_tui.tracking import attach_to_context
 
-    ctx = await acreate_run_context(_CFG, is_tui=True)
-    attach_to_context(ctx, _CFG)
+    ctx = await acreate_run_context(make_settings(_CFG), is_tui=True)
+    attach_to_context(ctx, ctx)
     first = ctx.os_backend
-    attach_to_context(ctx, _CFG)
+    attach_to_context(ctx, ctx)
 
     assert ctx.os_backend is first
 

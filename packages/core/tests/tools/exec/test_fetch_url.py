@@ -127,9 +127,7 @@ def test_fetch_url_policy_blocks_before_request(monkeypatch):
         _call(
             with_local_ctx(
                 FetchUrl,
-                config_dict=_url_policy_config(
-                    url_blacklist=["blocked.example"]
-                ),
+                _url_policy_config(url_blacklist=["blocked.example"]),
             ),
             url="https://blocked.example/page",
         )
@@ -153,7 +151,7 @@ def test_fetch_url_policy_blocks_disallowed_scheme_before_legacy_validation(
         _call(
             with_local_ctx(
                 FetchUrl,
-                config_dict=_url_policy_config(allowed_schemes=["https"]),
+                _url_policy_config(allowed_schemes=["https"]),
             ),
             url="http://example.com",
         )
@@ -347,7 +345,7 @@ def test_simple_fetch_url_policy_blocks_before_request(monkeypatch):
         _call(
             with_local_ctx(
                 SimpleFetchUrl,
-                config_dict=_url_policy_config(url_blacklist=["*.internal"]),
+                _url_policy_config(url_blacklist=["*.internal"]),
             ),
             url="https://api.internal/path",
         )

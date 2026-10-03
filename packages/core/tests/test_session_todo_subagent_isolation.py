@@ -16,6 +16,7 @@ from gc_core.summarize.working_memory_gateway import (
 )
 from gc_core.tools.session.todo import SessionTodo
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import make_settings
 
 PARENT_ITEMS = [
     {"content": "Спроектировать", "status": "completed"},
@@ -146,7 +147,7 @@ def test_reminder_uses_own_checklist():
     parent.session_todo = list(PARENT_ITEMS)
     child = _child_of(parent)
     child.session_todo = [{"content": "Готово", "status": "completed"}]
-    config = {"todo_params": {"reminder_steps": 1}}
+    config = make_settings({"todo_params": {"reminder_steps": 1}})
 
     out = apply_todo_reminder([], child, config, step_messages=[])
 

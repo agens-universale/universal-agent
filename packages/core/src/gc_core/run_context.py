@@ -136,6 +136,11 @@ class RunContext:
     #: переходят на ``settings``.
     settings: Any = None
     runtime: Any = None
+    #: Определения кастомных субагентов этого контекста (кэш дискавери) и
+    #: диагностика их загрузки. ``None`` — ещё не собраны; durable-сборка
+    #: (Temporal) кладёт сюда готовые определения, чтобы workflow не ходил на диск.
+    subagent_definitions: Any = None
+    subagent_diagnostics: Any = None
 
 
 def _coerce_settings(config, runtime):
@@ -163,8 +168,14 @@ def assemble_run_context(
     Both local creation and durable execution use this constructor. Discovery,
     workspace probes, logging files and provider clients belong to preparation.
     """
-    if prepared.schema_version != 1:
+    if prepared.schema_version != 2:
         raise ValueError("Unsupported PreparedRunContext schema_version")
+    # Настройки — из подготовленных значений: локально это сами объекты,
+    # durable-сборка (Temporal) получает публичный JSON-снимок.
+    from gc_core.config import flat_config
+    from gc_core.context_preparation import settings_from_snapshot
+
+    loaded = settings_from_snapshot(prepared.settings, prepared.runtime)
     workspace = ExecutionWorkspace(
         root=prepared.workspace_root,
         backend=bindings.os_backend,
@@ -173,15 +184,20 @@ def assemble_run_context(
         root_writable=prepared.workspace_root_writable,
     )
     ctx = RunContext(
-        config_dict=prepared.config_dict,
+        # Переходно, до удаления ``RunContext.config_dict``: плоский вид из тех
+        # же настроек. Локальная сборка затем ставит свой — тот, из которого
+        # собраны тулы.
+        config_dict=flat_config(loaded),
+        settings=loaded.settings,
+        runtime=loaded.runtime,
         run_id=prepared.run_id,
         trace_id=prepared.trace_id,
         auth_connector=bindings.auth_connector,
         logger=bindings.logger,
         logging_path=prepared.logging_path,
         summary_trace_path=prepared.summary_trace_path,
-        auxiliary_llm=auxiliary_llm_from_config_dict(prepared.config_dict),
-        intent_scope=intent_scope_from_config_dict(prepared.config_dict),
+        auxiliary_llm=auxiliary_llm_from_config_dict(loaded),
+        intent_scope=intent_scope_from_config_dict(loaded),
         tools_data=bindings.tools_data,
         tools_spec=prepared.tools_spec,
         tools_description=prepared.tools_description,
@@ -213,12 +229,6 @@ def assemble_run_context(
         summary_trace_sink=bindings.summary_trace_sink,
         collect_garbage=bindings.collect_garbage,
     )
-    # Настройки контекста — из того же снимка, что `config_dict`: durable-сборка
-    # (Temporal) получает только его. Локальная сборка затем ставит настоящие.
-    from gc_core.settings import settings_from_flat
-
-    loaded = settings_from_flat(prepared.config_dict)
-    ctx.settings, ctx.runtime = loaded.settings, loaded.runtime
     ctx.is_tui = prepared.is_tui
     return ctx
 
@@ -308,8 +318,11 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         athread_store(thread_store)
 
     settings, runtime, config_dict = _coerce_settings(config_dict, runtime)
+    # Подготовке — сами настройки; плоский вид — только переходно, когда
+    # вызывающий передал словарь.
+    source = _settings_source(settings, runtime, config_dict)
     prep = _prepare_run_context(
-        config_dict,
+        source,
         run_id=run_id,
         environment=environment,
         loop=loop,
@@ -343,7 +356,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # Закрыть его раньше некому: снос фильтрует по владельцу, а контекста,
     # которому он принадлежит, так и не появилось.
     try:
-        await aprime_backend_cwd(prep.backend, config_dict)
+        await aprime_backend_cwd(prep.backend, source)
         # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
         # успешно снятый тул снова считается опечаткой. Способность пришла с
         # develop, у нас её не было; тело, которое список заполняет, слилось
@@ -351,7 +364,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
         registered: list[str] = []
         with use_owner(prep.mcp_session_owner):
             tools = await abuild_tools_data(
-                config_dict,
+                source,
                 on_progress=on_progress,
                 os_backend=prep.backend,
                 skills_registry=prep.skills_registry,
@@ -451,10 +464,24 @@ class _RunContextPrep:
     #: сравнивалось с локальной переменной, всегда не-None. Условие стало
     #: вечно ложным, а обёртка — мёртвым кодом.
     backend_was_overridden: bool
+    #: Источник настроек сборки (``LoadedSettings``; переходно — плоский dict,
+    #: если вызывающий передал словарь): из него читает и досборка.
+    settings: Any = None
+
+
+def _settings_source(settings: Any, runtime: Any, config_dict: Any) -> Any:
+    """Что отдавать читателям настроек при сборке: ``LoadedSettings`` из
+    типизированных настроек, а плоский словарь — только переходно (вызывающий
+    передал dict, типизированных настроек нет)."""
+    if settings is None:
+        return config_dict
+    from gc_core.settings import LoadedSettings, RuntimeEnv
+
+    return LoadedSettings(settings=settings, runtime=runtime or RuntimeEnv())
 
 
 def _prepare_run_context(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     run_id: Optional[str],
     environment: Optional[Any],
@@ -465,22 +492,23 @@ def _prepare_run_context(
     """Бэкенд, реестр скиллов, логгер и токен владельца MCP-сессий.
 
     Вынесено, чтобы синхронная и асинхронная сборка делили одно тело: между
-    ними отличается ровно один шаг — как дождаться дискавери.
+    ними отличается ровно один шаг — как дождаться дискавери. ``settings`` —
+    всё, что принимают ``settings_of``/``runtime_of`` (``LoadedSettings``).
     """
     effective_run_id = run_id or generate_run_id()
     backend = resolve_os_backend(
-        config_dict,
+        settings,
         environment=environment,
         loop=loop,
         override=os_backend,
     )
-    skills_registry = get_skills_registry(config_dict, backend=backend)
+    skills_registry = get_skills_registry(settings, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в
     # лог-файл рана, а не только в stderr модульного логгера. Создание логгера
-    # зависит лишь от config_dict и run_id, поэтому порядок безопасен.
+    # зависит лишь от настроек и run_id, поэтому порядок безопасен.
     run_logger, logging_path, summary_trace_path = create_run_logger(
-        config_dict,
+        settings,
         run_id=effective_run_id,
         agent_kind="main",
         log_handlers=log_handlers,
@@ -498,6 +526,7 @@ def _prepare_run_context(
         summary_trace_path=summary_trace_path,
         mcp_session_owner=new_owner_token(),
         backend_was_overridden=os_backend is not None,
+        settings=settings,
     )
 
 
@@ -542,9 +571,9 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     logging_path = prep.logging_path
     summary_trace_path = prep.summary_trace_path
     mcp_session_owner = prep.mcp_session_owner
-    from gc_core.settings import settings_of
+    from gc_core.settings import runtime_of, settings_of
 
-    settings = settings_of(config_dict)
+    settings = settings_of(prep.settings)
 
     run_logger.info(
         "agent started: model=%s url=%s mode=%s",
@@ -568,7 +597,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         },
     )
 
-    _trace_id = trace_id_from_config(config_dict)
+    _trace_id = trace_id_from_config(prep.settings)
     if _trace_id:
         # Одна явная запись «под какими именами этот ран шлёт trace». Заголовки
         # нигде не логируются, а имя заголовка конфигурируемо, поэтому это
@@ -583,7 +612,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
             },
         )
 
-    workspace = build_execution_workspace(backend, config_dict)
+    workspace = build_execution_workspace(backend, prep.settings)
 
     configured_level = settings.level or "default"
     effective_level_provider = level_provider or (lambda: configured_level)
@@ -595,7 +624,8 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     )
 
     prepared = PreparedRunContext(
-        config_dict=config_dict,
+        settings=settings,
+        runtime=runtime_of(prep.settings),
         run_id=effective_run_id,
         trace_id=_trace_id,
         logging_path=logging_path,
@@ -631,6 +661,8 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         tool_effect=tool_effect,
     )
     ctx = assemble_run_context(prepared, bindings)
+    # Переходно: плоский вид локальной сборки — тот, из которого собраны тулы.
+    ctx.config_dict = config_dict
     # ``is_tui`` контекст только ПОМЕЧАЕТ. Обёртку в ``TrackingFsBackend``
     # (diff-журнал) ставит сам TUI — ``gc_tui.diff_tui.tracking.attach_to_context``,
     # его зовёт ``TuiApp``. Здесь стоял лениво-импортируемый вызов

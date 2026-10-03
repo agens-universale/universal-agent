@@ -112,7 +112,7 @@ async def test_download_file_guard_carries_the_abandoned_mark(
     launch_root.mkdir()
     tool = with_local_ctx(
         DownloadFile,
-        config_dict={
+        {
             "launch_root": str(launch_root),
             "download": {"download_dir": "downloads", "max_bytes": 52_428_800},
         },

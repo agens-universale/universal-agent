@@ -1,8 +1,8 @@
 """Сессионный слой конфига: переопределения, действующие в текущем треде.
 
-Базовый конфиг (`TuiApp._config`) — то, что прочитано из файла. Этот слой —
-то, что пользователь переключил в сессии. Эффективный конфиг = база + слой;
-его видят и UI, и агент. Владелец состава — белый список `SESSION_KEYS`:
+Базовые настройки (`TuiApp.base_settings()`) — то, что прочитано из файлов. Этот слой —
+то, что пользователь переключил в сессии. Действующие настройки
+(`TuiApp.effective_settings()`) = база + слой; их видят и UI, и агент. Владелец состава — белый список `SESSION_KEYS`:
 право переопределять ключ выдаёт сама фича, а не «можно всё» (пути к тредам и
 снапшот рабочего каталога на лету менять нельзя).
 
@@ -20,27 +20,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict
 
-
-def effective_finish_gate_mode(cfg: Dict[str, Any]) -> str:
-    """Эффективный режим /gate: явный tui-ключ > явный глобальный off > дефолт smart."""
-    mode = str(cfg.get("tui_finish_gate_mode") or "smart")
-    if bool(cfg.get("tui_finish_gate_mode_explicit")):
-        return mode
-    if bool(cfg.get("strict_turn_finish_explicit_false")):
-        return "off"
-    return "smart"
-
-
-def effective_text_answer_mode(cfg: Dict[str, Any]) -> str:
-    """Эффективный режим /answers: коллизии нет — значение или дефолт."""
-    return str(cfg.get("tui_text_answer_mode") or "judge")
+from gc_core.settings import is_explicit, runtime_of, settings_of
 
 
 def finish_gate_mode_of(settings: Any) -> str:
-    """Типизированный двойник `effective_finish_gate_mode` — то же правило
-    коллизии по явности полей (`is_explicit`) вместо плоских признаков."""
-    from gc_core.settings import is_explicit
+    """Эффективный режим /gate: явный tui-ключ > явный глобальный off > дефолт smart.
 
+    `settings` — всё, что принимает `settings_of` (`LoadedSettings`, `AppConfig`,
+    контекст). Явность — по `is_explicit` (файл, слой, CLI, сессия), а не по
+    значению: умолчание схемы явным выбором не считается."""
+    settings = settings_of(settings)
     mode = str(settings.tui.finish_gate_mode or "smart")
     if is_explicit(settings, "tui.finish_gate_mode"):
         return mode
@@ -53,50 +42,60 @@ def finish_gate_mode_of(settings: Any) -> str:
 
 
 def text_answer_mode_of(settings: Any) -> str:
-    """Типизированный двойник `effective_text_answer_mode`."""
-    return str(settings.tui.text_answer_mode or "judge")
+    """Эффективный режим /answers: коллизии нет — значение или дефолт."""
+    return str(settings_of(settings).tui.text_answer_mode or "judge")
+
+
+def _value_at(settings: Any, dotted: str) -> Any:
+    """Значение настройки по пути через точку (`tui.finish_gate_mode`)."""
+    current: Any = settings_of(settings)
+    for name in dotted.split("."):
+        if isinstance(current, dict):
+            current = current.get(name)
+        else:
+            current = getattr(current, name, None)
+        if current is None:
+            return None
+    return current
 
 
 @dataclass(frozen=True)
 class SessionKey:
-    """Переопределяемый ключ: dotted-имя (конфиг/метаданные), плоское имя
-    (flatten-конфиг), — если есть — имя флага «задано явно», который читает
-    правило коллизии, и читатель действующего значения (`effective`; нет своего
-    правила — берётся сырое плоское значение)."""
+    """Переопределяемый ключ: путь через точку (конфиг/метаданные) и — если у
+    ключа своё правило — читатель действующего значения (`effective`; нет
+    своего правила — значение поля настроек по этому пути)."""
 
     dotted: str
-    flat: str
-    explicit_flag: str | None = None
-    effective: Callable[[Dict[str, Any]], Any] | None = None
+    effective: Callable[[Any], Any] | None = None
 
-    def effective_value(self, cfg: Dict[str, Any]) -> Any:
-        """Значение ключа, действующее для данного конфига."""
-        return self.effective(cfg) if self.effective else cfg.get(self.flat)
+    def effective_value(self, settings: Any) -> Any:
+        """Значение ключа, действующее для данных настроек (всё, что принимает
+        `settings_of`; для `profile` — и `runtime_of`)."""
+        if self.effective is not None:
+            return self.effective(settings)
+        return _value_at(settings, self.dotted)
+
+
+def _active_profile_of(settings: Any) -> str:
+    """Действующий профиль — рантайм загрузки, а не указатель из файла."""
+    return runtime_of(settings).active_profile or ""
 
 
 SESSION_KEYS: Dict[str, SessionKey] = {
     "tui.finish_gate_mode": SessionKey(
-        "tui.finish_gate_mode",
-        "tui_finish_gate_mode",
-        "tui_finish_gate_mode_explicit",
-        effective_finish_gate_mode,
+        "tui.finish_gate_mode", finish_gate_mode_of
     ),
     "tui.text_answer_mode": SessionKey(
-        "tui.text_answer_mode",
-        "tui_text_answer_mode",
-        None,
-        effective_text_answer_mode,
+        "tui.text_answer_mode", text_answer_mode_of
     ),
-    # Профили и уровни: `level` — обычный ключ, накладывается флагом на плоский
-    # "level" как любой другой. `profile` тоже регистрируется здесь для
-    # персиста/восстановления/санации (белый список), но его
-    # ЗНАЧЕНИЕ не читается через apply_overrides — TuiApp.effective_config() перехватывает
-    # его отдельно ДО generic-наложения (смена профиля требует пере-мержа base конфига,
-    # не просто подмены плоского ключа); apply_overrides всё равно проставляет
-    # плоский "profile" поверх пере-смерженной базы — так cfg["profile"] честно отражает
-    # сессионный выбор для витрин.
-    "level": SessionKey("level", "level"),
-    "profile": SessionKey("profile", "profile"),
+    # Профили и уровни: `level` — обычный ключ, ложится сессионным слоем поверх
+    # настроек как любой другой. `profile` тоже регистрируется здесь для
+    # персиста/восстановления/санации (белый список), но слоем НЕ накладывается —
+    # `TuiApp.effective_settings()` перехватывает его отдельно: смена профиля
+    # требует пере-сборки базы под ним, а не подмены одного поля. Действующее
+    # значение — профиль, под которым база собрана (`RuntimeEnv.active_profile`).
+    "level": SessionKey("level"),
+    "profile": SessionKey("profile", _active_profile_of),
 }
 
 
@@ -128,34 +127,16 @@ def to_meta_patch(overrides: Dict[str, Any]) -> Dict[str, Any]:
     return {META_KEY: dict(overrides or {})}
 
 
-def apply_overrides(cfg: Dict[str, Any], overrides: Dict[str, Any]) -> None:
-    """Наложить переопределения на плоский конфиг (мутирует cfg).
-
-    Переключение в сессии — явное действие пользователя, поэтому для ключей с
-    `explicit_flag` флаг взводится: иначе правило коллизии сочло бы значение
-    неявным и могло вернуть не его."""
-    for dotted, value in (overrides or {}).items():
-        key = SESSION_KEYS.get(dotted)
-        if key is None:
-            continue
-        cfg[key.flat] = value
-        if key.explicit_flag:
-            cfg[key.explicit_flag] = True
-
-
-def diff_vs_base(
-    base: Dict[str, Any], overrides: Dict[str, Any]
-) -> Dict[str, Any]:
-    """Переопределения, отличающиеся от ДЕЙСТВУЮЩЕГО умолчания базового
-    конфига — инструмент сравнения сессии с базой (слой API; сейчас без
+def diff_vs_base(base: Any, overrides: Dict[str, Any]) -> Dict[str, Any]:
+    """Переопределения, отличающиеся от ДЕЙСТВУЮЩЕГО умолчания базовых
+    настроек (`base` — всё, что принимает `settings_of`) — инструмент сравнения сессии с базой (слой API; сейчас без
     потребителя в UI, ближайший — будущая фича /rigor).
 
-    Сравниваем с действующим умолчанием базы, а не с сырым плоским значением:
+    Сравниваем с действующим умолчанием базы, а не с сырым значением поля:
     у ключа может быть своё правило (коллизия /gate), и по сырому значению
-    расхождение видно не всегда — рукописный конфиг с легаси-флагом
-    глобального off по сырому значению совпал бы с сессией, включившей режим
-    явно, и результат остался бы пустым, хотя действующие значения
-    расходятся."""
+    расхождение видно не всегда — рукописный конфиг с явным глобальным off
+    по сырому значению совпал бы с сессией, включившей режим явно, и результат
+    остался бы пустым, хотя действующие значения расходятся."""
     changed: Dict[str, Any] = {}
     for dotted, value in (overrides or {}).items():
         key = SESSION_KEYS.get(dotted)

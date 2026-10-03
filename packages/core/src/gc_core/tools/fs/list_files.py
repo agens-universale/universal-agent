@@ -48,7 +48,7 @@ class ListFiles(AbstractSimpleTool):
     effect_is_read_only = True
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return {
             "type": "function",
             "name": "fs_list_files",
@@ -102,7 +102,7 @@ class ListFiles(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         description = """Tool name: fs_list_files
 List files and directories under an absolute directory path.
 Default max_depth=0 = immediate children only; raise max_depth to list nested entries.

@@ -1,4 +1,5 @@
 from gc_cli import onboarding_wizard as wz
+from gc_testkit.settings import make_settings
 
 
 def _capture():
@@ -31,20 +32,24 @@ def test_run_prints_rule_header_and_final_check(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": "https://x/v1",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": "https://x/v1",
+                "chat_completion_headers": {"Authorization": "Bearer sk"},
+                "model": "m",
+            }
+        ),
     )
     io, lines = _capture()
     # уже сконфигурен → collect_fields ничего не спросит (не review_all, pending пуст)
     wz.run(
-        {
-            "completions_url": "https://x/v1",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
-        },
+        make_settings(
+            {
+                "completions_url": "https://x/v1",
+                "chat_completion_headers": {"Authorization": "Bearer sk"},
+                "model": "m",
+            }
+        ),
         cfg,
         review_all=False,
         io=io,
@@ -73,11 +78,13 @@ def test_endpoint_rendered_as_section(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": "https://x/v1",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": "https://x/v1",
+                "chat_completion_headers": {"Authorization": "Bearer sk"},
+                "model": "m",
+            }
+        ),
     )
     printed = []
     it = iter(["https://real/v1/chat/completions"])  # ввод endpoint
@@ -85,11 +92,13 @@ def test_endpoint_rendered_as_section(tmp_path, monkeypatch):
         reader=lambda p, s: next(it, ""), printer=lambda m: printed.append(m)
     )
     wz.run(
-        {
-            "completions_url": "http://your-backend:PORT/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
-        },
+        make_settings(
+            {
+                "completions_url": "http://your-backend:PORT/v1/chat/completions",
+                "chat_completion_headers": {"Authorization": "Bearer sk"},
+                "model": "m",
+            }
+        ),
         cfg,
         review_all=False,
         io=io,
@@ -109,11 +118,13 @@ def test_blank_line_separates_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr(
         wz,
         "_reload_config",
-        lambda: {
-            "completions_url": "https://x/v1",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
-        },
+        lambda: make_settings(
+            {
+                "completions_url": "https://x/v1",
+                "chat_completion_headers": {"Authorization": "Bearer sk"},
+                "model": "m",
+            }
+        ),
     )
     # Список моделей не участвует в проверке — без подмены шаг «Модель» реально
     # стучится на «https://x/v1» (зелёный тест сейчас — только потому, что DNS
@@ -123,11 +134,13 @@ def test_blank_line_separates_blocks(tmp_path, monkeypatch):
     )
     io, lines = _capture()
     wz.run(
-        {
-            "completions_url": "https://x/v1",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
-        },
+        make_settings(
+            {
+                "completions_url": "https://x/v1",
+                "chat_completion_headers": {"Authorization": "Bearer sk"},
+                "model": "m",
+            }
+        ),
         cfg,
         review_all=True,
         io=io,

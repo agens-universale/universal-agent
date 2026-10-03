@@ -96,15 +96,14 @@ def _kind_badge(entry: DiffFileEntry) -> str:
 
 def _service_from_config(
     launch_root: str,
-    config: dict,
+    settings,
     *,
     threads_dir: Optional[str] = None,
     system_id: Optional[str] = None,
     thread_id: Optional[str] = None,
 ) -> DiffService:
-    """`config` — то, что принимает `settings_of`: настройки окна или
-    (переходно) плоский словарь."""
-    settings = settings_of(config)
+    """`settings` — то, что принимает `settings_of`: настройки окна."""
+    settings = settings_of(settings)
     security = settings.security
     dt = settings.diff_tui
     return DiffService(
@@ -216,7 +215,7 @@ class DiffScreen(Screen):
         self,
         *,
         launch_root: str,
-        config: Optional[dict] = None,
+        settings=None,
         service: Optional[DiffService] = None,
         on_undo_feedback: Optional[UndoFeedbackFn] = None,
         on_ui_ack: Optional[UiAckFn] = None,
@@ -225,10 +224,9 @@ class DiffScreen(Screen):
         thread_id: Optional[str] = None,
     ) -> None:
         super().__init__()
-        self._config = config or {}
         self._svc = service or _service_from_config(
             launch_root,
-            self._config,
+            settings,
             threads_dir=threads_dir,
             system_id=system_id,
             thread_id=thread_id,

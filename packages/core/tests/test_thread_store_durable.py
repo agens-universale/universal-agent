@@ -367,7 +367,7 @@ async def test_history_deleted_outside_journal_restarts_counter(tmp_path):
 
     store = DurableFileThreadStore(str(tmp_path))
     session = await ThreadSession.afrom_config(
-        config_dict={}, system_id="sys", thread_id="t1", store=store
+        settings=None, system_id="sys", thread_id="t1", store=store
     )
     await session.apersist_batch(
         [{"id": f"m{i}", "role": "user", "content": "x"} for i in range(5)],
@@ -376,7 +376,7 @@ async def test_history_deleted_outside_journal_restarts_counter(tmp_path):
     for path in glob.glob(os.path.join(str(tmp_path), "*_sys_t1*")):
         os.remove(path)
     fresh = await ThreadSession.afrom_config(
-        config_dict={}, system_id="sys", thread_id="t1", store=store
+        settings=None, system_id="sys", thread_id="t1", store=store
     )
     await fresh.apersist_batch(
         [{"id": "n1", "role": "user", "content": "y"}],

@@ -4,6 +4,7 @@ import sys
 
 import pytest
 from gc_core.utils.project_data import get_project_data
+from gc_testkit.settings import make_settings
 
 
 def _boom_platform_system():
@@ -36,10 +37,12 @@ async def test_get_project_data_allowed_paths_skip_non_writable_project_dir(
     old_mode = stat.S_IMODE(root.stat().st_mode)
     try:
         root.chmod(0o555)
-        cfg = {
-            "launch_root": str(root),
-            "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
-        }
+        cfg = make_settings(
+            {
+                "launch_root": str(root),
+                "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
+            }
+        )
         data = await get_project_data(cfg)
         assert data["projectDirWritable"] == "false"
         lines = [
@@ -56,10 +59,12 @@ async def test_get_project_data_merges_config_roots(tmp_path):
     root.mkdir()
     extra = tmp_path / "extra_allowed"
     extra.mkdir()
-    cfg = {
-        "launch_root": str(root),
-        "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
-    }
+    cfg = make_settings(
+        {
+            "launch_root": str(root),
+            "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
+        }
+    )
     data = await get_project_data(cfg)
     assert data["projectDir"] == os.path.abspath(str(root))
     lines = data["allowed_write_paths"].split("\n")

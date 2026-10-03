@@ -125,7 +125,7 @@ async def execute_native_tool_effect(
         raise GuardPreconditionChanged(
             "Tool arguments changed after guard evaluation"
         )
-    _revalidate_guard_checks(request, ctx.config_dict)
+    _revalidate_guard_checks(request, ctx)
     state = SimpleNamespace(
         shared=SimpleNamespace(
             working_memory=deepcopy(request.state.working_memory),
@@ -183,9 +183,10 @@ async def execute_native_tool_effect(
     )
 
 
-def _revalidate_guard_checks(request, config_dict):
+def _revalidate_guard_checks(request, settings):
+    """``settings`` — всё, что принимает ``settings_of`` (контекст эффекта)."""
     for check in request.guard_checks:
-        current = evaluate_guard_probe(check.request, config_dict=config_dict)
+        current = evaluate_guard_probe(check.request, settings=settings)
         if current.facts_digest != check.result.facts_digest:
             raise GuardPreconditionChanged(
                 "Guard facts changed after approval"

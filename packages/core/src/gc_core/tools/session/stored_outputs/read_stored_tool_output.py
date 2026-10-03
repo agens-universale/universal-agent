@@ -30,9 +30,7 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         return _fallback_logger
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {
             "type": "function",
             "name": _TOOL_NAME,
@@ -70,9 +68,7 @@ class ReadStoredToolOutput(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: session_read_stored_tool_output
 Tool description: Read paginated chunks from stored large tool output using output_ref.
 
@@ -100,7 +96,7 @@ Behavior:
 """
 
     def _inline_limit(self) -> int:
-        return get_tool_output_inline_max_chars(self._config_dict or {})
+        return get_tool_output_inline_max_chars(self._settings_source)
 
     @classmethod
     def _payload(cls, **fields: Any) -> str:

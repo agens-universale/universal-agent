@@ -18,9 +18,9 @@ _BRIEF_VALUE_LIMIT = 100
 _UNPARSED_ARGS = {"_unparsed": True}
 
 
-def is_enabled(config_dict: Any) -> bool:
-    """``agent.loop_detector.enabled``; ``config_dict`` — то, что знает ``settings_of``."""
-    return bool(settings_of(config_dict).agent.loop_detector.enabled)
+def is_enabled(settings: Any) -> bool:
+    """``agent.loop_detector.enabled``; ``settings`` — то, что принимает ``settings_of``."""
+    return bool(settings_of(settings).agent.loop_detector.enabled)
 
 
 def fingerprint(tool_name: str, args: dict[str, Any]) -> str:

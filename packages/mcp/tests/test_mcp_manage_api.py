@@ -1,3 +1,4 @@
+from gc_testkit.settings import make_settings
 from recommended_mcp.runtime import cli as cli
 
 
@@ -88,7 +89,7 @@ def test_installed_state_installed_with_version(monkeypatch):
 def test_manual_server_names_reads_runtime_key():
     server = {"transport": "stdio", "command": "x"}
     cfg = {"mcp-servers": {"corp-jira": server, "corp-confluence": server}}
-    assert sorted(cli.manual_server_names(cfg)) == [
+    assert sorted(cli.manual_server_names(make_settings(cfg))) == [
         "corp-confluence",
         "corp-jira",
     ]

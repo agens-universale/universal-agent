@@ -15,6 +15,7 @@ from gc_core.tools.subagents import special_agent as special_agent_module
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.tools.subagents.special_agent import SpecialAgent
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _make_orchestrator_state():
@@ -51,8 +52,8 @@ def _make_config(**overrides):
 
 
 def _make_ctx(cfg=None):
-    return SimpleNamespace(
-        config_dict=cfg or _make_config(),
+    return fake_ctx(
+        cfg or _make_config(),
         auxiliary_llm=ChatCompletionsLlmConfig(),
         auth_connector=None,
         logger=None,
@@ -82,7 +83,6 @@ class TestSpecialAgentCreateInstance:
                 role_description="Expert in Python",
                 task="Write a function",
                 model="test-model",
-                config_dict=_make_config(),
             )
         )
         assert instance.agent_role is None
@@ -97,7 +97,6 @@ class TestFinalizeRole:
                 role_description="Data analyst",
                 task="Analyze data",
                 model="test-model",
-                config_dict=_make_config(),
             )
         )
         with patch.object(
@@ -119,7 +118,6 @@ class TestFinalizeRole:
                 role_description="Specializes in web security",
                 task="Audit the app",
                 model="test-model",
-                config_dict=_make_config(),
             )
         )
         with patch.object(
@@ -143,7 +141,6 @@ class TestFinalizeRole:
                 role_description="desc",
                 task="task",
                 model="test-model",
-                config_dict=_make_config(),
             )
         )
         ctx = _make_ctx()
@@ -168,7 +165,6 @@ class TestFinalizeRole:
                 role_description="desc",
                 task="task",
                 model="test-model",
-                config_dict=_make_config(),
             )
         )
         with patch.object(
@@ -191,7 +187,6 @@ class TestFinalizeRole:
                 role_description="desc",
                 task="task",
                 model="m",
-                config_dict=_make_config(),
             )
         )
         with patch.object(
@@ -212,7 +207,7 @@ class TestSpecialAgentWithRunner:
         ctx = _make_ctx(cfg)
         run_agent_func = AsyncMock(return_value="Special agent done")
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         # Оба шва корутинные: генерация роли идёт нативной `a`-формой, сборка
         # дочернего контекста — тоже. Синхронные двойники здесь не подойдут:
@@ -227,14 +222,14 @@ class TestSpecialAgentWithRunner:
                 runner,
                 "_build_child_ctx",
                 new=AsyncMock(
-                    return_value=SimpleNamespace(
+                    return_value=fake_ctx(
+                        cfg,
                         logger=None,
                         run_id="cr",
                         is_tui=False,
                         # Профиль aux нужен: роль теперь зовёт
                         # `auxiliary_llm_completion_kwargs(ctx)`.
                         auxiliary_llm=ChatCompletionsLlmConfig(),
-                        config_dict=cfg,
                     )
                 ),
             ),

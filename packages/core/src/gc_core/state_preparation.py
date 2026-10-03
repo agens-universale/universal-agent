@@ -39,11 +39,14 @@ def load_state_metadata(
     request: StatePreparationRequest,
     *,
     logger: Any = None,
-    metadata_config: dict | None = None,
+    metadata_config: Any = None,
 ) -> tuple[str | None, LoadedInstructions]:
-    """Read instruction layers and project-memory status in the local runtime."""
+    """Read instruction layers and project-memory status in the local runtime.
+
+    ``metadata_config`` — всё, что принимает ``settings_of`` (контекст, настройки).
+    """
     variables: dict[str, Any] = {}
-    attach_status_to_prompt_vars(variables, config_dict=metadata_config)
+    attach_status_to_prompt_vars(variables, settings=metadata_config)
     instructions = build_instructions(
         agent_md_path=request.agent_md_path,
         is_tui=request.is_tui,
@@ -70,6 +73,8 @@ async def prepare_state(
     The metadata loader intentionally keeps the existing State semantics: the
     workspace configuration controls project discovery; memory status uses its
     ordinary local defaults. Changing that policy is separate from this extraction.
+    ``workspace_config`` — настройки рана: всё, что принимают ``settings_of``/
+    ``runtime_of`` (контекст, ``LoadedSettings``).
     """
     from gc_core.utils.project_data import get_project_data
 

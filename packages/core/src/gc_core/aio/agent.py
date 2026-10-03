@@ -79,10 +79,10 @@ class AsyncAgent:
         приложение, поднимающее агентов пачками, заплатит за каждого. Общий
         кэш снимает это, и он же достаётся субагентам через ``ctx``::
 
-            backend = resolve_os_backend(flat_config(settings))   # harbor: + environment, loop
-            cache = ToolsCache(flat_config(settings), os_backend=backend)
-            a1 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
-            a2 = await AsyncAgent.create(cfg, tools_cache=cache, os_backend=backend)
+            backend = resolve_os_backend(settings)   # harbor: + environment, loop
+            cache = ToolsCache(settings, os_backend=backend)
+            a1 = await AsyncAgent.create(settings, tools_cache=cache, os_backend=backend)
+            a2 = await AsyncAgent.create(settings, tools_cache=cache, os_backend=backend)
 
         Бэкенд кэшу нужен ОБЯЗАТЕЛЬНО, если в конфиге есть MCP-сервер с
         ``execute_on: os_backend``: свой бэкенд кэш получает только при

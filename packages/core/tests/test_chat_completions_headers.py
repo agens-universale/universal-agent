@@ -1,10 +1,10 @@
 import unittest
-from types import SimpleNamespace
 
 from gc_core.utils.connect_backend import (
     acreate_call_headers,
     build_call_headers,
 )
+from gc_testkit.settings import fake_ctx
 
 
 class _StateStub:
@@ -14,8 +14,8 @@ class _StateStub:
 
 class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_generic_chat_completion_headers(self):
-        ctx = SimpleNamespace(
-            config_dict={
+        ctx = fake_ctx(
+            {
                 "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {
@@ -32,8 +32,8 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(headers.get("X-Custom"), "v1")
 
     def test_uses_chat_completions_token_and_generic_headers(self):
-        ctx = SimpleNamespace(
-            config_dict={
+        ctx = fake_ctx(
+            {
                 "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {
@@ -56,8 +56,8 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
             def get_token(self):
                 return "auth-token"
 
-        ctx = SimpleNamespace(
-            config_dict={
+        ctx = fake_ctx(
+            {
                 "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {
@@ -76,8 +76,8 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
 
         `GcCliExternal._apply_polar_session` routes Polar trajectories through this key.
         """
-        ctx = SimpleNamespace(
-            config_dict={
+        ctx = fake_ctx(
+            {
                 "x_cl_id": "12345",
                 "backend_api_mode": "chat_completions",
                 "chat_completion_headers": {

@@ -11,6 +11,7 @@ from gc_core.states import State
 from gc_core.summarize import limit_trace_summary as lts
 from gc_core.summarize import llm as summary_llm
 from gc_testkit import run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _make_state(max_steps=2):
@@ -33,8 +34,8 @@ def _make_ctx(**overrides):
         "session_token_limit": None,
     }
     cfg.update(overrides)
-    return SimpleNamespace(
-        config_dict=cfg,
+    return fake_ctx(
+        cfg,
         logger=None,
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,
@@ -298,33 +299,59 @@ def test_function_call_serialized_in_trace(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Config wiring: flatten_app_config must propagate limit_trace_summary
-# from AgentConfig into config_dict (regression guard for missing wiring).
+# Config wiring: agent.limit_trace_summary из настроек доходит до читателя
+# (regression guard for missing wiring).
 # ---------------------------------------------------------------------------
 
 
-def test_kill_switch_wired_from_config():
-    """flatten_app_config must include limit_trace_summary from AgentConfig.
+def test_kill_switch_wired_from_config(monkeypatch):
+    """``agent.limit_trace_summary`` типизированных настроек управляет вызовом LLM.
 
-    Without this wiring, `agent.limit_trace_summary: false` in YAML has no
-    effect — _should_enable always returns True (default on) because the
-    key is absent from config_dict. Unit tests that set the key by hand
-    on a SimpleNamespace mask the bug.
+    Без этой проводки ``agent.limit_trace_summary: false`` в YAML не действует:
+    envelope всё равно зовёт LLM (default on). Тесты, где ключ задан руками на
+    двойнике контекста, маскируют поломку — здесь настройки собраны из модели.
     """
-    from gc_core.config import flatten_app_config
     from gc_core.config_modules.agent import AgentConfig
     from gc_core.config_modules.root import AppConfig
+    from gc_core.settings import LoadedSettings
 
-    # False case: kill-switch must reach config_dict as False
-    app_cfg_off = AppConfig(agent=AgentConfig(limit_trace_summary=False))
-    cd_off = flatten_app_config(app_cfg_off)
-    assert cd_off["limit_trace_summary"] is False, (
-        "flatten_app_config must wire agent.limit_trace_summary=False into config_dict"
+    called = {"n": 0}
+
+    async def _fake_llm(**_kw):
+        called["n"] += 1
+        return "summary"
+
+    monkeypatch.setattr(
+        summary_llm, "arequest_chat_completion_text", _fake_llm
     )
 
-    # True case (default): key present and True
-    app_cfg_on = AppConfig(agent=AgentConfig())
-    cd_on = flatten_app_config(app_cfg_on)
-    assert cd_on["limit_trace_summary"] is True, (
-        "flatten_app_config must wire agent.limit_trace_summary=True (default) into config_dict"
+    def _envelope(app_cfg):
+        state = _make_state(max_steps=1)
+        state.steps = 2
+        state.messages = [{"role": "user", "content": "hi"}]
+        ctx = fake_ctx(
+            loaded=LoadedSettings(settings=app_cfg),
+            logger=None,
+            auxiliary_llm=SimpleNamespace(
+                max_tokens=100, completion_kwargs={}
+            ),
+        )
+        return json.loads(
+            run_coro(lts.abuild_limit_envelope(state, "step_limit", ctx))
+        )
+
+    # False case: kill-switch must reach the reader as False
+    env_off = _envelope(
+        AppConfig(agent=AgentConfig(limit_trace_summary=False))
     )
+    assert env_off["raw_trace_summary"] == ""
+    assert called["n"] == 0, (
+        "agent.limit_trace_summary=False must disable the LLM call"
+    )
+
+    # True case (default): summary is requested
+    env_on = _envelope(AppConfig(agent=AgentConfig()))
+    assert called["n"] == 1, (
+        "agent.limit_trace_summary=True (default) must call the LLM"
+    )
+    assert env_on["raw_trace_summary"] == "summary"

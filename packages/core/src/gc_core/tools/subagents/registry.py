@@ -1,7 +1,8 @@
 import logging
-from typing import Any, Dict, List, Optional, Type
+from collections.abc import Mapping
+from typing import Any, Dict, List, Type
 
-from gc_core.settings import AppConfig, settings_of
+from gc_core.settings import AppConfig, LoadedSettings, settings_of
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 from gc_core.tools.subagents.code_planner import CodePlanner
 from gc_core.tools.subagents.code_reviewer import CodeReviewer
@@ -33,15 +34,18 @@ _SUBAGENT_MAP: Dict[str, Type[AbstractSubagent]] = {
     for cls in SUBAGENT_CLASSES  # type: ignore[attr-defined]
 }
 
-# Разобранные определения кэшируются в самом config_dict: реестр дёргается на
-# КАЖДЫЙ вызов тула (диспетчер apply_tool), и читать папку каждый раз было бы
-# расточительно. Кэш в config_dict, а не глобальный: в серверном режиме раны идут
-# в разных потоках со своими конфигами, и общий кэш отдавал бы чужие определения.
-_DEFS_CACHE_KEY = "_subagent_definitions_cache"
+# Разобранные определения кэшируются на контексте рана (``RunContext.
+# subagent_definitions``/``subagent_diagnostics``): реестр дёргается на КАЖДЫЙ
+# вызов тула (диспетчер apply_tool), и читать папку каждый раз было бы
+# расточительно. Кэш при контексте, а не глобальный: в серверном режиме раны идут
+# в разных потоках со своими настройками, и общий кэш отдавал бы чужие
+# определения. Durable-сборка (Temporal) кладёт туда готовые определения заранее —
+# workflow на диск не ходит.
+_DEFS_ATTR = "subagent_definitions"
 # Структурные факты о пропущенных файлах и отброшенных именах — для стартовых
 # уведомлений TUI. Лог читают не все, а «файл молча пропущен» оператор обязан
 # увидеть на экране.
-SUBAGENT_DIAGNOSTICS_KEY = "_subagent_diagnostics"
+_DIAGNOSTICS_ATTR = "subagent_diagnostics"
 
 _log = logging.getLogger(__name__)
 
@@ -143,44 +147,83 @@ def _apply_allowlist_and_limit(
     )
 
 
+def _is_run_context(source: Any) -> bool:
+    """Источник — контекст рана (у него свой кэш), а не сами настройки."""
+    return source is not None and not isinstance(
+        source, (AppConfig, LoadedSettings, Mapping)
+    )
+
+
+def _remember(source: Any, definitions: Any, diagnostics: Any) -> None:
+    """Запомнить итог дискавери на контексте рана (если источник — контекст)."""
+    if not _is_run_context(source):
+        return
+    try:
+        setattr(source, _DEFS_ATTR, definitions)
+        setattr(source, _DIAGNOSTICS_ATTR, diagnostics)
+    except (AttributeError, TypeError):
+        # Неизменяемый двойник контекста: кэша нет, дискавери повторится.
+        pass
+
+
+def subagent_diagnostics(settings: Any) -> List[Dict[str, Any]]:
+    """Диагностика дискавери кастомных сабагентов (для стартовых уведомлений).
+
+    С контекстом рана — его сохранённая диагностика (дискавери при первом
+    обращении); с настройками — свежий дискавери.
+    """
+    if settings is None:
+        return []
+    cached = getattr(settings, _DIAGNOSTICS_ATTR, None)
+    if _is_run_context(settings) and cached is not None:
+        return list(cached)
+    _, diagnostics = _discover(settings)
+    return list(diagnostics)
+
+
 def resolve_subagent_definitions(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
     *,
     logger: Any = None,
 ) -> Dict[str, SubagentDefinition]:
-    """Определения кастомных сабагентов для этого конфига (с мемоизацией).
+    """Определения кастомных сабагентов (с мемоизацией на контексте рана).
 
-    ``config_dict is None`` → кастомных нет вовсе: так вызывают тесты и любой
-    код, которому нужен только встроенный состав.
+    ``settings`` — контекст рана (предпочтительно: определения запоминаются в
+    ``ctx.subagent_definitions``, а заранее положенные туда возвращаются без
+    дискавери) или настройки — всё, что принимает ``settings_of``. ``None`` →
+    кастомных нет вовсе: так вызывают тесты и любой код, которому нужен только
+    встроенный состав.
     """
-    if config_dict is None:
+    if settings is None:
         return {}
+    seeded = getattr(settings, _DEFS_ATTR, None)
+    if _is_run_context(settings) and seeded is not None:
+        return seeded
+    resolved, diagnostics = _discover(settings, logger=logger)
+    _remember(settings, resolved, diagnostics)
+    return resolved
 
-    from gc_core.config_modules.frozen import derived_cache
 
-    cache = derived_cache(config_dict)
-    cached = cache.get(_DEFS_CACHE_KEY)
-    if isinstance(cached, dict):
-        return cached
-
-    # Кэш — при виде настроек, сами значения — из типизированных настроек.
-    settings = settings_of(config_dict)
+def _discover(
+    settings: Any, *, logger: Any = None
+) -> tuple[Dict[str, SubagentDefinition], List[Dict[str, Any]]]:
+    """Прочитать папку сабагентов: ``(определения, диагностика)``."""
+    app = settings_of(settings)
     builtin = builtin_subagent_names()
     diagnostics: List[Dict[str, Any]] = []
     definitions = discover_subagent_definitions(
-        settings,
+        app,
         builtin_names=builtin,
         logger=logger,
         diagnostics=diagnostics,
     )
     definitions = _apply_allowlist_and_limit(
         definitions,
-        settings,
+        app,
         builtin_names=builtin,
         logger=logger,
         diagnostics=diagnostics,
     )
-    cache[SUBAGENT_DIAGNOSTICS_KEY] = diagnostics
     for definition in definitions:
         banned = FileDefinedSubagent.required_tools_banned(definition)
         if banned:
@@ -206,17 +249,14 @@ def resolve_subagent_definitions(
             )
 
     resolved = {definition.name: definition for definition in definitions}
-    cache[_DEFS_CACHE_KEY] = resolved
-    return resolved
+    return resolved, diagnostics
 
 
-def get_subagent_class(
-    tool_name: str, config_dict: Optional[Dict[str, Any]] = None
-) -> Any:
+def get_subagent_class(tool_name: str, settings: Any = None) -> Any:
     builtin = _SUBAGENT_MAP.get(tool_name)
     if builtin is not None:
         return builtin
-    definition = resolve_subagent_definitions(config_dict).get(tool_name)
+    definition = resolve_subagent_definitions(settings).get(tool_name)
     return (
         FileDefinedSubagent.bound(definition)
         if definition is not None
@@ -224,16 +264,14 @@ def get_subagent_class(
     )
 
 
-def is_subagent_tool(
-    tool_name: str, config_dict: Optional[Dict[str, Any]] = None
-) -> bool:
+def is_subagent_tool(tool_name: str, settings: Any = None) -> bool:
     if tool_name in _SUBAGENT_MAP:
         return True
-    return tool_name in resolve_subagent_definitions(config_dict)
+    return tool_name in resolve_subagent_definitions(settings)
 
 
 def get_subagents_tools_data(
-    config_dict: Optional[Dict[str, Any]] = None,
+    settings: Any = None,
     *,
     logger: Any = None,
 ) -> Dict[str, Dict[str, Any]]:
@@ -248,7 +286,7 @@ def get_subagents_tools_data(
         }
 
     for name, definition in resolve_subagent_definitions(
-        config_dict, logger=logger
+        settings, logger=logger
     ).items():
         bound = FileDefinedSubagent.bound(definition)
         spec = bound.get_agent_specification()

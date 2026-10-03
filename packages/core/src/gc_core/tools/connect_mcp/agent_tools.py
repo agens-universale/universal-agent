@@ -421,7 +421,7 @@ _TRACE_ENV_VAR = "TRACE_ID"
 
 def _servers_cfg_with_trace(
     servers_cfg: Dict[str, Any],
-    config_dict: Dict[str, Any],
+    settings: Any,
 ) -> Dict[str, Any]:
     """Копия конфига MCP-серверов с внешним trace_id.
 
@@ -438,10 +438,10 @@ def _servers_cfg_with_trace(
     схемным (``config_modules/mcp.py``), иначе руками собранный конфиг вёл бы
     себя не так, как прошедший валидацию.
     """
-    trace_id = trace_id_from_config(config_dict)
+    trace_id = trace_id_from_config(settings)
     if not trace_id:
         return servers_cfg
-    header_name = trace_header_name(config_dict, "trace_id")
+    header_name = trace_header_name(settings, "trace_id")
     out: Dict[str, Any] = {}
     for name, srv in servers_cfg.items():
         if not isinstance(srv, dict) or not srv.get(
@@ -469,7 +469,7 @@ def _servers_cfg_with_trace(
 
 
 def _prepare_mcp_tools_data(
-    config_dict: Dict[str, Any],
+    settings: Any,
     *,
     tools_cache: Optional[ToolsCache] = None,
     os_backend: Any = None,
@@ -492,25 +492,25 @@ def _prepare_mcp_tools_data(
     некому чистить), протечка между арендаторами сервера с разными наборами
     серверов, и переживание между тестами.
     """
-    settings = settings_of(config_dict)
-    if not settings.mcp.servers:
+    app = settings_of(settings)
+    if not app.mcp.servers:
         return None
     # Ниже по слою (кэш, транспорты, ssl_config) конфиг сервера — словарь в
     # проекции плоского вида: ключи по alias (`server-name`, `verify-ssl`, ...),
     # секреты (token) — сырыми: транспорту нужен сам токен.
     servers_cfg: Dict[str, Any] = {
         name: plain_dump(server, by_alias=True)
-        for name, server in settings.mcp.servers.items()
+        for name, server in app.mcp.servers.items()
     }
     # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),
     # и в замыкание каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же
-    # для сабагентов через build_tools_data(child_config).
-    servers_cfg = _servers_cfg_with_trace(servers_cfg, config_dict)
+    # для сабагентов через build_tools_data(настройки ребёнка).
+    servers_cfg = _servers_cfg_with_trace(servers_cfg, settings)
 
     cfg: Dict[str, Any] = {
         "mcp-servers": servers_cfg,
-        "mcp-meta": settings.mcp.meta.model_dump(by_alias=True),
-        "use_retry": settings.backend.use_retry,
+        "mcp-meta": app.mcp.meta.model_dump(by_alias=True),
+        "use_retry": app.backend.use_retry,
     }
 
     if tools_cache is None:
@@ -520,7 +520,7 @@ def _prepare_mcp_tools_data(
         tools_cache = ToolsCache(cfg, os_backend=os_backend)
     else:
         # Чужой кэш адресуется по СОДЕРЖИМОМУ mcp-servers (_make_cache_key), а
-        # cfg здесь пересобран из config_dict — поэтому обновляем ссылку, чтобы
+        # cfg здесь пересобран из настроек — поэтому обновляем ссылку, чтобы
         # ключ считался от актуального набора серверов, а не от того, с которым
         # кэш когда-то создали.
         _warn_if_cache_misses_the_sandbox(tools_cache, servers_cfg, os_backend)
@@ -577,7 +577,7 @@ def _split_registry_entry(entry: Any) -> tuple:
 def _assemble_mcp_tools_data(
     mcp_registry: Dict[str, Any],
     status_map: Dict[str, Dict[str, Any]],
-    config_dict: Dict[str, Any],
+    settings: Any,
     servers_cfg: Dict[str, Any],
     os_backend: Any = None,
 ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Any]]]:
@@ -588,11 +588,11 @@ def _assemble_mcp_tools_data(
     дождаться дискавери, — и дублировать ради неё сотню строк фабрик и
     нормализации схем не за что.
     """
-    settings = settings_of(config_dict)
-    timeout = settings.mcp.meta.request_timeout_sec or 600
+    app = settings_of(settings)
+    timeout = app.mcp.meta.request_timeout_sec or 600
 
-    default_use_retry = settings.backend.use_retry
-    openai_strict = settings.backend.openai_strict_tools_schema
+    default_use_retry = app.backend.use_retry
+    openai_strict = app.backend.openai_strict_tools_schema
 
     def make_fabric(full_tool_name: str):
         def fabric(**_kwargs: Any) -> MCPToolWrapper:
@@ -643,7 +643,7 @@ def _assemble_mcp_tools_data(
 
 
 async def aget_mcp_tools_data_for_config(
-    config_dict: Dict[str, Any],
+    settings: Any,
     on_progress=None,
     *,
     tools_cache: Optional[ToolsCache] = None,
@@ -655,7 +655,7 @@ async def aget_mcp_tools_data_for_config(
     набора тулов, и она корутинная.
     """
     prepared = _prepare_mcp_tools_data(
-        config_dict, tools_cache=tools_cache, os_backend=os_backend
+        settings, tools_cache=tools_cache, os_backend=os_backend
     )
     if prepared is None:
         return {}, {}
@@ -669,7 +669,7 @@ async def aget_mcp_tools_data_for_config(
     return _assemble_mcp_tools_data(
         mcp_registry,
         status_map,
-        config_dict,
+        settings,
         servers_cfg,
         os_backend=os_backend,
     )

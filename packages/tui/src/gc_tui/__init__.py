@@ -1,7 +1,7 @@
 """gc-ua — entrypoint.
 
 Тонкий парсинг startup-аргументов (--config, --task-root) + сборка
-стека: load_config → threads_dir → TuiApp.
+стека: load_settings → threads_dir → TuiApp.
 """
 
 from __future__ import annotations
@@ -117,7 +117,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_core.config import (
         _bootstrap_user_config,
         apply_cli_overrides,
-        flat_config,
         load_settings,
         resolve_config_path,
         user_config_path,
@@ -157,7 +156,6 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             return 1
         settings, profile_meta = loaded.settings, loaded.meta
-        config_dict = loaded.config
         if not _interactive():
             # TUI не стартует — stderr доезжает до человека и остаётся на экране.
             # Гайд знает ступень лестницы: на деградировавшей «настроен — можно
@@ -167,7 +165,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(
                 onboarding.setup_guide(
                     str(onb_write_path),
-                    config_dict,
+                    settings,
                     program="gc-ua",
                     just_created=just_created,
                     repair=loaded,
@@ -233,17 +231,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             )
             return 1
         settings = apply_cli_overrides(settings)
-        config_dict, profile_meta = (
-            flat_config(settings),
-            settings.profile_meta,
-        )
+        profile_meta = settings.profile_meta
 
-        if args.config is None and onboarding.is_unconfigured(config_dict):
+        if args.config is None and onboarding.is_unconfigured(settings):
             if not _interactive():
                 print(
                     onboarding.setup_guide(
                         str(onb_write_path),
-                        config_dict,
+                        settings,
                         program="gc-ua",
                         just_created=just_created,
                     ),
@@ -257,11 +252,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     from gc_tui.runtime_config import apply_tui_runtime
 
     settings = apply_tui_runtime(settings)
-    config_dict = flat_config(settings)
 
     from gc_core.thread_store import resolve_threads_dir
 
-    threads_dir = resolve_threads_dir(config_dict)
+    threads_dir = resolve_threads_dir(settings)
 
     from recommended_mcp.runtime.daemon_autostart import (
         ensure_mcp_daemons,
@@ -272,7 +266,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     auto_mcp = args.auto_mcp
     if auto_mcp:
         ensure_mcp_daemons(
-            config_dict,
+            settings,
             disable_hint="отключить автозапуск целиком: `--no-auto-mcp`",
         )
 

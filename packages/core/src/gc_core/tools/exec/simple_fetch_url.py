@@ -43,7 +43,7 @@ class SimpleFetchUrl(FetchUrlBase):
     )
 
     @classmethod
-    def tool_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def tool_description(cls, settings: Any = None):
         return cls._tool_spec(
             description=(
                 "Fetches a URL via HTTP GET and returns readable text extracted from HTML without heavy dependencies. "
@@ -55,7 +55,7 @@ class SimpleFetchUrl(FetchUrlBase):
         )
 
     @classmethod
-    def prompt_description(cls, config_dict: Optional[Dict[str, Any]] = None):
+    def prompt_description(cls, settings: Any = None):
         return (
             "Tool name: exec_fetch_url\n"
             "Tool description: Downloads a URL and extracts readable text using a lightweight HTML cleaner. "
@@ -198,7 +198,7 @@ class SimpleFetchUrl(FetchUrlBase):
         attempts = 1 + self.max_retries
         # Политику берём ТЕМ ЖЕ путём, что и гвард `enforce_url_policy`, —
         # через `resolve_tool_context`. Политика лежит на ВЕРХНЕМ уровне
-        # (`path_policy.resolve_tool_context`); чтение config_dict напрямую давало
+        # (`path_policy.resolve_tool_context`); чтение плоского конфига напрямую давало
         # пустой чёрный список и per-hop проверка ничего не проверяла.
         _policy = resolve_tool_context(self, ctx=self._ctx, state=self._state)
         _allowed_schemes = list(

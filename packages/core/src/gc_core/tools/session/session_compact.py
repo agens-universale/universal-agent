@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, Optional
+from typing import Any
 
 from gc_core.constants.tool_names import SESSION_COMPACT_TOOL_NAME
 from gc_core.summarize.compaction import (
@@ -49,9 +49,7 @@ class SessionCompact(AbstractSimpleTool):
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
-    def tool_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> dict[str, Any]:
+    def tool_description(cls, settings: Any = None) -> dict[str, Any]:
         return {
             "type": "function",
             "name": SESSION_COMPACT_TOOL_NAME,
@@ -84,9 +82,7 @@ class SessionCompact(AbstractSimpleTool):
         }
 
     @classmethod
-    def prompt_description(
-        cls, config_dict: Optional[Dict[str, Any]] = None
-    ) -> str:
+    def prompt_description(cls, settings: Any = None) -> str:
         return """Tool name: session_compact
 Tool description: Replace the active step-by-step trace with a baseline summary for the same user turn—not durable memory and not a full log. When to use: after a major phase or before a new sub-goal (also when the trace is noisy or long). After success, the pre-compaction detailed trace is no longer sent to the model; the new trace is a structured dialog summary with updated thread memory registers, <last_dialog_steps> (recent pre-compaction messages), and current_user_intent for the open turn. Before calling, persist important verified facts or artifact paths in session_memory or a file.
 Input schema: {"type":"object","properties":{"reason":{"type":"string","description":"why compact now"}},"required":["reason"],"additionalProperties":false}

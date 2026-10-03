@@ -73,7 +73,7 @@ def _stub_tools_modules() -> None:
     async def _apply_tool(*_args, **_kwargs):
         return "ok"
 
-    def _build_tools_data(_config_dict):
+    def _build_tools_data(_settings):
         return {}, [], []
 
     tools_pkg.aapply_tool = _apply_tool
@@ -123,8 +123,10 @@ class SummaryTriggersTest(unittest.IsolatedAsyncioTestCase):
         )
         with open(prompt_path, "w", encoding="utf-8") as fd:
             fd.write("SYSTEM PROMPT")
-        return SimpleNamespace(
-            config_dict={
+        from gc_testkit.settings import fake_ctx
+
+        return fake_ctx(
+            {
                 "verbose": False,
                 "model": "CodeChat",
                 "max_steps": 0,

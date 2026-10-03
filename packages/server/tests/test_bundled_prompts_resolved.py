@@ -3,10 +3,10 @@
 и реально существовать — иначе в method-2 фича упадёт «prompt not found»."""
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from gc_core.bundled_assets import bundled_root
+from gc_testkit.settings import fake_ctx
 
 
 def _bp(*parts: str) -> Path:
@@ -28,7 +28,7 @@ def foreign_prompt_workspace(tmp_path, monkeypatch):
             "Foreign workspace prompt must not be loaded", encoding="utf-8"
         )
     monkeypatch.chdir(tmp_path)
-    return SimpleNamespace(config_dict={})
+    return fake_ctx()
 
 
 def test_intent_guard_prompt_under_bundled_root():
@@ -53,7 +53,7 @@ def test_command_judge_prompts_under_bundled_root(
         GuardProbeRequest(
             "command_prompts", "exec_command", "", cwd=str(tmp_path)
         ),
-        config_dict=foreign_prompt_workspace.config_dict,
+        settings=foreign_prompt_workspace,
     )
     for kind in ("system", "user"):
         path = _bp("prompts", "security", f"command_judge_{kind}.md")

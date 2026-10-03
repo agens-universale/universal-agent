@@ -8,6 +8,7 @@ from gc_core.project_memory.compaction import CompactionResult
 from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.registry import get_builtin_tools_data
 from gc_testkit.helpers.tool_ctx import CallableTool
+from gc_testkit.settings import fake_ctx, make_settings
 
 
 @pytest.fixture(autouse=True)
@@ -20,9 +21,9 @@ def _isolate_project_memory_gc_home(tmp_path, monkeypatch):
 
 
 def _make_tool(tmp_path) -> ProjectMemory:
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         project_gc_dir=tmp_path / ".gc",
-        config_dict={
+        config={
             "backend_api_mode": "chat_completions",
             "model": "test-model",
         },
@@ -308,7 +309,7 @@ def test_tool_unknown_action(tmp_path):
 
 
 def test_project_memory_registered_by_default():
-    data = get_builtin_tools_data({})
+    data = get_builtin_tools_data(make_settings())
     assert "project_memory" in data
     entry = data["project_memory"]
     assert entry["spec"]["name"] == "project_memory"
@@ -316,14 +317,16 @@ def test_project_memory_registered_by_default():
 
 
 def test_project_memory_filtered_by_stop_tools():
-    data = get_builtin_tools_data({"stop_tools": ["project_memory"]})
+    data = get_builtin_tools_data(
+        make_settings({"stop_tools": ["project_memory"]})
+    )
     assert "project_memory" not in data
 
 
 def _make_tool_with_limits(tmp_path, *, max_chars: int) -> ProjectMemory:
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         project_gc_dir=tmp_path / ".gc",
-        config_dict={
+        config={
             "backend_api_mode": "chat_completions",
             "project_memory_params": {"max_chars": max_chars},
         },
@@ -369,9 +372,9 @@ def test_tool_append_high_fill_includes_reorganize_hint(tmp_path):
 
 
 def test_tool_uses_custom_limits_from_config(tmp_path):
-    ctx = SimpleNamespace(
+    ctx = fake_ctx(
         project_gc_dir=tmp_path / ".gc",
-        config_dict={
+        config={
             "backend_api_mode": "chat_completions",
             "project_memory_params": {
                 "max_chars": 100,

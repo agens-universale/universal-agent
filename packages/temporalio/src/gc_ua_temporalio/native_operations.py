@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import timedelta
 
+from gc_core.context_preparation import settings_from_snapshot
 from gc_core.execution.contracts import (
     ExecutionFailure,
     GuardPreconditionChanged,
@@ -103,6 +104,7 @@ class NativeOperations:
         #: Снимок подготовки хода (NativePreparedContext), см. prompt/skills.
         self.prepared = None
         self._probe_cache = {}
+        self._settings_cache = None
         self.closed = False
         self.released = False
 
@@ -212,22 +214,34 @@ class NativeOperations:
         Защищённый путь проверяется до write/read guard того же пути. Если
         запрос ядра не совпадёт с предсказанным, кэш просто не сработает.
         """
-        config = (
-            self.prepared.context.config_dict if self.prepared else {}
-        ) or {}
-
-        def enabled(key):
-            block = config.get(key) or {}
-            return isinstance(block, dict) and bool(block.get("enabled"))
-
-        if request.kind == "protected_write" and enabled("write_guard"):
+        settings = self._prepared_settings()
+        if settings is None:
+            return []
+        security = settings.security
+        if request.kind == "protected_write" and security.write_guard.enabled:
             return [
                 replace(request, kind="write_path", operation=operation)
                 for operation in ("write", "append", "search_and_replace")
             ]
-        if request.kind == "protected_read" and enabled("read_guard"):
+        if request.kind == "protected_read" and security.read_guard.enabled:
             return [replace(request, kind="read_path", operation="")]
         return []
+
+    def _prepared_settings(self):
+        """Настройки из снимка подготовки хода (None — подготовки не было).
+
+        Собираются один раз на снимок: проверка guard идёт на каждый тул.
+        """
+        prepared = self.prepared
+        if prepared is None:
+            return None
+        cached = self._settings_cache
+        if cached is None or cached[0] is not prepared:
+            loaded = settings_from_snapshot(
+                prepared.context.settings, prepared.context.runtime
+            )
+            cached = self._settings_cache = (prepared, loaded.settings)
+        return cached[1]
 
     async def guard_probe(self, request):
         cached = self._probe_cache.pop(request, None)

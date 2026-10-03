@@ -11,6 +11,7 @@ import json
 import pytest
 from gc_core import processing_responses as pr
 from gc_testkit import as_coro, run_coro
+from gc_testkit.settings import fake_ctx
 
 
 def _state():
@@ -27,15 +28,16 @@ def _state():
     return s
 
 
-def _run_ctx():
+def _run_ctx(**extra):
     cd = {
         "backend_api_mode": "chat_completions",
         "console_trace": False,
         "no_tool_call_max_count": 1,
         "strict_turn_finish_validation": True,
         "text_answer_mode": "allow",
+        **extra,
     }
-    return type("C", (), {"config_dict": cd, "logger": None})()
+    return fake_ctx(cd, logger=None)
 
 
 def _bad_batch(call_id):
@@ -171,10 +173,8 @@ def _run_two_bad_turns(monkeypatch, apply_tool, tool_name):
         pr, "amaybe_update_intent_scope_from_tool", as_coro(lambda **kw: None)
     )
 
-    ctx = _run_ctx()
-    ctx.config_dict["max_unknown_tool_repeats"] = (
-        100  # повтор одного имени — отдельный сторож, не о нём
-    )
+    # повтор одного имени — отдельный сторож, не о нём
+    ctx = _run_ctx(max_unknown_tool_repeats=100)
     state = _state()
     result = run_coro(
         pr.arun_agent(

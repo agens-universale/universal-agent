@@ -158,14 +158,11 @@ def _upgrade(upgrade_info) -> List[Notice]:
     ]
 
 
-def _subagent_definitions(
-    settings: AppConfig, config_dict: Dict[str, Any]
-) -> List[Notice]:
+def _subagent_definitions(settings: AppConfig) -> List[Notice]:
     """Пропущенные файлы кастомных сабагентов и отброшенные имена.
 
     Дискавери зовём здесь намеренно: он читает несколько локальных .md и потому
-    дёшев (в отличие от MCP-дискавери, который ленив). Благодаря мемоизации в
-    config_dict повторного чтения не будет, а уведомления доступны сразу на
+    дёшев (в отличие от MCP-дискавери, который ленив). Уведомления доступны сразу на
     старте TUI, до первого запроса — иначе оператор узнал бы о пропущенном файле
     только после того, как сабагент не нашёлся.
 
@@ -175,17 +172,9 @@ def _subagent_definitions(
     if not (settings.agent.subagents_dir or "").strip():
         return []
     try:
-        from gc_core.tools.subagents.registry import (
-            SUBAGENT_DIAGNOSTICS_KEY,
-            resolve_subagent_definitions,
-        )
+        from gc_core.tools.subagents.registry import subagent_diagnostics
 
-        resolve_subagent_definitions(config_dict)
-        from gc_core.config_modules.frozen import derived_cache
-
-        records = (
-            derived_cache(config_dict).get(SUBAGENT_DIAGNOSTICS_KEY) or []
-        )
+        records = subagent_diagnostics(settings)
     except Exception:  # уведомления не должны ронять старт
         return []
 
@@ -278,7 +267,7 @@ def _basename(path: Any) -> str:
 
 
 def collect_startup_notices(
-    config_dict: Dict[str, Any],
+    settings: Any,
     builtin_tool_names: Set[str],
     mcp_status: Optional[Dict[str, Any]],
     *,
@@ -299,13 +288,16 @@ def collect_startup_notices(
     `known_tool_names` — каталог до вычитания ``stop_tools``. Без него
     валидатор видит только builtin: выключенный скилл-тул не считается
     известным, пока сборка не передала его имя.
+
+    ``settings`` — всё, что принимает ``settings_of`` (``LoadedSettings``,
+    ``AppConfig``, контекст).
     """
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     warns: List[Notice] = []
     infos: List[Notice] = []
     for n in (
         _stop_tools_unknown(settings, builtin_tool_names, known_tool_names)
-        + _subagent_definitions(settings, config_dict)
+        + _subagent_definitions(settings)
         + _mcp_failed(mcp_status)
         + _agentsmd(settings, is_tui=is_tui)
         + list(extra)

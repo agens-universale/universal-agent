@@ -89,7 +89,7 @@ def _write_tool(launch_root: Path, threads: Path, *, thread_id: str = "t1"):
     ctx.thread_id = thread_id
     wrapped = wrap_local_for_tui(ctx.os_backend, ctx)
     ctx.os_backend = wrapped
-    ctx.workspace = build_execution_workspace(wrapped, cfg)
+    ctx.workspace = build_execution_workspace(wrapped, ctx)
     return CallableTool(WriteToFile(ctx=ctx))
 
 

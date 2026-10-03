@@ -3,6 +3,7 @@
 Поведение зафиксировано в 30657a9 (полный трейс, старые сегменты не схлопываются):
 показываются ВСЕ сегменты, а маркер сжатия ставится между ними."""
 
+from gc_testkit.tui_support import tui_settings
 import json
 
 import pytest
@@ -64,7 +65,11 @@ async def test_all_segments_raw_plus_markers(tmp_path):
         ],
     )
 
-    app = TuiApp(threads_dir=str(threads), system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=str(threads),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
+    )
     async with app.run_test() as pilot:
         screen = app.screen
         screen.attach_active_task(_TID)

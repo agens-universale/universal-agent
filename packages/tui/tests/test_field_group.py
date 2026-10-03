@@ -1,5 +1,6 @@
 """Поле со списком — одна рамка на группу (спека §3.1)."""
 
+from gc_testkit.tui_support import tui_settings
 import pytest
 
 
@@ -15,7 +16,9 @@ async def test_address_and_presets_live_in_one_group(tmp_path):
     from textual.containers import VerticalScroll
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
             url_current="",
@@ -43,7 +46,9 @@ async def test_hint_is_below_the_group_not_inside(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
             url_current="",
@@ -68,7 +73,9 @@ async def test_saved_secret_marked_on_field(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
             url_current="https://h/v1/chat/completions",
@@ -106,7 +113,9 @@ async def test_proxy_field_has_no_marker(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
             url_current="https://h/v1/chat/completions",
@@ -131,7 +140,9 @@ async def test_form_hints_are_one_dim_colour(tmp_path):
     from gc_tui.palette import DEEP_DIM, INK
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
             url_current="https://h/v1/chat/completions",
@@ -170,7 +181,9 @@ async def test_voice_saved_token_marked_too(tmp_path):
     from gc_tui.palette import DEEP_DIM, INK
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         ed = VoiceEndpointEditor(
             values={
@@ -220,7 +233,9 @@ async def test_disabled_field_group_is_dimmed(tmp_path):
     from gc_tui.widgets.paste_input import PasteInput
     from textual.containers import Vertical
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         # Поле отключено ещё до монтирования (так строит поля-факты голосовой
         # редактор) — рамка обязана быть приглушённой с первого кадра.
@@ -253,7 +268,9 @@ async def test_marker_drops_when_auth_disabled(tmp_path):
     from gc_tui.editors.connection import ConnectionEditor
     from textual.widgets import Input
 
-    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
     async with app.run_test() as pilot:
         ed = ConnectionEditor(
             url_current="https://h/v1/chat/completions",

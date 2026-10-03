@@ -24,6 +24,7 @@ from gc_ua_temporalio.native_child_contracts import (
     NativeChildResult,
 )
 from gc_ua_temporalio.native_operations import restore_domain_error
+from gc_ua_temporalio.public_config import public_config_snapshot
 
 
 class RemoteChildInput:
@@ -123,16 +124,13 @@ class NativeChildTransport:
             capture_subagent_transfer(self._state, self.ctx),
             0,
         )
-        config = {
-            key: value
-            for key, value in self.ctx.config_dict.items()
-            if key
-            not in ("_subagent_definitions_cache", "_subagent_diagnostics")
-        }
+        # Снимок настроек родителя — тот же публичный дамп, что пришёл с
+        # воркера: настройки workflow собраны из него и неизменяемы.
+        public = public_config_snapshot(self.ctx)
         prepared = replace(
             self.prepared,
             context=PreparedRunContext.from_context(
-                self.ctx, config_dict=config
+                self.ctx, settings=public.settings, runtime=public.runtime
             ),
             resource_owner=self.operations.resource_owner,
         )

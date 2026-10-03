@@ -29,7 +29,7 @@ def setup_ports(config, tool_class):
 
     async def probe(request):
         events.append(("probe", request.kind))
-        return evaluate_guard_probe(request, config_dict=config)
+        return evaluate_guard_probe(request, settings=worker)
 
     async def human(request):
         events.append(("human", request.decision_key))
@@ -147,7 +147,7 @@ async def test_command_judge_human_and_effect_are_separate(
         auxiliary_llm_from_config_dict,
     )
 
-    ctx.auxiliary_llm = auxiliary_llm_from_config_dict(ctx.config_dict)
+    ctx.auxiliary_llm = auxiliary_llm_from_config_dict(ctx)
     ctx.logger = logging.getLogger("native_effect_test")
 
     async def model(**kwargs):

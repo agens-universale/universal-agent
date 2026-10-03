@@ -88,7 +88,7 @@ async def aappend_summary_trace_record(
     # Этот сток пишется сырым open()/json.dumps, мимо фильтра и форматтера, и у
     # него есть фолбэк в общий summary_trace.jsonl без kind и run_id — то есть
     # переименование файла его не покрывает.
-    trace_id = trace_id_from_config(getattr(ctx, "config_dict", None))
+    trace_id = trace_id_from_config(ctx)
     if trace_id:
         payload["trace_id"] = trace_id
     with open(trace_path, "a", encoding="utf-8") as fd:

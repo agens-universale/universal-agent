@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.usage.account import UsageAccount
 from gc_testkit import as_coro
+from gc_testkit.settings import fake_ctx
 
 
 class _FakeChildState:
@@ -79,10 +80,14 @@ def _runner():
         state_id="orch",
         discard_writes_after_stop=False,
     )
-    ctx = SimpleNamespace(
-        logger=None, run_id="r", auth_connector=None, is_tui=False
+    ctx = fake_ctx(
+        {"use_local_subagents": True},
+        logger=None,
+        run_id="r",
+        auth_connector=None,
+        is_tui=False,
     )
-    return SubagentRunner(ctx, orch, {"use_local_subagents": True}), orch
+    return SubagentRunner(ctx, orch), orch
 
 
 async def test_step_limit_returns_ok_false_not_completed(monkeypatch):

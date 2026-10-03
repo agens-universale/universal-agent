@@ -6,13 +6,19 @@ The durable adapter supplies its public configuration snapshot separately from
 the credential-bearing worker configuration.
 """
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
 
 @dataclass(frozen=True)
 class PreparedRunContext:
-    config_dict: dict[str, Any]
+    #: Настройки прогона (``AppConfig``) и рантайм (``RuntimeEnv``). Локальная
+    #: сборка кладёт сами объекты; durable-адаптер — JSON-снимок (вложенный
+    #: дамп без закрытых полей), который ``settings_from_snapshot`` собирает
+    #: обратно. Плоского ``config_dict`` здесь больше нет.
+    settings: Any
+    runtime: Any
     run_id: str
     logging_path: str
     summary_trace_path: str
@@ -28,17 +34,19 @@ class PreparedRunContext:
     registered_tool_names: list[str]
     mcp_session_owner: str
     is_tui: bool = False
-    schema_version: int = 1
+    #: 2 — настройки снимком ``settings``/``runtime`` (1 — плоский ``config_dict``).
+    schema_version: int = 2
 
     @classmethod
-    def from_context(cls, ctx, *, config_dict):
+    def from_context(cls, ctx, *, settings, runtime):
         """Describe a prepared native context without its live dependencies.
 
         The caller must explicitly choose the configuration being exported;
-        durable runtimes supply their public policy snapshot here.
+        durable runtimes supply their public snapshot (``settings``/``runtime``).
         """
         return cls(
-            config_dict=config_dict,
+            settings=settings,
+            runtime=runtime,
             run_id=ctx.run_id,
             logging_path=ctx.logging_path,
             summary_trace_path=ctx.summary_trace_path,
@@ -55,6 +63,29 @@ class PreparedRunContext:
             mcp_session_owner=ctx.mcp_session_owner,
             is_tui=getattr(ctx, "is_tui", False),
         )
+
+
+def settings_from_snapshot(settings: Any, runtime: Any) -> Any:
+    """``LoadedSettings`` из подготовленных значений ``PreparedRunContext``.
+
+    Объекты (локальная сборка) берутся как есть. JSON-снимок (durable) —
+    ``AppConfig.model_validate`` БЕЗ ``resolve_paths``: пути снимка уже такие,
+    какими их видит воркер, а резолв полез бы в cwd/home — в песочнице workflow
+    это запрещено. Явность полей сохраняет сам снимок (в нём только заданное).
+    """
+    from gc_core.settings import AppConfig, LoadedSettings, RuntimeEnv
+
+    if isinstance(settings, Mapping):
+        settings = AppConfig.model_validate(settings)
+    if isinstance(runtime, Mapping):
+        # Списков в ``RuntimeEnv`` нет: список снимка — это кортеж рантайма.
+        runtime = RuntimeEnv(
+            **{
+                key: tuple(value) if isinstance(value, list) else value
+                for key, value in runtime.items()
+            }
+        )
+    return LoadedSettings(settings=settings, runtime=runtime or RuntimeEnv())
 
 
 @dataclass

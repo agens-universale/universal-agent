@@ -34,7 +34,7 @@ def materialize_router_identity(identity, ctx):
     ):
         raise ValueError("Native router identity differs from pinned policy")
     router = ModelRouter(
-        ctx.config_dict,
+        ctx,
         level_provider=lambda: identity["level"],
         breaker=ctx.model_router.breaker,
         force_legacy=identity["force_legacy"],

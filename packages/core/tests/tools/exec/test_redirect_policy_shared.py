@@ -75,9 +75,7 @@ def test_fetch_url_refuses_a_redirect_into_a_blocked_address(monkeypatch):
     factory = _redirecting(monkeypatch, mod, visited)
     _patch_tool_globals(monkeypatch, factory, FetchUrl.acall)
 
-    tool = CallableTool(
-        with_local_ctx(FetchUrl, config_dict=_policy_config())._tool
-    )
+    tool = CallableTool(with_local_ctx(FetchUrl, _policy_config())._tool)
     out = json.loads(tool(url="https://example.com/start"))
 
     assert out["ok"] is False, out
@@ -94,9 +92,7 @@ def test_simple_fetch_url_refuses_the_same_redirect(monkeypatch):
     factory = _redirecting(monkeypatch, mod, visited)
     _patch_tool_globals(monkeypatch, factory, SimpleFetchUrl.acall)
 
-    tool = CallableTool(
-        with_local_ctx(SimpleFetchUrl, config_dict=_policy_config())._tool
-    )
+    tool = CallableTool(with_local_ctx(SimpleFetchUrl, _policy_config())._tool)
     out = json.loads(tool(url="https://example.com/start"))
 
     assert out["ok"] is False, out
@@ -115,9 +111,7 @@ def test_download_file_refuses_the_same_redirect(monkeypatch, tmp_path):
     )
 
     tool = CallableTool(
-        with_local_ctx(
-            DownloadFile, config_dict=_policy_config(launch_root)
-        )._tool
+        with_local_ctx(DownloadFile, _policy_config(launch_root))._tool
     )
     out = json.loads(tool(url="https://example.com/start", filename="x.pdf"))
 
@@ -213,9 +207,7 @@ def test_a_redirect_loop_is_not_reported_as_a_policy_block(monkeypatch):
     factory, seen = _looping(monkeypatch, mod, hops=30)
     _patch_tool_globals(monkeypatch, factory, FetchUrl.acall)
 
-    tool = CallableTool(
-        with_local_ctx(FetchUrl, config_dict=_policy_config())._tool
-    )
+    tool = CallableTool(with_local_ctx(FetchUrl, _policy_config())._tool)
     out = json.loads(tool(url="https://example.com/start"))
 
     assert out["ok"] is False, out

@@ -2,6 +2,7 @@ import json
 
 from gc_core.security.log_redaction import MASK
 from gc_core.utils.logging_module import create_run_logger
+from gc_testkit.settings import make_settings
 
 
 def _base(tmp_path, **over):
@@ -11,7 +12,7 @@ def _base(tmp_path, **over):
         "console_trace": False,
     }
     cfg.update(over)
-    return cfg
+    return make_settings(cfg)
 
 
 def test_text_default_writes_dot_log_plaintext(tmp_path):

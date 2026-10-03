@@ -20,6 +20,7 @@ from gc_core.tools.subagents.active_scope import (
 )
 from gc_core.tools.subagents.progress import QueueSubagentProgressSink
 from gc_core.tools.subagents.runner import SubagentRunner
+from gc_testkit.settings import fake_ctx
 
 # Уборщика глобали больше нет: скоуп живёт в контексте прогона и не может
 # пережить тест — переживать негде.
@@ -56,8 +57,8 @@ def _make_config(**overrides):
 
 
 def _make_ctx(cfg=None, **extra):
-    ns = SimpleNamespace(
-        config_dict=cfg or _make_config(),
+    ns = fake_ctx(
+        cfg or _make_config(),
         auth_connector=None,
         logger=None,
         logging_path="",
@@ -173,7 +174,7 @@ class TestRunnerWiresPending:
             captured["drained"] = pending
             return "done"
 
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
         runner._parent_call_id = "call_parent_9"
 
         def _run():
@@ -234,7 +235,7 @@ class TestRunnerWiresPending:
             system_id="cli",
             thread_id="task-steer",
         )
-        runner = SubagentRunner(ctx, orch, cfg)
+        runner = SubagentRunner(ctx, orch)
 
         def _run():
             with patch.object(

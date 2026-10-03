@@ -8,16 +8,16 @@ if TYPE_CHECKING:
 
 
 def build_auth_connector(
-    config_dict: Any,
+    settings: Any,
 ) -> Optional[AuthConnector]:
     """AuthConnector по секции ``agent_auth`` (None — секция пуста или не задана).
 
-    ``config_dict`` — всё, что принимает ``settings_of``.
+    ``settings`` — всё, что принимает ``settings_of``.
     """
     # Ленивый импорт: settings → root → config_modules.
     from gc_core.settings import settings_of
 
-    settings = settings_of(config_dict)
+    settings = settings_of(settings)
     verify = settings.backend.use_ssl
     auth_cfg: Dict[str, Any] = (
         settings.agent_auth.model_dump() if settings.agent_auth else {}

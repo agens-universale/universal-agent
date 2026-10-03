@@ -11,14 +11,17 @@
 import logging
 
 from gc_core.utils.logging_module import create_run_logger, release_run_logger
+from gc_testkit.settings import make_settings
 
 
 def _cfg(tmp_path):
-    return {
-        "save_logs": True,
-        "console_trace": False,
-        "logs_dump_dir": str(tmp_path),
-    }
+    return make_settings(
+        {
+            "save_logs": True,
+            "console_trace": False,
+            "logs_dump_dir": str(tmp_path),
+        }
+    )
 
 
 def test_release_removes_the_logger_from_the_registry(tmp_path):

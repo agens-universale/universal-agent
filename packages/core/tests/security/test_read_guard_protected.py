@@ -1,7 +1,7 @@
 import json
-import types
 
 from gc_core.security.read_guard import enforce_read_guard
+from gc_testkit.settings import fake_ctx
 
 
 class _Tool:
@@ -14,8 +14,8 @@ class _Tool:
 
 
 def _ctx(cwd):
-    return types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        config={
             "launch_root": str(cwd),
             "read_guard": {"enabled": False},
         },
@@ -30,8 +30,8 @@ def test_operational_gc_read_denied_even_when_readguard_off(
     from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
-    ctx = types.SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
             "read_guard": {"enabled": False},
         },
@@ -49,8 +49,8 @@ def test_skills_read_allowed(tmp_path, monkeypatch):
     (tmp_path / ".gc" / "skills" / "foo" / "SKILL.md").write_text(
         "x", encoding="utf-8"
     )
-    ctx = types.SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
             "read_guard": {"enabled": False},
         },

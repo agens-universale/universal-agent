@@ -1,5 +1,4 @@
 import json
-import types
 
 from gc_core.security.path_policy import enforce_write_guard
 
@@ -14,8 +13,8 @@ class _Tool:
 
 
 def _ctx(cwd, confirm=False):
-    return types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        config={
             "launch_root": str(cwd),
             "write_guard": {"enabled": True, "mode": "deny"},
         },
@@ -42,8 +41,8 @@ def test_operational_gc_write_denied_even_when_guard_disabled(
     from gc_core.config_modules import env_vars
 
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
-    ctx = types.SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
             "write_guard": {"enabled": False},
         },
@@ -74,13 +73,13 @@ def test_skills_write_allowed(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 # TUI repro — guard ask должен идти через confirm-порт, не stdin
 # ---------------------------------------------------------------------------
-import types as _types
+from gc_testkit.settings import fake_ctx
 
 
 def _ctx_ask_tui(launch_root, tui_confirm):
     """ctx для mode=ask в TUI-режиме."""
-    return _types.SimpleNamespace(
-        config_dict={
+    return fake_ctx(
+        config={
             "launch_root": str(launch_root),
             "write_guard": {"enabled": True, "mode": "ask"},
         },
@@ -106,8 +105,8 @@ def test_instruction_file_confirm_cached_by_decision_key(
         calls.append(question)
         return "once"
 
-    ctx = _types.SimpleNamespace(
-        config_dict={
+    ctx = fake_ctx(
+        config={
             "launch_root": str(tmp_path),
             "write_guard": {"enabled": True, "mode": "deny"},
         },

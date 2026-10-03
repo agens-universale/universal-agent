@@ -2,6 +2,7 @@ import pytest
 
 pytest.importorskip("textual")
 
+from gc_testkit.settings import make_settings
 from gc_tui.services.mcp_manager import McpManager, McpRow
 
 
@@ -14,7 +15,16 @@ def test_rows_merge_installable_wired_manual(monkeypatch):
     monkeypatch.setattr(cli, "wired_names", lambda config=None: ["office"])
     monkeypatch.setattr(cli, "manual_server_names", lambda uc: ["corp-jira"])
     monkeypatch.setattr(cli, "descriptions", lambda config=None: {})
-    m = McpManager(config=None, user_config={"mcp-servers": {"corp-jira": {}}})
+    m = McpManager(
+        config=None,
+        settings=make_settings(
+            {
+                "mcp-servers": {
+                    "corp-jira": {"transport": "stdio", "command": "x"}
+                }
+            }
+        ),
+    )
     rows = m.rows()
     assert McpRow("office", wired=True, manual=False) in rows
     assert McpRow("playwright", wired=False, manual=False) in rows
@@ -42,7 +52,7 @@ def test_rows_manual_excludes_managed_names(monkeypatch):
         "manual_server_names",
         lambda uc: ["office", "duckduckgo_search", "corp-jira"],
     )
-    m = McpManager(config=None, user_config={"mcp-servers": {}})
+    m = McpManager(config=None, settings=make_settings({"mcp-servers": {}}))
     rows = m.rows()
     manual = [r.name for r in rows if r.manual]
     assert manual == [

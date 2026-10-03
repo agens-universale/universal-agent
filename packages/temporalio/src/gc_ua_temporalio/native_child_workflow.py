@@ -168,7 +168,7 @@ class NativeSubagentWorkflow:
                     human_request=self.human_request,
                 )
                 parent_ctx.model_router = ModelRouter(
-                    parent_ctx.config_dict,
+                    parent_ctx,
                     level_provider=lambda: request.child_context[
                         "frozen_level"
                     ],
@@ -211,7 +211,6 @@ class NativeSubagentWorkflow:
                 runner = SubagentRunner(
                     parent_ctx,
                     parent_state,
-                    parent_ctx.config_dict,
                     preparation=PreparedNativeChild(prepared, child_ctx),
                     input_scope_factory=self.input_scope,
                 )

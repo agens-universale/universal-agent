@@ -14,15 +14,11 @@ CONTENT = "line1\nline2\nline3\nline4\n"
 
 def _harbor(files):
     t = ReadFile.__new__(ReadFile)
-    t._config_dict = None
     return bind_os_backend(t, FakeBackend(files))
 
 
 def _base():
     t = ReadFile.__new__(ReadFile)
-    t._config_dict = (
-        None  # __new__ skips __init__; base uses this for fs_read_max_bytes
-    )
     return bind_os_backend(t, LocalFsBackend())
 
 

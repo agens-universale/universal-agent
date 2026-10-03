@@ -139,14 +139,15 @@ def resolve_log_level(name: Optional[str]) -> int:
     return _LOG_LEVELS.get(str(name or "info").strip().lower(), logging.INFO)
 
 
-def human_console_enabled(config_dict: Dict[str, Any]) -> bool:
+def human_console_enabled(settings: Any) -> bool:
     """Печатать ли человекочитаемый рендер (>>>>>>>>>> …) в консоль.
 
     Только при ``console_trace`` И текстовом формате логов: в jsonl-режиме на
     stdout уже идёт структурный event-поток, и дублировать его человекочитаемым
     рендером не нужно (иначе jsonl-потребитель получает мусор пополам с JSON).
+    ``settings`` — всё, что принимает ``settings_of`` (контекст, настройки).
     """
-    logging_cfg = settings_of(config_dict).logging
+    logging_cfg = settings_of(settings).logging
     if not logging_cfg.console_trace:
         return False
     return str(logging_cfg.format).strip().lower() != "jsonl"
@@ -165,7 +166,7 @@ def _normalize_agent_kind(agent_kind: Optional[str]) -> str:
 
 
 def build_run_log_paths(
-    config_dict: Dict[str, Any],
+    settings: Any,
     run_id: Optional[str] = None,
     agent_kind: Optional[str] = None,
     log_ext: str = "log",
@@ -173,15 +174,18 @@ def build_run_log_paths(
     """
     Пути к логам одного запуска: общий лог агента (расширение log_ext) и
     отдельный trace-лог суммаризации (всегда .jsonl).
+
+    ``settings`` — всё, что принимает ``settings_of``: контекст, ``LoadedSettings``
+    (с рантаймом — ради ``trace_id``) или ``AppConfig``.
     """
-    base_dir = settings_of(config_dict).paths.logs_dump_dir
+    base_dir = settings_of(settings).paths.logs_dump_dir
     if not isinstance(base_dir, str) or not base_dir.strip():
         raise ValueError(
             "logs_dump_dir пуст; config_modules.root.resolve_paths() должен был его заполнить"
         )
     suffix = run_id or generate_run_id()
     kind = _normalize_agent_kind(agent_kind)
-    trace = trace_id_from_config(config_dict)
+    trace = trace_id_from_config(settings)
     if trace:
         # Слаг, а не сырое значение: os.makedirs ниже работает по уже собранному
         # пути, поэтому '/' в trace создал бы подкаталог, а '..' вышел бы из
@@ -206,12 +210,10 @@ _TEXT_FMT_TRACE = (
 )
 
 
-def _build_text_logger(
-    logger, config_dict, logging_cfg, run_id, kind, redactor
-):
+def _build_text_logger(logger, settings, logging_cfg, run_id, kind, redactor):
     # Историческое поведение main: DEBUG-уровень, .log файл, stderr ERROR-хендлер.
     logger.setLevel(logging.DEBUG)
-    trace = trace_id_from_config(config_dict)
+    trace = trace_id_from_config(settings)
     if trace:
         logger.addFilter(RunContextFilter(run_id, kind, trace))
         text_fmt = _TEXT_FMT_TRACE
@@ -219,7 +221,7 @@ def _build_text_logger(
         text_fmt = _TEXT_FMT
     if logging_cfg.save_logs:
         logging_path, summary_trace_path = build_run_log_paths(
-            config_dict, run_id=run_id, agent_kind=kind, log_ext="log"
+            settings, run_id=run_id, agent_kind=kind, log_ext="log"
         )
         os.makedirs(os.path.dirname(logging_path), exist_ok=True)
         handler = FlushFileHandler(logging_path, encoding="utf-8", mode="a")
@@ -239,19 +241,17 @@ def _build_text_logger(
     return logger, logging_path, summary_trace_path
 
 
-def _build_jsonl_logger(
-    logger, config_dict, logging_cfg, run_id, kind, redactor
-):
+def _build_jsonl_logger(logger, settings, logging_cfg, run_id, kind, redactor):
     logger.setLevel(resolve_log_level(logging_cfg.log_level))
     logger.addFilter(
-        RunContextFilter(run_id, kind, trace_id_from_config(config_dict))
+        RunContextFilter(run_id, kind, trace_id_from_config(settings))
     )
     formatter = JsonlFormatter(redactor=redactor)
     logging_path = _DISABLED_LOG_PATH
     summary_trace_path = ""
     if logging_cfg.save_logs:
         logging_path, summary_trace_path = build_run_log_paths(
-            config_dict, run_id=run_id, agent_kind=kind, log_ext="jsonl"
+            settings, run_id=run_id, agent_kind=kind, log_ext="jsonl"
         )
         os.makedirs(os.path.dirname(logging_path), exist_ok=True)
         file_handler = FlushFileHandler(
@@ -267,7 +267,7 @@ def _build_jsonl_logger(
 
 
 def create_run_logger(
-    config_dict: Dict[str, Any],
+    settings: Any,
     run_id: Optional[str] = None,
     agent_kind: Optional[str] = None,
     *,
@@ -277,6 +277,8 @@ def create_run_logger(
     Создать per-run логгер. Формат берётся из ``settings.logging.format``:
     'text' (дефолт) = историческое поведение; 'jsonl' = структурный event-поток.
     Редактирование секретов — только при redact_secrets.enabled.
+    ``settings`` — всё, что принимает ``settings_of`` (контекст, ``LoadedSettings``,
+    ``AppConfig``); ``trace_id`` берётся из его рантайма.
 
     ВСТРАИВАЮЩЕМУ: своя доставка логов — через ``log_handlers``.
 
@@ -302,7 +304,7 @@ def create_run_logger(
     kind = _normalize_agent_kind(agent_kind)
     logger_name = f"agent_run_{kind}_{effective_run_id}"
     logger = logging.getLogger(logger_name)
-    logging_cfg = settings_of(config_dict).logging
+    logging_cfg = settings_of(settings).logging
     logger.propagate = bool(logging_cfg.propagate)
     logger.handlers.clear()
     for existing in list(logger.filters):
@@ -316,11 +318,11 @@ def create_run_logger(
     fmt = str(logging_cfg.format).strip().lower()
     if fmt == "jsonl":
         built = _build_jsonl_logger(
-            logger, config_dict, logging_cfg, effective_run_id, kind, redactor
+            logger, settings, logging_cfg, effective_run_id, kind, redactor
         )
     else:
         built = _build_text_logger(
-            logger, config_dict, logging_cfg, effective_run_id, kind, redactor
+            logger, settings, logging_cfg, effective_run_id, kind, redactor
         )
 
     # Хендлеры вызывающего — ПОСЛЕ сборки: handlers.clear() выше стёр бы их.

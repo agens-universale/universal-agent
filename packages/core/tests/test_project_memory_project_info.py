@@ -8,6 +8,7 @@ rendered prompt.
 
 from gc_core.project_memory import attach_status_to_prompt_vars
 from gc_testkit.paths import ASSETS
+from gc_testkit.settings import make_settings
 
 
 def test_attach_status_with_no_memory_file(tmp_path, monkeypatch):
@@ -44,7 +45,7 @@ def test_attach_status_skipped_when_long_memory_in_stop_tools(
     monkeypatch.chdir(tmp_path)
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(
-        prompt_vars, config_dict={"stop_tools": ["project_memory"]}
+        prompt_vars, settings=make_settings({"stop_tools": ["project_memory"]})
     )
     assert "longMemoryStatus" not in prompt_vars
 
@@ -57,7 +58,7 @@ def test_attach_status_uses_configured_limit(tmp_path, monkeypatch):
     prompt_vars: dict = {}
     attach_status_to_prompt_vars(
         prompt_vars,
-        config_dict={"project_memory_params": {"max_chars": 1000}},
+        settings=make_settings({"project_memory_params": {"max_chars": 1000}}),
     )
     assert f"{len(body)}/1000 chars" in prompt_vars["longMemoryStatus"]
     assert "% filled" in prompt_vars["longMemoryStatus"]

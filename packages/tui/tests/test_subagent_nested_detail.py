@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from gc_testkit.tui_support import tui_settings
 import json
 from pathlib import Path
 
@@ -168,7 +169,9 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
     _write_parent_and_sidecar(tmp_path, tid)
 
     app = TuiApp(
-        threads_dir=str(tmp_path), system="cli", config={"model": "M"}
+        threads_dir=str(tmp_path),
+        system="cli",
+        settings=tui_settings({"model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -248,7 +251,11 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
         },
     )
 
-    app = TuiApp(threads_dir=threads, system="cli", config={"model": "M"})
+    app = TuiApp(
+        threads_dir=threads,
+        system="cli",
+        settings=tui_settings({"model": "M"}),
+    )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
         scr._active_task_id = "live_disk"

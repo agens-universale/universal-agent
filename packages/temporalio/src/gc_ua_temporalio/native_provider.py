@@ -7,7 +7,6 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Literal
 
-from gc_core.config import flat_config
 from gc_core.config_modules import AppConfig
 from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
@@ -171,8 +170,7 @@ class NativeContextProvider:
             async def bootstrap():
                 ctx = await acreate_run_context(
                     loaded,
-                    # build_auth_connector пока читает плоский вид.
-                    auth_connector=build_auth_connector(flat_config(loaded)),
+                    auth_connector=build_auth_connector(loaded),
                     run_id=_digest(call.owner_id)[:24],
                     thread_store=self.stores[store_id],
                 )
