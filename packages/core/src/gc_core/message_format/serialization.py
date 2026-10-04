@@ -3,6 +3,12 @@
 import re
 from typing import Any, Dict, List, Sequence
 
+from gc_core.attachments.model import (
+    CONTEXT_CHARS_PER_IMAGE,
+    CONTEXT_CHARS_PER_NOTE,
+    ORIGIN_USER,
+    attachments_of,
+)
 from gc_core.message_policy.user_message_policy import (
     is_dialog_summary_user_message_text,
     user_content_to_text,
@@ -108,6 +114,14 @@ def message_raw_payload_chars_for_trigger(
 
     Assistant: видимая проза при ``strip_think``; think-only (salvage) — сырой
     payload, он уходит в основной запрос.
+
+    Ваша картинка весит ``CONTEXT_CHARS_PER_IMAGE``: в ``content`` её нет, а
+    контекст модели она занимает (спека §5); снимок агента — записку
+    (``CONTEXT_CHARS_PER_NOTE``): пикселями он уходит только в своём ходе. Не
+    покрыто: ваши картинки старше окна живости считаются картинками, снимки
+    текущего хода — записками (реальный объём ловит токенный порог). Этим же счётом живут агрегаты
+    ``persistence.live_volume``, индикатор контекста TUI в символьной шкале и хвост
+    токенной оценки порога (после последнего запроса, до числа от бэкенда).
     """
     if not isinstance(message, dict):
         return 0
@@ -127,7 +141,12 @@ def message_raw_payload_chars_for_trigger(
         if projected:
             return len(projected)
         return len(_message_content_to_text(raw_content))
-    return len(_message_content_to_text(raw_content))
+    return len(_message_content_to_text(raw_content)) + sum(
+        CONTEXT_CHARS_PER_IMAGE
+        if att.origin == ORIGIN_USER
+        else CONTEXT_CHARS_PER_NOTE
+        for att in attachments_of(message)
+    )
 
 
 def calc_history_chars_for_trigger(

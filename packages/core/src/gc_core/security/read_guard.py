@@ -20,6 +20,7 @@ from typing import Any, Callable
 
 from gc_core.security.confirm_port import request_confirm
 from gc_core.security.dual_wrapper import OffLoop, dual_wrap
+from gc_core.security.media_roots import media_roots
 from gc_core.security.path_policy import (
     _extract_named_value,
     _tool_name,
@@ -365,6 +366,7 @@ def _operational_read_block(
     path_arg,
     path_extractor,
     context,
+    ps,
     blocked_result_factory,
 ):
     """Floor carve-out (Spec B §6): блок чтения operational .gc или None."""
@@ -372,7 +374,6 @@ def _operational_read_block(
         cand = _extract_named_value(
             func, args, kwargs, path_arg, path_extractor, "path"
         )
-        ps = protected_paths(cwd=context.launch_root)
     except ValueError:
         return None
     if classify_path(cand, ps) != "operational":
@@ -476,6 +477,21 @@ def _resolve_read_violation(
     )
 
 
+def _extra_read_roots(config_dict, candidate_path, ps, media) -> list[str]:
+    """Корни, разрешённые чтению сверх периметра: каталог скиллов и корни media.
+
+    Корни media разрешены, как каталог скиллов: без вопроса на каждый
+    просмотр картинки — но только пути класса media. Чужие карманы
+    `_staging/<pid>` лежат под корнем хранилища, а в класс не входят:
+    разрешение корня пустило бы их и при выключенном поле.
+    """
+    skills_root = _resolve_skills_root(config_dict)
+    extra_allowed = [skills_root] if skills_root else []
+    if classify_path(candidate_path, ps) == "media":
+        extra_allowed.extend(str(root) for root in media)
+    return extra_allowed
+
+
 def _read_guard_flow(
     func, args, kwargs, path_arg, path_extractor, blocked_result_factory
 ):
@@ -483,10 +499,12 @@ def _read_guard_flow(
     context = resolve_tool_context(*args, **kwargs)
     config_dict = _config_from_context(context)
     cfg = parse_read_guard_config(config_dict)
+    media = media_roots(config_dict)
+    ps = protected_paths(cwd=context.launch_root, media=media)
 
     # Floor carve-out (Spec B §6): runs BEFORE cfg.enabled check so
     # operational .gc reads are denied even when read_guard is off.
-    # skills/instructions/none fall through to the normal flow.
+    # skills/instructions/media/none fall through to the normal flow.
     if protection_enabled(config_dict):
         blocked = _operational_read_block(
             func,
@@ -495,6 +513,7 @@ def _read_guard_flow(
             path_arg,
             path_extractor,
             context,
+            ps,
             blocked_result_factory,
         )
         if blocked is not None:
@@ -523,8 +542,7 @@ def _read_guard_flow(
         # его validation error.
         return (yield)
 
-    skills_root = _resolve_skills_root(config_dict)
-    extra_allowed = [skills_root] if skills_root else None
+    extra_allowed = _extra_read_roots(config_dict, candidate_path, ps, media)
     try:
         check_read_path_allowed(
             candidate_path,

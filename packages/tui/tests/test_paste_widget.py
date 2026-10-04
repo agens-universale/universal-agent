@@ -52,7 +52,7 @@ async def test_second_same_paste_expands_inline():
         inp._handle_paste(BIG5)  # та же паста в окне → разворот
         await pilot.pause()
         assert inp.text == BIG5
-        assert inp._chips.get(1) is None
+        assert inp._chips.get(1) == BIG5  # запись жива: Ctrl+Z вернёт плашку
 
 
 @pytest.mark.asyncio
@@ -192,7 +192,7 @@ async def test_expand_works_always_no_timer():
         inp._handle_paste(BIG5)  # повторная вставка → разворот
         await pilot.pause()
         assert inp.text == BIG5
-        assert inp._chips.get(1) is None
+        assert inp._chips.get(1) == BIG5  # запись жива: Ctrl+Z вернёт плашку
 
 
 @pytest.mark.asyncio

@@ -12,8 +12,9 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Static
 
-from gc_tui.messages import CopyBlockRequest
+from gc_tui.messages import CopyBlockRequest, OpenImageRequest
 from gc_tui.services.clipboard_ops import copy_out
+from gc_tui.services.image_open import open_image
 from gc_tui.services.skill_view import truncate_path_left
 from gc_tui.services.trace_retention import subagent_parent_ids_in_window
 
@@ -115,6 +116,13 @@ class PreviewScreen(Screen[bool]):
             body.add_class("hidden")
             if marker is not None:
                 marker.set_prefix("▸ ")
+
+    def on_open_image_request(self, message: OpenImageRequest) -> None:
+        """Клик по картинке в реплике превью — как на главном экране; футера нет, поэтому
+        отказ — уведомлением."""
+        refusal = open_image(message.path)
+        if refusal:
+            self.notify(refusal, severity="warning")
 
     def on_copy_block_request(self, event: CopyBlockRequest) -> None:
         """Копия наружу без буфера сессии: превью показывает ЧУЖОЙ тред, а

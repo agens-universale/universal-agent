@@ -7,6 +7,8 @@ from gc_core.runtime_notices import maybe_push_llm_failure_notice
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
     has_payload,
+    is_image_rejection_error,
+    is_image_request_error,
     is_retriable_backend_error,
 )
 from gc_core.utils.connect_backend import arequest_backend_chat_completions
@@ -96,6 +98,35 @@ def _reduced_chat_completions_max_tokens(
     return max(int(minimum), reduced)
 
 
+def _payload_has_images(payload: Dict[str, Any]) -> bool:
+    """В сообщениях запроса есть части ``image_url`` (так их собирает проекция)."""
+    for message in payload.get("messages") or []:
+        content = message.get("content") if isinstance(message, dict) else None
+        if isinstance(content, list) and any(
+            isinstance(part, dict) and part.get("type") == "image_url"
+            for part in content
+        ):
+            return True
+    return False
+
+
+def _raise_if_image_failure(
+    exc: BaseException, payload: Dict[str, Any]
+) -> None:
+    """Картиночную ошибку запроса — наверх как есть: понижение max_tokens её не
+    лечит, а «Ошибка LLM» была бы ложной тревогой — потолок картинок и повтор с
+    меньшим их числом делает контроллер. На повторе адаптивного цикла — так же:
+    наверх уходит сам отказ, первая ошибка ничего о причине не скажет.
+
+    Отказ от зрения говорит о картинках сам; предел (413, число картинок) — только
+    если в запросе были картинки: 413 служебного вызова без картинок идёт прежним
+    путём, с «Ошибкой LLM»."""
+    if is_image_rejection_error(exc) or (
+        is_image_request_error(exc) and _payload_has_images(payload)
+    ):
+        raise exc
+
+
 async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
     *,
     payload_factory: Callable[[int], Dict[str, Any]],
@@ -125,10 +156,14 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
     transport retries. Connection errors/timeouts are not retried here.
     """
 
+    last_payload: Dict[str, Any] = {}
+
     async def _send_once(
         max_tokens: int, *, transport_use_retry: bool
     ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
         payload = payload_factory(max_tokens)
+        last_payload.clear()
+        last_payload.update(payload)
         response = await arequest_backend_chat_completions(
             payload,
             headers,
@@ -152,6 +187,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
             initial_max_tokens, transport_use_retry=use_retry
         )
     except Exception as first_exc:
+        _raise_if_image_failure(first_exc, last_payload)
         if not is_retriable_backend_error(first_exc):
             maybe_push_llm_failure_notice(
                 first_exc,
@@ -184,6 +220,7 @@ async def arequest_chat_completions_with_policy(  # noqa: PLR0913  # S107: won't
                     reduced_max_tokens, transport_use_retry=False
                 )
             except Exception as retry_exc:
+                _raise_if_image_failure(retry_exc, last_payload)
                 current_max_tokens = reduced_max_tokens
                 if not is_retriable_backend_error(retry_exc):
                     break

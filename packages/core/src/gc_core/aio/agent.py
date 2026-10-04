@@ -8,6 +8,7 @@ import logging
 from typing import Any, AsyncIterator
 
 from gc_core.agent_executor import AgentExecutor, undelivered_as_arun_args
+from gc_core.attachments.model import Attachment
 from gc_core.run_context import acreate_run_context
 from gc_core.utils.async_http import acquire_clients, release_clients
 
@@ -137,7 +138,13 @@ class AsyncAgent:
         """Исполнитель под фасадом — для того, чего фасад не покрывает."""
         return self._executor
 
-    async def run(self, prompt: str | list[str], **kwargs: Any) -> Any:
+    async def run(
+        self,
+        prompt: str | list[str],
+        *,
+        attachments: list[list[Attachment] | None] | None = None,
+        **kwargs: Any,
+    ) -> Any:
         """Ход агента — и доигрывание хвоста. Возвращает ответ последнего хода.
 
         Хвост — отданное `send` после последнего забора очереди циклом: пока ход
@@ -156,6 +163,11 @@ class AsyncAgent:
         Остановленный, упавший и отменённый ход хвост не доигрывает — это
         отменило бы стоп или спрятало отказ — и дальше его не оставляет: хвост
         уходит в лог событием `run_tail_dropped`, а исключение хода — наверх.
+
+        ``attachments`` — картинки по сообщениям, параллельно ``prompt`` (строка —
+        одно сообщение: ``[[a1, a2]]``): вложения из кармана процесса, в тред их
+        копирует ход. Хвост несёт свои вложения (``undelivered_as_arun_args``) —
+        картинки первого хода в него не переезжают.
         """
         messages = [prompt] if isinstance(prompt, str) else list(prompt)
         kwargs.setdefault("system", "sdk")
@@ -167,7 +179,9 @@ class AsyncAgent:
         # закончился: тогда место занимает следующий взятый хвост.
         in_flight: list = []
         try:
-            result = await self._executor.arun(messages, **kwargs)
+            result = await self._executor.arun(
+                messages, attachments=attachments, **kwargs
+            )
             while True:
                 tail = _take_tail(self._executor)
                 # С этой строки хвост — только здесь.
@@ -295,6 +309,9 @@ class AsyncAgent:
 
         Опоздавшее к последнему забору очереди — пока ход сохранял тред и
         сносил MCP — тот же `run` доигрывает отдельным ходом (см. `run`).
+
+        Картинки — ключ ``attachments`` (словари ``Attachment.to_dict()`` из
+        кармана): ход копирует их в тред, когда агент принимает сообщение.
         """
         self._executor.add_message(message)
 

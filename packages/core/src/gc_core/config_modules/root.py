@@ -21,6 +21,7 @@ from gc_core.config_modules.endpoint_presets import (
     default_endpoint_presets,
 )
 from gc_core.config_modules.fs_tools import FsToolsConfig
+from gc_core.config_modules.images import ImagesConfig
 from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     normalize_intent_scope_config,
@@ -119,6 +120,7 @@ class AppConfig(BaseModel):
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     agent_edits: AgentEditsConfig = Field(default_factory=AgentEditsConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig
     )

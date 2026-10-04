@@ -211,6 +211,7 @@ def _protected_write_block(
     `yield OffLoop(...)` драйверу, поэтому звать — через `yield from`.
     """
     from gc_core.security.confirm_port import request_confirm
+    from gc_core.security.media_roots import media_roots
     from gc_core.security.protected_paths import (
         protected_decision,
         protection_enabled,
@@ -219,7 +220,9 @@ def _protected_write_block(
     _cfg = getattr(context.ctx, "config_dict", None) or {}
     if not protection_enabled(_cfg):
         return None
-    _decision = protected_decision(candidate_path, cwd=context.launch_root)
+    _decision = protected_decision(
+        candidate_path, cwd=context.launch_root, media=media_roots(_cfg)
+    )
     if _decision == "deny":
         _err = {
             "type": "protected_path_denied",

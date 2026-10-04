@@ -1099,7 +1099,7 @@ async def test_profile_previews_count_what_belongs_to_the_profile(
         assert _preview(ed, "entry") == "3 модели · 1 в профиле"
         assert "flash-host" not in _preview(ed, "entry")
         assert _preview(ed, "slot") == "light→opus · default→glm · max→—"
-        assert _preview(ed, "assign") == "15 · в профиле 1"
+        assert _preview(ed, "assign") == "16 · в профиле 1"
         # Уровень в превью красится своим цветом — как везде на экране (§12.4).
         assert _value_color(ed._block_preview("slot"), "light") == _rgb(
             value_style("light")
@@ -1118,7 +1118,7 @@ async def test_a_profile_that_owns_nothing_says_only_the_count(
         ed,
     ):
         assert _preview(ed, "entry") == "2 модели"
-        assert _preview(ed, "assign") == "15"
+        assert _preview(ed, "assign") == "16"
         assert _preview(ed, "slot") == "light→opus · default→flash · max→—"
 
 
@@ -1148,7 +1148,7 @@ async def test_the_main_section_previews_keep_their_own_grammar(tmp_path):
         ed = _editor(scr)
         assert _preview(ed, "entry") == "2 модели · host"
         assert _preview(ed, "slot") == "light→— · default→flash · max→—"
-        assert _preview(ed, "assign") == "15 · все активная"
+        assert _preview(ed, "assign") == "16 · все активная"
 
 
 # --- пустые якоря секций (Task D, §11) ----------------------------------------

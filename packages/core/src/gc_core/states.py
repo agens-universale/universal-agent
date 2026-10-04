@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from uuid import uuid4
 
 from gc_core.execution_workspace import (
@@ -17,6 +17,10 @@ from gc_core.tools.session.stored_outputs.tool_call_outputs_store import (
 )
 from gc_core.tools.skills.skills_policy import render_skills_catalog
 from gc_core.usage.account import UsageAccount
+
+if TYPE_CHECKING:
+    from gc_core.vision.audience import Audience
+    from gc_core.vision.rejects import ImageRequestLimit
 
 
 @dataclass
@@ -182,6 +186,24 @@ class State:
         self.run_start_usage_meta: Optional[dict] = None
         # Чек-лист субагента: собственный, эфемерный (см. property session_todo).
         self.subagent_todo: List[Dict[str, str]] = []
+        # Картинки тулов текущего батча (спека §7.1): словари `Attachment`, уходят
+        # одним техническим сообщением после батча. Сериализуемы и попадают в
+        # снимок, как `session_compact_applied`.
+        self.pending_tool_attachments: List[Dict[str, Any]] = []
+        # «Кто смотрит» на картинки последнего запроса (`vision.audience`, спека
+        # §9.1): считает контроллер на каждый запрос, читает тул `fs_view_image`.
+        # Транзиентно: `StateSerializer` его не пишет (как `workspace`).
+        self.vision_audience: Optional[Audience] = None
+        # Id картинок, ушедших модели запроса целиком (base64) в последнем запросе:
+        # тул `fs_view_image` не прикладывает такую картинку второй раз. Тот же
+        # жизненный цикл, что у `vision_audience`: считает контроллер, транзиентно.
+        self.vision_live_ids: frozenset[str] = frozenset()
+        # Успешный потолок повторов с картинками для текущего хода и контекста;
+        # это не способность модели видеть. После смены области не применяется.
+        self.vision_request_limit: Optional[ImageRequestLimit] = None
+        self.vision_probe_turn: str | None = None
+        self.vision_routes: dict = {}
+        self.vision_probe_notices: set = set()
 
     @classmethod
     async def acreate(

@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from gc_core.config import load_config
+from gc_core.config_modules.env_vars import mcp_media_dir
 from gc_core.tools.connect_mcp.execute_on import resolve_mcp_client
 from gc_core.tools.connect_mcp.transport_policy import (
     resolve_effective_transport,
@@ -78,24 +78,15 @@ _MIME_EXT = {
 }
 
 
-def _default_mcp_media_dir() -> str:
-    """Дефолт: gc_paths()['cache'] / mcp-media (XDG на Linux, ~/.gc/cache на Windows)."""
-    from gc_core.config_modules.env_vars import gc_paths
-
-    return str(gc_paths()["cache"] / "mcp-media")
-
-
 def _mcp_media_save_dir() -> str:
-    """Куда складывать декодированные image/audio.
+    """Куда складывать декодированные image/audio: ``mcp_media_dir()``
+    (``<gc_cache>/mcp-media``). Создаётся при первой записи.
 
-    Приоритет: config `mcp-meta.media_save_dir` → gc_paths()['cache']/mcp-media.
-    Создаётся при первой записи.
+    Каталог не настраивается: ключа ``mcp-meta.media_save_dir`` в схеме нет
+    (``McpMetaConfig`` — ``extra="forbid"``). Тот же каталог охрана считает
+    классом ``media`` (``security.media_roots``) — путь берётся из одной функции.
     """
-    config = load_config()
-    raw = config.get("mcp-meta", {}).get("media_save_dir")
-    if raw:
-        return os.path.expanduser(str(raw))
-    return _default_mcp_media_dir()
+    return str(mcp_media_dir())
 
 
 def _pick_filename(

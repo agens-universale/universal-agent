@@ -147,6 +147,29 @@ class TestConsumerApply:
         assert finished[0]["ok"] is True
         assert heartbeats  # at least one after end
 
+    def test_user_message_images_reach_the_nested_row(self):
+        """Реплика ребёнку с картинкой — строка со строкой картинки, как у ответа
+        на его вопрос (смоук 2026-10-01)."""
+        from image_helpers import make_attachment
+
+        att = make_attachment("a" * 16, 1)
+        mounted: list[dict] = []
+        SubagentProgressConsumer().apply_drained(
+            [
+                _ev(
+                    kind="user_message",
+                    prose="[Изображение #1] что тут?",
+                    attachments=[att.to_dict()],
+                )
+            ],
+            mount_nested_tool=lambda **kw: None,
+            finish_nested_tool=lambda **kw: None,
+            mount_nested_prose=lambda **kw: None,
+            parent_heartbeat=lambda **kw: None,
+            mount_nested_user=lambda **kw: mounted.append(kw),
+        )
+        assert mounted[0]["images"] == (att,)
+
     def test_session_todo_tool_start_routes_to_todo_mount(self):
         consumer = SubagentProgressConsumer()
         mounted: list[tuple[str, dict]] = []
