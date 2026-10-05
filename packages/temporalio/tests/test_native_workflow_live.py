@@ -119,7 +119,6 @@ async def test_native_executor_uses_real_file_session_and_replays(
                 NativeAgentWorkflow.run,
                 NativeRunRequest(
                     "test",
-                    "v1",
                     "files",
                     "test",
                     "native-thread",

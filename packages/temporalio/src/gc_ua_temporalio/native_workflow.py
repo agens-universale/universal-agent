@@ -82,6 +82,9 @@ class NativeAgentWorkflow:
         self.post_error = None
         self.terminal_outcome = None
         self.resumed_store = None
+        #: Прокси треда с подтверждённым владением (после claim или resume).
+        self.store = None
+        self.owner_released = False
 
     def new_id(self, prefix):
         self.sequence += 1
@@ -297,8 +300,11 @@ class NativeAgentWorkflow:
         self.active_turn_id = (
             f"{workflow.info().workflow_id}/turn-{self.turns + 1}"
         )
+        # Владелец контекста — ход цепочки run: новый run на том же
+        # workflow ID не наследует кэш и квитанции прошлой цепочки.
+        chain = workflow.info().first_execution_run_id
         self.operations = NativeOperations(
-            start, f"{owner}/turn-{self.turns + 1}", self.new_id
+            start, f"{owner}/{chain}/turn-{self.turns + 1}", self.new_id
         )
         prepared = await self.operations.call(
             "agent.context.prepare",
@@ -344,6 +350,7 @@ class NativeAgentWorkflow:
                 )
                 epoch = receipt.owner_epoch
             store.owner_id, store.owner_epoch = owner, epoch
+        self.store = store
         ctx = assemble_native_context(
             prepared,
             operations=self.operations,
@@ -440,16 +447,21 @@ class NativeAgentWorkflow:
                         workflow.logger.exception(
                             "Native context cleanup failed"
                         )
+                try:
+                    # Упавшая сессия не держит тред: иначе он закрыт для
+                    # локального TUI/CLI и для workflow с другим ID.
+                    await asyncio.shield(self._release_owner(start))
+                except (Exception, asyncio.CancelledError):
+                    workflow.logger.exception("Thread owner release failed")
                 raise
 
     async def _run_session(self, start):
         # Владелец треда — сессия целиком: Continue-As-New его не меняет.
         owner = workflow.info().workflow_id
-        store = None
         while True:
             ran = False
             if self.pending_messages:
-                store = await self._prepare_turn(start, owner, store)
+                await self._prepare_turn(start, owner, self.store)
                 await self._run_turn(start)
                 ran = True
             if not start.keep_alive or (
@@ -459,16 +471,13 @@ class NativeAgentWorkflow:
             self.stop_requested = False
             if ran and not self.closed and not self.pending_messages:
                 # Ход закончен: новый run начинается с почти пустой историей.
-                await self._continue(start, store)
+                await self._continue(start, self.store)
             await workflow.wait_condition(
                 lambda: bool(self.pending_messages) or self.closed
             )
         self.closed = True
         await workflow.wait_condition(workflow.all_handlers_finished)
-        if store is not None:
-            await store._mutate(
-                start.system_id, start.thread_id, "release_owner", {}
-            )
+        await self._release_owner(start)
         self.phase = "stopped" if self.stop_requested else "completed"
         return {
             "answer": self.answer,
@@ -479,6 +488,31 @@ class NativeAgentWorkflow:
             "post_error": self.post_error,
             "exit_code": 1 if self.post_error or self.terminal_outcome else 0,
         }
+
+    async def _release_owner(self, start):
+        """Снять владение тредом, если эта цепочка run его держит.
+
+        Run после Continue-As-New, закрытый без хода, владеет тредом по
+        resume: прокси собирается из сохранённых epoch/generation.
+        """
+        if self.owner_released:
+            return
+        store = self.store
+        if store is None and self.resumed_store is not None:
+            epoch, generation = self.resumed_store
+            store = TemporalThreadStore(
+                start.store_id,
+                ThreadStoreTransport(task_queue=start.resource_queue),
+                owner_id=workflow.info().workflow_id,
+                owner_epoch=epoch,
+                generation=generation,
+            )
+        if store is None or store.owner_epoch is None:
+            return
+        await store._mutate(
+            start.system_id, start.thread_id, "release_owner", {}
+        )
+        self.owner_released = True
 
     async def _continue(self, start, store):
         self.phase = "continuing"

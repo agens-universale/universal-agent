@@ -158,7 +158,6 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
             },
             profiles={
                 "test": NativeProfile(
-                    revision="v1",
                     preview_stream=human,
                     workspace=str(workspace),
                     core=AppConfig.model_validate(

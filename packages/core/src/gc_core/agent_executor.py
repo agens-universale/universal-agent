@@ -814,6 +814,12 @@ class AgentExecutor:
             else:
                 try:
                     await cleanup()
+                except Exception:
+                    # Как локальная уборка: сбой закрытия MCP не отменяет
+                    # готовый ответ хода.
+                    logger = getattr(self._ctx, "logger", None)
+                    if logger is not None:
+                        logger.warning("mcp_cleanup_failed", exc_info=True)
                 finally:
                     reset_owner(owner_reset)
         except asyncio.CancelledError as exc:

@@ -148,7 +148,6 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
             },
             "profiles": {
                 "test": {
-                    "revision": "v1",
                     "workspace": str(workspace),
                     "core": {
                         "backend": {
@@ -209,7 +208,6 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
                         NativeAgentWorkflow.run,
                         NativeRunRequest(
                             "test",
-                            "v1",
                             "files",
                             "test",
                             "parity",

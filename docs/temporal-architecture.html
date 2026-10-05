@@ -348,7 +348,7 @@ post-run шаге вызывающий использует <code>account_run=Fa
 </tr>
 <tr>
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/native_provider.py"><code>NativeContextProvider</code></a></td>
-<td>Собирает на worker'е штатный <code>acreate_run_context</code> по закреплённому профилю (имя + <code>revision</code>).</td>
+<td>Собирает на worker'е штатный <code>acreate_run_context</code> по профилю воркера: workflow знает только имя профиля.</td>
 </tr>
 <tr>
 <td>ThreadStore</td>
@@ -360,7 +360,7 @@ post-run шаге вызывающий использует <code>account_run=Fa
 </tr>
 <tr>
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/payload_storage.py">Payload storage</a></td>
-<td>External storage Temporal SDK: payload больше порога (32 КБ по умолчанию) лежат вне истории.</td>
+<td>External storage Temporal SDK, включён по умолчанию: payload больше порога (32 КБ) лежат вне истории.</td>
 </tr>
 </tbody>
 </table></div>
@@ -751,7 +751,7 @@ replay восстанавливает буфер. Шаги теряются из
 продолжает тот же тред. Статусы: <code>idle</code>/<code>completed</code> → <code>completed</code>,
 <code>stopped</code> → <code>cancelled</code>, <code>failed</code> → <code>failed</code>.</p>
 <p>Команды клиента: <code>gc-temporal-native start | status | result | stop | answer | close | send</code>;
-<code>--config</code> нужен, если включён <code>payload_storage</code>.</p>
+<code>--config</code> (JSON воркера) нужен, чтобы читать крупные payload из <code>payload_storage</code>.</p>
 <h2 id="section-10">10. Конфигурация</h2>
 <p><a href="temporal-configuration.md#native-quickstart">Native quickstart и настройки</a>,
 <a href="temporal-native.md">размещение worker'а</a>, пример
@@ -765,7 +765,11 @@ replay восстанавливает буфер. Шаги теряются из
 может быть неизвестен, и модель должна проверить состояние сама.</li>
 <li>Запрос к модели может быть оплачен дважды при падении после ответа.</li>
 <li>Worker Versioning не используется: ход, идущий в момент несовместимого релиза,
-нужно доиграть старым кодом (мягкая остановка worker'а).</li>
+нужно доиграть старым кодом (мягкая остановка worker'а). Пока идёт разработка,
+несовместимые истории чистятся; при вводе versioning номером билда станет
+версия пакета <code>gc-ua-temporalio</code>.</li>
+<li>Настройки профиля воркер берёт из своего JSON при каждой activity: смена
+настроек или токена — перезапуск воркера, живые сессии продолжают работу.</li>
 <li>Blob'ы external storage Temporal не удаляет — нужна очистка по сроку.</li>
 <li>Файлы картинок (<code>ImageStore</code>, карман процесса <code>_staging/&lt;pid&gt;</code>) лежат на диске
 worker'а: несколько worker'ов на разных хостах требуют общего тома для каталога

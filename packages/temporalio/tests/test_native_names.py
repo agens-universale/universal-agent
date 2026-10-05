@@ -37,7 +37,7 @@ def test_registered_names_are_pinned(tmp_path, monkeypatch):
     config = NativeWorkerConfig(
         receipts_database=str(tmp_path / "receipts.sqlite"),
         thread_stores={"files": {"path": str(tmp_path / "threads")}},
-        profiles={"p": NativeProfile(revision="v1", workspace=str(tmp_path))},
+        profiles={"p": NativeProfile(workspace=str(tmp_path))},
     )
     provider, native, threads = build_native_runtime(config)
     try:

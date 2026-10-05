@@ -93,7 +93,6 @@ class NativeRunRegistry:
         client = await self.client()
         request = NativeRunRequest(
             profile=self.profile,
-            revision=self.config.profiles[self.profile].revision,
             store_id=self.store_id,
             system_id=system,
             thread_id=thread,

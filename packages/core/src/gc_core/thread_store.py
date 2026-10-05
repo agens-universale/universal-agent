@@ -877,6 +877,8 @@ class ThreadSession:
         self._deferred_messages: List[Dict[str, Any]] = []
         self._deferred_response_id: Optional[str] = None
         self._deferred_pending = False
+        #: Счётчик отложенных батчей: сброс не снимает флаг с пришедших во время записи.
+        self._deferred_mark = 0
 
     @property
     def port(self) -> Any:
@@ -1205,6 +1207,7 @@ class ThreadSession:
             self._deferred_messages.extend(deepcopy(list(step_messages)))
             self._deferred_response_id = previous_response_id
             self._deferred_pending = True
+            self._deferred_mark += 1
             return
         await self._apersist_now(
             step_messages, previous_response_id=previous_response_id
@@ -1214,11 +1217,16 @@ class ThreadSession:
         """Записать накопленные шаги одной операцией (persist: turn)."""
         if not self._deferred_pending:
             return
-        messages, self._deferred_messages = self._deferred_messages, []
-        self._deferred_pending = False
+        # Буфер очищается только после записи: при сбое коммита шаги
+        # остаются для повторного сброса (дубли отсекают ключи сообщений).
+        messages = list(self._deferred_messages)
+        mark = self._deferred_mark
         await self._apersist_now(
             messages, previous_response_id=self._deferred_response_id
         )
+        del self._deferred_messages[: len(messages)]
+        if self._deferred_mark == mark:
+            self._deferred_pending = False
 
     async def _apersist_now(
         self,

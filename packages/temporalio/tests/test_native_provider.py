@@ -26,9 +26,7 @@ def profile(tmp_path, **overrides):
             "logging": {"save_logs": False},
         }
     )
-    return NativeProfile(
-        revision="v1", workspace=str(tmp_path), core=config, **overrides
-    )
+    return NativeProfile(workspace=str(tmp_path), core=config, **overrides)
 
 
 def make_provider(tmp_path, profiles=None, store=None):
@@ -44,7 +42,7 @@ def make_provider(tmp_path, profiles=None, store=None):
 
 def call(**overrides):
     return replace(
-        NativeCall("test", "v1", "owner", "prepare", {"store_id": "files"}),
+        NativeCall("test", "owner", "prepare", {"store_id": "files"}),
         **overrides,
     )
 
@@ -115,14 +113,18 @@ async def test_background_owner_is_lazy_and_fresh_after_restart(
             await restarted.aclose()
 
 
-async def test_revision_store_and_owner_bindings_are_pinned(
+async def test_store_binding_pinned_profile_settings_follow_worker(
     tmp_path, monkeypatch
 ):
+    """Как pydantic-ai: workflow знает профиль по имени, настройки — у воркера.
+
+    Смена настроек или токена при перезапуске воркера не ломает сессии;
+    закреплены только store и владелец контекста.
+    """
     monkeypatch.chdir(tmp_path)
     provider, _ = make_provider(tmp_path)
+    restarted = None
     try:
-        with pytest.raises(ValueError, match="revision"):
-            await provider(call(revision="v2"))
         with pytest.raises(ValueError, match="store"):
             await provider(call(data={"store_id": "other"}))
         ctx = await provider(call())
@@ -134,11 +136,14 @@ async def test_revision_store_and_owner_bindings_are_pinned(
                 )
             }
         )
-        with pytest.raises(Exception, match="different content"):
-            make_provider(tmp_path, {"test": changed})
+        restarted, _ = make_provider(tmp_path, {"test": changed})
+        fresh = await restarted(call())
+        assert fresh.settings.agent.model_steering == "new behavior"
         assert await provider(call()) is ctx
     finally:
         await provider.aclose()
+        if restarted is not None:
+            await restarted.aclose()
 
 
 def test_wrong_workspace_rejected_without_chdir(tmp_path):
@@ -358,7 +363,7 @@ async def test_worker_never_records_agent_edits(tmp_path, monkeypatch):
             "agent_edits.record.server": True,
         },
     )
-    pinned = NativeProfile(revision="v1", workspace=str(tmp_path), core=core)
+    pinned = NativeProfile(workspace=str(tmp_path), core=core)
     provider, _ = make_provider(tmp_path, profiles={"test": pinned})
     try:
         ctx = await provider(call())

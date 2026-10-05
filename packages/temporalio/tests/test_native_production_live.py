@@ -38,7 +38,6 @@ async def test_production_provider_worker_client_and_replay(
             "receipts_database": str(tmp_path / "receipts.sqlite"),
             "profiles": {
                 "test": {
-                    "revision": "v1",
                     "workspace": str(tmp_path),
                     "core": {
                         "backend": {
@@ -80,7 +79,6 @@ async def test_production_provider_worker_client_and_replay(
                 handle = await client.start(
                     NativeRunRequest(
                         "test",
-                        "v1",
                         "files",
                         "test",
                         "production-thread",

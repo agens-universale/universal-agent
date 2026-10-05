@@ -132,7 +132,6 @@ class NativeOperations:
         """
         request = NativeCall(
             self.start.profile,
-            self.start.revision,
             self.owner_id,
             operation_id or self.new_id(name),
             data,

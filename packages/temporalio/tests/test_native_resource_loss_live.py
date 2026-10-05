@@ -117,7 +117,6 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             "thread_stores": {"files": {"path": str(tmp_path / "threads")}},
             "profiles": {
                 "test": {
-                    "revision": "v1",
                     "workspace": str(tmp_path),
                     "core": core,
                 }
@@ -150,7 +149,6 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             handle = await NativeAgentClient(env.client).start(
                 NativeRunRequest(
                     "test",
-                    "v1",
                     "files",
                     "test",
                     "lost",

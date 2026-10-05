@@ -7,6 +7,8 @@
 Хранилище должно быть доступно всем, кто кодирует или читает payload: worker'у,
 серверу API и клиенту ``gc-temporal-native``. Temporal blob'ы не удаляет —
 очистка по возрасту (``prune_file_payloads`` или lifecycle-правило S3) обязательна.
+Повторная запись и чтение blob'а обновляют его mtime: очистка по возрасту не
+трогает blob'ы, на которые ещё ссылаются живые сессии.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import asyncio
 import dataclasses
 import hashlib
 import os
+import tempfile
 import time
 from pathlib import Path
 from typing import Literal, Sequence
@@ -64,17 +67,42 @@ class FileStorageDriver(StorageDriver):
     def _write(self, data: bytes) -> str:
         key = hashlib.sha256(data).hexdigest()
         path = self._path(key)
-        if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            temporary = path.with_suffix(f".{os.getpid()}.tmp")
-            temporary.write_bytes(data)
+        try:
+            intact = hashlib.sha256(path.read_bytes()).hexdigest() == key
+        except FileNotFoundError:
+            intact = False
+        if intact:
+            # Тот же blob нужен новой ссылке: продлить его жизнь для очистки.
+            os.utime(path)
+            return key
+        # Нет или битый (сбой питания до fsync) — записать заново.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
             os.replace(temporary, path)
+        except BaseException:
+            Path(temporary).unlink(missing_ok=True)
+            raise
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
         return key
 
     def _read(self, key: str) -> bytes:
-        data = self._path(key).read_bytes()
+        path = self._path(key)
+        data = path.read_bytes()
         if hashlib.sha256(data).hexdigest() != key:
             raise ValueError("Stored payload digest mismatch")
+        try:
+            os.utime(path)
+        except OSError:  # хранилище только на чтение у клиента — не помеха
+            pass
         return data
 
     async def store(

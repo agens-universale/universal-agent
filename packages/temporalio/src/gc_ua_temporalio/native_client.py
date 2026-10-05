@@ -122,7 +122,6 @@ async def _run(args):
                 if args.structured_output_format
                 else None,
                 profile=args.profile,
-                revision=args.revision,
                 store_id=args.store,
                 system_id=args.system,
                 thread_id=args.thread,
@@ -161,12 +160,12 @@ def main():
     parser.add_argument("--namespace", default="default")
     parser.add_argument(
         "--config",
-        help="native-worker.json: нужен, если включён payload_storage",
+        help="native-worker.json воркера: читать крупные payload (payload_storage)",
     )
     parser.add_argument("--workflow-queue", default="ua-native-workflow")
     commands = parser.add_subparsers(dest="command", required=True)
     start = commands.add_parser("start")
-    for name in ("profile", "revision", "thread", "prompt"):
+    for name in ("profile", "thread", "prompt"):
         start.add_argument(f"--{name}", required=True)
     start.add_argument("--system", default="default")
     start.add_argument("--store", default="files")

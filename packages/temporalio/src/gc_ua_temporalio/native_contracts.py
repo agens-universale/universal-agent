@@ -59,7 +59,6 @@ class NativeResume:
 @dataclass(frozen=True)
 class NativeRunRequest:
     profile: str
-    revision: str
     store_id: str
     system_id: str
     thread_id: str
@@ -76,7 +75,6 @@ class NativeRunRequest:
 @dataclass(frozen=True)
 class NativeCall:
     profile: str
-    revision: str
     owner_id: str
     operation_id: str
     data: dict[str, Any] = field(default_factory=dict)

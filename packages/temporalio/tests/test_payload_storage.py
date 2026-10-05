@@ -29,6 +29,42 @@ async def test_file_driver_roundtrip_and_digest_check(tmp_path):
         await driver.retrieve(None, [claim])
 
 
+async def test_file_driver_rewrites_corrupt_blob_and_refreshes_mtime(tmp_path):
+    driver = FileStorageDriver(tmp_path)
+    payload = Payload(data=b"y" * 100, metadata={"encoding": b"binary/plain"})
+    [claim] = await driver.store(None, [payload])
+    path = next(tmp_path.glob("*/*.bin"))
+    stale = time.time() - 3600
+    os.utime(path, (stale, stale))
+    # Повторная ссылка на тот же blob продлевает его жизнь для очистки.
+    await driver.store(None, [payload])
+    assert path.stat().st_mtime > stale
+    assert prune_file_payloads(tmp_path, max_age_seconds=60) == 0
+    # Битый blob (сбой питания) перезаписывается следующей записью.
+    path.write_bytes(b"")
+    await driver.store(None, [payload])
+    [restored] = await driver.retrieve(None, [claim])
+    assert restored == payload
+    assert not list(tmp_path.glob("*/*.tmp"))
+
+
+def test_worker_config_stores_payloads_by_default(tmp_path):
+    from gc_ua_temporalio.native_provider import NativeWorkerConfig
+
+    base = {
+        "receipts_database": str(tmp_path / "receipts.sqlite"),
+        "profiles": {},
+    }
+    config = NativeWorkerConfig.model_validate(base)
+    assert config.payload_storage == PayloadStorageConfig(
+        kind="file", path=str(tmp_path / "payloads")
+    )
+    disabled = NativeWorkerConfig.model_validate(
+        {**base, "payload_storage": None}
+    )
+    assert disabled.payload_storage is None
+
+
 async def test_file_driver_rejects_path_outside_root(tmp_path):
     driver = FileStorageDriver(tmp_path)
     with pytest.raises(ValueError):

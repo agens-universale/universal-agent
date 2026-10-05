@@ -63,7 +63,6 @@ async def test_native_sigkill_durable_boundaries(
             },
             "profiles": {
                 "test": {
-                    "revision": "v1",
                     "workspace": str(tmp_path),
                     "store_id": "selected",
                     "core": {
@@ -116,7 +115,6 @@ async def test_native_sigkill_durable_boundaries(
             handle = await client.start(
                 NativeRunRequest(
                     "test",
-                    "v1",
                     "selected",
                     "test",
                     "restart-thread",

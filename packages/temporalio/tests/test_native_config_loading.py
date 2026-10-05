@@ -28,7 +28,6 @@ async def test_native_file_interpolates_credentials_before_validation_and_keeps_
         "thread_stores": {"files": {"path": str(tmp_path / "threads")}},
         "profiles": {
             "test": {
-                "revision": "v1",
                 "workspace": "${ENV:NATIVE_TEST_WORKSPACE}",
                 "core": {
                     "backend": {
@@ -55,9 +54,7 @@ async def test_native_file_interpolates_credentials_before_validation_and_keeps_
     )
     provider, native, _ = build_native_runtime(config)
     try:
-        call = NativeCall(
-            "test", "v1", "owner", "prepare", {"store_id": "files"}
-        )
+        call = NativeCall("test", "owner", "prepare", {"store_id": "files"})
         ctx = await provider(call)
         assert ctx.settings.backend.completions_url == endpoint
         prepared = await native._prepare(call, ctx)
@@ -87,7 +84,6 @@ def _native_with_header(tmp_path, value):
                 "receipts_database": "receipts.sqlite",
                 "profiles": {
                     "test": {
-                        "revision": "v1",
                         "workspace": str(tmp_path),
                         "core": {
                             "backend": {

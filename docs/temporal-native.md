@@ -32,7 +32,6 @@
   },
   "profiles": {
     "project": {
-      "revision": "v1",
       "workspace": "/absolute/project",
       "store_id": "files",
       "core": {
@@ -54,10 +53,10 @@
 журнал прерванной записи, владелец). База `receipts_database` содержит результаты
 завершённых activities и preview; это не копия истории агента.
 
-Имя профиля, ревизия и полная конфигурация закрепляются в технической базе.
-Изменение конфигурации требует новой ревизии; активный owner также закреплён
-за профилем и store. Сохраняйте старые ревизии и их worker deployment, пока
-существуют использующие их выполнения.
+Workflow ссылается на профиль только по имени; конфигурацию каждая activity
+берёт из текущего процесса воркера. Смена настроек или токена — перезапуск
+воркера, живые сессии продолжают работу. Владелец контекста хода закреплён за
+профилем и store.
 
 ## Запуск и управление
 
@@ -76,7 +75,7 @@ uv run --project /absolute/universal-agent --extra temporal \
 
 ```sh
 uv run --project /absolute/universal-agent --extra temporal \
-  gc-temporal-native start --profile project --revision v1 \
+  gc-temporal-native start --profile project \
   --system cli --thread example --store files \
   --resource-queue ua-native-resource-project \
   --prompt 'Прочитай README и опиши устройство проекта'

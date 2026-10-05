@@ -174,7 +174,6 @@ async def test_automatic_summary_full_trace_parity(
             },
             "profiles": {
                 "test": {
-                    "revision": "v1",
                     "workspace": str(tmp_path),
                     "core": {
                         "backend": {
@@ -281,7 +280,6 @@ async def test_automatic_summary_full_trace_parity(
                     NativeAgentWorkflow.run,
                     NativeRunRequest(
                         "test",
-                        "v1",
                         "files",
                         "test",
                         "parity",

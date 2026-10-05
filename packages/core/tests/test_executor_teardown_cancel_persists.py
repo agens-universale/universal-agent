@@ -187,3 +187,24 @@ async def test_deferred_accounting_still_includes_formatting_tokens(
     structured = usage[CATEGORY_STRUCTURED_OUTPUT]
     assert structured["input"] == 7
     assert structured["output"] == 4
+
+
+async def test_injected_mcp_cleanup_failure_keeps_answer(
+    monkeypatch, tmp_path
+):
+    """Сбой уборки durable-исполнителя не подменяет готовый ответ (как local)."""
+
+    async def _loop(_messages, state, _ctx, **_kw):
+        _remember_outcome(state)
+        return "ok"
+
+    async def _cleanup():
+        raise RuntimeError("worker lost the profile")
+
+    ex = await _executor(monkeypatch, tmp_path, _loop, _close_ok)
+    ex._ctx.mcp_cleanup = _cleanup
+    answer = await ex.arun(
+        ["ход"], thread_id="t", start_new_thread=True, system="cli"
+    )
+    assert answer == "ok"
+    _assert_finished_loop_on_disk(_meta(tmp_path))

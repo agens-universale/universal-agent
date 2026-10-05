@@ -251,11 +251,7 @@ async def test_native_child_model_tools_input_human_and_replay(
         thread_stores={
             "files": NativeStoreConfig(path=str(tmp_path / "threads"))
         },
-        profiles={
-            "test": NativeProfile(
-                revision="v1", workspace=str(tmp_path), core=core
-            )
-        },
+        profiles={"test": NativeProfile(workspace=str(tmp_path), core=core)},
     )
     provider, native, stores = build_native_runtime(config)
     try:
@@ -271,7 +267,6 @@ async def test_native_child_model_tools_input_human_and_replay(
                     NativeAgentWorkflow.run,
                     NativeRunRequest(
                         "test",
-                        "v1",
                         "files",
                         "test",
                         "thread",

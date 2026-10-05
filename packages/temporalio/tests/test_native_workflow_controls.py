@@ -125,7 +125,6 @@ async def runtime(tmp_path, url, *, core_extra=None):
             "receipts_database": str(tmp_path / "receipts.sqlite"),
             "profiles": {
                 "test": {
-                    "revision": "v1",
                     "workspace": str(tmp_path),
                     "core": core,
                 }
@@ -151,7 +150,6 @@ async def runtime(tmp_path, url, *, core_extra=None):
 def request(**kwargs):
     return NativeRunRequest(
         "test",
-        "v1",
         "files",
         "test",
         "controls",

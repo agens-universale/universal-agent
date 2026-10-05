@@ -413,7 +413,6 @@ async def test_actual_http_local_native_parity(
             },
             "profiles": {
                 "test": {
-                    "revision": "v1",
                     "workspace": str(tmp_path),
                     "core": {
                         "backend": {
@@ -485,7 +484,6 @@ async def test_actual_http_local_native_parity(
                     NativeAgentWorkflow.run,
                     NativeRunRequest(
                         "test",
-                        "v1",
                         "files",
                         "test",
                         "parity",

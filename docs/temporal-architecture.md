@@ -180,10 +180,10 @@ flowchart TB
 | [`NativeAgentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_workflow.py) | Сессия: очередь сообщений, ответы человека, stop/close, один ход за run. Внутри хода — настоящий `AgentExecutor.arun`. |
 | [`NativeSubagentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py) | Субагент: настоящий `SubagentRunner.arun` в child workflow. |
 | [`native_worker`](../packages/temporalio/src/gc_ua_temporalio/native_worker.py) | Один процесс обслуживает все три очереди и один workspace; cwd должен совпадать с `profiles.<name>.workspace`. |
-| [`NativeContextProvider`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) | Собирает на worker'е штатный `acreate_run_context` по закреплённому профилю (имя + `revision`). |
+| [`NativeContextProvider`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) | Собирает на worker'е штатный `acreate_run_context` по профилю воркера: workflow знает только имя профиля. |
 | ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-история-temporal-и-payload)). |
 | [`TechnicalStore`](../packages/temporalio/src/gc_ua_temporalio/storage/technical.py) | SQLite worker'а: результаты завершённых activities (повтор не платит второй раз) и необязательные preview. Не хранилище диалога. |
-| [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK: payload больше порога (32 КБ по умолчанию) лежат вне истории. |
+| [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK, включён по умолчанию: payload больше порога (32 КБ) лежат вне истории. |
 
 ## 2. Порты операций: один код, два исполнителя
 
@@ -483,7 +483,7 @@ replay восстанавливает буфер. Шаги теряются из
 `stopped` → `cancelled`, `failed` → `failed`.
 
 Команды клиента: `gc-temporal-native start | status | result | stop | answer | close | send`;
-`--config` нужен, если включён `payload_storage`.
+`--config` (JSON воркера) нужен, чтобы читать крупные payload из `payload_storage`.
 
 ## 10. Конфигурация
 
@@ -500,7 +500,11 @@ replay восстанавливает буфер. Шаги теряются из
   может быть неизвестен, и модель должна проверить состояние сама.
 - Запрос к модели может быть оплачен дважды при падении после ответа.
 - Worker Versioning не используется: ход, идущий в момент несовместимого релиза,
-  нужно доиграть старым кодом (мягкая остановка worker'а).
+  нужно доиграть старым кодом (мягкая остановка worker'а). Пока идёт разработка,
+  несовместимые истории чистятся; при вводе versioning номером билда станет
+  версия пакета `gc-ua-temporalio`.
+- Настройки профиля воркер берёт из своего JSON при каждой activity: смена
+  настроек или токена — перезапуск воркера, живые сессии продолжают работу.
 - Blob'ы external storage Temporal не удаляет — нужна очистка по сроку.
 - Файлы картинок (`ImageStore`, карман процесса `_staging/<pid>`) лежат на диске
   worker'а: несколько worker'ов на разных хостах требуют общего тома для каталога

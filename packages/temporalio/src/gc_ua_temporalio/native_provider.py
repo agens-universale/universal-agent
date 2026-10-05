@@ -13,18 +13,16 @@ from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
-from gc_core.config_modules.field_meta import REVEAL_SECRETS
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_ua_temporalio.payload_storage import PayloadStorageConfig
 
 
 class NativeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    revision: str = Field(min_length=1)
     workspace: str
     store_id: str = "files"
     preview_stream: bool = False
@@ -51,7 +49,28 @@ class NativeWorkerConfig(BaseModel):
     receipts_database: str
     profiles: dict[str, NativeProfile]
     #: Крупные payload истории Temporal — во внешнее хранилище (см. payload_storage).
+    #: По умолчанию — каталог ``payloads`` рядом с ``receipts_database``: без него
+    #: большой вывод тула или длинный ход упираются в лимиты Temporal (2 МБ на
+    #: payload, 50 МБ на историю). Явный ``null`` выключает хранилище.
     payload_storage: PayloadStorageConfig | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _default_payload_storage(cls, data):
+        if (
+            isinstance(data, dict)
+            and "payload_storage" not in data
+            and data.get("receipts_database")
+        ):
+            root = Path(data["receipts_database"]).absolute().parent
+            data = {
+                **data,
+                "payload_storage": {
+                    "kind": "file",
+                    "path": str(root / "payloads"),
+                },
+            }
+        return data
 
     @classmethod
     def load(cls, path):
@@ -81,7 +100,9 @@ class NativeContextProvider:
 
     Local backend relative paths currently follow process cwd. A worker must
     therefore start in its declared workspace; this provider never changes cwd.
-    Profiles are pinned durably by name/revision and their complete config hash.
+    Workflow знает профиль только по имени, как pydantic-ai — модель по ключу
+    реестра: activity берёт текущий профиль процесса. Смена настроек или
+    ротация токена — перезапуск воркера; живые сессии продолжают работать.
     """
 
     def __init__(self, *, profiles, stores, receipts, resource_host):
@@ -137,25 +158,12 @@ class NativeContextProvider:
                 settings=settings,
                 runtime=RuntimeEnv(launch_root=str(workspace.resolve())),
             )
-            self._profiles[name] = (profile.revision, profile.store_id, loaded)
-            identity = _digest([name, profile.revision])
-            receipts.save_operation_result(
-                "__native_profiles__",
-                identity,
-                # Дайджест — по сырым секретам: смена токена при той же
-                # ревизии обязана ловиться, а json-дамп SecretStr их маскирует.
-                _digest(
-                    profile.model_dump(mode="json", context=REVEAL_SECRETS)
-                ),
-                {"profile": name, "revision": profile.revision},
-            )
+            self._profiles[name] = (profile.store_id, loaded)
 
     def _resolve(self, call):
         if call.schema_version != 1 or not call.owner_id:
             raise ValueError("Invalid native context request")
-        revision, store_id, loaded = self._profiles[call.profile]
-        if call.revision != revision:
-            raise ValueError(f"Profile revision mismatch: {call.profile}")
+        store_id, loaded = self._profiles[call.profile]
         if "store_id" in call.data and call.data["store_id"] != store_id:
             raise ValueError(
                 "Requested thread store differs from pinned profile"
@@ -163,10 +171,9 @@ class NativeContextProvider:
         self.receipts.save_operation_result(
             call.owner_id,
             "__native_context_binding__",
-            _digest([call.profile, revision, store_id, call.child_context]),
+            _digest([call.profile, store_id, call.child_context]),
             {
                 "profile": call.profile,
-                "revision": revision,
                 "store_id": store_id,
             },
         )

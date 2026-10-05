@@ -46,7 +46,7 @@ async def test_concurrent_redelivery_has_one_handler_and_bounded_lock_cache(
         await release.wait()
         return "recorded"
 
-    request = NativeCall("test", "v1", "owner", "operation")
+    request = NativeCall("test", "owner", "operation")
     first = asyncio.create_task(native._recorded(request, str, handler))
     await entered.wait()
     second = asyncio.create_task(native._recorded(request, str, handler))
@@ -67,7 +67,7 @@ async def test_domain_error_crosses_the_boundary_as_the_same_type(tmp_path):
     async def empty_path(_call, _ctx):
         raise ValueError("path must not be empty")
 
-    request = NativeCall("test", "v1", "owner", "probe")
+    request = NativeCall("test", "owner", "probe")
     with pytest.raises(ApplicationError) as caught:
         await native._recorded(request, str, empty_path)
     assert caught.value.type == "DomainError"
@@ -115,7 +115,7 @@ async def test_precondition_change_is_recoverable_tool_feedback(tmp_path):
 
     with pytest.raises(Exception) as caught:
         await native._recorded(
-            NativeCall("test", "v1", "owner", "guarded"), str, changed
+            NativeCall("test", "owner", "guarded"), str, changed
         )
     restored = restore_domain_error(caught.value)
     assert isinstance(restored, GuardPreconditionChanged)

@@ -36,7 +36,6 @@ workflow; его histories не поддерживаются и не мигри�
   },
   "profiles": {
     "production": {
-      "revision": "v1",
       "workspace": "${ENV:UA_NATIVE_WORKSPACE}",
       "store_id": "files",
       "preview_stream": false,
@@ -113,12 +112,12 @@ uv run --project "$UA_REPO" --extra temporal gc-temporal-native-worker \
 uv run --project "$UA_REPO" --extra temporal gc-temporal-native \
   --address localhost:7233 --namespace default \
   --workflow-queue ua-native-workflow start \
-  --profile production --revision v1 --store files --system cli --thread example \
+  --profile production --store files --system cli --thread example \
   --resource-queue ua-native-resource-local --model-queue ua-native-model \
   --prompt 'Прочитай README рабочей папки и кратко опиши проект'
 ```
 
-Клиент печатает workflow ID и не читает worker JSON: profile/revision/store и
+Клиент печатает workflow ID и не читает worker JSON: profile/store и
 очереди должны совпадать с конфигурацией worker. Для `status WORKFLOW_ID`,
 `result WORKFLOW_ID`, `stop WORKFLOW_ID` используется тот же префикс команды.
 Старт с `--keep-alive` сохраняет сессию для `send WORKFLOW_ID --message-id UNIQUE_ID
@@ -127,7 +126,7 @@ uv run --project "$UA_REPO" --extra temporal gc-temporal-native \
 Structured output включается `start --structured-output-format /absolute/format.txt`.
 О поведении при сбоях — [ошибки и восстановление](#ошибки-и-восстановление).
 
-### Модель, ревизии и живые ресурсы
+### Модель, профили и живые ресурсы
 
 Поддержаны общий Chat Completions и Responses. Для Responses задайте
 `core.backend.api_mode: "responses"` и соответствующий endpoint в
@@ -136,17 +135,21 @@ Structured output включается `start --structured-output-format /absolu
 `preview_stream: true` — явный opt-in потокового preview, требующий совместимого
 streaming-провайдера; пример оставляет JSON Chat Completions без preview.
 
-Полный раскрытый профиль закрепляется по имени и ревизии в техническом журнале.
-Изменение настроек требует нового `revision`; это относится и к изменённым
-значениям headers после `${ENV:...}`. Сохраняйте старые конфигурации и их worker
-очереди для активных histories; автоматической миграции на другую ревизию нет.
+Workflow знает профиль только по имени (как pydantic-ai — модель по ключу
+реестра): каждая activity берёт текущий профиль процесса воркера. Чтобы сменить
+настройки или токен, перезапустите воркер с новым JSON — живые сессии
+продолжат работу, следующие шаги пойдут уже с новыми настройками. Имя профиля и
+`store_id` должны оставаться прежними: переименование профиля — это новый
+профиль, и сессии старого имени получат ошибку. Если правка меняет
+последовательность шагов внутри хода, ход, начатый на старом коде, может не
+пройти replay — на время разработки такие истории чистятся.
 Credentials не входят в публичный prepared context workflow.
 
 MCP задаётся обычным `core.mcp`, субагенты — штатными настройками `core.agent`
 и registry. Native MCP discovery и teardown исполняются
 в одной задаче `WorkerResourceHost`; background-владелец создаётся при первом
 реальном фоновом эффекте. Потеря процесса не разрешает скрытый reconnect/repeat.
-File/model контексты без живых ресурсов восстанавливаются из pinned profile.
+File/model контексты без живых ресурсов восстанавливаются из профиля воркера.
 
 ## HTTP backend
 
@@ -193,7 +196,7 @@ HTTP API, под существующей Bearer-авторизацией сер
 ### Native HTTP backend
 
 `native-worker.json` — тот же `NativeWorkerConfig`, который загружает native
-worker. `temporal_store` должен совпадать с `store_id` выбранного pinned profile.
+worker. `temporal_store` должен совпадать с `store_id` выбранного профиля.
 API-процессу нужен доступ к выбранному File/SQLite ThreadStore и технической
 receipts DB; модель и инструменты исполняет worker. Помещайте receipts DB вне
 workspace агента (например, `/var/lib/universal-agent/native/receipts.sqlite`),
@@ -230,19 +233,24 @@ Update-With-Start открывает новый run, и владелец тре�
 
 ### Крупные payload и Continue-As-New
 
-Вход запроса к модели несёт всю переписку. Чтобы история workflow не росла
-квадратично, включите external storage Temporal SDK:
+Вход запроса к модели несёт всю переписку, а вывод тула может весить мегабайты.
+Temporal ограничивает payload 2 МБ, а историю — 50 МБ, поэтому external storage
+Temporal SDK включён по умолчанию: каталог `payloads` рядом с
+`receipts_database`. Задать явно:
 
 ```json
 "payload_storage": {"kind": "file", "path": "/absolute/state/payloads", "threshold_bytes": 32768}
 ```
 
 Payload больше порога хранятся в каталоге (или `{"kind": "s3", "bucket": "..."}`
-с пакетом `aioboto3`), в истории остаётся sha256-ссылка. Хранилище нужно
-worker'у, серверу и клиенту (`gc-temporal-native --config`). Temporal blob'ы не
-удаляет: настройте lifecycle S3 или периодически вызывайте
+с пакетом `aioboto3`), в истории остаётся sha256-ссылка. `"payload_storage": null`
+выключает хранилище — тогда большой файл или длинный ход упрётся в лимиты
+Temporal. Хранилище нужно worker'у, серверу и клиенту (`gc-temporal-native
+--config` с тем же JSON). Temporal blob'ы не удаляет: настройте lifecycle S3 или
+периодически вызывайте
 `gc_ua_temporalio.payload_storage.prune_file_payloads(path, max_age_seconds=...)`
-со сроком больше retention namespace.
+со сроком больше retention namespace. Каждая новая ссылка на blob и его чтение
+обновляют mtime, поэтому очистка по возрасту не удаляет blob'ы живых сессий.
 
 После каждого хода workflow делает Continue-As-New: новый run получает только
 состояние доставки (последние 1000 ID сообщений и ответов), диалог остаётся в

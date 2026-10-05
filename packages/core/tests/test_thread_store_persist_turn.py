@@ -55,6 +55,27 @@ async def test_turn_mode_writes_all_steps_in_one_commit(tmp_path):
     assert store.load_meta("cli", "t")["messages_count"] == 3
 
 
+async def test_failed_flush_keeps_steps_for_retry(tmp_path):
+    """Сбой коммита не теряет ход: буфер чистится только после записи."""
+    store = CountingStore(str(tmp_path))
+    session = await _session(store, "turn")
+    for index in range(2):
+        await session.apersist_batch(
+            [_message(index)], previous_response_id=None
+        )
+    commit = store.commit_operation
+    store.commit_operation = lambda *args: (_ for _ in ()).throw(
+        RuntimeError("store is down")
+    )
+    with pytest.raises(RuntimeError):
+        await session.aflush_deferred()
+    store.commit_operation = commit
+    await session.aflush_deferred()
+    assert [m["id"] for m in store.load_messages("cli", "t")] == ["m0", "m1"]
+    await session.aflush_deferred()
+    assert store.commits == ["persist"]
+
+
 async def test_step_mode_keeps_one_commit_per_step(tmp_path):
     store = CountingStore(str(tmp_path))
     session = await _session(store, "step")

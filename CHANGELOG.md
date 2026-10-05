@@ -21,6 +21,9 @@
 - Добавлены native worker/client, backend `temporal-native` для server и remote CLI/TUI, подтверждения, stop, дочерние workflow и управление persistent MCP-ресурсами.
 - FileThreadStore и SQLite поддерживают квитанции операций и восстановление записи; неопределённый исход внешнего эффекта требует явного операторского решения. Continue-As-New сохраняет очередь доставки, включая большие checkpoint.
 - Конфигурация, архитектура и ограничения текущего deployment описаны в [документации Temporal](docs/temporal-configuration.md). Legacy workflow сохранён отдельно; автоматическая миграция его истории не выполняется.
+- Профиль native-воркера без `revision`: workflow знает профиль по имени, настройки и токены берутся из текущего процесса воркера. Смена конфигурации или ротация токена — перезапуск воркера; живые сессии продолжают работу. Ключ `revision` в JSON воркера и флаг `--revision` клиента удалены.
+- `payload_storage` включён по умолчанию (каталог `payloads` рядом с `receipts_database`); `null` выключает.
+- Сессия снимает владение тредом при закрытии после Continue-As-New и при падении; сбой коммита в режиме `persist: turn` не теряет шаги хода; сбой закрытия MCP не подменяет готовый ответ.
 
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)
 
