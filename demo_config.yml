@@ -104,17 +104,12 @@ backend:
   # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
   # отвергает разметку; можно на одну модель: models.<alias>.backend).
   # claude_prompt_cache: false
-  # Vendor-specific параметры. Настраивайте под свой провайдер.
-  chat_completion_kwargs:
-    temperature: 0.7
-    top_p: 0.8
-    top_k: 20
-    min_p: 0.0
-    repetition_penalty: 1.2
-    separate_reasoning: true
-    chat_template_kwargs:
-      enable_thinking: false
-    tool_choice: auto
+  # Vendor-параметры тела запроса (сэмплинг, диалект thinking, tool_choice).
+  # Диалект конкретного стека (Qwen/vLLM и другие) для других провайдеров не нужен
+  # и здесь не задаётся: его собирают в профиле, per-алиас. Рабочий референс —
+  # demo_profile.yml. null — секция не задана: в запрос уходят серверные дефолты
+  # модели. Это не «{} — осознанно слать пусто» (на алиасе это разные вещи).
+  chat_completion_kwargs: null
   # Заголовки для chat/completions (всё, что должно уйти в HTTP headers).
   # Примеры:
   # chat_completion_headers:
@@ -174,10 +169,9 @@ chat_completions:
     subagent_role_max_tokens: 24576
     # Служебный вызов, когда у алиаса нет своей секции auxiliary (и без реестра
     # моделей). Явный models.<alias>.auxiliary: {} этот словарь не подмешивает.
-    completion_kwargs:
-      separate_reasoning: false
-      chat_template_kwargs:
-        enable_thinking: false
+    # Диалект стека (Qwen/vLLM: enable_thinking и соседние ключи) для других
+    # провайдеров не нужен; настраивается в профиле. null — секция не задана.
+    completion_kwargs: null
 
 # TUI: что показывать во время стриминга. На подсчёт токенов и индикатор
 # (спиннер, «↓ N токенов», «обдумал за Nс») НЕ влияет — только рендер контента.

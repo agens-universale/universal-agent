@@ -51,6 +51,11 @@ backend:
   # HTTP/SOCKS-прокси для backend-вызовов. null/пусто → из env
   # (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY). Пример: "socks5h://proxy.example:1080"
   proxy: null
+  # Vendor-параметры тела запроса (сэмплинг, диалект thinking). Агент
+  # поставляется без предзаданных схем: null — секция не задана, в запрос
+  # уходят серверные дефолты модели. Не {}: на алиасе «секции нет» и «слать
+  # пусто» — разные вещи. Диалект стека собирается в профиле (demo_profile.yml).
+  chat_completion_kwargs: null
   chat_completion_headers:
     Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
     # Можно не хранить токен в файле:
@@ -192,6 +197,15 @@ summary:
   max_accumulated_summary_chars: 20000
   last_dialog_steps_count: 5
   last_dialog_step_message_max_chars: 1500
+
+# Вспомогательные LLM (summary, finish gate, intent scope, judges).
+chat_completions:
+  auxiliary_llm:
+    # Служебный вызов, когда у алиаса нет своей секции auxiliary.
+    # null — секция не задана: серверные дефолты модели, без vendor-ключей.
+    # Диалект (enable_thinking и соседние) — в профиле, per-алиас.
+    # Не {}: явный пустой словарь на алиасе значит «не слать этих ключей».
+    completion_kwargs: null
 
 # tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
 # Кодовый дефолт (ключа нет) — strip_think: false: копировать скрытое поле мысли.

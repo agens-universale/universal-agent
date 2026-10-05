@@ -491,12 +491,48 @@ assign:                                  # привязки отдельных �
   `backend.chat_completion_headers.Authorization`, а `url` вместе с
   `backend.completions_url` — ошибка валидации;
 - `main` и `auxiliary` читаются одинаково и друг в друга не подставляются.
-  Секции нет и YAML `null` — одно и то же, глобальный словарь своей роли:
-  `backend.chat_completion_kwargs`
-  для диалога и цикла субагента, `chat_completions.auxiliary_llm.completion_kwargs`
-  для summary, судей, finish_gate, intent и черновика роли. Явный `{}` — в запрос
-  эти ключи не класть, их выбирает сервер модели. Секция с ключами заменяет глобальный
-  словарь целиком, без слияния.
+  Агент поставляется без предзаданных vendor-схем: в шаблоне первого запуска
+  `backend.chat_completion_kwargs` и
+  `chat_completions.auxiliary_llm.completion_kwargs` равны `null`. Дефолт любого
+  запроса — серверные дефолты модели. Сэмплинг и диалекты thinking собираются
+  в профиле, per-алиас (рабочий референс — `demo_profile.yml`).
+
+Секции нет и YAML `null` — одно и то же: наследование глобального словаря своей
+роли (`backend.chat_completion_kwargs` для диалога и цикла субагента,
+`chat_completions.auxiliary_llm.completion_kwargs` для summary, судей,
+finish_gate, intent и черновика роли). Явный `{}` — replace глобали пустым
+набором: эти ключи в запрос не класть, даже если глобаль непустая (старый
+конфиг или свои kwargs). Секция с ключами заменяет глобальный словарь целиком,
+без слияния. При пустой глобали поставки обе ветки дают payload без
+vendor-ключей; это следствие пустой глобали, а не слияние семантик.
+
+Что задаётся на алиасе:
+
+| Ключ | Где |
+|---|---|
+| `main` | kwargs диалога и цикла субагента |
+| `auxiliary` | kwargs summary, судей, finish_gate, intent, черновика роли |
+| `strip_think` | вырезание мысли из истории. В поставке глобально `strip_tags_projection.strip_think: true` (нестрогий бэкенд отвечает 400 на мысль в истории). `false` на алиасе сохраняет скрытое поле; ключа нет — остаётся глобальный флаг |
+| `backend.use_max_tokens_param` | `true` — в тело `max_tokens`, `false` — `max_completion_tokens` |
+| `backend.chat_completions_max_tokens` | потолок ответа этой модели |
+| `backend.request_timeout_sec` | таймаут одного запроса |
+| `backend.proxy` | HTTP/SOCKS-прокси |
+| `backend.use_ssl` | TLS / путь к CA-bundle |
+| `backend.cert_path`, `backend.key_path` | клиентский сертификат (mTLS) |
+| `backend.use_retry` | ретраи транспорта |
+| `backend.retry_embedded_choice_errors` | ошибка внутри HTTP-200 |
+| `backend.claude_prompt_cache` | разметка prompt cache |
+| `backend.chat_completion_headers` | дополнительные заголовки |
+| `backend.completions_url` | свой адрес (пара с токеном) |
+
+В `main`, `auxiliary` и в overrides нельзя писать ключи, которые рантайм ставит
+сам: `model`, `messages`, `tools`, `max_tokens`, `max_completion_tokens`. Форма
+их отклоняет, обе воронки режут их безусловно — иначе пользовательский словарь
+затёр бы историю, список тулов или лимит ответа. При включённой разметке
+prompt cache к этому набору добавляется `cache_control`: его пишет разметка,
+чужое значение на проводе даёт 400. `api_mode`, `stream`,
+`openai_strict_tools_schema` и `send_tool_strict` остаются глобальными:
+один ран — один протокол, strict-схема тулов собирается до выбора модели.
 
 **`slots`** — какой алиас стоит за каким уровнем. Не заданный слот резолвится **матрицей
 фоллбэков**: `light` → `light, default, max`; `default` → `default, max, light`;
