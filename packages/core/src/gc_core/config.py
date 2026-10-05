@@ -340,6 +340,25 @@ def profile_mtime_set(
     )
 
 
+def _revalidate_layer_documents(
+    base_after: Any, base_before: Any, base_path: Path, layer_documents
+) -> None:
+    """Проверки слоёв, пропущенные из-за неразрешённых ссылок (см. вызов)."""
+    from gc_core.config_modules.profiles import _validate_profile_document
+
+    validate_registry_pairs(
+        base_after, source=str(base_path), raw_source=base_before
+    )
+    for name, path, before, after in layer_documents:
+        if not after:
+            continue
+        if str(name).startswith("profile:"):
+            validate_registry_pairs(after, source=str(path))
+            _validate_profile_document(after, source=str(path))
+        else:
+            validate_registry_pairs(after, source=str(path), raw_source=before)
+
+
 def load_settings(
     config_path: Optional[str] = None,
     *,
@@ -451,6 +470,13 @@ def load_settings(
         layer_documents = strip_unresolved_marks(list(layer_documents))
         managed_raw = strip_unresolved_marks(managed_raw)
         _base_voice = strip_unresolved_marks(_base_voice)
+        # Документ с неразрешённой ссылкой проверки пары и схемы профиля
+        # пропускал (загрузка всё равно отказывала). Теперь перекрытая ссылка
+        # загрузку не роняет — проверки догоняются здесь, по документу с
+        # пустой подстановкой: fail-closed, как до перекрытия.
+        _revalidate_layer_documents(
+            raw_base_after_env, base_before_env, base_path, layer_documents
+        )
 
     mtime_set = _build_mtime_set(
         base_path, managed_path, project_path, active_name, roots

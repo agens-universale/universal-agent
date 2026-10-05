@@ -215,6 +215,35 @@ def test_overridden_missing_env_does_not_fail(stack, monkeypatch):
     assert "\x00" not in repr(loaded.provenance.__dict__) and source.path
 
 
+def test_overridden_ref_keeps_pair_rule_of_its_document(stack, monkeypatch):
+    """Перекрытая ссылка не роняет загрузку, но и не отключает правило пары
+    своего документа: токен без адреса в базе остаётся ошибкой (fail-closed)."""
+    base = stack(
+        "config.yml",
+        {
+            "models": {
+                "m": {"model": "x", "url": "${ENV:GC_T_A}", "token": "t"}
+            }
+        },
+    )
+    project = stack(
+        ".gc/config.yml",
+        {
+            "models": {
+                "m": {
+                    "url": "https://p.example/v1/chat/completions",
+                    "token": "p",
+                }
+            }
+        },
+    )
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: project)
+    with pytest.raises(ValueError) as info:
+        load_settings(str(base))
+    assert "GC_T_A" in str(info.value)
+    assert "models.m" in str(info.value)
+
+
 def test_shipped_demo_profile_needs_only_used_keys(stack, monkeypatch):
     from pathlib import Path
 
