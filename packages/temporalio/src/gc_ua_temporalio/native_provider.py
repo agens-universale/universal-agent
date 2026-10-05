@@ -17,7 +17,7 @@ from gc_core.config_modules.field_meta import REVEAL_SECRETS
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_ua_temporalio.payload_storage import PayloadStorageConfig
 
@@ -32,9 +32,31 @@ class NativeProfile(BaseModel):
 
 
 class NativeStoreConfig(BaseModel):
+    """Хранилище тредов воркера: файлы, SQLite или S3.
+
+    ``path`` — для ``file``/``sqlite``. Для ``s3`` — ``bucket`` (обязателен),
+    ``prefix``, ``endpoint_url`` (S3-совместимые хранилища) и ``region``;
+    учётные данные — стандартная цепочка boto3 (``AWS_*``, профиль, роль).
+    """
+
     model_config = ConfigDict(extra="forbid", frozen=True)
-    kind: Literal["file", "sqlite"] = "file"
-    path: str
+    kind: Literal["file", "sqlite", "s3"] = "file"
+    path: str | None = None
+    bucket: str | None = None
+    prefix: str = ""
+    endpoint_url: str | None = None
+    region: str | None = None
+
+    @model_validator(mode="after")
+    def _location_matches_kind(self) -> "NativeStoreConfig":
+        if self.kind == "s3":
+            if not self.bucket:
+                raise ValueError("thread store kind=s3 requires bucket")
+            if self.path is not None:
+                raise ValueError("thread store kind=s3 does not take path")
+        elif not self.path:
+            raise ValueError(f"thread store kind={self.kind} requires path")
+        return self
 
 
 class NativeWorkerConfig(BaseModel):

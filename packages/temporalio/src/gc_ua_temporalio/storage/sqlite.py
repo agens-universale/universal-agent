@@ -13,9 +13,9 @@ from pathlib import Path
 
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.execution.message_keys import make_message_key
-from gc_core.thread_store_base import ThreadStoreBase
 from gc_core.utils.generate_message_id import generate_msg_id_sha256
 
+from gc_ua_temporalio.storage.durable_api import DurableThreadStoreAPI
 from gc_ua_temporalio.storage.sqlite_durable import SQLiteDurableOperations
 
 
@@ -33,7 +33,7 @@ class ProjectionConflict(ExecutionFailure):
     """Another owner or a reused operation ID with new content."""
 
 
-class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
+class SQLiteThreadStore(SQLiteDurableOperations, DurableThreadStoreAPI):
     def __init__(self, path: str | Path):
         self.path = str(path)
         self.ensure_ready()
@@ -127,9 +127,6 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
     def _after_messages(self, _db):
         """Fault-injection seam, inside the transaction before meta and ack."""
 
-    def load_messages(self, system_id, thread_id):
-        return self.load_thread_state(system_id, thread_id).messages
-
     def load_thread_state(self, system_id, thread_id):
         with self.transaction() as db:
             return self._state(db, system_id, thread_id)
@@ -141,115 +138,6 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
                 (system_id, thread_id),
             ).fetchone()
             return json.loads(row["meta"]) if row else {}
-
-    def append_messages(
-        self, system_id, thread_id, messages, *, known_keys=None, start_seq=0
-    ):
-        receipt = self._legacy_commit(
-            system_id,
-            thread_id,
-            "append_messages",
-            {
-                "messages": list(messages),
-                "known_keys": sorted(known_keys)
-                if known_keys is not None
-                else None,
-                "start_seq": start_seq,
-            },
-        )
-        if known_keys is not None:
-            known_keys.update(receipt.added_known_keys)
-        return receipt.written
-
-    def save_meta(self, system_id, thread_id, meta):
-        self._legacy_commit(system_id, thread_id, "save_meta", {"meta": meta})
-
-    def patch_runtime_flag(
-        self, system_id, thread_id, flag, *, active, session_meta=None
-    ):
-        receipt = self._legacy_commit(
-            system_id,
-            thread_id,
-            "patch_runtime_flag",
-            {"flag": flag, "active": active},
-        )
-        if session_meta is not None:
-            from copy import deepcopy
-
-            for key in ("runtime", "tui"):
-                if key in receipt.meta:
-                    session_meta[key] = deepcopy(receipt.meta[key])
-                else:
-                    session_meta.pop(key, None)
-
-    def reset_run_flags(self, system_id, thread_id, *, session_meta=None):
-        runtime = (session_meta or {}).get("runtime")
-        runtime = runtime if isinstance(runtime, dict) else {}
-        receipt = self._legacy_commit(
-            system_id,
-            thread_id,
-            "reset_run_flags",
-            {"stale_summarizing": bool(runtime.get("summarizing"))},
-        )
-        if session_meta is not None:
-            from copy import deepcopy
-
-            for section in ("runtime", "tui"):
-                if section in receipt.meta:
-                    session_meta[section] = deepcopy(receipt.meta[section])
-                else:
-                    session_meta.pop(section, None)
-
-    def update_runtime_meta(self, system_id, thread_id, patch):
-        self._legacy_commit(
-            system_id, thread_id, "update_runtime_meta", {"patch": patch}
-        )
-
-    def discard_message(self, system_id, thread_id, message_id):
-        return self._legacy_commit(
-            system_id, thread_id, "discard_message", {"message_id": message_id}
-        ).result
-
-    def reset(self, system_id, thread_id):
-        return self._legacy_commit(system_id, thread_id, "reset", {}).result
-
-    def replace_messages(self, system_id, thread_id, messages):
-        self._legacy_commit(
-            system_id,
-            thread_id,
-            "replace_messages",
-            {"messages": list(messages)},
-        )
-
-    def archive_and_replace(self, system_id, thread_id, messages):
-        return self._legacy_commit(
-            system_id,
-            thread_id,
-            "archive_and_replace",
-            {"messages": list(messages)},
-        ).archive
-
-    def append_subagent_trace(
-        self,
-        system_id,
-        thread_id,
-        *,
-        parent_call_id,
-        child_run_id,
-        kind,
-        payload,
-    ):
-        return self._legacy_commit(
-            system_id,
-            thread_id,
-            "append_subagent_trace",
-            {
-                "parent_call_id": parent_call_id,
-                "child_run_id": child_run_id,
-                "kind": kind,
-                "payload": payload,
-            },
-        ).result
 
     def read_subagent_trace(self, system_id, thread_id):
         with self.transaction() as db:
