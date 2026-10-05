@@ -496,7 +496,10 @@ async def test_the_form_refuses_to_save_an_address_without_a_token():
         ok, alias, fields = form.submit()
         assert (ok, alias) == (True, "flash")
         assert fields["url"] == "https://my-host/v1/chat/completions"
-        assert fields["token"] == "sk-OWN"
+        assert fields["token"] is None
+        assert fields["backend"]["chat_completion_headers"][
+            "Authorization"
+        ] == ("sk-OWN")
 
 
 async def test_the_form_refuses_to_save_a_token_without_an_address():
@@ -1303,7 +1306,10 @@ async def test_typing_after_ctrl_u_cancels_the_mark(tmp_path):
             "Токен   Ctrl+U — вернуть наследование"
         )
         ok, _alias, fields = form.submit()
-        assert ok is True and fields["token"] == "sk-NEW"
+        assert ok is True and fields["token"] is None
+        assert fields["backend"]["chat_completion_headers"][
+            "Authorization"
+        ] == ("sk-NEW")
         assert fields["url"] == "https://my-host/v1/chat/completions"
 
 
@@ -1873,7 +1879,7 @@ async def test_the_model_list_opens_when_only_the_bare_token_is_accepted():
         form.move(1)
         for _ in range(4):
             await pilot.pause()
-        assert calls == ["Bearer sk-live", "sk-live"], calls
+        assert calls == ["sk-live"], calls
         assert form.list_open is True
         rows = [str(w.render()) for w in _rows(form)]
         assert any("gemini" in row for row in rows), rows
@@ -1925,7 +1931,7 @@ async def test_changed_credentials_retry_the_autoload(tmp_path):
         for _ in range(3):
             await pilot.pause()
         assert len(calls) == 2, "изменённый токен не перечитал список"
-        assert calls[1][1] == "Bearer sk-NEW"
+        assert calls[1][1] == "sk-NEW"
         assert [str(w.render()) for w in _rows(form)], "список не раскрылся"
 
 
@@ -2266,9 +2272,7 @@ async def test_the_model_list_resolves_env_references_before_the_request(
         _land(form, "mef-model")
         for _ in range(3):
             await pilot.pause()
-        assert calls == [
-            ("https://hub/v1/chat/completions", "Bearer sk-REAL")
-        ], calls
+        assert calls == [("https://hub/v1/chat/completions", "sk-REAL")], calls
 
 
 async def test_a_missing_env_variable_is_named_instead_of_a_blind_request(
@@ -2676,6 +2680,28 @@ async def test_empty_server_answer_is_not_reported_as_a_failure():
             str(form.query_one("#mef-model-status", Static).render())
             == LIST_EMPTY
         )
+
+
+def test_empty_list_then_second_auth_error_keeps_list_empty():
+    """Пустой список первой формы + исключение второй → [] / LIST_EMPTY, не None."""
+    from gc_tui.editors.field_list import LIST_EMPTY
+    from gc_tui.editors.model_entry_form import (
+        _fetch_models_trying_auth,
+        _list_outcome,
+    )
+
+    calls = []
+
+    def fetch(url, auth, **kwargs):
+        calls.append(auth)
+        if auth == "sk-key":
+            return []
+        raise RuntimeError("second shape failed")
+
+    models = _fetch_models_trying_auth(fetch, "http://x/v1/models", "sk-key")
+    assert models == []
+    assert calls == ["sk-key", "Bearer sk-key"]
+    assert _list_outcome(models) == LIST_EMPTY
 
 
 @pytest.mark.asyncio

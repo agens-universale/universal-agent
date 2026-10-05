@@ -1834,7 +1834,7 @@ class OnboardingScreen(Screen):
             )
             return
         if token_raw:
-            auth = onboarding.authorization_header(token_raw)
+            auth = token_raw  # сырой — probe_connection перебирает формы
         elif ed.token_cleared:
             auth = None  # Ctrl+U: сохранённый стёрт ещё до записи
         else:
@@ -1901,6 +1901,10 @@ class OnboardingScreen(Screen):
             return  # протухший результат (правка/переход обесценили)
         from gc_tui.services.probe_presentation import connection_line_text
 
+        if result.auth_state == "accepted":
+            ed = self._connection_editor()
+            if ed is not None:
+                ed.apply_accepted_auth(result.accepted_auth)
         self._set_conn_probe_line(connection_line_text(result))
 
     def _set_conn_probe_line(self, text) -> None:

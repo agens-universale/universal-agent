@@ -316,16 +316,14 @@ async def test_connection_token_placeholder_shows_masked_on_return(tmp_path):
         ed.query_one("#conn-token", Input).value = "sk-secret"
         await pilot.press("enter")
         await pilot.pause()
-        assert scr._values["Authorization"] == "Bearer sk-secret"
+        assert scr._values["Authorization"] == "sk-secret"
         assert scr._step == 1
         await pilot.press("pageup")
         await pilot.pause()
         assert scr._step == 0
         tok = scr.query_one(ConnectionEditor).query_one("#conn-token", Input)
         assert tok.value == ""  # секрет не лежит открытым текстом
-        assert (
-            tok.placeholder == "Bearer sk-***"
-        )  # но маска намекает, что он задан
+        assert tok.placeholder == "***"  # но маска намекает, что он задан
 
 
 @pytest.mark.asyncio
@@ -353,7 +351,7 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(
         ed.query_one("#conn-token", Input).value = "sk-secret"
         await pilot.press("enter")  # шаг без пометки — сразу сабмит
         await pilot.pause()
-        assert scr._values["Authorization"] == "Bearer sk-secret"
+        assert scr._values["Authorization"] == "sk-secret"
         assert scr._step == 1
         await pilot.press("pageup")  # вернулись поправить адрес
         await pilot.pause()
@@ -372,7 +370,7 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(
             scr._values["completions_url"] == "https://h2/v1/chat/completions"
         )
         assert (
-            scr._values["Authorization"] == "Bearer sk-secret"
+            scr._values["Authorization"] == "sk-secret"
         )  # не стёрт пустым полем
 
 
@@ -926,8 +924,8 @@ async def test_connection_step_advances_with_one_enter_no_mark_needed(
 
 
 @pytest.mark.asyncio
-async def test_connection_token_becomes_bearer_header(tmp_path):
-    """Введённый токен уезжает в _values как Bearer-заголовок."""
+async def test_connection_token_saved_as_typed(tmp_path):
+    """Введённый токен уезжает в _values as-is (без тихой подстановки Bearer)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
@@ -946,7 +944,7 @@ async def test_connection_token_becomes_bearer_header(tmp_path):
         ed.query_one("#conn-token", Input).value = "sk-1"
         await pilot.press("enter")
         await pilot.pause()
-        assert scr._values["Authorization"] == "Bearer sk-1"
+        assert scr._values["Authorization"] == "sk-1"
         assert scr._step == 1
 
 
@@ -2569,10 +2567,10 @@ async def test_connection_new_token_replaces_env_ref(tmp_path, monkeypatch):
         ed.escape_presets()
         ed.query_one("#conn-token", Input).value = "sk-typed-by-hand"
         scr._submit_connection()
-        assert scr._values["Authorization"] == "Bearer sk-typed-by-hand"
+        assert scr._values["Authorization"] == "sk-typed-by-hand"
         assert scr._commit_config() is True
         content = cfg_path.read_text(encoding="utf-8")
-        assert 'Authorization: "Bearer sk-typed-by-hand"' in content
+        assert 'Authorization: "sk-typed-by-hand"' in content
         assert "${ENV:GC_TOKEN}" not in content
 
 

@@ -1722,14 +1722,13 @@ class SettingsScreen(Screen):
 
         Endpoint и token берутся из ПОЛЯ (ConnectionEditor.peek(), draft), а не из
         сохранённого конфига — иначе проверялась бы несуществующая комбинация
-        «новый адрес + старый токен».
+        «новый адрес + старый токен». Сырой токен из поля уходит в probe_connection
+        без Bearer-нормализации: проба сама перебирает формы.
 
         `manual` — проверку запустил человек (`Ctrl+Space`, `Enter`): её строки —
         ответ на клавишу и подводятся в кадр. Автопроверка кадр не двигает (см.
         `_set_probe_line`)."""
         show = self._show_probe_line if manual else self._set_probe_line
-        from gc_core.onboarding import authorization_header
-
         endpoint_cfg, auth_cfg, verify, model, proxy_cfg = (
             self._probe_args_from_config()
         )
@@ -1748,7 +1747,7 @@ class SettingsScreen(Screen):
         if auth_idx == 1:
             token = None  # без авторизации
         elif token_raw:
-            token = authorization_header(token_raw)  # введённый токен
+            token = token_raw  # сырой — probe_connection перебирает формы
         elif self._connection_editor().token_cleared:
             token = None  # Ctrl+U: сохранённый стёрт ещё до записи
         else:
@@ -1809,6 +1808,10 @@ class SettingsScreen(Screen):
         ):
             return
         self._draft_checked = result
+        if result.auth_state == "accepted":
+            # Приняли Bearer — показать в поле; submit потом пишет as-is.
+            self._connection_editor().apply_accepted_auth(result.accepted_auth)
+            self._update_dirty()
         show = self._show_probe_line if manual else self._set_probe_line
         show(connection_line_text(result))
         if on_done is not None:

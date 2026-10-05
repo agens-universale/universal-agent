@@ -2847,7 +2847,7 @@ async def test_literal_over_env_ref_needs_confirm_then_writes(
         await pilot.pause()
         await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
-        assert 'Authorization: "Bearer sk-typed-by-hand"' in content
+        assert 'Authorization: "sk-typed-by-hand"' in content
         assert "${ENV:GC_API_KEY}" not in content
 
 
@@ -2873,7 +2873,7 @@ async def test_literal_token_edit_saves_without_confirm(tmp_path):
             ".set-confirm"
         )  # ссылки не было — подтверждать нечего
         content = cfg_file.read_text(encoding="utf-8")
-        assert 'Authorization: "Bearer sk-new"' in content
+        assert 'Authorization: "sk-new"' in content
         assert scr._view == "menu"  # сохранено, возврат в хаб
 
 
