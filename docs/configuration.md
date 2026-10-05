@@ -911,10 +911,13 @@ ddgs-mcp --http
 | `sandbox.workdir` | `null` → изолируем текущий `launch_root`; `auto` → `<GC_STATE_DIR>/sandboxes/<slug папки запуска>/` — один на папку, общий для запусков и тредов |
 | `sandbox.network` | `true` по умолчанию; `false` режет сеть у shell-команд |
 | `sandbox.extra_ro` | дополнительные read-only пути (Linux) |
+| `fetch_url_execute_on` | `agent` (по умолчанию) — `exec_fetch_url` качает с хоста; `os_backend` — GET делает `python3` среды исполнения (сеть только там), редиректы и `url_policy` проверяются на хосте, разбор текста — на хосте. Для `local`/`sandbox` игнорируется |
+| `provision_skills` | `true` по умолчанию: для `docker`/`ssh`/`exec` скиллы (system + user + project) копируются на старте рана в `<launch_root>/.gc/skills_runtime/<слой>/`, реестр и `skills_run_script` работают по этим путям; повторный ран с тем же набором ничего не копирует (манифест sha256). `false` — скиллы не загружаются |
 
 `agent.harbor_exec_init` действует и для `docker` / `ssh` / `exec` (профиль перед командой модели).
 `sandbox` требует `bwrap` (Linux) или `sandbox-exec` (macOS); без них запуск падает, тихого отката в `local` нет. Windows не поддерживается.
-Удалённой стороне нужны GNU `stat`/`find`, `sh`, `cat`, `base64`, `sha256sum`; `python3` — для `run_python_code` и MCP `execute_on: os_backend`; `bash` — для фоновых команд (`run_in_background`), как и в Harbor.
+Удалённой стороне нужны GNU `stat`/`find`, `sh`, `cat`, `base64`, `sha256sum`; `python3` — для `run_python_code`, MCP `execute_on: os_backend` и `fetch_url_execute_on: os_backend`; `bash` — для фоновых команд (`run_in_background`), как и в Harbor.
+Правило разделения: хост — панель управления агента (конфиг, AGENTS.md, `project_memory`, треды и логи, MCP с `execute_on: agent`); среда исполнения — всё, с чем работает модель (`fs_*`, `exec_*`, фон, скиллы, MCP с `execute_on: os_backend`, при `fetch_url_execute_on: os_backend` — и сеть `exec_fetch_url`). `download_file` для remote-kind снят: он писал бы на хост.
 Чистка `sandboxes/`: `python -m gc_server.swarm.cleanup … --core-sandboxes-dir ~/.local/state/gc/sandboxes`.
 
 ## Где gc-cli хранит runtime-данные

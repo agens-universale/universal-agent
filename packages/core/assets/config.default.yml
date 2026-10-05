@@ -249,6 +249,8 @@ fs_tools:
 #   docker: {name: my-box}
 #   ssh: {host: dev.example, user: me, key_path: ~/.ssh/id_ed25519}
 #   sandbox: {workdir: null, network: true}
+#   fetch_url_execute_on: agent   # os_backend → exec_fetch_url качает через python3 той стороны
+#   provision_skills: true        # docker/ssh/exec: скиллы копируются в <launch_root>/.gc/skills_runtime/
 
 # Чек-лист задачи (session_todo): каждые reminder_steps шагов без вызова тула —
 # напоминание. Есть незакрытые пункты — директивное «обнови список»; активного

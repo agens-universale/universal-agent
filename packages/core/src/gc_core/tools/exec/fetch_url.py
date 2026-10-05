@@ -18,6 +18,10 @@ from gc_core.tools.exec.redirect_policy import (
     TooManyRedirects,
     fetch_validating_redirects,
 )
+from gc_core.tools.exec.remote_fetch import (
+    afetch_via_backend,
+    fetches_on_backend,
+)
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
 
@@ -164,6 +168,22 @@ Usage:
         attempts = 1 + self.max_retries
         for attempt in range(1, attempts + 1):
             try:
+                if fetches_on_backend(
+                    self._config_dict, self._backend_or_none()
+                ):
+                    # Сеть у среды исполнения: GET делает python3 той стороны,
+                    # редиректы и политика — здесь (см. remote_fetch).
+                    response = await afetch_via_backend(
+                        self._backend,
+                        normalized_url,
+                        headers,
+                        effective_timeout,
+                        normalized_proxy,
+                        allowed_schemes=policy_context.url_allowed_schemes,
+                        url_blacklist=policy_context.url_blacklist,
+                    )
+                    response.raise_for_status()
+                    return response, None
                 # Таймаут — на запрос: клиент общий и переиспользуется. Явный
                 # `proxy` тула идёт ПЕРВЫМ аргументом: он и должен побеждать окружение.
                 client = get_async_client(

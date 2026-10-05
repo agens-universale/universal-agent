@@ -54,6 +54,14 @@ class OsBackendConfig(BaseModel):
     kind: OsBackendKind = "local"
     cwd: str | None = None  # стартовый каталог «там» (не для sandbox)
     env: dict[str, str] = Field(default_factory=dict)
+    # Где качает `exec_fetch_url`: на хосте (agent) или через бэкенд
+    # (os_backend) — когда сеть есть только у среды исполнения. Разбор
+    # страницы всегда на хосте. Для local/sandbox значение игнорируется.
+    fetch_url_execute_on: Literal["agent", "os_backend"] = "agent"
+    # Копировать скиллы (system + user + project) в среду исполнения на
+    # старте рана: реестр читает их через бэкенд, а лежат они на хосте.
+    # Только для remote-kind (docker/ssh/exec); Harbor-адаптер грузит сам.
+    provision_skills: bool = True
     docker: DockerBackendConfig = Field(default_factory=DockerBackendConfig)
     ssh: SshBackendConfig = Field(default_factory=SshBackendConfig)
     exec: ExecBackendConfig = Field(default_factory=ExecBackendConfig)

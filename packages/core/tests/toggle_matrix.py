@@ -642,6 +642,8 @@ NOT_IN_MATRIX = {
     "os_backend.sandbox.workdir": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.sandbox.network": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
     "os_backend.sandbox.extra_ro": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.fetch_url_execute_on": "где качает exec_fetch_url; покрытие в tools/exec/test_remote_fetch.py и test_fetch_url.py",
+    "os_backend.provision_skills": "копия скиллов в среду исполнения; покрытие в skills/test_remote_skills_provision.py",
     # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
     # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв
     # эталон на этой же ветке. Паритет async/sync того же координатора уже

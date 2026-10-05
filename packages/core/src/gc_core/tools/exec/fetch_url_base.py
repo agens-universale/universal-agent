@@ -578,6 +578,10 @@ class FetchUrlBase(AbstractSimpleTool):
             cache_key,
         )
 
+    def _backend_or_none(self):
+        """Бэкенд контекста без исключения: у тула без ctx (тесты) его нет."""
+        return getattr(getattr(self, "_ctx", None), "os_backend", None)
+
     def _browser_headers(self) -> Dict[str, str]:
         """Заголовки «как у браузера»: без них часть сайтов отдаёт заглушку."""
         return {

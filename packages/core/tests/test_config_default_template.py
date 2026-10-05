@@ -86,6 +86,8 @@ EXPERT_ONLY_KEYS: set = {
     "os_backend.sandbox.workdir",
     "os_backend.sandbox.network",
     "os_backend.sandbox.extra_ro",
+    "os_backend.fetch_url_execute_on",
+    "os_backend.provision_skills",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",

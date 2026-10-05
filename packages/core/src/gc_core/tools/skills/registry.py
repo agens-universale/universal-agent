@@ -803,6 +803,20 @@ class SkillsRegistry:
         }
 
 
+def disabled_skills_from_config(
+    config_dict: Optional[Dict[str, Any]],
+) -> List[str]:
+    """`disable_skills` из плоского конфига: id паков и скиллов, без мусора."""
+    raw_disabled = (config_dict or {}).get("disable_skills")
+    if not isinstance(raw_disabled, list):
+        return []
+    return [
+        str(item).strip()
+        for item in raw_disabled
+        if isinstance(item, (str, int)) and str(item).strip()
+    ]
+
+
 def get_skills_registry(
     config_dict: Optional[Dict[str, Any]] = None,
     *,
@@ -822,20 +836,13 @@ def get_skills_registry(
       + Project (<cwd>/.gc/skills/), приоритет project > user > system.
     """
     skills_root: Optional[str] = None
-    disable_skills: List[str] = []
+    disable_skills = disabled_skills_from_config(config_dict)
     if config_dict is not None:
         raw = config_dict.get("skills_data_path")
         if isinstance(raw, str):
             path = raw.strip()
             if path:
                 skills_root = path
-        raw_disabled = config_dict.get("disable_skills")
-        if isinstance(raw_disabled, list):
-            disable_skills = [
-                str(item).strip()
-                for item in raw_disabled
-                if isinstance(item, (str, int)) and str(item).strip()
-            ]
 
     if skills_root is not None:
         return SkillsRegistry(
@@ -850,5 +857,6 @@ __all__ = [
     "AmbiguousSkillId",
     "Skill",
     "SkillsRegistry",
+    "disabled_skills_from_config",
     "get_skills_registry",
 ]

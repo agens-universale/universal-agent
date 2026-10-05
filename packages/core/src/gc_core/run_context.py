@@ -25,6 +25,7 @@ from gc_core.execution_workspace import (
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.tools import abuild_tools_data
+from gc_core.tools.skills.provision import aprovision_remote_skills
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
@@ -222,6 +223,13 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     try:
         await aprime_backend_cwd(prep.backend, config_dict)
         await areconcile_remote_root(prep.backend, config_dict)
+        # Remote-бэкенд: скиллы лежат на хосте, а реестр читает через бэкенд —
+        # копируем набор «туда» и пересобираем реестр по удалённым корням.
+        provisioned = await aprovision_remote_skills(
+            prep.backend, config_dict, run_logger=prep.run_logger
+        )
+        if provisioned is not None:
+            prep.skills_registry = provisioned
         # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
         # успешно снятый тул снова считается опечаткой. Способность пришла с
         # develop, у нас её не было; тело, которое список заполняет, слилось

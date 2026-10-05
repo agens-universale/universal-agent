@@ -85,3 +85,15 @@ def test_app_config_has_section_and_flatten_projects_dict():
 
 def test_app_config_default_flattens_to_local():
     assert flatten_app_config(AppConfig())["os_backend"]["kind"] == "local"
+
+
+def test_fetch_url_locus_and_skills_defaults():
+    cfg = OsBackendConfig()
+    assert cfg.fetch_url_execute_on == "agent"
+    assert cfg.provision_skills is True
+    assert (
+        OsBackendConfig(fetch_url_execute_on="os_backend").fetch_url_execute_on
+        == "os_backend"
+    )
+    with pytest.raises(ValidationError):
+        OsBackendConfig(fetch_url_execute_on="container")
