@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+import httpx
+
 from gc_core.execution.contracts import ModelProviderError
 from gc_core.execution.finish_reason import (
     nonempty_reasoning_text as nonempty_reasoning_text,
@@ -46,43 +48,37 @@ class EmbeddedChoiceError(Exception):
         self.raw_code = raw_code
 
 
-def _http_error_types(name):
-    # Transport classes are needed only on the worker side. Core workflow
-    # policy consumes ModelProviderError and must not import an HTTP client.
-    import httpx
+#: Исключение «HTTP-статус не тот». Кортеж, а не один класс: форма пережила
+#: время, когда транспортов было два (requests у тулов и MCP, httpx у модели),
+#: и вызывающие полагаются на isinstance с кортежем.
+HTTP_STATUS_ERRORS = (httpx.HTTPStatusError,)
 
-    if name == "HTTP_STATUS_ERRORS":
-        return (httpx.HTTPStatusError,)
-    return (
-        httpx.TimeoutException,
-        httpx.NetworkError,
-        httpx.ProxyError,
-        httpx.RemoteProtocolError,
-    )
-
-
-def __getattr__(name):
-    if name in {"HTTP_STATUS_ERRORS", "HTTP_TRANSPORT_ERRORS"}:
-        return _http_error_types(name)
-    raise AttributeError(name)
-
-
-def _is_http_error(exc, name):
-    # Preserve isinstance semantics (including user subclasses), while
-    # domain errors and unrelated exceptions never load worker HTTP modules.
-    if not any(
-        cls.__module__.split(".", 1)[0] == "httpx" for cls in type(exc).__mro__
-    ):
-        return False
-    return isinstance(exc, _http_error_types(name))
+#: Сетевые сбои, которые имеет смысл ПОВТОРЯТЬ: таймаут, обрыв, DNS, прокси.
+#:
+#: Раньше здесь стоял голый ``httpx.TransportError``, а он покрывает и то,
+#: что повторять бессмысленно: ``UnsupportedProtocol`` (URL без схемы) и
+#: ``LocalProtocolError`` (например не-latin1 в заголовке). То есть на
+#: ОШИБКЕ КОНФИГУРАЦИИ предохранитель ставил алиас модели в «недоступна» на
+#: всю сессию и перед этим честно ретраил 10/20/40/80 секунд. Докстрока
+#: предохранителя при этом требовала обратного — «конфигурационные ошибки
+#: наверх сразу».
+#:
+#: ``TimeoutException`` оставлен явно: он подкласс ``TransportError``, но
+#: читается в списке.
+HTTP_TRANSPORT_ERRORS = (
+    httpx.TimeoutException,
+    httpx.NetworkError,
+    httpx.ProxyError,
+    httpx.RemoteProtocolError,
+)
 
 
 def is_http_status_error(exc):
-    return _is_http_error(exc, "HTTP_STATUS_ERRORS")
+    return isinstance(exc, HTTP_STATUS_ERRORS)
 
 
 def is_http_transport_error(exc):
-    return _is_http_error(exc, "HTTP_TRANSPORT_ERRORS")
+    return isinstance(exc, HTTP_TRANSPORT_ERRORS)
 
 
 def is_previous_response_cache_miss(exc: BaseException) -> bool:
@@ -328,8 +324,6 @@ def _rejection_text(exc: BaseException) -> str:
     причина слепоты лежит только там, в статусе её нет. Тело не дочитано
     (обрыв на чтении) — текста нет."""
     if is_http_status_error(exc):
-        import httpx
-
         try:
             return exc.response.text
         except httpx.ResponseNotRead:

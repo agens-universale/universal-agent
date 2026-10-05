@@ -36,14 +36,8 @@ def _wire(monkeypatch, order: list, *, stdio_raises=None, stream_raises=None):
             if stream_raises is not None:
                 raise stream_raises
 
-    monkeypatch.setattr(
-        "gc_core.tools.connect_mcp.persistent_stdio.PersistentStdioRegistry",
-        _StdioRegistry,
-    )
-    monkeypatch.setattr(
-        "gc_core.tools.connect_mcp.stream_client._SESSION_MANAGER",
-        _StreamManager(),
-    )
+    monkeypatch.setattr(ae, "PersistentStdioRegistry", _StdioRegistry)
+    monkeypatch.setattr(ae, "_STREAM_SESSION_MANAGER", _StreamManager())
     monkeypatch.setattr(ae, "reset_owner", lambda token: order.append("owner"))
 
 

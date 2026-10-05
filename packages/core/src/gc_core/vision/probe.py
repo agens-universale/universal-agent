@@ -10,6 +10,8 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
 
+import httpx
+
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
     http_status_code,
@@ -78,8 +80,6 @@ def classify_answer(code: str, outcome: ChatCompletionText) -> ProbeResult:
 
 
 def _retry_after(exc: BaseException) -> float:
-    import httpx
-
     if not isinstance(exc, httpx.HTTPStatusError):
         return 30.0
     value = exc.response.headers.get("Retry-After", "")
@@ -95,8 +95,6 @@ def _retry_after(exc: BaseException) -> float:
 
 
 def _classify_error(exc: Exception) -> ProbeResult:
-    import httpx
-
     if is_image_rejection_error(exc):
         return ProbeResult(ProbeStatus.UNSUPPORTED, "image_unsupported")
     status = http_status_code(exc)
@@ -136,10 +134,6 @@ def _record_result(ctx, result, attempts, started, finish_reason=None):
 async def aprobe_route(
     ctx, state, prepared: PreparedChatCompletion
 ) -> ProbeResult:
-    # HTTP-клиент — только здесь: проба идёт на воркере или локально, а модуль
-    # импортируется и кодом workflow (реестр тулов), где httpx недоступен.
-    import httpx
-
     started = time.perf_counter()
     previous = None
     for attempt in range(2):

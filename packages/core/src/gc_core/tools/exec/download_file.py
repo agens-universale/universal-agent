@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional
+
+import httpx
 
 from gc_core.config_modules.security import DownloadConfig
 from gc_core.constants.tool_names import DOWNLOAD_FILE_NAME
@@ -31,9 +33,6 @@ from gc_core.utils.async_http import get_async_client
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.http_proxy import resolve_proxies
 from gc_core.utils.tool_report_paths import tool_report_abspath
-
-if TYPE_CHECKING:
-    import httpx
 
 _HTML_EXT = ".html"
 
@@ -392,8 +391,6 @@ class DownloadFile(AbstractSimpleTool):
     async def _http_get_bytes(
         self, url: str, max_bytes: int
     ) -> tuple[bytes, Optional[Dict[str, Any]]]:
-        import httpx
-
         context = resolve_tool_context(
             self,
             ctx=self._ctx,

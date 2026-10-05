@@ -363,6 +363,18 @@ async def _abuild_tools_registry(
     return all_tools, status_map
 
 
+def _cache_config(cfg: Any) -> Dict[str, Any]:
+    """Словарь кэша как есть; настройки (``LoadedSettings``/``AppConfig``) —
+    через ту же проекцию, что строит сборка контекста (``mcp_cache_config``)."""
+    if cfg is None:
+        return {}
+    if isinstance(cfg, dict):
+        return cfg
+    from gc_core.tools.connect_mcp.agent_tools import mcp_cache_config
+
+    return mcp_cache_config(cfg)
+
+
 class ToolsCache:
     """
     Класс для кэширования списка MCP-тулов в памяти процесса.
@@ -379,13 +391,14 @@ class ToolsCache:
 
     def __init__(
         self,
-        cfg: Optional[Dict[str, Any]] = None,
+        cfg: Any = None,
         ttl_default: int = 3600,
         *,
         os_backend: Any = None,
     ) -> None:
         """
-        cfg — словарь с mcp-конфигурацией, ожидаются ключи:
+        cfg — настройки (всё, что принимает ``settings_of``) или словарь
+        с mcp-конфигурацией нижнего слоя, ожидаются ключи:
         - "mcp-servers": {...}
         - "mcp-meta": {...} (опционально, для TTL).
 
@@ -393,7 +406,7 @@ class ToolsCache:
         ``cfg`` не нужен: каждая сборка перепривязывает его к своим серверам
         (``rebind``) — достаточно ``ToolsCache(os_backend=backend)``.
         """
-        self._config = cfg or {}
+        self._config = _cache_config(cfg)
         self._ttl_default = ttl_default
         self._os_backend = os_backend
         self._data: Optional[Dict[str, Dict[str, Any]]] = None
@@ -412,7 +425,7 @@ class ToolsCache:
         """
         return self._os_backend
 
-    def rebind(self, cfg: Dict[str, Any]) -> None:
+    def rebind(self, cfg: Any) -> None:
         """Переключить кэш на новый config-словарь, СОХРАНИВ содержимое.
 
         Нужно, когда кэшем владеет вызывающий (см. ``get_mcp_tools_data_for_config``):
@@ -424,7 +437,7 @@ class ToolsCache:
         серверов не поменялся — кэш валиден; поменялся — ``_is_valid`` увидит
         расхождение ключа и сходит в дискавери сам.
         """
-        self._config = cfg
+        self._config = _cache_config(cfg)
 
     def _discovery_timeout(self) -> int:
         meta = self._config.get("mcp-meta")

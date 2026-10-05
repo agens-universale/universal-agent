@@ -4,12 +4,10 @@ import asyncio
 import hashlib
 from dataclasses import asdict, replace
 
-from temporalio import workflow
-from temporalio.exceptions import ApplicationError
+# Сторонние транспорты — из процесса воркера, до первого импорта ядра.
+from gc_ua_temporalio import sandbox_passthrough  # noqa: F401
 
-with workflow.unsafe.imports_passed_through():
-    import pydantic  # noqa: F401
-
+# isort: split
 from gc_core.agent_executor import AgentExecutor
 from gc_core.execution.environment import execution_environment
 from gc_core.execution.human import HumanRequestInterrupted
@@ -24,6 +22,8 @@ from gc_core.structured_output import (
     arephrase_turn_outcome,
 )
 from gc_core.thread_store_durable import ThreadStoreOperation
+from temporalio import workflow
+from temporalio.exceptions import ApplicationError
 
 from gc_ua_temporalio.native_child_transport import install_native_subagents
 from gc_ua_temporalio.native_context import assemble_native_context

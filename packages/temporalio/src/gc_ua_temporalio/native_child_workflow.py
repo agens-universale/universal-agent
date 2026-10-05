@@ -5,11 +5,10 @@ import hashlib
 from contextlib import contextmanager
 from dataclasses import asdict
 
-from temporalio import workflow
+# Сторонние транспорты — из процесса воркера, до первого импорта ядра.
+from gc_ua_temporalio import sandbox_passthrough  # noqa: F401
 
-with workflow.unsafe.imports_passed_through():
-    import pydantic  # noqa: F401
-
+# isort: split
 from gc_core.execution.environment import execution_environment
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.model_router import CircuitBreaker, ModelRouter
@@ -23,6 +22,7 @@ from gc_core.tools.subagents.active_scope import (
 from gc_core.tools.subagents.runner import SubagentRunner
 from gc_core.tools.subagents.runner_transfer import capture_subagent_transfer
 from gc_core.tools.subagents.sidecar import bind_thread_identity
+from temporalio import workflow
 
 from gc_ua_temporalio.native_child_contracts import (
     NativeChildCheckpoint,

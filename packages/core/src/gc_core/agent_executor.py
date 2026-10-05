@@ -64,6 +64,10 @@ from gc_core.thread_store import (
     make_message_key,
     resolve_threads_dir,
 )
+from gc_core.tools.connect_mcp.persistent_stdio import PersistentStdioRegistry
+from gc_core.tools.connect_mcp.stream_client import (
+    _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
+)
 from gc_core.tools.subagents.active_scope import (
     active_parent_call_id,
     is_child_input_active,
@@ -161,13 +165,6 @@ async def _aclose_mcp_and_release(owner_reset: Any) -> None:
     Вынесено из `finally` отдельной функцией не ради красоты: внутри `finally`
     это свойство проверялось бы только копией блока в тесте, то есть никак.
     """
-    from gc_core.tools.connect_mcp.persistent_stdio import (
-        PersistentStdioRegistry,
-    )
-    from gc_core.tools.connect_mcp.stream_client import (
-        _SESSION_MANAGER as _STREAM_SESSION_MANAGER,
-    )
-
     cancelled: Optional[BaseException] = None
     try:
         # Долгоживущие stdio (напр. @playwright/mcp + Chromium): владелец

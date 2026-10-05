@@ -6,11 +6,10 @@ import logging
 import os
 import re
 from copy import deepcopy
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
-
-if TYPE_CHECKING:
-    import httpx
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
+
+import httpx
 
 from gc_core.config_modules.backend import (
     DEFAULT_REQUEST_TIMEOUT_SEC,
@@ -391,8 +390,6 @@ async def arequest_backend_responses(
     timeout — HTTP-таймаут (connect + idle между чанками стрима), секунды.
     config_proxy — backend.proxy; резолв (config/env/NO_PROXY) на каждый запрос.
     """
-    import httpx
-
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 
@@ -473,8 +470,6 @@ async def _astream_chat_completions(
     logger,
     on_delta: OnDelta,
 ):
-    import httpx
-
     stream_data = dict(data)
     stream_data["stream"] = True
     # OpenAI-совместимые провайдеры отдают usage в стриме только по явному
@@ -558,8 +553,6 @@ async def arequest_backend_chat_completions(
     """
     # `use_retry` забирает из kwargs декоратор ретраев (retry_with_backoff_async) —
     # до тела функции он не доходит; в сигнатуре остаётся как часть интерфейса.
-    import httpx
-
     del use_retry
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)

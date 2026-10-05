@@ -24,12 +24,11 @@ import json
 import re
 from abc import abstractmethod
 from collections import OrderedDict
-from typing import TYPE_CHECKING, Any, Dict, NamedTuple, Optional, Tuple
+from typing import Any, Dict, NamedTuple, Optional, Tuple
+
+import httpx
 
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
-
-if TYPE_CHECKING:
-    import httpx
 
 _INVALID_ARGUMENT = "invalid_argument"
 _EMPTY_META: Dict[str, Optional[str]] = {

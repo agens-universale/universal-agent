@@ -468,6 +468,28 @@ def _servers_cfg_with_trace(
     return out
 
 
+def mcp_cache_config(settings: Any) -> Dict[str, Any]:
+    """Конфиг ``ToolsCache`` из настроек: секция ``mcp`` в проекции нижнего слоя.
+
+    Ниже по слою (кэш, транспорты, ssl_config) конфиг сервера — словарь в
+    проекции плоского вида: ключи по alias (`server-name`, `verify-ssl`, ...),
+    секреты (token) — сырыми: транспорту нужен сам токен. Единственная точка:
+    этот же объект уходит и в ToolsCache (весь discovery), и в замыкание
+    каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же для
+    сабагентов через build_tools_data(настройки ребёнка).
+    """
+    app = settings_of(settings)
+    servers_cfg: Dict[str, Any] = {
+        name: plain_dump(server, by_alias=True)
+        for name, server in app.mcp.servers.items()
+    }
+    return {
+        "mcp-servers": _servers_cfg_with_trace(servers_cfg, settings),
+        "mcp-meta": app.mcp.meta.model_dump(by_alias=True),
+        "use_retry": app.backend.use_retry,
+    }
+
+
 def _prepare_mcp_tools_data(
     settings: Any,
     *,
@@ -492,26 +514,10 @@ def _prepare_mcp_tools_data(
     некому чистить), протечка между арендаторами сервера с разными наборами
     серверов, и переживание между тестами.
     """
-    app = settings_of(settings)
-    if not app.mcp.servers:
+    cfg = mcp_cache_config(settings)
+    if not cfg["mcp-servers"]:
         return None
-    # Ниже по слою (кэш, транспорты, ssl_config) конфиг сервера — словарь в
-    # проекции плоского вида: ключи по alias (`server-name`, `verify-ssl`, ...),
-    # секреты (token) — сырыми: транспорту нужен сам токен.
-    servers_cfg: Dict[str, Any] = {
-        name: plain_dump(server, by_alias=True)
-        for name, server in app.mcp.servers.items()
-    }
-    # Единственная точка: этот же объект уходит и в ToolsCache (весь discovery),
-    # и в замыкание каждого MCPToolWrapper (все вызовы тулов), и повторно сюда же
-    # для сабагентов через build_tools_data(настройки ребёнка).
-    servers_cfg = _servers_cfg_with_trace(servers_cfg, settings)
-
-    cfg: Dict[str, Any] = {
-        "mcp-servers": servers_cfg,
-        "mcp-meta": app.mcp.meta.model_dump(by_alias=True),
-        "use_retry": app.backend.use_retry,
-    }
+    servers_cfg = cfg["mcp-servers"]
 
     if tools_cache is None:
         # `os_backend` приехал с develop: через него говорят клиенты
