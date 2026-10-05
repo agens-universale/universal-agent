@@ -186,24 +186,81 @@ def test_unsupported_backend_is_rejected():
     assert "docker" in text
 
 
-def test_parse_args_keeps_own_flags_and_ignores_the_rest():
+def test_parse_args_keeps_own_flags_and_collects_overrides():
     bare = _parse_args([])
     assert bare.config is None
     assert bare.profile is None
+    assert bare.overrides == {}
 
     jetbrains = _parse_args(
         ["acp", "--experimental", "--config", "c.yml", "--profile", "work"]
     )
     assert jetbrains.config == "c.yml"
     assert jetbrains.profile == "work"
+    assert jetbrains.overrides == {"experimental": True}
 
     vscode = _parse_args(["--profile", "acp"])
     assert vscode.profile == "acp"
     assert vscode.config is None
+    assert vscode.overrides == {}
 
     junk = _parse_args(["nope", "--foo", "bar", "acp"])
     assert junk.config is None
     assert junk.profile is None
+    assert junk.overrides == {"foo": "bar"}
+
+
+def test_parse_args_coerces_override_types():
+    args = _parse_args(
+        ["--level", "max", "--max_steps=50", "--verbose", "true"]
+    )
+    assert args.overrides == {
+        "level": "max",
+        "max_steps": 50,
+        "verbose": True,
+    }
+
+
+def test_cli_overrides_apply_after_profile(monkeypatch, tmp_path):
+    held = {}
+
+    def load(path, profile_override=None):
+        held["profile"] = profile_override
+        return {
+            "os_backend": "local",
+            "threads_data_path": str(tmp_path),
+            "level": "default",
+            "max_steps": 100,
+            "models": {"flash": {"model": "m"}},
+        }, None
+
+    async def serve(config, protocol_out):
+        held["config"] = config
+
+    monkeypatch.setattr("gc_acp.main.load_config_ex", load)
+    monkeypatch.setattr("gc_acp.main.serve", serve)
+    assert (
+        main(
+            [
+                "--profile",
+                "work",
+                "--level",
+                "max",
+                "--max_steps",
+                "7",
+                "--model",
+                "forced",
+            ]
+        )
+        == 0
+    )
+    cfg = held["config"]
+    assert held["profile"] == "work"
+    assert cfg["level"] == "max"
+    assert cfg["max_steps"] == 7
+    assert cfg["model"] == "forced"
+    assert "model" in cfg["cli_explicit_keys"]
+    assert any("легаси-форс" in n for n in cfg["compat_notices"])
 
 
 def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
@@ -220,13 +277,20 @@ def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
     async def serve(config, protocol_out):
         held["started"] = True
         held["text_answer_mode"] = config["text_answer_mode"]
+        held["experimental"] = config.get("experimental")
 
     monkeypatch.setattr("gc_acp.main.load_config_ex", load)
     monkeypatch.setattr("gc_acp.main.serve", serve)
-    assert main(["acp", "--config", "c.yml", "--profile", "work"]) == 0
+    assert (
+        main(
+            ["acp", "--experimental", "--config", "c.yml", "--profile", "work"]
+        )
+        == 0
+    )
     assert held == {
         "path": "c.yml",
         "profile": "work",
         "started": True,
         "text_answer_mode": "allow",
+        "experimental": True,
     }

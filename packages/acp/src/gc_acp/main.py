@@ -7,13 +7,16 @@ import asyncio
 import sys
 from typing import Any, TextIO
 
+import yaml
 from gc_core.aio.agent import AsyncAgent
 from gc_core.backends.factory import (
     parse_os_backend_kind,
     resolve_os_backend,
 )
 from gc_core.config import (
+    apply_cli_overrides,
     build_auth_connector,
+    cli_forces_legacy_model,
     load_config_ex,
     resolve_config_path,
 )
@@ -47,6 +50,13 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    # Как у gc-cli: --ключ value поверх профиля/config.yml. В stdout не
+    # печатаем — канал занят JSON-RPC.
+    apply_cli_overrides(config, extra_overrides=args.overrides)
+    if cli_forces_legacy_model(config):
+        config.setdefault("compat_notices", []).append(
+            "--model: уровни отключены на этот запуск (легаси-форс)"
+        )
     rejection = backend_rejection(config)
     if rejection is not None:
         print(rejection, file=sys.stderr)
@@ -173,21 +183,61 @@ async def _create_agent(
         auth_connector=auth_connector,
         tools_cache=tools_cache,
         os_backend=os_backend,
+        force_legacy=cli_forces_legacy_model(config),
     )
+
+
+def _coerce_cli_value(raw: str) -> Any:
+    """Строка CLI → тип через yaml.safe_load (как у gc-cli)."""
+    try:
+        value = yaml.safe_load(raw)
+    except Exception:
+        return raw
+    return raw if value is None else value
+
+
+def _parse_unknown_args(tokens: list[str]) -> dict[str, Any]:
+    """``--param value`` / ``--param=value`` / ``--flag`` → оверрайды конфига.
+
+    Позиционные токены (JetBrains ``acp``) пропускаются. Контракт тот же,
+    что у ``gc-cli``: любой ``--ключ`` ложится в runtime-конфиг поверх
+    профиля и файловых слоёв.
+    """
+    overrides: dict[str, Any] = {}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if not token.startswith("--"):
+            i += 1
+            continue
+        key_part = token[2:]
+        value: Any = True
+        if "=" in key_part:
+            key, raw_val = key_part.split("=", 1)
+            value = _coerce_cli_value(raw_val)
+        else:
+            key = key_part
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+                value = _coerce_cli_value(tokens[i + 1])
+                i += 1
+        if key:
+            overrides[key] = value
+        i += 1
+    return overrides
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Разобрать запуск. Чужие аргументы не роняют процесс.
 
-    Точка входа одна. Свои флаги — только ``--config`` и ``--profile``
-    (пустой args у VS Code и ``--profile acp`` в его настройках).
-    Остальное клиенты дописывают сами: JetBrains передаёт позиционный
-    ``acp``. Такие токены отбрасываются.
+    Свои флаги — ``--config`` и ``--profile``. Остальные ``--ключ`` —
+    оверрайды конфига (как у gc-cli). Позиционные токены клиентов
+    (JetBrains ``acp``) отбрасываются.
     """
     parser = argparse.ArgumentParser(prog="gc-acp")
     parser.add_argument("--config", default=None, help="путь к config.yml")
     parser.add_argument("--profile", default=None, help="имя профиля")
-    args, _unknown = parser.parse_known_args(argv)
+    args, unknown = parser.parse_known_args(argv)
+    args.overrides = _parse_unknown_args(list(unknown))
     return args
 
 
