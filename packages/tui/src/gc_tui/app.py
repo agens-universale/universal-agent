@@ -1496,6 +1496,14 @@ class TuiApp(App):
         MCP-дискавери в worker-потоке (пользователь ждёт её до начала хода), и
         платить за неё, когда у треда те же значения, незачем."""
         new = dict(overrides or {})
+        # Мета треда старой версии или ручная правка: ключ, не проходящий
+        # схему, снимается с уведомлением — иначе рендер окна падал бы на
+        # каждой сборке действующих настроек.
+        new, dropped = self._drop_invalid_session_keys(
+            self.base_settings(), new
+        )
+        for notice in dropped:
+            push_runtime_notice(notice)
         changed = new != self._session_overrides
         self._session_overrides = new
         return changed

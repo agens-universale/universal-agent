@@ -49,7 +49,9 @@ models:
   deepseek-max:
     model: deepseek/deepseek-chat-v3-0324
     url: https://api.provider.example/v1/chat/completions
-    token: "${ENV:DEEPSEEK_API_KEY}"
+    # Необязательный ключ: `:-` — пустое умолчание. Без него незаданная
+    # переменная роняет загрузку (`${ENV:VAR}` строгий).
+    token: "${ENV:DEEPSEEK_API_KEY:-}"
 
   # --- Модель со зрением — для «глаз» (assign.vision ниже) ---
   qwen-vl:

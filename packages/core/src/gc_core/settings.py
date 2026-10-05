@@ -15,7 +15,6 @@ from typing import Any, Mapping, Optional
 from pydantic import BaseModel
 
 from gc_core.config_modules.field_meta import _nested_model
-from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.provenance import Provenance
 from gc_core.config_modules.root import AppConfig, resolve_paths
 
@@ -88,14 +87,23 @@ class _DictOf:
         self.value_type = value_type
 
 
+def _replace_at(document: dict[str, Any], dotted: str, value: Any) -> None:
+    """Поставить ``value`` по dotted-пути, заменив прежнее значение целиком."""
+    keys = _alias_path(AppConfig, dotted.split("."))
+    target = document
+    for key in keys[:-1]:
+        nested = target.get(key)
+        if not isinstance(nested, dict):
+            nested = target[key] = {}
+        target = nested
+    target[keys[-1]] = value
+
+
 def _nested(updates: Mapping[str, Any]) -> dict[str, Any]:
+    """Документ из dotted-правок (``{"agent.max_steps": 5}`` → вложенный)."""
     document: dict[str, Any] = {}
     for dotted, value in updates.items():
-        keys = _alias_path(AppConfig, dotted.split("."))
-        target = document
-        for key in keys[:-1]:
-            target = target.setdefault(key, {})
-        target[keys[-1]] = value
+        _replace_at(document, dotted, value)
     return document
 
 
@@ -110,11 +118,17 @@ def override_settings(
     Правки проходят ту же валидацию и нормализацию, что и файл: недопустимое
     значение — ``ValidationError``, относительный путь — от ``config_dir``.
     Явно заданные поля исходных настроек остаются явными.
+
+    Правка ЗАМЕНЯЕТ значение по своему пути, а не сливается с ним: CLI,
+    сервер и сессия сужают списки и словари (``--mcp-servers '{}'``
+    отключает серверы, ``allowed_read_roots`` не расширяется файловым
+    значением). Объединение списков — только у файловых слоёв.
     """
     if not updates:
         return settings
-    base = settings.model_dump(by_alias=True, exclude_unset=True)
-    merged = deep_merge(base, _nested(updates))
+    merged = settings.model_dump(by_alias=True, exclude_unset=True)
+    for dotted, value in updates.items():
+        _replace_at(merged, dotted, value)
     rebuilt = AppConfig.model_validate(merged)
     return resolve_paths(rebuilt, config_dir or os.getcwd())
 

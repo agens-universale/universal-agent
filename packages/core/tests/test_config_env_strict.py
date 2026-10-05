@@ -176,6 +176,58 @@ def test_load_settings_reports_all_layers_at_once(stack, monkeypatch):
     assert by_name["GC_T_C"].key == "agent.client_name"
 
 
+def test_overridden_missing_env_does_not_fail(stack, monkeypatch):
+    """Незаданная переменная, чьё значение перекрыто верхним слоем, ни на что
+    не влияет: отказ — только по ссылкам, дошедшим до итогового мержа."""
+    base = stack(
+        "config.yml",
+        {
+            "profile": "work",
+            "backend": {
+                "chat_completion_headers": {
+                    "Authorization": "Bearer ${ENV:GC_T_A}",
+                    "X-Trace": "${ENV:GC_T_B}",
+                }
+            },
+            "agent": {"client_name": "${ENV:GC_T_C}"},
+        },
+    )
+    project = stack(".gc/config.yml", {"agent": {"client_name": "project"}})
+    monkeypatch.setattr(env_vars, "project_local_config_path", lambda: project)
+    stack(
+        "profiles/work.yml",
+        {
+            "backend": {
+                "chat_completion_headers": {"Authorization": "Bearer t"}
+            }
+        },
+    )
+    with pytest.raises(UnresolvedPlaceholdersError) as info:
+        load_settings(str(base))
+    assert [r.name for r in info.value.refs] == ["GC_T_B"]
+
+    monkeypatch.setenv("GC_T_B", "trace")
+    loaded = load_settings(str(base))
+    headers = loaded.settings.backend.chat_completion_headers
+    assert headers["Authorization"] == "Bearer t"
+    assert loaded.settings.agent.client_name == "project"
+    source = loaded.provenance.source("agent.client_name")
+    assert "\x00" not in repr(loaded.provenance.__dict__) and source.path
+
+
+def test_shipped_demo_profile_needs_only_used_keys(stack, monkeypatch):
+    from pathlib import Path
+
+    import gc_core
+
+    demo = Path(gc_core.__file__).parents[4] / "demo_profile.yml"
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.setenv("OPENROUTER_API_KEY", "or-key")
+    base = stack("config.yml", {"profile": "demo"})
+    stack("profiles/demo.yml", yaml.safe_load(demo.read_text("utf-8")))
+    assert load_settings(str(base)).runtime.active_profile == "demo"
+
+
 def test_missing_env_wins_over_its_own_consequence(stack):
     """Пустая подстановка ломает правило пары записи реестра — но причина
     одна, незаданная переменная, и отказ называет её, а не пару."""

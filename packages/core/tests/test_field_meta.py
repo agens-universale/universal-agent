@@ -203,3 +203,41 @@ def test_python_dump_round_trip_keeps_secret_values():
     rebuilt = AppConfig.model_validate(settings.model_dump(by_alias=True))
     assert rebuilt == settings
     assert rebuilt.models["m1"].token.get_secret_value() == "model-SECRET"
+
+
+def test_free_form_leaves_are_redacted_by_key_name():
+    """В словарях без схемы (kwargs, env) секрет узнаётся по имени ключа."""
+    from gc_core.config_command import explain_entries
+    from gc_core.config_modules.field_meta import redacted_dump
+    from gc_core.settings import (
+        LoadedSettings,
+        default_settings,
+        override_settings,
+    )
+
+    settings = override_settings(
+        default_settings(),
+        {
+            "backend.chat_completion_kwargs": {
+                "api_key": "sk-KWARGS",
+                "max_tokens": 512,
+                "extra_body": {"auth_token": "sk-NESTED"},
+            },
+            "mcp.servers": {
+                "gh": {
+                    "transport": "stdio",
+                    "command": "x",
+                    "env": {"GITHUB_TOKEN": "ghp-ENV", "LOG_LEVEL": "debug"},
+                }
+            },
+        },
+    )
+    dump = redacted_dump(settings)
+    kwargs = dump["backend"]["chat_completion_kwargs"]
+    assert kwargs["api_key"] == "***" and kwargs["max_tokens"] == 512
+    assert kwargs["extra_body"]["auth_token"] == "***"
+    env = dump["mcp"]["servers"]["gh"]["env"]
+    assert env["GITHUB_TOKEN"] == "***"  # env секрет по схеме целиком
+    shown = repr(explain_entries(LoadedSettings(settings=settings)))
+    for secret in ("sk-KWARGS", "sk-NESTED", "ghp-ENV"):
+        assert secret not in shown

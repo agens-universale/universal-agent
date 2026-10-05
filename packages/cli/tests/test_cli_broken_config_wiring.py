@@ -626,3 +626,32 @@ def test_run_init_explains_an_unreadable_layer_instead_of_a_traceback(
     assert str(overlay) in err
     assert "не удалось прочитать" in err
     assert "Traceback" not in err
+
+
+def test_invalid_param_value_is_reported_without_the_value(
+    monkeypatch, tmp_path, capsys
+):
+    """Негодный `--param`: координата и причина, без значения (там токен)."""
+    base = tmp_path / "base.yml"
+    base.write_text("agent: {model: m}\n", encoding="utf-8")
+    ap = _reload_arg_parser_with_argv(
+        [
+            "gc-cli",
+            "--config",
+            str(base),
+            "--max_steps=Bearer sk-SECRET-123",
+            "-q",
+            "x",
+        ],
+        monkeypatch,
+    )
+    monkeypatch.setattr(cli, "arg_parser", ap)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert "agent.max_steps" in captured.err
+    assert "sk-SECRET-123" not in captured.err + captured.out

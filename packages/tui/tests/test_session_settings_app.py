@@ -308,3 +308,15 @@ def test_clear_session_overrides_noop_when_nothing_to_clear(
 
     app.clear_session_overrides(("tui.finish_gate_mode",))  # нечего снимать
     assert calls["n"] == 0  # persist не звался
+
+
+def test_invalid_thread_override_is_dropped_on_open(tmp_path):
+    """Невалидное значение в мете треда (старая версия, ручная правка)
+    снимается при открытии: сборка действующих настроек не падает."""
+    app = _app(tmp_path)
+    app.load_session_overrides(
+        {"tui.finish_gate_mode": "bogus", "tui.text_answer_mode": "deny"}
+    )
+    eff = app.effective_settings()
+    assert eff.settings.tui.finish_gate_mode == "on"
+    assert eff.settings.tui.text_answer_mode == "deny"

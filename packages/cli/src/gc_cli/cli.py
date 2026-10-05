@@ -27,6 +27,7 @@ from gc_core.config_modules.env_interpolation import (
     UnresolvedPlaceholdersError,
 )
 from gc_core.config_modules.images import read_images_config
+from gc_core.config_modules.root import schema_error_details
 from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
@@ -40,6 +41,7 @@ from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
 from gc_core.utils.json_text import format_json_for_display
 from gc_core.utils.logging_module import human_console_enabled
+from pydantic import ValidationError
 from recommended_mcp.runtime.daemon_autostart import (
     ensure_mcp_daemons,
     shutdown_mcp_daemons,
@@ -534,7 +536,17 @@ def _run_update() -> int:
     """
     src = _updater_source_or_hint()
     if src is not None:
-        loaded = load_settings(arg_parser.run_args.config)
+        try:
+            loaded = load_settings(arg_parser.run_args.config)
+        except ValueError as exc:
+            # Обновление чинит и сломанный конфиг: он нужен только ради
+            # `update.extra_args`, без них ставим с умолчаниями.
+            print(
+                "[gc] конфиг не загружается, обновление без "
+                f"update.extra_args: {exc}",
+                file=sys.stderr,
+            )
+            loaded = None
         command = updater_runner.build_install_command(
             src, updater_check.extra_args(loaded)
         )
@@ -760,6 +772,14 @@ async def arun_cli() -> int:
         # старте (`_cli_updates` резолвит строго), а не traceback.
         print(f"[gc] {exc}", file=sys.stderr)
         return 1
+    except ValidationError as exc:
+        # Негодное значение параметра: координата и причина, без значения
+        # (в нём может быть токен).
+        print(
+            f"[gc] некорректный параметр: {schema_error_details(exc)}",
+            file=sys.stderr,
+        )
+        return 2
     # Режим запуска для ядра: от него зависит запись журнала правок
     # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
     loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)

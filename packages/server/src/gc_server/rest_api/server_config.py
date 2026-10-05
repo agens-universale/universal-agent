@@ -12,7 +12,9 @@ from gc_core.config import (
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
+from gc_core.config_modules.root import schema_error_details
 from gc_core.utils.user_text import read_user_text
+from pydantic import ValidationError
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SERVER_CONFIG_NAME = "config_server.yml"
@@ -222,7 +224,13 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
     loaded = loaded.with_overrides(updates, layer="server")
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:
-        loaded = apply_cli_overrides(loaded, extra_overrides=overrides)
+        try:
+            loaded = apply_cli_overrides(loaded, extra_overrides=overrides)
+        except ValidationError as exc:
+            # Координата и причина без значения: в нём может быть токен.
+            raise ValueError(
+                f"agent_overrides: {schema_error_details(exc)}"
+            ) from None
     # Прежний `setdefault("limit_project_metadata", True)` ничего не менял:
     # плоский словарь всегда уже содержал ключ. Поведение сохранено.
     # Режим запуска для ядра: от него зависит запись журнала правок

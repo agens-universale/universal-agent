@@ -29,7 +29,12 @@ from typing import Any, Iterator, Optional, Sequence, TextIO
 from pydantic import AliasChoices, BaseModel, TypeAdapter
 from pydantic.fields import PydanticUndefined
 
-from gc_core.config_modules.field_meta import MASK, meta_for
+from gc_core.config_modules.field_meta import (
+    MASK,
+    is_secret_name,
+    meta_for,
+    redact_free_form,
+)
 from gc_core.config_modules.flat_keys import FLAT_TO_PATH, setting_path
 from gc_core.config_modules.provenance import DEFAULT, Source
 
@@ -236,7 +241,7 @@ def _entry(leaf: Leaf, provenance: Any, defaults: dict[str, Any]) -> Entry:
     is_default = untouched and default is not _ABSENT and default == leaf.value
     if untouched and not is_default:
         sources = (UNTRACKED,)
-    hide = mask_secret if secret else (lambda value: value)
+    hide = mask_secret if secret else redact_free_form
     return Entry(
         key=leaf.key,
         value=hide(leaf.value),
@@ -272,7 +277,9 @@ def _entry_inside_leaf(
         )
         return Entry(
             key=key,
-            value=mask_secret(value) if leaf.secret else value,
+            value=mask_secret(value)
+            if leaf.secret or is_secret_name(name)
+            else redact_free_form(value),
             sources=sources,
             is_default=sources == (DEFAULT,),
             secret=leaf.secret,

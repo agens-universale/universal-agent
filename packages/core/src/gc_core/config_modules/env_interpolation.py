@@ -182,16 +182,23 @@ class _Resolver:
         self.missing_files: dict[str, str] = {}
         self.file_cache: dict[str, tuple[Optional[str], str]] = {}
 
-    def _miss(self, kind: str, name: str, reason: str, key: str) -> None:
+    def _miss(self, kind: str, name: str, reason: str, key: str) -> str:
+        """Подстановка вместо неразрешённой ссылки.
+
+        Строгий режим ставит метку с номером ссылки: загрузчик после мержа
+        слоёв видит, пережило ли значение перекрытие (``settle_unresolved``).
+        """
         if self.unresolved is not None:
             self.unresolved.append(
                 UnresolvedRef(kind, name, reason, key=key, source=self.source)
             )
-        elif kind == "env":
+            return _UNRESOLVED_MARK.format(len(self.unresolved) - 1)
+        if kind == "env":
             if name not in self.missing_env:
                 self.missing_env.append(name)
         else:
             self.missing_files.setdefault(name, reason)
+        return ""
 
     def string(self, value: str, key: str) -> str:
         def repl_env(m: re.Match[str]) -> str:
@@ -201,8 +208,7 @@ class _Resolver:
                 return current or default
             if current is not None:
                 return current
-            self._miss("env", var, "не задана", key)
-            return ""
+            return self._miss("env", var, "не задана", key)
 
         def repl_file(m: re.Match[str]) -> str:
             path_raw, default = m.group(1), m.group(2)
@@ -211,8 +217,7 @@ class _Resolver:
                 return value
             if default is not None:
                 return default
-            self._miss("file", path_raw, reason, key)
-            return ""
+            return self._miss("file", path_raw, reason, key)
 
         return _FILE_MARKER.sub(repl_file, _ENV_MARKER.sub(repl_env, value))
 
@@ -274,6 +279,44 @@ def resolve_env_placeholders_strict(obj: Any, *, source: str = "") -> Any:
     )
     raise_unresolved(unresolved)
     return resolved
+
+
+#: Метка неразрешённой ссылки в строгом режиме (``\x00`` в YAML не встречается).
+_UNRESOLVED_MARK = "\x00gc-unresolved:{}\x00"
+_UNRESOLVED_RE = re.compile("\x00gc-unresolved:(\\d+)\x00")
+
+
+def strip_unresolved_marks(obj: Any, found: Optional[set] = None) -> Any:
+    """Копия ``obj`` без меток строгого режима (метка → ``""``).
+
+    В ``found`` — номера ссылок, чьи метки встретились."""
+    if isinstance(obj, dict):
+        return {k: strip_unresolved_marks(v, found) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [strip_unresolved_marks(v, found) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(strip_unresolved_marks(v, found) for v in obj)
+    if isinstance(obj, str) and "\x00gc-unresolved:" in obj:
+
+        def drop(m: re.Match[str]) -> str:
+            if found is not None:
+                found.add(int(m.group(1)))
+            return ""
+
+        return _UNRESOLVED_RE.sub(drop, obj)
+    return obj
+
+
+def settle_unresolved(
+    merged: Any, refs: list
+) -> tuple[Any, list[UnresolvedRef]]:
+    """Итоговый документ без меток и ссылки, значения которых пережили мерж.
+
+    Ссылка, чьё значение перекрыто верхним слоем (проект, профиль), загрузку
+    не роняет: незаданная переменная там ни на что не влияет."""
+    found: set[int] = set()
+    clean = strip_unresolved_marks(merged, found)
+    return clean, [refs[i] for i in sorted(found) if i < len(refs)]
 
 
 def tag_layer(

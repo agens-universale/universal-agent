@@ -29,6 +29,8 @@ from gc_core.config_modules.env_interpolation import (
     raise_unresolved,
     resolve_env_placeholders,
     resolve_env_placeholders_strict,
+    settle_unresolved,
+    strip_unresolved_marks,
     tag_layer,
 )
 from gc_core.config_modules.env_vars import project_gc_dir
@@ -440,7 +442,15 @@ def load_settings(
         if not isinstance(exc, UnresolvedPlaceholdersError):
             raise_unresolved(unresolved)
         raise
-    raise_unresolved(unresolved)
+    # Отказ — только по ссылкам, значения которых дошли до итогового мержа:
+    # перекрытая верхним слоем незаданная переменная ни на что не влияет.
+    raw_config, surviving = settle_unresolved(raw_config, unresolved)
+    raise_unresolved(surviving)
+    if unresolved:
+        raw_base_after_env = strip_unresolved_marks(raw_base_after_env)
+        layer_documents = strip_unresolved_marks(list(layer_documents))
+        managed_raw = strip_unresolved_marks(managed_raw)
+        _base_voice = strip_unresolved_marks(_base_voice)
 
     mtime_set = _build_mtime_set(
         base_path, managed_path, project_path, active_name, roots

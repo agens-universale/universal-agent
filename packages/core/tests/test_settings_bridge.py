@@ -141,3 +141,43 @@ def test_override_reaches_aliased_field_inside_dict_of_models():
         settings, {"mcp.servers.x.server_name": "renamed"}
     )
     assert updated.mcp.servers["x"].server_name == "renamed"
+
+
+def test_override_replaces_lists_and_dicts_instead_of_merging(tmp_path):
+    """CLI/сервер/сессия сужают: правка заменяет значение по своему пути."""
+    base = override_settings(
+        default_settings(),
+        {
+            "security.read_guard.allowed_read_roots": [str(tmp_path / "file")],
+            "mcp.servers": {"github": {"transport": "stdio", "command": "x"}},
+            "models": {
+                "m1": {
+                    "model": "prov/m1",
+                    "url": "https://file.example/v1/chat/completions",
+                    "token": "file-token",
+                }
+            },
+            "agent.stop_tools": ["turn_finish", "ask_human"],
+        },
+    )
+    narrowed = override_settings(
+        base,
+        {
+            "security.read_guard.allowed_read_roots": [str(tmp_path / "cli")],
+            "mcp.servers": {},
+            "models.m1": {"model": "prov/other"},
+            "agent.stop_tools": ["turn_finish"],
+        },
+    )
+    assert narrowed.security.read_guard.allowed_read_roots == [
+        str(tmp_path / "cli")
+    ]
+    assert narrowed.mcp.servers == {}
+    model = narrowed.models["m1"]
+    assert (model.model, model.url, model.token) == ("prov/other", None, None)
+    assert narrowed.agent.stop_tools == ["turn_finish"]
+    # Соседние явные значения не теряются.
+    assert (
+        base.security.read_guard.enabled
+        == narrowed.security.read_guard.enabled
+    )

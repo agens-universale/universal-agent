@@ -96,7 +96,11 @@ class AgentAuthConfig(BaseModel):
 
 
 class AppConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    # hide_input_in_errors: в `str(ValidationError)` нет `input_value` —
+    # токен из `--param` или `agent_overrides` не печатается в трейсбеке.
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, hide_input_in_errors=True
+    )
 
     backend: BackendConfig = Field(default_factory=BackendConfig)
     chat_completions: ChatCompletionsConfig = Field(

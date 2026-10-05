@@ -210,6 +210,46 @@ def _mask(value: Any) -> Any:
     return MASK
 
 
+#: Имена ключей, значение которых — секрет, в словарях без схемы
+#: (``*_kwargs``, ``extra_body``, ``env`` MCP-сервера). ``token`` — только
+#: окончанием имени: ``max_tokens`` — не секрет.
+_SECRET_NAME_PARTS = (
+    "api_key",
+    "api-key",
+    "apikey",
+    "authorization",
+    "secret",
+    "password",
+    "passwd",
+    "credential",
+)
+
+
+def is_secret_name(key: Any) -> bool:
+    name = str(key).lower()
+    return name.endswith("token") or any(
+        part in name for part in _SECRET_NAME_PARTS
+    )
+
+
+def redact_free_form(value: Any) -> Any:
+    """Содержимое словаря-листа без схемы: секреты — по имени ключа."""
+    if isinstance(value, Mapping):
+        return {
+            key: (
+                _mask(item) if is_secret_name(key) else redact_free_form(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [redact_free_form(item) for item in value]
+    return value
+
+
+def _is_leaf(parts: tuple[str, ...]) -> bool:
+    return any(_matches(path.split("."), list(parts)) for path in leaf_meta())
+
+
 def masked_repr_args(
     model: BaseModel, *, all_fields: bool = False
 ) -> Iterator[tuple[str | None, Any]]:
@@ -239,6 +279,9 @@ def redact(document: Any, parts: tuple[str, ...] = ()) -> Any:
             path = (*parts, str(key))
             if meta_for_parts(list(path)).secret:
                 out[key] = _mask(value)
+            elif isinstance(value, (Mapping, list)) and _is_leaf(path):
+                # Словарь-лист без схемы (kwargs, env): по имени ключа.
+                out[key] = redact_free_form(value)
             else:
                 out[key] = redact(value, path)
         return out
@@ -259,6 +302,7 @@ __all__ = [
     "FieldMeta",
     "SecretText",
     "gc_meta",
+    "is_secret_name",
     "iter_leaves",
     "leaf_meta",
     "masked_repr_args",
@@ -267,6 +311,7 @@ __all__ = [
     "paths_where",
     "plain_dump",
     "redact",
+    "redact_free_form",
     "redacted_dump",
     "secret_value",
 ]

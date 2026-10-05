@@ -36,7 +36,9 @@ class NativeStoreConfig(BaseModel):
 
 
 class NativeWorkerConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    model_config = ConfigDict(
+        extra="forbid", frozen=True, hide_input_in_errors=True
+    )
     address: str = "localhost:7233"
     namespace: str = "default"
     workflow_queue: str = "ua-native-workflow"
