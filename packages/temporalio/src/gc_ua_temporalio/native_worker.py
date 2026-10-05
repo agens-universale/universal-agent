@@ -29,25 +29,13 @@ from gc_ua_temporalio.storage.technical import TechnicalStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
 
 
-def build_thread_store(spec):
-    """Хранилище тредов по конфигу воркера (``NativeStoreConfig``)."""
-    if spec.kind == "file":
-        return DurableFileThreadStore(spec.path)
-    if spec.kind == "sqlite":
-        return SQLiteThreadStore(spec.path)
-    from gc_ua_temporalio.storage.s3 import S3ThreadStore
-
-    return S3ThreadStore(
-        spec.bucket,
-        spec.prefix,
-        endpoint_url=spec.endpoint_url,
-        region_name=spec.region,
-    )
-
-
 def build_native_runtime(config):
     stores = {
-        name: build_thread_store(spec)
+        name: (
+            DurableFileThreadStore(spec.path)
+            if spec.kind == "file"
+            else SQLiteThreadStore(spec.path)
+        )
         for name, spec in config.thread_stores.items()
     }
     receipts = TechnicalStore(config.receipts_database)

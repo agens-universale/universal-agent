@@ -1,8 +1,9 @@
 # Universal Agent: нативная интеграция с Temporal
 
 **Статус: реализовано в ветке `feat/temporal-runtime`.** База сравнения — `develop`
-`3e7f98e3`. Документ описывает фактические классы, activities и поведение;
-итоги проверок — в [разделе 12](#12-проверки).
+`824870f6` (влит 05.10.2026, вместе с изображениями). Документ описывает фактические
+классы, activities и поведение; итоги проверок — в [разделе 12](#12-проверки),
+порядок чтения кода — в [разделе 13](#13-с-каких-файлов-начинать).
 
 Основное решение: **один `AgentExecutor`, один `ThreadSession`, один агентский цикл**.
 Temporal меняет только исполнителя внешних операций: модель, внешние эффекты
@@ -214,6 +215,30 @@ flowchart LR
 функции напрямую. Чистые инструменты (memory, todo, calculator) исполняются в
 workflow и activities не порождают.
 
+**Песочница workflow.** Код workflow Temporal исполняет в песочнице: модуль
+workflow и всё, что он импортирует, загружаются заново, а сеть, файлы, время и
+`urllib.request` запрещены. Ядро импортирует httpx, MCP SDK, trafilatura и
+readability на уровне модулей, как в develop, хотя workflow ими не пользуется:
+модель, инструменты и MCP идут через activities. Поэтому модули workflow первым
+делом импортируют
+[`sandbox_passthrough`](../packages/temporalio/src/gc_ua_temporalio/sandbox_passthrough.py):
+эти сторонние пакеты песочница берёт готовыми из процесса worker'а (тот же приём
+у `temporalio.contrib.deepagents`). Код самого ядра по-прежнему загружается в
+песочнице и проходит её проверки
+([`test_executor_sandbox_import.py`](../packages/temporalio/tests/test_executor_sandbox_import.py)).
+Идентификаторы, которые локально берутся из `uuid4` (ход, ключ проб зрения,
+сообщения), в workflow выдаёт среда исполнения (`execution.environment.supplied_id`).
+
+**Изображения.** Вложения и снимки `fs_view_image` — ссылки на файлы
+`ImageStore`; пикселей в истории workflow нет. Проекция картинок в запрос и пробы
+зрения модели идут внутри `agent.model.request` (у worker'а есть хранилище
+картинок). `fs_view_image` исполняется в `agent.tool.execute`: срез состояния хода
+приходит в `ToolStateView.vision`, снимок возвращается в хвост батча через
+`StateDelta.pending_tool_attachments`. Картиночные отказы модели классифицируются
+на worker'е и приходят в workflow полями `ModelFailure.image_*`. Журнал правок
+(`agent_edits`) в durable-исполнении выключен: `NativeContextProvider` гасит
+`agent_edits.record` в профиле.
+
 ### Activities
 
 | Activity | Очередь | Что делает | Повторы |
@@ -415,6 +440,7 @@ flowchart LR
 | [`DurableFileThreadStore`](../packages/core/src/gc_core/thread_store_file_durable.py) | Temporal, один хост | Те же файлы + `.store/`: квитанции, журнал прерванной записи, владелец. |
 | [`SQLiteThreadStore`](../packages/temporalio/src/gc_ua_temporalio/storage/sqlite.py) | Temporal | Транзакции SQLite. |
 
+
 **Когда писать тред** — `thread_store.persist` в профиле:
 
 | Значение | Когда пишем | По умолчанию |
@@ -476,24 +502,47 @@ replay восстанавливает буфер. Шаги теряются из
 - Worker Versioning не используется: ход, идущий в момент несовместимого релиза,
   нужно доиграть старым кодом (мягкая остановка worker'а).
 - Blob'ы external storage Temporal не удаляет — нужна очистка по сроку.
+- Файлы картинок (`ImageStore`, карман процесса `_staging/<pid>`) лежат на диске
+  worker'а: несколько worker'ов на разных хостах требуют общего тома для каталога
+  картинок, даже если тред хранится в БД.
+- Ответ человека с картинками (`HumanAnswer.attachments`) через Temporal не
+  передаётся: ответ — строка.
+- Журнал правок агента (`agent_edits`: дифф, откат) в durable-исполнении не ведётся.
 - Одновременно активен один субагент.
 - Workflow histories прежнего экспериментального протокола не поддерживаются и
   не мигрируются; этот протокол удалён.
 
 ## 12. Проверки
 
-Полные прогоны 02.10.2026 на итоговом коде ветки:
+Прогоны 05.10.2026 после слияния develop `824870f6`:
 
 | Набор | Результат |
 |---|---|
-| `tests` + mcp + core + cli + server | 7309 passed, 4 skipped |
-| `packages/temporalio/tests` (включая live с Temporal dev server) | 203 passed |
-| `packages/tui/tests` | 4144 passed, 1 skipped, 9 xfailed |
+| Все наборы (`tests`, core, cli, server, tui, mcp, acp, temporalio — по файлу, параллельно) | 1280 из 1287 файлов зелёные; 7 — vendor-тесты `computer-mcp` (пакет не установлен в окружение) |
+| `packages/temporalio/tests` (live с Temporal dev server) | 28 из 28 файлов |
+| Эталон локального режима: 44 трассы develop `824870f6` | совпадают |
+| Parity и toggle matrix | 199 passed, 11 skipped |
 | Ruff check / format | без замечаний |
 
-Что покрыто:
+Живые прогоны на реальной модели (RouterAI, `qwen/qwen3.8-omni-flash`):
 
-- **Local = develop**: 44 эталонные трассы develop `3e7f98e3` совпадают; локальный
+| Проверка | Результат |
+|---|---|
+| Серия local vs native: 8 задач (файлы, память между ходами, отсутствующий файл, данные с ошибками, остатки, смена правила, делегирование, два субагента) × 3 повтора | верный `result.json` 24/24 в каждом режиме; два локальных прогона превысили лимит хода 600 с из-за задержек модели |
+| MCP-сценарии в Temporal: UA native vs Deep Agents (`temporalio.contrib.deepagents`), 2–3 MCP-сервера, × 3 | 6/6 у обоих; activities на прогон: UA 25–29 и 34–38, Deep Agents 9–11 и 17–18 |
+| Harbor, terminal-bench 2.0: 10 простых задач | 6/10; остальные 4 — тайм-аут агента 900 с при отдельных вызовах модели до 668 с |
+
+Состав activities одного хода (`mcp_lookup`, `persist: turn`): внутри цикла
+«модель → инструмент» commit'ов нет; служебная часть хода — `context.prepare`,
+`state.prepare`, 2× `thread.load`, `commit claim_owner`, `commit reset_run_flags`,
+`prompt.read`, 2× `commit patch_runtime_flag` (`finish_gate_checking`),
+`commit persist` (весь ход одной записью), `context.close`, `context.release`,
+`commit release_owner`. Разница с Deep Agents — эта служебная часть, судья
+`turn_finish` и `guard.probe` перед файловыми операциями.
+
+Что покрыто автоматическими тестами:
+
+- **Local = develop**: 44 эталонные трассы develop совпадают; локальный
   `FileThreadStore` не создаёт `.store/`; архитектурный тест пар sync/async зелёный.
 - **Durable-контракт**: `assert_durable_conforms` проходят `DurableFileThreadStore` и
   `SQLiteThreadStore`; внешнее удаление файлов треда не ломает следующую запись.
@@ -505,9 +554,49 @@ replay восстанавливает буфер. Шаги теряются из
   не исполняется; MCP-вызов после потери владельца — ошибка инструмента; отмена во
   время teardown MCP.
 - **Субагенты**: модель, инструменты, ввод, вопрос человеку, stop, fallback, replay.
+- **Изображения**: `fs_view_image` через границу эффекта (снимок возвращается в хвост
+  батча), картиночные отказы модели через `ModelFailure`.
 - **External storage**: вход activity 200 КБ хранится по ссылке, история без тела.
-- **Activities** на контролируемом сценарии (2 запроса модели, 1 инструмент):
-  было 26 / 24, сейчас 23 / 21 при `persist: step` и **14** при `persist: turn`;
-  событий истории 161 → 89.
 
-Живая серия качества на реальной модели в этом прогоне не повторялась.
+## 13. С каких файлов начинать
+
+Быстрый путь — пять файлов в таком порядке:
+
+1. [`native_worker.py`](../packages/temporalio/src/gc_ua_temporalio/native_worker.py) —
+   `build_native_runtime` и `worker_options`: что поднимает worker, какие хранилища и
+   activities на каких очередях.
+2. [`native_provider.py`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) —
+   `NativeWorkerConfig`/`NativeProfile` (конфиг worker'а) и `NativeContextProvider`:
+   как профиль превращается в штатный `RunContext` на worker'е.
+3. [`native_workflow.py`](../packages/temporalio/src/gc_ua_temporalio/native_workflow.py) —
+   `NativeAgentWorkflow`: `run` → `_run_session` → `_run_turn` → `AgentExecutor.arun`;
+   signals/updates (`submit_message`, `answer_human`, `stop`, `close_session`).
+4. [`native_operations.py`](../packages/temporalio/src/gc_ua_temporalio/native_operations.py) —
+   `NativeOperations`: как порты ядра (модель, инструмент, guard, промпты) становятся
+   вызовами activities.
+5. [`native_activities.py`](../packages/temporalio/src/gc_ua_temporalio/native_activities.py) —
+   `NativeActivities`: что исполняется на worker'е (`_prepare`, `_model`, `_tool`, `_guard`).
+
+Дальше по темам:
+
+| Тема | Файлы |
+|---|---|
+| Граница ядра (порты и контракты) | [`execution/contracts.py`](../packages/core/src/gc_core/execution/contracts.py) (DTO операций), [`execution/model.py`](../packages/core/src/gc_core/execution/model.py) (модельный запрос и `MODEL_STATE_FIELDS`), [`execution/tool_effects.py`](../packages/core/src/gc_core/execution/tool_effects.py) (эффект инструмента на worker'е), [`execution/reducers.py`](../packages/core/src/gc_core/execution/reducers.py) (применение результатов к `State`), [`context_preparation.py`](../packages/core/src/gc_core/context_preparation.py) и [`run_context.py`](../packages/core/src/gc_core/run_context.py) (`assemble_run_context`) |
+| Цикл хода в ядре | [`agent_executor.py`](../packages/core/src/gc_core/agent_executor.py), [`execution/loop.py`](../packages/core/src/gc_core/execution/loop.py), [`execution/policy.py`](../packages/core/src/gc_core/execution/policy.py), [`execution/state.py`](../packages/core/src/gc_core/execution/state.py) (снимок `State`) |
+| Песочница и сборка контекста workflow | [`sandbox_passthrough.py`](../packages/temporalio/src/gc_ua_temporalio/sandbox_passthrough.py), [`native_context.py`](../packages/temporalio/src/gc_ua_temporalio/native_context.py), [`public_config.py`](../packages/temporalio/src/gc_ua_temporalio/public_config.py) (что из настроек попадает в историю), [`execution/environment.py`](../packages/core/src/gc_core/execution/environment.py) (детерминированные id и время) |
+| Guards | [`security/guard_probe.py`](../packages/core/src/gc_core/security/guard_probe.py): `probe_step` (запрос фактов из guard'а) и `evaluate_guard_probe` (факты на worker'е); guard'ы — `security/path_policy.py`, `read_guard.py`, `command_guard.py` |
+| Ошибки модели | [`model_error_encoding.py`](../packages/temporalio/src/gc_ua_temporalio/model_error_encoding.py) (классификация на worker'е → `ModelFailure`) |
+| Тред и хранилища | [`thread_store_proxy.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_proxy.py) и [`thread_store_transport.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_transport.py) (сторона workflow), [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), [`thread_store_durable.py`](../packages/core/src/gc_core/thread_store_durable.py) (контракт), [`storage/sqlite.py`](../packages/temporalio/src/gc_ua_temporalio/storage/sqlite.py), [`thread_store_file_durable.py`](../packages/core/src/gc_core/thread_store_file_durable.py) и [`thread_store_journal.py`](../packages/core/src/gc_core/thread_store_journal.py), [`durable_thread_store_conformance.py`](../packages/testkit/src/gc_testkit/durable_thread_store_conformance.py) |
+| MCP и фоновые процессы | [`execution/resource_host.py`](../packages/core/src/gc_core/execution/resource_host.py), [`connect_mcp/durable_scope.py`](../packages/core/src/gc_core/tools/connect_mcp/durable_scope.py) |
+| Субагенты | [`native_child_workflow.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py), [`native_child_transport.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_transport.py), [`native_child_preparation.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_preparation.py) |
+| Крупные payload | [`payload_storage.py`](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) |
+| Клиент и сервер | [`native_client.py`](../packages/temporalio/src/gc_ua_temporalio/native_client.py), [`http_api.py`](../packages/temporalio/src/gc_ua_temporalio/http_api.py) |
+| Конфиг worker'а | [пример `native-worker.json`](../packages/temporalio/examples/native-worker.json), [`temporal-configuration.md`](temporal-configuration.md) |
+
+Тесты, которые лучше всего показывают поведение целиком:
+[`test_native_workflow_live.py`](../packages/temporalio/tests/test_native_workflow_live.py)
+(ход на настоящем Temporal + replay),
+[`test_native_parity_live.py`](../packages/temporalio/tests/test_native_parity_live.py)
+(local и Temporal на одних ответах модели),
+[`test_native_names.py`](../packages/temporalio/tests/test_native_names.py)
+(закреплённые имена activities и workflow).
