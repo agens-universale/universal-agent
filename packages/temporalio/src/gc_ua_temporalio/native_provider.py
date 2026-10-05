@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import time
 from dataclasses import replace
 from pathlib import Path
 from typing import Literal
@@ -116,6 +117,12 @@ class NativeContextProvider:
         self._refs = {}
         self._locks = {}
         self._parents = {}
+        #: Привязки владельца уже записаны этим процессом: повторная запись —
+        #: синхронная SQLite-транзакция на event loop на каждую activity.
+        self._bound = set()
+        #: Последнее обращение к контексту владельца (``time.monotonic``):
+        #: по нему обслуживание воркера находит брошенные контексты.
+        self._last_used = {}
         cwd = Path.cwd().resolve()
         for name, profile in profiles.items():
             workspace = Path(profile.workspace)
@@ -162,7 +169,7 @@ class NativeContextProvider:
             )
             self._profiles[name] = (profile.store_id, loaded)
 
-    def _resolve(self, call):
+    async def _resolve(self, call):
         if call.schema_version != 1 or not call.owner_id:
             raise ValueError("Invalid native context request")
         store_id, loaded = self._profiles[call.profile]
@@ -170,19 +177,21 @@ class NativeContextProvider:
             raise ValueError(
                 "Requested thread store differs from pinned profile"
             )
-        self.receipts.save_operation_result(
-            call.owner_id,
-            "__native_context_binding__",
-            _digest([call.profile, store_id, call.child_context]),
-            {
-                "profile": call.profile,
-                "store_id": store_id,
-            },
-        )
+        digest = _digest([call.profile, store_id, call.child_context])
+        if (call.owner_id, digest) not in self._bound:
+            await asyncio.to_thread(
+                self.receipts.save_operation_result,
+                call.owner_id,
+                "__native_context_binding__",
+                digest,
+                {"profile": call.profile, "store_id": store_id},
+            )
+            self._bound.add((call.owner_id, digest))
         return store_id, loaded
 
     async def __call__(self, call):
-        store_id, loaded = self._resolve(call)
+        store_id, loaded = await self._resolve(call)
+        self._last_used[call.owner_id] = time.monotonic()
         live = bool(loaded.settings.mcp.servers)
         lock = self._locks.setdefault(call.owner_id, asyncio.Lock())
         async with lock:
@@ -282,7 +291,7 @@ class NativeContextProvider:
             return ref
 
     async def close(self, call):
-        self._resolve(call)
+        await self._resolve(call)
         ref = self._refs.get(call.owner_id)
         if ref is not None and call.child_context is None:
             await self.resource_host.close(ref)
@@ -296,6 +305,8 @@ class NativeContextProvider:
             if parent == owner_id:
                 self._drop_context(child)
         ctx = self._contexts.pop(owner_id, None)
+        self._last_used.pop(owner_id, None)
+        self._bound = {item for item in self._bound if item[0] != owner_id}
         self._refs.pop(owner_id, None)
         self._locks.pop(owner_id, None)
         self._parents.pop(owner_id, None)
@@ -304,12 +315,31 @@ class NativeContextProvider:
 
     async def release(self, call):
         """Release worker caches only after the executor's accounting/poststeps."""
-        self._resolve(call)
+        await self._resolve(call)
         ref = self._refs.get(call.owner_id)
         if ref is not None and call.child_context is None:
             await self.resource_host.close(ref)
             self.resource_host.forget(ref)
         self._drop_context(call.owner_id)
+
+    def idle_owners(self, idle_seconds):
+        """Владельцы верхнего уровня без обращений дольше ``idle_seconds``."""
+        now = time.monotonic()
+        return [
+            owner
+            for owner in self._contexts
+            if owner not in self._parents
+            and now - self._last_used.get(owner, now) >= idle_seconds
+        ]
+
+    async def forget_owner(self, owner_id):
+        """Освободить контекст владельца, чей workflow уже не исполняется
+        (terminate посреди хода): release из кода workflow не придёт."""
+        ref = self._refs.get(owner_id)
+        if ref is not None:
+            await self.resource_host.close(ref)
+            self.resource_host.forget(ref)
+        self._drop_context(owner_id)
 
     async def aclose(self):
         refs = list(dict.fromkeys(self._refs.values()))

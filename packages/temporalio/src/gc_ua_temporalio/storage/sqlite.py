@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -79,6 +80,25 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
                     system TEXT, thread TEXT, suffix TEXT, messages TEXT, meta TEXT,
                     PRIMARY KEY(system,thread,suffix));
             """)
+            columns = {
+                row[1]
+                for row in db.execute("PRAGMA table_info(durable_receipts)")
+            }
+            if "created" not in columns:
+                # Время квитанции — для очистки (prune_receipts).
+                db.execute(
+                    "ALTER TABLE durable_receipts ADD COLUMN created REAL"
+                )
+
+    def prune_receipts(self, *, max_age_seconds):
+        """Удалить квитанции операций старше срока; нужны они только окну
+        повторов activity (минуты). Квитанции без времени (до этой версии)
+        остаются."""
+        with self.transaction() as db:
+            return db.execute(
+                "DELETE FROM durable_receipts WHERE created < ?",
+                (time.time() - max_age_seconds,),
+            ).rowcount
 
     @staticmethod
     def _row(db, system, thread):

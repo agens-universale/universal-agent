@@ -35,9 +35,27 @@ class DurableFileThreadStore(FileThreadStore):
         )
 
     def commit_operation(self, system_id, thread_id, operation):
-        from gc_core.thread_store_journal import commit_operation
+        from gc_core.thread_store_journal import (
+            commit_operation,
+            purge_after_reset,
+        )
 
-        return commit_operation(self._dir, system_id, thread_id, operation)
+        receipt = commit_operation(self._dir, system_id, thread_id, operation)
+        if operation.kind == "reset":
+            purge_after_reset(
+                self._dir,
+                system_id,
+                thread_id,
+                keep_operation=operation.operation_id,
+            )
+        return receipt
+
+    def reset(self, system_id, thread_id):
+        from gc_core.thread_store_journal import purge_after_reset
+
+        deleted = super().reset(system_id, thread_id)
+        purge_after_reset(self._dir, system_id, thread_id, keep_operation=None)
+        return deleted
 
     def append_messages(
         self, system_id, thread_id, messages, *, known_keys=None, start_seq=0

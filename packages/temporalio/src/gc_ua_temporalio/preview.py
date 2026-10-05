@@ -2,6 +2,7 @@
 
 import logging
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 from temporalio import activity
 
@@ -15,6 +16,12 @@ def _emit(views, owner, operation, attempt, sequence, kind, payload):
         logging.getLogger(__name__).warning(
             "Preview unavailable: %s", type(exc).__name__
         )
+
+
+#: Один писатель на процесс: дельты стрима идут на event loop, транзакция
+#: SQLite на каждую из них останавливала бы heartbeat соседних activities.
+#: Один поток сохраняет порядок событий.
+_WRITER = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ua-preview")
 
 
 def commit_preview(store, owner, operation, attempt=1):
@@ -41,7 +48,8 @@ class PreviewSink:
 
     def emit(self, kind, payload):
         self.sequence += 1
-        _emit(
+        _WRITER.submit(
+            _emit,
             self.views,
             self.owner,
             self.operation,

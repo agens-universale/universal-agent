@@ -87,9 +87,13 @@ class NativeRunRegistry:
             )
         return expected
 
+    async def aworkflow_id(self, system, thread):
+        """``workflow_id`` вне event loop: владелец читается под ``flock``."""
+        return await asyncio.to_thread(self.workflow_id, system, thread)
+
     async def start_or_send(self, system, thread, message):
         message.validate()
-        workflow_id = self.workflow_id(system, thread)
+        workflow_id = await self.aworkflow_id(system, thread)
         client = await self.client()
         request = NativeRunRequest(
             profile=self.profile,
@@ -110,7 +114,7 @@ class NativeRunRegistry:
 
     async def status(self, system, thread):
         client = await self.client()
-        value = await client.status(self.workflow_id(system, thread))
+        value = await client.status(await self.aworkflow_id(system, thread))
         return {**value, "backend": self.backend}
 
     async def legacy_status(self, system, thread):

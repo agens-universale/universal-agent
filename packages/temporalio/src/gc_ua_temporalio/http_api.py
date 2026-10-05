@@ -49,7 +49,9 @@ def router(registry):
     async def control(system, thread, action):
         # workflow_id() проверяет ID: ValueError → 400, а не 500.
         client = await registry.client()
-        return await action(client, registry.workflow_id(system, thread))
+        return await action(
+            client, await registry.aworkflow_id(system, thread)
+        )
 
     @routes.post("/{system}/{thread}/answer")
     async def answer(system: str, thread: str, value: HumanReply):

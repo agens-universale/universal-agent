@@ -17,6 +17,7 @@ from temporalio.worker import Worker
 from gc_ua_temporalio.native_activities import NativeActivities
 from gc_ua_temporalio.native_child_preparation import NativeChildActivities
 from gc_ua_temporalio.native_child_workflow import NativeSubagentWorkflow
+from gc_ua_temporalio.native_maintenance import NativeMaintenance
 from gc_ua_temporalio.native_provider import (
     NativeContextProvider,
     NativeWorkerConfig,
@@ -111,13 +112,12 @@ async def serve(config):
         )
         async with AsyncExitStack() as stack:
             for options in worker_options(config, native, threads):
-                await stack.enter_async_context(
-                    Worker(
-                        client,
-                        **options,
-                    )
-                )
-            await asyncio.Event().wait()
+                await stack.enter_async_context(Worker(client, **options))
+            # Брошенные контексты (terminate посреди хода) и служебные данные
+            # закрытых сессий — фоном, пока работает воркер.
+            await NativeMaintenance(
+                client, provider, native.receipts, provider.stores
+            ).serve()
     finally:
         await provider.aclose()
 

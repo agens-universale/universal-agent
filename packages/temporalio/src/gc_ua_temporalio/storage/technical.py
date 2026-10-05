@@ -63,6 +63,20 @@ class TechnicalStore:
             )
         return json.loads(row["result"])
 
+    def owners(self):
+        """Владельцы, у которых есть квитанции или preview."""
+        with self.transaction() as db:
+            rows = db.execute(
+                "SELECT owner FROM operations UNION SELECT owner FROM view_events"
+            ).fetchall()
+        return [row[0] for row in rows]
+
+    def delete_owner(self, owner):
+        """Квитанции и preview владельца, чей workflow Temporal уже удалил."""
+        with self.transaction() as db:
+            db.execute("DELETE FROM operations WHERE owner=?", (owner,))
+            db.execute("DELETE FROM view_events WHERE owner=?", (owner,))
+
     def save_operation_result(self, owner, operation, digest, result):
         with self.transaction() as db:
             db.execute(

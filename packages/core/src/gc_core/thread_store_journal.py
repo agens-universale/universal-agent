@@ -17,6 +17,7 @@ import json
 import os
 import tempfile
 import threading
+import time
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -260,6 +261,70 @@ def _bind_identity(directory, base, identity):
                 "Canonical metadata belongs to another logical thread"
             )
     _write(marker, _json(identity))
+
+
+def purge_after_reset(directory, system_id, thread_id, *, keep_operation):
+    """Догнать локальный сброс после durable ``reset``.
+
+    Журнал меняет файлы истории в своём stage-каталоге — картинки треда и
+    журналы правок туда не попадают и остались бы на диске. Квитанции
+    прошлого поколения остаются (поздний повтор их операции получает прежний
+    исход), но meta треда из них вычищается.
+    """
+    from gc_core.attachments.store import ImageStore
+    from gc_core.thread_store import (
+        edits_journal_path,
+        sanitize_system_id,
+        touched_journal_path,
+        validate_thread_id,
+    )
+
+    system = sanitize_system_id(system_id)
+    thread = validate_thread_id(thread_id)
+    with thread_read_scope(directory, system_id, thread_id):
+        edits = str(edits_journal_path(directory, system, thread))
+        for path in (
+            edits,
+            edits + ".lock",
+            touched_journal_path(directory, system, thread),
+        ):
+            Path(path).unlink(missing_ok=True)
+        ImageStore.for_threads_dir(directory).delete_thread_images(
+            system, thread
+        )
+        keep = (
+            hashlib.sha256(keep_operation.encode()).hexdigest() + ".json"
+            if keep_operation
+            else None
+        )
+        receipts = _control_path(directory, system_id, thread_id) / "receipts"
+        for path in receipts.glob("*.json"):
+            if path.name == keep:
+                continue
+            receipt = json.loads(path.read_bytes())
+            if receipt.get("meta"):
+                receipt["meta"] = {}
+                _write(path, _json(receipt))
+
+
+def prune_durable_receipts(directory, *, max_age_seconds):
+    """Удалить квитанции операций журнала старше срока (по mtime файла).
+
+    Квитанция нужна, чтобы повтор той же операции (повтор activity — минуты)
+    вернул прежний исход; через дни она только занимает место.
+    """
+    deadline = time.time() - max_age_seconds
+    removed = 0
+    for path in (Path(directory).absolute() / ".store").glob(
+        "*/receipts/*.json"
+    ):
+        try:
+            if path.stat().st_mtime < deadline:
+                path.unlink()
+                removed += 1
+        except FileNotFoundError:
+            continue
+    return removed
 
 
 @contextlib.contextmanager

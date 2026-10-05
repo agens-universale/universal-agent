@@ -8,6 +8,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -193,8 +194,15 @@ class SQLiteDurableOperations:
             owner_epoch=row["epoch"],
         )
         db.execute(
-            "INSERT INTO durable_receipts VALUES (?,?,?,?,?)",
-            (*key, operation.operation_id, digest, _encode(asdict(receipt))),
+            "INSERT INTO durable_receipts(system,thread,operation,digest,"
+            "receipt,created) VALUES (?,?,?,?,?,?)",
+            (
+                *key,
+                operation.operation_id,
+                digest,
+                _encode(asdict(receipt)),
+                time.time(),
+            ),
         )
         return receipt
 
@@ -343,6 +351,19 @@ class SQLiteDurableOperations:
             "UPDATE durable_control SET generation=generation+1 WHERE system=? AND thread=?",
             key,
         )
+        # Квитанции прошлого поколения остаются (поздний повтор их операции
+        # получает прежний исход), но meta треда (заголовок и т.п.) из них
+        # вычищается: сброс не оставляет содержимого, как локальный.
+        for operation_id, receipt in db.execute(
+            "SELECT operation,receipt FROM durable_receipts WHERE system=? AND thread=?",
+            key,
+        ).fetchall():
+            value = json.loads(receipt)
+            value["meta"] = {}
+            db.execute(
+                "UPDATE durable_receipts SET receipt=? WHERE system=? AND thread=? AND operation=?",
+                (_encode(value), *key, operation_id),
+            )
 
     def _durable_append_subagent_trace(self, db, key, operation, row, out):
         payload = operation.payload

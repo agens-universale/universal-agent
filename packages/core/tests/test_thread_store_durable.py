@@ -516,3 +516,25 @@ async def test_subagent_trace_does_not_bump_parent_revision(tmp_path):
         previous_response_id=None,
     )
     assert (store.reads - reads, store.commits - commits) == (0, 1)
+
+
+def test_durable_reset_removes_images_edits_and_old_receipts(tmp_path):
+    """Durable reset убирает то же, что локальный: картинки, журнал правок и
+    квитанции прошлого поколения (в них meta треда)."""
+    from gc_core.thread_store import edits_journal_path
+    from gc_core.thread_store_file_durable import DurableFileThreadStore
+
+    store = DurableFileThreadStore(str(tmp_path))
+    store.append_messages(
+        "s", "t", [{"role": "user", "content": "x", "id": "m"}]
+    )
+    store.save_meta("s", "t", {"title": "private title"})
+    image = tmp_path / "images" / "s_t_0123456789abcdef.png"
+    image.parent.mkdir()
+    image.write_bytes(b"png")
+    edits = edits_journal_path(str(tmp_path), "s", "t")
+    edits.write_text("{}\n")
+    store.reset("s", "t")
+    assert not image.exists() and not edits.exists()
+    receipts = list(tmp_path.glob(".store/*/receipts/*.json"))
+    assert not any("private title" in path.read_text() for path in receipts)
