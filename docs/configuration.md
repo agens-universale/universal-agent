@@ -79,7 +79,7 @@
     `session_todo`; `0` = выкл. В IDE-чате иначе легко толкает к реализации вопреки обсуждению.
   - Канал ACP также подставляет bundled special instructions
     (`chat_completions_acp_special_instructions.md`: discussion ≠ implementation).
-    Пример профиля — `packages/acp/profiles/acp.yml`.
+    Пример профиля — `packages/acp/profiles/acp.yml`. Гайд по процессу — [acp.md](acp.md).
   - `tui.file_view.enabled` / `max_file_bytes` / `page_lines` (`null` = авто по высоте)
     — постраничный просмотр `/view` в TUI (см. [tui.md](tui.md#просмотр-файла-view)).
 - **Правки агента**: секция `agent_edits` — журнал правок, снимки для отката, дифф в ленте
@@ -1068,7 +1068,7 @@ ddgs-mcp --http
 
 Секция `chat_api` живёт в том же `config.yml`, что и агент. Читает её только процесс `gc-chat`: и `POST /v1/responses`, и `POST /v1/chat/completions` на одном порту. В шаблон CLI и в `demo_config.yml` она не входит: без секции схема подставляет дефолты (`127.0.0.1:8090`, без токена, любой origin, проза `allow`, finish-gate `off`, напоминания `session_todo` выключены).
 
-Аннотированный образец для копирования в свой конфиг — [`demo_config_chat.yml`](../demo_config_chat.yml). Запуск, ключи и контракт HTTP — [responses.md](responses.md).
+Аннотированный образец для копирования в свой конфиг — [`demo_config_chat.yml`](../demo_config_chat.yml). Обзор процесса — [chat.md](chat.md); детальный контракт Responses — [responses.md](responses.md).
 
 ## Где gc-cli хранит runtime-данные
 

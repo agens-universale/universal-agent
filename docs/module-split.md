@@ -58,6 +58,12 @@ universal-agent/
   packages/mcp/
     pyproject.toml               # gc-mcp   → gc-core
     src/recommended_mcp/         # рецепты MCP + runtime: cli, установка, автозапуск
+  packages/acp/
+    pyproject.toml               # gc-acp   → gc-core
+    src/gc_acp/                  # ACP JSON-RPC фасад для IDE
+  packages/chat/
+    pyproject.toml               # gc-chat  → gc-core, FastAPI, uvicorn
+    src/gc_chat/                 # HTTP Responses + Chat Completions
   packages/testkit/
     pyproject.toml               # gc-testkit — только dev, в колёса не попадает
     src/gc_testkit/              # раскладка, фикстуры, pytest-плагин
@@ -81,11 +87,13 @@ universal-agent/
 | `gc-tui` | `gc_tui` | `gc-core`, `gc-mcp` | `gc-ua`, `gc-voice` |
 | `gc-server` | `gc_server` | `gc-core`, `gc-mcp` | `gc-serve` |
 | `gc-mcp` | `recommended_mcp` | `gc-core` | `gc-mcp`, `gc-mcp-install` |
-| `gc-ua` (мета) | — | все пять | все шесть |
+| `gc-acp` | `gc_acp` | `gc-core` | `gc-acp` |
+| `gc-chat` | `gc_chat` | `gc-core`, FastAPI, uvicorn | `gc-chat` |
+| `gc-ua` (мета) | — | все листовые | все листовые команды |
 
 Каждый профиль объявляет ТОЛЬКО свою команду: имя команды принадлежит одному
 дистрибутиву, иначе два профиля не ставятся рядом. Подробности и цена ошибки —
-`docs/packaging.md`.
+`docs/packaging.md`. Гайды фасадов: [acp.md](acp.md), [chat.md](chat.md).
 
 `gc-core` — библиотека, поэтому **не объявляет точек входа** и ставится иначе:
 
