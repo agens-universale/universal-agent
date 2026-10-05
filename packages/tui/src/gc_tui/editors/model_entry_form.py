@@ -287,13 +287,14 @@ tool_choice: auto
 Можно ставить:
 
 `use_max_tokens_param: false` — в тело пишется `max_completion_tokens`,
-`true` — `max_tokens`. `completions_url` — второе написание адреса: вместе с
-полем адреса выше его не задавать. `chat_completion_headers` — дополнительные
-заголовки.
+`true` — `max_tokens`. `openai_strict_tools_schema` и `send_tool_strict` —
+схема тулов этого алиаса в `chat_completions`: нет ключа — глобальный
+`backend`, явный `true`/`false` заменяет только себя. `completions_url` —
+второе написание адреса: вместе с полем адреса выше его не задавать.
+`chat_completion_headers` — дополнительные заголовки.
 
 Сюда не писать `chat_completion_kwargs` — температура и thinking живут в `main`
-и `auxiliary`. `api_mode`, `stream`, `openai_strict_tools_schema`,
-`send_tool_strict` читаются только из общего `backend`.
+и `auxiliary`. `api_mode` и `stream` читаются только из общего `backend`.
 
 ```yaml
 use_max_tokens_param: false

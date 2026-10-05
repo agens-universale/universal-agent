@@ -1147,6 +1147,8 @@ _HONORED_PER_MODEL = {
     "use_ssl",  # resolve_network_params
     "retry_embedded_choice_errors",  # там же
     "use_max_tokens_param",  # выбор max_tokens/max_completion_tokens
+    "openai_strict_tools_schema",  # проекция схемы тулов: create_call_data_completions
+    "send_tool_strict",  # то же: снимать ли function.strict с копии на отправке
 }
 
 # Остаются глобальными ОСОЗНАННО — с причиной у каждого.
@@ -1157,8 +1159,6 @@ _GLOBAL_ONLY = {
     ),
     "api_mode": "режим прогона: responses/chat_completions выбирается один раз на ран",
     "stream": "флаг TUI-стрима, к модели отношения не имеет",
-    "openai_strict_tools_schema": "спека тулов собирается один раз на RunContext",
-    "send_tool_strict": "то же: abuild_tools_data не знает resolved (бэклог «tools-схема per-model»)",
 }
 
 

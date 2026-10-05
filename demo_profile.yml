@@ -37,6 +37,9 @@ models:
     pricing: {input: 12, output: 48}         # тариф модели (формат ModelTariff); главнее pricing.models[<id>]
     backend:                                 # транспорт поверх эффективного backend (ssl, timeout, headers)
       use_max_tokens_param: false
+      # Схема тулов этого алиаса в chat_completions. Нет ключа — глобальный backend.
+      openai_strict_tools_schema: false
+      send_tool_strict: true
     main:
       temperature: 1.0
       top_p: 1.0

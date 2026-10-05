@@ -475,6 +475,7 @@ async def _arequest_responses_once(
         state,
         set_previous_response_id=set_previous_response_id,
         resolved=resolved,
+        config_dict=cfg,
     )
     with usage_scope(
         getattr(state, "usage", None), USAGE_CATEGORY_MAIN, "responses"

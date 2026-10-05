@@ -45,6 +45,8 @@ MODEL_BACKEND_OVERLAY_KEYS = (
     "chat_completions_max_tokens",
     "chat_completions_min_response_tokens",
     "use_max_tokens_param",
+    "openai_strict_tools_schema",
+    "send_tool_strict",
     "claude_prompt_cache",
     "chat_completion_headers",
     "completions_url",
@@ -56,8 +58,6 @@ MODEL_BACKEND_REJECTED = {
     ),
     "api_mode": "режим API задаётся в общем backend",
     "stream": "stream задаётся в общем backend",
-    "openai_strict_tools_schema": "схема тулов задаётся в общем backend",
-    "send_tool_strict": "strict тулов задаётся в общем backend",
 }
 
 # Рантайм ставит их сам (модель, история, тулы, лимит ответа). В main/auxiliary

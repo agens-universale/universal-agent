@@ -787,21 +787,96 @@ def _responses_input_without_message_call_id(messages):
     return cleaned
 
 
+def _tool_schema_flags(
+    resolved: Optional[ResolvedModel],
+    cfg: Dict,
+    *,
+    honor_alias: bool,
+) -> tuple[bool, bool]:
+    """``openai_strict_tools_schema``, ``send_tool_strict``.
+
+    В ``chat_completions`` незаписанный ключ алиаса берётся из глобального
+    backend. В ``responses`` алиас не читается: на провод идёт проекция глобали.
+    """
+    if honor_alias:
+        openai_strict = _config_value(
+            resolved, cfg, "openai_strict_tools_schema", False
+        )
+        send_tool_strict = _config_value(
+            resolved, cfg, "send_tool_strict", True
+        )
+    else:
+        openai_strict = cfg.get("openai_strict_tools_schema", False)
+        send_tool_strict = cfg.get("send_tool_strict", True)
+    return bool(openai_strict), bool(send_tool_strict)
+
+
+def project_tool_specs(
+    tools: Optional[List],
+    *,
+    openai_strict: bool,
+    send_tool_strict: bool,
+) -> List:
+    """Копия спек под флаги этого запроса. Исходный список не меняется.
+
+    ``openai_strict`` разворачивает ``required`` на каждом object и вешает
+    подсказку пустой строки. Иначе остаётся семантический ``required`` и
+    подсказка «пропусти поле». ``send_tool_strict: false`` снимает ``strict``.
+    """
+    from gc_core.tools.schema_optional import (
+        apply_openai_strict_schema_tree,
+        augment_optional_property_descriptions,
+    )
+
+    projected = deepcopy(tools) if isinstance(tools, list) else []
+    for tool in projected:
+        if not isinstance(tool, dict):
+            continue
+        body = tool
+        function = tool.get("function")
+        if isinstance(function, dict) and "parameters" not in tool:
+            body = function
+        if openai_strict:
+            from gc_core.tools import _apply_openai_strict_tools_schema
+
+            _apply_openai_strict_tools_schema(body)
+            params = body.get("parameters")
+            if isinstance(params, dict):
+                apply_openai_strict_schema_tree(params)
+        augment_optional_property_descriptions(
+            body, openai_strict=openai_strict
+        )
+        if not send_tool_strict:
+            body.pop("strict", None)
+    return projected
+
+
 def create_call_data_responses(
     messages,
     state,
     tools: Optional[List] = None,
     set_previous_response_id: bool = True,
     resolved: Optional[ResolvedModel] = None,
+    config_dict: Optional[Dict] = None,
 ) -> Dict:
     # Responses-режим: из ResolvedModel действует только провайдерский id модели —
     # url/token/backend-квирки per-model в этом API-режиме не применяются (спека §4).
+    # Схема тулов — проекция глобальных флагов, без чтения алиаса.
     call_data = dict()
     call_data["model"] = (
         resolved.model if resolved is not None else state.default_model
     )
     call_data["input"] = _responses_input_without_message_call_id(messages)
-    call_data["tools"] = tools if tools else state.tools
+    cfg = config_dict if isinstance(config_dict, dict) else {}
+    openai_strict, send_tool_strict = _tool_schema_flags(
+        resolved, cfg, honor_alias=False
+    )
+    raw_tools = tools if tools else state.tools
+    call_data["tools"] = project_tool_specs(
+        raw_tools,
+        openai_strict=openai_strict,
+        send_tool_strict=send_tool_strict,
+    )
     call_data["metadata"] = state.call_metadata
     call_data["previous_response_id"] = (
         state.previous_response_id if set_previous_response_id else None
@@ -889,7 +964,16 @@ def create_call_data_completions(
     state_tools = deepcopy(state.tools) if state is not None else []
     to_send_messages = _merge_state_messages(state_messages, messages)
 
+    cfg = config_dict if isinstance(config_dict, dict) else {}
     to_send_tools = tools if tools is not None else state_tools
+    openai_strict, send_tool_strict = _tool_schema_flags(
+        resolved, cfg, honor_alias=True
+    )
+    to_send_tools = project_tool_specs(
+        to_send_tools,
+        openai_strict=openai_strict,
+        send_tool_strict=send_tool_strict,
+    )
     to_send_tools = normalize_chat_completions_tools(to_send_tools)
 
     to_send_messages_formatted = []
@@ -906,8 +990,6 @@ def create_call_data_completions(
         effective_model = state.default_model
     if resolved is not None:
         effective_model = resolved.model
-
-    cfg = config_dict if isinstance(config_dict, dict) else {}
 
     configured_max_tokens = _safe_positive_int(
         _config_value(resolved, cfg, "chat_completions_max_tokens")

@@ -91,14 +91,17 @@ backend:
   api_mode: chat_completions
   completions_url: "http://127.0.0.1:8014/v1/chat/completions"
   chat_completions_max_tokens: 32768
-  # true -> отправлять max_tokens; false -> max_completion_tokens
+  # true -> отправлять max_tokens; false -> max_completion_tokens.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
+  # Профиль может задать и свой backend.use_max_tokens_param поверх этого файла.
   use_max_tokens_param: true
   # true — провайдер требует OpenAI strict tools (все properties в required).
-  # false — типично для GigaCode и non-OpenAI; при true локальная валидация
-  # принимает omit semantic optional (x-optional-keys).
+  # false — типично для GigaCode и non-OpenAI. Локальная проверка читает канон.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   openai_strict_tools_schema: false
   # Слать ли провайдеру поле function.strict в схемах тулов.
   # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   send_tool_strict: true
   # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
   # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси

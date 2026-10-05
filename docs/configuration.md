@@ -513,7 +513,9 @@ vendor-ключей; это следствие пустой глобали, а �
 | `main` | kwargs диалога и цикла субагента |
 | `auxiliary` | kwargs summary, судей, finish_gate, intent, черновика роли |
 | `strip_think` | вырезание мысли из истории. В поставке глобально `strip_tags_projection.strip_think: true` (нестрогий бэкенд отвечает 400 на мысль в истории). `false` на алиасе сохраняет скрытое поле; ключа нет — остаётся глобальный флаг |
-| `backend.use_max_tokens_param` | `true` — в тело `max_tokens`, `false` — `max_completion_tokens` |
+| `backend.use_max_tokens_param` | `true` — в тело `max_tokens`, `false` — `max_completion_tokens`. Нет ключа — глобальный `backend`. Профиль может перекрыть и сам глобальный ключ своей секцией `backend` |
+| `backend.openai_strict_tools_schema` | проекция схемы тулов в `chat_completions`: `true` — все properties в `required`. Нет ключа — глобальный `backend` |
+| `backend.send_tool_strict` | слать ли `function.strict`. `false` снимает поле с копии на отправке. Нет ключа — глобальный `backend` |
 | `backend.chat_completions_max_tokens` | потолок ответа этой модели |
 | `backend.request_timeout_sec` | таймаут одного запроса |
 | `backend.proxy` | HTTP/SOCKS-прокси |
@@ -530,9 +532,12 @@ vendor-ключей; это следствие пустой глобали, а �
 их отклоняет, обе воронки режут их безусловно — иначе пользовательский словарь
 затёр бы историю, список тулов или лимит ответа. При включённой разметке
 prompt cache к этому набору добавляется `cache_control`: его пишет разметка,
-чужое значение на проводе даёт 400. `api_mode`, `stream`,
-`openai_strict_tools_schema` и `send_tool_strict` остаются глобальными:
-один ран — один протокол, strict-схема тулов собирается до выбора модели.
+чужое значение на проводе даёт 400. `api_mode` и `stream` остаются глобальными:
+один ран — один протокол. `openai_strict_tools_schema` и `send_tool_strict`
+можно задать на алиасе; ключа нет — берётся глобальный `backend`. В
+`chat_completions` схема тулов проецируется на каждый запрос под резолвнутую
+модель. В `responses` per-alias этих флагов нет: на провод идёт проекция
+глобальных.
 
 **`slots`** — какой алиас стоит за каким уровнем. Не заданный слот резолвится **матрицей
 фоллбэков**: `light` → `light, default, max`; `default` → `default, max, light`;
