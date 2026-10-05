@@ -100,6 +100,38 @@ def seatbelt_wrapper(root: str, *, network: bool) -> Wrapper:
     return wrap
 
 
+def _probe_bwrap(bwrap: str) -> None:
+    """Fail-closed на старте: бинарь есть, а user namespaces могут быть выключены
+    (CI, контейнеры) — тогда каждая команда падала бы в рантайме."""
+    import subprocess
+
+    try:
+        res = subprocess.run(
+            [
+                bwrap,
+                "--unshare-all",
+                "--ro-bind",
+                "/",
+                "/",
+                "--dev",
+                "/dev",
+                "true",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(
+            f"os_backend=sandbox: bwrap не запускается: {exc}"
+        ) from exc
+    if res.returncode != 0:
+        raise ValueError(
+            "os_backend=sandbox: bwrap не может создать namespace "
+            f"(rc={res.returncode}): {res.stderr.strip()[:300]}"
+        )
+
+
 def build_sandbox_wrapper(root: str, section: dict) -> Wrapper:
     """Обёртка под платформу. Fail-closed: нет инструмента — ValueError."""
     s = section.get("sandbox") or {}
@@ -111,8 +143,10 @@ def build_sandbox_wrapper(root: str, section: dict) -> Wrapper:
         if not shutil.which("sandbox-exec"):
             raise ValueError("os_backend=sandbox: не найден sandbox-exec")
         return seatbelt_wrapper(root, network=network)
-    if not shutil.which("bwrap"):
+    bwrap = shutil.which("bwrap")
+    if not bwrap:
         raise ValueError("os_backend=sandbox: не найден bwrap (bubblewrap)")
+    _probe_bwrap(bwrap)
     return bwrap_wrapper(
         root,
         network=network,

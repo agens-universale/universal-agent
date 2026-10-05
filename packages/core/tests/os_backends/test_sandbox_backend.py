@@ -207,3 +207,38 @@ def test_default_cwd_is_root_when_no_auto_workdir(tmp_path):
     # обязаны идти в корень песочницы, а не в os.getcwd() вне него.
     be = SandboxBackend(wrapper=lambda cwd: [], root=str(tmp_path))
     assert be.default_cwd() == str(tmp_path)
+
+
+def test_build_wrapper_fails_closed_when_bwrap_cannot_unshare(
+    tmp_path, monkeypatch
+):
+    # bwrap есть, но user namespaces выключены (CI, контейнер): без пробы
+    # команды падали бы в рантайме с криптичной ошибкой вместо отказа на старте.
+    import subprocess
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/bwrap")
+    fake = subprocess.CompletedProcess(
+        args=[],
+        returncode=1,
+        stdout="",
+        stderr="bwrap: No permissions to create new namespace",
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: fake)
+    with pytest.raises(ValueError, match="namespace"):
+        build_sandbox_wrapper(str(tmp_path), {"sandbox": {}})
+
+
+def test_build_wrapper_accepts_working_bwrap(tmp_path, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/bwrap")
+    ok = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout="", stderr=""
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: ok)
+    assert (
+        build_sandbox_wrapper(str(tmp_path), {"sandbox": {}})(None)[0]
+        == "bwrap"
+    )
