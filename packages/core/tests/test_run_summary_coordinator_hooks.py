@@ -86,6 +86,36 @@ def test_pre_backend_passes_full_history_including_suffix(
     assert captured.get("non_system") == [u1, u2]
 
 
+def test_pre_backend_tells_compaction_which_messages_come_back(
+    monkeypatch, ctx_stub
+):
+    """Сжатие узнаёт, что вернётся в историю как есть, — картинки этих сообщений
+    не попадают в сводку как «вне контекста»."""
+    sys_m = {"role": "system", "content": "s"}
+    u1 = {"role": "user", "content": "a", "id": "1"}
+    state = _minimal_state(messages=[sys_m, u1])
+    captured: dict = {}
+
+    async def capture(**kwargs):
+        captured["kept"] = kwargs.get("kept_messages")
+        kwargs["state"].messages = [sys_m]
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", capture)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
+
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    run_coro(coord.apre_backend_compaction_hook([u1], "user_ask"))
+
+    assert captured["kept"] == [u1]
+
+
 def test_suffix_mismatch_returns_without_changing_state(monkeypatch, ctx_stub):
     sys_m = {"role": "system", "content": "s"}
     stale = {"role": "user", "content": "stale", "id": "u0"}
@@ -330,3 +360,54 @@ def test_function_call_output_clears_current_when_preservation_empty(
     )
 
     assert current == []
+
+
+def test_function_call_output_keeps_technical_tail_after_compaction(
+    monkeypatch, ctx_stub
+):
+    """Pre-backend компакция на шаге «ответы + напоминание»: хвост батча
+    возвращается в state и в следующий шаг вслед за парами (спека изображений §7.3)."""
+    sys_m = {"role": "system", "content": "s"}
+    call = {
+        "type": "function_call",
+        "call_id": "c1",
+        "name": "fs_read_file",
+        "arguments": '{"path": "a.py"}',
+        "id": "fc_c1",
+    }
+    out = {
+        "type": "function_call_output",
+        "call_id": "c1",
+        "output": '{"ok": true}',
+        "id": "fco_c1",
+    }
+    notice = {
+        "role": "user",
+        "content": '<technical type="technical">Loop detector: you called fs_read_file '
+        "with the same arguments again.</technical>",
+        "id": "m_notice",
+    }
+    summary = {"role": "user", "content": "<summary/>", "id": "sum"}
+    state = _minimal_state(messages=[sys_m, call, out, notice])
+
+    async def mock_compact(**kwargs):
+        kwargs["state"].messages = [sys_m, summary]
+
+    monkeypatch.setattr(rsc, "arun_summary_compaction", mock_compact)
+    monkeypatch.setattr(rsc, "exceeded_summary_triggers", lambda **_k: True)
+
+    coord = RunSummaryCoordinator(
+        ctx=ctx_stub,
+        state=state,
+        thread_session=None,
+        summary_trigger_chars=10,
+        is_cli_mode=False,
+        pre_backend_trigger_reason="pre_backend",
+    )
+    current = [out, notice]
+    run_coro(
+        coord.apre_backend_compaction_hook(current, "function_call_output")
+    )
+
+    assert current == [call, out, notice]
+    assert state.messages == [sys_m, summary, call, out, notice]

@@ -31,6 +31,7 @@ class _FakeExecutor:
         message_ids=None,
         display_contents=None,
         skills_loaded=None,
+        attachments=None,
     ):
         self.run_called_with = {
             "messages": messages,
@@ -84,22 +85,20 @@ def test_runner_double_start_rejected():
     runner.wait(timeout=1.0)
 
 
-def test_submit_ask_human_reply_terminates_real_read_loop():
-    """Fake executor running ask_human's actual read-loop must complete with the answer."""
+def test_submit_ask_human_reply_reaches_the_port():
+    """Ответ TUI доходит до порта ядра `ctx.ask_human` на продовом пути (executor
+    из фабрики, порт ставит runner). Мост stdin ответа не видит: у ответов своя
+    очередь (дизайн картинок §20.3)."""
     from gc_tui.services.agent_runner import AgentRunner
 
     captured = {}
 
     class _Fake:
+        def __init__(self):
+            self._ctx = type("Ctx", (), {"ask_human": None})()
+
         async def arun(self, messages, *, thread_id, **kw):
-            # Воспроизводим точную логику ask_human.__call__ read-loop
-            lines = []
-            while True:
-                line = input()
-                if line == "":
-                    break
-                lines.append(line)
-            captured["response"] = "\n".join(lines).strip()
+            captured["response"] = await self._ctx.ask_human("?")
 
         def stop_run(self):
             pass
@@ -107,11 +106,41 @@ def test_submit_ask_human_reply_terminates_real_read_loop():
         def add_message(self, m):
             pass
 
-    runner = AgentRunner(executor=_Fake())
+    fake = _Fake()
+    runner = AgentRunner(executor_factory=lambda: fake)
     runner.start(query="hi", thread_id="t1")
     runner.submit_ask_human_reply("user answer")
     runner.wait(timeout=2.0)
     assert captured["response"] == "user answer"
+    assert runner._stdin_queue.empty()
+
+
+def test_stop_without_a_question_does_not_answer_the_next_one():
+    """`stop()` будит ожидание вопроса пустышкой и тогда, когда вопроса нет (Esc во
+    время тулов). Runner на сессию один: пустышка не должна достаться вопросу
+    следующего прогона вместо ответа человека (ревью 2026-10-01; было в develop)."""
+    captured = {}
+
+    class _Fake:
+        def __init__(self):
+            self._ctx = type("Ctx", (), {"ask_human": None})()
+
+        async def arun(self, messages, *, thread_id, **kw):
+            captured["response"] = await self._ctx.ask_human("?")
+
+        def stop_run(self):
+            pass
+
+        def add_message(self, m):
+            pass
+
+    fake = _Fake()
+    runner = AgentRunner(executor_factory=lambda: fake)
+    runner.stop()
+    runner.start(query="hi", thread_id="t1")
+    runner.submit_ask_human_reply("настоящий ответ")
+    runner.wait(timeout=2.0)
+    assert captured["response"] == "настоящий ответ"
 
 
 def test_cancel_ask_human_yields_empty_response():
@@ -160,6 +189,7 @@ def test_start_passes_message_id_as_message_ids():
             message_ids=None,
             display_contents=None,
             skills_loaded=None,
+            attachments=None,
         ):
             seen.append(message_ids)
 
@@ -194,6 +224,7 @@ async def test_runner_start_passes_discard_writes_after_stop_kwarg():
             message_ids=None,
             display_contents=None,
             skills_loaded=None,
+            attachments=None,
         ):
             calls.append(
                 {

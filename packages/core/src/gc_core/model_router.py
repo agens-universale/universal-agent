@@ -34,6 +34,7 @@ CONSUMERS = (
     "intent_scope",
     "memory_compaction",
     "auto_judge",
+    "vision",
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
 
@@ -48,6 +49,7 @@ _SCALAR_ASSIGN_FIELDS = (
     "intent_scope",
     "memory_compaction",
     "auto_judge",
+    "vision",
 )
 
 

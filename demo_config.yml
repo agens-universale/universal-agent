@@ -107,12 +107,14 @@ backend:
   # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
   # отвергает разметку; можно на одну модель: models.<alias>.backend).
   # claude_prompt_cache: false
+
   # Vendor-параметры тела запроса (сэмплинг, диалект thinking, tool_choice).
   # Диалект конкретного стека (Qwen/vLLM и другие) для других провайдеров не нужен
   # и здесь не задаётся: его собирают в профиле, per-алиас. Рабочий референс —
   # demo_profile.yml. null — секция не задана: в запрос уходят серверные дефолты
   # модели. Это не «{} — осознанно слать пусто» (на алиасе это разные вещи).
   chat_completion_kwargs: null
+
   # Заголовки для chat/completions (всё, что должно уйти в HTTP headers).
   # Примеры:
   # chat_completion_headers:
@@ -488,6 +490,14 @@ fs_tools:
     default_max_matches: 100          # max_matches if caller omits it
     hard_max_matches: 300             # hard ceiling: max_matches_eff = min(requested, 300)
     max_visited: 500000               # walk safety cap (not a caller argument)
+
+# Изображения во вводе (TUI: Alt+V, Ctrl+V, путь к файлу; CLI: --image).
+# Пикселями картинки уходят только зрячей модели и только в chat_completions;
+# остальное модель получает текстовой запиской со ссылкой на файл.
+images:
+  max_per_message: 10     # больше — отказ при вставке / ошибка старта CLI
+  live_user_images: 10    # сколько ваших картинок уходит модели пикселями (>= max_per_message)
+  live_tool_images: 3     # сколько снимков агента уходит пикселями (только текущий ход)
 
 security:
   # =========================================================================

@@ -1,6 +1,7 @@
 import copy
 from typing import Any, Dict, Optional
 
+from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.loop_detector.constants import LOOP_WARN_KEY, copy_loop_warn
 from gc_core.tools.exec.calculator import Calculator
 from gc_core.tools.exec.download_file import DownloadFile
@@ -16,6 +17,7 @@ from gc_core.tools.fs.list_files import ListFiles
 from gc_core.tools.fs.read_file import ReadFile
 from gc_core.tools.fs.save_base64_file import SaveBase64File
 from gc_core.tools.fs.search_and_replace import SearchAndReplace
+from gc_core.tools.fs.view_image import ViewImage
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
 from gc_core.tools.project.project_memory import ProjectMemory
 from gc_core.tools.session.read_user_intent_log import ReadUserIntentLog
@@ -72,6 +74,7 @@ def _fs_registry(
         "fs_find_in_files": _tool_entry(FindInFiles, config_dict),
         "fs_search_and_replace": _tool_entry(SearchAndReplace, config_dict),
         "fs_save_base64_file": _tool_entry(SaveBase64File, config_dict),
+        FS_VIEW_IMAGE_NAME: _tool_entry(ViewImage, config_dict),
     }
 
 

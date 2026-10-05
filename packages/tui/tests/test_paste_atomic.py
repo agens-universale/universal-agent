@@ -24,7 +24,7 @@ async def test_backspace_deletes_whole_chip():
         inp.action_delete_left()
         await pilot.pause()
         assert inp.text == ""
-        assert inp._chips.get(1) is None
+        assert inp._chips.get(1) == BIG5  # запись жива: Ctrl+Z вернёт плашку
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ async def test_delete_right_before_chip_removes_it():
         inp.action_delete_right()
         await pilot.pause()
         assert inp.text == ""
-        assert inp._chips.get(1) is None
+        assert inp._chips.get(1) == BIG5  # запись жива: Ctrl+Z вернёт плашку
 
 
 @pytest.mark.asyncio
@@ -58,7 +58,7 @@ async def test_chip_surrounded_by_text_atomic_delete():
         inp.action_delete_left()  # backspace у правой границы плашки
         await pilot.pause()
         assert inp.text == "AB"
-        assert inp._chips.get(1) is None
+        assert inp._chips.get(1) == BIG5  # запись жива: Ctrl+Z вернёт плашку
 
 
 @pytest.mark.asyncio
@@ -95,7 +95,7 @@ async def test_numbering_stable_after_middle_chip_delete():
     """Удаление средней плашки не перенумеровывает соседей: #1 и #3 остаются."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
-    from gc_tui.services.paste_chips import token_spans
+    from gc_tui.services.paste_chips import CHIP_TEXT, token_spans
 
     async with TuiApp().run_test() as pilot:
         inp = await _input(pilot)
@@ -110,7 +110,11 @@ async def test_numbering_stable_after_middle_chip_delete():
         assert "[Вставка #3 · 5 строк]" in inp.text
 
         # удалить среднюю (#2): курсор на её правую границу + backspace
-        span2 = next(s for s in token_spans(inp.text, inp._chips) if s[0] == 2)
+        span2 = next(
+            s
+            for s in token_spans(inp.text, inp._chips)
+            if s[0] == (CHIP_TEXT, 2)
+        )
         inp.move_cursor((span2[1], span2[3]))
         inp.action_delete_left()
         await pilot.pause()
@@ -119,6 +123,8 @@ async def test_numbering_stable_after_middle_chip_delete():
         assert "[Вставка #1 · 5 строк]" in inp.text
         assert "[Вставка #2 · 5 строк]" not in inp.text
         assert "[Вставка #3 · 5 строк]" in inp.text
-        assert inp._chips.get(2) is None
+        assert (
+            inp._chips.get(2) == "b\n" * 4 + "b"
+        )  # запись жива: Ctrl+Z вернёт плашку
         assert inp._chips.get(1) is not None
         assert inp._chips.get(3) is not None

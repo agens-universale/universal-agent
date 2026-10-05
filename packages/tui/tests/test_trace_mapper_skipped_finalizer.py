@@ -7,7 +7,12 @@ turn_finish рисует фантомную прозу-«ответ», а вто
 
 import json
 
-from gc_tui.services.trace_mapper import collect_skipped_call_ids, map_message
+from gc_tui.services.trace_mapper import (
+    RenderContext,
+    collect_render_context,
+    collect_skipped_call_ids,
+    map_message,
+)
 
 
 # Точная форма synthetic skip-output из processing_responses.py:409-418.
@@ -95,7 +100,7 @@ def test_skipped_finish_call_suppressed_when_in_set():
         _finish_call_payload("c_finish"),
         no=2,
         ts="2026-07-07T10:00:00+00:00",
-        skipped_call_ids={"c_finish"},
+        context=RenderContext(skipped_call_ids=frozenset({"c_finish"})),
     )
     assert ev is None
 
@@ -106,7 +111,7 @@ def test_skipped_second_ask_call_suppressed_when_in_set():
         _ask_call_payload("c_ask2"),
         no=2,
         ts="2026-07-07T10:00:00+00:00",
-        skipped_call_ids={"c_ask2"},
+        context=RenderContext(skipped_call_ids=frozenset({"c_ask2"})),
     )
     assert ev is None
 
@@ -118,7 +123,7 @@ def test_finish_call_not_in_set_still_renders():
         _finish_call_payload("c_finish"),
         no=2,
         ts="2026-07-07T10:00:00+00:00",
-        skipped_call_ids=set(),
+        context=RenderContext(),
     )
     assert ev is not None
     assert ev.kind == "agent"
@@ -152,14 +157,11 @@ def test_batch_only_real_finalizer_survives():
         },
         _skip_output_payload("c_finish"),
     ]
-    skipped = collect_skipped_call_ids(batch)
+    context = collect_render_context(batch)
     kinds = []
     for i, m in enumerate(batch):
         ev = map_message(
-            m,
-            no=i + 1,
-            ts="2026-07-07T10:00:00+00:00",
-            skipped_call_ids=skipped,
+            m, no=i + 1, ts="2026-07-07T10:00:00+00:00", context=context
         )
         if ev is not None:
             kinds.append((ev.kind, ev.tool_name))

@@ -8,6 +8,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from gc_core.attachments.store import with_committed_attachments
 from gc_core.bundled_assets import bundled_root
 from gc_core.config_modules.agent import (
     merge_special_instructions_with_model_steering,
@@ -703,28 +704,39 @@ class SubagentRunner:
             trace_writes: list = []
             trace_writes_lock = threading.Lock()
 
+            async def _apersist_child_user(
+                message: Dict[str, Any], prose: str
+            ) -> None:
+                payload: Dict[str, Any] = {"role": "user", "content": prose}
+                attachments = with_committed_attachments(
+                    message, child_ctx
+                ).get("attachments")
+                if attachments:
+                    payload["attachments"] = attachments
+                msg_id = message.get("id")
+                if isinstance(msg_id, str) and msg_id:
+                    payload["id"] = msg_id
+                await apersist_subagent_trace(
+                    child_ctx, kind="user", payload=payload
+                )
+
             def _on_child_user_enqueue(message: Dict[str, Any]) -> None:
                 prose = extract_real_user_message_text(message)
                 if not prose:
                     return
+                # Строке в ленте — картинки как есть: карман живёт до выхода.
                 emit_progress(
                     child_ctx,
                     child_state,
                     "user_message",
                     prose=prose,
+                    attachments=message.get("attachments"),
                 )
-                payload: Dict[str, Any] = {
-                    "role": "user",
-                    "content": prose,
-                }
-                msg_id = message.get("id")
-                if isinstance(msg_id, str) and msg_id:
-                    payload["id"] = msg_id
+                # Копия в тред и запись трассы — на loop ребёнка, а не в потоке
+                # постановки (UI TUI): там же, где приём из очереди, — копии не
+                # гоняются, повторная идемпотентна.
                 future = asyncio.run_coroutine_threadsafe(
-                    apersist_subagent_trace(
-                        child_ctx, kind="user", payload=payload
-                    ),
-                    loop,
+                    _apersist_child_user(message, prose), loop
                 )
                 with trace_writes_lock:
                     trace_writes.append(future)
@@ -744,7 +756,12 @@ class SubagentRunner:
                     persist_messages_callback=persist_messages_callback,
                     pre_backend_compaction_hook=pre_backend_compaction_hook,
                     session_meta=child_meta,
-                    get_pending_messages=scope.drain,
+                    # Приём реплик из очереди — как у родителя: картинки
+                    # из кармана процесса переезжают в тред.
+                    get_pending_messages=lambda: [
+                        with_committed_attachments(m, child_ctx)
+                        for m in scope.drain()
+                    ],
                 )
             finally:
                 # Колбэк снимается ПЕРВЫМ делом: пока он вооружён, чужой поток
@@ -1063,6 +1080,12 @@ class SubagentRunner:
         child_state.tool_call_outputs_store.set_max_entries(
             get_stored_tool_outputs_max_entries(child_config)
         )
+        child_state.vision_probe_turn = getattr(
+            parent, "vision_probe_turn", None
+        )
+        child_state.vision_probe_notices = getattr(
+            parent, "vision_probe_notices", set()
+        )
         child_state.backend_api_mode = "chat_completions"
         child_state.discard_writes_after_stop = (
             parent.discard_writes_after_stop
@@ -1273,12 +1296,18 @@ class SubagentRunner:
         # потоко-локальна: поток читал настоящую консоль, которую держит
         # Textual, и делил с ним нажатия — ход висел, клавиши пропадали.
         child_ctx.ask_human = getattr(self._ctx, "ask_human", None)
+        # Пометка «изображение не просмотрено» — в ленту родителя: отказ «глаз»
+        # внутри субагента иначе ушёл бы только в журнал ребёнка.
+        child_ctx.on_trace_note = getattr(self._ctx, "on_trace_note", None)
         # Хранилище тредов — туда же, и по той же причине: трассу субагента
         # пишет `apersist_subagent_trace`, а без этого поля она уходила в
         # файловое хранилище по умолчанию. У встраивающего, отдавшего свой стор
         # (`AsyncAgent.create(cfg, thread_store=…)`), трасса либо терялась, либо
         # ложилась на диск хоста мимо него.
         child_ctx.thread_store = getattr(self._ctx, "thread_store", None)
+        # Хранилище картинок — родителя: запросы ребёнка проецируют вложения (снимки
+        # его тула) через это хранилище.
+        child_ctx.image_store = getattr(self._ctx, "image_store", None)
         child_ctx.subagent_tool_name = tool_name
         return child_ctx
 

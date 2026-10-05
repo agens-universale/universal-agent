@@ -18,7 +18,7 @@
 остаются ветка и хвост-разворот; у записи без диффа (бинарь/удаление) нет и
 хвоста — одна ветка со счётчиками.
 
-Ветка и хвост невидимы для выделения (класс `_NoSelect` ветки копирования:
+Ветка и хвост невидимы для выделения (класс `NoSelectStatic` ветки копирования:
 ALLOW_SELECT=False + get_selection()->None) — иначе в буфер попадали бы счётчики
 и глиф кнопки.
 
@@ -55,10 +55,10 @@ from gc_tui.services.plural import lines_word
 from gc_tui.widgets.block_panel import (
     CopyFeedbackMixin,
     _copy_request,
-    _NoSelect,
     copy_glyph,
 )
 from gc_tui.widgets.click_model import ClickModelMixin
+from gc_tui.widgets.no_select import NoSelectStatic
 
 COLLAPSE_LABEL = "свернуть"
 BRANCH_PREFIX = "└ изменено:"
@@ -145,19 +145,21 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
     def compose(self) -> ComposeResult:
         record = self._record
         with Horizontal(classes="block-header"):
-            yield _NoSelect(
+            yield NoSelectStatic(
                 f"{BRANCH_PREFIX} +{record.add} −{record.del_}",
                 classes="block-label",
                 markup=False,
             )
-            yield _NoSelect(copy_glyph(), classes="block-copy", markup=False)
+            yield NoSelectStatic(
+                copy_glyph(), classes="block-copy", markup=False
+            )
         collapsed = self._diff_render(expanded=False)
         if collapsed.total_lines == 0:
             return  # binary / delete / no_diff — только ветка, без пустой рамки
         if collapsed.shown_lines:
             yield Static(collapsed.text, classes="block-body", markup=False)
         if collapsed.truncated:
-            yield _NoSelect(
+            yield NoSelectStatic(
                 self._tail_label(), classes="diff-more", markup=False
             )
 
@@ -247,7 +249,7 @@ class DiffBlock(CopyFeedbackMixin, ClickModelMixin, Vertical):
                 tail.first(Static).update(self._tail_label())
             else:
                 self.mount(
-                    _NoSelect(
+                    NoSelectStatic(
                         self._tail_label(), classes="diff-more", markup=False
                     )
                 )

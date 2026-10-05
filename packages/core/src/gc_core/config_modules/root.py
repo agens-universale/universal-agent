@@ -15,12 +15,14 @@ from gc_core.config_modules.agent import (
 )
 from gc_core.config_modules.agent_edits import AgentEditsConfig
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.chat_api import ChatApiConfig
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
 from gc_core.config_modules.endpoint_presets import (
     EndpointPreset,
     default_endpoint_presets,
 )
 from gc_core.config_modules.fs_tools import FsToolsConfig
+from gc_core.config_modules.images import ImagesConfig
 from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     normalize_intent_scope_config,
@@ -109,6 +111,7 @@ class AppConfig(BaseModel):
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
     acp: AcpConfig = Field(default_factory=AcpConfig)
+    chat_api: ChatApiConfig = Field(default_factory=ChatApiConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     endpoint_presets: list[EndpointPreset] = Field(
         default_factory=default_endpoint_presets
@@ -119,6 +122,7 @@ class AppConfig(BaseModel):
     update: UpdateConfig = Field(default_factory=UpdateConfig)
     agent_edits: AgentEditsConfig = Field(default_factory=AgentEditsConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig
     )

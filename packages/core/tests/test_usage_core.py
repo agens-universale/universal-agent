@@ -411,6 +411,7 @@ def test_label_to_category():
         == "project_memory"
     )
     assert category_for_request_label("intent_scope_summary") == "intent_scope"
+    assert category_for_request_label("vision") == "vision"
     assert category_for_request_label("") == CATEGORY_MAIN
     assert category_for_request_label("whatever") == CATEGORY_MAIN
     assert (

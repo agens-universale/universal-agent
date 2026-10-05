@@ -1843,6 +1843,16 @@ def test_consumer_labels_reuse_the_transport_dictionary():
     assert set(labels) == set(models_section.assign_consumers())
 
 
+def test_vision_row_is_in_the_assign_block():
+    """Строка «глаз» приезжает из реестров кода сама (`CONSUMERS` и транспортный
+    словарь подписей). Подпись — та, на которую ссылаются пометки в ленте:
+    «Модель для зрения можно выбрать в /settings → Модели»."""
+    from gc_tui.editors.models_section import assign_consumers, consumer_labels
+
+    assert "vision" in assign_consumers()
+    assert consumer_labels()["vision"] == "модель для зрения"
+
+
 async def test_auto_judge_row_is_present_and_marked_inert(tmp_path):
     """`auto_judge` в реестре потребителей есть (строка на месте), но до волны C
     привязка инертна — это говорит ГОЛОВА строки («имя · описание», построчной

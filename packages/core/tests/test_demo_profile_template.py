@@ -92,6 +92,7 @@ def test_demo_profile_covers_all_service_consumers(demo_profile_raw):
         "intent_scope",
         "memory_compaction",
         "auto_judge",
+        "vision",
     ):
         assert consumer in assign, (
             f"demo_profile.yml не привязывает потребителя {consumer}"

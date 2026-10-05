@@ -34,6 +34,7 @@ agent_overrides:
     - fs_find_files_by_name
     - fs_find_in_files
     - fs_search_and_replace
+    - fs_view_image
     - exec_command
     - exec_python
     # - exec_fetch_url

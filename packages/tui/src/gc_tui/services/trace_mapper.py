@@ -4,11 +4,39 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Optional
+from dataclasses import dataclass, field
+from typing import Any, Iterable, Mapping, Optional
+
+from gc_core.attachments.model import ORIGIN_USER, Attachment, attachments_of
+from gc_core.vision.errors import (
+    ERR_NO_IMAGE_STORE,
+    ERR_NO_VISION_MODEL,
+    ERR_TOO_MANY_IMAGES,
+    ERR_VISION_FAILED,
+    REASON_EMPTY_RESPONSE,
+    REASON_HTTP,
+)
 
 from gc_tui.models import TraceEvent
+from gc_tui.services.image_chips import images_mentioned
 from gc_tui.services.path_display import truncate_path
 from gc_tui.services.tool_identity import tool_id
+
+#: Сводки строки fs_view_image в ленте (визуальный контракт картинок §4): модель
+#: получает английский текст ошибки, человек — русский по типу ошибки.
+ROW_NO_VISION = "нет модели для просмотра изображений"
+ROW_VISION_FAILED = "модель для зрения не ответила ({reason})"
+ROW_TOO_MANY_IMAGES = "не прикреплено: за шаг не больше {n} изображений"
+ROW_NO_IMAGE_STORE = "не просмотрено: нет хранилища изображений"
+# Причина сбоя «глаз» (`error.reason`: код HTTP, имя исключения, пустой ответ) — частые
+# по-русски; прочие показываются как есть.
+_REASON_TIMEOUT = "таймаут"
+_REASON_NO_CONNECTION = "нет связи"
+_REASON_EMPTY = "пустой ответ"
+_REASON_SERVER_ERROR = "ошибка сервера {status}"
+_HTTP_REASON_RE = re.compile(
+    re.escape(REASON_HTTP).replace(re.escape("{status}"), r"(\d{3})")
+)
 
 _TECHNICAL_TAG_RE = re.compile(r"<technical[^>]*>(.*?)</technical>", re.DOTALL)
 # Greedy: strips first <think> → LAST </think> (one span). Robust к тому, что
@@ -117,6 +145,48 @@ def collect_skipped_call_ids(messages) -> set:
     return ids
 
 
+def collect_image_index(messages) -> dict[str, Attachment]:
+    """Пользовательские картинки батча по подписи (`Изображение #N`).
+
+    Вызывающие делают pre-pass по записям (как collect_skipped_call_ids) и передают
+    индекс в map_message: ответ на turn_ask_human несёт в тексте только плашки, а сами
+    вложения лежат в следующем техническом сообщении (дизайн картинок §20.3). Номер
+    сквозной по треду — подпись уникальна; снимки агента (origin=tool) делят одну
+    подпись и в индекс не идут."""
+    index: dict[str, Attachment] = {}
+    for m in messages:
+        if not isinstance(m, dict):
+            continue
+        for att in attachments_of(m):
+            if att.origin == ORIGIN_USER:
+                index[att.label] = att
+    return index
+
+
+@dataclass(frozen=True)
+class RenderContext:
+    """Сведения о батче записей, которые map_message не видит в одном сообщении.
+
+    ``skipped_call_ids`` — call_id штатно пропущенных финализаторов (см.
+    collect_skipped_call_ids): их `function_call` не рендерим (парный skip-output
+    подавляется отдельно по маркеру `skipped: true`).
+    ``image_index`` — пользовательские картинки батча по подписи (см.
+    collect_image_index): ответ на turn_ask_human берёт из него свои картинки."""
+
+    skipped_call_ids: frozenset = frozenset()
+    image_index: Mapping[str, Attachment] = field(default_factory=dict)
+
+
+def collect_render_context(messages: Iterable) -> RenderContext:
+    """Pre-pass по payload'ам батча — один на всех вызывающих (лента, превью, сегменты
+    сжатого треда)."""
+    payloads = list(messages)
+    return RenderContext(
+        skipped_call_ids=frozenset(collect_skipped_call_ids(payloads)),
+        image_index=collect_image_index(payloads),
+    )
+
+
 # Лимит текста технической врезки (Ж1 батча 4) — см. комментарий у среза ниже.
 # Величина — со смоука 5 (З3): при 120 весь бюджет уходил вступлению отказа
 # схемы («Wrong arguments for `X`: Arguments for tool 'X' do not match its
@@ -127,13 +197,16 @@ _TECH_TEXT_LIMIT = 240
 
 
 def map_message(
-    msg: dict, *, no: int, ts: str, skipped_call_ids: Optional[set] = None
+    msg: dict,
+    *,
+    no: int,
+    ts: str,
+    context: Optional[RenderContext] = None,
 ) -> Optional[TraceEvent]:
     """Превращает payload-сообщение thread_store в TraceEvent.
 
-    ``skipped_call_ids`` — набор call_id штатно пропущенных финализаторов (см.
-    collect_skipped_call_ids). Их `function_call` не рендерим (парный skip-output
-    подавляется отдельно по маркеру `skipped: true`)."""
+    ``context`` — сведения о батче (collect_render_context); без него — пустые."""
+    context = context or RenderContext()
     if not isinstance(msg, dict):
         return None
     role = msg.get("role")
@@ -157,6 +230,7 @@ def map_message(
                 summary=disp,
                 full_payload=msg,
                 message_id=mid,
+                attachments=tuple(attachments_of(msg)),
             )
         content = msg.get("content")
         if isinstance(content, str) and content.strip():
@@ -233,6 +307,7 @@ def map_message(
                 summary=stripped,
                 full_payload=msg,
                 message_id=mid,
+                attachments=tuple(attachments_of(msg)),
             )
         return None
 
@@ -272,11 +347,7 @@ def map_message(
         msg.get("output")
     ):
         return None
-    if (
-        typ == "function_call"
-        and skipped_call_ids
-        and call_id in skipped_call_ids
-    ):
+    if typ == "function_call" and call_id in context.skipped_call_ids:
         return None
 
     # ASK_HUMAN — kind=ask_human, summary=question (TraceScreen mounts banner).
@@ -445,6 +516,9 @@ def map_message(
         if is_ask_human:
             response_text = _extract_ask_human_response(msg.get("output"))
             if response_text:
+                # Картинки ответа лежат в следующем техническом сообщении, а не на
+                # output (иначе проекция отправила бы их дважды) — сцепка по плашкам
+                # в тексте ответа (дизайн картинок §20.3).
                 return TraceEvent(
                     no=no,
                     event_ts_utc_iso=ts,
@@ -455,6 +529,9 @@ def map_message(
                     message_id=mid,
                     call_id=call_id,
                     tool_name="ask_human",
+                    attachments=images_mentioned(
+                        response_text, context.image_index
+                    ),
                 )
             return TraceEvent(
                 no=no,
@@ -669,6 +746,38 @@ def _looks_like_error(output: Any) -> bool:
     return bool(data.get("error"))
 
 
+def _vision_error_row(err: dict) -> str:
+    """Русская сводка ошибки fs_view_image по её типу; "" — ошибка не про зрение."""
+    kind = err.get("type")
+    if kind == ERR_NO_VISION_MODEL:
+        return ROW_NO_VISION
+    if kind == ERR_TOO_MANY_IMAGES:
+        return ROW_TOO_MANY_IMAGES.format(n=err.get("limit"))
+    if kind == ERR_NO_IMAGE_STORE:
+        return ROW_NO_IMAGE_STORE
+    if kind != ERR_VISION_FAILED:
+        return ""
+    return ROW_VISION_FAILED.format(
+        reason=_vision_reason_text(str(err.get("reason") or ""))
+    )
+
+
+def _vision_reason_text(reason: str) -> str:
+    """Причина сбоя «глаз» для человека: таймаут, 5xx, пустой ответ и обрыв связи —
+    по-русски (имена исключений httpx/openai: `ReadTimeout`, `APIConnectionError`…),
+    остальное — как есть."""
+    if "Timeout" in reason:
+        return _REASON_TIMEOUT
+    if "Connect" in reason:
+        return _REASON_NO_CONNECTION
+    if reason == REASON_EMPTY_RESPONSE:
+        return _REASON_EMPTY
+    http = _HTTP_REASON_RE.fullmatch(reason)
+    if http and http.group(1).startswith("5"):
+        return _REASON_SERVER_ERROR.format(status=http.group(1))
+    return reason
+
+
 def _truncate_word_boundary(text: str, limit: int) -> str:
     """Обрезать ПРОЗУ до `limit` символов, не разрывая слово посередине.
 
@@ -725,6 +834,9 @@ def _summarize_output(output: Any, *, error: bool) -> str:
         err = data.get("error") or data.get("message") or ""
         # error может быть dict {type, message, ...} — извлекаем message/type.
         if isinstance(err, dict):
+            vision_row = _vision_error_row(err)
+            if vision_row:
+                return vision_row
             err = (
                 err.get("message")
                 or err.get("type")

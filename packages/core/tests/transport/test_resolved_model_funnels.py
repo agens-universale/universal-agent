@@ -722,7 +722,13 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
         processing_module, [{"role": "user", "content": "hi"}], state, ctx
     )
 
-    router.resolve.assert_called_once_with("main")
+    # main фиксируется один раз; vision резолвится для свежего ключа доступа
+    # и затем чистого решения compute_audience (без сетевой пробы).
+    assert [c.args for c in router.resolve.call_args_list] == [
+        ("main",),
+        ("vision",),
+        ("vision",),
+    ]
 
 
 def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
@@ -1149,6 +1155,7 @@ _HONORED_PER_MODEL = {
     "use_max_tokens_param",  # выбор max_tokens/max_completion_tokens
     "openai_strict_tools_schema",  # проекция схемы тулов: create_call_data_completions
     "send_tool_strict",  # то же: снимать ли function.strict с копии на отправке
+    "vision",  # vision/audience: модель заявлена слепой
 }
 
 # Остаются глобальными ОСОЗНАННО — с причиной у каждого.
@@ -1196,6 +1203,7 @@ def test_fields_declared_per_model_are_actually_read_by_the_funnels():
         core / "utils" / "llm_chat_client.py",
         core / "processing_responses.py",
         core / "model_router.py",
+        core / "vision" / "audience.py",
     ]
     text = "\n".join(p.read_text(encoding="utf-8") for p in readers)
     missing = sorted(f for f in _HONORED_PER_MODEL if f'"{f}"' not in text)

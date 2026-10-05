@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
+from gc_core.attachments.model import Attachment
+
 Kind = Literal[
     "user",
     "agent",
@@ -80,3 +82,6 @@ class TraceEvent:
     summary_content: str = (
         ""  # очищенный текст сводки (только для kind="summary")
     )
+    # Картинки реплики (kind="user"): вложения сообщения, а у ответа на
+    # turn_ask_human — из следующего технического сообщения (дизайн картинок §20.3).
+    attachments: tuple[Attachment, ...] = ()

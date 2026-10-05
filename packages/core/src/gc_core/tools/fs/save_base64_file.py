@@ -19,6 +19,7 @@ class SaveBase64File(AbstractSimpleTool):
             "description": (
                 "Decodes a base64-encoded string and saves it as a binary file. "
                 "Use this to persist images (screenshots, etc.) received as base64 data from MCP tools. "
+                "To look at a saved image, call fs_view_image with its path. "
                 "data must be standard base64 (A-Z a-z 0-9 + / =), ASCII only, with correct padding; "
                 "no data URI prefix. Returns JSON with fields: ok, path, bytes_written, error."
             ),
@@ -54,6 +55,7 @@ class SaveBase64File(AbstractSimpleTool):
             "Usage:\n"
             "- Use this after browser_screenshot (or any tool returning base64 image data) "
             "to save the result to disk.\n"
+            "- To look at the saved image, call fs_view_image with its path.\n"
             "- path must be absolute.\n"
             "- data is the raw standard base64 string (A-Z a-z 0-9 + / =), ASCII only, "
             "with correct padding; no data URI prefix.\n"

@@ -30,6 +30,7 @@ gc-cli считает токены, потраченные за прогон а�
 | `command_moderation` | judge опасных команд (`exec_command`/`exec_python`) |
 | `project_memory` | компакция project-памяти |
 | `intent_scope` | post-hook intent-scope |
+| `vision` | «глаза»: описание изображения моделью для зрения (`assign.vision`) |
 | `subagent` | свёрнутый вклад субагентов (их main + aux) |
 
 Для каждой категории хранятся `input` / `output` / `cached` токены, число вызовов (`calls`) и

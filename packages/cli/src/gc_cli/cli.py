@@ -1,10 +1,19 @@
 import os
 import sys
-from typing import Any
+from typing import Any, NamedTuple
 
 from gc_core import config_sync, onboarding
 from gc_core.agent_edits.ctx import RUN_MODE_CLI, RUN_MODE_KEY
 from gc_core.agent_executor import AgentExecutor
+from gc_core.attachments.model import (
+    ORIGIN_USER,
+    Attachment,
+    chip_text,
+    user_label,
+)
+from gc_core.attachments.normalize import REASON_TOO_LARGE, NormalizeError
+from gc_core.attachments.numbering import read_image_seq
+from gc_core.attachments.store import ImageStore, amake_attachment
 from gc_core.config import (
     _bootstrap_user_config,
     apply_cli_overrides,
@@ -15,11 +24,14 @@ from gc_core.config import (
     resolve_config_path,
     user_config_path,
 )
+from gc_core.config_modules.images import read_images_config
 from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
     wrap_technical_user_content,
 )
 from gc_core.run_context import RunContext, acreate_run_context
+from gc_core.thread_store import resolve_threads_dir
+from gc_core.thread_store_file import FileThreadStore
 from gc_core.updater import check as updater_check
 from gc_core.updater import runner as updater_runner
 from gc_core.updater import source as updater_source
@@ -129,6 +141,147 @@ async def _resolve_forced_skill(
     if res.note:
         print(f"note: {res.note}", file=sys.stderr)
     return res.canonical_id
+
+
+#: Отказы `--image` — в stderr, до старта агента. По смыслу — те же, что отказы
+#: вставки в футере TUI.
+IMAGE_TOO_MANY = "[gc] --image: не больше {n} изображений в одном сообщении (передано {count})"
+IMAGE_UNREADABLE = "[gc] --image {path}: файл не найден или недоступен"
+IMAGE_NOT_AN_IMAGE = "[gc] --image {path}: это не изображение"
+IMAGE_TOO_LARGE = "[gc] --image {path}: изображение слишком большое"
+
+
+class ImageArgError(ValueError):
+    """Отказ `--image`: текст готов для stderr."""
+
+
+def _first_image_number(
+    threads_dir: str, thread_id: str | None, start_new_thread: bool
+) -> int:
+    """Номер первой картинки запроса — сквозной по треду (спека §4).
+
+    С `-t` — следующий за `runtime.image_seq` треда; без `-t` и с `-n` — 1: тред
+    либо не пишется, либо начинается заново. Система `cli` — та же, что ставит
+    исполнитель по умолчанию (`AgentExecutor.arun`).
+    """
+    if not thread_id or start_new_thread:
+        return 1
+    return (
+        read_image_seq(
+            FileThreadStore(threads_dir).load_meta("cli", thread_id)
+        )
+        + 1
+    )
+
+
+async def _astage_cli_images(
+    paths: list[str], store: ImageStore, *, first_n: int, max_per_message: int
+) -> list[Attachment]:
+    """Файлы `--image` → вложения в кармане процесса, по порядку, с номерами от `first_n`.
+
+    Отказ — `ImageArgError` с готовым текстом. Один и тот же файл дважды — одно
+    вложение: вложения сообщения уникальны по хешу (спека §4).
+    """
+    if len(paths) > max_per_message:
+        raise ImageArgError(
+            IMAGE_TOO_MANY.format(n=max_per_message, count=len(paths))
+        )
+    out: list[Attachment] = []
+    for path in paths:
+        try:
+            att = await amake_attachment(
+                store,
+                path,
+                origin=ORIGIN_USER,
+                label=user_label(first_n + len(out)),
+            )
+        except OSError as exc:
+            raise ImageArgError(IMAGE_UNREADABLE.format(path=path)) from exc
+        except NormalizeError as exc:
+            text = (
+                IMAGE_TOO_LARGE
+                if exc.reason == REASON_TOO_LARGE
+                else IMAGE_NOT_AN_IMAGE
+            )
+            raise ImageArgError(text.format(path=path)) from exc
+        if all(prev.id != att.id for prev in out):
+            out.append(att)
+    return out
+
+
+class _CliImages(NamedTuple):
+    """Картинки `--image` запуска: карман процесса, вложения и номер первой плашки."""
+
+    store: ImageStore
+    images: list[Attachment]
+    first_n: int
+
+
+async def _aprepare_cli_images(
+    config_dict: dict,
+    image_paths: list[str],
+    *,
+    thread_id: str | None,
+    start_new_thread: bool,
+) -> _CliImages | None:
+    """Карман процесса и картинки `--image` — до стампа и до сборки контекста: отказ по
+    файлу уходит раньше MCP-дискавери и не «сжигает» notice «агент обновлён». Карманы
+    мёртвых процессов подметаем на каждом старте, есть картинки или нет; уборка — не
+    условие запуска: ошибка диска её пропускает, как в TUI. Каталог тредов нужен только
+    номеру первой плашки — без `--image` к нему не обращаемся. None — отказ: текст уже в
+    stderr, карман снят."""
+    store = ImageStore.for_config(config_dict)
+    try:
+        store.sweep_dead_staging()
+    except OSError:
+        pass
+    if not image_paths:
+        return _CliImages(store, [], 1)
+    first_n = _first_image_number(
+        resolve_threads_dir(config_dict), thread_id, start_new_thread
+    )
+    try:
+        images = await _astage_cli_images(
+            image_paths,
+            store,
+            first_n=first_n,
+            max_per_message=read_images_config(config_dict).max_per_message,
+        )
+    except ImageArgError as exc:
+        print(str(exc), file=sys.stderr)
+        store.clear_own_staging()
+        return None
+    return _CliImages(store, images, first_n)
+
+
+def _cli_user_parts(
+    query: str,
+    images: list[Attachment],
+    *,
+    first_n: int,
+    wrap_technical: bool,
+    forced_skill_id: str | None,
+) -> tuple[list[str], list[list[Attachment] | None] | None]:
+    """Сообщения запуска и параллельный им список вложений для `arun`.
+
+    Картинки — вложения к сообщению `-q`: его текст начинается с плашек
+    `[Изображение #N]`. При `-T` обёртка ложится поверх плашек и текста — это всё
+    ещё сообщение `-q`. Указание `-s` — отдельное техническое сообщение без вложений.
+    """
+    text = query
+    if images:
+        chips = " ".join(chip_text(first_n + i) for i in range(len(images)))
+        text = f"{chips} {query}"
+    if wrap_technical:
+        text = wrap_technical_user_content(text)
+    parts = [text]
+    if forced_skill_id:
+        parts.append(
+            wrap_skill_resolution_technical_instruction(forced_skill_id)
+        )
+    if not images:
+        return parts, None
+    return parts, [list(images), *([None] * (len(parts) - 1))]
 
 
 def _interactive() -> bool:
@@ -615,6 +768,18 @@ async def arun_cli() -> int:
     if setup_exit is not None:
         return setup_exit
 
+    thread_id = arg_parser.run_args.thread_id
+    start_new_thread = arg_parser.run_args.new
+    cli_images = await _aprepare_cli_images(
+        config_dict,
+        getattr(arg_parser.run_args, "images", None) or [],
+        thread_id=thread_id,
+        start_new_thread=start_new_thread,
+    )
+    if cli_images is None:
+        return 1
+    image_store, images, first_image_n = cli_images
+
     # Стамп — только на полноценном запуске: хинт-путь выше не должен «сжигать»
     # notice «агент обновлён» (ревью Task 4).
     upgrade_gate.mark_current_run()
@@ -664,17 +829,15 @@ async def arun_cli() -> int:
     if _notices:
         print(render_notices_for_cli(_notices), file=sys.stderr)
 
-    user_parts: list[str] = [arg_parser.run_args.query]
-    if arg_parser.run_args.wrap_technical:
-        user_parts[0] = wrap_technical_user_content(user_parts[0])
-    if forced_skill_id:
-        user_parts.append(
-            wrap_skill_resolution_technical_instruction(forced_skill_id)
-        )
+    user_parts, attachments = _cli_user_parts(
+        arg_parser.run_args.query,
+        images,
+        first_n=first_image_n,
+        wrap_technical=arg_parser.run_args.wrap_technical,
+        forced_skill_id=forced_skill_id,
+    )
 
     verbose = arg_parser.run_args.verbose
-    thread_id = arg_parser.run_args.thread_id
-    start_new_thread = arg_parser.run_args.new
 
     executor = AgentExecutor(ctx)
     structured_exit: int | None = None
@@ -688,6 +851,7 @@ async def arun_cli() -> int:
             thread_id=thread_id,
             start_new_thread=start_new_thread,
             verbose=verbose,
+            attachments=attachments,
             account_run=not close_accounting_after,
         )
         ran = True
@@ -712,6 +876,9 @@ async def arun_cli() -> int:
             from gc_core.utils.async_http import aclose_clients
 
             await aclose_clients()
+            # Карман процесса больше не нужен: с `-t` ядро уже скопировало
+            # картинки в тред, без `-t` запуск кончился вместе с ними.
+            image_store.clear_own_staging()
             if auto_mcp:
                 shutdown_mcp_daemons()
     if structured_exit is not None:

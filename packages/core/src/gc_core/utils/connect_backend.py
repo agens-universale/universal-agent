@@ -28,8 +28,10 @@ from gc_core.utils.backend_errors import (
     HTTP_TRANSPORT_ERRORS,
     http_status_code,
     is_empty_completion,
+    is_image_request_error,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError, OnDelta
+from gc_core.utils.data_urls import mask_data_urls
 from gc_core.utils.format_messages import (
     format_message_chat_completions_to_send_backend,
 )
@@ -197,7 +199,13 @@ def _default_should_retry_backend_exception(exc: Exception) -> bool:
     - HTTP 404: LLM-прокси отдаёт его, пока route модели нет после обрыва
       туннеля (транзиентно); честный 404 просто ждёт retry-бюджет.
     - иногда рвётся стрим: ошибки парсинга/валидации
+
+    Картиночная ошибка запроса (модель не принимает картинки или не столько) не
+    ретраится ни в какой форме: тот же запрос её не лечит, а OpenRouter отвечает на
+    картинку 404-м, SSE-ошибкой — vLLM в стриме.
     """
+    if is_image_request_error(exc):
+        return False
     if isinstance(exc, HTTP_STATUS_ERRORS):
         status_code = http_status_code(exc)
         if status_code is None:
@@ -214,15 +222,17 @@ def _log_backend_request(
     logger, api_mode: str, url: str, payload: Dict
 ) -> None:
     """Лог исходящего запроса. Один на оба транспорта: расхождение в логах
-    между sync и async путями искало бы себя часами."""
+    между sync и async путями искало бы себя часами. Картинки в лог не идут:
+    data-URL маскируется до ``data:<mime>;base64,<N bytes>``."""
     if logger is None:
         return
+    logged = mask_data_urls(payload)
     try:
         logger.debug(
             "Send request to backend %s url=%s payload=%s",
             api_mode,
             url,
-            json.dumps(payload, ensure_ascii=False),
+            json.dumps(logged, ensure_ascii=False),
         )
     except Exception:
         # Не роняем процесс из-за проблем с сериализацией payload.
@@ -233,7 +243,7 @@ def _log_backend_request(
             "event": "backend_request",
             "api_mode": api_mode,
             "url": url,
-            "payload": payload,
+            "payload": logged,
         },
     )
 
@@ -382,7 +392,7 @@ async def arequest_backend_responses(
                 "event": "backend_request",
                 "api_mode": "responses",
                 "url": url,
-                "payload": data,
+                "payload": mask_data_urls(data),
             },
         )
 
@@ -609,7 +619,11 @@ async def aresolve_auth_token(auth_connector, *, force: bool = False) -> str:
 
 
 async def acreate_call_headers(
-    state, ctx, resolved: Optional[ResolvedModel] = None
+    state,
+    ctx,
+    resolved: Optional[ResolvedModel] = None,
+    *,
+    api_mode: str | None = None,
 ) -> Dict[str, str]:
     """Заголовки вызова backend. ЕДИНСТВЕННАЯ форма этой операции.
 
@@ -627,7 +641,27 @@ async def acreate_call_headers(
     token = None
     if auth_connector is not None:
         token = await aresolve_auth_token(auth_connector)
-    return build_call_headers(state, ctx, resolved, token=token)
+    return build_call_headers(
+        state, ctx, resolved, token=token, api_mode=api_mode
+    )
+
+
+async def acreate_main_and_vision_headers(
+    state, ctx, resolved, vision_resolved
+):
+    """One auth acquisition, with each recipient's own header overlays."""
+    auth = getattr(ctx, "auth_connector", None)
+    token = await aresolve_auth_token(auth) if auth is not None else None
+    return (
+        build_call_headers(state, ctx, resolved, token=token),
+        build_call_headers(
+            state,
+            ctx,
+            vision_resolved,
+            token=token,
+            api_mode="chat_completions",
+        ),
+    )
 
 
 def _authorization_header(
@@ -654,6 +688,13 @@ def _authorization_header(
             "берёт токен вне loop."
         )
     return f"Bearer {token}"
+
+
+def _set_call_header(headers, name, value):
+    for existing in list(headers):
+        if existing.lower() == name.lower():
+            del headers[existing]
+    headers[name] = value
 
 
 def _apply_chat_completion_headers(
@@ -696,7 +737,7 @@ def _apply_chat_completion_headers(
         v = str(raw_val).strip()
         if not v:
             continue
-        call_headers[k] = v
+        _set_call_header(call_headers, k, v)
 
 
 def build_call_headers(
@@ -705,6 +746,7 @@ def build_call_headers(
     resolved: Optional[ResolvedModel] = None,
     *,
     token: Optional[str] = None,
+    api_mode: str | None = None,
 ) -> Dict[str, str]:
     """
     Собрать заголовки вызова для backend API на основе State и RunContext.
@@ -720,7 +762,9 @@ def build_call_headers(
     config_dict = getattr(ctx, "config_dict", {}) or {}
     auth_connector = getattr(ctx, "auth_connector", None)
     backend_mode = (
-        str(config_dict.get("backend_api_mode", "responses")).strip().lower()
+        str(api_mode or config_dict.get("backend_api_mode", "responses"))
+        .strip()
+        .lower()
     )
     resolved_for_headers = (
         resolved if backend_mode == "chat_completions" else None
@@ -767,7 +811,11 @@ def build_call_headers(
     # отправляет литерал "None".
     trace_id = trace_id_from_config(config_dict)
     if trace_id and model_trace_header_enabled(config_dict):
-        call_headers[trace_header_name(config_dict, "x_trace_id")] = trace_id
+        _set_call_header(
+            call_headers,
+            trace_header_name(config_dict, "x_trace_id"),
+            trace_id,
+        )
     return call_headers
 
 
@@ -867,11 +915,13 @@ def create_call_data_responses(
         resolved.model if resolved is not None else state.default_model
     )
     call_data["input"] = _responses_input_without_message_call_id(messages)
+    # Явный набор (в том числе пустой) — решение вызывающего: главный цикл
+    # фильтрует набор на запрос (`fs_view_image`, спека §9.2). None — набор state.
     cfg = config_dict if isinstance(config_dict, dict) else {}
     openai_strict, send_tool_strict = _tool_schema_flags(
         resolved, cfg, honor_alias=False
     )
-    raw_tools = tools if tools else state.tools
+    raw_tools = tools if tools is not None else state.tools
     call_data["tools"] = project_tool_specs(
         raw_tools,
         openai_strict=openai_strict,

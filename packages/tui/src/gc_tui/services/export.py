@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 
+from gc_core.attachments.model import attachments_of, chip_of, wh_text
 from gc_core.message_policy.user_message_policy import (
     is_technical_user_message_text,
     resolve_technical_user_content_type,
@@ -142,6 +143,15 @@ def _header_line(h: dict) -> str:
     return "===== " + " · ".join(parts) + " ====="
 
 
+def _image_lines(payload: dict) -> list[str]:
+    """Картинки записи: подпись, формат и размер, путь файла. Экспорт несёт текст
+    и пути, байтов картинок в нём нет (дизайн картинок §12)."""
+    return [
+        f"    └ {chip_of(att)} · {wh_text(att)} · {att.path}"
+        for att in attachments_of(payload)
+    ]
+
+
 def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
     role, typ = payload.get("role"), payload.get("type")
 
@@ -164,19 +174,21 @@ def _render_record(n: int, payload: dict, name_by_call: dict) -> list[str]:
         return [f"[{n}] THINK", *_indent(_as_text(text))]
 
     if role == "user":
+        images = _image_lines(payload)
         if "display_content" in payload:
             disp = (payload.get("display_content") or "").strip()
             if not disp:
                 return []  # mid-run доставка — не выводим как USER
-            return [f"[{n}] USER", *_indent(disp)]
+            return [f"[{n}] USER", *_indent(disp), *images]
         content = user_content_to_text(payload.get("content"))
         if is_technical_user_message_text(content):
             ttype = resolve_technical_user_content_type(content)
             return [
                 f"[{n}] USER [technical:{ttype}]",
                 *_indent(_strip_technical(content)),
+                *images,
             ]
-        return [f"[{n}] USER", *_indent(content)]
+        return [f"[{n}] USER", *_indent(content), *images]
 
     if role == "assistant":
         think, answer = _split_think(_assistant_text(payload.get("content")))

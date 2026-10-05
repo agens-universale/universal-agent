@@ -42,8 +42,9 @@ def test_port_is_a_coroutine_function():
     """Синхронный порт ядро зовёт инлайн — значит порт обязан быть корутинным."""
     runner = AgentRunner(executor=_Ex())
 
-    assert inspect.iscoroutinefunction(runner._read_stdin_answer), (
-        "порт снова синхронный: ядро позовёт его инлайн и заморозит loop на всё время, пока человек думает"
+    assert inspect.iscoroutinefunction(runner._read_answer), (
+        "порт снова синхронный: ядро позовёт его инлайн и заморозит loop "
+        "на всё время, пока человек думает"
     )
 
 
@@ -72,16 +73,15 @@ async def test_loop_keeps_ticking_while_the_human_thinks():
     #
     # Пульс прогретый и общий. Собственный видел начало порта только потому,
     # что его задачу создавали РАНЬШЕ задачи порта и loop запускал их по
-    # очереди: 0,2 с сна в начале `_read_stdin_answer` тест замечал, но
+    # очереди: 0,2 с сна в начале `_read_answer` тест замечал, но
     # держалось это на порядке двух строк, который ничто не сторожит. Прогрев
     # делает это свойством измерителя.
     with quiet_gc_for_loop_timing():
         async with LoopPulse() as pulse:
-            asker = asyncio.create_task(runner._read_stdin_answer("как дела?"))
+            asker = asyncio.create_task(runner._read_answer("как дела?"))
 
             await asyncio.sleep(0.3)  # человек «думает»
-            runner._stdin_queue.put("хорошо\n")
-            runner._stdin_queue.put("\n")
+            runner.submit_ask_human_reply("хорошо")
 
             answer = await asyncio.wait_for(asker, 5)
 
@@ -101,7 +101,7 @@ def test_stop_unblocks_a_pending_ask_human():
     result: list = []
 
     def _wait() -> None:
-        result.append(runner._read_stdin_blocking("?"))
+        result.append(runner._read_answer_blocking("?"))
         done.set()
 
     waiter = threading.Thread(target=_wait, daemon=True)
