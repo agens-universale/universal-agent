@@ -14,6 +14,9 @@ readability) на уровне модулей (как в develop):
 from temporalio import workflow
 
 with workflow.unsafe.imports_passed_through():
+    # httpcore httpx грузит лениво — при первом клиенте; модуль ядра создаёт
+    # клиент при импорте (`utils.http_session`), поэтому пропускаем и его.
+    import httpcore  # noqa: F401
     import httpx  # noqa: F401
     import mcp.client.session
     import mcp.client.sse

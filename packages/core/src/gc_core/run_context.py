@@ -5,7 +5,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set
 
 from gc_core.attachments.store import ImageStore
 from gc_core.backends.factory import resolve_os_backend
@@ -39,9 +39,7 @@ from gc_core.tools import abuild_tools_data
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
-
-if TYPE_CHECKING:
-    from gc_core.utils.prod_auth import AuthConnector
+from gc_core.utils.prod_auth import AuthConnector
 
 
 @dataclass
