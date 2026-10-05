@@ -16,6 +16,7 @@ dependencies = [
     "gc-server==0.3.1",
     "gc-mcp==0.3.1",
     "gc-acp==0.3.1",
+    "gc-chat==0.3.1",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,7 @@ gc-mcp = "recommended_mcp.runtime.cli:main"
 gc-mcp-install = "recommended_mcp.runtime.install_cli:main"
 gc-voice = "gc_tui.voice_runtime.cli:main"
 gc-acp = "gc_acp.main:main"
+gc-chat = "gc_chat.main:main"
 
 [tool.hatch.build.targets.wheel]
 bypass-selection = true
@@ -88,6 +90,7 @@ gc-tui = { workspace = true }
 gc-server = { workspace = true }
 gc-mcp = { workspace = true }
 gc-acp = { workspace = true }
+gc-chat = { workspace = true }
 
 gc-testkit = { workspace = true }
 office-mcp = { path = "packages/mcp/external/vendor/office-mcp", editable = true }
@@ -103,6 +106,7 @@ testpaths = [
     "packages/server/tests",
     "packages/tui/tests",
     "packages/acp/tests",
+    "packages/chat/tests",
 ]
 asyncio_mode = "auto"
 
@@ -185,6 +189,7 @@ paths = [
     "packages/mcp/src",
     "packages/server/src",
     "packages/acp/src",
+    "packages/chat/src",
     "packages/core/assets/skills",
     "scripts",
     "integrations",

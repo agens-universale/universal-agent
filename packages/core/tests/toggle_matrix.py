@@ -689,6 +689,7 @@ NOT_IN_MATRIX = {
     "assign.subagents": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.summary": "выбор модели: харнесс маршрутизирует по agent.model",
     "assign.text_answer_judge": "выбор модели: харнесс маршрутизирует по agent.model",
+    "assign.vision": "выбор модели: харнесс маршрутизирует по agent.model",
     "level": "выбор модели: харнесс маршрутизирует по agent.model",
     "profile": "выбор модели: харнесс маршрутизирует по agent.model",
     "slots.default": "выбор модели: харнесс маршрутизирует по agent.model",
@@ -699,6 +700,10 @@ NOT_IN_MATRIX = {
     # `agent.model`, разметка на нём не включается вовсе, и дамп от переключения
     # не меняется. Покрытие самой фичи — `test_prompt_cache.py`.
     "backend.claude_prompt_cache": "разметка payload только для claude-моделей; модель сценария не claude",
+    # Заявленная слепота модели (спека изображений). Меняет только судьбу
+    # вложений-картинок, а в сценарии матрицы их нет — дамп от переключения не
+    # меняется. Покрытие — `vision/test_vision_audience.py`.
+    "backend.vision": "действует только на картинки во вложениях; в сценарии матрицы их нет",
     # Тулы нового FS-поиска (PR #86). Сценарий матрицы их не зовёт: у неё три
     # хода с `calculator` и финализатором. Ключи меняют пороги и фильтры внутри
     # самих тулов, до цикла агента не доходят.
@@ -719,6 +724,12 @@ NOT_IN_MATRIX = {
     "fs_tools.find_in_files.max_total_matches": "порог внутри тула поиска; сценарий матрицы его не зовёт",
     "fs_tools.find_in_files.max_unfiltered_host_reads": "порог внутри тула поиска; сценарий матрицы его не зовёт",
     "fs_tools.find_in_files.top_level_dirs_cap": "порог внутри тула поиска; сценарий матрицы его не зовёт",
+    # Изображения во вводе: сценарий матрицы картинок не шлёт, а пороги живости и
+    # потолок сообщения меняют состав запроса, не путь исполнения. Покрытие —
+    # наборы `attachments/` и `message_policy/` ядра, TUI и CLI.
+    "images.max_per_message": "сценарий матрицы картинок не шлёт",
+    "images.live_user_images": "сценарий матрицы картинок не шлёт",
+    "images.live_tool_images": "сценарий матрицы картинок не шлёт",
     # Голос — дистрибутив gc-tui, ядро его не знает вовсе.
     "voice_endpoint_presets": "голосовой ввод живёт в gc-tui, ядро его не касается",
     "voice.language": "голосовой ввод живёт в gc-tui, ядро его не касается",
@@ -763,6 +774,18 @@ NOT_IN_MATRIX = {
     "acp.finish_gate_mode": "только ACP",
     "acp.todo_reminder_steps": "только ACP",
     "tui.finish_gate_mode": "только TUI",
+    "chat_api.host": "только процесс gc-chat",
+    "chat_api.port": "только процесс gc-chat",
+    "chat_api.auth_token": "только процесс gc-chat",
+    "chat_api.cors_origins": "только процесс gc-chat",
+    "chat_api.launch_root": "только процесс gc-chat",
+    "chat_api.text_answer_mode": "только процесс gc-chat",
+    "chat_api.finish_gate_mode": "только процесс gc-chat",
+    "chat_api.todo_reminder_steps": "только процесс gc-chat",
+    "todo.reminder_steps": (
+        "напоминание чеклиста; матрица гоняет CLI и этот лист не "
+        "переключает. Канал Responses пишет его в runtime"
+    ),
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",
     "tui.bang_shell.max_output_bytes": "только TUI",

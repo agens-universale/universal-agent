@@ -100,4 +100,39 @@ def test_tail_becomes_a_turn_with_the_same_ids_and_display_fields():
         "message_ids": ["m_1", "m_2"],
         "display_contents": [None, "чистый текст"],
         "skills_loaded": [None, "review"],
+        "attachments": [None, None],
     }
+
+
+def test_tail_carries_the_attachments_of_its_messages():
+    """Картинки хвоста едут с ним: в тред их переложит ход, который их понесёт."""
+    from gc_core.agent_executor import undelivered_as_arun_args
+    from gc_core.attachments.model import ORIGIN_USER, Attachment, user_label
+
+    att = Attachment(
+        id="aaaaaaaaaaaaaaaa",
+        kind="image",
+        mime="image/png",
+        width=64,
+        height=48,
+        size=100,
+        path="/pocket/aaaaaaaaaaaaaaaa.png",
+        origin=ORIGIN_USER,
+        label=user_label(1),
+        source="clipboard",
+        orig_width=64,
+        orig_height=48,
+    )
+    _texts, extra = undelivered_as_arun_args(
+        [
+            {"role": "user", "content": "текст", "id": "m_1"},
+            {
+                "role": "user",
+                "content": "[Изображение #1]",
+                "id": "m_2",
+                "attachments": [att.to_dict()],
+            },
+        ]
+    )
+
+    assert extra["attachments"] == [None, [att]]

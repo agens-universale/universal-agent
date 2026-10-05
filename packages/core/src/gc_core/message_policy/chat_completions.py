@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
 from typing import Any, Dict, List
 
@@ -219,9 +220,28 @@ def coalesce_consecutive_assistant_tool_calls(
     return result
 
 
-_INTERRUPTED_ASSISTANT_PLACEHOLDER = (
-    "(previous turn was interrupted — continuing from the new request)"
-)
+#: Мост между серией ответов тулов и следующим сообщением: модель получила
+#: ответы — и всё. Верно при любом продолжении: технический хвост батча, реплика
+#: человека посреди работы тулов, новый запрос после остановки прогона.
+BRIDGE_TOOL_RESULTS = "(tool results received)"
+
+_BRIDGE_NOISE = re.compile(r"[\W_]+")
+
+
+def _bridge_words(text: str) -> str:
+    return _BRIDGE_NOISE.sub(" ", text).strip().casefold()
+
+
+def is_bridge_echo(text: str) -> bool:
+    """Ответ модели целиком — повтор нашего моста: модель переняла шаблон из истории
+    (смоук 2026-10-01). Это не ответ — синтетический текст, вставленный от имени
+    модели, её итогом не бывает. Сравнение — с ответом целиком, только слова, без
+    регистра и любой пунктуации; упоминание фразы внутри настоящего ответа — не
+    повтор. Из истории повтор не убирается: он стоит сразу после ответов тулов — ровно
+    там, где запрос и так получил бы мост, провод с ним и без него одинаков."""
+    return bool(text) and _bridge_words(text) == _bridge_words(
+        BRIDGE_TOOL_RESULTS
+    )
 
 
 def inject_assistant_after_orphan_tool_outputs(
@@ -234,13 +254,16 @@ def inject_assistant_after_orphan_tool_outputs(
     tool_outputs и финальным ответом LLM). В чистом payload backend такое
     отвергает (400 invalid sequence).
 
-    Функция вставляет синтетический assistant-ack между tool-серией и
-    следующим non-assistant сообщением — payload снова валиден, история
-    остаётся информативной для модели («был прерванный ход, теперь новый
-    user-запрос»).
+    Функция вставляет синтетический assistant-ack ``BRIDGE_TOOL_RESULTS`` между
+    tool-серией и следующим non-assistant сообщением — payload снова валиден.
+    Текст один на все случаи: после технического хвоста батча (напоминание loop
+    detector, картинка тула) и после реплики человека посреди работы тулов ход не
+    прерывался — «ход прерван» уводил модель от начатой задачи (ревью 2026-10-01);
+    после остановки прогона ответы тулов тоже получены, а новый запрос модель
+    видит сама.
 
     Инертна в здоровом потоке (tool → assistant). Триггерится только когда
-    user/system идёт сразу после tool (классический stop-corruption pattern).
+    user/system идёт сразу после tool.
 
     user → user (несколько сообщений подряд без assistant между ними) НЕ
     обрабатывается тут специально — это legitimate flow (например юзер
@@ -261,10 +284,7 @@ def inject_assistant_after_orphan_tool_outputs(
         role = msg.get("role")
         if prev_was_tool and role in ("user", "system"):
             result.append(
-                {
-                    "role": "assistant",
-                    "content": _INTERRUPTED_ASSISTANT_PLACEHOLDER,
-                }
+                {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
             )
         result.append(msg)
         prev_was_tool = role == "tool"
@@ -286,7 +306,8 @@ def prepare_chat_completion_messages_for_api(
     2. repair_tool_call_pairing — отбрасывает orphan assistant.tool_calls без
        соответствующих tool-ответов.
     3. inject_assistant_after_orphan_tool_outputs — вставляет ack-assistant
-       между tool-серией и следующим user/system (последствие прерванного хода).
+       между tool-серией и следующим user/system (последствие прерванного хода
+       или технический хвост батча).
     """
     coalesced = coalesce_consecutive_assistant_tool_calls(messages)
     repaired = repair_tool_call_pairing(

@@ -89,6 +89,18 @@ def test_assign_value_auto_forbidden():
         validate_model_sections(cfg)
 
 
+def test_assign_vision_is_checked_like_every_consumer():
+    ok = AppConfig.model_validate(
+        {"models": {"qwen": {}}, "assign": {"vision": "qwen"}}
+    )
+    assert validate_model_sections(ok) == []
+    ghost = AppConfig.model_validate(
+        {"models": {"a": {}}, "assign": {"vision": "ghost"}}
+    )
+    with pytest.raises(Exception, match=r"assign\.vision.*ghost"):
+        validate_model_sections(ghost)
+
+
 def test_assign_subagents_known_name_ok():
     cfg = AppConfig.model_validate(
         {

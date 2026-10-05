@@ -2,13 +2,26 @@
 
 Основной трейс шлёт канон as-is (включая ``<think>`` / ``reasoning_content``).
 Проекцию без think делают derived-sink'и (саммари, digest, intent), не outbound.
+
+Оговорка (спека §5): единственная проекция на выходе — вложения. Сообщение с
+ключом ``attachments`` уходит картинками и/или записками
+(``message_policy.attachments_outbound``) и без самого ключа; остальной канон — as-is.
 """
 
 from __future__ import annotations
 
 import copy
+import os
+import tempfile
 
 from gc_core import processing_responses as pr
+from gc_core.attachments.model import (
+    ORIGIN_USER,
+    Attachment,
+    user_label,
+    wh_text,
+)
+from gc_core.attachments.texts import STUB_NOBODY
 from gc_core.message_format.serialization import (
     calc_history_chars_for_trigger,
     message_raw_payload_chars_for_trigger,
@@ -135,3 +148,47 @@ def test_only_think_assistant_kept_in_outbound(capture_outbound):
     assistant_texts = _assistant_contents(capture_outbound["messages"])
     assert assistant_texts == ["<think>only reasoning</think>"]
     assert "<think>only reasoning</think>" in str(state.messages[1]["content"])
+
+
+def test_attachments_are_the_only_outbound_projection(capture_outbound):
+    """Оговорка инварианта: сообщение с ``attachments`` уходит запиской (у двойника
+    ctx нет роутера — видеть некому), остальной канон — as-is, state не меняется."""
+    att = Attachment(
+        id="3f9a1c27b0e4d5a6",
+        kind="image",
+        mime="image/png",
+        width=1456,
+        height=819,
+        size=214880,
+        path=os.path.join(
+            tempfile.gettempdir(), "gc-images", "cli_t_3f9a1c27b0e4d5a6.png"
+        ),
+        origin=ORIGIN_USER,
+        label=user_label(8),
+        source="clipboard",
+        orig_width=1456,
+        orig_height=819,
+    )
+    history = dirty_canonical_history() + [
+        {
+            "id": "u9",
+            "role": "user",
+            "content": "[Изображение #8] почему кнопка съехала?",
+            "attachments": [att.to_dict()],
+        },
+    ]
+    ctx, state = make_ctx_state(history=history)
+    before = copy.deepcopy(state.messages)
+
+    run_coro(pr._arequest_backend_canonical([], state, ctx))
+
+    outbound = capture_outbound["messages"]
+    assert DIRTY_THINK in "\n".join(_assistant_contents(outbound))
+    assert outbound[-1] == {
+        "role": "user",
+        "content": STUB_NOBODY.format(
+            label=att.label, wh=wh_text(att), path=att.path
+        )
+        + "\n[Изображение #8] почему кнопка съехала?",
+    }
+    assert state.messages == before

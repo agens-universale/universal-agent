@@ -137,6 +137,8 @@ EXPERT_ONLY_KEYS: set = {
     "backend.stream",
     # Закомментированный пример; дефолт — авто по id модели.
     "backend.claude_prompt_cache",
+    # Закомментированный пример; дефолт — зрение узнаётся по факту отказа.
+    "backend.vision",
     # --- chat_completions: вспомогательный LLM (summary / finish gate / intent scope) ---
     # Тюнинг вспомогательных вызовов; публичный шаблон не нацелен на chat_completions.
     "chat_completions.auxiliary_llm.max_tokens",
@@ -255,7 +257,17 @@ EXPERT_ONLY_KEYS: set = {
     "assign.intent_scope",
     "assign.memory_compaction",
     "assign.auto_judge",
+    "assign.vision",
     "assign.subagents",
+    # --- chat_api: порт процесса gc-chat, не шаблон CLI/TUI ---
+    "chat_api.host",
+    "chat_api.port",
+    "chat_api.auth_token",
+    "chat_api.cors_origins",
+    "chat_api.launch_root",
+    "chat_api.text_answer_mode",
+    "chat_api.finish_gate_mode",
+    "chat_api.todo_reminder_steps",
 }
 
 

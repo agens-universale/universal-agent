@@ -1,0 +1,2270 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gigacode Universal Agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%233fd0c9'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --panel: #12151c;
+    --panel2: #181c25;
+    --bd: #1f242d;
+    --bd2: #2a3140;
+    --tx: #e8ebf1;
+    --mut: #8b93a3;
+    --mut2: #6b727f;
+    --acc: #3fd0c9;
+    --warn: #e6b86b;
+    --bad: #e07a72;
+    --ok: #7ed957;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(900px 420px at 100% -10%, rgba(63, 208, 201, .12), transparent 55%),
+      radial-gradient(700px 380px at 0% 0%, rgba(126, 217, 87, .06), transparent 50%),
+      var(--bg);
+    color: var(--tx);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .app {
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+  }
+  .shell { flex: 1; display: flex; min-height: 0; }
+  aside {
+    width: 260px;
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    padding: 10px 10px 8px;
+  }
+  #sidebar { border-right: 1px solid var(--bd); }
+  #filesbar { border-left: 1px solid var(--bd); }
+  #dialogList, #artifactList { flex: 1 1 auto; min-height: 0; overflow: auto; }
+  .center {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    justify-content: center;
+  }
+  .side-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    margin: 4px 0 6px;
+    padding: 4px 4px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--mut);
+    font-size: 12px;
+    text-align: left;
+  }
+  .side-toggle::after { content: none; }
+  .pane-tabs { display: none; }
+  .pane-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+    padding: 11px 8px 9px;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    background: transparent;
+    color: var(--mut);
+    font-size: 14px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .pane-tab:hover { color: var(--tx); }
+  .pane-tab.active { color: var(--acc); border-bottom-color: var(--acc); }
+  @media (min-width: 1200px) {
+    .side-toggle { pointer-events: none; }
+    #chatToggle { display: none; }
+  }
+  .side-note { color: var(--mut); font-size: 12px; margin: 4px 8px; }
+  .dialog-btn, .file-link {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    padding: 6px 8px;
+    color: var(--tx);
+  }
+  .dialog-btn:hover, .file-link:hover { background: var(--panel); }
+  .dialog-btn.active { background: rgba(63, 208, 201, .12); }
+  .dialog-btn .t {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dialog-btn .m { display: block; color: var(--mut2); font-size: 11px; }
+  .file-link { color: var(--acc); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .file-link.dir { color: var(--tx); }
+  .file-link.action { color: var(--mut); }
+  .file-link.danger { color: var(--bad); }
+  .file-link:disabled { opacity: .45; cursor: default; }
+  .mkdir-row { display: flex; gap: 4px; align-items: center; margin: 0 0 4px; }
+  .mkdir-row input { min-width: 0; padding: 6px 8px; }
+  .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; margin: 0 4px 4px; }
+  .crumb, .crumb-sep { border: 0; background: transparent; color: var(--mut); font-size: 12px; padding: 2px; }
+  .crumb { border-radius: 6px; }
+  .crumb:hover { background: var(--panel); color: var(--tx); }
+  .file-menu {
+    position: fixed;
+    z-index: 40;
+    min-width: 180px;
+    max-width: 240px;
+    background: var(--panel);
+    border: 1px solid var(--bd2);
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, .45);
+  }
+  .file-menu-name {
+    padding: 4px 8px 6px;
+    color: var(--mut);
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .file-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    padding: 8px;
+  }
+  .file-menu button:hover { background: var(--panel2); }
+  .file-menu button.danger { color: var(--bad); }
+  .maincol {
+    flex: 1;
+    width: 100%;
+    max-width: 920px;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    padding: 0 16px;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 16px;
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid var(--bd);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .brand svg { width: 36px; height: 36px; flex: none; filter: drop-shadow(0 0 10px rgba(63, 208, 201, .45)); }
+  h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 750;
+    letter-spacing: .2px;
+    background: linear-gradient(90deg, #e8ebf1 0%, #9be88f 42%, #3fd0c9 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .sub { color: var(--mut); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .btn, .primary {
+    border: 1px solid var(--bd2);
+    background: var(--panel);
+    color: var(--tx);
+    border-radius: 10px;
+    padding: 7px 12px;
+  }
+  .btn:hover, .primary:hover { border-color: var(--acc); }
+  .btn:disabled, .primary:disabled { opacity: .45; cursor: default; }
+  .primary { background: rgba(63, 208, 201, .16); border-color: rgba(63, 208, 201, .45); color: var(--acc); }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    padding: 8px 0;
+    color: var(--mut);
+    font-size: 13px;
+  }
+  .stats .item { white-space: nowrap; }
+  .stats b { color: var(--tx); font-weight: 650; }
+  .est { color: var(--mut2); font-size: 12px; }
+  .warn, .alert {
+    border: 1px solid rgba(230, 184, 107, .4);
+    background: rgba(230, 184, 107, .08);
+    color: var(--warn);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+  .alert { border-color: rgba(224, 122, 114, .45); background: rgba(224, 122, 114, .08); color: var(--bad); }
+  #log { flex: 1; overflow: auto; padding: 12px 0 8px; }
+  .empty { max-width: 520px; margin: 12vh auto 0; color: var(--mut); }
+  .empty h2 { margin: 0 0 8px; color: var(--tx); font-size: 20px; }
+  .empty p { margin: 8px 0; }
+  .msg { margin: 0 0 16px; }
+  .msg.user { display: flex; justify-content: flex-end; }
+  .user-text {
+    max-width: min(78%, 640px);
+    background: rgba(63, 208, 201, .12);
+    border: 1px solid rgba(63, 208, 201, .28);
+    border-radius: 16px 16px 4px 16px;
+    padding: 10px 14px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .assistant { max-width: 100%; }
+  details {
+    margin: 0 0 8px;
+    border: 1px solid var(--bd);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  summary { cursor: pointer; padding: 8px 12px; color: var(--mut); }
+  details pre {
+    margin: 0;
+    padding: 0 12px 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--mut);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .tool {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--panel);
+    border: 1px solid var(--bd);
+    font-size: 13px;
+  }
+  .tool.nested { margin-left: 18px; }
+  .tool .st { margin-left: auto; color: var(--mut2); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mut2); flex: none; transform: translateY(1px); }
+  .tool.in_progress .dot { background: var(--acc); }
+  .tool.completed .dot { background: var(--ok); }
+  .tool.failed .dot { background: var(--bad); }
+  .prose { overflow-wrap: anywhere; }
+  .prose p { margin: 0 0 8px; }
+  .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 {
+    margin: 12px 0 6px;
+    line-height: 1.3;
+    background: none;
+    color: var(--tx);
+    -webkit-text-fill-color: var(--tx);
+  }
+  .prose h1 { font-size: 1.35rem; }
+  .prose h2 { font-size: 1.15rem; }
+  .prose h3, .prose h4, .prose h5, .prose h6 { font-size: 1rem; }
+  .prose hr { border: 0; border-top: 1px solid var(--bd2); margin: 14px 0; }
+  .prose .table-wrap { overflow-x: auto; margin: 0 0 12px; }
+  .prose table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .prose th, .prose td {
+    border: 1px solid var(--bd2);
+    padding: 6px 8px;
+    text-align: left;
+    vertical-align: top;
+  }
+  .prose th { color: var(--tx); font-weight: 650; background: var(--panel2); }
+  details .trace { padding: 0 12px 8px; color: var(--mut); font-size: 13.5px; }
+  details .trace :is(h1, h2, h3, h4, h5, h6, strong) { color: var(--tx); }
+  .prose ul, .prose ol { margin: 0 0 8px; padding-left: 1.3em; }
+  .prose a { color: var(--acc); }
+  .prose code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .92em;
+    background: var(--panel2);
+    border-radius: 5px;
+    padding: 1px 5px;
+  }
+  .prose pre {
+    margin: 0 0 10px;
+    padding: 12px;
+    background: var(--panel);
+    border: 1px solid var(--bd);
+    border-radius: 10px;
+    overflow: auto;
+  }
+  .prose pre code { background: none; padding: 0; }
+  .flag { margin-top: 6px; font-size: 12px; color: var(--mut); }
+  .flag.bad { color: var(--bad); }
+  .copy-md {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin: 2px 0 0;
+    padding: 2px 0;
+    border: 0;
+    background: transparent;
+    color: var(--mut);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .copy-md svg { display: block; }
+  .copy-md:hover { color: var(--acc); }
+  .working {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--mut);
+    font-size: 13px;
+    grid-column: 1;
+    align-self: center;
+  }
+  .spin {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--bd2);
+    border-top-color: var(--acc);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    flex: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    align-items: end;
+    padding: 10px 0 16px;
+    border-top: 1px solid var(--bd);
+  }
+  textarea {
+    grid-column: 1;
+    resize: none;
+    overflow: hidden;
+    min-height: 46px;
+    max-height: 180px;
+    padding: 11px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--bd2);
+    background: var(--panel);
+    outline: none;
+  }
+  textarea:focus { border-color: var(--acc); }
+  #stop { grid-column: 2; }
+  #send { grid-column: 2; }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .overlay[hidden], .warn[hidden], .alert[hidden], #stop[hidden], .working[hidden] { display: none; }
+  .panel {
+    width: min(480px, 100%);
+    background: var(--panel);
+    border: 1px solid var(--bd2);
+    border-radius: 16px;
+    padding: 18px;
+  }
+  .panel h2 { margin: 0 0 12px; font-size: 18px; }
+  label { display: block; margin: 10px 0 4px; color: var(--mut); font-size: 13px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  input, select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--bd2);
+    background: var(--bg);
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--acc); }
+  .hint { margin: 6px 0 0; color: var(--mut2); font-size: 12px; }
+  .panel-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .form-alert { min-height: 1.2em; margin: 8px 0 0; color: var(--bad); font-size: 13px; }
+  @media (max-width: 1199px) {
+    .pane-tabs {
+      display: flex;
+      flex: none;
+      padding: 0 12px;
+      border-bottom: 1px solid var(--bd);
+    }
+    .shell { flex-direction: column; overflow: hidden; }
+    .side-toggle { display: none; }
+    aside, #chatpane { width: 100%; border: 0; }
+    .center { flex-direction: column; align-items: stretch; }
+    aside.collapsed, #chatpane.collapsed { display: none; }
+    aside:not(.collapsed),
+    #chatpane:not(.collapsed) { display: flex; flex: 1 1 0%; min-height: 0; }
+  }
+  @media (max-width: 720px) {
+    header { align-items: flex-start; }
+    .actions { flex: 1 1 100%; justify-content: flex-start; }
+    .sub { white-space: normal; }
+    h1 { font-size: 16px; }
+    #composer { align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <defs>
+          <radialGradient id="orb" cx="32%" cy="30%" r="70%">
+            <stop offset="0%" stop-color="#9be88f"/>
+            <stop offset="55%" stop-color="#3fd0c9"/>
+            <stop offset="100%" stop-color="#138f88"/>
+          </radialGradient>
+        </defs>
+        <circle cx="16" cy="16" r="14" fill="url(#orb)"/>
+      </svg>
+      <div>
+        <h1>Gigacode Universal Agent</h1>
+        <div class="sub" id="conn"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="newBtn">Новый чат</button>
+      <button type="button" class="btn" id="importBtn">Импорт</button>
+      <button type="button" class="btn" id="exportBtn">Экспорт</button>
+      <button type="button" class="btn" id="settingsBtn">Настройки</button>
+    </div>
+  </header>
+  <nav class="pane-tabs" id="paneTabs" aria-label="Разделы">
+    <button type="button" class="pane-tab active" id="chatTab" data-pane="chatpane" role="tab" aria-selected="true" aria-controls="chatpane">Чат</button>
+    <button type="button" class="pane-tab" id="filesTab" data-pane="filesbar" role="tab" aria-selected="false" aria-controls="filesbar">Файлы</button>
+    <button type="button" class="pane-tab" id="dialogsTab" data-pane="sidebar" role="tab" aria-selected="false" aria-controls="sidebar">Диалоги</button>
+  </nav>
+  <div class="shell">
+  <aside id="sidebar" class="collapsed">
+    <button type="button" class="side-toggle" id="dialogsToggle" data-pane="sidebar" aria-expanded="false" aria-controls="dialogList">Диалоги</button>
+    <div id="dialogList"></div>
+  </aside>
+  <div class="center" id="chatpane">
+  <button type="button" class="side-toggle" id="chatToggle" data-pane="chatpane" aria-expanded="true" aria-controls="maincol">Чат</button>
+  <div class="maincol" id="maincol">
+  <div class="stats" id="stats" title="Оценка без токенизатора: gc-chat не возвращает usage. У Chat Completions вход считается заново на каждом ходе — уходит вся история."></div>
+  <div class="warn" id="warn" hidden>Этот диалог сервер не продолжит: нет id прошлого ответа. Следующее сообщение откроет новый ход.</div>
+  <main id="log"></main>
+  <div class="alert" id="alert" hidden></div>
+  <form id="composer">
+    <div class="working" id="working" hidden><span class="spin"></span>работаю…</div>
+    <button type="button" class="btn" id="stop" hidden>Стоп</button>
+    <textarea id="input" rows="1" placeholder="Сообщение. Enter — отправить, Shift+Enter — новая строка"></textarea>
+    <button type="submit" class="primary" id="send">Отправить</button>
+  </form>
+  </div>
+  </div>
+  <aside id="filesbar" class="collapsed">
+    <button type="button" class="side-toggle" id="filesToggle" data-pane="filesbar" aria-expanded="false" aria-controls="artifactList">Файлы</button>
+    <div id="artifactList"></div>
+  </aside>
+  </div>
+</div>
+
+<div class="overlay" id="settings" hidden>
+  <form class="panel" id="settingsForm">
+    <h2>Настройки</h2>
+    <label for="f-api">Интерфейс</label>
+    <select id="f-api">
+      <option value="responses">Responses — диалог помнит сервер</option>
+      <option value="completions">Chat Completions — история в каждом запросе</option>
+    </select>
+    <label for="f-token">Токен</label>
+    <input id="f-token" type="password" autocomplete="off" placeholder="пусто, если сервер без авторизации">
+    <label for="f-model">Модель</label>
+    <div class="row">
+      <select id="f-model" required>
+        <option value="">список не загружен</option>
+      </select>
+      <button type="button" class="btn" id="pullModel" style="flex:0 0 auto">Обновить</button>
+    </div>
+    <p class="hint">Список с этого же адреса. После смены токена нажмите «Обновить».</p>
+    <div class="form-alert" id="formAlert"></div>
+    <div class="panel-actions">
+      <button type="button" class="btn" id="settingsCancel">Отмена</button>
+      <button type="submit" class="primary">Сохранить</button>
+    </div>
+  </form>
+</div>
+<input type="file" id="file" accept="application/json,.json" hidden>
+
+<script>
+(function () {
+  var SETTINGS_KEY = "gc-ua-chat-settings";
+  var MESSAGES_KEY = "gc-ua-chat-messages";
+  var THREAD_KEY = "gc-ua-chat-thread";
+  var PANE_KEY = "gc-ua-chat-panes";
+  var narrowMedia = window.matchMedia("(max-width: 1199px)");
+  var PANE_IDS = ["sidebar", "chatpane", "filesbar"];
+  var DEFAULTS = { api: "responses", token: "", model: "" };
+
+  var settings = loadSettings();
+  var messages = loadMessages();
+  var busy = false;
+  var activeThread = loadThread();
+  var artifactDir = "";
+  var artifactBody = null;
+  var artifactGen = 0;
+  var workspaceCwd = "";
+  var dialogs = [];
+  var turnGen = 0;
+  var abortCtl = null;
+  var frame = 0;
+  var saveTimer = 0;
+
+  var logEl = document.getElementById("log");
+  var input = document.getElementById("input");
+  var alertEl = document.getElementById("alert");
+  var warnEl = document.getElementById("warn");
+  var statsEl = document.getElementById("stats");
+  var connEl = document.getElementById("conn");
+  var stopBtn = document.getElementById("stop");
+  var workingEl = document.getElementById("working");
+  var sendBtn = document.getElementById("send");
+  var settingsEl = document.getElementById("settings");
+  var formAlert = document.getElementById("formAlert");
+
+  logEl.addEventListener("click", onCopyAnswer);
+  document.getElementById("composer").addEventListener("submit", function (e) {
+    e.preventDefault();
+    send();
+  });
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      send();
+    }
+  });
+  input.addEventListener("input", grow);
+  document.getElementById("newBtn").addEventListener("click", newChat);
+  document.getElementById("importBtn").addEventListener("click", function () {
+    document.getElementById("file").click();
+  });
+  document.getElementById("file").addEventListener("change", onImport);
+  document.getElementById("exportBtn").addEventListener("click", exportChat);
+  document.getElementById("settingsBtn").addEventListener("click", openSettings);
+  document.getElementById("settingsCancel").addEventListener("click", closeSettings);
+  document.getElementById("settingsForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    saveForm();
+  });
+  document.getElementById("pullModel").addEventListener("click", pullModel);
+  stopBtn.addEventListener("click", stop);
+  settingsEl.addEventListener("click", function (e) {
+    if (e.target === settingsEl) closeSettings();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !settingsEl.hidden) closeSettings();
+  });
+  loadPanes();
+  ensureSinglePane();
+  syncPaneToggles();
+  narrowMedia.addEventListener("change", function () {
+    ensureSinglePane();
+    syncPaneToggles();
+  });
+  document.querySelectorAll(".side-toggle, .pane-tab").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      if (!narrowMedia.matches) return;
+      var id = btn.getAttribute("data-pane");
+      if (paneOpen(id)) return;
+      showOnlyPane(id);
+      closeFileMenu();
+      syncPaneToggles();
+      savePanes();
+    });
+  });
+
+  render();
+  loadDialogs().then(showFilesForCurrent);
+  input.focus();
+
+  function paneOpen(id) {
+    return !document.getElementById(id).classList.contains("collapsed");
+  }
+
+  function showOnlyPane(id) {
+    PANE_IDS.forEach(function (paneId) {
+      document.getElementById(paneId).classList.toggle("collapsed", paneId !== id);
+    });
+  }
+
+  function ensureSinglePane() {
+    if (!narrowMedia.matches) return;
+    var open = PANE_IDS.filter(paneOpen);
+    if (open.length === 1) return;
+    showOnlyPane(open.indexOf("chatpane") >= 0 ? "chatpane" : (open[0] || "chatpane"));
+    savePanes();
+  }
+
+  function loadPanes() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(PANE_KEY) || "null");
+      if (!raw || typeof raw !== "object") return;
+      if (typeof raw.dialogs === "boolean") document.getElementById("sidebar").classList.toggle("collapsed", !raw.dialogs);
+      if (typeof raw.files === "boolean") document.getElementById("filesbar").classList.toggle("collapsed", !raw.files);
+      if (typeof raw.chat === "boolean") document.getElementById("chatpane").classList.toggle("collapsed", !raw.chat);
+    } catch (e) {}
+  }
+
+  function savePanes() {
+    localStorage.setItem(PANE_KEY, JSON.stringify({
+      dialogs: paneOpen("sidebar"),
+      files: paneOpen("filesbar"),
+      chat: paneOpen("chatpane"),
+    }));
+  }
+
+  function syncPaneToggles() {
+    var wide = !narrowMedia.matches;
+    document.querySelectorAll(".side-toggle").forEach(function (btn) {
+      var pane = document.getElementById(btn.getAttribute("data-pane"));
+      var open = wide || !pane.classList.contains("collapsed");
+      btn.setAttribute("aria-expanded", open ? "true" : "false");
+      btn.tabIndex = wide ? -1 : 0;
+    });
+    document.querySelectorAll(".pane-tab").forEach(function (btn) {
+      var open = paneOpen(btn.getAttribute("data-pane"));
+      btn.classList.toggle("active", open);
+      btn.setAttribute("aria-selected", open ? "true" : "false");
+    });
+  }
+
+  function loadSettings() {
+    var s = { api: DEFAULTS.api, token: DEFAULTS.token, model: DEFAULTS.model };
+    try {
+      var raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
+      if (!raw || typeof raw !== "object") return s;
+      if (raw.api === "completions" || raw.api === "responses") s.api = raw.api;
+      if (typeof raw.token === "string") s.token = raw.token;
+      if (typeof raw.model === "string") s.model = raw.model;
+    } catch (e) {}
+    return s;
+  }
+
+  function loadMessages() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "[]");
+      if (!Array.isArray(raw)) return [];
+      var out = [];
+      for (var i = 0; i < raw.length; i++) {
+        var m = hydrate(raw[i]);
+        if (m) out.push(m);
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function hydrate(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    if (raw.role === "user") {
+      if (typeof raw.content !== "string" || !raw.content) return null;
+      return { role: "user", content: raw.content };
+    }
+    if (raw.role !== "assistant") return null;
+    var parts = [];
+    if (Array.isArray(raw.parts)) {
+      for (var i = 0; i < raw.parts.length; i++) parts.push.apply(parts, partFrom(raw.parts[i]));
+    } else {
+      if (raw.reasoning) parts.push({ id: "think", kind: "reasoning", text: String(raw.reasoning) });
+      if (Array.isArray(raw.tools)) {
+        for (var t = 0; t < raw.tools.length; t++) {
+          var tool = raw.tools[t] || {};
+          parts.push({
+            id: "tool-" + t,
+            kind: "tool",
+            title: String(tool.title || tool.name || "tool"),
+            name: String(tool.name || ""),
+            status: String(tool.status || "completed"),
+            parent: tool.parent ? String(tool.parent) : null
+          });
+        }
+      }
+      parts.push({ id: "answer", kind: "answer", text: String(raw.content || "") });
+    }
+    return {
+      role: "assistant",
+      parts: parts,
+      responseId: typeof raw.responseId === "string" ? raw.responseId : null,
+      status: typeof raw.status === "string" ? raw.status : null,
+      note: typeof raw.note === "string" ? raw.note : null,
+      error: typeof raw.error === "string" ? raw.error : null,
+      streaming: false
+    };
+  }
+
+  function partFrom(p) {
+    if (!p || typeof p !== "object") return [];
+    if (p.kind === "reasoning" || p.kind === "answer") {
+      return [{ id: String(p.id || p.kind), kind: p.kind, text: String(p.text || "") }];
+    }
+    if (p.kind === "tool") {
+      return [{
+        id: String(p.id || "tool"),
+        kind: "tool",
+        title: String(p.title || p.name || "tool"),
+        name: String(p.name || ""),
+        status: String(p.status || "completed"),
+        parent: p.parent ? String(p.parent) : null
+      }];
+    }
+    return [];
+  }
+
+  function loadThread() {
+    try {
+      var id = localStorage.getItem(THREAD_KEY);
+      return typeof id === "string" && id ? id : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function saveThread() {
+    try {
+      if (activeThread) localStorage.setItem(THREAD_KEY, activeThread);
+      else localStorage.removeItem(THREAD_KEY);
+    } catch (e) {}
+  }
+
+  function knownThread(id) {
+    if (!id) return null;
+    for (var i = 0; i < dialogs.length; i++) {
+      if (dialogs[i].thread_id === id) return id;
+    }
+    return null;
+  }
+
+  function threadForMessages() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var responseId = messages[i].responseId;
+      if (!responseId) continue;
+      for (var j = 0; j < dialogs.length; j++) {
+        if (dialogs[j].latest_response_id === responseId) return dialogs[j].thread_id;
+      }
+    }
+    return null;
+  }
+
+  function showFilesForCurrent() {
+    if (settings.api !== "responses") return;
+    activeThread = knownThread(activeThread) || threadForMessages();
+    saveThread();
+    renderDialogs();
+    loadArtifacts();
+  }
+
+  function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  function saveMessages() {
+    var dump = messages.map(function (m) {
+      if (m.role === "user") return { role: "user", content: m.content };
+      return {
+        role: "assistant",
+        parts: m.parts,
+        responseId: m.responseId,
+        status: m.status,
+        note: m.note,
+        error: m.error
+      };
+    });
+    try { localStorage.setItem(MESSAGES_KEY, JSON.stringify(dump)); } catch (e) {}
+  }
+
+  function authHeaders(s, json) {
+    var h = {};
+    if (json) h["Content-Type"] = "application/json";
+    var token = String(s.token || "").trim();
+    if (token) h.Authorization = "Bearer " + token;
+    return h;
+  }
+
+  function setAlert(text) {
+    alertEl.hidden = !text;
+    alertEl.textContent = text || "";
+  }
+
+  function grow() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 180) + "px";
+    input.style.overflowY = input.scrollHeight > 180 ? "auto" : "hidden";
+  }
+
+  function answerText(m) {
+    return (m.parts || []).filter(function (p) { return p.kind === "answer"; }).map(function (p) { return p.text || ""; }).join("\n");
+  }
+
+  function assistantBlob(m) {
+    return (m.parts || []).map(function (p) {
+      return p.kind === "tool" ? (p.title || "") : (p.text || "");
+    }).join("\n");
+  }
+
+  function estimateTokens(text) {
+    if (!text) return 0;
+    var tokens = 0;
+    var i = 0;
+    while (i < text.length) {
+      var c = text.charCodeAt(i);
+      if (c <= 32) { i++; continue; }
+      if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) {
+        var j = i + 1;
+        while (j < text.length) {
+          var d = text.charCodeAt(j);
+          if ((d >= 48 && d <= 57) || (d >= 65 && d <= 90) || (d >= 97 && d <= 122)) j++;
+          else break;
+        }
+        tokens += Math.max(1, Math.ceil((j - i) / 4));
+        i = j;
+        continue;
+      }
+      if (c > 127) {
+        var k = i + 1;
+        while (k < text.length && text.charCodeAt(k) > 127) k++;
+        tokens += Math.max(1, Math.ceil((k - i) / 2));
+        i = k;
+        continue;
+      }
+      tokens += 1;
+      i++;
+    }
+    return tokens;
+  }
+
+  function sessionStats() {
+    var prompt = 0;
+    var completion = 0;
+    var history = 0;
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m.role === "user") {
+        var t = estimateTokens(m.content);
+        history += t;
+        if (messages[i + 1] && messages[i + 1].role === "assistant") {
+          prompt += settings.api === "responses" ? t : history;
+        }
+      } else {
+        completion += estimateTokens(assistantBlob(m));
+        history += estimateTokens(answerText(m));
+      }
+    }
+    return { prompt: prompt, completion: completion, total: prompt + completion };
+  }
+
+  function fmt(n) {
+    return n.toLocaleString("ru-RU");
+  }
+
+  function orphan() {
+    if (busy || settings.api !== "responses") return false;
+    var assistants = messages.filter(function (m) { return m.role === "assistant" && !m.streaming; });
+    if (!assistants.length) return false;
+    return !assistants[assistants.length - 1].responseId;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function splitFences(src) {
+    var parts = [];
+    var re = /```([^\n`]*)\n([\s\S]*?)```/g;
+    var last = 0;
+    var m;
+    while ((m = re.exec(src))) {
+      parts.push({ type: "md", text: src.slice(last, m.index) });
+      parts.push({ type: "code", text: m[2].replace(/\n$/, "") });
+      last = m.index + m[0].length;
+    }
+    var rest = src.slice(last);
+    var open = /```([^\n`]*)\n([\s\S]*)$/.exec(rest);
+    if (open) {
+      parts.push({ type: "md", text: rest.slice(0, open.index) });
+      parts.push({ type: "code", text: open[2] });
+    } else {
+      parts.push({ type: "md", text: rest });
+    }
+    return parts;
+  }
+
+  function renderInline(s) {
+    var t = escapeHtml(s);
+    t = t.replace(/`([^`]+)`/g, "<code>$1</code>");
+    t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    t = t.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return t;
+  }
+
+  function splitRow(line) {
+    var s = String(line).trim();
+    if (s.charAt(0) === "|") s = s.slice(1);
+    if (s.charAt(s.length - 1) === "|") s = s.slice(0, -1);
+    return s.split("|");
+  }
+
+  function isTableSep(line) {
+    if (line.indexOf("|") < 0) return false;
+    var cells = splitRow(line);
+    if (cells.length < 2) return false;
+    for (var n = 0; n < cells.length; n++) {
+      if (!/^:?-+:?$/.test(cells[n].trim())) return false;
+    }
+    return true;
+  }
+
+  function isHr(line) {
+    return /^\s*([-*_])\1{2,}\s*$/.test(line);
+  }
+
+  function isTableStart(lines, i) {
+    if (i + 1 >= lines.length || lines[i].indexOf("|") < 0 || !isTableSep(lines[i + 1])) return false;
+    return splitRow(lines[i]).length >= 2;
+  }
+
+  function isBlockStart(lines, i) {
+    if (i >= lines.length || !lines[i].trim()) return false;
+    var line = lines[i];
+    return isHr(line) || /^\s*(#{1,6})\s+/.test(line) || /^\s*[-*]\s+/.test(line) || /^\s*\d+[.)]\s+/.test(line) || isTableStart(lines, i);
+  }
+
+  function renderTable(lines, i) {
+    var headers = splitRow(lines[i]).map(function (c) { return c.trim(); });
+    i += 2;
+    var html = '<div class="table-wrap"><table><thead><tr>';
+    for (var h = 0; h < headers.length; h++) html += "<th>" + renderInline(headers[h]) + "</th>";
+    html += "</tr></thead><tbody>";
+    while (i < lines.length && lines[i].indexOf("|") >= 0 && lines[i].trim() && !isTableSep(lines[i])) {
+      var cells = splitRow(lines[i]);
+      html += "<tr>";
+      for (var c = 0; c < headers.length; c++) html += "<td>" + renderInline((cells[c] || "").trim()) + "</td>";
+      html += "</tr>";
+      i++;
+    }
+    return { html: html + "</tbody></table></div>", i: i };
+  }
+
+  function renderMd(text) {
+    var lines = String(text).replace(/\r\n/g, "\n").split("\n");
+    var html = "";
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (!line.trim()) { i++; continue; }
+      if (isHr(line)) {
+        html += "<hr>";
+        i++;
+        continue;
+      }
+      var h = /^\s*(#{1,6})\s+(.*)$/.exec(line);
+      if (h) {
+        var level = h[1].length;
+        html += "<h" + level + ">" + renderInline(h[2]) + "</h" + level + ">";
+        i++;
+        continue;
+      }
+      if (isTableStart(lines, i)) {
+        var table = renderTable(lines, i);
+        html += table.html;
+        i = table.i;
+        continue;
+      }
+      if (/^\s*[-*]\s+/.test(line)) {
+        html += "<ul>";
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+          html += "<li>" + renderInline(lines[i].replace(/^\s*[-*]\s+/, "")) + "</li>";
+          i++;
+        }
+        html += "</ul>";
+        continue;
+      }
+      if (/^\s*\d+[.)]\s+/.test(line)) {
+        html += "<ol>";
+        while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+          html += "<li>" + renderInline(lines[i].replace(/^\s*\d+[.)]\s+/, "")) + "</li>";
+          i++;
+        }
+        html += "</ol>";
+        continue;
+      }
+      var buf = [];
+      while (i < lines.length && lines[i].trim() && !isBlockStart(lines, i)) {
+        buf.push(lines[i]);
+        i++;
+      }
+      if (!buf.length) {
+        buf.push(lines[i]);
+        i++;
+      }
+      html += "<p>" + buf.map(renderInline).join("<br>") + "</p>";
+    }
+    return html;
+  }
+
+  function renderMarkdown(src) {
+    return splitFences(String(src || "")).map(function (p) {
+      return p.type === "code" ? "<pre><code>" + escapeHtml(p.text) + "</code></pre>" : renderMd(p.text);
+    }).join("");
+  }
+
+  function toolLabel(status) {
+    if (status === "in_progress") return "выполняется";
+    if (status === "failed") return "ошибка";
+    if (status === "completed") return "готово";
+    return status || "";
+  }
+
+  function noteLabel(note) {
+    if (note === "token_limit") return "Лимит токенов";
+    if (note === "step_limit") return "Лимит шагов";
+    if (note === "tool_call_limit") return "Лимит вызовов";
+    if (note === "length") return "Лимит длины";
+    return note;
+  }
+
+  function renderAssistant(m, index) {
+    var html = '<article class="msg assistant">';
+    for (var n = 0; n < m.parts.length; n++) {
+      var p = m.parts[n];
+      if (p.kind === "reasoning") {
+        if (!p.text) continue;
+        html += "<details" + (m.streaming ? " open" : "") + '><summary>Рассуждение</summary><div class="prose trace">' + renderMarkdown(p.text) + "</div></details>";
+      } else if (p.kind === "tool") {
+        html += '<div class="tool ' + escapeHtml(p.status || "") + (p.parent ? " nested" : "") + '"><span class="dot"></span><span>' + escapeHtml(p.title || p.name || "tool") + '</span><span class="st">' + escapeHtml(toolLabel(p.status)) + "</span></div>";
+      } else if (p.kind === "answer" && p.text) {
+        html += '<div class="prose">' + renderMarkdown(p.text) + "</div>";
+        if (!m.streaming) html += copyAnswerButton(index, n);
+      }
+    }
+    if (m.error) html += '<div class="flag bad">' + escapeHtml(m.error) + "</div>";
+    else if (m.status === "cancelled") html += '<div class="flag">Остановлено</div>';
+    else if (m.note) html += '<div class="flag">' + escapeHtml(noteLabel(m.note)) + "</div>";
+    html += "</article>";
+    return html;
+  }
+
+  function render() {
+    var stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
+    if (!messages.length) {
+      logEl.innerHTML = '<div class="empty"><h2>Чат с агентом</h2><p>Задайте вопрос или поставьте задачу</p></div>';
+    } else {
+      logEl.innerHTML = messages.map(function (m, i) {
+        if (m.role === "user") return '<article class="msg user"><div class="user-text">' + escapeHtml(m.content) + "</div></article>";
+        return renderAssistant(m, i);
+      }).join("");
+    }
+    if (stick) logEl.scrollTop = logEl.scrollHeight;
+    var st = sessionStats();
+    statsEl.innerHTML = '<span class="item">токены <span class="est">оценка</span></span><span class="item">вход <b>~' + fmt(st.prompt) + '</b></span><span class="item">ответ <b>~' + fmt(st.completion) + '</b></span><span class="item">всего <b>~' + fmt(st.total) + '</b></span>';
+    var apiName = settings.api === "completions" ? "Chat Completions" : "Responses";
+    connEl.textContent = apiName + (settings.model ? " · " + settings.model : " · модель не задана");
+    warnEl.hidden = !orphan();
+    stopBtn.hidden = !busy;
+    workingEl.hidden = !busy;
+    sendBtn.disabled = busy;
+    syncFileActions();
+  }
+
+  function copyAnswerButton(msgIndex, partIndex) {
+    return '<button type="button" class="copy-md" data-msg="' + msgIndex + '" data-part="' + partIndex + '">' +
+      '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="5.2" y="3.2" width="8" height="10" rx="1.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M3.8 11.2H3.2A1.2 1.2 0 0 1 2 10V3.2A1.2 1.2 0 0 1 3.2 2H9a1.2 1.2 0 0 1 1.2 1.2V3" fill="none" stroke="currentColor" stroke-width="1.3"/></svg>' +
+      "<span>Скопировать</span></button>";
+  }
+
+  function onCopyAnswer(e) {
+    var node = e.target;
+    var btn = null;
+    while (node && node !== logEl) {
+      if (node.classList && node.classList.contains("copy-md")) {
+        btn = node;
+        break;
+      }
+      node = node.parentNode;
+    }
+    if (!btn) return;
+    var msg = messages[Number(btn.getAttribute("data-msg"))];
+    var part = msg && msg.parts && msg.parts[Number(btn.getAttribute("data-part"))];
+    if (!part || part.kind !== "answer") return;
+    var label = btn.querySelector("span");
+    copyPlain(part.text).then(function (ok) {
+      if (!label || !btn.isConnected) return;
+      label.textContent = ok ? "Скопировано" : "Не скопировано";
+      setTimeout(function () {
+        if (label && btn.isConnected) label.textContent = "Скопировать";
+      }, 1200);
+    });
+  }
+
+  function copyPlain(text) {
+    var value = String(text == null ? "" : text);
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(value).then(function () {
+        return true;
+      }, function () {
+        return copyPlainFallback(value);
+      });
+    }
+    return Promise.resolve(copyPlainFallback(value));
+  }
+
+  function copyPlainFallback(value) {
+    var area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.appendChild(area);
+    area.select();
+    var ok = false;
+    try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
+    area.remove();
+    return ok;
+  }
+
+  function touch() {
+    if (frame) return;
+    frame = requestAnimationFrame(function () {
+      frame = 0;
+      render();
+    });
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveMessages, 400);
+  }
+
+  function newChat() {
+    if (messages.length && !confirm("Начать новый чат?")) return;
+    turnGen++;
+    stop();
+    messages = [];
+    activeThread = null;
+    artifactDir = "";
+    saveThread();
+    busy = false;
+    setAlert("");
+    saveMessages();
+    render();
+    loadArtifacts();
+    loadDialogs();
+    input.focus();
+  }
+
+  function exportChat() {
+    var payload = {
+      app: "gigacode-universal-agent-chat",
+      version: 1,
+      exported_at: new Date().toISOString(),
+      api: settings.api,
+      model: settings.model,
+      messages: messages.map(function (m) {
+        if (m.role === "user") return { role: "user", content: m.content };
+        return {
+          role: "assistant",
+          parts: m.parts,
+          responseId: m.responseId,
+          status: m.status,
+          note: m.note,
+          error: m.error
+        };
+      })
+    };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "gigacode-chat-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function onImport(e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(String(reader.result || ""));
+        var list = Array.isArray(data) ? data : (data && data.messages);
+        if (!Array.isArray(list)) throw new Error("В файле нет сообщений");
+        var next = [];
+        for (var i = 0; i < list.length; i++) {
+          var m = hydrate(list[i]);
+          if (m) next.push(m);
+        }
+        messages = next;
+        if (data && data.api === "completions") settings.api = "completions";
+        if (data && data.api === "responses") settings.api = "responses";
+        if (data && typeof data.model === "string" && data.model.trim()) settings.model = data.model.trim();
+        saveSettings();
+        saveMessages();
+        setAlert("Импортировано сообщений: " + messages.length);
+        render();
+      } catch (err) {
+        setAlert(err.message || "Не удалось прочитать файл");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function fillForm() {
+    document.getElementById("f-api").value = settings.api;
+    document.getElementById("f-token").value = settings.token;
+    fillModels(settings.model ? [settings.model] : [], settings.model);
+    formAlert.textContent = "";
+  }
+
+  function fillModels(ids, preferred) {
+    var sel = document.getElementById("f-model");
+    var current = preferred != null ? preferred : sel.value;
+    sel.textContent = "";
+    if (!ids.length) {
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "сервер не вернул модели";
+      sel.appendChild(empty);
+      return;
+    }
+    for (var i = 0; i < ids.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = ids[i];
+      opt.textContent = ids[i];
+      sel.appendChild(opt);
+    }
+    sel.value = ids.indexOf(current) >= 0 ? current : ids[0];
+  }
+
+  function readForm() {
+    return {
+      api: document.getElementById("f-api").value === "completions" ? "completions" : "responses",
+      token: document.getElementById("f-token").value,
+      model: document.getElementById("f-model").value.trim()
+    };
+  }
+
+  function openSettings() {
+    fillForm();
+    settingsEl.hidden = false;
+    document.getElementById("f-token").focus();
+    pullModel();
+  }
+
+  function closeSettings() {
+    settingsEl.hidden = true;
+    document.getElementById("settingsBtn").focus();
+  }
+
+  function saveForm() {
+    var next = readForm();
+    if (!next.model) {
+      formAlert.textContent = "Укажите модель";
+      return;
+    }
+    settings = next;
+    if (settings.api !== "responses") {
+      activeThread = null;
+      saveThread();
+    }
+    saveSettings();
+    closeSettings();
+    setAlert("");
+    render();
+    loadDialogs();
+    loadArtifacts();
+  }
+
+  async function pullModel() {
+    var btn = document.getElementById("pullModel");
+    btn.disabled = true;
+    formAlert.textContent = "";
+    var draft = readForm();
+    try {
+      var res = await fetch("/v1/models", { headers: authHeaders(draft, false) });
+      if (!res.ok) throw new Error(await errorText(res));
+      var data = await res.json();
+      var list = data && data.data;
+      var ids = [];
+      if (Array.isArray(list)) {
+        for (var i = 0; i < list.length; i++) {
+          if (list[i] && typeof list[i].id === "string" && list[i].id) ids.push(list[i].id);
+        }
+      }
+      if (!ids.length) throw new Error("Сервер не вернул модели");
+      fillModels(ids, document.getElementById("f-model").value || settings.model);
+    } catch (e) {
+      formAlert.textContent = e.name === "TypeError" ? netMessage() : (e.message || "Не удалось получить модель");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function previousId() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var m = messages[i];
+      if (m.streaming) continue;
+      if (m.role === "assistant" && m.responseId && m.status !== "in_progress") return m.responseId;
+    }
+    return null;
+  }
+
+  function streamingMessage() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].streaming) return messages[i];
+    }
+    return null;
+  }
+
+  function netMessage() {
+    return "Нет соединения с сервером. Запущен ли gc-chat?";
+  }
+
+  function turnStillRunning() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var m = messages[i];
+      if (m.role === "assistant" && !m.streaming) return m.status === "in_progress";
+    }
+    return false;
+  }
+
+  async function errorText(res) {
+    var body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+    if (res.status === 401) return "Неверный токен";
+    if (res.status === 409 && body && body.error && body.error.message === "turn already running") return "Ход ещё идёт";
+    if (res.status === 409 && body && body.error && body.error.message === "already exists") return "Уже есть такое имя";
+    if (res.status === 400 && body && body.error && body.error.message === "invalid name") return "Недопустимое имя";
+    if (res.status === 409) return (body && body.error && body.error.message) || "Ход ещё идёт";
+    if (body && body.error && body.error.message) return body.error.message;
+    return "Ошибка " + res.status;
+  }
+
+  function restoreDraft(text) {
+    messages.pop();
+    messages.pop();
+    input.value = text;
+    grow();
+  }
+
+  async function send() {
+    var text = input.value.trim();
+    if (!text || busy) return;
+    if (!String(settings.model || "").trim()) {
+      setAlert("Укажите модель в настройках");
+      openSettings();
+      return;
+    }
+    if (settings.api === "responses" && turnStillRunning()) {
+      setAlert("Последний ход ещё идёт");
+      return;
+    }
+    var my = ++turnGen;
+    busy = true;
+    input.value = "";
+    grow();
+    setAlert("");
+    messages.push({ role: "user", content: text });
+    var msg = { role: "assistant", parts: [], streaming: true, responseId: null, status: null, note: null, error: null };
+    messages.push(msg);
+    render();
+    var ac = new AbortController();
+    abortCtl = ac;
+    try {
+      if (settings.api === "responses") await runResponses(msg, text, ac.signal, my);
+      else await runCompletions(msg, ac.signal, my);
+    } catch (e) {
+      if (my !== turnGen) return;
+      if (e.restored) setAlert(e.message);
+      else if (e.name === "AbortError") {
+        msg.streaming = false;
+        if (!msg.status) msg.status = "cancelled";
+      } else if (e.name === "TypeError") {
+        restoreDraft(text);
+        setAlert(netMessage());
+      } else {
+        msg.streaming = false;
+        msg.error = e.message || String(e);
+      }
+    } finally {
+      if (abortCtl === ac) abortCtl = null;
+      if (my !== turnGen) return;
+      busy = false;
+      if (messages.indexOf(msg) >= 0) msg.streaming = false;
+      saveMessages();
+      render();
+      if (settings.api === "responses") refreshAfterTurn(msg.responseId);
+      input.focus();
+    }
+  }
+
+  function stop() {
+    var msg = streamingMessage();
+    var id = msg && msg.responseId;
+    if (settings.api === "responses" && id) {
+      fetch("/v1/responses/" + encodeURIComponent(id) + "/cancel", {
+        method: "POST",
+        headers: authHeaders(settings, true)
+      }).catch(function () {});
+    }
+    if (abortCtl) abortCtl.abort();
+  }
+
+  async function runResponses(msg, text, signal, my) {
+    var body = { model: settings.model.trim(), input: text, stream: true };
+    var prev = previousId();
+    if (prev) body.previous_response_id = prev;
+    var res = await fetch("/v1/responses", {
+      method: "POST",
+      headers: authHeaders(settings, true),
+      body: JSON.stringify(body),
+      signal: signal
+    });
+    if (my !== turnGen) return;
+    if (!res.ok) {
+      var err = new Error(await errorText(res));
+      restoreDraft(text);
+      err.restored = true;
+      throw err;
+    }
+    await readBody(res, function (ev) {
+      onResponseEvent(msg, ev);
+      touch();
+      return msg.streaming;
+    });
+  }
+
+  async function runCompletions(msg, signal, my) {
+    var history = [];
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m.streaming) continue;
+      if (m.role === "user") history.push({ role: "user", content: m.content });
+      else {
+        var prose = answerText(m);
+        if (prose) history.push({ role: "assistant", content: prose });
+      }
+    }
+    var res = await fetch("/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(settings, true),
+      body: JSON.stringify({ model: settings.model.trim(), messages: history, stream: true }),
+      signal: signal
+    });
+    if (my !== turnGen) return;
+    if (!res.ok) {
+      var err = new Error(await errorText(res));
+      restoreDraft(messages[messages.length - 2] ? messages[messages.length - 2].content : "");
+      err.restored = true;
+      throw err;
+    }
+    await readBody(res, function (ev) {
+      onCompletion(msg, ev);
+      touch();
+      return msg.streaming;
+    });
+  }
+
+  async function readBody(res, onEvent) {
+    var ct = res.headers.get("content-type") || "";
+    if (ct.indexOf("text/event-stream") < 0) {
+      onEvent(await res.json());
+      return;
+    }
+    var reader = res.body.getReader();
+    var dec = new TextDecoder();
+    var buf = "";
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += dec.decode(chunk.value, { stream: true });
+      buf = buf.replace(/\r\n/g, "\n");
+      var idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        var block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        var lines = [];
+        var rows = block.split("\n");
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].indexOf("data:") === 0) lines.push(rows[i].slice(5).replace(/^ /, ""));
+        }
+        if (!lines.length) continue;
+        var data = lines.join("\n");
+        if (data === "[DONE]") return;
+        var keep = true;
+        try { keep = onEvent(JSON.parse(data)); } catch (e) { keep = true; }
+        if (keep === false) {
+          try { await reader.cancel(); } catch (e2) {}
+          return;
+        }
+      }
+    }
+  }
+
+  function onResponseEvent(msg, ev) {
+    if (!ev) return;
+    if (ev.error && ev.error.message && !ev.type && !ev.output) {
+      msg.error = ev.error.message;
+      msg.streaming = false;
+      return;
+    }
+    if (ev.object === "response" && Array.isArray(ev.output)) {
+      applyFinal(msg, ev);
+      return;
+    }
+    var t = ev.type || "";
+    if ((t === "response.created" || t === "response.in_progress") && ev.response && ev.response.id) {
+      msg.responseId = ev.response.id;
+      return;
+    }
+    if (t === "response.output_text.delta") {
+      appendPart(msg, ev.item_id || "answer", "answer", ev.delta || "");
+      return;
+    }
+    if (t === "response.reasoning_summary_text.delta") {
+      appendPart(msg, ev.item_id || "think", "reasoning", ev.delta || "");
+      return;
+    }
+    if (t === "response.gc_stream_reset") {
+      msg.parts = msg.parts.filter(function (p) { return p.id !== ev.item_id; });
+      return;
+    }
+    if ((t === "response.output_item.added" || t === "response.output_item.done") && ev.item && ev.item.type === "gc_tool_call") {
+      var item = ev.item;
+      var part = {
+        id: item.id || ("gtc_" + item.call_id),
+        kind: "tool",
+        title: item.title || item.name || "tool",
+        name: item.name || "",
+        status: item.status || "in_progress",
+        parent: item.parent_call_id || null
+      };
+      var found = msg.parts.findIndex(function (p) { return p.id === part.id; });
+      if (found >= 0) msg.parts[found] = part;
+      else msg.parts.push(part);
+      return;
+    }
+    if (t === "response.completed" || t === "response.incomplete" || t === "response.cancelled" || t === "response.failed") {
+      applyFinal(msg, ev.response || {});
+    }
+  }
+
+  function appendPart(msg, id, kind, delta) {
+    if (!delta) return;
+    var p = null;
+    for (var i = msg.parts.length - 1; i >= 0; i--) {
+      if (msg.parts[i].id === id) { p = msg.parts[i]; break; }
+    }
+    if (!p) {
+      p = { id: id, kind: kind, text: "" };
+      msg.parts.push(p);
+    }
+    p.text += delta;
+  }
+
+  function applyFinal(msg, response) {
+    if (response.id) msg.responseId = response.id;
+    if (response.status) msg.status = response.status;
+    if (response.error && response.error.message) msg.error = response.error.message;
+    if (response.incomplete_details && response.incomplete_details.reason) msg.note = response.incomplete_details.reason;
+    if (Array.isArray(response.output)) {
+      var parts = [];
+      for (var i = 0; i < response.output.length; i++) {
+        var p = itemToPart(response.output[i]);
+        if (p) parts.push(p);
+      }
+      msg.parts = parts;
+    }
+    msg.streaming = false;
+  }
+
+  function itemToPart(item) {
+    if (!item || !item.type) return null;
+    if (item.type === "message") {
+      var text = (item.content || []).map(function (c) { return c.text || ""; }).join("");
+      return { id: item.id || "answer", kind: "answer", text: text };
+    }
+    if (item.type === "reasoning") {
+      var summary = (item.summary || []).map(function (c) { return c.text || ""; }).join("");
+      return { id: item.id || "think", kind: "reasoning", text: summary };
+    }
+    if (item.type === "gc_tool_call") {
+      return {
+        id: item.id || ("gtc_" + item.call_id),
+        kind: "tool",
+        title: item.title || item.name || "tool",
+        name: item.name || "",
+        status: item.status || "completed",
+        parent: item.parent_call_id || null
+      };
+    }
+    return null;
+  }
+
+  function splitThink(raw) {
+    var closed = raw.match(/^<think>\r?\n?([\s\S]*?)<\/think>\r?\n?([\s\S]*)$/i);
+    if (closed) return { reasoning: closed[1], answer: closed[2] };
+    var open = raw.match(/^<think>\r?\n?([\s\S]*)$/i);
+    if (open) return { reasoning: open[1], answer: "" };
+    return { reasoning: "", answer: raw };
+  }
+
+  function onCompletion(msg, ev) {
+    if (!ev) return;
+    if (ev.error && ev.error.message && !ev.choices) {
+      msg.error = ev.error.message;
+      msg.streaming = false;
+      return;
+    }
+    if (ev.object === "chat.completion" && ev.choices && ev.choices[0] && ev.choices[0].message) {
+      msg.raw = ev.choices[0].message.content || "";
+      applyThink(msg);
+      msg.streaming = false;
+      msg.status = ev.choices[0].finish_reason === "length" ? "incomplete" : "completed";
+      if (ev.choices[0].finish_reason === "length") msg.note = "length";
+      return;
+    }
+    var choice = ev.choices && ev.choices[0];
+    if (!choice) return;
+    var delta = choice.delta && choice.delta.content;
+    if (delta) {
+      msg.raw = (msg.raw || "") + delta;
+      applyThink(msg);
+    }
+    if (choice.finish_reason) {
+      msg.streaming = false;
+      msg.status = choice.finish_reason === "length" ? "incomplete" : "completed";
+      if (choice.finish_reason === "length") msg.note = "length";
+    }
+  }
+
+  function applyThink(msg) {
+    var split = splitThink(msg.raw || "");
+    var parts = [];
+    if (split.reasoning) parts.push({ id: "think", kind: "reasoning", text: split.reasoning });
+    parts.push({ id: "answer", kind: "answer", text: split.answer });
+    msg.parts = parts;
+  }
+
+  async function loadDialogs() {
+    var box = document.getElementById("dialogList");
+    if (settings.api !== "responses") {
+      box.innerHTML = '<p class="side-note">Chat Completions не хранит диалоги на сервере.</p>';
+      document.getElementById("artifactList").innerHTML = "";
+      return;
+    }
+    try {
+      var res = await fetch("/v1/dialogs", { headers: authHeaders(settings, false) });
+      if (!res.ok) throw new Error(await errorText(res));
+      var list = await res.json();
+      dialogs = Array.isArray(list) ? list : [];
+      renderDialogs();
+    } catch (e) {
+      box.textContent = e.message || "Не удалось загрузить диалоги";
+    }
+  }
+
+  function renderDialogs() {
+    var box = document.getElementById("dialogList");
+    if (settings.api !== "responses") return;
+    if (!dialogs.length) {
+      box.innerHTML = '<p class="side-note">Пока нет диалогов.</p>';
+      return;
+    }
+    box.innerHTML = "";
+    for (var i = 0; i < dialogs.length; i++) {
+      var item = dialogs[i];
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "dialog-btn" + (item.thread_id === activeThread ? " active" : "");
+      var title = document.createElement("span");
+      title.className = "t";
+      title.textContent = item.title || "Без названия";
+      title.title = title.textContent;
+      var meta = document.createElement("span");
+      meta.className = "m";
+      meta.textContent = item.status || "";
+      btn.appendChild(title);
+      btn.appendChild(meta);
+      btn.addEventListener("click", openDialog.bind(null, item.thread_id));
+      box.appendChild(btn);
+    }
+  }
+
+  async function openDialog(threadId) {
+    if (busy) return;
+    var res = await fetch("/v1/dialogs/" + encodeURIComponent(threadId), { headers: authHeaders(settings, false) });
+    if (!res.ok) {
+      setAlert(await errorText(res));
+      return;
+    }
+    var turns = await res.json();
+    var next = [];
+    var status = null;
+    if (Array.isArray(turns)) {
+      for (var i = 0; i < turns.length; i++) {
+        var turn = turns[i] || {};
+        if (typeof turn.text === "string" && turn.text) next.push({ role: "user", content: turn.text });
+        var parts = [];
+        if (Array.isArray(turn.output)) {
+          for (var j = 0; j < turn.output.length; j++) {
+            var part = itemToPart(turn.output[j]);
+            if (part) parts.push(part);
+          }
+        }
+        status = typeof turn.status === "string" ? turn.status : status;
+        next.push({
+          role: "assistant",
+          parts: parts,
+          responseId: typeof turn.response_id === "string" ? turn.response_id : null,
+          status: typeof turn.status === "string" ? turn.status : null,
+          note: null,
+          error: null,
+          streaming: false
+        });
+      }
+    }
+    messages = next;
+    activeThread = threadId;
+    artifactDir = "";
+    saveThread();
+    settings.api = "responses";
+    saveSettings();
+    saveMessages();
+    setAlert(status === "in_progress" ? "Последний ход ещё идёт" : "");
+    if (narrowMedia.matches) {
+      showOnlyPane("chatpane");
+      syncPaneToggles();
+      savePanes();
+    }
+    render();
+    renderDialogs();
+    loadArtifacts();
+    input.focus();
+  }
+
+  function artifactsBase() {
+    if (activeThread) {
+      return "/v1/dialogs/" + encodeURIComponent(activeThread) + "/artifacts";
+    }
+    return "/v1/workspace/artifacts";
+  }
+
+  async function loadArtifacts(fallback) {
+    var box = document.getElementById("artifactList");
+    var gen = ++artifactGen;
+    if (settings.api !== "responses") {
+      box.innerHTML = "";
+      return;
+    }
+    var url = artifactsBase();
+    if (artifactDir) url += "?path=" + encodeURIComponent(artifactDir);
+    var res = await fetch(url, { headers: authHeaders(settings, false) });
+    if (gen !== artifactGen) return;
+    if (!res.ok) {
+      if (artifactDir && !fallback) {
+        artifactDir = "";
+        return loadArtifacts(true);
+      }
+      box.innerHTML = "";
+      return;
+    }
+    var body = await res.json();
+    if (gen !== artifactGen) return;
+    if (!body || !Array.isArray(body.entries)) {
+      box.innerHTML = "";
+      return;
+    }
+    artifactDir = typeof body.path === "string" ? body.path : "";
+    if (!activeThread && typeof body.cwd === "string") workspaceCwd = body.cwd;
+    renderFolder(body);
+  }
+
+  function filesLocked() {
+    return busy || turnStillRunning();
+  }
+
+  function syncFileActions() {
+    var locked = filesLocked();
+    var mkdirBtn = document.getElementById("mkdirBtn");
+    if (mkdirBtn) mkdirBtn.disabled = locked;
+    var mkdirName = document.getElementById("mkdirName");
+    if (mkdirName) mkdirName.disabled = locked;
+    if (locked) closeFileMenu();
+  }
+
+  function renderFolder(body) {
+    closeFileMenu();
+    artifactBody = body;
+    var box = document.getElementById("artifactList");
+    box.innerHTML = "";
+    if (artifactDir) {
+      var crumbs = document.createElement("div");
+      crumbs.className = "crumbs";
+      crumbs.appendChild(crumbButton("", "папка"));
+      var parts = artifactDir.split("/");
+      for (var i = 0; i < parts.length; i++) {
+        var sep = document.createElement("span");
+        sep.className = "crumb-sep";
+        sep.textContent = "/";
+        crumbs.appendChild(sep);
+        crumbs.appendChild(crumbButton(parts.slice(0, i + 1).join("/"), parts[i]));
+      }
+      box.appendChild(crumbs);
+    }
+    box.appendChild(mkdirRow());
+    var entries = body.entries;
+    if (!entries.length) {
+      var note = document.createElement("p");
+      note.className = "side-note";
+      note.textContent = "Папка пуста.";
+      box.appendChild(note);
+      return;
+    }
+    for (var n = 0; n < entries.length; n++) {
+      var item = entries[n] || {};
+      var btn = document.createElement("button");
+      btn.type = "button";
+      var dir = item.kind === "dir";
+      btn.className = "file-link" + (dir ? " dir" : "");
+      btn.textContent = dir ? (item.name || "dir") + "/" : (item.name || item.path || "file");
+      btn.title = item.path || "";
+      btn.addEventListener("click", openFileMenu.bind(null, btn, item));
+      box.appendChild(btn);
+    }
+  }
+
+  function mkdirRow() {
+    var row = document.createElement("div");
+    row.className = "mkdir-row";
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "file-link action";
+    btn.id = "mkdirBtn";
+    btn.textContent = "Новая папка";
+    btn.disabled = filesLocked();
+    btn.addEventListener("click", showMkdirInput);
+    row.appendChild(btn);
+    return row;
+  }
+
+  function showMkdirInput() {
+    if (filesLocked()) return;
+    var row = document.querySelector(".mkdir-row");
+    if (!row) return;
+    row.innerHTML = "";
+    var field = document.createElement("input");
+    field.id = "mkdirName";
+    field.type = "text";
+    field.autocomplete = "off";
+    field.placeholder = "имя папки";
+    field.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        if (artifactBody) renderFolder(artifactBody);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        createFolder(field.value);
+      }
+    });
+    row.appendChild(field);
+    field.focus();
+  }
+
+  function folderNameOk(name) {
+    if (!name || name === "." || name === ".." || name.charAt(0) === ".") return false;
+    return name.indexOf("/") < 0 && name.indexOf("\\") < 0 && name.indexOf("\x00") < 0;
+  }
+
+  async function createFolder(raw) {
+    var name = String(raw || "").trim();
+    if (filesLocked()) return;
+    if (!folderNameOk(name)) {
+      setAlert("Недопустимое имя");
+      return;
+    }
+    var res = await fetch(artifactsBase(), {
+      method: "POST",
+      headers: authHeaders(settings, true),
+      body: JSON.stringify({ path: artifactDir, name: name })
+    });
+    if (!res.ok) {
+      setAlert(await errorText(res));
+      return;
+    }
+    setAlert("");
+    await loadArtifacts();
+  }
+
+  async function deleteEntry(path) {
+    if (filesLocked() || !path) return;
+    var res = await fetch(
+      artifactsBase() + "?path=" + encodeURIComponent(path),
+      { method: "DELETE", headers: authHeaders(settings, false) }
+    );
+    if (!res.ok) {
+      setAlert(await errorText(res));
+      return;
+    }
+    setAlert("");
+    await loadArtifacts();
+  }
+
+  function crumbButton(path, label) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "crumb";
+    btn.textContent = label;
+    btn.addEventListener("click", openFolder.bind(null, path));
+    return btn;
+  }
+
+  function openFolder(path) {
+    artifactDir = path || "";
+    loadArtifacts();
+  }
+
+  function openFileMenu(anchor, item) {
+    closeFileMenu();
+    var menu = document.createElement("div");
+    menu.id = "fileMenu";
+    menu.className = "file-menu";
+    var title = document.createElement("div");
+    title.className = "file-menu-name";
+    title.textContent = item.name || item.path || "";
+    menu.appendChild(title);
+    if (item.kind === "dir") {
+      menu.appendChild(menuAction("Открыть", function () {
+        closeFileMenu();
+        openFolder(item.path || "");
+      }));
+    } else {
+      if (item.text) {
+        menu.appendChild(menuAction("Просмотреть", function () {
+          closeFileMenu();
+          viewFile(item.path || "");
+        }));
+      }
+      menu.appendChild(menuAction("Скачать", function () {
+        closeFileMenu();
+        downloadFile(item.path || "");
+      }));
+    }
+    var copy = menuAction("Скопировать путь", function () {
+      copyEntryPath(item.path || "", copy);
+    });
+    menu.appendChild(copy);
+    if (!filesLocked() && item.path) {
+      menu.appendChild(menuAction("Удалить", function () {
+        askDelete(menu, anchor, item);
+      }));
+    }
+    document.body.appendChild(menu);
+    placeFileMenu(menu, anchor);
+    setTimeout(function () {
+      document.addEventListener("mousedown", onFileMenuOutside);
+      document.addEventListener("keydown", onFileMenuKey);
+    }, 0);
+  }
+
+  function askDelete(menu, anchor, item) {
+    var kept = menu.querySelector(".file-menu-name");
+    menu.innerHTML = "";
+    if (kept) menu.appendChild(kept);
+    var ask = document.createElement("div");
+    ask.className = "file-menu-name";
+    ask.textContent = item.kind === "dir" ? "Удалить папку и всё внутри?" : "Удалить файл?";
+    menu.appendChild(ask);
+    var remove = menuAction("Удалить", function () {
+      closeFileMenu();
+      deleteEntry(item.path || "");
+    });
+    remove.className = "danger";
+    menu.appendChild(remove);
+    menu.appendChild(menuAction("Отмена", closeFileMenu));
+    placeFileMenu(menu, anchor);
+  }
+
+  function menuAction(label, action) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = label;
+    btn.addEventListener("click", action);
+    return btn;
+  }
+
+  function placeFileMenu(menu, anchor) {
+    var rect = anchor.getBoundingClientRect();
+    var width = menu.offsetWidth;
+    var left = rect.left;
+    if (left + width > window.innerWidth - 8) left = rect.right - width;
+    left = Math.max(8, Math.min(left, window.innerWidth - width - 8));
+    menu.style.left = left + "px";
+    menu.style.top = (rect.bottom + 4) + "px";
+    var box = menu.getBoundingClientRect();
+    if (box.bottom > window.innerHeight - 8) {
+      menu.style.top = Math.max(8, rect.top - box.height - 4) + "px";
+    }
+  }
+
+  function onFileMenuOutside(ev) {
+    var menu = document.getElementById("fileMenu");
+    if (!menu || menu.contains(ev.target)) return;
+    closeFileMenu();
+  }
+
+  function onFileMenuKey(ev) {
+    if (ev.key === "Escape") closeFileMenu();
+  }
+
+  var fileMenuTimer = 0;
+
+  function closeFileMenu() {
+    if (fileMenuTimer) {
+      clearTimeout(fileMenuTimer);
+      fileMenuTimer = 0;
+    }
+    var menu = document.getElementById("fileMenu");
+    if (menu) menu.remove();
+    document.removeEventListener("mousedown", onFileMenuOutside);
+    document.removeEventListener("keydown", onFileMenuKey);
+  }
+
+  function entryPath(relative) {
+    var cwd = activeThread ? "" : workspaceCwd;
+    if (activeThread) {
+      for (var i = 0; i < dialogs.length; i++) {
+        if (dialogs[i].thread_id === activeThread && dialogs[i].cwd) {
+          cwd = dialogs[i].cwd;
+          break;
+        }
+      }
+    }
+    if (!cwd) return relative;
+    if (cwd.charAt(cwd.length - 1) === "/") return cwd + relative;
+    return cwd + "/" + relative;
+  }
+
+  async function copyEntryPath(relative, button) {
+    var menu = document.getElementById("fileMenu");
+    var text = entryPath(relative);
+    var copied = false;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        copied = true;
+      } catch (e) {
+        copied = false;
+      }
+    }
+    if (!menu || !menu.isConnected) return;
+    if (!copied) {
+      input.value = input.value ? input.value.replace(/\s+$/, "") + " " + text : text;
+      input.dispatchEvent(new Event("input"));
+      input.focus();
+    }
+    if (button) button.textContent = copied ? "Скопировано" : "Вставлено в сообщение";
+    fileMenuTimer = setTimeout(closeFileMenu, 700);
+  }
+
+  var PREVIEW_LIMIT = 1048576;
+
+  function viewFile(path) {
+    if (!path) return;
+    var tab = window.open("", "_blank");
+    if (!tab) {
+      setAlert("Браузер заблокировал вкладку");
+      return;
+    }
+    loadPreview(tab, path);
+  }
+
+  async function loadPreview(tab, path) {
+    try {
+      var res = await fetch(
+        artifactsBase() + "/download?path=" + encodeURIComponent(path),
+        { headers: authHeaders(settings, false) }
+      );
+      if (!res.ok) {
+        tab.close();
+        setAlert(await errorText(res));
+        return;
+      }
+      var buf = await res.arrayBuffer();
+      if (buf.byteLength > PREVIEW_LIMIT) {
+        tab.close();
+        setAlert("Файл слишком большой для просмотра");
+        return;
+      }
+      var text = textFromBytes(buf);
+      if (text == null) {
+        tab.close();
+        setAlert("Это не текстовый файл");
+        return;
+      }
+      var name = path.split("/").pop() || path;
+      tab.document.open();
+      tab.document.write(previewPage(name, sourceRows(text), entryPath(path)));
+      tab.document.close();
+    } catch (e) {
+      try { tab.close(); } catch (ignore) {}
+      setAlert("Не удалось открыть файл");
+    }
+  }
+
+  function textFromBytes(buf) {
+    var bytes = new Uint8Array(buf);
+    for (var i = 0; i < bytes.length; i++) {
+      if (bytes[i] === 0) return null;
+    }
+    try {
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function sourceRows(text) {
+    var normalized = String(text).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+    var lines = normalized.split("\n");
+    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+    if (!lines.length) lines = [""];
+    var gutter = Math.max(2, String(lines.length).length);
+    var html = '<div class="src" style="--gutter:' + gutter + 'ch">';
+    for (var i = 0; i < lines.length; i++) {
+      var n = String(i + 1);
+      html += '<div class="row" data-line="' + n + '"><span class="gutter">' + n +
+        '</span><span class="code">' + escapeHtml(lines[i]) + "</span></div>";
+    }
+    return html + "</div>";
+  }
+
+  function previewPage(title, rows, filePath) {
+    var pathJs = JSON.stringify(String(filePath || "")).replace(/</g, "\\u003c");
+    return '<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">' +
+      '<meta name="viewport" content="width=device-width, initial-scale=1">' +
+      "<title>" + escapeHtml(title) + "</title><style>" +
+      "body{margin:0;background:#0a0c10;color:#e8ebf1;font:15px/1.5 ui-sans-serif,system-ui,sans-serif}" +
+      ".hint{margin:0;padding:10px 16px;color:#8b93a3;font-size:13px;user-select:none;border-bottom:1px solid #1f242d}" +
+      ".src{max-width:860px;margin:0 auto;padding:28px 20px 48px}" +
+      ".row{display:flex;gap:16px}" +
+      ".gutter{flex:none;width:var(--gutter);text-align:right;color:#6b727f;user-select:none;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}" +
+      ".code{flex:1;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}" +
+      "#toast{position:fixed;right:16px;bottom:16px;padding:8px 12px;border-radius:8px;background:#181c25;border:1px solid #2a3140;color:#7ed957;opacity:0;pointer-events:none}" +
+      "#toast.on{opacity:1}" +
+      "</style></head><body>" +
+      '<p class="hint">Ctrl+C или «Копировать» — фрагмент и ссылка на строки файла.</p>' +
+      rows +
+      '<div id="toast"></div><script>' +
+      "var FILE_PATH=" + pathJs + ";" +
+      "var toastTimer=0;" +
+      "function sliceCode(range,code){" +
+      "if(!range.intersectsNode(code))return null;" +
+      "var contents=document.createRange();contents.selectNodeContents(code);" +
+      "var probe=range.cloneRange();" +
+      "if(probe.compareBoundaryPoints(Range.START_TO_START,contents)<0)probe.setStart(contents.startContainer,contents.startOffset);" +
+      "if(probe.compareBoundaryPoints(Range.END_TO_END,contents)>0)probe.setEnd(contents.endContainer,contents.endOffset);" +
+      "if(probe.collapsed){" +
+      "var startsBefore=range.compareBoundaryPoints(Range.START_TO_START,contents)<0;" +
+      "var endsAfter=range.compareBoundaryPoints(Range.END_TO_END,contents)>0;" +
+      "return startsBefore&&endsAfter?'':null;" +
+      "}" +
+      "return probe.toString();" +
+      "}" +
+      "function citation(){" +
+      "try{" +
+      "var sel=window.getSelection();" +
+      "if(!sel||sel.isCollapsed||!sel.rangeCount)return '';" +
+      "var range=sel.getRangeAt(0);" +
+      "var rows=document.querySelectorAll('.row');" +
+      "var parts=[];var lines=[];" +
+      "for(var i=0;i<rows.length;i++){" +
+      "var code=rows[i].querySelector('.code');" +
+      "if(!code)continue;" +
+      "var chunk=sliceCode(range,code);" +
+      "if(chunk==null)continue;" +
+      "parts.push(chunk);lines.push(+rows[i].getAttribute('data-line'));" +
+      "}" +
+      "if(!lines.length||!parts.join('\\n'))return '';" +
+      "var start=lines[0];var end=lines[lines.length-1];" +
+      "var span=start===end?'L'+start:'L'+start+'-L'+end;" +
+      "return parts.join('\\n')+'\\n['+FILE_PATH+']('+span+')';" +
+      "}catch(e){return '';}" +
+      "}" +
+      "function flash(){" +
+      "var el=document.getElementById('toast');" +
+      "if(!el)return;" +
+      "el.textContent='Скопировано';el.className='on';" +
+      "clearTimeout(toastTimer);" +
+      "toastTimer=setTimeout(function(){el.className='';},1200);" +
+      "}" +
+      "document.addEventListener('copy',function(ev){" +
+      "var text=citation();" +
+      "if(!text||!ev.clipboardData)return;" +
+      "ev.preventDefault();" +
+      "ev.clipboardData.setData('text/plain',text);" +
+      "flash();" +
+      "});" +
+      "</scr" + "ipt></body></html>";
+  }
+
+  async function downloadFile(path) {
+    if (!path) return;
+    var url = artifactsBase() + "/download?path=" + encodeURIComponent(path);
+    var res = await fetch(url, { headers: authHeaders(settings, false) });
+    if (!res.ok) {
+      setAlert(await errorText(res));
+      return;
+    }
+    var blob = await res.blob();
+    var file = new Blob([blob], { type: "application/octet-stream" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(file);
+    a.download = path.split("/").pop() || "file";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  async function refreshAfterTurn(responseId) {
+    await loadDialogs();
+    if (!responseId) return;
+    for (var i = 0; i < dialogs.length; i++) {
+      if (dialogs[i].latest_response_id === responseId) {
+        activeThread = dialogs[i].thread_id;
+        saveThread();
+        renderDialogs();
+        await loadArtifacts();
+        return;
+      }
+    }
+  }
+})();
+</script>
+</body>
+</html>

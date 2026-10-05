@@ -3,6 +3,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set
 
+from gc_core.attachments.store import ImageStore
 from gc_core.backends.factory import resolve_os_backend
 from gc_core.backends.protocol import FsBackend
 from gc_core.config_modules.chat_completions import (
@@ -78,6 +79,10 @@ class RunContext:
     project_gc_dir: Path = field(default_factory=lambda: Path("."))
     environment: Optional[Any] = None
     on_stream_delta: Optional[Callable[[str, str], None]] = None
+    # Пометка в ленте о судьбе изображения («не просмотрено», спека изображений
+    # §10): текст готов к показу. Не задан — `vision.notes.emit_trace_note`
+    # пишет предупреждение в `logger` (CLI, сервер, SDK).
+    on_trace_note: Optional[Callable[[str], None]] = None
     # Порт «спросить человека»: обычная функция или корутинная. Не задан —
     # тул turn_ask_human читает stdin (поведение CLI). Встраивающему приложению
     # stdin не принадлежит, поэтому спрашивать оно обязано своим способом.
@@ -105,6 +110,11 @@ class RunContext:
     # сессии параллельных агентов. Пустая строка — контекст собран в обход
     # create_run_context (тесты, ручная сборка); тогда владельца нет.
     mcp_session_owner: str = ""
+    # Хранилище картинок (`gc_core.attachments.store`): проекция читает байты
+    # вложений через `read_for_send`, ядро делает `commit` в тред. Заполняет
+    # `_finish_run_context`; контекст, собранный в обход фабрики, — None
+    # (живые картинки уходят запиской «файл недоступен»).
+    image_store: Optional[ImageStore] = None
 
 
 async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING.md
@@ -117,6 +127,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     loop: Optional[Any] = None,
     os_backend: Optional[FsBackend] = None,
     on_stream_delta=None,
+    on_trace_note: Optional[Callable[[str], None]] = None,
     on_messages_evicted: Optional[
         Callable[[List[Dict[str, Any]]], None]
     ] = None,
@@ -253,6 +264,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
             auth_connector=auth_connector,
             environment=environment,
             on_stream_delta=on_stream_delta,
+            on_trace_note=on_trace_note,
             on_messages_evicted=on_messages_evicted,
             is_tui=is_tui,
             tools_cache=tools_cache,
@@ -392,6 +404,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     auth_connector: Optional[AuthConnector],
     environment: Optional[Any],
     on_stream_delta,
+    on_trace_note: Optional[Callable[[str], None]] = None,
     on_messages_evicted: Optional[Callable[[List[Dict[str, Any]]], None]],
     is_tui: bool,
     tools_cache: Any,
@@ -492,6 +505,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
         workspace=workspace,
         model_router=model_router,
         on_stream_delta=on_stream_delta,
+        on_trace_note=on_trace_note,
         on_messages_evicted=on_messages_evicted,
         mcp_session_owner=mcp_session_owner,
         tools_cache=tools_cache,
@@ -509,6 +523,7 @@ def _finish_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRIBUTING
     # это уже приводило ко второй обёртке поверх первой — каждая правка
     # уходила в журнал дважды. Точка установки ровно одна, и она здесь.
     ctx.is_tui = bool(is_tui)
+    ctx.image_store = ImageStore.for_config(config_dict)
 
     # Флаг, а не ``os_backend is None``: после ``resolve_os_backend`` параметр
     # уже не отличает «передали свой» от «собрали дефолтный» (см. докстринг

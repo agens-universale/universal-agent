@@ -265,6 +265,27 @@ def test_resolve_file_and_dir(tmp_path):
     assert resolve_attachment(str(tmp_path), "nope.py") is None
 
 
+def test_an_image_is_resolved_as_an_image_by_its_bytes(tmp_path):
+    """Картинка из проекта через «@» — ссылка, как любой файл: агент смотрит её
+    тулом по пути. Пометка «изображение» говорит модели, что файл — картинка;
+    узнаём по первым байтам, как при вставке, а не по расширению."""
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (4, 3)).save(buf, format="PNG")
+    (tmp_path / "shot.dat").write_bytes(buf.getvalue())
+    (tmp_path / "fake.png").write_text("не картинка", encoding="utf-8")
+
+    shot = resolve_attachment(str(tmp_path), "shot.dat")
+    fake = resolve_attachment(str(tmp_path), "fake.png")
+    assert shot[2] == "изображение"
+    assert fake[2] == "файл"
+    body = build_attachment_footer([shot])
+    assert f"@shot.dat → {shot[1]} (изображение)" in body
+
+
 def test_build_footer():
     body = build_attachment_footer(
         [

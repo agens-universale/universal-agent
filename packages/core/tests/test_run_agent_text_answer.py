@@ -373,6 +373,52 @@ def test_run_agent_judge_accept_returns_text(monkeypatch):
     assert result == "Привет! Чем помочь?"
 
 
+def test_run_agent_does_not_accept_an_echo_of_the_bridge(monkeypatch):
+    """Модель переняла из истории наш мост «(tool results received)» и выдала его
+    ответом: это не итог хода — напоминание вызвать тул, как при прозе без вызова
+    (смоук 2026-10-01: субагент отдал родителю такой «результат»)."""
+    from gc_core import processing_responses as pr
+    from gc_core.message_policy.chat_completions import BRIDGE_TOOL_RESULTS
+    from gc_core.message_policy.no_tool_call_bounce import (
+        NO_TOOL_CALL_BOUNCE_MESSAGE,
+    )
+
+    captured = {}
+
+    def _fake_make_feedback(content, technical_type=None, call_id=None):
+        captured["content"] = content
+        return {"role": "user", "id": "m_tech", "content": content}
+
+    def _fake_process_user_ask(messages, state, ctx):
+        state.last_finish_reason = "stop"
+        return [
+            {"role": "assistant", "type": "message", "content": "итог"}
+        ], "resp_2"
+
+    monkeypatch.setattr(
+        pr, "_make_technical_feedback_user_message", _fake_make_feedback
+    )
+    monkeypatch.setattr(
+        pr, "aprocess_user_ask", as_coro(_fake_process_user_ask)
+    )
+    monkeypatch.setattr(
+        pr, "amaybe_record_final_answer_intent", as_coro(lambda **_kw: None)
+    )
+
+    echo = [
+        {
+            "role": "assistant",
+            "type": "message",
+            "content": BRIDGE_TOOL_RESULTS,
+        }
+    ]
+    state = _state()
+    state.last_finish_reason = "stop"
+    result = run_coro(pr.arun_agent(echo, state, _run_ctx("allow")))
+    assert result == "итог"
+    assert captured["content"] == NO_TOOL_CALL_BOUNCE_MESSAGE
+
+
 def test_run_agent_content_filter_bounces_even_in_allow(monkeypatch):
     """content_filter — отказ провайдера, не финальный текст; allow не принимает."""
     from gc_core import processing_responses as pr

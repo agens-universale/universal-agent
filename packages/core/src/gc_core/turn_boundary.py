@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from gc_core.states import State
 
@@ -36,6 +37,9 @@ def begin_turn(state: State, ctx: Any) -> None:
     оперирующие Router'ом) — ``state.default_model`` остаётся тем, что задал
     вызывающий код.
     """
+    if not getattr(state, "parent_state_id", None):
+        state.vision_probe_turn = str(uuid4())
+        state.vision_probe_notices = set()
     router = getattr(ctx, "model_router", None)
     if router is None:
         return

@@ -1,8 +1,13 @@
 from gc_core.message_policy.chat_completions import (
+    is_bridge_echo,
+    BRIDGE_TOOL_RESULTS,
     coalesce_consecutive_assistant_tool_calls,
     inject_assistant_after_orphan_tool_outputs,
     prepare_chat_completion_messages_for_api,
     repair_tool_call_pairing,
+)
+from gc_core.message_policy.user_message_policy import (
+    wrap_technical_user_content,
 )
 
 
@@ -434,3 +439,113 @@ def test_prepare_chat_completion_messages_repairs_stop_corrupted_history():
     assert (
         roles[user_idx - 1] == "assistant"
     )  # перед последним user — assistant
+
+
+# --- мост перед техническим хвостом (спека изображений §7.5) -----------------------
+
+_IMAGE_PART = {
+    "type": "image_url",
+    "image_url": {"url": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg=="},
+}
+
+
+def _tool_series():
+    return [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {
+                        "name": "fs_read_file",
+                        "arguments": '{"path": "a.py"}',
+                    },
+                },
+            ],
+        },
+        {"role": "tool", "tool_call_id": "c1", "content": '{"ok": true}'},
+    ]
+
+
+def test_bridge_before_technical_tail_says_tool_results_received():
+    notice = {
+        "role": "user",
+        "content": wrap_technical_user_content(
+            "Loop detector: you called fs_read_file with the same arguments again."
+        ),
+    }
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), notice])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+    assert out[3] == notice
+
+
+def test_bridge_before_a_mid_run_human_message_does_not_say_interrupted():
+    """Реплика посреди работы тулов дописана к их ответам (ревью 2026-10-01): ход
+    не прерывался — мост тот же, что перед техническим хвостом."""
+    human = {"role": "user", "content": "и проверь заодно логин"}
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), human])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+    assert out[3] == human
+
+
+def test_bridge_reads_only_text_parts_of_a_projected_technical_message():
+    """После проекции вложений content — список частей: картинка + текст."""
+    tech = {
+        "role": "user",
+        "content": [
+            _IMAGE_PART,
+            {
+                "type": "text",
+                "text": wrap_technical_user_content(
+                    "Image from fs_view_image: /work/shot.png · png 1456×819"
+                ),
+            },
+        ],
+    }
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), tech])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+
+
+def test_bridge_before_projected_human_message():
+    human = {
+        "role": "user",
+        "content": [
+            _IMAGE_PART,
+            {
+                "type": "text",
+                "text": "[Изображение #1] почему кнопка съехала?",
+            },
+        ],
+    }
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), human])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+
+
+def test_bridge_before_system():
+    system = {"role": "system", "content": "[policy] something"}
+    out = inject_assistant_after_orphan_tool_outputs([*_tool_series(), system])
+    assert out[2] == {"role": "assistant", "content": BRIDGE_TOOL_RESULTS}
+
+
+# --- модель повторила мост: не ответ (смоук 2026-10-01) ----------------------------
+
+
+def test_echo_of_the_bridge_is_recognised_in_any_spelling():
+    for text in (
+        BRIDGE_TOOL_RESULTS,
+        "tool results received",
+        "Tool results received.",
+        "  [tool results received]\n",
+        "Tool results received!",
+        "«tool-results received»",
+    ):
+        assert is_bridge_echo(text), text
+
+
+def test_a_real_answer_mentioning_the_bridge_is_not_an_echo():
+    assert not is_bridge_echo(
+        "Готово: (tool results received) больше не нужно, вот итог."
+    )
+    assert not is_bridge_echo("")

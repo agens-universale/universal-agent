@@ -11,7 +11,7 @@ agent_kwargs:
     subagent_finish_gate_max_iterations: 3
     strict_turn_finish_validation: true
     finish_gate_max_iterations: 10
-    stop_tools: [turn_ask_human, project_memory]
+    stop_tools: [turn_ask_human, project_memory, fs_view_image]
     disable_skills: [supercoder, topic-research, complex-task-solver, science-article-creator, articles]
     tool_output_inline_max_chars: 10000
     stored_tool_outputs_max_entries: 50

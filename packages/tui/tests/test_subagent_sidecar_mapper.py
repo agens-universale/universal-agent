@@ -74,6 +74,43 @@ def test_plan_user_kind_mounts_nested_user():
     assert actions[0].prose == "steer here"
 
 
+def test_user_kind_with_images_mounts_them_after_a_restart():
+    from gc_tui.services.subagent_sidecar_mapper import (
+        apply_sidecar_nested_actions,
+    )
+    from image_helpers import make_attachment
+
+    att = make_attachment("b" * 16, 2)
+    mounted: list[dict] = []
+    apply_sidecar_nested_actions(
+        plan_sidecar_nested_actions(
+            [
+                {
+                    "seq": 1,
+                    "parent_call_id": "p1",
+                    "kind": "user",
+                    "payload": {
+                        "role": "user",
+                        "content": "[Изображение #2] вот",
+                        "attachments": [att.to_dict()],
+                    },
+                }
+            ]
+        ),
+        mount_nested_tool=lambda **kw: None,
+        finish_nested_tool=lambda **kw: None,
+        mount_nested_prose=lambda **kw: None,
+        mount_nested_user=lambda **kw: mounted.append(kw),
+    )
+    assert mounted == [
+        {
+            "parent_call_id": "p1",
+            "prose": "[Изображение #2] вот",
+            "images": (att,),
+        }
+    ]
+
+
 def test_apply_calls_hooks_in_order():
     seen = []
     actions = plan_sidecar_nested_actions(
