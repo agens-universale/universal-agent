@@ -140,7 +140,6 @@ async def runtime(tmp_path, url, *, core_extra=None):
             async with Worker(
                 env.client,
                 **options,
-                workflow_failure_exception_types=[Exception],
             ):
                 yield env, contexts, config
     finally:

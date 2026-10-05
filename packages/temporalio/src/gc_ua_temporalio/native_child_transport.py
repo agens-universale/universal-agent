@@ -43,15 +43,31 @@ class RemoteChildInput:
             pending, self.pending = self.pending, []
             for message in pending:
                 self.tasks.append(
-                    asyncio.create_task(
-                        self.handle.signal("submit_message", message)
+                    (
+                        message,
+                        asyncio.create_task(
+                            self.handle.signal("submit_message", message)
+                        ),
                     )
                 )
 
     async def drain_deliveries(self):
-        if self.tasks:
-            # Ребёнок мог завершиться раньше доставки: такой сигнал не ошибка хода.
-            await asyncio.gather(*self.tasks, return_exceptions=True)
+        """Дождаться сигналов; вернуть сообщения, которые ребёнок не получил.
+
+        Ребёнок мог завершиться раньше доставки: это не ошибка хода, но
+        сообщение уже принято сессией — оно возвращается родителю.
+        """
+        tasks, self.tasks = self.tasks, []
+        if not tasks:
+            return []
+        results = await asyncio.gather(
+            *(task for _, task in tasks), return_exceptions=True
+        )
+        return [
+            message
+            for (message, _), result in zip(tasks, results)
+            if isinstance(result, BaseException)
+        ]
 
 
 class NativeChildTransport:
@@ -69,6 +85,17 @@ class NativeChildTransport:
         self._sequence = 0
         #: Доставка сообщения в цикл родителя (``AgentExecutor.add_message``).
         self.redeliver = None
+        #: Сбой применения checkpoint из сигнала: поднимается в ``execute``,
+        #: а не в обработчике сигнала (там он валил бы весь workflow).
+        self.checkpoint_failure = None
+
+    def receive_checkpoint(self, payload):
+        """Обработчик сигнала ``child_checkpoint``: сбой — в ход, не в сессию."""
+        try:
+            self.apply_checkpoint(payload)
+        except Exception as exc:
+            if self.checkpoint_failure is None:
+                self.checkpoint_failure = exc
 
     def apply_checkpoint(self, payload):
         checkpoint = (
@@ -96,8 +123,11 @@ class NativeChildTransport:
             workflow.logger.warning("Human request from an inactive child")
             return
         try:
+            # Ребёнок, завершившийся во время ожидания, снимает свой вопрос:
+            # иначе обработчик сигнала держал бы сессию до stop.
             answer = await self.human_request(
-                value_to_type(HumanRequest, payload["request"])
+                value_to_type(HumanRequest, payload["request"]),
+                abandon=lambda: self.active_child != child_id,
             )
         except HumanRequestInterrupted:
             return
@@ -164,6 +194,7 @@ class NativeChildTransport:
             self.store._generation,
         )
         self.active_child = child_id
+        self.checkpoint_failure = None
         scope = RemoteChildInput(parent_call_id)
         undelivered = []
         previous_scope = getattr(self.ctx, "child_input_scope", None)
@@ -183,19 +214,36 @@ class NativeChildTransport:
             try:
                 result = await self._handle
             except ChildWorkflowError as exc:
+                if not isinstance(exc.cause, ApplicationError):
+                    # terminate/таймаут ребёнка извне — ошибка инструмента,
+                    # а не отказ всей сессии.
+                    return runner._error_response(
+                        tool_name=tool_name,
+                        code="subagent_interrupted",
+                        message=(
+                            "Субагент прерван извне; часть его действий могла "
+                            "выполниться. Проверьте состояние, прежде чем "
+                            "повторять."
+                        ),
+                        retryable=False,
+                    )
                 raise _child_error(exc) from exc
             finally:
                 # Дальнейший ввод больше не уходит ребёнку.
                 scope.handle = None
             undelivered = result.undelivered
+            if self.checkpoint_failure is not None:
+                raise ExecutionFailure(
+                    "Child checkpoint cannot be applied to the parent"
+                ) from self.checkpoint_failure
             self.apply_checkpoint(result.checkpoint)
             return result.output
         finally:
             if getattr(self.ctx, "child_input_scope", None) is scope:
                 self.ctx.child_input_scope = previous_scope
             try:
-                await scope.drain_deliveries()
-                late = [*undelivered, *scope.pending]
+                failed = await scope.drain_deliveries()
+                late = [*undelivered, *failed, *scope.pending]
                 scope.pending = []
                 if late and self.redeliver is not None:
                     for message in late:

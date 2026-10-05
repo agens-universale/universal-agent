@@ -33,7 +33,10 @@ from gc_ua_temporalio.native_contracts import (
     NativeRunRequest,
     UserMessage,
 )
-from gc_ua_temporalio.native_operations import NativeOperations
+from gc_ua_temporalio.native_operations import (
+    NativeOperations,
+    session_failure,
+)
 from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_ua_temporalio.thread_store_transport import ThreadStoreTransport
 
@@ -52,10 +55,10 @@ def _recent(values):
     return list(values)[-DEDUP_WINDOW:]
 
 
-@workflow.defn(
-    name="NativeAgentWorkflow",
-    failure_exception_types=[Exception],
-)
+# Без failure_exception_types=[Exception]: недетерминизм и сбой кода
+# workflow роняют только workflow task (ход продолжится на исправленном
+# воркере); доменные отказы переводит в ApplicationError ``session_failure``.
+@workflow.defn(name="NativeAgentWorkflow")
 class NativeAgentWorkflow:
     def __init__(self):
         self.start = None
@@ -132,7 +135,7 @@ class NativeAgentWorkflow:
     @workflow.signal
     def child_checkpoint(self, payload: dict):
         if self.children is not None:
-            self.children.apply_checkpoint(payload)
+            self.children.receive_checkpoint(payload)
 
     @workflow.signal
     async def stop(self):
@@ -223,7 +226,7 @@ class NativeAgentWorkflow:
             )
         self.human_replies[request_id] = answer
 
-    async def human_request(self, request, *, flush=True):
+    async def human_request(self, request, *, flush=True, abandon=None):
         # Ожидание может длиться часами: шаги и сам вопрос — в тред до него.
         # Вопрос ребёнка приходит сигналом, параллельно с основным циклом:
         # там тред родителя не трогаем, он запишется в конце его хода.
@@ -234,12 +237,18 @@ class NativeAgentWorkflow:
         self.phase = "waiting_human"
         try:
             await workflow.wait_condition(
-                lambda: self.stop_requested or request_id in self.human_replies
+                lambda: (
+                    self.stop_requested
+                    or request_id in self.human_replies
+                    or (abandon is not None and abandon())
+                )
             )
             if self.stop_requested:
                 raise HumanRequestInterrupted(
                     "Agent was stopped while waiting for a human"
                 )
+            if request_id not in self.human_replies:
+                raise HumanRequestInterrupted("Human request was abandoned")
             return self.human_replies[request_id]
         finally:
             self.pending_human = None
@@ -364,8 +373,8 @@ class NativeAgentWorkflow:
             prepared,
             store,
             self.operations,
-            human_request=lambda request: self.human_request(
-                request, flush=False
+            human_request=lambda request, **kwargs: self.human_request(
+                request, flush=False, **kwargs
             ),
         )
         self.ctx = ctx
@@ -427,7 +436,12 @@ class NativeAgentWorkflow:
     async def run(self, start: NativeRunRequest) -> dict:
         self.run_identity = workflow.info().run_id
         self.start = start
-        self._initialize(start)
+        try:
+            self._initialize(start)
+        except ValueError as exc:
+            raise ApplicationError(
+                str(exc), type="ValueError", non_retryable=True
+            ) from exc
         with execution_environment(new_id=self.new_id, now=workflow.now):
             try:
                 result = await self._run_session(start)
@@ -435,7 +449,19 @@ class NativeAgentWorkflow:
                 if cancellation is not None:
                     raise asyncio.CancelledError(cancellation)
                 return result
-            except (Exception, asyncio.CancelledError):
+            except (Exception, asyncio.CancelledError) as exc:
+                failure = (
+                    None
+                    if isinstance(exc, asyncio.CancelledError)
+                    else session_failure(exc)
+                )
+                if failure is None and not isinstance(
+                    exc, asyncio.CancelledError
+                ):
+                    # Сбой кода workflow: без новых команд, только сбой
+                    # workflow task. Уборка здесь попала бы в историю, и
+                    # replay исправленного кода с ней разошёлся бы.
+                    raise
                 self.closed = True
                 self.accepting_inputs = False
                 self.phase = "failed"
@@ -453,7 +479,9 @@ class NativeAgentWorkflow:
                     await asyncio.shield(self._release_owner(start))
                 except (Exception, asyncio.CancelledError):
                     workflow.logger.exception("Thread owner release failed")
-                raise
+                if failure is None or failure is exc:
+                    raise
+                raise failure from exc
 
     async def _run_session(self, start):
         # Владелец треда — сессия целиком: Continue-As-New его не меняет.

@@ -80,7 +80,6 @@ async def main():
                         client,
                         **options,
                         interceptors=[RestartInterceptor()],
-                        workflow_failure_exception_types=[Exception],
                     )
                 )
             await asyncio.Event().wait()

@@ -2,12 +2,19 @@
 
 import asyncio
 import inspect
+from dataclasses import replace
 
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.thread_store_async import athread_store
-from gc_core.thread_store_durable import durable_store_capability
+from gc_core.thread_store_durable import (
+    ThreadStoreConflict,
+    ThreadStoreOperation,
+    durable_store_capability,
+)
 from temporalio import activity
+from temporalio.client import WorkflowExecutionStatus
 from temporalio.exceptions import ApplicationError
+from temporalio.service import RPCError, RPCStatusCode
 
 from gc_ua_temporalio.thread_store_contracts import (
     ThreadStoreCall,
@@ -74,13 +81,10 @@ class ThreadStoreActivities:
             )
         store = self._port(request)
         try:
-            receipt = await _invoke(
-                store,
-                "commit_operation",
-                request.system_id,
-                request.thread_id,
-                request.operation,
-            )
+            if request.operation.kind == "claim_owner":
+                receipt = await _claim(store, request)
+            else:
+                receipt = await _commit(store, request, request.operation)
             return ThreadStoreReply(receipt=receipt)
         except ExecutionFailure as exc:
             raise _application_error(exc) from exc
@@ -100,6 +104,81 @@ class ThreadStoreActivities:
 
     def registered(self):
         return [self.load, self.commit, self.read_trace]
+
+
+async def _commit(store, request, operation):
+    return await _invoke(
+        store,
+        "commit_operation",
+        request.system_id,
+        request.thread_id,
+        operation,
+    )
+
+
+async def _claim(store, request):
+    """Захват треда; владельца, чей workflow уже не RUNNING, снять.
+
+    Владелец треда — workflow ID сессии. Упавшая, снятая (terminate) или
+    исчезнувшая сессия иначе держала бы тред вечно. Снятие идёт операцией от
+    имени старого владельца с его эпохой: новая эпоха отсекает его поздние
+    коммиты. Живой чужой владелец — по-прежнему отказ.
+    """
+    operation = request.operation
+    try:
+        return await _commit(store, request, operation)
+    except ThreadStoreConflict:
+        snapshot = await _invoke(
+            store,
+            "read_snapshot",
+            request.system_id,
+            request.thread_id,
+            include_state=False,
+        )
+        desired = operation.payload.get("owner_id", operation.owner_id)
+        stale = snapshot.owner_id
+        if stale not in (None, desired):
+            if await _owner_alive(stale):
+                raise
+            await _commit(
+                store,
+                request,
+                ThreadStoreOperation(
+                    f"{operation.operation_id}/release-stale",
+                    "release_owner",
+                    generation=snapshot.generation,
+                    owner_id=stale,
+                    owner_epoch=snapshot.owner_epoch,
+                ),
+            )
+            activity.logger.warning(
+                "Released thread owner %s: its workflow is not running", stale
+            )
+        receipt = await _commit(
+            store,
+            request,
+            replace(
+                operation,
+                operation_id=f"{operation.operation_id}/takeover",
+                expected_revision=None,
+                generation=snapshot.generation,
+            ),
+        )
+        # Workflow ждёт квитанцию своей операции: захват — её исход.
+        return replace(receipt, operation_id=operation.operation_id)
+
+
+async def _owner_alive(workflow_id):
+    """Workflow владельца ещё исполняется (без клиента — считать живым)."""
+    try:
+        client = activity.client()
+    except RuntimeError:
+        return True
+    try:
+        description = await client.get_workflow_handle(workflow_id).describe()
+    except RPCError as exc:
+        return exc.status != RPCStatusCode.NOT_FOUND
+    return description.status == WorkflowExecutionStatus.RUNNING
 
 
 def _application_error(exc):

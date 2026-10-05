@@ -274,7 +274,6 @@ async def test_automatic_summary_full_trace_parity(
             async with Worker(
                 env.client,
                 **worker_options(config, native, stores)[0],
-                workflow_failure_exception_types=[Exception],
             ):
                 handle = await env.client.start_workflow(
                     NativeAgentWorkflow.run,

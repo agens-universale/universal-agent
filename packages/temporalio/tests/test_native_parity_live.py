@@ -478,7 +478,6 @@ async def test_actual_http_local_native_parity(
             async with Worker(
                 env.client,
                 **options,
-                workflow_failure_exception_types=[Exception],
             ):
                 handle = await env.client.start_workflow(
                     NativeAgentWorkflow.run,

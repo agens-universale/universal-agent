@@ -113,7 +113,6 @@ async def test_native_executor_uses_real_file_session_and_replays(
             task_queue="native-test",
             workflows=[NativeAgentWorkflow],
             activities=registered,
-            workflow_failure_exception_types=[Exception],
         ):
             handle = await env.client.start_workflow(
                 NativeAgentWorkflow.run,

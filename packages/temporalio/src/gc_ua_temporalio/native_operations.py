@@ -24,6 +24,7 @@ from temporalio.exceptions import (
     ActivityError,
     ApplicationError,
     CancelledError,
+    FailureError,
 )
 
 from gc_ua_temporalio.native_contracts import (
@@ -71,6 +72,30 @@ INTERRUPTED_EFFECT = (
     "Исполнение прервано сбоем исполнителя; неизвестно, успела ли операция "
     "выполниться. Проверьте состояние, прежде чем повторять."
 )
+
+
+def session_failure(exc):
+    """Доменный отказ сессии — ``ApplicationError``, run становится FAILED.
+
+    Доменный — ``ExecutionFailure`` ядра или ошибка, поднятая из исхода
+    activity/child workflow (в цепочке ``__cause__`` есть ``FailureError``).
+    Всё остальное — сбой кода workflow: недетерминизм после деплоя, запрет
+    песочницы, баг. Тогда ``None``: падает только workflow task, run ждёт
+    исправленного воркера и продолжает ход, а не теряет его.
+    """
+    if isinstance(exc, ApplicationError):
+        return exc
+    current, seen = exc, set()
+    while current is not None and id(current) not in seen:
+        if isinstance(current, (ExecutionFailure, FailureError)):
+            return ApplicationError(
+                str(exc) or type(exc).__name__,
+                type=type(exc).__name__,
+                non_retryable=True,
+            )
+        seen.add(id(current))
+        current = current.__cause__
+    return None
 
 
 def restore_domain_error(cause):

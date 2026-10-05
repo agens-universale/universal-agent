@@ -115,7 +115,6 @@ async def serve(config):
                     Worker(
                         client,
                         **options,
-                        workflow_failure_exception_types=[Exception],
                     )
                 )
             await asyncio.Event().wait()

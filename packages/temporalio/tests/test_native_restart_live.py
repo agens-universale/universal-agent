@@ -190,6 +190,5 @@ async def test_native_sigkill_durable_boundaries(
         await Replayer(
             workflows=[NativeAgentWorkflow],
             interceptors=[RestartInterceptor()],
-            workflow_failure_exception_types=[Exception],
         ).replay_workflow(history)
         assert len(requests) == expected_requests

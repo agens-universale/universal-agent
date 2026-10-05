@@ -207,7 +207,6 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
                 async with Worker(
                     env.client,
                     **worker_options(config, native, threads)[0],
-                    workflow_failure_exception_types=[Exception],
                 ):
                     registry, first = remote()
                     receipt = await first.send("message-1", "Hello")

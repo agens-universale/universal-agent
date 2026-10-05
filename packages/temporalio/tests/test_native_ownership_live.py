@@ -137,7 +137,6 @@ async def test_profile_change_on_worker_restart_keeps_sessions(
             return contexts, Worker(
                 env.client,
                 **options,
-                workflow_failure_exception_types=[Exception],
             )
 
         contexts, worker = await serve("model-a")
@@ -178,3 +177,62 @@ async def test_profile_change_on_worker_restart_keeps_sessions(
         finally:
             await contexts.aclose()
     assert owner(tmp_path) is None
+
+
+async def test_terminated_owner_is_taken_over_by_new_session(
+    tmp_path, monkeypatch, scripted_http
+):
+    """terminate не оставляет тред запертым навсегда: workflow-владелец не
+    RUNNING — следующая сессия с другим ID снимает его и захватывает тред."""
+    monkeypatch.chdir(tmp_path)
+    url, _, script = scripted_http
+    script.extend([[finish("first")], [finish("second")]])
+    async with runtime(tmp_path, url) as (env, _, _):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(keep_alive=True),
+            id="controls",
+            task_queue="native-controls",
+        )
+        await wait_status(
+            handle, lambda s: s["turns"] == 1 and s["phase"] == "idle"
+        )
+        await handle.terminate("operator")
+        assert owner(tmp_path) == "controls"
+        other = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(),
+            id="controls-other",
+            task_queue="native-controls",
+        )
+        assert (await other.result())["turns"] == 1
+    assert owner(tmp_path) is None
+
+
+async def test_live_owner_is_not_taken_over(
+    tmp_path, monkeypatch, scripted_http
+):
+    monkeypatch.chdir(tmp_path)
+    url, _, script = scripted_http
+    script.append([finish("first")])
+    async with runtime(tmp_path, url) as (env, _, _):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(keep_alive=True),
+            id="controls",
+            task_queue="native-controls",
+        )
+        await wait_status(
+            handle, lambda s: s["turns"] == 1 and s["phase"] == "idle"
+        )
+        other = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(),
+            id="controls-other",
+            task_queue="native-controls",
+        )
+        with pytest.raises(WorkflowFailureError):
+            await other.result()
+        assert owner(tmp_path) == "controls"
+        await handle.signal(NativeAgentWorkflow.close_session)
+        await handle.result()

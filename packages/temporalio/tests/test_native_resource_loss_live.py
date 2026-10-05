@@ -214,7 +214,6 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
         await Replayer(
             workflows=[NativeAgentWorkflow],
             interceptors=[RestartInterceptor()],
-            workflow_failure_exception_types=[Exception],
         ).replay_workflow(history)
         assert effects(audit.read_text()) == expected
 
@@ -308,6 +307,5 @@ async def test_native_cancellation_during_actual_mcp_teardown(
             release.set()
     await Replayer(
         workflows=[NativeAgentWorkflow],
-        workflow_failure_exception_types=[Exception],
     ).replay_workflow(history)
     assert len(requests) == 2

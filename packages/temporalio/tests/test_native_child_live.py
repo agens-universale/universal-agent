@@ -261,7 +261,6 @@ async def test_native_child_model_tools_input_human_and_replay(
             async with Worker(
                 env.client,
                 **worker_options(config, native, stores)[0],
-                workflow_failure_exception_types=[Exception],
             ):
                 handle = await env.client.start_workflow(
                     NativeAgentWorkflow.run,

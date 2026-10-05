@@ -201,7 +201,6 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
             async with Worker(
                 env.client,
                 **options,
-                workflow_failure_exception_types=[Exception],
             ):
                 for turn in range(2):
                     handle = await env.client.start_workflow(

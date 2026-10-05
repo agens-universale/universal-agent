@@ -32,15 +32,15 @@ from gc_ua_temporalio.native_child_contracts import (
 )
 from gc_ua_temporalio.native_child_preparation import PreparedNativeChild
 from gc_ua_temporalio.native_context import assemble_native_context
-from gc_ua_temporalio.native_operations import NativeOperations
+from gc_ua_temporalio.native_operations import (
+    NativeOperations,
+    session_failure,
+)
 from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_ua_temporalio.thread_store_transport import ThreadStoreTransport
 
 
-@workflow.defn(
-    name="NativeSubagentWorkflow",
-    failure_exception_types=[Exception],
-)
+@workflow.defn(name="NativeSubagentWorkflow")
 class NativeSubagentWorkflow:
     def __init__(self):
         self.sequence = 0
@@ -126,7 +126,12 @@ class NativeSubagentWorkflow:
                         scope.enqueue(message)
 
             scope.set_on_enqueue = set_callback
-            yield scope
+            try:
+                yield scope
+            finally:
+                # Пришедшее после последней выборки цикла не теряется:
+                # вернётся родителю как undelivered.
+                self.pending_messages.extend(scope.drain())
 
     @workflow.run
     async def run(self, request: NativeChildRequest) -> NativeChildResult:
@@ -228,6 +233,18 @@ class NativeSubagentWorkflow:
                     if self.signal_tasks:
                         await asyncio.gather(*self.signal_tasks)
                 undelivered, self.pending_messages = self.pending_messages, []
-                return NativeChildResult(output, checkpoint, undelivered)
-            finally:
+            except asyncio.CancelledError:
                 await operations.release_context()
+                raise
+            except Exception as exc:
+                # Как у родителя: доменный отказ — FAILED ребёнка; сбой кода
+                # workflow — только workflow task, без новых команд.
+                failure = session_failure(exc)
+                if failure is None:
+                    raise
+                await operations.release_context()
+                if failure is exc:
+                    raise
+                raise failure from exc
+            await operations.release_context()
+            return NativeChildResult(output, checkpoint, undelivered)
