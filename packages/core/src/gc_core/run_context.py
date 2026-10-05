@@ -19,6 +19,7 @@ from gc_core.config_modules.intent_scope import (
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
+    areconcile_remote_root,
     build_execution_workspace,
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
@@ -220,6 +221,7 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # которому он принадлежит, так и не появилось.
     try:
         await aprime_backend_cwd(prep.backend, config_dict)
+        await areconcile_remote_root(prep.backend, config_dict)
         # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
         # успешно снятый тул снова считается опечаткой. Способность пришла с
         # develop, у нас её не было; тело, которое список заполняет, слилось

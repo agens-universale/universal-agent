@@ -42,3 +42,56 @@ async def test_auto_workdir_overrides_runtime_launch_root(tmp_path):
     ctx = await acreate_run_context(cfg, os_backend=AutoDirBackend(str(auto)))
     assert cfg["launch_root"] == str(auto)
     assert os.path.realpath(ctx.workspace.root) == os.path.realpath(str(auto))
+
+
+class RemoteFake:
+    """Удалённая ФС: каталоги только под /data; cwd той стороны — /data."""
+
+    def __init__(self, files):
+        from gc_testkit.harbor_fakes import FakeBackend
+
+        self._inner = FakeBackend(files)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    @property
+    def is_sandbox(self):
+        return True
+
+    def default_cwd(self):
+        return "/data"
+
+
+async def test_host_launch_root_is_replaced_by_remote_cwd(tmp_path):
+    # TUI/ACP ставят launch_root=cwd хоста до сборки; у remote-бэкенда такого
+    # каталога нет — корнем обязан стать cwd той стороны, иначе env-блок и
+    # guards смотрят на путь хоста.
+    cfg = {
+        "model": "m",
+        "system_prompt_id": "v1",
+        "save_logs": False,
+        "launch_root": str(tmp_path),
+        "project_root": str(tmp_path),
+    }
+    ctx = await acreate_run_context(
+        cfg,
+        os_backend=RemoteFake({"/data/a.txt": "x", "/data/sub/b.txt": "y"}),
+    )
+    assert cfg["launch_root"] == "/data"
+    assert ctx.workspace.root == "/data"
+
+
+async def test_explicit_remote_launch_root_is_kept():
+    cfg = {
+        "model": "m",
+        "system_prompt_id": "v1",
+        "save_logs": False,
+        "launch_root": "/data/sub",
+    }
+    ctx = await acreate_run_context(
+        cfg,
+        os_backend=RemoteFake({"/data/a.txt": "x", "/data/sub/b.txt": "y"}),
+    )
+    assert cfg["launch_root"] == "/data/sub"
+    assert ctx.workspace.root == "/data/sub"
