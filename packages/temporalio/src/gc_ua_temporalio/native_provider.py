@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal
 
 from gc_core.config_modules import AppConfig
+from gc_core.config_modules.agent_edits import AgentEditsRecordConfig
 from gc_core.config_modules.auth import build_auth_connector
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
@@ -70,6 +71,11 @@ def _digest(value):
     ).hexdigest()
 
 
+_NO_EDITS_RECORDING = AgentEditsRecordConfig(
+    tui=False, cli=False, server=False
+)
+
+
 class NativeContextProvider:
     """Build the actual SDK context, never a reduced adapter-specific agent.
 
@@ -116,6 +122,17 @@ class NativeContextProvider:
                         )
                     }
                 )
+            # Журнал правок агента (agent_edits) в durable-исполнении не
+            # ведётся при любом профиле: его читают только дифф, сводка хода
+            # и откат в TUI, а на воркере он стоил бы снимков файлов и
+            # `git status` вокруг каждой команды.
+            settings = settings.model_copy(
+                update={
+                    "agent_edits": settings.agent_edits.model_copy(
+                        update={"record": _NO_EDITS_RECORDING}
+                    )
+                }
+            )
             loaded = LoadedSettings(
                 settings=settings,
                 runtime=RuntimeEnv(launch_root=str(workspace.resolve())),

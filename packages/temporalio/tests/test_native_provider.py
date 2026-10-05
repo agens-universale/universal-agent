@@ -341,3 +341,35 @@ async def test_cleanup_retry_after_handler_before_receipt_never_rebuilds_context
     finally:
         await provider.aclose()
         await restarted.aclose()
+
+
+async def test_worker_never_records_agent_edits(tmp_path, monkeypatch):
+    """Журнал правок в durable-исполнении выключен при любом профиле: обёртки
+    записи на бэкенде нет, и тулы правок не пишут журнал на воркере."""
+    from gc_core.agent_edits.ctx import recording_enabled
+    from gc_core.agent_edits.tracking import TrackingFsBackend
+
+    monkeypatch.chdir(tmp_path)
+    core = override_settings(
+        profile(tmp_path).core,
+        {
+            "agent_edits.record.tui": True,
+            "agent_edits.record.cli": True,
+            "agent_edits.record.server": True,
+        },
+    )
+    pinned = NativeProfile(revision="v1", workspace=str(tmp_path), core=core)
+    provider, _ = make_provider(tmp_path, profiles={"test": pinned})
+    try:
+        ctx = await provider(call())
+        assert not isinstance(ctx.os_backend, TrackingFsBackend)
+        assert ctx.settings.agent_edits.record.model_dump() == {
+            "tui": False,
+            "cli": False,
+            "server": False,
+        }
+        # Даже если режим запуска объявят позже, записывать нечего.
+        ctx.runtime = ctx.runtime.with_values(run_mode="server")
+        assert recording_enabled(ctx) is False
+    finally:
+        await provider.aclose()
