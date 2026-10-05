@@ -458,8 +458,8 @@ class _CountingStore:
 
 
 async def test_idless_message_survives_revision_conflict(tmp_path):
-    """Сообщение без id получает его до ключей: сверка после чужой записи
-    сходится, а не упирается в конфликт навсегда."""
+    """Ключ сообщения без id при чтении — как при записи (до синтеза id):
+    сверка после чужой записи сходится, а не упирается в конфликт."""
     import uuid
 
     from gc_core.thread_store import ThreadSession
@@ -472,7 +472,6 @@ async def test_idless_message_survives_revision_conflict(tmp_path):
     )
     message = {"role": "user", "content": "hello"}
     await session.apersist_batch([message], previous_response_id=None)
-    assert message["id"]
     snapshot = raw.read_snapshot("s", "t", include_state=False)
     raw.commit_operation(
         "s",

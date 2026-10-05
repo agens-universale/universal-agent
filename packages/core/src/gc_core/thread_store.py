@@ -463,6 +463,9 @@ def load_thread_messages(
             payload = record.get("payload")
             if not isinstance(payload, dict):
                 continue
+            # Ключ — по записи как есть, до синтеза id: так же он считается при
+            # записи, и сверка после конфликта ревизии сходится.
+            message_keys.add(make_message_key(payload))
             if not isinstance(payload.get("id"), str) or not payload["id"]:
                 # Legacy records need the same identity on every snapshot,
                 # including after a process restart and unrelated deletions.
@@ -472,7 +475,6 @@ def load_thread_messages(
                     "m_" + hashlib.sha256(identity.encode()).hexdigest()[:32]
                 )
             messages.append(payload)
-            message_keys.add(make_message_key(payload))
 
     return messages, message_keys, max_seq
 
@@ -1199,15 +1201,6 @@ class ThreadSession:
         не было, а порядок обращений к хранилищу у обоих был один и тот же
         (сторож этого порядка — в тестах базы хранилища).
         """
-        # Сообщение без id получает его на месте, до ключей: иначе ключ в
-        # квитанции (по содержимому) и ключ перечитанного сообщения (по
-        # синтезированному id) расходятся, и сверка после конфликта ревизии
-        # не сходится никогда.
-        for message in step_messages:
-            if isinstance(message, dict) and not (
-                isinstance(message.get("id"), str) and message["id"]
-            ):
-                message["id"] = generate_message_id_func("m")
         if self._defer_persist:
             # Шаг остаётся в памяти до точки сброса (aflush_deferred): его
             # защищает история durable-исполнителя, а не хранилище.

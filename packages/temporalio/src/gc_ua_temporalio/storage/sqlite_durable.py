@@ -77,13 +77,15 @@ class SQLiteDurableOperations:
     @staticmethod
     def _state(db, system, thread):
         rows = db.execute(
-            "SELECT seq,payload FROM messages WHERE system=? AND thread=? ORDER BY seq",
+            "SELECT seq,key,payload FROM messages WHERE system=? AND thread=? ORDER BY seq",
             (system, thread),
         ).fetchall()
         messages = [json.loads(row["payload"]) for row in rows]
+        # Ключи — сохранённые при записи (до назначения id сообщению без
+        # него): пересчёт по сохранённому сообщению дал бы другой ключ.
         return ThreadState(
             messages,
-            {make_message_key(message) for message in messages},
+            {row["key"] for row in rows},
             max((row["seq"] for row in rows), default=0),
         )
 

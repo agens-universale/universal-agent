@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import os
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -79,12 +80,28 @@ class NativeWorkerConfig(BaseModel):
         return data
 
     def state_paths(self):
-        """Служебные пути воркера: треды, квитанции, payload."""
-        paths = [spec.path for spec in self.thread_stores.values()]
-        paths.append(self.receipts_database)
+        """Служебные пути воркера для ``protected_paths``: треды, квитанции,
+        payload.
+
+        Базы SQLite — вместе с ``-wal``/``-shm``/``-journal`` (корень-файл не
+        накрывает соседей). Каждый путь — в двух формах, ``abspath`` и
+        ``realpath``: проверка защиты не раскрывает симлинки, и путь через
+        симлинк иначе прошёл бы мимо.
+        """
+        paths = []
+        for spec in self.thread_stores.values():
+            paths += (
+                [spec.path] if spec.kind == "file" else _db_files(spec.path)
+            )
+        paths += _db_files(self.receipts_database)
         if self.payload_storage is not None and self.payload_storage.path:
             paths.append(self.payload_storage.path)
-        return [str(Path(path).absolute()) for path in paths]
+        forms = []
+        for path in paths:
+            for form in (os.path.abspath(path), os.path.realpath(path)):
+                if form not in forms:
+                    forms.append(form)
+        return forms
 
     @classmethod
     def load(cls, path):
@@ -96,6 +113,13 @@ class NativeWorkerConfig(BaseModel):
         return cls.model_validate(
             resolve_env_placeholders_strict(raw, source=str(path))
         )
+
+
+def _db_files(path):
+    return [
+        path,
+        *(f"{path}{suffix}" for suffix in ("-wal", "-shm", "-journal")),
+    ]
 
 
 def _digest(value):
@@ -165,14 +189,9 @@ class NativeContextProvider:
                         )
                     }
                 )
-            # Служебное состояние воркера внутри workspace (явно заданный
-            # относительный путь) агент не трогает: история, квитанции и
-            # payload — не его файлы.
-            inside = [
-                path
-                for path in state_paths
-                if Path(path).resolve().is_relative_to(workspace.resolve())
-            ]
+            # Служебное состояние воркера агент не трогает, где бы оно ни
+            # лежало: история всех сессий, квитанции и payload — не его файлы.
+            inside = list(state_paths)
             if inside:
                 protected = settings.security.protected_paths
                 settings = settings.model_copy(

@@ -36,7 +36,12 @@ def tool_vision_view(state: Any) -> ToolVisionView:
     )
 
 
-def tool_state_view(state: Any, *, vision: bool = False) -> ToolStateView:
+def tool_state_view(
+    state: Any, *, vision: bool = False, fetch_cache: bool = True
+) -> ToolStateView:
+    """Срез состояния для инструмента. ``fetch_cache`` — кэш страниц
+    ``fetch_url`` (до 10 страниц текста): остальным инструментам он не нужен
+    и только раздувает каждый запрос эффекта."""
     shared = getattr(state, "shared", None)
     return ToolStateView(
         vision=tool_vision_view(state) if vision else None,
@@ -47,7 +52,9 @@ def tool_state_view(state: Any, *, vision: bool = False) -> ToolStateView:
             for key, value in (
                 getattr(shared, "fetch_url_cache", {}) or {}
             ).items()
-        ],
+        ]
+        if fetch_cache
+        else [],
     )
 
 

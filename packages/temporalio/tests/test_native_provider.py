@@ -412,3 +412,12 @@ async def test_worker_state_inside_workspace_is_protected(
         assert inside in ctx.settings.security.protected_paths.extra
     finally:
         await provider.aclose()
+    receipts = str(tmp_path / "state" / "receipts.sqlite")
+    paths = config.state_paths()
+    assert receipts + "-wal" in paths and receipts + "-shm" in paths
+    from gc_core.security.protected_paths import protected_decision
+
+    assert (
+        protected_decision(receipts + "-wal", cwd=str(workspace), extra=paths)
+        == "deny"
+    )

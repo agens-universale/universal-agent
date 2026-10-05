@@ -9,7 +9,10 @@ from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
-from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
+from gc_core.constants.tool_names import (
+    EXEC_FETCH_URL_NAME,
+    FS_VIEW_IMAGE_NAME,
+)
 from gc_core.execution.contracts import (
     GuardPreconditionChanged,
     ToolEffectRequest,
@@ -81,7 +84,11 @@ async def invoke_native_tool(
             call_id=call_id,
             arguments=deepcopy(arguments),
             arguments_digest=arguments_digest(arguments),
-            state=tool_state_view(state, vision=name == FS_VIEW_IMAGE_NAME),
+            state=tool_state_view(
+                state,
+                vision=name == FS_VIEW_IMAGE_NAME,
+                fetch_cache=name == EXEC_FETCH_URL_NAME,
+            ),
             guard_checks=list(checks),
             effect_step="download" if effect_data is not None else "body",
             effect_data=effect_data or {},

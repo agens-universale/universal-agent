@@ -75,9 +75,10 @@ activities и preview. Она не заменяет выбранный ThreadSto
 
 Без `thread_stores` и `payload_storage` воркер кладёт треды и payload рядом с
 `receipts_database` (каталоги `threads` и `payloads`), а не в workspace агента.
-Если служебный путь всё же задан внутри workspace, он попадает в
-`security.protected_paths.extra` профиля: агент не правит свою историю. Файлы
-баз создаются с правами 0600, каталоги payload — 0700.
+Все служебные пути (вместе с `-wal`/`-shm` баз, в форме `abspath` и `realpath`)
+попадают в `security.protected_paths.extra` профиля: агент не читает и не правит
+историю сессий, квитанции и payload. Файлы баз создаются с правами 0600,
+каталоги payload — 0700.
 
 Раз в 10 минут воркер обслуживает себя: освобождает контекст хода, чей workflow
 уже не исполняется (terminate посреди хода), вместе с его MCP-процессами;
