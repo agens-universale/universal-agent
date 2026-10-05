@@ -54,7 +54,6 @@ class ToolResult:
     outcome: Literal["ok", "tool_error"] = "ok"
     delta: StateDelta = field(default_factory=StateDelta)
     artifacts: list[ArtifactRef] = field(default_factory=list)
-    invalid_arguments: bool = False
     schema_version: int = 1
 
 

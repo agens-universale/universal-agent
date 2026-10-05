@@ -338,11 +338,12 @@ class NativeOperations:
         return await self.call("agent.skills.list", {}, list[dict])
 
     async def project_memory_io(self, request):
+        # Чтение памяти повторяемо; запись — эффект не более одного раза.
         return await self.call(
             "agent.memory.execute",
             asdict(request),
             ProjectMemoryReply,
-            effect=True,
+            effect=request.action != "read",
         )
 
     async def project_memory_hash(self):

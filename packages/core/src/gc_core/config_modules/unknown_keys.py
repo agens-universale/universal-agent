@@ -135,6 +135,13 @@ def unknown_key_notice(unknown: UnknownKey, source: str | None = None) -> str:
     со своим пояснением — например, поля backend, неприменимые на модели."""
     where = f"{source}: " if source else ""
     hint = f" — возможно, «{unknown.suggestion}»" if unknown.suggestion else ""
+    if unknown.dotted.startswith("security."):
+        # Опечатка в защите молча ослабляет её (список запретов, режим
+        # модерации) — уведомление должно бросаться в глаза.
+        return (
+            f"{where}ВНИМАНИЕ: настройка защиты не применена — неизвестный "
+            f"ключ «{unknown.dotted}» проигнорирован{hint}"
+        )
     return f"{where}неизвестный ключ «{unknown.dotted}» проигнорирован{hint}"
 
 

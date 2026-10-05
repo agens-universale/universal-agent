@@ -105,3 +105,16 @@ def test_valid_templates_have_no_unknown_keys():
         raw = yaml.safe_load((REPO / rel).read_text(encoding="utf-8"))
         _, dropped = drop_unknown_keys(raw, AppConfig)
         assert dropped == [], (rel, [d.dotted for d in dropped])
+
+
+def test_unknown_security_key_notice_warns_that_protection_is_off():
+    from gc_core.config_modules.unknown_keys import (
+        UnknownKey,
+        unknown_key_notice,
+    )
+
+    notice = unknown_key_notice(
+        UnknownKey(("security", "read_guard", "denied_pathz"), "denied_paths")
+    )
+    assert notice.startswith("ВНИМАНИЕ: настройка защиты не применена")
+    assert "security.read_guard.denied_pathz" in notice

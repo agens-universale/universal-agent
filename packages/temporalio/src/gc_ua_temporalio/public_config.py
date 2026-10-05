@@ -47,7 +47,6 @@ class PublicConfigSnapshot:
     runtime: dict[str, Any]
     model_transport_configured: bool
     provider_currency: str
-    model_provider_currencies: dict[str, str]
 
 
 #: Поля схемы, закрытые политикой снимка, а не флагом: адрес записи реестра —
@@ -255,18 +254,6 @@ def public_runtime(runtime: RuntimeEnv) -> dict[str, Any]:
     return output
 
 
-def _provider_currencies(settings: AppConfig) -> dict[str, str]:
-    inherited = settings.backend.completions_url
-    return {
-        alias: provider_currency_for_url(
-            entry.url
-            or (entry.backend.completions_url if entry.backend else None)
-            or inherited
-        )
-        for alias, entry in settings.models.items()
-    }
-
-
 def public_config_snapshot(source: Any) -> PublicConfigSnapshot:
     """Снимок настроек воркера для истории workflow.
 
@@ -281,7 +268,6 @@ def public_config_snapshot(source: Any) -> PublicConfigSnapshot:
         runtime=public_runtime(runtime),
         model_transport_configured=bool(url),
         provider_currency=provider_currency_for_url(url),
-        model_provider_currencies=_provider_currencies(settings),
     )
 
 

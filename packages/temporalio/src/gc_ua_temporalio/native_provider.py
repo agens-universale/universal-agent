@@ -59,21 +59,32 @@ class NativeWorkerConfig(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _default_payload_storage(cls, data):
-        if (
-            isinstance(data, dict)
-            and "payload_storage" not in data
-            and data.get("receipts_database")
-        ):
-            root = Path(data["receipts_database"]).absolute().parent
-            data = {
-                **data,
-                "payload_storage": {
-                    "kind": "file",
-                    "path": str(root / "payloads"),
-                },
-            }
+    def _state_defaults(cls, data):
+        """Служебное состояние по умолчанию — рядом с ``receipts_database``.
+
+        Не в cwd: воркер стартует в workspace агента, и треды по умолчанию
+        оказались бы в папке, которую агент читает и правит.
+        """
+        if not isinstance(data, dict) or not data.get("receipts_database"):
+            return data
+        root = Path(data["receipts_database"]).absolute().parent
+        data = dict(data)
+        data.setdefault(
+            "payload_storage", {"kind": "file", "path": str(root / "payloads")}
+        )
+        data.setdefault(
+            "thread_stores",
+            {"files": {"kind": "file", "path": str(root / "threads")}},
+        )
         return data
+
+    def state_paths(self):
+        """Служебные пути воркера: треды, квитанции, payload."""
+        paths = [spec.path for spec in self.thread_stores.values()]
+        paths.append(self.receipts_database)
+        if self.payload_storage is not None and self.payload_storage.path:
+            paths.append(self.payload_storage.path)
+        return [str(Path(path).absolute()) for path in paths]
 
     @classmethod
     def load(cls, path):
@@ -108,7 +119,9 @@ class NativeContextProvider:
     ротация токена — перезапуск воркера; живые сессии продолжают работать.
     """
 
-    def __init__(self, *, profiles, stores, receipts, resource_host):
+    def __init__(
+        self, *, profiles, stores, receipts, resource_host, state_paths=()
+    ):
         self.resource_host: WorkerResourceHost = resource_host
         self.stores = dict(stores)
         self.receipts = receipts
@@ -152,6 +165,29 @@ class NativeContextProvider:
                         )
                     }
                 )
+            # Служебное состояние воркера внутри workspace (явно заданный
+            # относительный путь) агент не трогает: история, квитанции и
+            # payload — не его файлы.
+            inside = [
+                path
+                for path in state_paths
+                if Path(path).resolve().is_relative_to(workspace.resolve())
+            ]
+            if inside:
+                protected = settings.security.protected_paths
+                settings = settings.model_copy(
+                    update={
+                        "security": settings.security.model_copy(
+                            update={
+                                "protected_paths": protected.model_copy(
+                                    update={
+                                        "extra": [*protected.extra, *inside]
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
             # Журнал правок агента (agent_edits) в durable-исполнении не
             # ведётся при любом профиле: его читают только дифф, сводка хода
             # и откат в TUI, а на воркере он стоил бы снимков файлов и
@@ -160,7 +196,12 @@ class NativeContextProvider:
                 update={
                     "agent_edits": settings.agent_edits.model_copy(
                         update={"record": _NO_EDITS_RECORDING}
-                    )
+                    ),
+                    # Консольная трасса печатается из кода workflow: при
+                    # replay вывод повторялся бы. Ход виден в истории и логах.
+                    "logging": settings.logging.model_copy(
+                        update={"console_trace": False}
+                    ),
                 }
             )
             loaded = LoadedSettings(

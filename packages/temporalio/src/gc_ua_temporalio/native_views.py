@@ -60,7 +60,7 @@ class NativeViews:
         if not owner:
             return []
         # Native operations are scoped to owner/turn-N. No legacy projector read.
-        with self.technical.store.transaction() as db:
+        with self.technical.store.transaction(readonly=True) as db:
             rows = db.execute(
                 "SELECT * FROM view_events WHERE (owner=? OR substr(owner,1,?)=?) AND cursor>? ORDER BY cursor LIMIT ?",
                 (owner, len(owner) + 1, owner + "/", after, limit),

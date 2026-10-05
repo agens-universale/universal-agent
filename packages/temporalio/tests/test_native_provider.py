@@ -378,3 +378,37 @@ async def test_worker_never_records_agent_edits(tmp_path, monkeypatch):
         assert recording_enabled(ctx) is False
     finally:
         await provider.aclose()
+
+
+async def test_worker_state_inside_workspace_is_protected(
+    tmp_path, monkeypatch
+):
+    """Служебное состояние по умолчанию — вне workspace; заданное внутри —
+    защищено от агента (история, квитанции, payload — не его файлы)."""
+    from gc_ua_temporalio.native_provider import NativeWorkerConfig
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    monkeypatch.chdir(workspace)
+    config = NativeWorkerConfig.model_validate(
+        {
+            "receipts_database": str(tmp_path / "state" / "receipts.sqlite"),
+            "profiles": {},
+        }
+    )
+    assert all(
+        not path.startswith(str(workspace)) for path in config.state_paths()
+    )
+    inside = str(workspace / "threads")
+    provider = NativeContextProvider(
+        profiles={"test": profile(workspace)},
+        stores={"files": DurableFileThreadStore(inside)},
+        receipts=TechnicalStore(str(tmp_path / "receipts.sqlite")),
+        resource_host=WorkerResourceHost("test"),
+        state_paths=[inside],
+    )
+    try:
+        ctx = await provider(call())
+        assert inside in ctx.settings.security.protected_paths.extra
+    finally:
+        await provider.aclose()

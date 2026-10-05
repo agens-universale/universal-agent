@@ -45,6 +45,7 @@ def build_native_runtime(config):
         stores=stores,
         receipts=receipts,
         resource_host=WorkerResourceHost(config.worker_id),
+        state_paths=config.state_paths(),
     )
     native = NativeActivities(
         context_provider=provider,

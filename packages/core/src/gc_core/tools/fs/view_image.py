@@ -129,6 +129,9 @@ class _InputError(Exception):
 
 @loop_warn_on_repeat(**READ_PROFILE)
 class ViewImage(AbstractSimpleTool):
+    # Чтение файла картинки: повтор видит тот же или более новый файл.
+    effect_is_read_only = True
+
     @classmethod
     def tool_description(cls, settings: Any = None) -> Dict[str, Any]:
         return {

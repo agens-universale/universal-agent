@@ -7,6 +7,7 @@ A Temporal-owned thread rejects plain ThreadStore mutations.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -30,6 +31,15 @@ def encode(value):
     )
 
 
+def _private_file(path):
+    """Создать файл базы с правами 0600: в ней история и квитанции агента.
+
+    SQLite создаёт ``-wal``/``-shm`` с правами файла базы.
+    """
+    if not Path(path).exists():
+        os.close(os.open(path, os.O_CREAT | os.O_WRONLY, 0o600))
+
+
 class ProjectionConflict(ExecutionFailure):
     """Another owner or a reused operation ID with new content."""
 
@@ -40,13 +50,14 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
         self.ensure_ready()
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, readonly=False):
+        """Транзакция; ``readonly`` — чтение без блокировки записи (WAL)."""
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
             db.execute("PRAGMA foreign_keys=ON")
             db.execute("PRAGMA synchronous=FULL")
-            db.execute("BEGIN IMMEDIATE")
+            db.execute("BEGIN" if readonly else "BEGIN IMMEDIATE")
             yield db
             db.commit()
         except BaseException:
@@ -57,6 +68,7 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
 
     def ensure_ready(self):
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        _private_file(self.path)
         with sqlite3.connect(self.path) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
@@ -151,11 +163,11 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
         return self.load_thread_state(system_id, thread_id).messages
 
     def load_thread_state(self, system_id, thread_id):
-        with self.transaction() as db:
+        with self.transaction(readonly=True) as db:
             return self._state(db, system_id, thread_id)
 
     def load_meta(self, system_id, thread_id):
-        with self.transaction() as db:
+        with self.transaction(readonly=True) as db:
             row = db.execute(
                 "SELECT meta FROM threads WHERE system=? AND thread=?",
                 (system_id, thread_id),
@@ -272,7 +284,7 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
         ).result
 
     def read_subagent_trace(self, system_id, thread_id):
-        with self.transaction() as db:
+        with self.transaction(readonly=True) as db:
             return [
                 json.loads(r[0])
                 for r in db.execute(

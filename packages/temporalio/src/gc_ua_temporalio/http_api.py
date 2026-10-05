@@ -6,7 +6,11 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
-from temporalio.client import WorkflowUpdateFailedError
+from temporalio.client import (
+    WorkflowQueryFailedError,
+    WorkflowQueryRejectedError,
+    WorkflowUpdateFailedError,
+)
 from temporalio.service import RPCError, RPCStatusCode
 
 from gc_ua_temporalio.native_contracts import HumanReply, UserMessage
@@ -19,6 +23,9 @@ async def api_call(call):
         raise HTTPException(400, str(exc)) from exc
     except WorkflowUpdateFailedError as exc:
         raise HTTPException(409, str(exc.cause)) from exc
+    except (WorkflowQueryFailedError, WorkflowQueryRejectedError) as exc:
+        # Сессия ещё не готова отвечать или уже закрыта — не сбой сервера.
+        raise HTTPException(409, str(exc)) from exc
     except RPCError as exc:
         code = 404 if exc.status == RPCStatusCode.NOT_FOUND else 503
         raise HTTPException(code, "Temporal request unavailable") from exc

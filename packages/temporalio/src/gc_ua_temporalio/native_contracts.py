@@ -10,6 +10,11 @@ from gc_core.execution.resource_contracts import ResourceOwnerRef
 from gc_core.run_preparation import PreparedPrompts, PromptPreparationRequest
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
 
+#: Предел текста сообщения. Крупный текст уходит во внешнее хранилище
+#: payload; предел лишь отсекает явно ошибочный ввод (webhook кладёт в текст
+#: весь свой JSON).
+MAX_MESSAGE_CHARS = 1_000_000
+
 
 @dataclass
 class UserMessage:
@@ -21,10 +26,11 @@ class UserMessage:
             not self.message_id
             or len(self.message_id) > 128
             or not self.text.strip()
-            or len(self.text) > 16000
+            or len(self.text) > MAX_MESSAGE_CHARS
         ):
             raise ValueError(
-                "Message requires an ID <= 128 chars and text <= 16000 chars"
+                "Message requires an ID <= 128 chars and nonempty text "
+                f"<= {MAX_MESSAGE_CHARS} chars"
             )
 
 
@@ -92,7 +98,6 @@ class NativePreparedContext:
     resource_owner: ResourceOwnerRef | None = None
     model_transport_configured: bool = False
     provider_currency: str = "$"
-    model_provider_currencies: dict[str, str] = field(default_factory=dict)
     schema_version: int = 1
     subagent_definitions: dict[str, SubagentDefinition] = field(
         default_factory=dict

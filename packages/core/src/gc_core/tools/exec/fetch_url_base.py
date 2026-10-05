@@ -106,6 +106,10 @@ class FetchRequest(NamedTuple):
 class FetchUrlBase(AbstractSimpleTool):
     """База ``FetchUrl`` / ``SimpleFetchUrl``: всё, кроме разбора HTML и запроса."""
 
+    # GET-чтение страницы: повтор после сбоя исполнителя допустим, внешней
+    # мутации инструмент не делает.
+    effect_is_read_only = True
+
     timeout_seconds = 20
     max_content_chars = 20_000
     # LRU-лимит кэша извлечённого текста страниц (на тред/сессию).

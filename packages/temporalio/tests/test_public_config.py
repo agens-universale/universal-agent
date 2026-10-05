@@ -240,7 +240,6 @@ def test_default_settings_round_trip_and_transport_flags():
     assert snapshot.settings == {}
     assert snapshot.model_transport_configured is False
     assert snapshot.provider_currency == "$"
-    assert snapshot.model_provider_currencies == {}
     rebuilt = settings_from_snapshot(snapshot.settings, snapshot.runtime)
     assert rebuilt.settings == AppConfig()
     assert rebuilt.runtime == RuntimeEnv()
@@ -251,7 +250,6 @@ def test_routing_identity_and_currencies_survive_without_transport():
     public = public_config_snapshot(loaded)
     assert public.model_transport_configured is True
     assert public.provider_currency == "₽"
-    assert public.model_provider_currencies == {"fast": "$", "large": "₽"}
     worker_router = ModelRouter(loaded, level_provider=lambda: "max")
     public_router = ModelRouter(
         settings_from_snapshot(public.settings, public.runtime),

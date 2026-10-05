@@ -54,6 +54,8 @@ class FileStorageDriver(StorageDriver):
 
     def __init__(self, root: str | os.PathLike, *, driver_name="ua.file"):
         self.root = Path(root).absolute()
+        # Payload — промпты, файлы и вывод инструментов: только владельцу.
+        self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._name = driver_name
 
     def name(self) -> str:
@@ -76,7 +78,7 @@ class FileStorageDriver(StorageDriver):
             os.utime(path)
             return key
         # Нет или битый (сбой питания до fsync) — записать заново.
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd, temporary = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
         try:
             with os.fdopen(fd, "wb") as handle:

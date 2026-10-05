@@ -13,13 +13,18 @@ import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
 
-from gc_ua_temporalio.storage.sqlite import ProjectionConflict, encode
+from gc_ua_temporalio.storage.sqlite import (
+    ProjectionConflict,
+    _private_file,
+    encode,
+)
 
 
 class TechnicalStore:
     def __init__(self, path: str | Path):
         self.path = str(path)
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        _private_file(self.path)
         with sqlite3.connect(self.path) as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
@@ -35,12 +40,13 @@ class TechnicalStore:
             """)
 
     @contextmanager
-    def transaction(self):
+    def transaction(self, *, readonly=False):
+        """Транзакция; ``readonly`` — чтение без блокировки записи (WAL)."""
         db = sqlite3.connect(self.path, timeout=10, isolation_level=None)
         db.row_factory = sqlite3.Row
         try:
             db.execute("PRAGMA synchronous=FULL")
-            db.execute("BEGIN IMMEDIATE")
+            db.execute("BEGIN" if readonly else "BEGIN IMMEDIATE")
             yield db
             db.commit()
         except BaseException:
@@ -50,7 +56,7 @@ class TechnicalStore:
             db.close()
 
     def operation_result(self, owner, operation, digest):
-        with self.transaction() as db:
+        with self.transaction(readonly=True) as db:
             row = db.execute(
                 "SELECT digest,result FROM operations WHERE owner=? AND operation=?",
                 (owner, operation),
@@ -65,7 +71,7 @@ class TechnicalStore:
 
     def owners(self):
         """Владельцы, у которых есть квитанции или preview."""
-        with self.transaction() as db:
+        with self.transaction(readonly=True) as db:
             rows = db.execute(
                 "SELECT owner FROM operations UNION SELECT owner FROM view_events"
             ).fetchall()

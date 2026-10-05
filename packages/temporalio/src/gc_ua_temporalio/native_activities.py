@@ -234,7 +234,6 @@ class NativeActivities:
             else None,
             model_transport_configured=public.model_transport_configured,
             provider_currency=public.provider_currency,
-            model_provider_currencies=public.model_provider_currencies,
             skills=await ctx.skills_registry.list_skills(),
             prompts_request=prompts_request,
             prompts=prompts,
