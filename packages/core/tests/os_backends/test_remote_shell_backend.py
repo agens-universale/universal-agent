@@ -230,3 +230,15 @@ async def test_capability_probes_work(be):
     # перекрывал его, и `has_find` падал с TypeError (поймано docker live).
     await be.awarm_capabilities()
     assert isinstance(be.has_find, bool) and isinstance(be.has_grep, bool)
+
+
+async def test_download_errors_are_not_all_file_not_found(be, tmp_path):
+    # Каталог и запрет на чтение — не «файла нет»: иначе модель решит, что файла
+    # не существует, и перезапишет его.
+    d = tmp_path / "dir"
+    d.mkdir()
+    with pytest.raises(OSError) as ei:
+        await be.read_bytes(str(d))
+    assert not isinstance(ei.value, FileNotFoundError)
+    with pytest.raises(FileNotFoundError):
+        await be.read_bytes(str(tmp_path / "missing.txt"))

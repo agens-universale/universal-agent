@@ -200,3 +200,10 @@ async def test_background_spawn_outlives_parent_thread(tmp_path, monkeypatch):
         seen["cmd"].startswith("bwrap ")
         and "--die-with-parent" not in seen["cmd"]
     )
+
+
+def test_default_cwd_is_root_when_no_auto_workdir(tmp_path):
+    # workdir=null и launch_root ≠ реальный cwd процесса: команды по умолчанию
+    # обязаны идти в корень песочницы, а не в os.getcwd() вне него.
+    be = SandboxBackend(wrapper=lambda cwd: [], root=str(tmp_path))
+    assert be.default_cwd() == str(tmp_path)

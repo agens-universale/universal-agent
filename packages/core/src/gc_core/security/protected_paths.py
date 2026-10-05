@@ -34,12 +34,12 @@ def protected_paths(
         hard.add(Path(os.path.abspath(raw)))
     gc_roots = {paths[key] for key in ("config", "state", "cache", "data")}
     ci = os.name == "nt"
+    # Только каталог рана песочницы: cwd=~/.config/gc не снимает защиту с config.yml.
+    sandboxes = paths["state"] / "sandboxes"
     workspace = (
         proj
-        if any(
-            is_within_root(str(proj), str(r), case_insensitive=ci)
-            for r in gc_roots
-        )
+        if is_within_root(str(proj), str(sandboxes), case_insensitive=ci)
+        and proj != sandboxes
         else None
     )
 

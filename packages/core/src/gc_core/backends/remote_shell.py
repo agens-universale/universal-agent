@@ -135,8 +135,12 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             raise OSError(res.stderr.strip() or f"upload failed: {path}")
 
     async def _adownload_bytes(self, path: str) -> bytes:
+        q = shlex.quote(path)
+        # Явная проверка каталога: `base64 < dir` на macOS отдаёт rc 0 и пустой
+        # вывод, и каталог читался бы как пустой файл.
         res = await self._run(
-            f"base64 < {shlex.quote(path)}",
+            f"if [ -d {q} ]; then echo {shlex.quote(path + ': Is a directory')} >&2; exit 1; fi; "
+            f"base64 < {q}",
             timeout=self.fs_op_timeout_sec,
             capture_max_chars=self.walk_output_max_chars,
         )
@@ -145,7 +149,15 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
                 f"download timed out after {self.fs_op_timeout_sec} s: {path}"
             )
         if res.return_code != 0:
-            raise FileNotFoundError(res.stderr.strip() or path)
+            err = res.stderr.strip()
+            # «Файла нет» — только когда так сказала та сторона: каталог или
+            # запрет на чтение иначе выглядели бы как отсутствие файла, и
+            # модель шла бы его создавать.
+            if "No such file" in err:
+                raise FileNotFoundError(err)
+            if "Permission denied" in err:
+                raise PermissionError(err)
+            raise OSError(err or f"download failed: {path}")
         if res.stdout_hit_capture_cap:
             raise OSError(
                 f"file exceeds download ceiling ({self.walk_output_max_chars} chars): {path}"

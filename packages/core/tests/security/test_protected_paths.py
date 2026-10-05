@@ -46,3 +46,14 @@ def test_workspace_inside_gc_state_is_not_operational(tmp_path, monkeypatch):
         == "operational"
     )
     assert classify_path(tmp_path / "gc" / "config.yml", ps) == "operational"
+
+
+def test_carve_out_only_under_state_sandboxes(tmp_path, monkeypatch):
+    """Исключение — только для <state>/sandboxes/<run_id>; cwd=~/.config/gc не снимает защиту с config.yml."""
+    from gc_core.config_modules import env_vars
+    from gc_core.security.protected_paths import classify_path
+
+    monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
+    ps = protected_paths(cwd=str(tmp_path / "gc"))
+    assert classify_path(tmp_path / "gc" / "config.yml", ps) == "operational"
+    assert ps.workspace_exception is None

@@ -150,7 +150,9 @@ class SandboxBackend(LocalFsBackend):
         self.auto_workdir = auto_workdir
 
     def default_cwd(self) -> Optional[str]:
-        return self.auto_workdir or os.getcwd()
+        # Корень песочницы, не os.getcwd(): при launch_root ≠ cwd процесса
+        # команды по умолчанию иначе шли бы вне записываемой области.
+        return self.auto_workdir or self.root
 
     async def aexec(
         self,
