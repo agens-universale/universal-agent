@@ -238,6 +238,15 @@ EXPERT_ONLY_KEYS: set = {
     "assign.auto_judge",
     "assign.vision",
     "assign.subagents",
+    # --- chat_api: порт процесса gc-chat, не шаблон CLI/TUI ---
+    "chat_api.host",
+    "chat_api.port",
+    "chat_api.auth_token",
+    "chat_api.cors_origins",
+    "chat_api.launch_root",
+    "chat_api.text_answer_mode",
+    "chat_api.finish_gate_mode",
+    "chat_api.todo_reminder_steps",
 }
 
 

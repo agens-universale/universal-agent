@@ -750,6 +750,18 @@ NOT_IN_MATRIX = {
     "acp.finish_gate_mode": "только ACP",
     "acp.todo_reminder_steps": "только ACP",
     "tui.finish_gate_mode": "только TUI",
+    "chat_api.host": "только процесс gc-chat",
+    "chat_api.port": "только процесс gc-chat",
+    "chat_api.auth_token": "только процесс gc-chat",
+    "chat_api.cors_origins": "только процесс gc-chat",
+    "chat_api.launch_root": "только процесс gc-chat",
+    "chat_api.text_answer_mode": "только процесс gc-chat",
+    "chat_api.finish_gate_mode": "только процесс gc-chat",
+    "chat_api.todo_reminder_steps": "только процесс gc-chat",
+    "todo.reminder_steps": (
+        "напоминание чеклиста; матрица гоняет CLI и этот лист не "
+        "переключает. Канал Responses пишет его в runtime"
+    ),
     "tui.agentsmd_override": "только TUI",
     "tui.bang_shell.timeout_sec": "только TUI",
     "tui.bang_shell.max_output_bytes": "только TUI",

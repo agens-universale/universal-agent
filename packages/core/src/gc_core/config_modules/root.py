@@ -15,6 +15,7 @@ from gc_core.config_modules.agent import (
 )
 from gc_core.config_modules.agent_edits import AgentEditsConfig
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.chat_api import ChatApiConfig
 from gc_core.config_modules.chat_completions import ChatCompletionsConfig
 from gc_core.config_modules.endpoint_presets import (
     EndpointPreset,
@@ -110,6 +111,7 @@ class AppConfig(BaseModel):
     pricing: PricingConfig = Field(default_factory=PricingConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
     acp: AcpConfig = Field(default_factory=AcpConfig)
+    chat_api: ChatApiConfig = Field(default_factory=ChatApiConfig)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     endpoint_presets: list[EndpointPreset] = Field(
         default_factory=default_endpoint_presets

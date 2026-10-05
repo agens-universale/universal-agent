@@ -43,6 +43,7 @@ PROD_PATHS = [
     "packages/testkit/src",
     "packages/tui/src",
     "packages/acp/src",
+    "packages/chat/src",
     "packages/core/assets/skills",
     "scripts",
     "integrations",
@@ -55,6 +56,7 @@ USAGE_PATHS = [
     "packages/server/tests",
     "packages/tui/tests",
     "packages/acp/tests",
+    "packages/chat/tests",
     "tests",
 ]
 WHITELIST = "scripts/dead_code_whitelist.py"
