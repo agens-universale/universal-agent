@@ -783,7 +783,7 @@ worker'а: несколько worker'ов на разных хостах тре�
 не мигрируются; этот протокол удалён.</li>
 </ul>
 <h2 id="section-12">12. Проверки</h2>
-<p>Прогоны 05.10.2026 после слияния develop <code>824870f6</code>:</p>
+<p>Прогоны 05.10.2026 после исправлений по ревью и слияния develop <code>8f43bf03</code>:</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
 <thead>
 <tr>
@@ -793,20 +793,16 @@ worker'а: несколько worker'ов на разных хостах тре�
 </thead>
 <tbody>
 <tr>
-<td>Все наборы (<code>tests</code>, core, cli, server, tui, mcp, acp, temporalio — по файлу, параллельно)</td>
-<td>1280 из 1287 файлов зелёные; 7 — vendor-тесты <code>computer-mcp</code> (пакет не установлен в окружение)</td>
+<td>Все наборы, кроме temporalio (<code>tests</code>, core, cli, server, tui, mcp, acp, chat — по файлу, параллельно)</td>
+<td>1211 из 1212 файлов зелёные; 1 — замер задержки event loop под параллельной нагрузкой (отдельно проходит)</td>
 </tr>
 <tr>
 <td><code>packages/temporalio/tests</code> (live с Temporal dev server)</td>
-<td>28 из 28 файлов</td>
+<td>220 passed</td>
 </tr>
 <tr>
 <td>Эталон локального режима: 44 трассы develop <code>824870f6</code></td>
 <td>совпадают</td>
-</tr>
-<tr>
-<td>Parity и toggle matrix</td>
-<td>199 passed, 11 skipped</td>
 </tr>
 <tr>
 <td>Ruff check / format</td>
@@ -825,14 +821,18 @@ worker'а: несколько worker'ов на разных хостах тре�
 <tbody>
 <tr>
 <td>Серия local vs native: 8 задач (файлы, память между ходами, отсутствующий файл, данные с ошибками, остатки, смена правила, делегирование, два субагента) × 3 повтора</td>
-<td>верный <code>result.json</code> 24/24 в каждом режиме; два локальных прогона превысили лимит хода 600 с из-за задержек модели</td>
+<td>23/24 в каждом режиме; по одному обрыву соединения провайдера (<code>RemoteProtocolError</code>)</td>
+</tr>
+<tr>
+<td>Temporal без guard'ов, треды в S3 (MinIO, внешний модуль): 10 задач × 3</td>
+<td>30/30; мимо S3 пишется только <code>receipts.sqlite</code>; 61 префикс, 1020 объектов — проверка целостности без проблем</td>
 </tr>
 <tr>
 <td>MCP-сценарии в Temporal: UA native vs Deep Agents (<code>temporalio.contrib.deepagents</code>), 2–3 MCP-сервера, × 3</td>
-<td>6/6 у обоих; activities на прогон: UA 25–29 и 34–38, Deep Agents 9–11 и 17–18</td>
+<td>6/6 у обоих; activities на прогон: UA 25 и 34, Deep Agents 9 и 19</td>
 </tr>
 <tr>
-<td>Harbor, terminal-bench 2.0: 10 простых задач</td>
+<td>Harbor, terminal-bench 2.0: 10 простых задач (04.10)</td>
 <td>6/10; остальные 4 — тайм-аут агента 900 с при отдельных вызовах модели до 668 с</td>
 </tr>
 </tbody>
