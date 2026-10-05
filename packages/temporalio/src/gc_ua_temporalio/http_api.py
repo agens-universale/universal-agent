@@ -57,7 +57,7 @@ def router(registry):
         # workflow_id() проверяет ID: ValueError → 400, а не 500.
         client = await registry.client()
         return await action(
-            client, await registry.aworkflow_id(system, thread)
+            client, await registry.lookup_workflow_id(system, thread)
         )
 
     @routes.post("/{system}/{thread}/answer")
