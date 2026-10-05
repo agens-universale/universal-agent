@@ -83,8 +83,9 @@ INTERRUPTED_EFFECT = (
 def session_failure(exc):
     """Доменный отказ сессии — ``ApplicationError``, run становится FAILED.
 
-    Доменный — ``ExecutionFailure`` ядра или ошибка, поднятая из исхода
-    activity/child workflow (в цепочке ``__cause__`` есть ``FailureError``).
+    Доменный — ``ExecutionFailure`` ядра, ошибка, поднятая из исхода
+    activity/child workflow (в цепочке ``__cause__`` есть ``FailureError``),
+    или восстановленный исход модельной операции (``restored_model_failure``).
     Всё остальное — сбой кода workflow: недетерминизм после деплоя, запрет
     песочницы, баг. Тогда ``None``: падает только workflow task, run ждёт
     исправленного воркера и продолжает ход, а не теряет его.
@@ -93,7 +94,9 @@ def session_failure(exc):
         return exc
     current, seen = exc, set()
     while current is not None and id(current) not in seen:
-        if isinstance(current, (ExecutionFailure, FailureError)):
+        if isinstance(current, (ExecutionFailure, FailureError)) or getattr(
+            current, "restored_model_failure", False
+        ):
             return ApplicationError(
                 str(exc) or type(exc).__name__,
                 type=type(exc).__name__,

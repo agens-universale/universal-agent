@@ -116,8 +116,11 @@ def protected_extra_paths(source: Any) -> list[str]:
     ``protected_paths`` берёт только ``abspath``. ``source`` — то, что
     принимает ``settings_of``.
     """
+    # ``expanduser`` — только для ``~``: guard команд считает это и в коде
+    # durable-workflow, где обращение к ``os.path`` запрещено песочницей
+    # (воркер раскрывает ``~`` профиля заранее).
     return [
-        os.path.expanduser(raw)
+        os.path.expanduser(raw) if str(raw).startswith("~") else str(raw)
         for raw in settings_of(source).security.protected_paths.extra
         if str(raw).strip()
     ]

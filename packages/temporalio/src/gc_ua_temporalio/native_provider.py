@@ -192,16 +192,17 @@ class NativeContextProvider:
             # Служебное состояние воркера агент не трогает, где бы оно ни
             # лежало: история всех сессий, квитанции и payload — не его файлы.
             inside = list(state_paths)
-            if inside:
-                protected = settings.security.protected_paths
+            protected = settings.security.protected_paths
+            if inside or any(str(p).startswith("~") for p in protected.extra):
+                # ``~`` — здесь, на воркере: guard команд в коде workflow не
+                # может обращаться к os.path.
+                expanded = [os.path.expanduser(p) for p in protected.extra]
                 settings = settings.model_copy(
                     update={
                         "security": settings.security.model_copy(
                             update={
                                 "protected_paths": protected.model_copy(
-                                    update={
-                                        "extra": [*protected.extra, *inside]
-                                    }
+                                    update={"extra": [*expanded, *inside]}
                                 )
                             }
                         )

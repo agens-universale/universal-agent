@@ -16,7 +16,17 @@ _EXECUTION_ERRORS = {
 
 
 def restore_model_failure(failure: ModelFailure) -> Exception:
-    """Preserve consumer policy without constructing HTTP clients/requests."""
+    """Preserve consumer policy without constructing HTTP clients/requests.
+
+    Исключение помечено ``restored_model_failure``: это исход модельной
+    операции, а не сбой кода вызывающего (durable-исполнитель отличает их).
+    """
+    exc = _restore_model_failure(failure)
+    exc.restored_model_failure = True
+    return exc
+
+
+def _restore_model_failure(failure: ModelFailure) -> Exception:
     if failure.schema_version != 1:
         return ExecutionFailure("Unsupported ModelFailure schema_version")
     name, message = failure.error_type, failure.message

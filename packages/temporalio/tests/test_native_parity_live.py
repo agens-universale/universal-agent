@@ -425,7 +425,9 @@ async def test_actual_http_local_native_parity(
                             "max_steps": 15,
                             "strict_turn_finish_validation": scenario.get(
                                 "config", {}
-                            ).get("strict_turn_finish_validation", False),
+                            ).get(
+                                "agent.strict_turn_finish_validation", False
+                            ),
                             **scenario.get("agent_extra", {}),
                         },
                         "tui": {"text_answer_mode": "deny"},
