@@ -1114,6 +1114,12 @@ ddgs-mcp --http
 В `config.yml` агента укажи нужный транспорт (`http`, `stream_http` и т.д.)
 и endpoint подключения (см. раздел [MCP-серверы](#mcp-серверы) выше).
 
+## HTTP-процесс gc-chat
+
+Секция `chat_api` живёт в том же `config.yml`, что и агент. Читает её только процесс `gc-chat`: и `POST /v1/responses`, и `POST /v1/chat/completions` на одном порту. В шаблон CLI и в `demo_config.yml` она не входит: без секции схема подставляет дефолты (`127.0.0.1:8090`, без токена, любой origin, проза `allow`, finish-gate `off`, напоминания `session_todo` выключены).
+
+Аннотированный образец для копирования в свой конфиг — [`demo_config_chat.yml`](../demo_config_chat.yml). Запуск, ключи и контракт HTTP — [responses.md](responses.md).
+
 ## Где gc-cli хранит runtime-данные
 
 Кросс-платформенная раскладка. По умолчанию:

@@ -31,7 +31,11 @@ from typing import Any, Dict, Mapping, Optional, Tuple
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
 from gc_core.config_modules.flat_keys import setting_path
 from gc_core.config_modules.root import AppConfig, resolve_paths
-from gc_core.settings import LoadedSettings, RuntimeEnv
+from gc_core.settings import (
+    LoadedSettings,
+    RuntimeEnv,
+    expand_section_updates,
+)
 
 #: Профильные ключи, которые не настройки, а факты запуска (``RuntimeEnv``).
 _RUNTIME_KEYS = frozenset(f.name for f in dataclasses.fields(RuntimeEnv))
@@ -105,7 +109,9 @@ def profile_updates(
             continue
         updates[setting_path(key)] = copy.deepcopy(value)
     ordered = dict(sorted(updates.items(), key=lambda kv: kv[0].count(".")))
-    return ordered, runtime
+    # Профиль сливается с умолчаниями бенча (правка по пути заменяет значение):
+    # секция профиля раскладывается на листья.
+    return expand_section_updates(ordered), runtime
 
 
 def build_gc_cli_settings(

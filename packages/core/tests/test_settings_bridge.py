@@ -181,3 +181,19 @@ def test_override_replaces_lists_and_dicts_instead_of_merging(tmp_path):
         base.security.read_guard.enabled
         == narrowed.security.read_guard.enabled
     )
+
+
+def test_expand_section_updates_keeps_dict_leaves_and_model_entries():
+    from gc_core.settings import expand_section_updates
+
+    assert expand_section_updates(
+        {
+            "summary": {"max_message_chars": 10},
+            "backend.chat_completion_kwargs": {"temperature": 0},
+            "models": {"m": {"model": "x"}},
+        }
+    ) == {
+        "summary.max_message_chars": 10,
+        "backend.chat_completion_kwargs": {"temperature": 0},
+        "models": {"m": {"model": "x"}},
+    }

@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gigacode Universal Agent</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='%233fd0c9'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #0a0c10;
+    --panel: #12151c;
+    --panel2: #181c25;
+    --bd: #1f242d;
+    --bd2: #2a3140;
+    --tx: #e8ebf1;
+    --mut: #8b93a3;
+    --mut2: #6b727f;
+    --acc: #3fd0c9;
+    --warn: #e6b86b;
+    --bad: #e07a72;
+    --ok: #7ed957;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(900px 420px at 100% -10%, rgba(63, 208, 201, .12), transparent 55%),
+      radial-gradient(700px 380px at 0% 0%, rgba(126, 217, 87, .06), transparent 50%),
+      var(--bg);
+    color: var(--tx);
+    font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .app {
+    max-width: 920px;
+    margin: 0 auto;
+    height: 100vh;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    padding: 0 16px;
+  }
+  header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px 16px;
+    padding: 14px 0 10px;
+    border-bottom: 1px solid var(--bd);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .brand svg { width: 36px; height: 36px; flex: none; filter: drop-shadow(0 0 10px rgba(63, 208, 201, .45)); }
+  h1 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 750;
+    letter-spacing: .2px;
+    background: linear-gradient(90deg, #e8ebf1 0%, #9be88f 42%, #3fd0c9 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .sub { color: var(--mut); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+  .btn, .primary {
+    border: 1px solid var(--bd2);
+    background: var(--panel);
+    color: var(--tx);
+    border-radius: 10px;
+    padding: 7px 12px;
+  }
+  .btn:hover, .primary:hover { border-color: var(--acc); }
+  .btn:disabled, .primary:disabled { opacity: .45; cursor: default; }
+  .primary { background: rgba(63, 208, 201, .16); border-color: rgba(63, 208, 201, .45); color: var(--acc); }
+  .stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    padding: 8px 0;
+    color: var(--mut);
+    font-size: 13px;
+  }
+  .stats .item { white-space: nowrap; }
+  .stats b { color: var(--tx); font-weight: 650; }
+  .est { color: var(--mut2); font-size: 12px; }
+  .warn, .alert {
+    border: 1px solid rgba(230, 184, 107, .4);
+    background: rgba(230, 184, 107, .08);
+    color: var(--warn);
+    border-radius: 10px;
+    padding: 8px 12px;
+    font-size: 13px;
+    margin-bottom: 8px;
+  }
+  .alert { border-color: rgba(224, 122, 114, .45); background: rgba(224, 122, 114, .08); color: var(--bad); }
+  #log { flex: 1; overflow: auto; padding: 12px 0 8px; }
+  .empty { max-width: 520px; margin: 12vh auto 0; color: var(--mut); }
+  .empty h2 { margin: 0 0 8px; color: var(--tx); font-size: 20px; }
+  .empty p { margin: 8px 0; }
+  .msg { margin: 0 0 16px; }
+  .msg.user { display: flex; justify-content: flex-end; }
+  .user-text {
+    max-width: min(78%, 640px);
+    background: rgba(63, 208, 201, .12);
+    border: 1px solid rgba(63, 208, 201, .28);
+    border-radius: 16px 16px 4px 16px;
+    padding: 10px 14px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .assistant { max-width: 100%; }
+  details {
+    margin: 0 0 8px;
+    border: 1px solid var(--bd);
+    border-radius: 10px;
+    background: var(--panel);
+  }
+  summary { cursor: pointer; padding: 8px 12px; color: var(--mut); }
+  details pre {
+    margin: 0;
+    padding: 0 12px 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--mut);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 12.5px;
+  }
+  .tool {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 6px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--panel);
+    border: 1px solid var(--bd);
+    font-size: 13px;
+  }
+  .tool.nested { margin-left: 18px; }
+  .tool .st { margin-left: auto; color: var(--mut2); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mut2); flex: none; transform: translateY(1px); }
+  .tool.in_progress .dot { background: var(--acc); }
+  .tool.completed .dot { background: var(--ok); }
+  .tool.failed .dot { background: var(--bad); }
+  .prose { overflow-wrap: anywhere; }
+  .prose p { margin: 0 0 8px; }
+  .prose h1, .prose h2, .prose h3 { margin: 12px 0 6px; line-height: 1.3; }
+  .prose h1 { font-size: 1.25rem; }
+  .prose h2 { font-size: 1.1rem; }
+  .prose h3 { font-size: 1rem; }
+  .prose ul, .prose ol { margin: 0 0 8px; padding-left: 1.3em; }
+  .prose a { color: var(--acc); }
+  .prose code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .92em;
+    background: var(--panel2);
+    border-radius: 5px;
+    padding: 1px 5px;
+  }
+  .prose pre {
+    margin: 0 0 10px;
+    padding: 12px;
+    background: var(--panel);
+    border: 1px solid var(--bd);
+    border-radius: 10px;
+    overflow: auto;
+  }
+  .prose pre code { background: none; padding: 0; }
+  .flag { margin-top: 6px; font-size: 12px; color: var(--mut); }
+  .flag.bad { color: var(--bad); }
+  .working {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--mut);
+    font-size: 13px;
+    grid-column: 1;
+    align-self: center;
+  }
+  .spin {
+    width: 12px;
+    height: 12px;
+    border: 2px solid var(--bd2);
+    border-top-color: var(--acc);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    flex: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 8px;
+    align-items: end;
+    padding: 10px 0 16px;
+    border-top: 1px solid var(--bd);
+  }
+  textarea {
+    grid-column: 1;
+    resize: none;
+    overflow: hidden;
+    min-height: 46px;
+    max-height: 180px;
+    padding: 11px 12px;
+    border-radius: 12px;
+    border: 1px solid var(--bd2);
+    background: var(--panel);
+    outline: none;
+  }
+  textarea:focus { border-color: var(--acc); }
+  #stop { grid-column: 2; }
+  #send { grid-column: 2; }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .overlay[hidden], .warn[hidden], .alert[hidden], #stop[hidden], .working[hidden] { display: none; }
+  .panel {
+    width: min(480px, 100%);
+    background: var(--panel);
+    border: 1px solid var(--bd2);
+    border-radius: 16px;
+    padding: 18px;
+  }
+  .panel h2 { margin: 0 0 12px; font-size: 18px; }
+  label { display: block; margin: 10px 0 4px; color: var(--mut); font-size: 13px; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  input, select {
+    width: 100%;
+    padding: 8px 10px;
+    border-radius: 10px;
+    border: 1px solid var(--bd2);
+    background: var(--bg);
+    outline: none;
+  }
+  input:focus, select:focus { border-color: var(--acc); }
+  .hint { margin: 6px 0 0; color: var(--mut2); font-size: 12px; }
+  .panel-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .form-alert { min-height: 1.2em; margin: 8px 0 0; color: var(--bad); font-size: 13px; }
+  @media (max-width: 720px) {
+    header { align-items: flex-start; }
+    .actions { flex: 1 1 100%; justify-content: flex-start; }
+    .sub { white-space: normal; }
+    h1 { font-size: 16px; }
+    #composer { align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">
+      <svg viewBox="0 0 32 32" aria-hidden="true">
+        <defs>
+          <radialGradient id="orb" cx="32%" cy="30%" r="70%">
+            <stop offset="0%" stop-color="#9be88f"/>
+            <stop offset="55%" stop-color="#3fd0c9"/>
+            <stop offset="100%" stop-color="#138f88"/>
+          </radialGradient>
+        </defs>
+        <circle cx="16" cy="16" r="14" fill="url(#orb)"/>
+      </svg>
+      <div>
+        <h1>Gigacode Universal Agent</h1>
+        <div class="sub" id="conn"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="button" class="btn" id="newBtn">Новый чат</button>
+      <button type="button" class="btn" id="importBtn">Импорт</button>
+      <button type="button" class="btn" id="exportBtn">Экспорт</button>
+      <button type="button" class="btn" id="settingsBtn">Настройки</button>
+    </div>
+  </header>
+  <div class="stats" id="stats" title="Оценка без токенизатора: gc-chat не возвращает usage. У Chat Completions вход считается заново на каждом ходе — уходит вся история."></div>
+  <div class="warn" id="warn" hidden>Этот диалог сервер не продолжит: нет id прошлого ответа. Следующее сообщение откроет новый ход.</div>
+  <main id="log"></main>
+  <div class="alert" id="alert" hidden></div>
+  <form id="composer">
+    <div class="working" id="working" hidden><span class="spin"></span>работаю…</div>
+    <button type="button" class="btn" id="stop" hidden>Стоп</button>
+    <textarea id="input" rows="1" placeholder="Сообщение. Enter — отправить, Shift+Enter — новая строка"></textarea>
+    <button type="submit" class="primary" id="send">Отправить</button>
+  </form>
+</div>
+
+<div class="overlay" id="settings" hidden>
+  <form class="panel" id="settingsForm">
+    <h2>Настройки</h2>
+    <label for="f-api">Интерфейс</label>
+    <select id="f-api">
+      <option value="responses">Responses — диалог помнит сервер</option>
+      <option value="completions">Chat Completions — история в каждом запросе</option>
+    </select>
+    <label for="f-host">Эндпоинт</label>
+    <div class="row">
+      <select id="f-scheme" aria-label="Схема" style="flex:0 0 96px">
+        <option value="http">http</option>
+        <option value="https">https</option>
+      </select>
+      <input id="f-host" autocomplete="off" placeholder="127.0.0.1" required>
+      <input id="f-port" aria-label="Порт" inputmode="numeric" autocomplete="off" placeholder="8090" style="flex:0 0 96px" required>
+    </div>
+    <p class="hint">Хост и порт процесса gc-chat. Можно вставить адрес целиком, порт подставится сам.</p>
+    <label for="f-token">Токен</label>
+    <input id="f-token" type="password" autocomplete="off" placeholder="пусто, если сервер без авторизации">
+    <label for="f-model">Модель</label>
+    <div class="row">
+      <select id="f-model" required>
+        <option value="">список не загружен</option>
+      </select>
+      <button type="button" class="btn" id="pullModel" style="flex:0 0 auto">Обновить</button>
+    </div>
+    <p class="hint">Список с сервера. После смены адреса или токена нажмите «Обновить».</p>
+    <div class="form-alert" id="formAlert"></div>
+    <div class="panel-actions">
+      <button type="button" class="btn" id="settingsCancel">Отмена</button>
+      <button type="submit" class="primary">Сохранить</button>
+    </div>
+  </form>
+</div>
+<input type="file" id="file" accept="application/json,.json" hidden>
+
+<script>
+(function () {
+  var SETTINGS_KEY = "gc-ua-chat-settings";
+  var MESSAGES_KEY = "gc-ua-chat-messages";
+  var DEFAULTS = { api: "responses", scheme: "http", host: "127.0.0.1", port: "8090", token: "", model: "" };
+
+  var settings = loadSettings();
+  var messages = loadMessages();
+  var busy = false;
+  var turnGen = 0;
+  var abortCtl = null;
+  var frame = 0;
+  var saveTimer = 0;
+
+  var logEl = document.getElementById("log");
+  var input = document.getElementById("input");
+  var alertEl = document.getElementById("alert");
+  var warnEl = document.getElementById("warn");
+  var statsEl = document.getElementById("stats");
+  var connEl = document.getElementById("conn");
+  var stopBtn = document.getElementById("stop");
+  var workingEl = document.getElementById("working");
+  var sendBtn = document.getElementById("send");
+  var settingsEl = document.getElementById("settings");
+  var formAlert = document.getElementById("formAlert");
+
+  document.getElementById("composer").addEventListener("submit", function (e) {
+    e.preventDefault();
+    send();
+  });
+  input.addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      send();
+    }
+  });
+  input.addEventListener("input", grow);
+  document.getElementById("newBtn").addEventListener("click", newChat);
+  document.getElementById("importBtn").addEventListener("click", function () {
+    document.getElementById("file").click();
+  });
+  document.getElementById("file").addEventListener("change", onImport);
+  document.getElementById("exportBtn").addEventListener("click", exportChat);
+  document.getElementById("settingsBtn").addEventListener("click", openSettings);
+  document.getElementById("settingsCancel").addEventListener("click", closeSettings);
+  document.getElementById("settingsForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    saveForm();
+  });
+  document.getElementById("pullModel").addEventListener("click", pullModel);
+  stopBtn.addEventListener("click", stop);
+  settingsEl.addEventListener("click", function (e) {
+    if (e.target === settingsEl) closeSettings();
+  });
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape" && !settingsEl.hidden) closeSettings();
+  });
+
+  render();
+  input.focus();
+
+  function loadSettings() {
+    var s = {
+      api: DEFAULTS.api, scheme: DEFAULTS.scheme, host: DEFAULTS.host,
+      port: DEFAULTS.port, token: DEFAULTS.token, model: DEFAULTS.model
+    };
+    try {
+      var raw = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null");
+      if (!raw || typeof raw !== "object") return s;
+      if (raw.api === "completions" || raw.api === "responses") s.api = raw.api;
+      if (raw.scheme === "https" || raw.scheme === "http") s.scheme = raw.scheme;
+      if (typeof raw.host === "string") s.host = raw.host;
+      if (typeof raw.port === "string" || typeof raw.port === "number") s.port = String(raw.port);
+      if (typeof raw.token === "string") s.token = raw.token;
+      if (typeof raw.model === "string") s.model = raw.model;
+    } catch (e) {}
+    return s;
+  }
+
+  function loadMessages() {
+    try {
+      var raw = JSON.parse(localStorage.getItem(MESSAGES_KEY) || "[]");
+      if (!Array.isArray(raw)) return [];
+      var out = [];
+      for (var i = 0; i < raw.length; i++) {
+        var m = hydrate(raw[i]);
+        if (m) out.push(m);
+      }
+      return out;
+    } catch (e) {
+      return [];
+    }
+  }
+
+  function hydrate(raw) {
+    if (!raw || typeof raw !== "object") return null;
+    if (raw.role === "user") {
+      if (typeof raw.content !== "string" || !raw.content) return null;
+      return { role: "user", content: raw.content };
+    }
+    if (raw.role !== "assistant") return null;
+    var parts = [];
+    if (Array.isArray(raw.parts)) {
+      for (var i = 0; i < raw.parts.length; i++) parts.push.apply(parts, partFrom(raw.parts[i]));
+    } else {
+      if (raw.reasoning) parts.push({ id: "think", kind: "reasoning", text: String(raw.reasoning) });
+      if (Array.isArray(raw.tools)) {
+        for (var t = 0; t < raw.tools.length; t++) {
+          var tool = raw.tools[t] || {};
+          parts.push({
+            id: "tool-" + t,
+            kind: "tool",
+            title: String(tool.title || tool.name || "tool"),
+            name: String(tool.name || ""),
+            status: String(tool.status || "completed"),
+            parent: tool.parent ? String(tool.parent) : null
+          });
+        }
+      }
+      parts.push({ id: "answer", kind: "answer", text: String(raw.content || "") });
+    }
+    return {
+      role: "assistant",
+      parts: parts,
+      responseId: typeof raw.responseId === "string" ? raw.responseId : null,
+      status: typeof raw.status === "string" ? raw.status : null,
+      note: typeof raw.note === "string" ? raw.note : null,
+      error: typeof raw.error === "string" ? raw.error : null,
+      streaming: false
+    };
+  }
+
+  function partFrom(p) {
+    if (!p || typeof p !== "object") return [];
+    if (p.kind === "reasoning" || p.kind === "answer") {
+      return [{ id: String(p.id || p.kind), kind: p.kind, text: String(p.text || "") }];
+    }
+    if (p.kind === "tool") {
+      return [{
+        id: String(p.id || "tool"),
+        kind: "tool",
+        title: String(p.title || p.name || "tool"),
+        name: String(p.name || ""),
+        status: String(p.status || "completed"),
+        parent: p.parent ? String(p.parent) : null
+      }];
+    }
+    return [];
+  }
+
+  function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  }
+
+  function saveMessages() {
+    var dump = messages.map(function (m) {
+      if (m.role === "user") return { role: "user", content: m.content };
+      return {
+        role: "assistant",
+        parts: m.parts,
+        responseId: m.responseId,
+        status: m.status,
+        note: m.note,
+        error: m.error
+      };
+    });
+    try { localStorage.setItem(MESSAGES_KEY, JSON.stringify(dump)); } catch (e) {}
+  }
+
+  function resolveOrigin(s) {
+    var scheme = s.scheme === "https" ? "https" : "http";
+    var host = String(s.host || "").trim();
+    var port = String(s.port == null ? "" : s.port).trim();
+    if (/^https?:\/\//i.test(host)) {
+      var u = new URL(host);
+      scheme = u.protocol === "https:" ? "https" : "http";
+      host = u.hostname;
+      if (u.port) port = u.port;
+    }
+    var hp = host.match(/^([^[\]]+):(\d+)$/);
+    if (hp) {
+      host = hp[1];
+      if (!port) port = hp[2];
+    }
+    if (!host) throw new Error("Укажите эндпоинт");
+    if (!port) port = scheme === "https" ? "443" : "8090";
+    if (!/^\d+$/.test(port) || +port < 1 || +port > 65535) throw new Error("Порт от 1 до 65535");
+    var shown = host.indexOf(":") >= 0 ? "[" + host + "]" : host;
+    return { scheme: scheme, host: host, port: port, origin: scheme + "://" + shown + ":" + port };
+  }
+
+  function authHeaders(s, json) {
+    var h = {};
+    if (json) h["Content-Type"] = "application/json";
+    var token = String(s.token || "").trim();
+    if (token) h.Authorization = "Bearer " + token;
+    return h;
+  }
+
+  function setAlert(text) {
+    alertEl.hidden = !text;
+    alertEl.textContent = text || "";
+  }
+
+  function grow() {
+    input.style.height = "auto";
+    input.style.height = Math.min(input.scrollHeight, 180) + "px";
+    input.style.overflowY = input.scrollHeight > 180 ? "auto" : "hidden";
+  }
+
+  function answerText(m) {
+    return (m.parts || []).filter(function (p) { return p.kind === "answer"; }).map(function (p) { return p.text || ""; }).join("\n");
+  }
+
+  function assistantBlob(m) {
+    return (m.parts || []).map(function (p) {
+      return p.kind === "tool" ? (p.title || "") : (p.text || "");
+    }).join("\n");
+  }
+
+  function estimateTokens(text) {
+    if (!text) return 0;
+    var tokens = 0;
+    var i = 0;
+    while (i < text.length) {
+      var c = text.charCodeAt(i);
+      if (c <= 32) { i++; continue; }
+      if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) {
+        var j = i + 1;
+        while (j < text.length) {
+          var d = text.charCodeAt(j);
+          if ((d >= 48 && d <= 57) || (d >= 65 && d <= 90) || (d >= 97 && d <= 122)) j++;
+          else break;
+        }
+        tokens += Math.max(1, Math.ceil((j - i) / 4));
+        i = j;
+        continue;
+      }
+      if (c > 127) {
+        var k = i + 1;
+        while (k < text.length && text.charCodeAt(k) > 127) k++;
+        tokens += Math.max(1, Math.ceil((k - i) / 2));
+        i = k;
+        continue;
+      }
+      tokens += 1;
+      i++;
+    }
+    return tokens;
+  }
+
+  function sessionStats() {
+    var prompt = 0;
+    var completion = 0;
+    var history = 0;
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m.role === "user") {
+        var t = estimateTokens(m.content);
+        history += t;
+        if (messages[i + 1] && messages[i + 1].role === "assistant") {
+          prompt += settings.api === "responses" ? t : history;
+        }
+      } else {
+        completion += estimateTokens(assistantBlob(m));
+        history += estimateTokens(answerText(m));
+      }
+    }
+    return { prompt: prompt, completion: completion, total: prompt + completion };
+  }
+
+  function fmt(n) {
+    return n.toLocaleString("ru-RU");
+  }
+
+  function orphan() {
+    if (busy || settings.api !== "responses") return false;
+    var assistants = messages.filter(function (m) { return m.role === "assistant" && !m.streaming; });
+    if (!assistants.length) return false;
+    return !assistants[assistants.length - 1].responseId;
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function splitFences(src) {
+    var parts = [];
+    var re = /```([^\n`]*)\n([\s\S]*?)```/g;
+    var last = 0;
+    var m;
+    while ((m = re.exec(src))) {
+      parts.push({ type: "md", text: src.slice(last, m.index) });
+      parts.push({ type: "code", text: m[2].replace(/\n$/, "") });
+      last = m.index + m[0].length;
+    }
+    var rest = src.slice(last);
+    var open = /```([^\n`]*)\n([\s\S]*)$/.exec(rest);
+    if (open) {
+      parts.push({ type: "md", text: rest.slice(0, open.index) });
+      parts.push({ type: "code", text: open[2] });
+    } else {
+      parts.push({ type: "md", text: rest });
+    }
+    return parts;
+  }
+
+  function renderInline(s) {
+    var t = escapeHtml(s);
+    t = t.replace(/`([^`]+)`/g, "<code>$1</code>");
+    t = t.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    t = t.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+    t = t.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+    return t;
+  }
+
+  function renderMd(text) {
+    var lines = String(text).replace(/\r\n/g, "\n").split("\n");
+    var html = "";
+    var i = 0;
+    while (i < lines.length) {
+      var line = lines[i];
+      if (!line.trim()) { i++; continue; }
+      var h = /^(#{1,3})\s+(.*)$/.exec(line);
+      if (h) {
+        html += "<h" + h[1].length + ">" + renderInline(h[2]) + "</h" + h[1].length + ">";
+        i++;
+        continue;
+      }
+      if (/^\s*[-*]\s+/.test(line)) {
+        html += "<ul>";
+        while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
+          html += "<li>" + renderInline(lines[i].replace(/^\s*[-*]\s+/, "")) + "</li>";
+          i++;
+        }
+        html += "</ul>";
+        continue;
+      }
+      if (/^\s*\d+[.)]\s+/.test(line)) {
+        html += "<ol>";
+        while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+          html += "<li>" + renderInline(lines[i].replace(/^\s*\d+[.)]\s+/, "")) + "</li>";
+          i++;
+        }
+        html += "</ol>";
+        continue;
+      }
+      var buf = [];
+      while (i < lines.length && lines[i].trim() && !/^(#{1,3})\s+/.test(lines[i]) && !/^\s*[-*]\s+/.test(lines[i]) && !/^\s*\d+[.)]\s+/.test(lines[i])) {
+        buf.push(lines[i]);
+        i++;
+      }
+      html += "<p>" + buf.map(renderInline).join("<br>") + "</p>";
+    }
+    return html;
+  }
+
+  function renderMarkdown(src) {
+    return splitFences(String(src || "")).map(function (p) {
+      return p.type === "code" ? "<pre><code>" + escapeHtml(p.text) + "</code></pre>" : renderMd(p.text);
+    }).join("");
+  }
+
+  function toolLabel(status) {
+    if (status === "in_progress") return "выполняется";
+    if (status === "failed") return "ошибка";
+    if (status === "completed") return "готово";
+    return status || "";
+  }
+
+  function noteLabel(note) {
+    if (note === "token_limit") return "Лимит токенов";
+    if (note === "step_limit") return "Лимит шагов";
+    if (note === "tool_call_limit") return "Лимит вызовов";
+    if (note === "length") return "Лимит длины";
+    return note;
+  }
+
+  function renderAssistant(m) {
+    var html = '<article class="msg assistant">';
+    for (var n = 0; n < m.parts.length; n++) {
+      var p = m.parts[n];
+      if (p.kind === "reasoning") {
+        if (!p.text) continue;
+        html += "<details" + (m.streaming ? " open" : "") + "><summary>Рассуждение</summary><pre>" + escapeHtml(p.text) + "</pre></details>";
+      } else if (p.kind === "tool") {
+        html += '<div class="tool ' + escapeHtml(p.status || "") + (p.parent ? " nested" : "") + '"><span class="dot"></span><span>' + escapeHtml(p.title || p.name || "tool") + '</span><span class="st">' + escapeHtml(toolLabel(p.status)) + "</span></div>";
+      } else if (p.kind === "answer" && p.text) {
+        html += '<div class="prose">' + renderMarkdown(p.text) + "</div>";
+      }
+    }
+    if (m.error) html += '<div class="flag bad">' + escapeHtml(m.error) + "</div>";
+    else if (m.status === "cancelled") html += '<div class="flag">Остановлено</div>';
+    else if (m.note) html += '<div class="flag">' + escapeHtml(noteLabel(m.note)) + "</div>";
+    html += "</article>";
+    return html;
+  }
+
+  function render() {
+    var stick = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight < 80;
+    if (!messages.length) {
+      logEl.innerHTML = '<div class="empty"><h2>Чат с агентом</h2><p>Откройте настройки и укажите эндпоинт, порт, токен и модель. Процесс gc-chat по умолчанию слушает 127.0.0.1:8090.</p><p>Responses продолжает диалог на сервере. Chat Completions каждый раз отправляет историю сообщений, а трейс приходит внутри блока рассуждения.</p></div>';
+    } else {
+      logEl.innerHTML = messages.map(function (m) {
+        if (m.role === "user") return '<article class="msg user"><div class="user-text">' + escapeHtml(m.content) + "</div></article>";
+        return renderAssistant(m);
+      }).join("");
+    }
+    if (stick) logEl.scrollTop = logEl.scrollHeight;
+    var st = sessionStats();
+    statsEl.innerHTML = '<span class="item">токены <span class="est">оценка</span></span><span class="item">вход <b>~' + fmt(st.prompt) + '</b></span><span class="item">ответ <b>~' + fmt(st.completion) + '</b></span><span class="item">всего <b>~' + fmt(st.total) + '</b></span>';
+    var origin = "эндпоинт не задан";
+    try { origin = resolveOrigin(settings).origin; } catch (e) {}
+    var apiName = settings.api === "completions" ? "Chat Completions" : "Responses";
+    connEl.textContent = apiName + " · " + origin + (settings.model ? " · " + settings.model : " · модель не задана");
+    warnEl.hidden = !orphan();
+    stopBtn.hidden = !busy;
+    workingEl.hidden = !busy;
+    sendBtn.disabled = busy;
+  }
+
+  function touch() {
+    if (frame) return;
+    frame = requestAnimationFrame(function () {
+      frame = 0;
+      render();
+    });
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(saveMessages, 400);
+  }
+
+  function newChat() {
+    if (messages.length && !confirm("Начать новый чат?")) return;
+    turnGen++;
+    stop();
+    messages = [];
+    busy = false;
+    setAlert("");
+    saveMessages();
+    render();
+    input.focus();
+  }
+
+  function exportChat() {
+    var payload = {
+      app: "gigacode-universal-agent-chat",
+      version: 1,
+      exported_at: new Date().toISOString(),
+      api: settings.api,
+      model: settings.model,
+      messages: messages.map(function (m) {
+        if (m.role === "user") return { role: "user", content: m.content };
+        return {
+          role: "assistant",
+          parts: m.parts,
+          responseId: m.responseId,
+          status: m.status,
+          note: m.note,
+          error: m.error
+        };
+      })
+    };
+    var blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    var a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "gigacode-chat-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function onImport(e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(String(reader.result || ""));
+        var list = Array.isArray(data) ? data : (data && data.messages);
+        if (!Array.isArray(list)) throw new Error("В файле нет сообщений");
+        var next = [];
+        for (var i = 0; i < list.length; i++) {
+          var m = hydrate(list[i]);
+          if (m) next.push(m);
+        }
+        messages = next;
+        if (data && data.api === "completions") settings.api = "completions";
+        if (data && data.api === "responses") settings.api = "responses";
+        if (data && typeof data.model === "string" && data.model.trim()) settings.model = data.model.trim();
+        saveSettings();
+        saveMessages();
+        setAlert("Импортировано сообщений: " + messages.length);
+        render();
+      } catch (err) {
+        setAlert(err.message || "Не удалось прочитать файл");
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function fillForm() {
+    document.getElementById("f-api").value = settings.api;
+    document.getElementById("f-scheme").value = settings.scheme;
+    document.getElementById("f-host").value = settings.host;
+    document.getElementById("f-port").value = settings.port;
+    document.getElementById("f-token").value = settings.token;
+    fillModels(settings.model ? [settings.model] : [], settings.model);
+    formAlert.textContent = "";
+  }
+
+  function fillModels(ids, preferred) {
+    var sel = document.getElementById("f-model");
+    var current = preferred != null ? preferred : sel.value;
+    sel.textContent = "";
+    if (!ids.length) {
+      var empty = document.createElement("option");
+      empty.value = "";
+      empty.textContent = "сервер не вернул модели";
+      sel.appendChild(empty);
+      return;
+    }
+    for (var i = 0; i < ids.length; i++) {
+      var opt = document.createElement("option");
+      opt.value = ids[i];
+      opt.textContent = ids[i];
+      sel.appendChild(opt);
+    }
+    sel.value = ids.indexOf(current) >= 0 ? current : ids[0];
+  }
+
+  function readForm() {
+    return {
+      api: document.getElementById("f-api").value === "completions" ? "completions" : "responses",
+      scheme: document.getElementById("f-scheme").value === "https" ? "https" : "http",
+      host: document.getElementById("f-host").value,
+      port: document.getElementById("f-port").value,
+      token: document.getElementById("f-token").value,
+      model: document.getElementById("f-model").value.trim()
+    };
+  }
+
+  function openSettings() {
+    fillForm();
+    settingsEl.hidden = false;
+    document.getElementById("f-host").focus();
+    pullModel();
+  }
+
+  function closeSettings() {
+    settingsEl.hidden = true;
+    document.getElementById("settingsBtn").focus();
+  }
+
+  function saveForm() {
+    var next;
+    try {
+      next = readForm();
+      var origin = resolveOrigin(next);
+      next.scheme = origin.scheme;
+      next.host = origin.host;
+      next.port = origin.port;
+    } catch (e) {
+      formAlert.textContent = e.message;
+      return;
+    }
+    if (!next.model) {
+      formAlert.textContent = "Укажите модель";
+      return;
+    }
+    settings = next;
+    saveSettings();
+    closeSettings();
+    setAlert("");
+    render();
+  }
+
+  async function pullModel() {
+    var btn = document.getElementById("pullModel");
+    btn.disabled = true;
+    formAlert.textContent = "";
+    var draft = readForm();
+    var origin = "";
+    try {
+      origin = resolveOrigin(draft).origin;
+      var res = await fetch(origin + "/v1/models", { headers: authHeaders(draft, false) });
+      if (!res.ok) throw new Error(await errorText(res));
+      var data = await res.json();
+      var list = data && data.data;
+      var ids = [];
+      if (Array.isArray(list)) {
+        for (var i = 0; i < list.length; i++) {
+          if (list[i] && typeof list[i].id === "string" && list[i].id) ids.push(list[i].id);
+        }
+      }
+      if (!ids.length) throw new Error("Сервер не вернул модели");
+      fillModels(ids, document.getElementById("f-model").value || settings.model);
+    } catch (e) {
+      formAlert.textContent = e.name === "TypeError" ? netMessage(origin) : (e.message || "Не удалось получить модель");
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function previousId() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      var m = messages[i];
+      if (m.streaming) continue;
+      if (m.role === "assistant" && m.responseId) return m.responseId;
+    }
+    return null;
+  }
+
+  function streamingMessage() {
+    for (var i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].streaming) return messages[i];
+    }
+    return null;
+  }
+
+  function netMessage(origin) {
+    return "Нет соединения с " + (origin || "сервером") + ". Запущен ли gc-chat?";
+  }
+
+  async function errorText(res) {
+    var body = null;
+    try { body = await res.json(); } catch (e) { body = null; }
+    if (res.status === 401) return "Неверный токен";
+    if (res.status === 409) return (body && body.error && body.error.message) || "Ход ещё идёт";
+    if (body && body.error && body.error.message) return body.error.message;
+    return "Ошибка " + res.status;
+  }
+
+  function restoreDraft(text) {
+    messages.pop();
+    messages.pop();
+    input.value = text;
+    grow();
+  }
+
+  async function send() {
+    var text = input.value.trim();
+    if (!text || busy) return;
+    var origin;
+    try { origin = resolveOrigin(settings).origin; }
+    catch (e) { setAlert(e.message); openSettings(); return; }
+    if (!String(settings.model || "").trim()) {
+      setAlert("Укажите модель в настройках");
+      openSettings();
+      return;
+    }
+    var my = ++turnGen;
+    busy = true;
+    input.value = "";
+    grow();
+    setAlert("");
+    messages.push({ role: "user", content: text });
+    var msg = { role: "assistant", parts: [], streaming: true, responseId: null, status: null, note: null, error: null };
+    messages.push(msg);
+    render();
+    var ac = new AbortController();
+    abortCtl = ac;
+    try {
+      if (settings.api === "responses") await runResponses(msg, text, origin, ac.signal, my);
+      else await runCompletions(msg, origin, ac.signal, my);
+    } catch (e) {
+      if (my !== turnGen) return;
+      if (e.restored) setAlert(e.message);
+      else if (e.name === "AbortError") {
+        msg.streaming = false;
+        if (!msg.status) msg.status = "cancelled";
+      } else if (e.name === "TypeError") {
+        restoreDraft(text);
+        setAlert(netMessage(origin));
+      } else {
+        msg.streaming = false;
+        msg.error = e.message || String(e);
+      }
+    } finally {
+      if (abortCtl === ac) abortCtl = null;
+      if (my !== turnGen) return;
+      busy = false;
+      if (messages.indexOf(msg) >= 0) msg.streaming = false;
+      saveMessages();
+      render();
+      input.focus();
+    }
+  }
+
+  function stop() {
+    var msg = streamingMessage();
+    var id = msg && msg.responseId;
+    if (settings.api === "responses" && id) {
+      var origin = "";
+      try { origin = resolveOrigin(settings).origin; } catch (e) { origin = ""; }
+      if (origin) {
+        fetch(origin + "/v1/responses/" + encodeURIComponent(id) + "/cancel", {
+          method: "POST",
+          headers: authHeaders(settings, true)
+        }).catch(function () {});
+      }
+    }
+    if (abortCtl) abortCtl.abort();
+  }
+
+  async function runResponses(msg, text, origin, signal, my) {
+    var body = { model: settings.model.trim(), input: text, stream: true };
+    var prev = previousId();
+    if (prev) body.previous_response_id = prev;
+    var res = await fetch(origin + "/v1/responses", {
+      method: "POST",
+      headers: authHeaders(settings, true),
+      body: JSON.stringify(body),
+      signal: signal
+    });
+    if (my !== turnGen) return;
+    if (!res.ok) {
+      var err = new Error(await errorText(res));
+      restoreDraft(text);
+      err.restored = true;
+      throw err;
+    }
+    await readBody(res, function (ev) {
+      onResponseEvent(msg, ev);
+      touch();
+      return msg.streaming;
+    });
+  }
+
+  async function runCompletions(msg, origin, signal, my) {
+    var history = [];
+    for (var i = 0; i < messages.length; i++) {
+      var m = messages[i];
+      if (m.streaming) continue;
+      if (m.role === "user") history.push({ role: "user", content: m.content });
+      else {
+        var prose = answerText(m);
+        if (prose) history.push({ role: "assistant", content: prose });
+      }
+    }
+    var res = await fetch(origin + "/v1/chat/completions", {
+      method: "POST",
+      headers: authHeaders(settings, true),
+      body: JSON.stringify({ model: settings.model.trim(), messages: history, stream: true }),
+      signal: signal
+    });
+    if (my !== turnGen) return;
+    if (!res.ok) {
+      var err = new Error(await errorText(res));
+      restoreDraft(messages[messages.length - 2] ? messages[messages.length - 2].content : "");
+      err.restored = true;
+      throw err;
+    }
+    await readBody(res, function (ev) {
+      onCompletion(msg, ev);
+      touch();
+      return msg.streaming;
+    });
+  }
+
+  async function readBody(res, onEvent) {
+    var ct = res.headers.get("content-type") || "";
+    if (ct.indexOf("text/event-stream") < 0) {
+      onEvent(await res.json());
+      return;
+    }
+    var reader = res.body.getReader();
+    var dec = new TextDecoder();
+    var buf = "";
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buf += dec.decode(chunk.value, { stream: true });
+      buf = buf.replace(/\r\n/g, "\n");
+      var idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        var block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        var lines = [];
+        var rows = block.split("\n");
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].indexOf("data:") === 0) lines.push(rows[i].slice(5).replace(/^ /, ""));
+        }
+        if (!lines.length) continue;
+        var data = lines.join("\n");
+        if (data === "[DONE]") return;
+        var keep = true;
+        try { keep = onEvent(JSON.parse(data)); } catch (e) { keep = true; }
+        if (keep === false) {
+          try { await reader.cancel(); } catch (e2) {}
+          return;
+        }
+      }
+    }
+  }
+
+  function onResponseEvent(msg, ev) {
+    if (!ev) return;
+    if (ev.error && ev.error.message && !ev.type && !ev.output) {
+      msg.error = ev.error.message;
+      msg.streaming = false;
+      return;
+    }
+    if (ev.object === "response" && Array.isArray(ev.output)) {
+      applyFinal(msg, ev);
+      return;
+    }
+    var t = ev.type || "";
+    if ((t === "response.created" || t === "response.in_progress") && ev.response && ev.response.id) {
+      msg.responseId = ev.response.id;
+      return;
+    }
+    if (t === "response.output_text.delta") {
+      appendPart(msg, ev.item_id || "answer", "answer", ev.delta || "");
+      return;
+    }
+    if (t === "response.reasoning_summary_text.delta") {
+      appendPart(msg, ev.item_id || "think", "reasoning", ev.delta || "");
+      return;
+    }
+    if (t === "response.gc_stream_reset") {
+      msg.parts = msg.parts.filter(function (p) { return p.id !== ev.item_id; });
+      return;
+    }
+    if ((t === "response.output_item.added" || t === "response.output_item.done") && ev.item && ev.item.type === "gc_tool_call") {
+      var item = ev.item;
+      var part = {
+        id: item.id || ("gtc_" + item.call_id),
+        kind: "tool",
+        title: item.title || item.name || "tool",
+        name: item.name || "",
+        status: item.status || "in_progress",
+        parent: item.parent_call_id || null
+      };
+      var found = msg.parts.findIndex(function (p) { return p.id === part.id; });
+      if (found >= 0) msg.parts[found] = part;
+      else msg.parts.push(part);
+      return;
+    }
+    if (t === "response.completed" || t === "response.incomplete" || t === "response.cancelled" || t === "response.failed") {
+      applyFinal(msg, ev.response || {});
+    }
+  }
+
+  function appendPart(msg, id, kind, delta) {
+    if (!delta) return;
+    var p = null;
+    for (var i = msg.parts.length - 1; i >= 0; i--) {
+      if (msg.parts[i].id === id) { p = msg.parts[i]; break; }
+    }
+    if (!p) {
+      p = { id: id, kind: kind, text: "" };
+      msg.parts.push(p);
+    }
+    p.text += delta;
+  }
+
+  function applyFinal(msg, response) {
+    if (response.id) msg.responseId = response.id;
+    if (response.status) msg.status = response.status;
+    if (response.error && response.error.message) msg.error = response.error.message;
+    if (response.incomplete_details && response.incomplete_details.reason) msg.note = response.incomplete_details.reason;
+    if (Array.isArray(response.output)) {
+      var parts = [];
+      for (var i = 0; i < response.output.length; i++) {
+        var p = itemToPart(response.output[i]);
+        if (p) parts.push(p);
+      }
+      msg.parts = parts;
+    }
+    msg.streaming = false;
+  }
+
+  function itemToPart(item) {
+    if (!item || !item.type) return null;
+    if (item.type === "message") {
+      var text = (item.content || []).map(function (c) { return c.text || ""; }).join("");
+      return { id: item.id || "answer", kind: "answer", text: text };
+    }
+    if (item.type === "reasoning") {
+      var summary = (item.summary || []).map(function (c) { return c.text || ""; }).join("");
+      return { id: item.id || "think", kind: "reasoning", text: summary };
+    }
+    if (item.type === "gc_tool_call") {
+      return {
+        id: item.id || ("gtc_" + item.call_id),
+        kind: "tool",
+        title: item.title || item.name || "tool",
+        name: item.name || "",
+        status: item.status || "completed",
+        parent: item.parent_call_id || null
+      };
+    }
+    return null;
+  }
+
+  function splitThink(raw) {
+    var closed = raw.match(/^<think>\r?\n?([\s\S]*?)<\/think>\r?\n?([\s\S]*)$/i);
+    if (closed) return { reasoning: closed[1], answer: closed[2] };
+    var open = raw.match(/^<think>\r?\n?([\s\S]*)$/i);
+    if (open) return { reasoning: open[1], answer: "" };
+    return { reasoning: "", answer: raw };
+  }
+
+  function onCompletion(msg, ev) {
+    if (!ev) return;
+    if (ev.error && ev.error.message && !ev.choices) {
+      msg.error = ev.error.message;
+      msg.streaming = false;
+      return;
+    }
+    if (ev.object === "chat.completion" && ev.choices && ev.choices[0] && ev.choices[0].message) {
+      msg.raw = ev.choices[0].message.content || "";
+      applyThink(msg);
+      msg.streaming = false;
+      msg.status = ev.choices[0].finish_reason === "length" ? "incomplete" : "completed";
+      if (ev.choices[0].finish_reason === "length") msg.note = "length";
+      return;
+    }
+    var choice = ev.choices && ev.choices[0];
+    if (!choice) return;
+    var delta = choice.delta && choice.delta.content;
+    if (delta) {
+      msg.raw = (msg.raw || "") + delta;
+      applyThink(msg);
+    }
+    if (choice.finish_reason) {
+      msg.streaming = false;
+      msg.status = choice.finish_reason === "length" ? "incomplete" : "completed";
+      if (choice.finish_reason === "length") msg.note = "length";
+    }
+  }
+
+  function applyThink(msg) {
+    var split = splitThink(msg.raw || "");
+    var parts = [];
+    if (split.reasoning) parts.push({ id: "think", kind: "reasoning", text: split.reasoning });
+    parts.push({ id: "answer", kind: "answer", text: split.answer });
+    msg.parts = parts;
+  }
+})();
+</script>
+</body>
+</html>

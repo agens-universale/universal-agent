@@ -107,6 +107,46 @@ def _nested(updates: Mapping[str, Any]) -> dict[str, Any]:
     return document
 
 
+def _is_section(dotted: str) -> bool:
+    """Путь ведёт к вложенной модели-секции (``summary``), а не к листу."""
+    current: Any = AppConfig
+    for name in dotted.split("."):
+        fields = getattr(current, "model_fields", None) or {}
+        info = fields.get(name) or next(
+            (field for field in fields.values() if field.alias == name), None
+        )
+        if info is None:
+            return False
+        kind, nested = _nested_model(info.annotation)
+        if kind != "model":
+            return False
+        current = nested
+    return True
+
+
+def expand_section_updates(updates: Mapping[str, Any]) -> dict[str, Any]:
+    """Правки-секции (словарь на месте секции схемы) → правки её листьев.
+
+    ``override_settings`` заменяет значение по пути. Слой, который должен
+    СЛИВАТЬСЯ со значениями ниже (профиль бенча поверх его умолчаний),
+    раскладывает секции на листья: заданное заменяется, прочее остаётся.
+    Словари-листья (``chat_completion_kwargs``) и записи словарей моделей
+    (``models.<alias>``) остаются целыми.
+    """
+    out: dict[str, Any] = {}
+
+    def expand(dotted: str, value: Any) -> None:
+        if isinstance(value, Mapping) and _is_section(dotted):
+            for key, item in value.items():
+                expand(f"{dotted}.{key}", item)
+        else:
+            out[dotted] = value
+
+    for dotted, value in updates.items():
+        expand(dotted, value)
+    return out
+
+
 def override_settings(
     settings: AppConfig,
     updates: Mapping[str, Any],

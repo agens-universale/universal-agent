@@ -30,6 +30,8 @@ REPO = Path(__file__).resolve().parents[1]
 CORE_REQUIRED = [
     "gc_core/assets/prompts/chat_completions_system_prompt.md",
     "gc_core/assets/prompts/chat_completions_tui_special_instructions.md",
+    "gc_core/assets/prompts/chat_completions_responses_special_instructions.md",
+    "gc_core/assets/prompts/chat_completions_completions_special_instructions.md",
     "gc_core/assets/config.default.yml",
     "gc_core/config.py",
 ]
@@ -46,6 +48,7 @@ MANIFESTS = {
     "gc_mcp": "packages/mcp",
     "gc_ua_temporalio": "packages/temporalio",
     "gc_acp": "packages/acp",
+    "gc_chat": "packages/chat",
 }
 
 
@@ -335,6 +338,7 @@ OWN_COMMANDS = {
         "gc-temporal-native-worker",
     },
     "gc_acp": {"gc-acp"},
+    "gc_chat": {"gc-chat"},
 }
 
 
@@ -425,6 +429,7 @@ def test_meta_pulls_every_profile():
         f"gc-server=={ver}",
         f"gc-mcp=={ver}",
         f"gc-acp=={ver}",
+        f"gc-chat=={ver}",
     }
     assert root["project"]["optional-dependencies"]["temporal"] == [
         f"gc-ua-temporalio=={ver}"
@@ -455,6 +460,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/acp",
+        "packages/chat",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")
@@ -466,6 +472,7 @@ def test_versions_are_pinned_together():
         "packages/server",
         "packages/mcp",
         "packages/acp",
+        "packages/chat",
     ):
         leaf = tomllib.loads(
             (REPO / sub / "pyproject.toml").read_text(encoding="utf-8")

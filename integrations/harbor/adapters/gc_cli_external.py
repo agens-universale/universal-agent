@@ -684,9 +684,10 @@ class GcCliExternal(BaseAgent):
                 mcp.meta.discovery_timeout_sec, 120
             ),
         }
-        if fresh:
-            # Слияние, не замена: записи конфига остаются, задачные добавляются.
-            updates["mcp.servers"] = fresh
+        # Правка заменяет значение по своему пути: каждая задачная запись —
+        # своим путём, записи конфига остаются.
+        for name, server in fresh.items():
+            updates[f"mcp.servers.{name}"] = server
         return settings.with_overrides(updates, layer="harbor")
 
     def _dump_outcome(self, state, *, executor, timings, context) -> None:
