@@ -57,3 +57,18 @@ def test_carve_out_only_under_state_sandboxes(tmp_path, monkeypatch):
     ps = protected_paths(cwd=str(tmp_path / "gc"))
     assert classify_path(tmp_path / "gc" / "config.yml", ps) == "operational"
     assert ps.workspace_exception is None
+
+
+def test_skills_runtime_copy_is_classified_as_skills(tmp_path, monkeypatch):
+    # Копия скиллов в среде исполнения (<launch_root>/.gc/skills_runtime)
+    # читается моделью как обычные скиллы, а не как служебный `.gc`.
+    from gc_core.security.protected_paths import classify_path, protected_paths
+
+    proj = tmp_path / "work"
+    proj.mkdir()
+    ps = protected_paths(cwd=str(proj))
+    script = (
+        proj / ".gc" / "skills_runtime" / "system" / "x" / "scripts" / "a.py"
+    )
+    assert classify_path(script, ps) == "skills"
+    assert classify_path(proj / ".gc" / "config.yml", ps) == "operational"

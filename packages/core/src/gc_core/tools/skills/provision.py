@@ -9,18 +9,25 @@ project) лежат на хосте. У remote-бэкенда (docker / ssh / ex
 
 Ограничения (сознательно): без tar — файлы уходят по одному через
 ``write_bytes`` (десятки файлов, секунды, один раз на набор); symlink'и внутри
-скиллов не переносятся.
+скиллов пропускаются (не разыменовываются — проектный скилл из чужого репо не
+должен утащить ``~/.aws/credentials`` в контейнер). Копия заливается во
+временный каталог и подменяется одним ``rm -rf && mv``: параллельный ран с тем
+же корнем не читает полузаписанное дерево.
 """
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import os
 import posixpath
+import shlex
+import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
 from gc_core.backends.async_protocol import arun_backend_exec_raw
+from gc_core.backends.factory import parse_os_backend_kind
 from gc_core.tools.skills import registry as skills_registry_module
 from gc_core.tools.skills.registry import SkillsRegistry
 
@@ -29,6 +36,10 @@ logger = logging.getLogger(__name__)
 RUNTIME_SUBDIR = ".gc/skills_runtime"
 MANIFEST_NAME = ".manifest.sha256"
 LAYERS = ("system", "user", "project")
+#: Только remote-kind: Harbor грузит скиллы адаптером, local/sandbox читают хост.
+PROVISIONED_KINDS = frozenset({"docker", "ssh", "exec"})
+#: Потолок на весь провижининг: медленный ssh не должен держать старт рана.
+PROVISION_TIMEOUT_SEC = 120
 
 
 def _host_layer_roots() -> Dict[str, str]:
@@ -47,7 +58,7 @@ def _layer_files(layer: str, root: str) -> List[Tuple[str, bytes]]:
         dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
-            if not os.path.isfile(full):
+            if os.path.islink(full) or not os.path.isfile(full):
                 continue
             rel = os.path.relpath(full, root).replace(os.sep, "/")
             with open(full, "rb") as fh:
@@ -77,8 +88,13 @@ def _digest(files: List[Tuple[str, bytes]]) -> str:
 
 
 def should_provision(config_dict: Dict[str, Any], backend: Any) -> bool:
-    """Remote-бэкенд, провижининг не выключен, single-source не задан."""
+    """docker/ssh/exec, провижининг не выключен, single-source не задан."""
     if not getattr(backend, "is_sandbox", False):
+        return False
+    try:
+        if parse_os_backend_kind(config_dict) not in PROVISIONED_KINDS:
+            return False
+    except ValueError:
         return False
     if str(config_dict.get("skills_data_path") or "").strip():
         return False  # Harbor-адаптер и CI: набор уже «там»
@@ -95,22 +111,43 @@ async def _remote_manifest(backend: Any, path: str) -> Optional[str]:
         return None
 
 
-async def _reset_remote_root(backend: Any, root: str) -> None:
-    """Снести прошлую копию, чтобы удалённый на хосте скилл не пережил ран."""
-    try:
-        res = await arun_backend_exec_raw(backend, f"rm -rf {_q(root)}")
-        if res.return_code not in (0, None):
-            logger.warning(
-                "skills_runtime: rm -rf %s failed: %s", root, res.stderr
-            )
-    except NotImplementedError:
-        pass  # бэкенд без exec (двойники в тестах): перезапишем поверх
+async def _swap_in(backend: Any, staged: str, root: str) -> None:
+    """Подменить живую копию заготовленной одним шагом (rm -rf && mv)."""
+    res = await arun_backend_exec_raw(
+        backend, f"rm -rf {_q(root)} && mv {_q(staged)} {_q(root)}"
+    )
+    if res.return_code != 0:
+        raise OSError(res.stderr.strip() or f"swap failed: {staged} -> {root}")
 
 
 def _q(path: str) -> str:
-    import shlex
-
     return shlex.quote(path)
+
+
+def _remote_root(config_dict: Dict[str, Any], backend: Any) -> Optional[str]:
+    """Тот же корень, от которого guards считают ``.gc``: launch_root → project_root → cwd бэкенда."""
+    root = config_dict.get("launch_root") or config_dict.get("project_root")
+    if not root and callable(getattr(backend, "default_cwd", None)):
+        root = backend.default_cwd()
+    return str(root) if root else None
+
+
+async def _upload_set(
+    backend: Any, files: List[Tuple[str, bytes]], remote_root: str, digest: str
+) -> None:
+    staged = f"{remote_root}.staging-{uuid.uuid4().hex[:8]}"
+    dirs_done: set[str] = set()
+    for rel, data in files:
+        target = posixpath.join(staged, rel)
+        parent = posixpath.dirname(target)
+        if parent not in dirs_done:
+            await backend.makedirs(parent)
+            dirs_done.add(parent)
+        await backend.write_bytes(target, data)
+    if not files:
+        await backend.makedirs(staged)
+    await backend.write(posixpath.join(staged, MANIFEST_NAME), digest + "\n")
+    await _swap_in(backend, staged, remote_root)
 
 
 async def aprovision_remote_skills(
@@ -127,39 +164,25 @@ async def aprovision_remote_skills(
     log = run_logger or logger
     if not should_provision(config_dict, backend):
         return None
-    launch_root = config_dict.get("launch_root") or (
-        backend.default_cwd()
-        if callable(getattr(backend, "default_cwd", None))
-        else None
-    )
+    launch_root = _remote_root(config_dict, backend)
     if not launch_root:
         return None
-    remote_root = posixpath.join(str(launch_root), RUNTIME_SUBDIR)
+    remote_root = posixpath.join(launch_root, RUNTIME_SUBDIR)
     manifest_path = posixpath.join(remote_root, MANIFEST_NAME)
 
     files = _collect(_host_layer_roots())
     digest = _digest(files)
     try:
-        if await _remote_manifest(backend, manifest_path) == digest:
-            log.debug("skills_runtime: up to date at %s", remote_root)
-        else:
-            await _reset_remote_root(backend, remote_root)
-            dirs_done: set[str] = set()
-            for rel, data in files:
-                target = posixpath.join(remote_root, rel)
-                parent = posixpath.dirname(target)
-                if parent not in dirs_done:
-                    await backend.makedirs(parent)
-                    dirs_done.add(parent)
-                await backend.write_bytes(target, data)
-            if not files:
-                await backend.makedirs(remote_root)
-            await backend.write(manifest_path, digest + "\n")
-            log.info(
-                "skills_runtime: %d files provisioned to %s",
-                len(files),
-                remote_root,
-            )
+        async with asyncio.timeout(PROVISION_TIMEOUT_SEC):
+            if await _remote_manifest(backend, manifest_path) == digest:
+                log.debug("skills_runtime: up to date at %s", remote_root)
+            else:
+                await _upload_set(backend, files, remote_root, digest)
+                log.info(
+                    "skills_runtime: %d files provisioned to %s",
+                    len(files),
+                    remote_root,
+                )
     except Exception as exc:  # провижининг не должен ронять старт рана
         log.warning(
             "skills_runtime: provisioning failed (%s), skills stay host-only",
@@ -181,6 +204,7 @@ async def aprovision_remote_skills(
 __all__ = [
     "LAYERS",
     "MANIFEST_NAME",
+    "PROVISIONED_KINDS",
     "RUNTIME_SUBDIR",
     "aprovision_remote_skills",
     "should_provision",

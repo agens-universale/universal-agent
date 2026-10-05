@@ -1175,9 +1175,12 @@ class SubagentRunner:
         parent_backend = (
             getattr(self._ctx, "os_backend", None) or parent_workspace.backend
         )
-        child_skills_registry = get_skills_registry(
-            child_config, backend=parent_backend
-        )
+        # Реестр родителя: у remote-бэкенда он собран по скиллам, скопированным
+        # в среду исполнения (tools/skills/provision.py); свой по хостовым
+        # корням у ребёнка смотрел бы в пустоту контейнера.
+        child_skills_registry = getattr(
+            self._ctx, "skills_registry", None
+        ) or get_skills_registry(child_config, backend=parent_backend)
         (
             child_tools_data,
             child_tools_spec,

@@ -1,5 +1,8 @@
 """Скиллы в среде исполнения: копия слоёв через бэкенд и реестр по ним."""
 
+import shlex
+from types import SimpleNamespace
+
 import pytest
 
 from gc_core.tools.skills import registry as registry_module
@@ -11,9 +14,11 @@ from gc_core.tools.skills.provision import (
 )
 from gc_testkit.harbor_fakes import FakeBackend
 
+DOCKER = {"kind": "docker", "docker": {"name": "c"}}
+
 
 class RemoteFs(FakeBackend):
-    """Удалённая ФС с cwd /work и считающим exec (rm -rf)."""
+    """Удалённая ФС с cwd /work и exec, понимающим `rm -rf ROOT && mv STAGED ROOT`."""
 
     def __init__(self, files=None):
         super().__init__(files)
@@ -24,13 +29,14 @@ class RemoteFs(FakeBackend):
         return "/work"
 
     async def aexec(self, command, **kwargs):
-        from types import SimpleNamespace
-
         self.exec_commands.append(command)
-        if command.startswith("rm -rf "):
-            prefix = command[len("rm -rf ") :].strip("'") + "/"
-            for key in [k for k in self.files if k.startswith(prefix)]:
-                del self.files[key]
+        rm_part, mv_part = command.split(" && ")
+        root = shlex.split(rm_part)[2]
+        staged = shlex.split(mv_part)[1]
+        for key in [k for k in self.files if k.startswith(root + "/")]:
+            del self.files[key]
+        for key in [k for k in self.files if k.startswith(staged + "/")]:
+            self.files[root + key[len(staged) :]] = self.files.pop(key)
         return SimpleNamespace(
             stdout="", stderr="", return_code=0, timed_out=False
         )
@@ -76,7 +82,7 @@ def host_layers(tmp_path, monkeypatch):
 
 async def test_provisions_three_layers_and_registry_reads_remote(host_layers):
     backend = RemoteFs()
-    cfg = {"launch_root": "/work", "os_backend": {"kind": "docker"}}
+    cfg = {"launch_root": "/work", "os_backend": DOCKER}
     registry = await aprovision_remote_skills(backend, cfg)
     assert registry is not None
     root = f"/work/{RUNTIME_SUBDIR}"
@@ -84,7 +90,12 @@ async def test_provisions_three_layers_and_registry_reads_remote(host_layers):
     assert f"{root}/user/beta/scripts/run.py" in backend.files
     assert f"{root}/project/alpha/SKILL.md" in backend.files
     assert f"{root}/{MANIFEST_NAME}" in backend.files
-    assert backend.exec_commands == [f"rm -rf {root}"]
+    # одна подмена живой копии, staging-каталога после неё нет
+    assert len(backend.exec_commands) == 1
+    assert backend.exec_commands[0].startswith(
+        f"rm -rf {root} && mv {root}.staging-"
+    )
+    assert not any(".staging-" in k for k in backend.files)
 
     skills = {s["id"]: s for s in await registry.list_skills(include_all=True)}
     assert set(skills) == {"alpha", "beta"}
@@ -99,7 +110,10 @@ async def test_provisions_three_layers_and_registry_reads_remote(host_layers):
 
 async def test_second_run_with_same_set_copies_nothing(host_layers):
     backend = RemoteFs()
-    cfg = {"launch_root": "/work"}
+    cfg = {
+        "launch_root": "/work",
+        "os_backend": {"kind": "ssh", "ssh": {"host": "h"}},
+    }
     await aprovision_remote_skills(backend, cfg)
     writes, cmds = backend.writes, list(backend.exec_commands)
     await aprovision_remote_skills(backend, cfg)
@@ -115,9 +129,18 @@ async def test_second_run_with_same_set_copies_nothing(host_layers):
     assert len(backend.exec_commands) == len(cmds) + 1
 
 
-async def test_falls_back_to_backend_cwd_without_launch_root(host_layers):
+async def test_root_fallbacks_project_root_then_backend_cwd(host_layers):
     backend = RemoteFs()
-    registry = await aprovision_remote_skills(backend, {})
+    exec_cfg = {"kind": "exec", "exec": {"argv_prefix": ["x"]}}
+    await aprovision_remote_skills(
+        backend, {"project_root": "/proj", "os_backend": exec_cfg}
+    )
+    assert any(k.startswith(f"/proj/{RUNTIME_SUBDIR}/") for k in backend.files)
+
+    backend = RemoteFs()
+    registry = await aprovision_remote_skills(
+        backend, {"os_backend": exec_cfg}
+    )
     assert registry is not None
     assert any(k.startswith(f"/work/{RUNTIME_SUBDIR}/") for k in backend.files)
 
@@ -129,17 +152,37 @@ def test_should_provision_rules():
     class Remote:
         is_sandbox = True
 
-    assert should_provision({}, Remote()) is True
-    assert should_provision({}, Host()) is False
+    docker = {"os_backend": DOCKER}
+    assert should_provision(docker, Remote()) is True
+    assert should_provision(docker, Host()) is False
     assert (
-        should_provision({"skills_data_path": "/harbor/skills"}, Remote())
+        should_provision(
+            {**docker, "skills_data_path": "/harbor/skills"}, Remote()
+        )
         is False
     )
     assert (
-        should_provision({"os_backend": {"provision_skills": False}}, Remote())
+        should_provision(
+            {"os_backend": {**DOCKER, "provision_skills": False}}, Remote()
+        )
         is False
     )
-    assert should_provision({"os_backend": "docker"}, Remote()) is True
+    # harbor грузит адаптером, local/sandbox читают хост — не трогаем
+    assert should_provision({"os_backend": "harbor"}, Remote()) is False
+    assert should_provision({}, Remote()) is False
+    assert should_provision({"os_backend": "sandbox"}, Remote()) is False
+
+
+async def test_symlinked_files_are_not_uploaded(host_layers, tmp_path):
+    secret = tmp_path / "secret.txt"
+    secret.write_text("creds", encoding="utf-8")
+    (host_layers / "usr" / "beta" / "scripts" / "leak.txt").symlink_to(secret)
+    backend = RemoteFs()
+    await aprovision_remote_skills(
+        backend, {"launch_root": "/work", "os_backend": DOCKER}
+    )
+    assert not any(k.endswith("/leak.txt") for k in backend.files)
+    assert "creds" not in backend.files.values()
 
 
 async def test_provisioning_failure_keeps_default_registry(host_layers):
@@ -147,10 +190,8 @@ async def test_provisioning_failure_keeps_default_registry(host_layers):
         async def write_bytes(self, p, data):
             raise OSError("disk full")
 
-    assert (
-        await aprovision_remote_skills(Broken(), {"launch_root": "/work"})
-        is None
-    )
+    cfg = {"launch_root": "/work", "os_backend": DOCKER}
+    assert await aprovision_remote_skills(Broken(), cfg) is None
 
 
 async def test_run_context_uses_provisioned_registry(host_layers):
@@ -163,13 +204,8 @@ async def test_run_context_uses_provisioned_registry(host_layers):
         "save_logs": False,
         "launch_root": "/work",
         "project_root": "/work",
-        "os_backend": {"kind": "docker", "docker": {"name": "x"}},
+        "os_backend": DOCKER,
     }
     ctx = await acreate_run_context(cfg, os_backend=backend)
-    try:
-        detail = await ctx.skills_registry.load_skill_detail("beta")
-        assert detail["root_path"] == f"/work/{RUNTIME_SUBDIR}/user/beta"
-    finally:
-        close = getattr(ctx, "aclose", None)
-        if close is not None:
-            await close()
+    detail = await ctx.skills_registry.load_skill_detail("beta")
+    assert detail["root_path"] == f"/work/{RUNTIME_SUBDIR}/user/beta"

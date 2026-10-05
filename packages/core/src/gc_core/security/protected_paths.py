@@ -43,7 +43,14 @@ def protected_paths(
         else None
     )
 
-    skills = {project_gc_dir(str(proj)) / "skills", paths["data"] / "skills"}
+    # skills_runtime — копия слоёв скиллов в среде исполнения remote-бэкенда
+    # (tools/skills/provision.py): для модели это те же скиллы, что и
+    # `.gc/skills`, иначе чтение скрипта скилла ловит protected_path_denied.
+    skills = {
+        project_gc_dir(str(proj)) / "skills",
+        project_gc_dir(str(proj)) / "skills_runtime",
+        paths["data"] / "skills",
+    }
 
     return ProtectedSet(
         instructions=frozenset(instr),
