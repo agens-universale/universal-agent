@@ -339,7 +339,6 @@ def _prepare_run_context(
         environment=environment,
         loop=loop,
         override=os_backend,
-        run_id=effective_run_id,
     )
     # sandbox.workdir=auto: каталог рана обязан стать launch_root — его читают
     # write_guard (`launch_root_from_config`) и workspace, а бэкенда у них нет.

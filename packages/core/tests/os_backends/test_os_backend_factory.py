@@ -198,15 +198,22 @@ def test_resolve_sandbox_auto_workdir(tmp_path, monkeypatch):
     monkeypatch.setattr(
         "gc_core.backends.sandbox.gc_paths", lambda: {"state": tmp_path}
     )
-    be = resolve_os_backend(
-        {"os_backend": {"kind": "sandbox", "sandbox": {"workdir": "auto"}}},
-        run_id="r1",
-    )
+    monkeypatch.chdir(tmp_path / "proj") if (
+        tmp_path / "proj"
+    ).mkdir() is None else None
+    from gc_core.config_modules.env_vars import project_slug
+
+    cfg = {"os_backend": {"kind": "sandbox", "sandbox": {"workdir": "auto"}}}
+    be = resolve_os_backend(cfg)
     assert isinstance(be, SandboxBackend)
-    assert be.auto_workdir == str(
-        tmp_path / "sandboxes" / "r1"
-    ) and os.path.isdir(be.auto_workdir)
+    # Один каталог на папку запуска: повторный запуск и продолжение треда
+    # (-t) видят те же файлы, а не пустую песочницу.
+    expected = str(
+        tmp_path / "sandboxes" / project_slug(str(tmp_path / "proj"))
+    )
+    assert be.auto_workdir == expected and os.path.isdir(expected)
     assert be.default_cwd() == be.auto_workdir
+    assert resolve_os_backend(cfg).auto_workdir == expected
 
 
 def test_resolve_sandbox_fails_closed_without_tool(monkeypatch):

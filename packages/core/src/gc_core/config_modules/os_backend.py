@@ -42,7 +42,7 @@ class ExecBackendConfig(BaseModel):
 
 class SandboxBackendConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    # None → изолируем текущий launch_root; "auto" → свежий каталог на ран.
+    # None → изолируем текущий launch_root; "auto" → каталог на папку запуска.
     workdir: Literal["auto"] | None = None
     network: bool = True
     extra_ro: list[str] = Field(default_factory=list)

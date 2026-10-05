@@ -908,7 +908,7 @@ ddgs-mcp --http
 | `docker.name` / `docker.user` / `docker.binary` | `docker exec -i [-u USER] NAME`; `binary: podman` для podman |
 | `ssh.host` / `port` / `user` / `key_path` / `options` / `control_master` | `ssh -T -o BatchMode=yes …`; `key_path: null` → ssh-agent; пароль не поддерживается |
 | `exec.argv_prefix` | произвольный префикс (`kubectl exec -i -n NS POD --`, `container exec -i NAME`) |
-| `sandbox.workdir` | `null` → изолируем текущий `launch_root`; `auto` → `<GC_STATE_DIR>/sandboxes/<run_id>/` |
+| `sandbox.workdir` | `null` → изолируем текущий `launch_root`; `auto` → `<GC_STATE_DIR>/sandboxes/<slug папки запуска>/` — один на папку, общий для запусков и тредов |
 | `sandbox.network` | `true` по умолчанию; `false` режет сеть у shell-команд |
 | `sandbox.extra_ro` | дополнительные read-only пути (Linux) |
 

@@ -23,7 +23,7 @@ from gc_core.backends.local import (
     _sanitize_env,
 )
 from gc_core.backends.protocol import DEFAULT_EXEC_OUTPUT_CAPTURE_MAX_CHARS
-from gc_core.config_modules.env_vars import gc_paths
+from gc_core.config_modules.env_vars import gc_paths, project_slug
 
 Wrapper = Callable[[Optional[str]], list[str]]
 
@@ -155,12 +155,14 @@ def build_sandbox_wrapper(root: str, section: dict) -> Wrapper:
     )
 
 
-def sandbox_auto_workdir(run_id: str) -> str:
-    """Свежий каталог ``<state>/sandboxes/<run_id>`` — launch_root рана.
+def sandbox_auto_workdir(cwd: Optional[str] = None) -> str:
+    """Каталог ``<state>/sandboxes/<project_slug(cwd)>`` — launch_root песочницы.
 
+    Один на папку запуска (тот же слаг, что у тредов и логов): повторный
+    запуск и продолжение треда ``-t`` видят те же файлы, а не пустой каталог.
     Чистит его janitor ``gc_server.swarm.cleanup`` (``--core-sandboxes-dir``).
     """
-    path = gc_paths()["state"] / "sandboxes" / run_id
+    path = gc_paths()["state"] / "sandboxes" / project_slug(cwd)
     path.mkdir(parents=True, exist_ok=True)
     return str(path)
 

@@ -68,13 +68,11 @@ def resolve_os_backend(
     environment: Optional[Any] = None,
     loop: Optional[asyncio.AbstractEventLoop] = None,
     override: Optional[FsBackend] = None,
-    run_id: Optional[str] = None,
 ) -> FsBackend:
     """Build the physical I/O backend for a run.
 
     ``override`` wins (tests) and keeps its own ``exec_output_capture_max_chars``.
-    ``harbor`` requires ``environment`` and ``loop``. ``run_id`` нужен только
-    ``sandbox`` с ``workdir: auto`` — имя свежего каталога рана.
+    ``harbor`` requires ``environment`` and ``loop``.
     """
     if override is not None:
         return override
@@ -115,7 +113,7 @@ def resolve_os_backend(
 
     if kind == "sandbox":
         auto = (
-            sandbox_auto_workdir(run_id or "adhoc")
+            sandbox_auto_workdir()
             if (section.get("sandbox") or {}).get("workdir") == "auto"
             else None
         )
