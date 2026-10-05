@@ -34,6 +34,9 @@ class StateDelta:
     working_memory: dict[str, str] | None = None
     session_todo: list[dict[str, str]] | None = None
     fetch_url_cache: list[list[Any]] | None = None
+    #: Снимки, которые тул приложил к хвосту батча (``fs_view_image``):
+    #: дописываются к ``state.pending_tool_attachments``.
+    pending_tool_attachments: list[dict[str, Any]] | None = None
     schema_version: int = 1
 
 
@@ -56,12 +59,33 @@ class ToolResult:
 
 
 @dataclass
+class ToolVisionView:
+    """Срез State для ``fs_view_image``: зрение хода и картинки шага.
+
+    ``known_attachments`` — вложения истории (словари ``Attachment``): по ним
+    тул называет уже живую картинку. Пикселей здесь нет — только ссылки.
+    """
+
+    probe_turn: str | None = None
+    turn_level: str | None = None
+    live_ids: list[str] = field(default_factory=list)
+    step_attachments: list[dict[str, Any]] = field(default_factory=list)
+    known_attachments: list[dict[str, Any]] = field(default_factory=list)
+    view_tool_in_set: bool = False
+    schema_version: int = 1
+
+
+@dataclass
 class ToolStateView:
-    """Only state owned by session_memory/session_todo, never a copied State."""
+    """Only state owned by session_memory/session_todo, never a copied State.
+
+    ``vision`` — только для ``fs_view_image`` (см. ``ToolVisionView``).
+    """
 
     working_memory: dict[str, str] = field(default_factory=dict)
     session_todo: list[dict[str, str]] = field(default_factory=list)
     fetch_url_cache: list[list[Any]] = field(default_factory=list)
+    vision: ToolVisionView | None = None
     schema_version: int = 1
 
 

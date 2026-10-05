@@ -229,3 +229,150 @@ async def test_stored_output_reads_live_pure_store_in_core(tmp_path):
     )
     assert json.loads(output)["content"] == "hello"
     assert events == []
+
+
+def _png_bytes():
+    import io
+
+    from PIL import Image
+
+    buf = io.BytesIO()
+    Image.new("RGB", (32, 24), "blue").save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def _vision_ports(tmp_path, monkeypatch):
+    from gc_core.attachments.store import ImageStore
+    from gc_core.model_router import ResolvedModel
+    from gc_core.tools.fs import view_image as view_image_module
+    from gc_core.tools.fs.view_image import ViewImage
+    from gc_core.vision.audience import Audience
+
+    project = tmp_path / "project"
+    project.mkdir()
+    ctx, worker, events = setup_ports({"launch_root": str(project)}, ViewImage)
+    worker.image_store = ImageStore(str(tmp_path / "worker-images"))
+    worker.model_router = object()
+    seen = {}
+    native = ResolvedModel(
+        alias="vis",
+        model="vis-model",
+        url="http://backend.local/v1/chat/completions",
+        authorization=None,
+        backend_overrides={},
+        tariff=None,
+        source="test",
+    )
+
+    async def audience(ctx_arg, state):
+        # «Кто смотрит» считается на воркере — по срезу хода из workflow.
+        seen["probe_turn"] = state.vision_probe_turn
+        seen["tools"] = state.tools
+        return Audience(native=native, eyes=None, tool_visible=True)
+
+    monkeypatch.setattr(view_image_module, "aensure_view_audience", audience)
+    return project, ctx, worker, events, seen
+
+
+def _workflow_state(**fields):
+    from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
+
+    base = dict(
+        shared=SimpleNamespace(working_memory={}, fetch_url_cache={}),
+        session_todo=[],
+        messages=[],
+        tools=[{"name": FS_VIEW_IMAGE_NAME}],
+        vision_probe_turn="turn-1",
+        turn_level=None,
+        vision_live_ids=frozenset(),
+        vision_audience=None,
+        pending_tool_attachments=[],
+    )
+    base.update(fields)
+    return SimpleNamespace(**base)
+
+
+@pytest.mark.asyncio
+async def test_view_image_snapshot_crosses_the_effect_boundary(
+    tmp_path, monkeypatch
+):
+    """Снимок кладёт тул на воркере, а в хвост батча он попадает в workflow —
+    через ``StateDelta.pending_tool_attachments``, не через общий State."""
+    project, ctx, worker, events, seen = _vision_ports(tmp_path, monkeypatch)
+    image = project / "shot.png"
+    image.write_bytes(_png_bytes())
+    state = _workflow_state()
+
+    output = json.loads(
+        await aapply_tool(
+            "fs_view_image",
+            {"path": str(image)},
+            ctx=ctx,
+            state=state,
+            call_id="v1",
+        )
+    )
+
+    assert output["ok"] is True and output["attached"] is True
+    assert events[-1] == ("effect", "body")
+    assert seen == {
+        "probe_turn": "turn-1",
+        "tools": [{"name": "fs_view_image"}],
+    }
+    assert len(state.pending_tool_attachments) == 1
+    snapshot = state.pending_tool_attachments[0]
+    from gc_core.attachments.model import Attachment
+
+    stored = worker.image_store.read_for_send(Attachment.from_dict(snapshot))
+    assert stored, "файл снимка лежит в хранилище воркера"
+
+
+@pytest.mark.asyncio
+async def test_view_image_names_an_image_already_live_in_the_request(
+    tmp_path, monkeypatch
+):
+    """Картинка уже ушла модели целиком: тул называет её подписью из истории
+    и второй снимок не прикладывает."""
+    from gc_core.attachments.normalize import normalize_image
+    from gc_core.attachments.store import image_id
+
+    project, ctx, _, _, _ = _vision_ports(tmp_path, monkeypatch)
+    data = _png_bytes()
+    image = project / "shot.png"
+    image.write_bytes(data)
+    att_id = image_id(normalize_image(data).data)
+    state = _workflow_state(
+        vision_live_ids=frozenset({att_id}),
+        messages=[
+            {
+                "role": "user",
+                "content": "[Изображение #3] вот",
+                "attachments": [
+                    {
+                        "id": att_id,
+                        "kind": "image",
+                        "mime": "image/png",
+                        "width": 32,
+                        "height": 24,
+                        "size": len(data),
+                        "path": "/nowhere.png",
+                        "origin": "user",
+                        "label": "Изображение #3",
+                        "source": "clipboard",
+                        "orig_width": 32,
+                        "orig_height": 24,
+                    }
+                ],
+            }
+        ],
+    )
+
+    output = json.loads(
+        await aapply_tool(
+            "fs_view_image", {"path": str(image)}, ctx=ctx, state=state
+        )
+    )
+
+    assert output.get("already_in_context") is True
+    assert "Изображение #3" in output["message"]
+    assert state.pending_tool_attachments == []

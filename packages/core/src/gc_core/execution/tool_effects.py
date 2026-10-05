@@ -9,6 +9,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from typing import Any
 
+from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
 from gc_core.execution.contracts import (
     GuardPreconditionChanged,
     ToolEffectRequest,
@@ -80,7 +81,7 @@ async def invoke_native_tool(
             call_id=call_id,
             arguments=deepcopy(arguments),
             arguments_digest=arguments_digest(arguments),
-            state=tool_state_view(state),
+            state=tool_state_view(state, vision=name == FS_VIEW_IMAGE_NAME),
             guard_checks=list(checks),
             effect_step="download" if effect_data is not None else "body",
             effect_data=effect_data or {},
@@ -135,6 +136,9 @@ async def execute_native_tool_effect(
         ),
         session_todo=deepcopy(request.state.session_todo),
     )
+    vision = request.state.vision
+    if vision is not None:
+        _add_vision_state(state, vision)
     prepared = _prepare_tool_call(
         request.name,
         request.arguments,
@@ -174,12 +178,45 @@ async def execute_native_tool_effect(
     delta = StateDelta(
         fetch_url_cache=cache
         if cache != request.state.fetch_url_cache
-        else None
+        else None,
+        pending_tool_attachments=(
+            deepcopy(
+                state.pending_tool_attachments[len(vision.step_attachments) :]
+            )
+            or None
+        )
+        if vision is not None
+        else None,
     )
     return ToolResult(
         output=output,
         outcome="tool_error" if ok is False else "ok",
         delta=delta,
+    )
+
+
+def _add_vision_state(state, vision):
+    """Поля State, которые читает и пишет ``fs_view_image``, — из среза хода.
+
+    Кто смотрит, тул на воркере узнаёт сам (``aensure_view_audience``): пробы
+    маршрутов и хранилище картинок есть только здесь. Обратно уходят лишь
+    новые снимки (``StateDelta.pending_tool_attachments``).
+    """
+    if vision.schema_version != 1:
+        raise ValueError("Unsupported tool vision view")
+    state.vision_probe_turn = vision.probe_turn
+    state.turn_level = vision.turn_level
+    state.vision_live_ids = frozenset(vision.live_ids)
+    state.vision_audience = None
+    state.vision_routes = {}
+    state.pending_tool_attachments = deepcopy(vision.step_attachments)
+    state.messages = (
+        [{"role": "user", "attachments": deepcopy(vision.known_attachments)}]
+        if vision.known_attachments
+        else []
+    )
+    state.tools = (
+        [{"name": FS_VIEW_IMAGE_NAME}] if vision.view_tool_in_set else []
     )
 
 
