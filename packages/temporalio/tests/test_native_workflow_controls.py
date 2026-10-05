@@ -381,3 +381,52 @@ async def test_post_run_result_and_usage_are_accounted_once(
         assert len(requests) == 2 and meta == store.load_meta(
             "test", "controls"
         )
+
+
+async def test_resubmit_after_stopped_turn_is_accepted_again(
+    tmp_path, monkeypatch, scripted_http
+):
+    """Сообщение, отброшенное остановкой хода, при повторе с тем же ID
+    принимается заново, а не отвечает duplicate навсегда."""
+    import time
+
+    monkeypatch.chdir(tmp_path)
+    url, requests, script = scripted_http
+    (tmp_path / "a.txt").write_text("a")
+
+    def slow():
+        time.sleep(2.0)
+        return [call("r", "fs_read_file", {"path": "a.txt"})]
+
+    script.extend([slow, [finish("first")], [finish("second")]])
+    async with runtime(tmp_path, url) as (env, _, _):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(keep_alive=True),
+            id="controls",
+            task_queue="native-controls",
+        )
+        status = await wait_status(
+            handle, lambda s: s["phase"] == "running" and requests
+        )
+        await handle.execute_update(
+            NativeAgentWorkflow.submit_message, UserMessage("m2", "SECOND")
+        )
+        await handle.execute_update(
+            NativeAgentWorkflow.stop_turn, status["turn_id"]
+        )
+        status = await wait_status(
+            handle, lambda s: s["turns"] == 1 and s["undelivered"]
+        )
+        assert [m["message_id"] for m in status["undelivered"]] == ["m2"]
+        receipt = await handle.execute_update(
+            NativeAgentWorkflow.submit_message, UserMessage("m2", "SECOND")
+        )
+        assert receipt["duplicate"] is False
+        status = await wait_status(
+            handle, lambda s: s["turns"] == 2 and s["phase"] == "idle"
+        )
+        assert status["undelivered"] == []
+        assert any("SECOND" in json.dumps(body) for body in requests[-1:])
+        await handle.signal(NativeAgentWorkflow.close_session)
+        await handle.result()

@@ -74,6 +74,15 @@ def apply_model_result(state: Any, result: ModelResult, *, main: bool) -> None:
     if result.schema_version != 1:
         raise ValueError("Unsupported ModelResult schema_version")
     state.usage.merge(UsageAccount.from_meta(result.usage))
+    if result.vision is not None:
+        # Как при живом State в develop: что ушло модели целиком и потолок
+        # картинок хода живут в состоянии до следующего запроса.
+        from gc_core.vision.rejects import image_limit_from_data
+
+        state.vision_live_ids = frozenset(result.vision.get("live_ids") or ())
+        state.vision_request_limit = image_limit_from_data(
+            result.vision.get("request_limit")
+        )
     if main:
         state.last_finish_reason = result.finish_reason
         state.last_main_prompt_tokens = result.prompt_tokens

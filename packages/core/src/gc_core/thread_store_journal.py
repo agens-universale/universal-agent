@@ -263,6 +263,29 @@ def _bind_identity(directory, base, identity):
 
 
 @contextlib.contextmanager
+def local_write_scope(directory, system_id, thread_id, *, forbid_owned=True):
+    """Запись мимо журнала (локальный ``FileThreadStore``, мета TUI).
+
+    Тред, у которого есть служебный каталог журнала, пишется под той же
+    файловой блокировкой: иначе запись между снимком журнала и его коммитом
+    оставляет ``pending.json``, и тред мёртв для воркера и views. Владелец
+    перепроверяется под блокировкой. Тред без журнала — как раньше, без
+    блокировки и без ``.store/``.
+    """
+    base = _control_path(directory, system_id, thread_id)
+    if not base.exists():
+        yield
+        return
+    with thread_read_scope(directory, system_id, thread_id):
+        if forbid_owned and durable_owner_id(directory, system_id, thread_id):
+            raise ThreadStoreOwnershipError(
+                "Thread is owned by a durable executor (Temporal); "
+                "local writes are forbidden"
+            )
+        yield
+
+
+@contextlib.contextmanager
 def thread_read_scope(directory, system_id, thread_id):
     """Recover and bind an unambiguous logical identity under its file lock."""
     from gc_core.thread_store import sanitize_system_id, validate_thread_id
@@ -600,7 +623,10 @@ class _FileTransaction:
             self.control["generation"] += 1
             self.control["owner_id"] = None
             self.control["owner_epoch"] += 1
-        self.control["revision"] += 1
+        if not self.sidecar_only:
+            # Трейс субагента — отдельный файл: история и meta треда не
+            # меняются, и сессия родителя не должна ловить конфликт ревизии.
+            self.control["revision"] += 1
         maximum = (
             self.control["max_seq"]
             if self.metadata_only or self.sidecar_only

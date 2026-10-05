@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Mapping, Optional
+from typing import TYPE_CHECKING, Any, Mapping, Optional
 
 from gc_core.utils.backend_errors import (
     image_limit_from_error,
@@ -28,6 +28,43 @@ class ImageRequestLimit:
 
     scope: tuple[VisionRouteKey, str, int, int, frozenset[str]]
     cap: int
+
+
+def image_limit_to_data(limit: Optional[ImageRequestLimit]) -> Optional[dict]:
+    """Потолок как JSON-данные: он пересекает границу модельной операции."""
+    if limit is None:
+        return None
+    key, probe_turn, user_turn_seq, offset, live_ids = limit.scope
+    return {
+        "route": None
+        if key is None
+        else {
+            "url": key.url,
+            "model": key.model,
+            "fingerprint": key.fingerprint,
+        },
+        "probe_turn": probe_turn,
+        "user_turn_seq": user_turn_seq,
+        "dialog_steps_offset": offset,
+        "live_ids": sorted(live_ids),
+        "cap": limit.cap,
+    }
+
+
+def image_limit_from_data(data: Any) -> Optional[ImageRequestLimit]:
+    if data is None or isinstance(data, ImageRequestLimit):
+        return data
+    route = data["route"]
+    return ImageRequestLimit(
+        (
+            None if route is None else VisionRouteKey(**route),
+            data["probe_turn"],
+            data["user_turn_seq"],
+            data["dialog_steps_offset"],
+            frozenset(data["live_ids"]),
+        ),
+        data["cap"],
+    )
 
 
 class ImageRejects:

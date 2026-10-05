@@ -26,6 +26,7 @@ from temporalio.exceptions import (
     CancelledError,
     FailureError,
 )
+from temporalio.exceptions import TimeoutError as TemporalTimeoutError
 
 from gc_ua_temporalio.native_contracts import (
     NativeCall,
@@ -65,6 +66,11 @@ _DOMAIN_ERRORS.update(
         "JSONDecodeError": ValueError,
     }
 )
+
+#: Потолок activity по умолчанию; инструмент с долгим ``timeout`` получает
+#: свой (``timeout`` + запас), иначе Temporal обрывал бы его на 15 минутах.
+ACTIVITY_TIMEOUT = timedelta(minutes=15)
+TOOL_TIMEOUT_MARGIN = timedelta(minutes=5)
 
 #: Ход продолжается без этих activities только для эффекта инструмента:
 #: сбой исполнителя после единственной попытки становится ошибкой инструмента.
@@ -148,6 +154,7 @@ class NativeOperations:
         operation_id=None,
         model=False,
         effect=False,
+        start_to_close=ACTIVITY_TIMEOUT,
     ):
         """Execute one activity.
 
@@ -173,7 +180,7 @@ class NativeOperations:
                 task_queue=self.start.model_queue
                 if model
                 else self.start.resource_queue,
-                start_to_close_timeout=timedelta(minutes=15),
+                start_to_close_timeout=start_to_close,
                 heartbeat_timeout=timedelta(seconds=30),
                 retry_policy=RetryPolicy(maximum_attempts=2 if effect else 5),
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
@@ -186,6 +193,12 @@ class NativeOperations:
         cause = exc.cause
         if isinstance(cause, CancelledError):
             return asyncio.CancelledError(str(cause))
+        if effect and isinstance(cause, TemporalTimeoutError):
+            return ToolOutcomeUnknown(
+                "Исполнение превысило лимит времени activity и прервано; "
+                "неизвестно, успела ли операция выполниться. Проверьте "
+                "состояние, прежде чем повторять."
+            )
         if isinstance(cause, ApplicationError):
             if cause.type == "DomainError":
                 return restore_domain_error(cause)
@@ -230,6 +243,21 @@ class NativeOperations:
             ToolResult,
             operation_id=request.operation_id,
             effect=effect,
+            start_to_close=self._tool_timeout(request),
+        )
+
+    def _tool_timeout(self, request):
+        """Лимит activity инструмента: его ``timeout`` (или умолчание
+        ``agent.exec_timeout_sec`` для команд) плюс запас, не меньше 15 минут."""
+        seconds = request.arguments.get("timeout")
+        if not isinstance(seconds, int) and request.name == "exec_command":
+            settings = self._prepared_settings()
+            seconds = settings.agent.exec_timeout_sec if settings else None
+        if not isinstance(seconds, int) or seconds <= 0:
+            return ACTIVITY_TIMEOUT
+        return max(
+            ACTIVITY_TIMEOUT,
+            timedelta(seconds=seconds) + TOOL_TIMEOUT_MARGIN,
         )
 
     def _probe_companions(self, request):

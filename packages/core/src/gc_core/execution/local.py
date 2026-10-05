@@ -9,7 +9,7 @@ from gc_core.execution.contracts import (
     ModelRequest,
     ModelResult,
 )
-from gc_core.execution.model import model_state
+from gc_core.execution.model import model_state, model_vision
 
 
 class LocalOperations:
@@ -78,4 +78,5 @@ class LocalOperations:
                 result.prompt_message_count = (
                     state.last_main_prompt_message_count
                 )
+                result.vision = model_vision(state)
         return result

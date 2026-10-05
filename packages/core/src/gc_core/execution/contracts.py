@@ -179,6 +179,10 @@ class ModelResult:
     schema_version: int = 1
     context_overflow: bool = False
     failure: ModelFailure | None = None
+    #: Состояние зрения после запроса основного цикла: какие картинки ушли
+    #: модели целиком (``live_ids`` — для ``fs_view_image``) и успешный
+    #: потолок картинок (``request_limit``). ``None`` — запрос его не трогал.
+    vision: dict[str, Any] | None = None
 
 
 class ModelOperationError(Exception):

@@ -11,6 +11,7 @@ from gc_core.execution.contracts import (
 from gc_core.execution.model_errors import restore_model_failure
 from gc_core.execution.reducers import apply_model_result
 from gc_core.usage.account import UsageAccount
+from gc_core.vision.rejects import image_limit_from_data, image_limit_to_data
 
 MODEL_STATE_FIELDS = (
     "state_id",
@@ -33,7 +34,17 @@ MODEL_STATE_FIELDS = (
     "vision_probe_turn",
     "user_turn_seq",
     "dialog_steps_offset",
+    # Успешный потолок картинок хода: без него каждый шаг после 413 снова
+    # начинал с полного набора картинок (данные — ``image_limit_to_data``).
+    "vision_request_limit",
 )
+
+
+def _state_value(state, name):
+    value = deepcopy(getattr(state, name, None))
+    if name == "vision_request_limit":
+        return image_limit_to_data(value)
+    return value
 
 
 def make_model_request(operations, state, messages, *, consumer, **kwargs):
@@ -41,10 +52,7 @@ def make_model_request(operations, state, messages, *, consumer, **kwargs):
         operation_id=operations.next_operation_id("model"),
         consumer=consumer,
         messages=deepcopy(messages),
-        state={
-            name: deepcopy(getattr(state, name, None))
-            for name in MODEL_STATE_FIELDS
-        },
+        state={name: _state_value(state, name) for name in MODEL_STATE_FIELDS},
         **kwargs,
     )
 
@@ -80,4 +88,18 @@ def model_state(request: ModelRequest):
         raise ValueError("Unsupported ModelRequest schema_version")
     if set(request.state) - set(MODEL_STATE_FIELDS):
         raise ValueError("Unexpected model state fields")
-    return SimpleNamespace(**deepcopy(request.state), usage=UsageAccount())
+    state = SimpleNamespace(**deepcopy(request.state), usage=UsageAccount())
+    state.vision_request_limit = image_limit_from_data(
+        getattr(state, "vision_request_limit", None)
+    )
+    return state
+
+
+def model_vision(state) -> dict:
+    """Состояние зрения модельного запроса для ``ModelResult.vision``."""
+    return {
+        "live_ids": sorted(getattr(state, "vision_live_ids", None) or ()),
+        "request_limit": image_limit_to_data(
+            getattr(state, "vision_request_limit", None)
+        ),
+    }

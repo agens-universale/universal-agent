@@ -390,3 +390,129 @@ async def test_history_deleted_outside_journal_restarts_counter(tmp_path):
     )
     assert fresh.persisted_messages_count == 1
     assert [m["id"] for m in store.load_messages("sys", "t1")] == ["n1"]
+
+
+def test_local_file_write_waits_for_journal_commit(tmp_path, monkeypatch):
+    """Локальный FileThreadStore пишет под блокировкой журнала: запись между
+    снимком журнала и коммитом раньше оставляла pending.json (тред мёртв)."""
+    import threading
+    import uuid
+
+    from gc_core import thread_store_journal as journal
+    from gc_core.thread_store_durable import ThreadStoreOperation
+    from gc_core.thread_store_file import FileThreadStore
+    from gc_core.thread_store_file_durable import DurableFileThreadStore
+
+    local = FileThreadStore(str(tmp_path))
+    durable = DurableFileThreadStore(str(tmp_path))
+    local.append_messages(
+        "s", "t", [{"role": "user", "content": "hi", "id": "m"}]
+    )
+    snapshot = durable.read_snapshot("s", "t", include_state=False)
+    writer = threading.Thread(
+        target=lambda: local.save_meta("s", "t", {"title": "local"})
+    )
+    original = journal._FileTransaction._read_after
+    blocked = []
+
+    def read_after(self):
+        original(self)
+        writer.start()
+        writer.join(0.3)
+        blocked.append(writer.is_alive())
+
+    monkeypatch.setattr(journal._FileTransaction, "_read_after", read_after)
+    durable.commit_operation(
+        "s",
+        "t",
+        ThreadStoreOperation(
+            uuid.uuid4().hex,
+            "update_tui",
+            {"patch": {"title": "server"}},
+            generation=snapshot.generation,
+        ),
+    )
+    writer.join(5)
+    assert blocked == [True]
+    assert local.load_meta("s", "t")["title"] == "local"
+    assert not list(tmp_path.glob(".store/*/pending.json"))
+    durable.read_snapshot("s", "t")
+
+
+class _CountingStore:
+    """Обёртка durable-хранилища: считает чтения снимка и коммиты."""
+
+    def __init__(self, inner):
+        self.inner, self.reads, self.commits = inner, 0, 0
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    def read_snapshot(self, *args, **kwargs):
+        self.reads += 1
+        return self.inner.read_snapshot(*args, **kwargs)
+
+    def commit_operation(self, *args, **kwargs):
+        self.commits += 1
+        return self.inner.commit_operation(*args, **kwargs)
+
+
+async def test_idless_message_survives_revision_conflict(tmp_path):
+    """Сообщение без id получает его до ключей: сверка после чужой записи
+    сходится, а не упирается в конфликт навсегда."""
+    import uuid
+
+    from gc_core.thread_store import ThreadSession
+    from gc_core.thread_store_durable import ThreadStoreOperation
+    from gc_core.thread_store_file_durable import DurableFileThreadStore
+
+    raw = DurableFileThreadStore(str(tmp_path))
+    session = await ThreadSession.afrom_config(
+        settings=None, system_id="s", thread_id="t", store=raw
+    )
+    message = {"role": "user", "content": "hello"}
+    await session.apersist_batch([message], previous_response_id=None)
+    assert message["id"]
+    snapshot = raw.read_snapshot("s", "t", include_state=False)
+    raw.commit_operation(
+        "s",
+        "t",
+        ThreadStoreOperation(
+            uuid.uuid4().hex,
+            "update_tui",
+            {"patch": {"title": "x"}},
+            generation=snapshot.generation,
+        ),
+    )
+    await session.apersist_batch(
+        [{"role": "assistant", "content": "a", "id": "a1"}],
+        previous_response_id=None,
+    )
+    assert [m["content"] for m in raw.load_messages("s", "t")] == [
+        "hello",
+        "a",
+    ]
+
+
+async def test_subagent_trace_does_not_bump_parent_revision(tmp_path):
+    from gc_core.thread_store import ThreadSession
+    from gc_core.thread_store_async import athread_store
+    from gc_core.thread_store_file_durable import DurableFileThreadStore
+
+    store = _CountingStore(DurableFileThreadStore(str(tmp_path)))
+    session = await ThreadSession.afrom_config(
+        settings=None, system_id="s", thread_id="t", store=store
+    )
+    await session.apersist_batch(
+        [{"role": "user", "content": "u", "id": "u1"}],
+        previous_response_id=None,
+    )
+    await athread_store(store).aappend_subagent_trace(
+        "s", "t", parent_call_id="c", child_run_id="r", kind="k", payload={}
+    )
+    reads, commits = store.reads, store.commits
+    await session.apersist_batch(
+        [{"role": "assistant", "content": "a", "id": "a1"}],
+        previous_response_id=None,
+    )
+    assert (store.reads - reads, store.commits - commits) == (0, 1)

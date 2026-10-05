@@ -27,6 +27,11 @@ from gc_core.thread_store_durable import (
 )
 from gc_core.thread_store_types import ThreadState
 
+#: Операции только над трейсом субагента: ревизию треда не повышают.
+_SIDECAR_KINDS = frozenset(
+    {"append_subagent_trace", "restore_subagent_trace_records"}
+)
+
 _SELECT_MAX_SEQ = (
     "SELECT coalesce(max(seq),0) FROM messages WHERE system=? AND thread=?"
 )
@@ -168,7 +173,9 @@ class SQLiteDurableOperations:
             "UPDATE threads SET meta=?,max_seq=? WHERE system=? AND thread=?",
             (_encode(out.meta), maximum, *key),
         )
-        self._advance_revision(db, *key)
+        if kind not in _SIDECAR_KINDS:
+            # Трейс субагента не меняет историю и meta: ревизия треда та же.
+            self._advance_revision(db, *key)
         row, control = (self._row(db, *key), self._control(db, *key))
         receipt = ThreadStoreReceipt(
             operation.operation_id,

@@ -170,9 +170,15 @@ class NativeAgentWorkflow:
         if existing is not None:
             if existing != digest:
                 raise ApplicationError("Message ID reused", non_retryable=True)
-            return {"message_id": message.message_id, "duplicate": True}
+            if not any(
+                value.get("message_id") == message.message_id
+                for value in self.undelivered
+            ):
+                return {"message_id": message.message_id, "duplicate": True}
+            # Повтор сообщения, отброшенного остановкой хода: принять заново.
         if self.closed:
             raise ApplicationError("Session is closing", non_retryable=True)
+        self._take_undelivered(message.message_id)
         self.accepted[message.message_id] = digest
         value = {
             "role": "user",
@@ -184,6 +190,14 @@ class NativeAgentWorkflow:
         else:
             self.pending_messages.append(value)
         return {"message_id": message.message_id, "duplicate": False}
+
+    def _take_undelivered(self, message_id):
+        """Убрать сообщение из отброшенных остановкой (повтор принят заново)."""
+        self.undelivered = [
+            value
+            for value in self.undelivered
+            if value.get("message_id") != message_id
+        ]
 
     @workflow.update
     async def answer_human(

@@ -41,6 +41,21 @@ from gc_core.thread_store_types import (
     ThreadState,
 )
 
+#: Пишущие файловые функции (по имени: часть импортируется по месту).
+_WRITE_HELPERS = frozenset(
+    {
+        "append_new_thread_messages",
+        "append_subagent_trace_record",
+        "archive_and_replace_thread_files",
+        "discard_message_by_id",
+        "patch_runtime_flag",
+        "reset_thread_files",
+        "restore_subagent_trace_records",
+        "save_thread_meta",
+        "update_runtime_meta",
+    }
+)
+
 
 class FileThreadStore(ThreadStoreBase):
     """Хранилище треда в каталоге с ``data_*.jsonl`` и ``meta_*.json``."""
@@ -59,10 +74,18 @@ class FileThreadStore(ThreadStoreBase):
     def _call(self, helper, *args, **kwargs):
         """Единая точка вызова файловых функций.
 
-        Здесь — прямой вызов, ровно как раньше. ``DurableFileThreadStore``
-        переопределяет только её, чтобы провести те же функции через журнал.
+        Чтение — прямой вызов. Запись в тред, который знает журнал durable
+        хранилища, — под его блокировкой (``local_write_scope``).
+        ``DurableFileThreadStore`` переопределяет её, чтобы провести те же
+        функции через журнал.
         """
-        return helper(*args, **kwargs)
+        if helper.__name__ not in _WRITE_HELPERS:
+            return helper(*args, **kwargs)
+        from gc_core.thread_store_journal import local_write_scope
+
+        directory, system_id, thread_id = args[:3]
+        with local_write_scope(directory, system_id, thread_id):
+            return helper(*args, **kwargs)
 
     # --- чтение ------------------------------------------------------------
 
