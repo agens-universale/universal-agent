@@ -177,7 +177,9 @@ def test_execute_command_ask_path_confirmed_executes(tmp_path, monkeypatch):
 
     # Patch scan to return "ask" for any command.
     monkeypatch.setattr(
-        cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask"
+        cg,
+        "scan_command_for_protected",
+        lambda cmd, cwd, extra=None, media=(): "ask",
     )
     monkeypatch.setattr(
         "gc_core.security.confirm_port.request_confirm", lambda **k: True
@@ -201,7 +203,9 @@ def test_execute_command_ask_path_not_confirmed_blocks(tmp_path, monkeypatch):
     monkeypatch.setattr(env_vars.env, "gc_home", tmp_path / "gc")
 
     monkeypatch.setattr(
-        cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask"
+        cg,
+        "scan_command_for_protected",
+        lambda cmd, cwd, extra=None, media=(): "ask",
     )
     monkeypatch.setattr(
         "gc_core.security.confirm_port.request_confirm", lambda **k: False
@@ -231,7 +235,9 @@ def test_blocked_envelope_form_is_the_same_in_both_branches(
     tool = with_local_ctx(ExecuteCommand)
 
     monkeypatch.setattr(
-        cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "ask"
+        cg,
+        "scan_command_for_protected",
+        lambda cmd, cwd, extra=None, media=(): "ask",
     )
     monkeypatch.setattr(
         "gc_core.security.confirm_port.request_confirm", lambda **k: False
@@ -241,7 +247,9 @@ def test_blocked_envelope_form_is_the_same_in_both_branches(
     )["error"]
 
     monkeypatch.setattr(
-        cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "deny"
+        cg,
+        "scan_command_for_protected",
+        lambda cmd, cwd, extra=None, media=(): "deny",
     )
     denied = json.loads(
         tool(command="echo x", cwd=str(tmp_path), ctx=_ctx(tmp_path))
@@ -274,7 +282,9 @@ def test_run_python_code_gc_deny_blocks_before_subprocess(
 
     # Force scanner to deny
     monkeypatch.setattr(
-        cg, "scan_command_for_protected", lambda cmd, cwd, extra=None: "deny"
+        cg,
+        "scan_command_for_protected",
+        lambda cmd, cwd, extra=None, media=(): "deny",
     )
 
     subprocess_called = []

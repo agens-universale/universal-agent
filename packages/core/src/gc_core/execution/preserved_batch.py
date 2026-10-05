@@ -57,8 +57,7 @@ def _preserved_user_ask_batch(
             continue
         if str(msg.get("role", "")).strip().lower() != "user":
             continue
-        entry = extract_real_user_message_text(msg)
-        if not entry:
+        if not (extract_real_user_message_text(msg) or msg.get("attachments")):
             continue
         out.append(msg)
     out.append(last)
@@ -92,6 +91,7 @@ def _preserved_function_output_batch(
             continue
         seen_calls.add(call_id_raw)
         batches.extend((shallow_copy(call_msg), shallow_copy(output)))
+    batches.extend(shallow_copy(m) for m in _technical_tail(current_messages))
     return batches
 
 
@@ -112,7 +112,14 @@ def build_preserved_batch(
     Для режима ``user_ask``: если передан непустой ``message_keys_already_persisted``,
     сообщения режутся до **входа текущего шага** — только те элементы ``current_messages``,
     чей ключ не был известен треду до ``persist_batch`` этого шага (уже сохранённые
-    ключи считаются повторным контекстом, а не новым входом шага).
+    ключи считаются повторным контекстом, а не новым входом шага). Из входа
+    остаются реплики человека, user-сообщения с вложениями (картинка тула или
+    ответа на вопрос агента — сводка её не несёт) и последнее сообщение.
+
+    Для режима ``function_call_output``: пары «вызов → ответ» и за ними технический
+    хвост батча — user-сообщения после последнего ответа (напоминание loop detector,
+    картинки тулов) в исходном порядке. Реплик человека в таком батче нет
+    (``check_mode``).
     """
     if not current_messages:
         return []
@@ -125,6 +132,18 @@ def build_preserved_batch(
             current_messages, state_messages
         )
     return []
+
+
+def _technical_tail(messages: list[dict]) -> list[dict]:
+    """User-сообщения после последнего ответа тула — в исходном порядке."""
+    tail: list[dict] = []
+    for m in reversed(messages):
+        if not isinstance(m, dict) or m.get("type") in _FUNCTION_OUTPUT_TYPES:
+            break
+        if str(m.get("role", "")).strip().lower() == "user":
+            tail.append(m)
+    tail.reverse()
+    return tail
 
 
 def find_function_call_for_id(

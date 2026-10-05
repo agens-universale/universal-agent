@@ -20,6 +20,12 @@ dependencies = [
     "certifi",
     "mcp==1.26.0",
     "chardet>=7.4.3",
+    # Изображения во вводе (`gc_core.attachments.normalize`): разбор, поворот по
+    # EXIF, ужатие, перекодирование. Импорт ленивый — только внутри функций
+    # нормализации, старт ядра за C-расширение не платит (сторож —
+    # tests/attachments/test_attachments_import_light.py). Граница 10.3: всё
+    # используемое API там уже есть, и закрыта CVE-2024-28219.
+    "pillow>=10.3",
 ]
 
 [tool.hatch.build.targets.wheel]

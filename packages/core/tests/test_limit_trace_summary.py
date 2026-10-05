@@ -355,3 +355,23 @@ def test_kill_switch_wired_from_config(monkeypatch):
         "agent.limit_trace_summary=True (default) must call the LLM"
     )
     assert env_on["raw_trace_summary"] == "summary"
+
+
+def test_trace_carries_no_attachment_metadata_or_image_bytes():
+    """Сериализация трейса берёт content — ключ attachments (пути, размеры) в
+    промпт аварийной сводки не попадает (спека §5)."""
+    message = {
+        "role": "user",
+        "id": "m1",
+        "content": "[Изображение #1] что тут?",
+        "attachments": [
+            {
+                "id": "0000000000000001",
+                "kind": "image",
+                "path": "/secret/cli_t_1.png",
+            }
+        ],
+    }
+    assert (
+        lts._serialize_trace([message]) == "[user] [Изображение #1] что тут?"
+    )

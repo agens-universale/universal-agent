@@ -7,12 +7,18 @@ State создаётся заново при каждом run(). Возвращ�
 """
 
 import asyncio
+import functools
 import gc
 import threading
 from copy import copy as _shallow_copy_msg
 from typing import Any, Optional
 
 from gc_core.agent_edits.snapshots import purge_thread_snapshots
+from gc_core.attachments.model import Attachment, attachments_of
+from gc_core.attachments.store import (
+    commit_to_run_thread,
+    with_committed_attachments,
+)
 from gc_core.config_modules.stored_outputs import (
     get_stored_tool_outputs_max_entries,
 )
@@ -195,15 +201,29 @@ def undelivered_as_arun_args(messages: list[dict]) -> tuple[list[str], dict]:
     Владелец доигрывает хвост (`take_undelivered_messages`) новым ходом, а
     `arun` принимает тексты и параллельные списки полей, тогда как в очередь
     кладут готовые словари. Поля переносятся те, из которых `arun` и строит
-    сообщение: id (по нему TUI точечно откатывает реплику), display_content и
-    skill_loaded — других в очередь не кладут ни сервер, ни TUI.
+    сообщение: id (по нему TUI точечно откатывает реплику), display_content,
+    skill_loaded и attachments (картинки из кармана процесса — в тред их
+    переложит ход, который их понесёт) — других в очередь не кладут ни
+    сервер, ни TUI, ни SDK.
     """
     texts = [str(m.get("content", "")) for m in messages]
     return texts, {
         "message_ids": [m.get("id") for m in messages],
         "display_contents": [m.get("display_content") for m in messages],
         "skills_loaded": [m.get("skill_loaded") for m in messages],
+        "attachments": [attachments_of(m) or None for m in messages],
     }
+
+
+def _put_attachments(msg: dict, attachments, i: int, commit) -> None:
+    """Вложения ``i``-го сообщения прогона — в ``msg["attachments"]`` словарями: каждое
+    проходит через ``commit`` (копия в тред прогона), ``commit=None`` — как есть, в
+    кармане. Нет вложений — ключа нет."""
+    atts = attachments[i] if attachments and i < len(attachments) else None
+    if atts:
+        msg["attachments"] = [
+            (commit(a) if commit is not None else a).to_dict() for a in atts
+        ]
 
 
 class AgentExecutor:
@@ -256,7 +276,9 @@ class AgentExecutor:
         with self._lock:
             out = self._pending_messages[:]
             self._pending_messages.clear()
-            return out
+        # Вне замка: копия картинок в тред — файловая операция, а замок ждут
+        # поток TUI и обработчик сервера.
+        return self._commit_queued(out)
 
     def _is_stop_requested(self) -> bool:
         with self._lock:
@@ -826,12 +848,19 @@ class AgentExecutor:
         message_ids: list[str] | None = None,
         display_contents: list[str | None] | None = None,
         skills_loaded: list[str | None] | None = None,
+        attachments: list[list[Attachment] | None] | None = None,
         account_run: bool = True,
     ) -> Any:
         """Прогон агента, не блокирующий вызывающий loop.
 
         При каждом вызове state создаётся заново. messages — непустой список
         текстов, каждый уходит отдельным user-сообщением.
+
+        attachments — вложения по сообщениям, параллельно messages (как
+        display_contents): элемент — картинки своего сообщения из кармана
+        процесса (``ImageStore.stage``) или None. В тред их копирует сам ход
+        (``commit_to_run_thread``); текст сообщения остаётся строкой с
+        плашками ``[Изображение #N]``.
 
         Форма ОДНА. Синхронного ``run`` нет: из синхронного кода агента
         ведут своим ``asyncio.run`` в рабочем потоке — так делают TUI и
@@ -974,6 +1003,10 @@ class AgentExecutor:
                 "Список пользовательских сообщений не должен быть пустым."
             )
         user_bodies = [str(x) for x in messages]
+        # Копия вложений в тред — здесь и при приёме очереди, и только после
+        # сброса треда и привязки его адреса к контексту выше: копия, сделанная
+        # до сброса, пропала бы вместе с тредом.
+        commit_attachment = functools.partial(commit_to_run_thread, self._ctx)
         # id можно задать снаружи (TUI пробрасывает свой, чтобы потом точечно
         # откатить осиротевшую реплику при быстрой отмене); иначе генерим.
         new_user_messages = self._build_user_messages(
@@ -982,6 +1015,8 @@ class AgentExecutor:
             display_contents=display_contents,
             skills_loaded=skills_loaded,
             gen_id=generate_message_id_func,
+            attachments=attachments,
+            commit=commit_attachment,
         )
         self._seed_current_user_intent(state, new_user_messages)
 
@@ -1159,10 +1194,19 @@ class AgentExecutor:
 
     @staticmethod
     def _build_user_messages(
-        user_bodies, *, message_ids, display_contents, skills_loaded, gen_id
+        user_bodies,
+        *,
+        message_ids,
+        display_contents,
+        skills_loaded,
+        gen_id,
+        attachments=None,
+        commit=None,
     ):
-        """Собрать user-сообщения с опциональными display_content/skill_loaded.
-        display_content ставится только при отличии от content; skill_loaded — если задан."""
+        """Собрать user-сообщения с опциональными display_content/skill_loaded/attachments.
+        display_content ставится только при отличии от content; skill_loaded — если задан;
+        attachments — если у сообщения есть вложения: каждое проходит через ``commit``
+        (копия в тред прогона), ``commit=None`` — вложения как есть, в кармане."""
         out = []
         for i, body in enumerate(user_bodies):
             body = str(body)
@@ -1189,8 +1233,14 @@ class AgentExecutor:
             )
             if sk:
                 msg["skill_loaded"] = sk
+            _put_attachments(msg, attachments, i, commit)
             out.append(msg)
         return out
+
+    def _commit_queued(self, messages: list[dict]) -> list[dict]:
+        """Сообщения очереди с вложениями, переложенными в тред прогона: сообщение
+        получает тред, когда его принимает агент, — здесь и копируем его картинки."""
+        return [with_committed_attachments(m, self._ctx) for m in messages]
 
     def stop_run(self) -> None:
         """Выставляет флаг остановки; агент завершит текущую итерацию и выйдет.

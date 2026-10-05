@@ -5,6 +5,8 @@ import os
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
+from gc_core.thread_store import delete_thread, thread_meta_path
+
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _EXT_JSON = ".json"
 
@@ -34,7 +36,41 @@ def _meta_to_data_path(meta_path: str) -> str:
     return meta_path + ".l"
 
 
+def _is_canonical_meta(threads_dir: str, meta_path: str, meta: dict) -> bool:
+    """Файл — каноническая meta того треда, который назван в его содержимом.
+
+    Архив компакции (``meta_<sys>_<tid>__pre_summary__<ts>.json``) и legacy
+    ``meta_<tid>.json`` несут те же system/thread_id: удаление треда по ним
+    снесло бы живой тред вместе с картинками. Их удаляем по имени файла.
+    """
+    system_id, thread_id = meta.get("system"), meta.get("thread_id")
+    if not isinstance(system_id, str) or not isinstance(thread_id, str):
+        return False
+    try:
+        return thread_meta_path(threads_dir, system_id, thread_id) == meta_path
+    except ValueError:
+        return False
+
+
+def _delete_canonical_thread(
+    threads_dir: str, meta_path: str, data_path: str, meta: dict, result: dict
+) -> bool:
+    """Тред целиком — тем же путём, что удаление сессии в TUI: вместе с
+    картинками, сайдкаром субагентов, архивами компакции и журналом правок.
+    Свой перечень файлов здесь забывал бы каждый новый — так сайдкары и архивы
+    и оставались навсегда. False — meta не каноническая, удалять по имени."""
+    if not _is_canonical_meta(threads_dir, meta_path, meta):
+        return False
+    deleted = delete_thread(threads_dir, meta["system"], meta["thread_id"])
+    if meta_path in deleted:
+        result["removed_meta"] += 1
+    if data_path in deleted:
+        result["removed_data"] += 1
+    return True
+
+
 def _cleanup_thread(
+    threads_dir: str,
     meta_path: str,
     now: datetime,
     cutoff: datetime,
@@ -68,6 +104,11 @@ def _cleanup_thread(
         result["removed_meta"] += 1
         if os.path.exists(data_path):
             result["removed_data"] += 1
+        return
+
+    if _delete_canonical_thread(
+        threads_dir, meta_path, data_path, meta, result
+    ):
         return
 
     try:
@@ -121,9 +162,13 @@ def cleanup_threads(
     ]
 
     for meta_path in sorted(meta_paths):
+        if not os.path.exists(meta_path):
+            continue  # архив, удалённый раньше в этом проходе вместе со своим тредом
         result["scanned"] += 1
         try:
-            _cleanup_thread(meta_path, now, cutoff, dry_run, result)
+            _cleanup_thread(
+                threads_dir, meta_path, now, cutoff, dry_run, result
+            )
         except Exception as e:
             result["errors"] += 1
             print(f"[cleanup] error for {meta_path}: {e!r}")

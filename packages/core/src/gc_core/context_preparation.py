@@ -102,6 +102,7 @@ class RunContextBindings:
     thread_store: Any = None
     tools_cache: Any = None
     on_stream_delta: Any = None
+    on_trace_note: Any = None
     on_messages_evicted: Any = None
     operations: Any = None
     prompt_loader: Any = None

@@ -9,6 +9,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
+from gc_core.attachments.numbering import (
+    IMAGE_SEQ_KEY,
+    bumped_image_seq,
+    read_image_seq,
+)
+from gc_core.attachments.store import ImageStore
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
@@ -26,20 +32,26 @@ from gc_core.persistence.live_volume import (
     live_volume_from_messages,
     merge_tui_into_meta,
 )
-from gc_core.persistence.meta_ownership import resolve_runtime_flag_name
+from gc_core.persistence.meta_ownership import (
+    merge_runtime_into_meta,
+    resolve_runtime_flag_name,
+)
 from gc_core.persistence.thread_meta_mapper import (
     ThreadMetaMapper,
     read_optional_nonneg_int,
 )
 from gc_core.settings import settings_of
+from gc_core.thread_paths import (
+    resolve_threads_dir,
+    sanitize_system_id,
+    validate_thread_id,
+)
 from gc_core.utils.aio_compat import await_callback
 from gc_core.utils.atomic_io import atomic_replace
 from gc_core.utils.generate_message_id import (
     generate_msg_id_sha256 as generate_message_id_func,
 )
 
-_THREAD_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
-_SYSTEM_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 _META_SCHEMA_VERSION = 2
 
 # Process-local счётчик последнего выданного seq sidecar (SPEC 2026-07-30-sidecar-append-o1-seq).
@@ -69,67 +81,16 @@ def ensure_message_id(
     return patched
 
 
-def validate_thread_id(thread_id: str) -> str:
-    if not isinstance(thread_id, str) or len(thread_id.strip()) == 0:
-        raise ValueError("thread_id должен быть непустой строкой")
-    normalized = thread_id.strip()
-    if not _THREAD_ID_PATTERN.match(normalized):
-        raise ValueError(
-            "thread_id может содержать только латинские буквы, цифры, '_' и '-'"
-        )
-    return normalized
+def _bump_image_seq(base_meta: Dict[str, Any], fresh: List[Dict]) -> None:
+    """Сквозной номер картинок треда (`[Изображение #N]`) в ``runtime`` meta: фронт
+    выдаёт следующий от него. Только растёт — компакция уносит записи в архив, но не
+    meta; ключ появляется у треда с первой картинкой."""
+    image_seq = bumped_image_seq(base_meta, fresh)
+    if image_seq > read_image_seq(base_meta):
+        merge_runtime_into_meta(base_meta, {IMAGE_SEQ_KEY: image_seq})
 
 
 _logger = logging.getLogger(__name__)
-
-
-def sanitize_system_id(system_id: str) -> str:
-    """
-    Санитизировать идентификатор внешней системы для использования в имени файла.
-
-    Разрешаем только латинские буквы, цифры, '_' и '-'.
-    Остальные символы заменяем на '_'.
-    """
-    if not isinstance(system_id, str):
-        raise ValueError("system_id должен быть строкой")
-
-    s = system_id.strip().lower()
-    if not s:
-        raise ValueError("system_id должен быть непустой строкой")
-
-    s = re.sub(r"[^A-Za-z0-9_-]+", "_", s)
-    s = s.strip("_")
-    if not s:
-        raise ValueError("system_id после санитизации стал пустым")
-    if not _SYSTEM_ID_PATTERN.match(s):
-        # На случай логической ошибки при замене символов.
-        raise ValueError(
-            "system_id может содержать только латинские буквы, цифры, '_' и '-'"
-        )
-    return s
-
-
-def resolve_threads_dir(settings: Any) -> str:
-    """
-    Определить директорию для хранения тредов.
-
-    ``settings`` — всё, что принимает ``settings_of``. Контракт:
-    ``paths.threads_data_path`` должен быть АБСОЛЮТНЫМ путём, заполненным
-    config_modules.root.resolve_paths(). Пустое значение означает, что
-    resolve_paths() не вызывался — это ошибка интеграции.
-    """
-    path_cfg = settings_of(settings).paths.threads_data_path
-    if not isinstance(path_cfg, str) or len(path_cfg.strip()) == 0:
-        raise ValueError(
-            "threads_data_path пуст; config_modules.root.resolve_paths() должен был его заполнить"
-        )
-
-    path_cfg = path_cfg.strip()
-    if not os.path.isabs(path_cfg):
-        raise ValueError(
-            f"threads_data_path должен быть абсолютным путём, получено: {path_cfg!r}"
-        )
-    return path_cfg
 
 
 def _thread_paths_legacy(threads_dir: str, thread_id: str) -> Tuple[str, str]:
@@ -153,6 +114,11 @@ def _thread_paths(
         threads_dir, f"meta_{sys_norm}_{normalized_thread_id}.json"
     )
     return data_path, meta_path
+
+
+def thread_meta_path(threads_dir: str, system_id: str, thread_id: str) -> str:
+    """Путь канонической meta треда: meta_{system}_{thread_id}.json."""
+    return _thread_paths(threads_dir, system_id, thread_id)[1]
 
 
 def subagent_trace_path(
@@ -227,8 +193,9 @@ def reset_thread_files(
     threads_dir: str, system_id: str, thread_id: str
 ) -> List[str]:
     """
-    Удалить файлы конкретного треда (data/meta/lock/sidecar), включая legacy data/meta.
-    Возвращает список удалённых путей.
+    Удалить файлы конкретного треда (data/meta/lock/sidecar), включая legacy data/meta,
+    и его картинки (`images/<sys>_<tid>_*`). Возвращает список удалённых путей файлов
+    истории; картинки в него не входят — их раскладкой владеет `ImageStore`.
 
     Снимки баз журнала правок здесь НЕ трогаются: тем же сбросом ходит
     запасной путь компакции (хранилище → ``areplace_messages``), где сносить
@@ -261,6 +228,12 @@ def reset_thread_files(
     # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
     with _sidecar_seq_lock:
         _sidecar_last_seq.pop(sidecar, None)
+    # Картинки треда: `-n` начинает тред заново, копии вложений прежнего не нужны.
+    # Компакция сюда не ходит (она идёт через `archive_and_replace`), поэтому
+    # картинки живого хвоста этот сброс не заденет.
+    ImageStore.for_threads_dir(threads_dir).delete_thread_images(
+        sys_norm, normalized_thread_id
+    )
     return deleted
 
 
@@ -301,9 +274,11 @@ def _thread_archive_paths(
 def delete_thread(
     threads_dir: str, system_id: str, thread_id: str
 ) -> List[str]:
-    """Полностью удалить тред: canonical + legacy + lock + sidecar + touched + __pre_summary__.
+    """Полностью удалить тред: canonical + legacy + lock + sidecar + touched + __pre_summary__
+    + картинки треда (`images/<sys>_<tid>_*`).
 
-    Возвращает список удалённых путей. Отсутствие файла — no-op.
+    Возвращает список удалённых путей файлов истории (картинки в него не входят —
+    их раскладкой владеет `ImageStore`). Отсутствие файла — no-op.
     """
     paths: List[str] = []
     paths.extend(_thread_paths(threads_dir, system_id, thread_id))
@@ -323,6 +298,10 @@ def delete_thread(
     # Сброс process-local счётчика sidecar seq, иначе recreate получит «дырявый» seq (S5).
     with _sidecar_seq_lock:
         _sidecar_last_seq.pop(sidecar, None)
+    # Идентичность — нормализованная, как у файлов истории выше: `CLI` и `cli` — один тред.
+    ImageStore.for_threads_dir(threads_dir).delete_thread_images(
+        sanitize_system_id(system_id), validate_thread_id(thread_id)
+    )
     return deleted
 
 
@@ -1150,6 +1129,7 @@ class ThreadSession:
                     tags=self._proj_tags,
                     strip_think=self._proj_strip_think,
                 )
+                _bump_image_seq(base_meta, fresh)
         base_meta["created_at"] = self.meta.get("created_at") or base_meta.get(
             "created_at"
         )

@@ -339,6 +339,7 @@ class AssignConfig(BaseModel):
     intent_scope: str | None = None
     memory_compaction: str | None = None
     auto_judge: str | None = None
+    vision: str | None = None
     subagents: dict[str, str] = {}
 
     @model_validator(mode="before")

@@ -27,6 +27,12 @@ MODEL_STATE_FIELDS = (
     "last_main_prompt_tokens",
     "last_main_prompt_message_count",
     "last_finish_reason",
+    # Картинки: ключ хода для проб зрения и область успешного потолка картинок
+    # (``processing_responses._image_request_rejects``). Пробы и проекция идут
+    # в обработчике модели, где есть хранилище картинок.
+    "vision_probe_turn",
+    "user_turn_seq",
+    "dialog_steps_offset",
 )
 
 

@@ -61,10 +61,13 @@ class TestBuildChildState:
     @pytest.mark.asyncio
     async def test_parent_state_id_equals_orchestrator(self):
         orch = _make_orchestrator_state()
+        orch.vision_probe_turn = "parent-root"
         cfg = _make_config()
         runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("test role")
         assert child.parent_state_id == orch.state_id
+        assert child.vision_probe_turn == "parent-root"
+        assert child.vision_probe_notices is orch.vision_probe_notices
 
     @pytest.mark.asyncio
     async def test_shared_is_same_reference(self):

@@ -155,6 +155,18 @@ def _bare_app_writes_no_logs(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_image_temp_root(tmp_path, monkeypatch):
+    """TuiApp без абсолютного `threads_data_path` держит картинки в
+    `<temp>/gc-images-<uid>` — каталоге пользователя, общем для всех его процессов:
+    старт приложения подметает там карманы мёртвых процессов, выход чистит свой.
+    Тесты работают в своём корне и настоящий каталог разработчика не трогают."""
+    from gc_core.attachments import store
+
+    root = tmp_path / "gc-images"
+    monkeypatch.setattr(store, "_temp_root", lambda: str(root))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_model_list_cache():
     """ModelEditor ходит за списком моделей через session-кэш
     (`gc_tui.services.model_list_cache`) — модуль-уровневый dict переживает между
@@ -184,6 +196,16 @@ def _isolate_slow_git_memo():
     yield
     file_index._slow_git_roots.clear()
     file_index._exiting = False
+
+
+@pytest.fixture(autouse=True)
+def _no_clipboard_probe(monkeypatch):
+    """TUI-тесты не читают настоящий буфер обмена разработчика: главный экран проверяет
+    его на старте и при возвращении в окно терминала (совет вставить картинку), и
+    картинка в буфере меняла бы футер. Тесты самого чтения переопределяют фикстуру."""
+    from gc_tui.services import os_ops
+
+    monkeypatch.setattr(os_ops, "probe_clipboard_image", lambda: None)
 
 
 @pytest.fixture(autouse=True)

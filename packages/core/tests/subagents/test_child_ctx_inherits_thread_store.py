@@ -21,7 +21,14 @@ from gc_core.tools.subagents import runner as runner_module
 #: Поля, которые дочерний контекст обязан взять у родителя. Список не
 #: декоративный: каждое сюда попало после отдельной поломки — порт ответа
 #: человека, баннер подтверждения, хранилище решений, теперь хранилище тредов.
-INHERITED = ("ask_human", "tui_confirm", "permission_store", "thread_store")
+INHERITED = (
+    "ask_human",
+    "tui_confirm",
+    "permission_store",
+    "thread_store",
+    "image_store",
+    "on_trace_note",
+)
 
 
 def _build_child_ctx_node() -> ast.FunctionDef:

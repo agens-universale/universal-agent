@@ -412,6 +412,7 @@ class RunSummaryCoordinator:
                 trigger_threshold_chars=self._summary_trigger_chars,
                 exceeded_chars=exceeded_chars,
                 exceeded_tokens=exceeded_tokens,
+                kept_messages=preserved_batch,
             )
         msgs = getattr(state, "messages", None)
         if isinstance(msgs, list):

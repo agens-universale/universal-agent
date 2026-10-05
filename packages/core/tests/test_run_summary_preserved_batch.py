@@ -281,3 +281,125 @@ def test_filter_messages_not_in_state_empty_when_batch_already_in_state():
     msg = {"role": "user", "content": "x", "id": "m1"}
     state = [msg]
     assert filter_messages_not_in_state(state, [msg]) == []
+
+
+# --- технический хвост батча (спека изображений §7.3, §21.1) ------------------------
+
+_IMAGE_REF = {
+    "id": "3f9a1c27b0e4d5a6",
+    "kind": "image",
+    "mime": "image/png",
+    "width": 1456,
+    "height": 819,
+    "size": 214880,
+    "path": "/threads/images/cli_t1_3f9a1c27b0e4d5a6.png",
+    "origin": "tool",
+    "label": "Image from fs_view_image",
+    "source": "/work/shot.png",
+    "orig_width": 2912,
+    "orig_height": 1638,
+}
+
+
+def _call(call_id: str) -> dict:
+    return {
+        "type": "function_call",
+        "call_id": call_id,
+        "name": "fs_read_file",
+        "arguments": '{"path": "a.py"}',
+        "id": f"fc_{call_id}",
+    }
+
+
+def _output(call_id: str) -> dict:
+    return {
+        "type": "function_call_output",
+        "call_id": call_id,
+        "output": '{"ok": true}',
+        "id": f"fco_{call_id}",
+    }
+
+
+def _technical(text: str, msg_id: str, **extra) -> dict:
+    return {
+        "role": "user",
+        "content": wrap_technical_user_content(text),
+        "id": msg_id,
+        **extra,
+    }
+
+
+def test_function_call_output_keeps_trailing_technical_tail_in_order():
+    """Пары «вызов → ответ» и за ними хвост батча: напоминание и картинка тула."""
+    c1, c2 = _call("c1"), _call("c2")
+    o1, o2 = _output("c1"), _output("c2")
+    notice = _technical(
+        "Loop detector: you called fs_read_file with the same arguments again.",
+        "m_n",
+    )
+    image = _technical(
+        "Image from fs_view_image: /work/shot.png · png 1456×819",
+        "m_i",
+        attachments=[_IMAGE_REF],
+    )
+    batch = build_preserved_batch(
+        current_messages=[o1, o2, notice, image],
+        mode="function_call_output",
+        state_messages=[c1, c2, o1, o2, notice, image],
+    )
+    assert batch == [c1, o1, c2, o2, notice, image]
+
+
+def test_function_call_output_keeps_only_the_tail_after_last_output():
+    """Техническое сообщение внутри батча вызовов (фидбэк битого вызова из снимка
+    session_compact) хвостом не считается: хвост — только после последнего ответа."""
+    c1 = _call("c1")
+    o1 = _output("c1")
+    feedback = _technical(
+        "Tool call cannot be sent: invalid JSON in tool arguments.", "m_f"
+    )
+    batch = build_preserved_batch(
+        current_messages=[feedback, c1, o1],
+        mode="function_call_output",
+        state_messages=[],
+    )
+    assert batch == [c1, o1]
+
+
+def test_user_ask_keeps_technical_message_with_attachments():
+    """[ответы, картинка тула, напоминание, реплика]: картинка переживает компакцию,
+    напоминание без вложений — нет (как любое техническое сообщение)."""
+    o1 = _output("c1")
+    image = _technical(
+        "Image from fs_view_image: /work/shot.png · png 1456×819",
+        "m_i",
+        attachments=[_IMAGE_REF],
+    )
+    notice = _technical(
+        "Loop detector: you called fs_read_file with the same arguments again.",
+        "m_n",
+    )
+    human = {"role": "user", "content": "а что на скриншоте?", "id": "m_h"}
+    batch = build_preserved_batch(
+        current_messages=[o1, image, notice, human],
+        mode="user_ask",
+        state_messages=[_call("c1"), o1, image, notice, human],
+    )
+    assert batch == [image, human]
+
+
+def test_user_ask_scoped_to_incoming_keeps_technical_message_with_attachments():
+    o1 = _output("c1")
+    image = _technical(
+        "Image from fs_view_image: /work/shot.png · png 1456×819",
+        "m_i",
+        attachments=[_IMAGE_REF],
+    )
+    human = {"role": "user", "content": "а что на скриншоте?", "id": "m_h"}
+    batch = build_preserved_batch(
+        current_messages=[o1, image, human],
+        mode="user_ask",
+        state_messages=[],
+        message_keys_already_persisted=frozenset({make_message_key(o1)}),
+    )
+    assert batch == [image, human]

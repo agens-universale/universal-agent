@@ -100,8 +100,8 @@ from gc_tui.screens.diff import (
 )
 from gc_tui.services.edits_view import ResetTarget, RevertTarget
 from gc_tui.services.plural import files_word
-from gc_tui.widgets.block_panel import _NoSelect
 from gc_tui.widgets.lazy_body import BodySlot, LazyBody
+from gc_tui.widgets.no_select import NoSelectStatic
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _SEL_TRACE = "#trace"
@@ -542,14 +542,14 @@ class RevertConfirmScreen(Screen[bool]):
                 )
                 slots.extend(
                     BodySlot(
-                        _NoSelect(warn, classes="tree-warn", markup=False)
+                        NoSelectStatic(warn, classes="tree-warn", markup=False)
                     )
                     for warn in revert_target_warnings(target)
                 )
             if path in self._external:
                 slots.append(
                     BodySlot(
-                        _NoSelect(
+                        NoSelectStatic(
                             WARN_EXTERNAL, classes="tree-warn", markup=False
                         )
                     )
@@ -677,7 +677,7 @@ class RevertConfirmScreen(Screen[bool]):
             loss = reset_loss_line(target)
             slots.append(
                 BodySlot(
-                    _NoSelect(loss, classes="tree-warn", markup=False)
+                    NoSelectStatic(loss, classes="tree-warn", markup=False)
                     if target.loses_point
                     else meta_line(loss, "tree-line")
                 )

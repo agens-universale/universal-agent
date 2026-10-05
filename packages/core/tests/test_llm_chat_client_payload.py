@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
 from gc_testkit.settings import fake_ctx
@@ -188,3 +190,76 @@ def test_request_chat_completion_text_does_not_salvage_reasoning(monkeypatch):
         )
     )
     assert captured["kwargs"]["salvage_reasoning"] is False
+
+
+_IMAGE_CONTENT = [
+    {
+        "type": "image_url",
+        "image_url": {"url": "data:image/png;base64," + "A" * 400},
+    },
+    {"type": "text", "text": "что тут?"},
+]
+
+
+def test_service_funnel_rejects_images_without_the_flag(monkeypatch):
+    """Служебные вызовы шлют текст (спека §5): картинки без allow_images=True — регрессия."""
+    _patch_policy(monkeypatch)
+    ctx = fake_ctx(_cfg(), logger=None)
+    state = SimpleNamespace(default_model="m")
+    with pytest.raises(ValueError):
+        run_coro(
+            llm_chat_client.arequest_chat_completion_text(
+                ctx=ctx,
+                state=state,
+                messages=[{"role": "user", "content": _IMAGE_CONTENT}],
+                max_tokens=10,
+                consumer="summary",
+            )
+        )
+    with pytest.raises(ValueError):
+        run_coro(
+            llm_chat_client.arequest_chat_completion_text(
+                ctx=ctx,
+                state=state,
+                messages=[{"role": "user", "content": "x", "attachments": []}],
+                max_tokens=10,
+                consumer="summary",
+            )
+        )
+
+
+def test_service_funnel_sends_images_with_the_flag(monkeypatch):
+    captured = _patch_policy(monkeypatch)
+    ctx = fake_ctx(_cfg(), logger=None)
+    state = SimpleNamespace(default_model="m")
+    run_coro(
+        llm_chat_client.arequest_chat_completion_text(
+            ctx=ctx,
+            state=state,
+            messages=[{"role": "user", "content": _IMAGE_CONTENT}],
+            max_tokens=10,
+            consumer="summary",
+            allow_images=True,
+        )
+    )
+    assert captured["payload"]["messages"][0]["content"] == _IMAGE_CONTENT
+
+
+def test_prompt_log_masks_image_data():
+    lines = []
+
+    class _Log:
+        def info(self, fmt, *args):
+            lines.append(fmt % args)
+
+    llm_chat_client.log_llm_prompt_and_result(
+        logger=_Log(),
+        label="vision",
+        messages=[
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": _IMAGE_CONTENT},
+        ],
+        output_text="кнопка съехала",
+    )
+    assert all("A" * 400 not in line for line in lines)
+    assert any("data:image/png;base64,<400 bytes>" in line for line in lines)

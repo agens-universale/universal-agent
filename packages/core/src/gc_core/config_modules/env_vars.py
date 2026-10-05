@@ -241,6 +241,18 @@ def managed_config_path() -> Path:
     return effective_config_dir() / "config.local.yml"
 
 
+def mcp_media_dir() -> Path:
+    """Куда MCP-клиент сохраняет картинки и аудио из ответов тулов:
+    ``<gc_cache>/mcp-media``.
+
+    Живёт здесь, а не в ``tools.connect_mcp``, хотя пишет туда именно MCP: путь
+    читают двое — сохраняющий (``connect_mcp.api``) и охрана
+    (``security.media_roots``, класс ``media``), а охрана не импортирует
+    ``tools`` на загрузке модуля. Одна функция на двоих — каталоги не разойдутся.
+    """
+    return gc_paths()["cache"] / "mcp-media"
+
+
 def project_local_config_path() -> Optional[str]:
     """Абсолютный путь к `<cwd>/.gc/config.yml`, если файл есть, иначе None.
 

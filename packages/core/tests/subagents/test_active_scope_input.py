@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
@@ -213,6 +214,83 @@ class TestRunnerWiresPending:
         assert captured["drained"][0]["content"] == "look at auth"
         assert is_child_input_active(ctx) is False
 
+    def test_drained_message_images_are_moved_into_the_thread(self, tmp_path):
+        """Реплика ребёнку посреди его работы — такой же приём из очереди, как у
+        родителя: картинки из кармана процесса переезжают в тред (адрес — родителя),
+        иначе после выхода из TUI карман снесён и в треде остаётся мёртвый путь."""
+        import io
+
+        from PIL import Image
+
+        from gc_core.attachments.model import ORIGIN_USER, user_label
+        from gc_core.attachments.store import ImageStore, amake_attachment
+
+        store = ImageStore.for_threads_dir(str(tmp_path))
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 48), "red").save(buf, format="PNG")
+        staged = asyncio.run(
+            amake_attachment(
+                store,
+                buf.getvalue(),
+                origin=ORIGIN_USER,
+                label=user_label(1),
+            )
+        )
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        ctx = _make_ctx(cfg)
+        captured = {}
+        barrier = threading.Event()
+        release = threading.Event()
+
+        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+            barrier.set()
+            release.wait(timeout=2)
+            captured["drained"] = kwargs["get_pending_messages"]()
+            return "done"
+
+        runner = SubagentRunner(ctx, orch, cfg)
+        child_ctx = SimpleNamespace(
+            run_id="run_c1",
+            parent_call_id="call_parent_9",
+            subagent_progress_sink=None,
+            logger=None,
+            image_store=store,
+            system_id="cli",
+            thread_id="t" * 32,
+        )
+
+        def _run():
+            with patch.object(
+                runner, "_build_child_ctx", return_value=child_ctx
+            ):
+                asyncio.run(
+                    runner.arun(
+                        "subagent_worker",
+                        {"task": "test"},
+                        fake_run_agent,
+                        parent_call_id="call_parent_9",
+                    )
+                )
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        assert barrier.wait(timeout=2)
+        try_enqueue_user_message(
+            ctx,
+            {
+                "role": "user",
+                "content": "[Изображение #1] вот",
+                "attachments": [staged.to_dict()],
+            },
+        )
+        release.set()
+        t.join(timeout=2)
+        [att] = captured["drained"][0]["attachments"]
+        assert att["path"] != staged.path
+        assert not att["path"].startswith(store.staging_dir)
+        assert os.path.isfile(att["path"])
+
     def test_enqueue_emits_progress_and_sidecar_user(self, tmp_path):
         orch = _make_orchestrator_state()
         cfg = _make_config()
@@ -286,6 +364,99 @@ class TestRunnerWiresPending:
 
 
 class TestParentPendingUnchangedWithoutChild:
+    def test_enqueued_images_reach_progress_and_sidecar_from_the_thread(
+        self, tmp_path
+    ):
+        """Картинки реплики ребёнку — как у ответа на его вопрос: строка в ленте
+        вживую (событие — путь кармана, он живёт до выхода) и после перезапуска
+        (запись ленты субагента — путь в треде). Копия в тред — в цикле ребёнка, не в
+        потоке, поставившем реплику в очередь (UI TUI) (смоук и ревью 2026-10-01)."""
+        import io
+
+        from PIL import Image
+
+        from gc_core.attachments.model import ORIGIN_USER, user_label
+        from gc_core.attachments.store import ImageStore, amake_attachment
+
+        store = ImageStore.for_threads_dir(str(tmp_path))
+        buf = io.BytesIO()
+        Image.new("RGB", (64, 48), "blue").save(buf, format="PNG")
+        staged = asyncio.run(
+            amake_attachment(
+                store,
+                buf.getvalue(),
+                origin=ORIGIN_USER,
+                label=user_label(1),
+            )
+        )
+        orch = _make_orchestrator_state()
+        cfg = _make_config()
+        sink = QueueSubagentProgressSink()
+        ctx = _make_ctx(cfg, subagent_progress_sink=sink)
+        barrier = threading.Event()
+        release = threading.Event()
+
+        def fake_run_agent(messages, child_state, child_ctx, **kwargs):
+            barrier.set()
+            release.wait(timeout=2)
+            return "done"
+
+        child_ctx = SimpleNamespace(
+            run_id="run_c1",
+            parent_call_id="call_sub_img",
+            subagent_progress_sink=sink,
+            logger=None,
+            threads_dir=str(tmp_path),
+            image_store=store,
+            system_id="cli",
+            thread_id="task-img",
+        )
+        runner = SubagentRunner(ctx, orch, cfg)
+
+        def _run():
+            with patch.object(
+                runner, "_build_child_ctx", return_value=child_ctx
+            ):
+                asyncio.run(
+                    runner.arun(
+                        "subagent_worker",
+                        {"task": "test"},
+                        fake_run_agent,
+                        parent_call_id="call_sub_img",
+                    )
+                )
+
+        t = threading.Thread(target=_run, daemon=True)
+        t.start()
+        assert barrier.wait(timeout=5)
+        try_enqueue_user_message(
+            ctx,
+            {
+                "role": "user",
+                "content": "[Изображение #1] что тут?",
+                "id": "m_img",
+                "attachments": [staged.to_dict()],
+            },
+        )
+        [event] = [e for e in sink.drain() if e.kind == "user_message"]
+        assert event.attachments == [staged.to_dict()]
+        # поток постановки в очередь файлов не пишет
+        assert not [
+            f for f in os.listdir(store.root) if f.startswith("cli_task-img_")
+        ]
+
+        release.set()
+        t.join(timeout=5)
+        [row] = [
+            r
+            for r in read_subagent_trace(str(tmp_path), "cli", "task-img")
+            if r.get("kind") == "user"
+        ]
+        [kept] = row["payload"]["attachments"]
+        assert kept["id"] == staged.id
+        assert not kept["path"].startswith(store.staging_dir)
+        assert os.path.isfile(kept["path"])
+
     def test_technical_only_parent_path(self):
         """Regression: no active child → parent pending as before."""
         from gc_core.agent_executor import AgentExecutor

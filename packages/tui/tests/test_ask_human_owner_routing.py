@@ -176,6 +176,8 @@ async def test_target_none_when_not_running(tmp_path):
 
 
 class _Evt:
+    attachments = ()
+
     def __init__(self, value):
         self.value = value
 

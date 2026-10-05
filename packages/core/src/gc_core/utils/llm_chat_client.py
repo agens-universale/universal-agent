@@ -1,11 +1,16 @@
 """Shared chat/completions client helpers for controller-level modules."""
 
+import copy
 import functools
 import json
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
 
 from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
 from gc_core.request_backend_policy import (
+    _raise_on_embedded_choice_error,
     arequest_chat_completions_with_policy,
 )
 from gc_core.runtime_notices import maybe_push_fallback_to_active_notice
@@ -16,9 +21,11 @@ from gc_core.utils.backend_errors import is_model_unavailable_error
 from gc_core.utils.connect_backend import (
     NO_BACKEND_OVERRIDE,
     acreate_call_headers,
+    arequest_backend_chat_completions,
     backend_override_value,
     resolve_network_params,
 )
+from gc_core.utils.data_urls import mask_data_urls
 
 # РУССКИЕ ПОДПИСИ служебных потребителей (спека §5.1/§8) для notice деградации
 # «модель привязки недоступна → повтор активной моделью». `auto_judge` в таблице
@@ -35,6 +42,7 @@ CONSUMER_RU_LABEL = {
     "summary": "суммаризация",
     "intent_scope": "intent scope",
     "memory_compaction": "компакция памяти",
+    "vision": "модель для зрения",
 }
 
 _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(
@@ -124,13 +132,16 @@ def log_llm_prompt_and_result(
 ) -> None:
     if logger is None:
         return
+    # Картинка «глаз» — часть content; в лог она идёт маской data-URL, не байтами.
     system_part = "\n\n".join(
-        str(m.get("content", ""))
+        str(mask_data_urls(m.get("content", "")))
         for m in messages
         if m.get("role") == "system"
     )
     user_part = "\n\n".join(
-        str(m.get("content", "")) for m in messages if m.get("role") == "user"
+        str(mask_data_urls(m.get("content", "")))
+        for m in messages
+        if m.get("role") == "user"
     )
     logger.info(
         "summary_llm_prompt label=%s system=\n%s\n\nuser=\n%s",
@@ -232,6 +243,104 @@ def _completion_text_and_finish(res: Any) -> ChatCompletionText:
     )
 
 
+@dataclass(frozen=True)
+class PreparedChatCompletion:
+    """Effective recipient and settings, fixed before authorizing pixels."""
+
+    resolved: ResolvedModel = field(repr=False)
+    url: str
+    headers: Mapping[str, str] = field(repr=False)
+    network_kwargs: Mapping[str, Any] = field(repr=False)
+    payload_kwargs: Mapping[str, Any] = field(repr=False)
+    volatile_headers: frozenset[str] = field(default=frozenset(), repr=False)
+
+
+def snapshot_chat_completion(ctx, state, *, resolved, headers):
+    """Snapshot an already authenticated call without fetching another token."""
+    settings = settings_of(ctx)
+    verify, cert, _, timeout, proxy, _ = resolve_network_params(
+        settings, resolved
+    )
+    payload = _build_chat_completion_payload(
+        ctx=ctx, state=state, messages=[], max_tokens=512, resolved=resolved
+    )
+    payload.pop("model")
+    payload.pop("messages")
+    extra = backend_override_value(resolved, "chat_completion_headers")
+    if extra is NO_BACKEND_OVERRIDE:
+        extra = settings.backend.chat_completion_headers
+    explicit = {str(k).strip().lower() for k, v in (extra or {}).items() if v}
+    volatile = {
+        "x_rq_id",
+        "x-session-id",
+        "traceparent",
+        "tracestate",
+        "x_trace_id",
+    }
+    from gc_core.trace_id import trace_header_name
+
+    volatile.add(trace_header_name(settings, "x_trace_id").lower())
+    return PreparedChatCompletion(
+        resolved,
+        resolved.url,
+        MappingProxyType(dict(headers)),
+        MappingProxyType(
+            {
+                "verify": verify,
+                "cert": cert,
+                "timeout": timeout,
+                "config_proxy": proxy,
+            }
+        ),
+        MappingProxyType(copy.deepcopy(payload)),
+        frozenset(volatile - explicit),
+    )
+
+
+async def aprepare_chat_completion(ctx, state, *, resolved):
+    headers = await acreate_call_headers(
+        state, ctx, resolved=resolved, api_mode="chat_completions"
+    )
+    return snapshot_chat_completion(
+        ctx, state, resolved=resolved, headers=headers
+    )
+
+
+async def arequest_chat_completion_once(
+    ctx, state, *, prepared, messages, max_tokens, request_label
+) -> ChatCompletionText:
+    """One pinned HTTP attempt, no adaptive retry or model fallback."""
+    payload = copy.deepcopy(dict(prepared.payload_kwargs))
+    token_key = (
+        "max_tokens" if "max_tokens" in payload else "max_completion_tokens"
+    )
+    payload[token_key] = max_tokens
+    for key in (
+        "tools",
+        "tool_choice",
+        "response_format",
+        "stream",
+        "previous_response_id",
+    ):
+        payload.pop(key, None)
+    payload.update(model=prepared.resolved.model, messages=messages)
+    with usage_scope(
+        getattr(state, "usage", None),
+        category_for_request_label(request_label),
+        "chat_completions",
+    ):
+        res = await arequest_backend_chat_completions(
+            payload,
+            dict(prepared.headers),
+            url=prepared.url,
+            **prepared.network_kwargs,
+            use_retry=False,
+            logger=getattr(ctx, "logger", None),
+        )
+        _raise_on_embedded_choice_error(res)
+    return _completion_text_and_finish(res)
+
+
 async def _asend_chat_completion_text(
     *,
     ctx: Any,
@@ -241,6 +350,8 @@ async def _asend_chat_completion_text(
     request_label: str,
     payload_overrides: Optional[Dict[str, Any]],
     resolved: Optional[ResolvedModel],
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
 ) -> ChatCompletionText:
     settings = settings_of(ctx)
     full_log_backend = bool(settings.logging.full_log_backend)
@@ -264,7 +375,28 @@ async def _asend_chat_completion_text(
         else _min_response_tokens_override,
         default=1024,
     )
-    headers = await acreate_call_headers(state, ctx, resolved=resolved)
+    headers = await acreate_call_headers(
+        state,
+        ctx,
+        resolved=resolved,
+        **({"api_mode": "chat_completions"} if before_send else {}),
+    )
+    prepared = None
+    if before_send is not None:
+        if resolved is None:
+            resolved = ResolvedModel(
+                alias=None,
+                model=settings.agent.model,
+                url=settings.backend.completions_url,
+                authorization=None,
+                backend_overrides={},
+                tariff=None,
+                source="legacy",
+            )
+        prepared = snapshot_chat_completion(
+            ctx, state, resolved=resolved, headers=headers
+        )
+        await before_send(prepared)
     url = (
         resolved.url
         if resolved is not None
@@ -279,11 +411,28 @@ async def _asend_chat_completion_text(
         retry_embedded_choice_errors,
     ) = resolve_network_params(settings, resolved)
 
+    if prepared is not None:
+
+        def _payload_factory(requested_max_tokens):
+            payload = copy.deepcopy(dict(prepared.payload_kwargs))
+            token_key = (
+                "max_tokens"
+                if "max_tokens" in payload
+                else "max_completion_tokens"
+            )
+            payload.update(model=prepared.resolved.model, messages=messages)
+            payload[token_key] = requested_max_tokens
+            apply_payload_overrides(payload, payload_overrides)
+            return payload
+
     usage_category = category_for_request_label(request_label)
     with usage_scope(
         getattr(state, "usage", None), usage_category, "chat_completions"
     ):
-        res, _call_data = await arequest_chat_completions_with_policy(
+        res, _call_data = await _arequest_admitted_chat_completion(
+            ctx=ctx,
+            state=state,
+            prepared=prepared,
             payload_factory=_payload_factory,
             initial_max_tokens=max_tokens,
             min_response_tokens=min_response_tokens,
@@ -309,6 +458,45 @@ async def _asend_chat_completion_text(
     return _completion_text_and_finish(res)
 
 
+async def _arequest_admitted_chat_completion(
+    *, ctx, state, prepared, **kwargs
+):
+    try:
+        return await arequest_chat_completions_with_policy(**kwargs)
+    except Exception as exc:
+        if prepared is not None:
+            from gc_core.vision.notes import note_probe
+            from gc_core.vision.registry import process_vision_probes
+            from gc_core.vision.rejects import learn_image_cap
+            from gc_core.vision.route import vision_route_key
+
+            key = vision_route_key(prepared)
+            if learn_image_cap(key, exc):
+                note_probe(
+                    ctx,
+                    state,
+                    key,
+                    prepared.resolved,
+                    process_vision_probes().peek(key),
+                )
+        raise
+
+
+def _require_text_only(messages: List[Dict[str, Any]]) -> None:
+    """Служебная воронка шлёт текст (спека §5): список частей в ``content`` или
+    ключ ``attachments`` — это картинки, и без ``allow_images=True`` это
+    регрессия вызывающего, а не данные для провода. Только проверка типа."""
+    for message in messages:
+        if (
+            isinstance(message.get("content"), list)
+            or "attachments" in message
+        ):
+            raise ValueError(
+                "служебный вызов без allow_images=True получил картинки: "
+                "список частей в content или ключ attachments"
+            )
+
+
 async def arequest_chat_completion_outcome(
     *,
     ctx: Any,
@@ -318,6 +506,9 @@ async def arequest_chat_completion_outcome(
     consumer: str,
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
+    allow_images: bool = False,
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
 ) -> ChatCompletionText:
     """Request text and finish reason through the configured model boundary."""
     from gc_core.execution.model import arequest_model
@@ -334,6 +525,16 @@ async def arequest_chat_completion_outcome(
             consumer=consumer,
             request_label=request_label,
             payload_overrides=payload_overrides,
+            allow_images=allow_images,
+            before_send=before_send,
+        )
+    if allow_images or before_send is not None:
+        # Картинки и проверка маршрута до отправки — только там, где есть
+        # хранилище картинок и транспорт (локально или в activity воркера):
+        # колбэк ``before_send`` через границу durable-операции не переносится.
+        raise RuntimeError(
+            "вызов модели с картинками или before_send не поддерживается "
+            "через durable-границу"
         )
     result = await arequest_model(
         operations,
@@ -356,6 +557,9 @@ async def _arequest_chat_completion_outcome_local(
     consumer: str,
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
+    allow_images: bool = False,
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
 ) -> ChatCompletionText:
     """Текст choice и ``finish_reason``. ``consumer`` — canonical id из
     ``ModelRouter.CONSUMERS`` (спека §5.1); резолвится
@@ -367,9 +571,14 @@ async def _arequest_chat_completion_outcome_local(
     повторяется ОДИН РАЗ активной моделью + notice. Если и деградированный вызов
     падает — исключение уходит наверх без изменений (существующая per-consumer
     fail-семантика: finish_gate/text_answer_judge fail-open, summary — пропуск
-    цикла, command_judge — fail-closed)."""
+    цикла, command_judge — fail-closed).
+
+    ``allow_images=True`` — вызов несёт картинки (``content`` списком частей): так
+    зовут только «глаза» (``vision/eyes``). Без флага картинки — ``ValueError``."""
     if max_tokens < 1:
         raise ValueError("max_tokens must be >= 1")
+    if not allow_images:
+        _require_text_only(messages)
 
     router = getattr(ctx, "model_router", None)
     send = functools.partial(
@@ -380,6 +589,7 @@ async def _arequest_chat_completion_outcome_local(
         max_tokens=max_tokens,
         request_label=request_label,
         payload_overrides=payload_overrides,
+        before_send=before_send,
     )
     if router is None:
         return await send(resolved=None)
@@ -447,6 +657,9 @@ async def arequest_chat_completion_text(
     consumer: str,
     request_label: str = "chat_completion",
     payload_overrides: Optional[Dict[str, Any]] = None,
+    allow_images: bool = False,
+    before_send: Callable[[PreparedChatCompletion], Awaitable[None]]
+    | None = None,
 ) -> str:
     """Текст choice. Причина остановки — в ``arequest_chat_completion_outcome``."""
     outcome = await arequest_chat_completion_outcome(
@@ -457,6 +670,8 @@ async def arequest_chat_completion_text(
         consumer=consumer,
         request_label=request_label,
         payload_overrides=payload_overrides,
+        allow_images=allow_images,
+        before_send=before_send,
     )
     return outcome.text
 

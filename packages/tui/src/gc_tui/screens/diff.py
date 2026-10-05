@@ -150,8 +150,8 @@ from gc_tui.services.edits_view import (
 )
 from gc_tui.services.plural import files_word, files_word_genitive
 from gc_tui.services.skill_view import truncate_path_left
-from gc_tui.widgets.block_panel import _NoSelect
 from gc_tui.widgets.lazy_body import BodySlot, LazyBody
+from gc_tui.widgets.no_select import NoSelectStatic
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
 _KEY_CTRL_A = "ctrl+a"
@@ -2875,7 +2875,7 @@ def meta_line(text: Union[str, Text], extra: str = "") -> Static:
     превью отката несёт счётчики, и красит их общий `paint_counters`.
     """
     classes = "line-meta" + (f" {extra}" if extra else "")
-    return _NoSelect(text, classes=classes, markup=False)
+    return NoSelectStatic(text, classes=classes, markup=False)
 
 
 def split_body(

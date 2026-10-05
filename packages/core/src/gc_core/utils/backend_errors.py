@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from gc_core.execution.contracts import ModelProviderError
 from gc_core.execution.finish_reason import (
     nonempty_reasoning_text as nonempty_reasoning_text,
@@ -255,6 +257,12 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
         return True
     if is_context_overflow_error(exc):
         return False
+    if is_image_request_error(exc):
+        # Слепая модель или предел картинок — факт о модели, а не недоступность.
+        # OpenRouter отвечает на картинку 404-м, и без этой проверки предохранитель
+        # гасил бы алиас на всю сессию, а служебный вызов уходил бы в откат на
+        # активную модель.
+        return False
     # Транспорт здесь httpx, а не requests: предикат приехал с develop, где
     # ветка была синхронной. Спрашиваем общие кортежи модуля — они и заведены
     # ради того, чтобы правило не зависело от транспорта.
@@ -289,5 +297,132 @@ def is_model_unavailable_error(exc: BaseException) -> bool:
 
 
 from gc_core.execution.finish_reason import (
+    _CONTEXT_OVERFLOW_MARKERS as _CONTEXT_OVERFLOW_MARKERS,
+)
+from gc_core.execution.finish_reason import (
     is_context_overflow_error as is_context_overflow_error,
 )
+
+# Отказ модели принять изображение (спека изображений §10): модель слепая или
+# сервер поднят без зрения. Это факт о модели, а не сбой: повтор его не лечит, и
+# недоступностью модели он не является. Маркеры — дословные фразы провайдеров в
+# нижнем регистре. Размер тела (413, «too large») и форма запроса («Image URLs
+# are only allowed for messages with role 'user'» — картинка не в user-сообщении,
+# это наш баг) под маркеры не попадают: о зрении модели они ничего не говорят.
+_IMAGE_REJECTION_MARKERS = (
+    "at most 0 image(s) may be provided",  # vLLM: зрячая модель с --language-model-only
+    "is not a multimodal model",  # vLLM: текстовая модель
+    "image_url is only supported by certain models",  # OpenAI
+    "no endpoints found that support image input",  # OpenRouter, HTTP 404
+    "does not support image",  # общая форма: «…images» / «…image input»
+    "unknown variant `image_url`",  # шлюзы на serde: части image_url не знают
+    "only supports text input",  # litellm-прокси: «Model only supports text input»
+)
+
+
+def _rejection_text(exc: BaseException) -> str:
+    """Текст отказа бэкенда: тело HTTP-ответа или сообщение исключения.
+
+    Тело HTTP-отказа транспорт дочитывает до raise и в стрим-пути
+    (`connect_backend.arequest_backend_chat_completions`, `_aread_error_text`):
+    причина слепоты лежит только там, в статусе её нет. Тело не дочитано
+    (обрыв на чтении) — текста нет."""
+    if is_http_status_error(exc):
+        import httpx
+
+        try:
+            return exc.response.text
+        except httpx.ResponseNotRead:
+            return ""
+    if isinstance(exc, (BackendStreamError, EmbeddedChoiceError)):
+        return str(exc)
+    return ""
+
+
+def is_image_rejection_error(exc: BaseException) -> bool:
+    """True — бэкенд отказал, потому что модель не принимает изображения.
+
+    Классифицирует только формы отказа бэкенда: HTTP-статус с телом, SSE-ошибку
+    внутри 200-стрима, ошибку, зашитую прокси в HTTP-200. Проверяется во всех
+    трёх слоях повторов — транспорт (`connect_backend`), адаптивная политика
+    (`request_backend_policy`), предохранитель (`is_model_unavailable_error`):
+    отказ не повторяется, не даёт «Ошибка LLM» и не гасит алиас на сессию.
+    Что с ним делать (пометка модели, повтор без картинок) — решает контроллер.
+
+    ``ModelProviderError`` (durable-исполнение) несёт классификацию, сделанную
+    на воркере по исходному исключению."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.image_rejection
+    text = _rejection_text(exc).lower()
+    return any(marker in text for marker in _IMAGE_REJECTION_MARKERS)
+
+
+# Бэкенд принимает не все картинки запроса: предел числа картинок на запрос (vLLM
+# `--limit-mm-per-prompt`: «At most N image(s) may be provided in one prompt»; у
+# облачных провайдеров — свои тексты) или тело запроса больше предела прокси (413,
+# у nginx по умолчанию 1 МБ — меньше одного крупного скриншота в base64). Лечится
+# меньшим числом картинок; сколько слать, решает контроллер
+# (`vision.rejects.next_image_cap`). Предел должен говорить о самих картинках — слово о
+# пределе рядом со словом «image(s)»: переполнение контекста у мультимодальной модели
+# («…maximum model length… the number of image tokens depends on the number of
+# images») с ним не совпадает, как и имя тула `fs_view_image` и картинка не в той роли.
+_STATED_IMAGE_LIMIT = re.compile(
+    r"\b(?:at most|no more than|up to|maximum of|max(?:imum)?)\s+(\d+)\s+images?\b"
+)
+_IMAGE_LIMIT_PHRASES = (
+    _STATED_IMAGE_LIMIT,
+    re.compile(r"\btoo many images?\b"),
+    re.compile(r"\bimages?\b[^.]{0,40}?\b(?:limit|exceed(?:s|ed)?)\b"),
+)
+_IMAGE_LIMIT_STATUSES = frozenset({400, 422})
+_PAYLOAD_TOO_LARGE = 413
+
+
+def _error_status(exc: BaseException) -> int | None:
+    """HTTP-код отказа бэкенда в любой его форме: HTTP-статус, SSE-ошибка в 200-стриме,
+    ошибка, зашитая прокси в HTTP-200. Нечисловой код — None."""
+    if is_http_status_error(exc):
+        return http_status_code(exc)
+    if isinstance(exc, (BackendStreamError, EmbeddedChoiceError)):
+        try:
+            return int(exc.status_code)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _is_image_limit_error(exc: BaseException) -> bool:
+    status = _error_status(exc)
+    if status == _PAYLOAD_TOO_LARGE:
+        return True
+    if status not in _IMAGE_LIMIT_STATUSES:
+        return False
+    text = _rejection_text(exc).lower()
+    if any(marker in text for marker in _CONTEXT_OVERFLOW_MARKERS):
+        return (
+            False  # переполнение контекста — путь сжатия истории, не картинок
+        )
+    return any(phrase.search(text) for phrase in _IMAGE_LIMIT_PHRASES)
+
+
+def is_image_request_error(exc: BaseException) -> bool:
+    """True — ошибка лечится меньшим числом картинок в запросе: модель не принимает их
+    вовсе (`is_image_rejection_error`) или принимает не все (предел числа, размер тела).
+
+    Проверяется во всех трёх слоях повторов — транспорт (`connect_backend`),
+    адаптивная политика (`request_backend_policy`), предохранитель
+    (`is_model_unavailable_error`): такая ошибка не повторяется тем же запросом, не
+    даёт «Ошибка LLM» и не гасит алиас. Ни о чём не говорит без картинок в запросе —
+    это проверяет контроллер (`request_carries_images`)."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.image_request
+    return is_image_rejection_error(exc) or _is_image_limit_error(exc)
+
+
+def image_limit_from_error(exc: BaseException) -> int | None:
+    """Предел числа картинок на запрос, названный в тексте ошибки (vLLM: «At most N
+    image(s)»), или None, если числа нет."""
+    if isinstance(exc, ModelProviderError):
+        return exc.failure.image_limit
+    match = _STATED_IMAGE_LIMIT.search(_rejection_text(exc).lower())
+    return int(match.group(1)) if match else None

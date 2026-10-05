@@ -494,10 +494,12 @@ def test_resolve_thresholds_reads_only_tools_data_key():
 
 
 def test_builtin_registry_copies_loop_warn_key():
+    from gc_core.constants.tool_names import FS_VIEW_IMAGE_NAME
     from gc_core.tools.registry import get_builtin_tools_data
 
     tools = get_builtin_tools_data(make_settings())
     assert tools["fs_read_file"][LOOP_WARN_KEY] == READ_PROFILE
+    assert tools[FS_VIEW_IMAGE_NAME][LOOP_WARN_KEY] == READ_PROFILE
     assert tools["session_think"][LOOP_WARN_KEY] == GENERIC_PROFILE
     assert LOOP_WARN_KEY not in tools["fs_write_file"]
     assert LOOP_WARN_KEY not in tools["exec_command"]

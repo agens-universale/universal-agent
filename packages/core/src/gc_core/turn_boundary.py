@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 from gc_core.execution.state import ExecutionState as State
 
@@ -36,6 +37,13 @@ def begin_turn(state: State, ctx: Any) -> None:
     оперирующие Router'ом) — ``state.default_model`` остаётся тем, что задал
     вызывающий код.
     """
+    if not getattr(state, "parent_state_id", None):
+        # Ключ хода для проб зрения. В durable-исполнении id выдаёт среда
+        # (``supplied_id``): ``uuid4`` в workflow недетерминирован.
+        from gc_core.execution.environment import supplied_id
+
+        state.vision_probe_turn = supplied_id("vision_turn") or str(uuid4())
+        state.vision_probe_notices = set()
     router = getattr(ctx, "model_router", None)
     if router is None:
         return

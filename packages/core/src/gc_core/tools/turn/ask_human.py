@@ -2,8 +2,11 @@ import inspect
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
+from gc_core.attachments.model import Attachment, chip_of
+from gc_core.attachments.store import commit_to_run_thread
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
 
@@ -40,7 +43,38 @@ _TOOL_DESCRIPTION = (
 )
 
 
-async def _aread_human_response(ctx: "Any", question: str) -> str:
+@dataclass(frozen=True)
+class HumanAnswer:
+    """Ответ человека с изображениями (спека §20.3).
+
+    Порт ``ctx.ask_human`` возвращает строку (прежнее поведение: встраивания SDK
+    не ломаются) или ``HumanAnswer``. ``attachments`` — вложения из кармана
+    ``ImageStore`` как есть: в тред их копирует ядро, модели они уходят
+    техническим сообщением после батча.
+    """
+
+    text: str
+    attachments: tuple[Attachment, ...] = ()
+
+
+def _answer_text(answer: HumanAnswer) -> str:
+    """Текст ответа, в котором названа каждая картинка ответа.
+
+    TUI присылает текст уже с плашками; встраивающий SDK может прислать голый
+    текст — тогда недостающие плашки встают в начало, иначе модель и лента не
+    свяжут картинку с ответом.
+    """
+    missing = [
+        chip_of(att)
+        for att in answer.attachments
+        if chip_of(att) not in answer.text
+    ]
+    return " ".join([*missing, answer.text.strip()]).strip()
+
+
+async def _aread_human_response(
+    ctx: "Any", question: str
+) -> "str | HumanAnswer":
     """Спросить человека через порт вызывающего, а по умолчанию — через stdin.
 
     Ядро — библиотека: у встраивающего приложения свой способ спросить
@@ -66,6 +100,8 @@ async def _aread_human_response(ctx: "Any", question: str) -> str:
         result = port(question)
         if inspect.isawaitable(result):
             result = await result
+        if isinstance(result, HumanAnswer):
+            return result  # картинки ответа: str() их потерял бы
         return (str(result) if result is not None else "").strip()
     # Порта нет — читаем stdin, как CLI. Это блокирующий ввод, и нативной
     # асинхронной формы у него нет; уводим в поток, чтобы не морозить loop
@@ -261,6 +297,9 @@ Do not implement until they confirm.
                 ok=False,
             )
             raise
+        if isinstance(response, HumanAnswer):
+            self._queue_answer_images(response.attachments)
+            response = _answer_text(response)
         return self._ask_answered(question, via_name, response)
 
     def _begin_ask(self, question: Any):
@@ -357,6 +396,22 @@ Do not implement until they confirm.
             error=None,
             hint=_RESPONSE_HINT,
         )
+
+    def _queue_answer_images(
+        self, attachments: tuple[Attachment, ...]
+    ) -> None:
+        """Картинки ответа — в тред и в хвост батча (``state.pending_tool_attachments``).
+
+        Ядро — единственный владелец ``commit`` (спека §3): фронт отдаёт вложения
+        из кармана как есть. Прогон без треда оставляет их в кармане процесса.
+        Файл кармана пропал (ручное удаление) — ``commit`` сам возвращает ссылку
+        как есть: проекция пошлёт на её месте «файл недоступен», текст ответа
+        доходит (так же ведёт себя commit сообщения пользователя, часть F).
+        """
+        for att in attachments:
+            self._state.pending_tool_attachments.append(
+                commit_to_run_thread(self._ctx, att).to_dict()
+            )
 
     def _ask_interrupted(self, question: str, via_name: Optional[str]) -> str:
         from gc_core.tools.subagents.progress import emit_progress

@@ -116,6 +116,11 @@ class ModelFailure:
     unavailable: bool = False
     context_overflow: bool = False
     response_cache_miss: bool = False
+    # Отказ из-за картинок в запросе (``backend_errors.is_image_*``): модель
+    # их не принимает вовсе или принимает не все; предел — если назван.
+    image_rejection: bool = False
+    image_request: bool = False
+    image_limit: int | None = None
 
 
 class ModelProviderError(RuntimeError):

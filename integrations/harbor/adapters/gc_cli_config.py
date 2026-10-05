@@ -55,6 +55,8 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
     """
     return {
         "backend.api_mode": "chat_completions",
+        # Text benches keep their tool set; vision experiments opt in explicitly.
+        "backend.vision": False,
         "paths.chat_completions_system_prompt_path": str(
             prompts_dir / "chat_completions_system_prompt.md"
         ),

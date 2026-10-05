@@ -23,6 +23,10 @@ on_click целиком (со своим prevent_default(), иначе микс�
 
 Симметрия распространяется и на гейт security-confirm: экран события не
 открывает НИ Enter, НИ Ctrl+клик, пока баннер ждёт ответа (`confirm_is_active`).
+
+Исключение — картинка внутри строки (плашка реплики, её строка под репликой): она
+ведёт себя как ссылка, как кнопка «скопировать» у блока кода, — обычный клик по ней
+открывает файл (`_plain_click_image_path`), под тем же гейтом.
 """
 
 from __future__ import annotations
@@ -69,6 +73,9 @@ def focus_target_at(
     return default
 
 
+from gc_tui.messages import OpenImageRequest
+
+
 def confirm_is_active(widget) -> bool:
     """Висит ли на экране security-confirm, ждущий ответа юзера.
 
@@ -111,6 +118,16 @@ class ClickModelMixin:
     def _open_request(self) -> Optional[Message]:
         raise NotImplementedError
 
+    def _image_path(self, image_id: str) -> Optional[str]:
+        """Файл картинки по `image_id` из meta спана под курсором (плашка или
+        подстрока вложения). У строк без картинок — None."""
+        return None
+
+    def _plain_click_image_path(self, event: events.Click) -> Optional[str]:
+        """Файл картинки, если обычный клик — клик по ней как по ссылке (строки с
+        картинками решают, засчитан ли жест). У строк без картинок — None."""
+        return None
+
     def on_click(self, event: events.Click) -> None:
         # Мышиная половина того же гейта, что и Enter в on_key: пока висит
         # security-confirm, Ctrl+клик не открывает detail/viewer — иначе экран
@@ -118,7 +135,10 @@ class ClickModelMixin:
         # которого юзер уже не видит. Ctrl+клик при этом ведёт себя как обычный
         # клик (просто выделяет строку) — обычный клик не трогаем.
         if event.ctrl and not confirm_is_active(self):
-            message = self._open_request()
+            # Картинка — по месту клика (дизайн картинок §20.2): Screen кладёт стиль
+            # ячейки под курсором в event.style, спан плашки/подстроки несёт image_id.
+            path = self._image_path(event.style.meta.get("image_id") or "")
+            message = OpenImageRequest(path) if path else self._open_request()
             if message is not None:
                 event.stop()
                 if self.can_focus:
@@ -126,6 +146,12 @@ class ClickModelMixin:
                     # фокус остаётся на этой строке, а не на прошлом выделении.
                     self.focus(scroll_visible=False)
                 self.post_message(message)
+                return
+        if not event.ctrl and not confirm_is_active(self):
+            path = self._plain_click_image_path(event)
+            if path:
+                event.stop()
+                self.post_message(OpenImageRequest(path))
                 return
         if self.can_focus:
             event.stop()  # не отдать фокус контейнеру #trace (main.py.on_click)

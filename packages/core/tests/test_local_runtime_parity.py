@@ -34,7 +34,7 @@ from parity_harness import (
 )
 
 REFERENCE = (
-    Path(__file__).parent / "fixtures/local_runtime_reference_3e7f98e3.json"
+    Path(__file__).parent / "fixtures/local_runtime_reference_824870f6.json"
 )
 
 

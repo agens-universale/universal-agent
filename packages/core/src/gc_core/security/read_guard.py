@@ -20,6 +20,7 @@ from typing import Any, Callable
 from gc_core.security.confirm_port import confirmation_step, request_confirm
 from gc_core.security.dual_wrapper import dual_wrap
 from gc_core.security.guard_probe import GuardProbeRequest, probe_step
+from gc_core.security.media_roots import media_roots
 from gc_core.security.path_policy import (
     _extract_named_value,
     _guard_path_argument,
@@ -385,10 +386,10 @@ def _operational_read_block(
         )
         denied = facts.protected_decision == "deny"
     else:
-        denied = (
-            classify_path(cand, protected_paths(cwd=context.launch_root))
-            == "operational"
+        ps = protected_paths(
+            cwd=context.launch_root, media=media_roots(context.ctx)
         )
+        denied = classify_path(cand, ps) == "operational"
     if not denied:
         return None
     err = {
@@ -487,6 +488,21 @@ def _resolve_read_violation(
     )
 
 
+def extra_read_roots(settings, candidate_path, ps, media) -> list[str]:
+    """Корни, разрешённые чтению сверх периметра: каталог скиллов и корни media.
+
+    Корни media разрешены, как каталог скиллов: без вопроса на каждый
+    просмотр картинки — но только пути класса media. Чужие карманы
+    `_staging/<pid>` лежат под корнем хранилища, а в класс не входят:
+    разрешение корня пустило бы их и при выключенном поле.
+    """
+    skills_root = _resolve_skills_root(settings)
+    extra_allowed = [skills_root] if skills_root else []
+    if classify_path(candidate_path, ps) == "media":
+        extra_allowed.extend(str(root) for root in media)
+    return extra_allowed
+
+
 def _read_guard_flow(
     func, args, kwargs, path_arg, path_extractor, blocked_result_factory
 ):
@@ -498,7 +514,7 @@ def _read_guard_flow(
 
     # Floor carve-out (Spec B §6): runs BEFORE cfg.enabled check so
     # operational .gc reads are denied even when read_guard is off.
-    # skills/instructions/none fall through to the normal flow.
+    # skills/instructions/media/none fall through to the normal flow.
     if protection_enabled(source):
         blocked = yield from _operational_read_block(
             func,
@@ -548,12 +564,16 @@ def _read_guard_flow(
                     mode=error["mode"],
                 )
         else:
-            skills_root = _resolve_skills_root(source)
+            media = media_roots(context.ctx)
+            ps = protected_paths(cwd=context.launch_root, media=media)
             check_read_path_allowed(
                 candidate_path,
                 launch_root=context.launch_root,
                 cfg=cfg,
-                extra_allowed_paths=[skills_root] if skills_root else None,
+                extra_allowed_paths=extra_read_roots(
+                    source, candidate_path, ps, media
+                )
+                or None,
             )
     except ReadGuardViolation as exc:
         allowed, blocked = yield from _resolve_read_violation(

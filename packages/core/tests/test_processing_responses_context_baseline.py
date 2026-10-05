@@ -284,6 +284,60 @@ def test_first_poll_merges_pending_with_the_start_batch(monkeypatch):
     )
 
 
+def test_first_poll_merges_pending_with_a_start_batch_of_tool_pairs(
+    monkeypatch,
+):
+    """Стартовый батч из пары «вызов → ответ» (история треда, не ответ модели) и
+    реплика в очереди на ПЕРВОМ опросе: реплика дописывается к паре.
+
+    Сторож условия `first_poll or` в обеих ветках разбора: без первого очередь не
+    разбиралась бы (в батче есть function_call), без второго реплика подменила бы
+    батч, и пара пропала бы."""
+    seen: list = []
+
+    async def _fake_process_user_ask(messages, _state, _ctx):
+        seen.append([m.get("id") for m in messages if isinstance(m, dict)])
+        return [_submit_solution_call()], "resp_1"
+
+    monkeypatch.setattr(
+        processing_module, "aprocess_user_ask", _fake_process_user_ask
+    )
+
+    polls = [
+        [{"role": "user", "content": "пришло во время прогона", "id": "m2"}]
+    ]
+
+    def _get_pending():
+        return polls.pop(0) if polls else []
+
+    start = [
+        {
+            "type": "function_call",
+            "id": "fc1",
+            "call_id": "c1",
+            "name": "fs_read_file",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "id": "fo1",
+            "call_id": "c1",
+            "output": '{"ok": true}',
+        },
+    ]
+    result = run_coro(
+        arun_agent(
+            start,
+            _make_state(),
+            _make_ctx(),
+            get_pending_messages=_get_pending,
+        )
+    )
+
+    assert result == _expected_finish_return()
+    assert seen and seen[0] == ["fc1", "fo1", "m2"]
+
+
 def test_run_agent_calls_pre_backend_hook_before_tool_output_backend(
     monkeypatch,
 ):

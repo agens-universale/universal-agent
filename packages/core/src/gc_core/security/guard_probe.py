@@ -36,6 +36,7 @@ def evaluate_guard_probe(
     """
     if request.schema_version != 1 or not request.cwd:
         raise ValueError("Guard probe requires schema 1 and an explicit cwd")
+    from gc_core.security.media_roots import media_roots
     from gc_core.security.path_policy import (
         WriteGuardViolation,
         check_write_path_allowed,
@@ -47,7 +48,6 @@ def evaluate_guard_probe(
     )
     from gc_core.security.read_guard import (
         ReadGuardViolation,
-        _resolve_skills_root,
         check_read_path_allowed,
         parse_read_guard_config,
     )
@@ -66,13 +66,21 @@ def evaluate_guard_probe(
         except WriteGuardViolation as exc:
             result = replace(result, violation=exc.error)
     elif request.kind == "read_path":
-        skills_root = _resolve_skills_root(settings)
+        from gc_core.security.read_guard import extra_read_roots
+
+        media = media_roots(settings)
         try:
             path = check_read_path_allowed(
                 request.value,
                 launch_root=request.cwd,
                 cfg=parse_read_guard_config(settings),
-                extra_allowed_paths=[skills_root] if skills_root else None,
+                extra_allowed_paths=extra_read_roots(
+                    settings,
+                    request.value,
+                    protected_paths(cwd=request.cwd, media=media),
+                    media,
+                )
+                or None,
             )
             result = replace(result, canonical_path=str(path))
         except ReadGuardViolation as exc:
@@ -83,11 +91,13 @@ def evaluate_guard_probe(
             protected_decision=protected_decision(
                 request.value,
                 cwd=request.cwd,
+                media=media_roots(settings),
             ),
         )
     elif request.kind == "protected_read":
         category = classify_path(
-            request.value, protected_paths(cwd=request.cwd)
+            request.value,
+            protected_paths(cwd=request.cwd, media=media_roots(settings)),
         )
         result = replace(
             result,
@@ -105,6 +115,7 @@ def evaluate_guard_probe(
                 request.value,
                 cwd=request.cwd,
                 extra=protected_extra_paths(settings) or None,
+                media=media_roots(settings),
             ),
         )
     elif request.kind == "download_destination":

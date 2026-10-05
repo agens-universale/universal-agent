@@ -23,6 +23,7 @@ from gc_core.config_modules.endpoint_presets import (
 )
 from gc_core.config_modules.field_meta import gc_meta, masked_repr_args
 from gc_core.config_modules.fs_tools import FsToolsConfig
+from gc_core.config_modules.images import ImagesConfig
 from gc_core.config_modules.intent_scope import (
     IntentScopeConfig,
     normalize_intent_scope_config,
@@ -148,6 +149,7 @@ class AppConfig(BaseModel):
     )
     agent_edits: AgentEditsConfig = Field(default_factory=AgentEditsConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
+    images: ImagesConfig = Field(default_factory=ImagesConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig
     )

@@ -19,6 +19,8 @@ import time
 from collections import deque
 from typing import Callable, Optional
 
+from gc_tui.services.image_paste import is_image_file
+
 
 def parse_at_segment(text: str, cursor: int) -> Optional[tuple[int, str]]:
     """Активный @-сегмент под курсором → (индекс_@, query) или None.
@@ -737,7 +739,11 @@ def extract_at_mentions(text: str) -> list[str]:
 
 def resolve_attachment(root: str, rel: str) -> Optional[tuple[str, str, str]]:
     """rel → (rel_norm, abs_path, kind) если путь существует под root; иначе None.
-    kind ∈ {'файл','папка'}. Для папки rel_norm с хвостовым '/'."""
+    kind ∈ {'файл','изображение','папка'}. Для папки rel_norm с хвостовым '/'.
+
+    Картинка через «@» — ссылка на файл проекта, как любой другой: агент смотрит её
+    тулом по пути, актуальное содержимое. «изображение» — по первым байтам, как при
+    вставке (`image_paste.is_image_file`), чтобы модель знала, что файл — картинка."""
     rel_clean = rel.rstrip("/\\")
     if not rel_clean:
         return None
@@ -745,7 +751,8 @@ def resolve_attachment(root: str, rel: str) -> Optional[tuple[str, str, str]]:
     if os.path.isdir(full):
         return (rel_clean.replace("\\", "/") + "/", full, "папка")
     if os.path.isfile(full):
-        return (rel_clean.replace("\\", "/"), full, "файл")
+        kind = "изображение" if is_image_file(full) else "файл"
+        return (rel_clean.replace("\\", "/"), full, kind)
     return None
 
 

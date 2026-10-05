@@ -93,6 +93,7 @@ _CONTEXT_OVERFLOW_MARKERS = (
     "context window",
     "reduce the number of tokens",
     "please reduce the length",
+    "maximum model length",  # vLLM: «The decoder prompt (length N) is longer than the maximum model length of M»
 )
 
 

@@ -48,6 +48,7 @@ _ASSIGN_SCALAR_FIELDS = (
     "intent_scope",
     "memory_compaction",
     "auto_judge",
+    "vision",
 )
 
 

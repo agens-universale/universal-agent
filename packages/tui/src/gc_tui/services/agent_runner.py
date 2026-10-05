@@ -13,9 +13,13 @@ import logging
 import queue
 import threading
 import time
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from gc_tui.services.stdin_bridge import redirect_stdin
+
+if TYPE_CHECKING:
+    from gc_core.attachments.model import Attachment
+    from gc_core.tools.turn.ask_human import HumanAnswer
 
 # O11: без timeout агент-поток может висеть вечно, если UI не ответил на confirm.
 # 10 мин — достаточно человеку; дальше fail-closed deny.
@@ -57,6 +61,7 @@ def _run_agent(executor, a, *, thread_id, start_new_thread, system) -> None:
                 message_ids=a["message_ids"],
                 display_contents=a["display_contents"],
                 skills_loaded=a["skills_loaded"],
+                attachments=a["attachments"],
             )
         finally:
             await aclose_clients()
@@ -120,6 +125,13 @@ class AgentRunner:
         self._on_error = on_error
         self._on_complete = on_complete
         self._stdin_queue: queue.Queue[str] = queue.Queue()
+        # Ответы на turn_ask_human — своя очередь объектов: строка или HumanAnswer
+        # с картинками (дизайн картинок §20.3); None — отмена ожидания. Мост
+        # redirect_stdin (_stdin_queue) остаётся чужому input(): в общей очереди
+        # чужой input() съел бы ответ человека.
+        self._answer_queue: queue.Queue[str | HumanAnswer | None] = (
+            queue.Queue()
+        )
         self._prebuild_messages: list[dict] = []
         #: Прогон ещё принимает сообщения в свою очередь. Ставится при запуске
         #: воркера и снимается им под `_lock` в том же шаге, где он убедился,
@@ -162,22 +174,19 @@ class AgentRunner:
         except Exception:
             pass
 
-    def _read_stdin_blocking(self, _question: str) -> str:
+    def _read_answer_blocking(self, _question: str) -> str | HumanAnswer:
         """Ответ из очереди TUI. БЛОКИРУЕТ поток — звать только вне loop.
 
         Мост ``redirect_stdin`` потоко-локален, и ``input()`` проваливался бы
         на настоящий stdin, занятый Textual. Очередь общая на runner, поэтому
-        читать её можно с любого потока.
+        читать её можно с любого потока. Отмена (None) — пустой ответ.
         """
-        lines: list[str] = []
-        while True:
-            line = self._stdin_queue.get()
-            if line in ("", "\n"):
-                break
-            lines.append(line.rstrip("\n"))
-        return "\n".join(lines).strip()
+        answer = self._answer_queue.get()
+        if answer is None:
+            return ""
+        return answer.strip() if isinstance(answer, str) else answer
 
-    async def _read_stdin_answer(self, question: str) -> str:
+    async def _read_answer(self, question: str) -> str | HumanAnswer:
         """Порт «спросить человека» для ядра. КОРУТИННЫЙ, и это существенно.
 
         Ядро ждёт порт нативно, если он awaitable, и зовёт инлайн, если нет
@@ -192,7 +201,7 @@ class AgentRunner:
         """
         import asyncio
 
-        return await asyncio.to_thread(self._read_stdin_blocking, question)
+        return await asyncio.to_thread(self._read_answer_blocking, question)
 
     def _ensure_executor(self) -> Any:
         with self._build_lock:
@@ -208,7 +217,7 @@ class AgentRunner:
                 ctx = getattr(self._executor, "_ctx", None)
                 if ctx is not None and getattr(ctx, "ask_human", None) is None:
                     try:
-                        ctx.ask_human = self._read_stdin_answer
+                        ctx.ask_human = self._read_answer
                     except Exception:
                         pass
             return self._executor
@@ -303,27 +312,38 @@ class AgentRunner:
 
     @staticmethod
     def _run_args(
-        *, query, technical, message_id, display_query, skill_loaded
+        *,
+        query,
+        technical,
+        message_id,
+        display_query,
+        skill_loaded,
+        attachments=(),
     ):
         """Построить параллельные списки аргументов для executor.run.
 
-        Технический хвост (technical) получает None в display_contents/skills_loaded,
-        чтобы executor не добавлял display-поля к служебным сообщениям."""
+        Технический хвост (technical) получает None в display_contents/skills_loaded/
+        attachments, чтобы executor не добавлял display-поля и картинки к служебным
+        сообщениям. Картинки — у запроса пользователя (дизайн картинок §4)."""
+        images = list(attachments) or None
         if technical is None:
             msgs = [query]
             display_contents = [display_query]
             skills_loaded = [skill_loaded]
             mids = [message_id] if message_id else None
+            images_list = [images]
         else:
             msgs = [query, technical]
             display_contents = [display_query, None]
             skills_loaded = [skill_loaded, None]
             mids = [message_id, None] if message_id else None
+            images_list = [images, None]
         return {
             "msgs": msgs,
             "display_contents": display_contents,
             "skills_loaded": skills_loaded,
             "message_ids": mids,
+            "attachments": images_list,
         }
 
     def start(
@@ -337,13 +357,15 @@ class AgentRunner:
         technical: Optional[str] = None,
         display_query: Optional[str] = None,
         skill_loaded: Optional[str] = None,
+        attachments: tuple[Attachment, ...] = (),
     ) -> bool:
         """Запустить run. Возвращает False если уже работает.
 
         message_id — id user-сообщения (TUI задаёт свой, чтобы потом точечно
         откатить осиротевшую реплику при быстрой отмене).
         display_query / skill_loaded — чистые display-поля; передаются в executor.run
-        параллельными списками (технический хвост получает None)."""
+        параллельными списками (технический хвост получает None).
+        attachments — картинки запроса из кармана процесса; в тред их копирует ядро."""
         with self._lock:
             if self._busy_locked():
                 return False
@@ -355,6 +377,7 @@ class AgentRunner:
                     message_id=message_id,
                     display_query=display_query,
                     skill_loaded=skill_loaded,
+                    attachments=attachments,
                 ),
                 thread_id=thread_id,
                 start_new_thread=start_new_thread,
@@ -384,6 +407,7 @@ class AgentRunner:
         system: str,
     ) -> threading.Thread:
         """Завести воркер прогона. Звать под `_lock`; запускает вызывающий."""
+        self._drop_stale_answers()
         self._thread_kind = "run"
         self._accepting = True
         self._last_target = (thread_id, system)
@@ -396,6 +420,18 @@ class AgentRunner:
         self._thread = t
         self._workers += 1
         return t
+
+    def _drop_stale_answers(self) -> None:
+        """Сбросить ответы, оставшиеся от прошлых прогонов. `stop()` будит ожидание
+        вопроса пустышкой и тогда, когда вопроса не было (Esc во время тулов), — в
+        следующем прогоне она досталась бы вопросу вместо ответа человека. Прогон
+        ещё не заведён — вопросов нет, всё в очередях устарело."""
+        for stale in (self._answer_queue, self._stdin_queue):
+            while True:
+                try:
+                    stale.get_nowait()
+                except queue.Empty:
+                    break
 
     def _run_worker(
         self, batch: dict, thread_id: str, start_new_thread: bool, system: str
@@ -619,11 +655,10 @@ class AgentRunner:
         except Exception:
             return False
 
-    def submit_ask_human_reply(self, text: str) -> None:
-        """TUI кладёт ответ юзера в queue. ask_human читает строки до пустой,
-        поэтому шлём ответ + завершающую пустую строку (иначе read-loop виснет)."""
-        self._stdin_queue.put(text + "\n")
-        self._stdin_queue.put("\n")  # терминатор read-loop в ask_human
+    def submit_ask_human_reply(self, answer: str | HumanAnswer) -> None:
+        """TUI кладёт ответ юзера — строку или HumanAnswer с картинками — в очередь
+        ответов; порт ядра отдаёт его ask_human целиком, одним элементом."""
+        self._answer_queue.put(answer)
 
     def make_tui_confirm(
         self,
@@ -718,7 +753,9 @@ class AgentRunner:
 
         НЕ путать с «cancel» в семантике юзера — у юзера Esc делает clean stop
         всего треда через TraceScreen._stop_for_ask_human(); этот метод —
-        только механический stdin-unblock."""
+        только механический stdin-unblock. Разблокирует оба ожидания: порт ядра
+        (None в очереди ответов → пустой ответ) и чужой input() через мост stdin."""
+        self._answer_queue.put(None)
         self._stdin_queue.put("\n")
 
     def wait(self, timeout: Optional[float] = None) -> None:

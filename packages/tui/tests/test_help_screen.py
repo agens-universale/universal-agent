@@ -281,3 +281,63 @@ async def test_quickstart_mentions_voice_input():
             i for i, r in enumerate(block) if r[:20].strip() == "Enter"
         )
         assert block.index(voice) == enter + 1  # сразу за строкой про набор
+
+
+@pytest.mark.asyncio
+async def test_help_lists_the_image_paste_hotkey():
+    """Alt+V описан в справке F1: постоянной подсказки в футере нет (визуальный контракт §2)."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from gc_tui.screens.help import HelpScreen
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(HelpScreen())
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        cmds = "\n".join(str(s.render()) for s in scr.query(".help-row-cmd"))
+        descs = "\n".join(str(s.render()) for s in scr.query(".help-row-desc"))
+        assert "Alt+V" in cmds
+        assert "Вставка изображения из буфера обмена" in descs
+
+
+@pytest.mark.asyncio
+async def test_help_lists_image_keys():
+    """Постоянной подсказки про картинки в футере нет — клавиши обязаны быть в F1
+    (визуальный контракт картинок §2): вставка, путь к файлу, открытие кликом."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from gc_tui.screens.help import HelpScreen
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(HelpScreen())
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        cmds = "\n".join(str(s.render()) for s in scr.query(".help-row-cmd"))
+        assert "Alt+V" in cmds
+        assert "путь к файлу" in cmds
+        assert "Клик по картинке" in cmds
+
+
+@pytest.mark.asyncio
+async def test_help_explains_every_key_the_clipboard_tip_names():
+    """Совет в футере «в буфере изображение · клавиша — вставить» называет клавишу по
+    системе и содержимому буфера — F1 объясняет каждую (контракт картинок §2)."""
+    pytest.importorskip("textual")
+    from textual.app import App
+    from gc_tui.screens.help import HelpScreen
+
+    class _A(App):
+        def on_mount(self):
+            self.push_screen(HelpScreen())
+
+    async with _A().run_test() as pilot:
+        scr = pilot.app.screen
+        rows = "\n".join(
+            str(s.render()) for s in scr.query(".help-row-cmd, .help-row-desc")
+        )
+        for key in ("Ctrl+V", "Alt+V", "Option+V", "Cmd+V"):
+            assert key in rows

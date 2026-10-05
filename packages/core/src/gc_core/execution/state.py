@@ -99,7 +99,19 @@ STATE_FIELDS = (
     "_session_compact_batch_snapshot",
     "session_compact_applied",
     "allow_pairing_persist",
+    "pending_tool_attachments",
+    "vision_probe_turn",
 )
+
+#: Транзиентные кэши зрения: считаются на каждый запрос (спека изображений
+#: §9) и в снимок не идут — после восстановления берут эти умолчания.
+TRANSIENT_STATE_DEFAULTS = {
+    "vision_audience": lambda: None,
+    "vision_live_ids": frozenset,
+    "vision_request_limit": lambda: None,
+    "vision_routes": dict,
+    "vision_probe_notices": set,
+}
 
 
 class ExecutionState:
@@ -196,6 +208,7 @@ class ExecutionState:
         unknown = (
             set(vars(self))
             - set(STATE_FIELDS)
+            - set(TRANSIENT_STATE_DEFAULTS)
             - {"logger", "workspace", "on_messages_evicted"}
         )
         if unknown:
@@ -247,4 +260,6 @@ class ExecutionState:
             setattr(state, key, deserialize_list(data[key]))
         state.logger = None
         state.on_messages_evicted = None
+        for name, default in TRANSIENT_STATE_DEFAULTS.items():
+            setattr(state, name, default())
         return state

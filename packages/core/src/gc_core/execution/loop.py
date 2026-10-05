@@ -159,18 +159,34 @@ class AgentLoop:
 
     # ----------------------------------------------------------- iteration
     def _poll_pending(self, messages, *, first_poll: bool):
-        """Подхват сообщений из очереди (``get_pending_messages``) перед шагом цикла."""
+        """Подхват сообщений из очереди (``get_pending_messages``) перед шагом цикла.
+
+        `messages` здесь ещё не записан в state (запись — после опроса). Свежий
+        ответ модели с вызовами очередь не разбирает: вызовы исполняются в этом
+        проходе, реплики дождутся следующего опроса (дописанная реплика увела бы
+        шаг в user_ask, и вызовы остались бы без исполнения). К ответам тулов (с
+        техническим хвостом) реплики ДОПИСЫВАЮТСЯ: подмена оставляла в state
+        вызов без ответа. Первый опрос тоже дописывает: стартовый батч — не ответ
+        модели, а вызовы в нём (responses без previous_response_id) — история
+        треда; сообщение, пришедшее между стартом прогона и первым запросом к
+        модели, иначе вытесняло бы стартовое. Прочее (текстовый ответ модели,
+        отскок, подхваченный новый ход) реплика подменяет, как раньше: ответ
+        модели, дописанный к реплике, в responses ушёл бы в дельте повторно — он
+        уже в цепочке сервера."""
         if self.get_pending_messages is None:
+            return messages
+        if not first_poll and self.bindings._batch_has_pending_function_calls(
+            messages
+        ):
             return messages
         pending = self.get_pending_messages()
         if not pending:
             return messages
-        # На ПЕРВОМ опросе склеиваем со стартовым батчем, а не
-        # подменяем его: сообщение, пришедшее между стартом прогона и
-        # первым запросом к модели, иначе вытесняло стартовое — и оно
-        # не доходило ни до модели, ни до треда. Дальше подмена верна:
-        # там `messages` — это уже ответ модели, а не просьба человека.
-        return [*messages, *pending] if first_poll else pending
+        if first_poll or self.bindings._is_tool_outputs_with_technical_tail(
+            messages
+        ):
+            return [*messages, *pending]
+        return pending
 
     def _technical_bounce(self, text: str) -> List[Dict]:
         return [
@@ -711,6 +727,10 @@ class AgentLoop:
         # мусор и крутит до no_tool_call_max_count / сдаёт ход.
         # Payload уже в state/jsonl; reject → bounce, не discard.
         if self.bindings.finish_prevents_text_final(last_finish):
+            return False, None
+        # Модель повторила наш мост «(tool results received)» — шаблон из истории,
+        # не итог: напоминание вызвать тул, как при прозе без вызова.
+        if self.bindings.is_bridge_echo(assistant_text):
             return False, None
         decision = await self.bindings.ashould_return_text_answer(
             self.ctx, self.state, assistant_text

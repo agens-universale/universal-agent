@@ -175,6 +175,8 @@ class ExecutionPolicy:
         if len(messages) == 0:
             raise ValueError("Empty messages list")
         if messages[-1].get("role", None) == "user":
+            if self.bindings._is_tool_outputs_with_technical_tail(messages):
+                return "function_call_output"
             return "user_ask"
         for message in messages:
             if message.get("type", None) == "function_call":
@@ -191,7 +193,8 @@ class ExecutionPolicy:
         raise ValueError("Undefined mode")
 
     def _batch_has_pending_function_calls(self, messages: List[Dict]) -> bool:
-        """True, если в батче есть function_call — их надо исполнить до step/token/tool лимитов.
+        """True, если в батче есть function_call — их надо исполнить до step/token/tool лимитов
+        и до разбора очереди реплик.
 
         Иначе лимит между «модель уже вернула tools» и process_tool_calls даёт
         orphan call без output и теряет заявленную работу (sidecar/диск/summary).
@@ -686,6 +689,8 @@ class ExecutionPolicy:
             # Прогон остановлен: notice агенту не нужен, окно прошлого батча
             # не должно всплыть при продолжении сессии.
             self.bindings.clear_loop_detector(state)
+            # Картинки батча тоже: ход остановлен, смотреть их некому.
+            state.pending_tool_attachments = []
 
         if getattr(state, "session_compact_applied", False):
             tools_outputs = self.bindings._apply_session_compact_to_batch(
@@ -698,6 +703,20 @@ class ExecutionPolicy:
                 self.bindings._make_technical_feedback_user_message(
                     notice,
                     technical_type=self.bindings.TECHNICAL_TYPE_TECHNICAL,
+                )
+            )
+
+        # Картинки из тулов и из ответа на turn_ask_human — одним техническим
+        # сообщением в самом конце батча (спека §7.1): tool-сообщение картинку не
+        # несёт. После принятого turn_finish оно уходит вместе с хвостом
+        # (`_split_batch_new_around_finish`).
+        pending_attachments = getattr(state, "pending_tool_attachments", None)
+        state.pending_tool_attachments = []
+        if pending_attachments:
+            tools_outputs.append(
+                self.bindings.build_tool_attachments_message(
+                    pending_attachments,
+                    message_id=self.bindings.generate_message_id_func("m"),
                 )
             )
 
@@ -819,6 +838,10 @@ class ExecutionPolicy:
         batch_snapshot = list(messages)
         state._session_compact_batch_snapshot = batch_snapshot
         state.session_compact_applied = False
+        # Картинки батча (fs_view_image, ответ на turn_ask_human) копятся здесь и
+        # уходят одним техническим сообщением в конце. Остаток прерванного батча
+        # (исключение посреди исполнения) в новый батч не протекает.
+        state.pending_tool_attachments = []
 
         tools_outputs = []
         # Work, затем не больше одного finish; skipped — лишние turn_finish.

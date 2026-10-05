@@ -38,8 +38,104 @@ def test_consumers_constant_matches_spec():
         "intent_scope",
         "memory_compaction",
         "auto_judge",
+        "vision",
     )
     assert SUBAGENT_CONSUMER_PREFIX == "subagent:"
+
+
+def test_consumer_registries_agree():
+    """Потребитель заводится во всех реестрах разом. Реестров четыре, и
+    пропуск любого молчит: без `_SCALAR_ASSIGN_FIELDS` Router игнорирует
+    `assign.<имя>`, без `_ASSIGN_SCALAR_FIELDS` валидатор пропускает опечатку в
+    алиасе, без поля схемы конфиг не грузится, без подписи notice отката и строка
+    /settings показывают сырое имя. Подписи `auto_judge` в транспортном словаре
+    нет намеренно — `utils/llm_chat_client.py`, комментарий над словарём."""
+    from gc_core.config_modules.model_registry import AssignConfig
+    from gc_core.config_modules.model_sections_validation import (
+        _ASSIGN_SCALAR_FIELDS,
+    )
+    from gc_core.model_router import _SCALAR_ASSIGN_FIELDS
+    from gc_core.utils.llm_chat_client import CONSUMER_RU_LABEL
+
+    service = set(CONSUMERS) - {"main"}
+    assert set(_SCALAR_ASSIGN_FIELDS) == service
+    assert set(_ASSIGN_SCALAR_FIELDS) == service
+    assert set(AssignConfig.model_fields) - {"subagents"} == service
+    assert set(CONSUMER_RU_LABEL) == service - {"auto_judge"}
+
+
+def test_vision_without_binding_follows_the_active_level():
+    """«Глаза» без привязки — активная модель, по общему правилу, без особого
+    случая `auto_judge` (спека изображений §8)."""
+    router = _router(
+        {
+            "models": {"a": {}, "b": {}, "c": {}},
+            "slots": {"light": "a", "default": "b", "max": "c"},
+        },
+        level="max",
+    )
+    resolved = router.resolve("vision")
+    assert resolved.alias == "c"
+    assert resolved.source == "активный уровень max"
+
+
+def test_vision_binding_pins_its_alias():
+    router = _router(
+        {
+            "models": {"glm": {}, "qwen": {}},
+            "slots": {"default": "glm"},
+            "assign": {"vision": "qwen"},
+        }
+    )
+    resolved = router.resolve("vision")
+    assert resolved.alias == "qwen"
+    assert resolved.source == "привязка vision→qwen"
+
+
+def test_vision_in_legacy_is_the_legacy_model():
+    """Пустой реестр: `assign` не действует, «глаза» — та же легаси-модель."""
+    router = _router(
+        {
+            "assign": {"vision": "max"},
+            "backend": {
+                "completions_url": "http://legacy/v1/chat/completions"
+            },
+            "agent": {"model": "legacy-model"},
+        }
+    )
+    resolved = router.resolve("vision")
+    assert resolved.alias is None
+    assert resolved.model == "legacy-model"
+    assert resolved.source == "легаси"
+
+
+def test_vision_under_forced_legacy_ignores_the_binding():
+    router = _router(
+        {
+            "models": {"qwen": {}},
+            "slots": {"default": "qwen"},
+            "assign": {"vision": "qwen"},
+            "backend": {"completions_url": "http://legacy/v1"},
+            "agent": {"model": "legacy-model"},
+        },
+        force_legacy=True,
+    )
+    resolved = router.resolve("vision")
+    assert resolved.alias is None
+    assert resolved.model == "legacy-model"
+
+
+def test_vision_in_a_subagent_router_is_the_subagent_model_unless_bound():
+    """Дочерний Router субагента: неназначенные «глаза» — модель субагента
+    (`unbound_override`), назначенные — своя привязка."""
+    raw = {"models": {"flash": {}, "qwen": {}}, "slots": {"default": "flash"}}
+    unbound = _router(raw, unbound_override=_pin())
+    assert unbound.resolve("vision").alias == "pinned"
+
+    bound = _router(
+        {**raw, "assign": {"vision": "qwen"}}, unbound_override=_pin()
+    )
+    assert bound.resolve("vision").alias == "qwen"
 
 
 def test_binding_level_resolves_through_slot():

@@ -14,6 +14,7 @@ from gc_tui.widgets.trace_row import TraceRow
 from gc_tui.widgets.user_reply import UserReplyContainer
 from textual import events
 from textual.app import App, ComposeResult
+from gc_testkit.tui_support import tui_settings
 
 
 def _click(widget, *, ctrl=False, chain=1):
@@ -407,3 +408,47 @@ async def test_user_reply_double_click_no_longer_opens():
         row.on_click(_click(row, chain=2))
         await pilot.pause()
         assert received == []
+
+
+@pytest.mark.asyncio
+async def test_a_just_sent_reply_gets_its_event_number_on_delivery(tmp_path):
+    """Живая реплика монтируется «отправляется» без номера события; сверка с записью
+    треда отдаёт ей номер — Ctrl+клик и Enter открывают событие сразу, а не только
+    после перезапуска."""
+    import json
+
+    from gc_tui.app import TuiApp
+
+    threads = tmp_path / "threads"
+    threads.mkdir()
+    tid = "e" * 32
+    (threads / f"data_cli_{tid}.jsonl").write_text("", encoding="utf-8")
+    (threads / f"meta_cli_{tid}.json").write_text(
+        json.dumps({"thread_id": tid, "tui": {}}), encoding="utf-8"
+    )
+    async with TuiApp(
+        threads_dir=str(threads), system="cli", settings=tui_settings({})
+    ).run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        await pilot.pause()
+        cid = scr._track_pending(
+            display_text="привет", wire_content="привет", images=()
+        )
+        widget = scr._mount_user_reply(
+            "привет", state="pending", client_id=cid
+        )
+        assert widget._open_request() is None  # ещё не доставлена
+
+        scr._render_record(
+            {
+                "ts": "2026-09-28T10:00:00+00:00",
+                "payload": {"id": "u1", "role": "user", "content": "привет"},
+            },
+            live=True,
+        )
+        await pilot.pause()
+
+        request = widget._open_request()
+        assert isinstance(request, OpenEventRequest)
+        assert request.event_no == scr._task_events[-1].no

@@ -5,8 +5,11 @@ from gc_core.execution.contracts import ExecutionFailure, ModelFailure
 from gc_core.model_router import AliasCircuitOpenError
 from gc_core.utils.backend_errors import (
     EmbeddedChoiceError,
+    image_limit_from_error,
     is_auth_error,
     is_context_overflow_error,
+    is_image_rejection_error,
+    is_image_request_error,
     is_model_unavailable_error,
     is_previous_response_cache_miss,
     is_retriable_backend_error,
@@ -25,6 +28,9 @@ def _provider_failure(exc, message, details=None):
         unavailable=is_model_unavailable_error(exc),
         context_overflow=is_context_overflow_error(exc),
         response_cache_miss=is_previous_response_cache_miss(exc),
+        image_rejection=is_image_rejection_error(exc),
+        image_request=is_image_request_error(exc),
+        image_limit=image_limit_from_error(exc),
     )
 
 
