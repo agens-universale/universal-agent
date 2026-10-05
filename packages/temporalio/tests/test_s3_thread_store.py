@@ -3,11 +3,7 @@
 
 import io
 import itertools
-import shutil
-import socket
-import subprocess
 import threading
-import time
 import uuid
 
 import pytest
@@ -19,6 +15,10 @@ from gc_testkit.durable_thread_store_conformance import (
     assert_durable_conforms,
 )
 from gc_ua_temporalio.storage.s3 import S3ThreadStore
+from s3_support import (  # noqa: F401  # shared MinIO fixtures
+    minio_client,
+    minio_server,
+)
 
 
 def _error(code, status):
@@ -72,7 +72,7 @@ class FakeS3:
         with self.lock:
             self.objects.pop((Bucket, Key), None)
 
-    def keys(self, bucket="b"):
+    def object_keys(self, bucket="b"):
         return sorted(key for b, key in self.objects if b == bucket)
 
 
@@ -147,14 +147,16 @@ def test_head_race_reapplies_the_operation_and_leaves_no_orphans():
     assert state.max_seq == 2
     assert receipt.revision == store.read_snapshot("sys", "t1").revision
     head = client.objects[("b", "threads/sys/t1/head.json")][0]
-    referenced = {key for key in client.keys() if key.endswith("head.json")}
+    referenced = {
+        key for key in client.object_keys() if key.endswith("head.json")
+    }
     import json as _json
 
     doc = _json.loads(head)
     referenced |= set(doc["segments"]) | {
         r["key"] for r in doc["receipts"].values()
     }
-    assert set(client.keys()) == referenced, (
+    assert set(client.object_keys()) == referenced, (
         "объекты проигравшей попытки остались"
     )
 
@@ -186,7 +188,7 @@ def test_segments_are_compacted_and_old_ones_removed():
             f"op{i}",
             [{"role": "user", "content": str(i), "id": f"m{i}"}],
         )
-    segments = [k for k in client.keys() if "/segments/" in k]
+    segments = [k for k in client.object_keys() if "/segments/" in k]
     assert len(segments) < s3_module.COMPACT_AFTER
     state = store.load_thread_state("sys", "t1")
     assert [m["id"] for m in state.messages] == [
@@ -203,73 +205,10 @@ def test_local_write_to_a_temporal_owned_thread_is_refused():
         store.append_messages("sys", "t1", [{"role": "user", "content": "x"}])
 
 
-# --- живой S3: MinIO в Docker ---------------------------------------------
+# --- живой S3: MinIO в Docker (фикстура — s3_support) ---------------------
 
 
-def _free_port():
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
-@pytest.fixture(scope="module")
-def minio_client():
-    docker = shutil.which("docker")
-    if docker is None:
-        pytest.skip("docker недоступен")
-    images = subprocess.run(
-        [docker, "images", "-q", "minio/minio:latest"],
-        capture_output=True,
-        text=True,
-    )
-    if images.returncode != 0 or not images.stdout.strip():
-        pytest.skip("образа minio/minio:latest нет локально")
-    port = _free_port()
-    name = f"gc-s3-test-{uuid.uuid4().hex[:8]}"
-    subprocess.run(
-        [
-            docker,
-            "run",
-            "-d",
-            "--rm",
-            "--name",
-            name,
-            "-p",
-            f"127.0.0.1:{port}:9000",
-            "-e",
-            "MINIO_ROOT_USER=gcadmin",
-            "-e",
-            "MINIO_ROOT_PASSWORD=gcadmin-secret",
-            "minio/minio:latest",
-            "server",
-            "/data",
-        ],
-        check=True,
-        capture_output=True,
-    )
-    try:
-        import boto3
-
-        client = boto3.client(
-            "s3",
-            endpoint_url=f"http://127.0.0.1:{port}",
-            aws_access_key_id="gcadmin",
-            aws_secret_access_key="gcadmin-secret",
-            region_name="us-east-1",
-        )
-        for _ in range(100):
-            try:
-                client.list_buckets()
-                break
-            except Exception:
-                time.sleep(0.1)
-        client.create_bucket(Bucket="threads")
-        yield client
-    finally:
-        subprocess.run([docker, "rm", "-f", name], capture_output=True)
-
-
-def test_s3_store_conforms_on_minio(minio_client):
+def test_s3_store_conforms_on_minio(minio_client):  # noqa: F811
     counter = itertools.count()
     passed = assert_durable_conforms(
         lambda: S3ThreadStore(
@@ -279,7 +218,7 @@ def test_s3_store_conforms_on_minio(minio_client):
     assert len(passed) == len(STRUCTURE_CHECKS) + len(BEHAVIOUR_CHECKS)
 
 
-def test_minio_enforces_the_head_condition(minio_client):
+def test_minio_enforces_the_head_condition(minio_client):  # noqa: F811
     """Хранилище, которое молча игнорирует If-Match, потеряло бы записи —
     проверяем, что конфликт head действительно приходит от сервера."""
     store = S3ThreadStore("threads", "race", client=minio_client)
