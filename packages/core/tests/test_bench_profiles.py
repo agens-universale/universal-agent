@@ -39,7 +39,7 @@ def _build(gc_cli_config):
 
     # completions_url: the adapter has no hardcoded default (fail-fast) — supply one.
     cfg = {
-        "completions_url": "http://test/v1/chat/completions",
+        "backend.completions_url": "http://test/v1/chat/completions",
         **gc_cli_config,
     }
     a = mod.GcCliExternal(

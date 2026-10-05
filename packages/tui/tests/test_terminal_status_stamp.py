@@ -49,7 +49,7 @@ async def test_falling_edge_stamps_status(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -76,7 +76,7 @@ async def test_compact_transition_does_not_stamp(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -110,7 +110,7 @@ async def test_prepare_for_new_run_stamps_running_over_completed(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -140,7 +140,7 @@ async def test_rising_edge_stamps_running(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -173,7 +173,7 @@ async def test_session_status_word_reads_tui_running(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

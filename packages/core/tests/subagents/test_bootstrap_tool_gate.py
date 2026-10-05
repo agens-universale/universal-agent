@@ -38,7 +38,7 @@ def _runner():
         discard_writes_after_stop=False,
     )
     ctx = fake_ctx(
-        {"use_local_subagents": True},
+        {"agent.use_local_subagents": True},
         logger=None,
         run_id="r",
         auth_connector=None,

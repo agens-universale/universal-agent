@@ -32,9 +32,9 @@ def _patch_chat_completion(monkeypatch, fake):
 def _ctx(trigger_chars: int = 1):
     return fake_ctx(
         {
-            "model": "test-model",
-            "completions_url": "http://example.test/v1/chat/completions",
-            "summary_params": {
+            "agent.model": "test-model",
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "summary": {
                 "chat_completions_summary_trigger_chars": trigger_chars,
                 "incremental_batch_chars": int(trigger_chars * 1.4)
                 if trigger_chars > 0
@@ -43,7 +43,7 @@ def _ctx(trigger_chars: int = 1):
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {
                     "max_tokens": 8192,
                     "completion_kwargs": {},
@@ -126,7 +126,7 @@ async def test_maybe_run_summary_compaction_twice_uses_meta_user_log(
             },
         )
         session = await ThreadSession.afrom_config(
-            settings=make_settings({"threads_data_path": tmp_dir}),
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -216,7 +216,7 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
         thread_id = "demo-thread"
         system_id = "cli"
         session = await ThreadSession.afrom_config(
-            settings=make_settings({"threads_data_path": tmp_dir}),
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -233,7 +233,7 @@ async def test_persist_batch_writes_user_intent_log_to_meta():
         )
 
         reloaded = await ThreadSession.afrom_config(
-            settings=make_settings({"threads_data_path": tmp_dir}),
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )

@@ -33,7 +33,7 @@ async def test_child_ask_human_answer_no_parent_pending(tmp_path):
     app = TuiApp(
         threads_dir=str(threads),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -108,7 +108,7 @@ async def test_parent_ask_human_answer_still_tracks_pending(tmp_path):
     app = TuiApp(
         threads_dir=str(threads),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -170,7 +170,7 @@ async def test_child_ask_human_answer_with_images_renders_like_a_reply(
     app = TuiApp(
         threads_dir=str(threads),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     att = make_attachment_file(3, tmp_path)
     text = f"{chip_text(3)} вот ошибка"

@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 def test_parse_turn_end_reads_normalized_value_only():
     config_dict = {
-        "summary_params": {
+        "summary": {
             "chat_completions_summary_turn_end_trigger_chars": 120000,
         }
     }
@@ -28,19 +28,15 @@ def test_parse_turn_end_reads_normalized_value_only():
 
 def test_parse_turn_end_without_key_returns_zero():
     assert (
-        parse_summary_turn_end_trigger_chars(
-            make_settings({"summary_params": {}})
-        )
+        parse_summary_turn_end_trigger_chars(make_settings({"summary": {}}))
         == 0
     )
-    assert (
-        parse_summary_trigger_chars(make_settings({"summary_params": {}})) == 0
-    )
+    assert parse_summary_trigger_chars(make_settings({"summary": {}})) == 0
 
 
 def test_parse_turn_end_explicit_zero_disables():
     config_dict = {
-        "summary_params": {
+        "summary": {
             "chat_completions_summary_turn_end_trigger_chars": 0,
         }
     }
@@ -65,16 +61,13 @@ def test_turn_end_default_sixty_percent_via_load_settings():
 
 
 def test_parse_trigger_tokens_broken_value_is_zero():
-    assert (
-        parse_summary_trigger_tokens(make_settings({"summary_params": {}}))
-        == 0
-    )
+    assert parse_summary_trigger_tokens(make_settings({"summary": {}})) == 0
     # Нечисло отсекает схема настроек (строгая конвертация плоского вида).
     with pytest.raises(ValidationError):
         parse_summary_trigger_tokens(
             make_settings(
                 {
-                    "summary_params": {
+                    "summary": {
                         "chat_completions_summary_trigger_tokens": "nope"
                     }
                 }
@@ -84,7 +77,7 @@ def test_parse_trigger_tokens_broken_value_is_zero():
         parse_summary_turn_end_trigger_tokens(
             make_settings(
                 {
-                    "summary_params": {
+                    "summary": {
                         "chat_completions_summary_turn_end_trigger_tokens": None
                     }
                 }
@@ -96,7 +89,7 @@ def test_parse_trigger_tokens_broken_value_is_zero():
 
 def test_parse_turn_end_tokens_explicit_zero_disables():
     config_dict = {
-        "summary_params": {
+        "summary": {
             "chat_completions_summary_turn_end_trigger_tokens": 0,
         }
     }
@@ -125,18 +118,11 @@ def test_turn_end_tokens_default_sixty_percent_via_load_settings():
 
 
 def test_mid_turn_enabled_when_either_threshold_positive():
-    assert (
-        summary_mid_turn_enabled(make_settings({"summary_params": {}}))
-        is False
-    )
+    assert summary_mid_turn_enabled(make_settings({"summary": {}})) is False
     assert (
         summary_mid_turn_enabled(
             make_settings(
-                {
-                    "summary_params": {
-                        "chat_completions_summary_trigger_chars": 10
-                    }
-                }
+                {"summary": {"chat_completions_summary_trigger_chars": 10}}
             )
         )
         is True
@@ -144,11 +130,7 @@ def test_mid_turn_enabled_when_either_threshold_positive():
     assert (
         summary_mid_turn_enabled(
             make_settings(
-                {
-                    "summary_params": {
-                        "chat_completions_summary_trigger_tokens": 10
-                    }
-                }
+                {"summary": {"chat_completions_summary_trigger_tokens": 10}}
             )
         )
         is True

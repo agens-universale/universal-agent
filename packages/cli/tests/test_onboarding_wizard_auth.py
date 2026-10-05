@@ -13,11 +13,11 @@ def _io(answers):
 def test_auth_menu_token():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "m",
+            "agent.model": "m",
         }
     )
     # endpoint пропущен(Enter), auth: выбор "1", токен "sk-1"
@@ -29,11 +29,11 @@ def test_auth_menu_token():
 def test_auth_menu_no_auth_writes_empty():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "m",
+            "agent.model": "m",
         }
     )
     io = _io(["", "2"])  # endpoint пропущен, auth: "2" без авторизации
@@ -44,11 +44,11 @@ def test_auth_menu_no_auth_writes_empty():
 def test_auth_menu_skip():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "m",
+            "agent.model": "m",
         }
     )
     io = _io(["", "3"])  # endpoint пропущен, auth: "3" пропустить
@@ -60,11 +60,11 @@ def test_auth_token_prompt_flat_style():
     # ввод токена — общий стиль: хинт «  токен (ввод скрыт)» + приглашение «  > » (секретное)
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "m",
+            "agent.model": "m",
         }
     )
     prompts, out = [], []

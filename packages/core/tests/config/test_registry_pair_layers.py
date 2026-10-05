@@ -85,9 +85,9 @@ def test_cli_models_override_goes_through_the_rule():
     """`--models` задаёт весь реестр строкой поверх уже загруженных настроек (мимо
     послойной проверки файлов) — правило прогоняется явно, иначе CLI обходит его."""
     from gc_core.config import apply_cli_overrides
-    from gc_testkit.settings import settings_from_flat
+    from gc_testkit.settings import make_settings
 
-    loaded = settings_from_flat({})
+    loaded = make_settings({})
     with pytest.raises(ValueError, match="--models.*задан свой адрес"):
         apply_cli_overrides(
             loaded,

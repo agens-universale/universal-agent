@@ -62,7 +62,7 @@ def _facade(tmp_path, agent: FakeAgent) -> ResponsesFacade:
 
     return ResponsesFacade(
         settings=make_settings(
-            **{"model": "from-config", "chat_api.launch_root": None}
+            **{"agent.model": "from-config", "chat_api.launch_root": None}
         ),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
@@ -185,7 +185,7 @@ async def test_get_survives_a_new_facade(tmp_path):
     saved = await handle.wait_finished()
     threads = tmp_path / "threads"
     restarted = ResponsesFacade(
-        settings=make_settings(model="m"),
+        settings=make_settings(**{"agent.model": "m"}),
         agent_factory=facade._agent_factory,
         index=ResponseIndex(str(threads)),
     )

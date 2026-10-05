@@ -47,15 +47,15 @@ async def test_child_view_image_snapshot_lands_in_the_parent_store(tmp_path):
     proj.mkdir()
     threads = tmp_path / "threads"
     config = {
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
-        "backend_request_timeout_sec": 600,
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
+        "backend.request_timeout_sec": 600,
         "launch_root": str(proj),
-        "threads_data_path": str(threads),
-        "use_local_subagents": True,
+        "paths.threads_data_path": str(threads),
+        "agent.use_local_subagents": True,
     }
     config = make_settings(config)
     parent = await acreate_run_context(config)

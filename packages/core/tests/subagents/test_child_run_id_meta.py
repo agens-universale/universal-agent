@@ -85,7 +85,7 @@ def _runner():
         discard_writes_after_stop=False,
     )
     ctx = fake_ctx(
-        {"use_local_subagents": True},
+        {"agent.use_local_subagents": True},
         logger=None,
         run_id="r",
         auth_connector=None,
@@ -145,7 +145,7 @@ async def test_early_error_without_ctx_has_no_child_run_id():
         discard_writes_after_stop=False,
     )
     ctx = fake_ctx(
-        {"use_local_subagents": True},
+        {"agent.use_local_subagents": True},
         logger=None,
         run_id="r",
         auth_connector=None,

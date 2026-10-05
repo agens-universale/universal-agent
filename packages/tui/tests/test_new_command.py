@@ -40,7 +40,7 @@ async def test_new_when_idle_goes_to_empty_state(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -86,7 +86,7 @@ async def test_new_when_running_asks_confirm(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -135,7 +135,7 @@ async def test_new_confirm_has_title_and_wording(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -183,7 +183,7 @@ async def test_new_confirm_yes_clears_runner_and_indicator(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:

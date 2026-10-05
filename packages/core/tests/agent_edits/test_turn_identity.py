@@ -60,22 +60,24 @@ def _prompt_file(tmp_path):
 
 def _config(tmp_path):
     return {
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "threads_data_path": str(tmp_path / "threads"),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "paths.threads_data_path": str(tmp_path / "threads"),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
         "launch_root": str(tmp_path),
         "run_mode": "cli",
         "agent_edits": {"record": {"cli": True}},
-        "max_steps": 0,
-        "system_prompt_id": "v1",
-        "chat_completions_system_prompt_path": str(_prompt_file(tmp_path)),
-        "no_tool_call_max_count": 5,
-        "verbose": False,
+        "agent.max_steps": 0,
+        "agent.system_prompt_id": "v1",
+        "paths.chat_completions_system_prompt_path": str(
+            _prompt_file(tmp_path)
+        ),
+        "agent.no_tool_call_max_count": 5,
+        "agent.verbose": False,
     }
 
 
@@ -149,13 +151,13 @@ def _subagent_parent_ctx(tmp_path, monkeypatch, *, turn_id: str | None):
     threads_dir.mkdir()
 
     cfg = {
-        "save_logs": True,
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "model": "m",
-        "system_prompt_id": "p",
+        "logging.save_logs": True,
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "m",
+        "agent.system_prompt_id": "p",
         "launch_root": str(launch_root),
         "chat_completions.auxiliary_llm": {
             "max_tokens": 128,

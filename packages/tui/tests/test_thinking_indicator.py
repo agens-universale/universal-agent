@@ -247,7 +247,7 @@ async def test_indicator_shows_when_running_and_stays_on_stop(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -331,7 +331,7 @@ async def test_indicator_shows_processing_after_agent_event_with_pause(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:
@@ -405,7 +405,7 @@ async def test_esc_stops_running_run(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
     async with app.run_test() as pilot:

@@ -101,7 +101,7 @@ async def test_footer_switches_to_main_text_on_attach_active_task(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
 

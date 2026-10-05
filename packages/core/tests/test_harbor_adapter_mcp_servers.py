@@ -114,7 +114,7 @@ def test_explicit_entry_wins_even_under_the_servers_natural_name():
     would register the same sidecar twice under two tool prefixes."""
     settings = make_settings(
         {
-            "mcp-servers": {
+            "mcp.servers": {
                 "user-server": {
                     "transport": "stream_http",
                     "url": "http://user-server:8000/mcp",
@@ -140,7 +140,7 @@ def test_explicit_entry_wins_even_under_the_servers_natural_name():
 def test_existing_config_entry_wins_over_autotagging():
     settings = make_settings(
         {
-            "mcp-servers": {
+            "mcp.servers": {
                 "user_server": {
                     "transport": "stream_http",
                     "url": "http://user-server:8000/mcp",
@@ -165,7 +165,7 @@ def test_existing_config_entry_wins_over_autotagging():
 
 def test_task_servers_are_added_next_to_config_entries():
     settings = make_settings(
-        {"mcp-servers": {"keep": {"transport": "http", "url": "http://k"}}}
+        {"mcp.servers": {"keep": {"transport": "http", "url": "http://k"}}}
     )
     servers = GcCliExternal._apply_mcp_servers(
         settings, [_server("s", "streamable-http", url="http://x/mcp")]
@@ -179,7 +179,7 @@ def test_task_servers_are_added_next_to_config_entries():
 
 def test_empty_server_list_leaves_config_untouched():
     settings = make_settings(
-        {"mcp-servers": {"keep": {"transport": "http", "url": "http://k"}}}
+        {"mcp.servers": {"keep": {"transport": "http", "url": "http://k"}}}
     )
     assert GcCliExternal._apply_mcp_servers(settings, []) is settings
 
@@ -201,7 +201,7 @@ def test_timeouts_are_raised_for_exec_round_trips():
 
 
 def test_existing_higher_timeouts_are_kept():
-    settings = make_settings({"mcp-meta": {"request_timeout_sec": 900}})
+    settings = make_settings({"mcp.meta": {"request_timeout_sec": 900}})
     meta = GcCliExternal._apply_mcp_servers(
         settings, [_server("s", "streamable-http", url="http://x/mcp")]
     ).settings.mcp.meta

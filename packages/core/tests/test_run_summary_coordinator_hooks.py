@@ -22,7 +22,9 @@ def _minimal_state(*, messages: list):
 
 @pytest.fixture
 def ctx_stub():
-    return fake_ctx({"save_logs": False}, summary_trace_path="", logger=None)
+    return fake_ctx(
+        {"logging.save_logs": False}, summary_trace_path="", logger=None
+    )
 
 
 def _patch_save_thread_meta(monkeypatch) -> None:

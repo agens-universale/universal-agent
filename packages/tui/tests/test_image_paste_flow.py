@@ -35,7 +35,11 @@ def _app(tmp_path, **config) -> TuiApp:
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "threads_data_path": str(tmp_path), **config}
+            {
+                "agent.model": "M",
+                "paths.threads_data_path": str(tmp_path),
+                **config,
+            }
         ),
     )
 

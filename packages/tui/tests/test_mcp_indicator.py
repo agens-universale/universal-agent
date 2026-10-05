@@ -22,7 +22,7 @@ async def test_indicator_failed_settles_to_persistent_line(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     _stub_factory(app)
     async with app.run_test() as pilot:
@@ -67,7 +67,7 @@ async def test_indicator_warning_survives_trace_rebuild(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     _stub_factory(app)
     async with app.run_test() as pilot:
@@ -104,7 +104,7 @@ async def test_indicator_all_ok_settles_to_ready(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     _stub_factory(app)
     async with app.run_test() as pilot:
@@ -144,8 +144,8 @@ async def test_settle_card_reflects_mcp_fail_trace_clean(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "mcp-servers": {
+                "agent.model": "M",
+                "mcp.servers": {
                     "office": {"transport": "stdio", "command": "office-mcp"}
                 },
             }

@@ -39,8 +39,8 @@ ConfigLike = Union[Mapping[str, Any], LoadedSettings, None]
 def tool_settings(config: ConfigLike = None) -> LoadedSettings:
     """``LoadedSettings`` для теста тула.
 
-    ``config`` — описание теста (прежние плоские имена и/или пути через точку,
-    как у :func:`gc_testkit.settings.make_settings`) либо готовые
+    ``config`` — описание теста (пути через точку и/или секции, как у
+    :func:`gc_testkit.settings.make_settings`) либо готовые
     ``LoadedSettings`` (берутся как есть). Гарды, не заданные описанием,
     выключены — см. ``_UNCONFIGURED_GUARDS``.
     """

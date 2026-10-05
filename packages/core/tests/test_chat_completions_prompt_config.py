@@ -496,10 +496,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
         merged = make_settings(
             {
-                "chat_completion_kwargs": {
+                "backend.chat_completion_kwargs": {
                     "chat_template_kwargs": {"enable_thinking": True},
                 },
-                "auxiliary_llm_params": {
+                "chat_completions.auxiliary_llm": {
                     "max_tokens": 8192,
                     "judge_max_tokens": 10000,
                     "completion_kwargs": {
@@ -531,10 +531,10 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
         merged = make_settings(
             {
-                "chat_completion_kwargs": {
+                "backend.chat_completion_kwargs": {
                     "chat_template_kwargs": {"enable_thinking": True},
                 },
-                "chat_completions_params": {
+                "chat_completions": {
                     "auxiliary_llm": {
                         "max_tokens": 4096,
                         "judge_max_tokens": 10000,
@@ -561,14 +561,14 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         )
 
         cfg = {
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {
                     "completion_kwargs": {
                         "chat_template_kwargs": {"enable_thinking": True},
                     },
                 },
             },
-            "auxiliary_llm_params": {
+            "chat_completions.auxiliary_llm": {
                 "completion_kwargs": {
                     "chat_template_kwargs": {"enable_thinking": False},
                 },
@@ -593,11 +593,11 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
         merged = make_settings(
             {
-                "chat_completion_kwargs": {
+                "backend.chat_completion_kwargs": {
                     "temperature": 1.0,
                     "top_p": 1.0,
                 },
-                "auxiliary_llm_params": {
+                "chat_completions.auxiliary_llm": {
                     "max_tokens": 8192,
                     "judge_max_tokens": 10000,
                     "completion_kwargs": {},
@@ -635,14 +635,14 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
 
         merged = make_settings(
             {
-                "chat_completion_kwargs": {
+                "backend.chat_completion_kwargs": {
                     "chat_template_kwargs": {
                         "thinking": True,
                         "reasoning_effort": "high",
                     },
                     "tool_choice": "auto",
                 },
-                "auxiliary_llm_params": {
+                "chat_completions.auxiliary_llm": {
                     "max_tokens": 8192,
                     "judge_max_tokens": 10000,
                     "completion_kwargs": {

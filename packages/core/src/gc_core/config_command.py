@@ -35,7 +35,7 @@ from gc_core.config_modules.field_meta import (
     meta_for,
     redact_free_form,
 )
-from gc_core.config_modules.flat_keys import FLAT_TO_PATH, setting_path
+from gc_core.config_modules.path_hints import suggest_paths
 from gc_core.config_modules.provenance import DEFAULT, Source
 
 EXIT_OK = 0
@@ -253,7 +253,7 @@ def _entry(leaf: Leaf, provenance: Any, defaults: dict[str, Any]) -> Entry:
 
 
 def _known_names(leaves: list[Leaf]) -> list[str]:
-    names: set[str] = set(FLAT_TO_PATH)
+    names: set[str] = set()
     for leaf in leaves:
         for depth in range(1, len(leaf.parts) + 1):
             names.add(".".join(leaf.parts[:depth]))
@@ -294,9 +294,10 @@ def explain_entries(
     include_defaults: bool = False,
 ) -> list[Entry]:
     """Строки ``explain``. Без ``keys`` — заданные настройки (с
-    ``include_defaults`` — все); ключ-секция раскрывается во все свои листья,
-    старое плоское имя (``max_steps``) переводится в путь. Неизвестный ключ —
-    ``UnknownKey`` с близкими вариантами."""
+    ``include_defaults`` — все); ключ-секция раскрывается во все свои листья.
+    Ключ — путь через точку; неизвестный (в том числе прежнее плоское имя
+    ``max_steps``) — ``UnknownKey``: пути с тем же последним сегментом
+    (``agent.max_steps``), затем близкие варианты."""
     leaves = list(iter_setting_leaves(loaded.settings))
     defaults = _defaults_by_key(loaded)
     by_key = {leaf.key: leaf for leaf in leaves}
@@ -308,8 +309,7 @@ def explain_entries(
         return entries
 
     entries: list[Entry] = []
-    for raw in keys:
-        key = setting_path(raw)
+    for key in keys:
         if key in by_key:
             entries.append(_entry(by_key[key], provenance, defaults))
             continue
@@ -323,11 +323,11 @@ def explain_entries(
         if inner is not None:
             entries.append(inner)
             continue
+        close = difflib.get_close_matches(
+            key, _known_names(leaves), n=3, cutoff=0.6
+        )
         raise UnknownKey(
-            raw,
-            difflib.get_close_matches(
-                raw, _known_names(leaves), n=3, cutoff=0.6
-            ),
+            key, list(dict.fromkeys([*suggest_paths(key), *close]))[:3]
         )
     return entries
 
@@ -604,8 +604,7 @@ def build_parser(program: str, out: TextIO, err: TextIO) -> _Parser:
         "keys",
         nargs="*",
         metavar="KEY",
-        help="Путь настройки (agent.max_steps), секция (agent) или старое "
-        "плоское имя (max_steps)",
+        help="Путь настройки (agent.max_steps) или секция (agent)",
     )
     explain.add_argument(
         "--all",

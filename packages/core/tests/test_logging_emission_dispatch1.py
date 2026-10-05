@@ -23,11 +23,11 @@ from transport_fakes import install_transport, json_response, stream_response
 
 def _make_logger(tmp_path, level="info"):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "console_trace": False,
-        "logging_format": "jsonl",
-        "log_level": level,
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "logging.format": "jsonl",
+        "logging.log_level": level,
     }
     logger, path, _ = create_run_logger(
         make_settings(cfg), run_id="t", agent_kind="main"

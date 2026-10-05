@@ -69,12 +69,12 @@ def _config(tmp_path, *, hang: bool):
     script.write_text(_SERVER, encoding="utf-8")
     return make_settings(
         {
-            "stop_tools": [],
-            "backend_api_mode": "chat_completions",
-            "save_logs": True,
-            "console_trace": False,
-            "logs_dump_dir": str(tmp_path / "logs"),
-            "mcp-servers": {
+            "agent.stop_tools": [],
+            "backend.api_mode": "chat_completions",
+            "logging.save_logs": True,
+            "logging.console_trace": False,
+            "paths.logs_dump_dir": str(tmp_path / "logs"),
+            "mcp.servers": {
                 _SERVER_NAME: {
                     "transport": "stdio",
                     "command": sys.executable,

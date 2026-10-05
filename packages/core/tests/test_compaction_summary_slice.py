@@ -78,7 +78,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = fake_ctx({"summary_params": {}}, logger=None)
+        ctx = fake_ctx({"summary": {}}, logger=None)
 
         with (
             patch(
@@ -160,7 +160,7 @@ class CompactionSummarySliceTest(unittest.TestCase):
                 }
             ),
         )
-        ctx = fake_ctx({"summary_params": {}}, logger=None)
+        ctx = fake_ctx({"summary": {}}, logger=None)
 
         with (
             patch(

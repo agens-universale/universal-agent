@@ -28,7 +28,7 @@ def test_builtin_and_skills_tool_names_have_no_prefix_collision():
 
     names = sorted(
         all_builtin_tool_names(
-            make_settings({"backend_api_mode": "chat_completions"})
+            make_settings({"backend.api_mode": "chat_completions"})
         )
         | set(get_skills_tools_data(None))
     )

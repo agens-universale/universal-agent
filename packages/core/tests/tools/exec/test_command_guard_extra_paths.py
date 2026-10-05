@@ -14,7 +14,10 @@ from gc_testkit.helpers.tool_ctx import local_ctx, with_local_ctx
 
 
 def _ctx(tmp_path, **security):
-    cfg = {"launch_root": str(tmp_path), "write_guard": {"enabled": False}}
+    cfg = {
+        "launch_root": str(tmp_path),
+        "security.write_guard": {"enabled": False},
+    }
     cfg.update(security)
     return local_ctx(cfg, is_tui=False, tui_confirm=None, logger=None)
 
@@ -32,7 +35,12 @@ def test_write_extra_path_is_not_auto_denied(tmp_path, monkeypatch):
     shared.mkdir()
     ctx = _ctx(
         tmp_path,
-        write_guard={"enabled": True, "extra_paths": [str(shared)]},
+        **{
+            "security.write_guard": {
+                "enabled": True,
+                "extra_paths": [str(shared)],
+            }
+        },
     )
     result = _run(tmp_path, monkeypatch, f"ls {shared}", ctx)
     # Команда дошла до запуска: безобидный ls по пустому каталогу.
@@ -43,7 +51,9 @@ def test_write_extra_path_is_not_auto_denied(tmp_path, monkeypatch):
 def test_protected_extra_path_is_denied(tmp_path, monkeypatch):
     secrets = tmp_path / "secrets"
     secrets.mkdir()
-    ctx = _ctx(tmp_path, protected_paths={"extra": [str(secrets)]})
+    ctx = _ctx(
+        tmp_path, **{"security.protected_paths": {"extra": [str(secrets)]}}
+    )
     result = _run(tmp_path, monkeypatch, f"cat {secrets}/token", ctx)
     assert result["ok"] is False
     assert result["error"]["type"] == "protected_path_denied"
@@ -52,6 +62,8 @@ def test_protected_extra_path_is_denied(tmp_path, monkeypatch):
 def test_protected_extra_expands_home(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     (tmp_path / ".corp").mkdir()
-    ctx = _ctx(tmp_path, protected_paths={"extra": ["~/.corp"]})
+    ctx = _ctx(
+        tmp_path, **{"security.protected_paths": {"extra": ["~/.corp"]}}
+    )
     result = _run(tmp_path, monkeypatch, f"cat {tmp_path}/.corp/tokens", ctx)
     assert result["error"]["type"] == "protected_path_denied"

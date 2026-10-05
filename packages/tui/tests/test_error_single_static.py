@@ -14,7 +14,7 @@ async def test_command_error_is_single_static(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

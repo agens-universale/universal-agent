@@ -1,11 +1,11 @@
 import pytest
 from gc_core.config import apply_cli_overrides
-from gc_testkit.settings import settings_from_flat
+from gc_testkit.settings import make_settings
 
 
 def _apply(base: dict | None = None, **kwargs):
     """CLI поверх настроек из плоского словаря: новый объект, исходный не трогается."""
-    return apply_cli_overrides(settings_from_flat(base or {}), **kwargs)
+    return apply_cli_overrides(make_settings(base or {}), **kwargs)
 
 
 class TestApplyCliOverridesTraceId:
@@ -44,7 +44,7 @@ class TestApplyCliOverridesTraceId:
 
     def test_source_settings_are_not_mutated(self):
         # Новый API не мутирует вход: trace_id уезжает только в возвращённый объект.
-        base = settings_from_flat({})
+        base = make_settings({})
         loaded = apply_cli_overrides(base, trace_id="wf-1")
         assert base.runtime.trace_id is None
         assert loaded.runtime.trace_id == "wf-1"

@@ -168,13 +168,13 @@ class TestC2AgentExecutorFinally:
     def _make_cfg(self, tmp_path):
         return make_settings(
             {
-                "threads_data_path": str(tmp_path),
-                "backend_api_mode": "chat_completions",
-                "completions_url": "http://test",
-                "model": "x",
-                "max_steps": 1,
-                "system_prompt_id": "v1",
-                "save_logs": False,
+                "paths.threads_data_path": str(tmp_path),
+                "backend.api_mode": "chat_completions",
+                "backend.completions_url": "http://test",
+                "agent.model": "x",
+                "agent.max_steps": 1,
+                "agent.system_prompt_id": "v1",
+                "logging.save_logs": False,
             }
         )
 

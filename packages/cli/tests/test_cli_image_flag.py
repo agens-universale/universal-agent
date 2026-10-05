@@ -267,7 +267,10 @@ def cli_env(monkeypatch, tmp_path):
     """`arun_cli` до исполнителя: конфиг, стамп, контекст и исполнитель подменены."""
     threads = tmp_path / "threads"
     config = make_settings(
-        {"threads_data_path": str(threads), "console_trace": False}
+        {
+            "paths.threads_data_path": str(threads),
+            "logging.console_trace": False,
+        }
     )
     rec = types.SimpleNamespace(
         arun_calls=[], stamped=False, ctx_built=False, staged_existed=[]

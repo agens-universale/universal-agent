@@ -30,9 +30,9 @@ _TOKEN = "Bearer sk-demo-token"
 def _config() -> dict:
     """База приложения — плоскими именами теста (`tui_settings` переводит их в пути)."""
     return {
-        "completions_url": _URL,
-        "chat_completion_headers": {"Authorization": _TOKEN},
-        "model": _MODEL,
+        "backend.completions_url": _URL,
+        "backend.chat_completion_headers": {"Authorization": _TOKEN},
+        "agent.model": _MODEL,
     }
 
 

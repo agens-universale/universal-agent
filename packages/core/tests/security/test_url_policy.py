@@ -67,7 +67,7 @@ def test_match_url_blacklist_supports_exact_and_glob_rules():
 def test_enforce_url_policy_returns_structured_error(tmp_path):
     ctx = fake_ctx(
         {
-            "url_policy": {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "deny",
                 "allowed_schemes": ["https"],
@@ -91,7 +91,7 @@ def test_enforce_url_policy_audits_blocked_decision():
     logger = _Logger()
     ctx = fake_ctx(
         {
-            "url_policy": {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "deny",
                 "allowed_schemes": ["https"],
@@ -118,7 +118,7 @@ def test_enforce_url_policy_mode_allow_passes_with_audit():
     logger = _Logger()
     ctx = fake_ctx(
         {
-            "url_policy": {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "allow",
                 "allowed_schemes": ["https"],
@@ -152,7 +152,7 @@ def test_enforce_url_policy_mode_ask_confirmed_passes(monkeypatch):
     logger = _Logger()
     ctx = fake_ctx(
         {
-            "url_policy": {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "ask",
                 "allowed_schemes": ["https"],
@@ -181,7 +181,7 @@ def test_enforce_url_policy_mode_ask_declined_blocks(monkeypatch):
     logger = _Logger()
     ctx = fake_ctx(
         {
-            "url_policy": {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "ask",
                 "allowed_schemes": ["https"],

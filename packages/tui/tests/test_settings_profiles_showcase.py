@@ -150,8 +150,8 @@ async def test_an_unreadable_profile_is_named_once(tmp_path, monkeypatch):
 
 def _base_dict() -> dict:
     return {
-        "completions_url": "http://host/v1/chat/completions",
-        "model": "test-model",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "agent.model": "test-model",
     }
 
 
@@ -733,12 +733,15 @@ async def test_settings_screen_shows_profile_overlay_label_no_keyerror(
 
     app = app_mod.TuiApp(
         settings=tui_settings(
-            {"completions_url": "http://profile/v1", "profile": "work"}
+            {"backend.completions_url": "http://profile/v1", "profile": "work"}
         )
     )
     async with app.run_test() as pilot:
         scr = _mk_screen(
-            config={"completions_url": "http://profile/v1", "profile": "work"},
+            config={
+                "backend.completions_url": "http://profile/v1",
+                "profile": "work",
+            },
             config_path=base_cfg,
         )
         app.push_screen(scr)
@@ -863,7 +866,7 @@ async def test_config_screen_header_shows_profile_level_model(
             {
                 "profile": "work",
                 "level": "default",
-                "model": "flash",
+                "agent.model": "flash",
                 "models": {"flash": {}},
                 "slots": {"default": "flash"},
             }
@@ -1005,7 +1008,7 @@ def test_onboarding_note_for_registry_from_layer_above_base(
 def test_onboarding_note_absent_in_legacy_mode():
     from gc_core.onboarding import overriding_layer_note
 
-    assert overriding_layer_note(make_settings({"model": "x"})) is None
+    assert overriding_layer_note(make_settings({"agent.model": "x"})) is None
 
 
 def test_setup_guide_includes_profile_note():
@@ -1016,8 +1019,8 @@ def test_setup_guide_includes_profile_note():
         make_settings(
             {
                 "profile": "work",
-                "model": "x",
-                "completions_url": "http://x",
+                "agent.model": "x",
+                "backend.completions_url": "http://x",
             }
         ),
         program="gc-ua",
@@ -1098,10 +1101,10 @@ async def test_onboarding_screen_no_warning_in_legacy_mode(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
     from textual.css.query import NoMatches
 
-    app = app_mod.TuiApp(settings=tui_settings({"model": "x"}))
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "x"}))
     async with app.run_test() as pilot:
         scr = OnboardingScreen(
-            settings=as_settings({"model": "x"}),
+            settings=as_settings({"agent.model": "x"}),
             config_path=str(tmp_path / "config.yml"),
             review_all=True,
             on_commit=lambda: None,

@@ -123,7 +123,10 @@ async def test_download_file_records_the_file_it_created(roots, monkeypatch):
         launch_root,
         threads_dir,
         config={
-            "download": {"download_dir": "downloads", "max_bytes": 1_000_000}
+            "security.download": {
+                "download_dir": "downloads",
+                "max_bytes": 1_000_000,
+            }
         },
     )
     result = json.loads(

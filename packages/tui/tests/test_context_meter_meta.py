@@ -39,9 +39,9 @@ def _write_task(
 
 def _cfg(trigger=10_000, turn_end=1):
     return {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "summary_params": {
+        "agent.model": "M",
+        "backend.api_mode": "chat_completions",
+        "summary": {
             "chat_completions_summary_trigger_chars": trigger,
             "chat_completions_summary_turn_end_trigger_chars": turn_end,
         },
@@ -144,7 +144,7 @@ async def test_cmd_compact_antispam_uses_live_msg_count(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     async with app.run_test() as pilot:

@@ -127,11 +127,11 @@ def _make_state():
 
 def _make_ctx(tools_data, *, sink=None):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
     }
     return fake_ctx(
         cfg,
@@ -213,15 +213,15 @@ class TestApplyToolPassesCallId:
 
 def _make_runner_config(tmp_path):
     return {
-        "save_logs": True,
-        "logs_dump_dir": str(tmp_path),
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "subagent_max_steps": 30,
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "chat_completions_params": {
+        "logging.save_logs": True,
+        "paths.logs_dump_dir": str(tmp_path),
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "agent.subagent_max_steps": 30,
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "chat_completions": {
             "auxiliary_llm": {"max_tokens": 8192, "completion_kwargs": {}},
         },
     }

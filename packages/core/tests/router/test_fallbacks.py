@@ -64,9 +64,9 @@ def _service_state(**overrides) -> SimpleNamespace:
 def _service_ctx(router: ModelRouter, *, is_tui: bool = False):
     return fake_ctx(
         {
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "backend_api_mode": "chat_completions",
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
         },
         model_router=router,
         logger=None,
@@ -308,10 +308,10 @@ def test_finish_gate_guard_double_failure_is_fail_open_error(monkeypatch):
     )
     ctx = fake_ctx(
         {
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "backend_api_mode": "chat_completions",
-            "strict_turn_finish_validation": True,
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
+            "agent.strict_turn_finish_validation": True,
         },
         model_router=router,
         logger=None,
@@ -360,9 +360,9 @@ async def test_command_judge_fail_closed_semantics_unchanged(monkeypatch):
     )
     ctx = fake_ctx(
         {
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "backend_api_mode": "chat_completions",
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
         },
         model_router=router,
         logger=None,
@@ -670,13 +670,13 @@ def _subagent_cfg(tmp_path, raw):
     return tool_settings(
         {
             **raw,
-            "use_local_subagents": True,
-            "backend_api_mode": "chat_completions",
-            "subagent_max_steps": 30,
-            "skills_data_path": "",
-            "system_prompt_id": "test-prompt",
-            "save_logs": True,
-            "logs_dump_dir": str(tmp_path),
+            "agent.use_local_subagents": True,
+            "backend.api_mode": "chat_completions",
+            "agent.subagent_max_steps": 30,
+            "paths.skills_data_path": "",
+            "agent.system_prompt_id": "test-prompt",
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path),
         }
     )
 

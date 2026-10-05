@@ -14,11 +14,11 @@ def _io(answers):
 def test_auto_asks_only_pending_and_wraps_token():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",  # задан → не спрашивается
+            "agent.model": "gigacode_agent_v1.6_rc",  # задан → не спрашивается
         }
     )
     # endpoint, затем auth-меню: "1" (ввести токен), затем сам токен
@@ -33,11 +33,11 @@ def test_auto_asks_only_pending_and_wraps_token():
 def test_skip_leaves_field_out():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "m",
+            "agent.model": "m",
         }
     )
     io, _ = _io(["", ""])  # оба пропущены
@@ -47,9 +47,9 @@ def test_skip_leaves_field_out():
 def test_review_all_asks_all_three(monkeypatch):
     cfg = make_settings(
         {
-            "completions_url": "https://old/v1",
-            "chat_completion_headers": {"Authorization": "Bearer old"},
-            "model": "old-model",
+            "backend.completions_url": "https://old/v1",
+            "backend.chat_completion_headers": {"Authorization": "Bearer old"},
+            "agent.model": "old-model",
         }
     )
     # Список моделей не участвует в проверке — без подмены шаг «Модель» реально
@@ -71,9 +71,9 @@ def test_review_all_asks_all_three(monkeypatch):
 def test_invalid_endpoint_reask_then_enter_skips():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer set"},
-            "model": "m",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {"Authorization": "Bearer set"},
+            "agent.model": "m",
         }
     )
     io, _ = _io(["ftp://weird", ""])  # невалид → переспрос → Enter = пропуск

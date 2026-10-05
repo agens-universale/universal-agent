@@ -193,19 +193,19 @@ def test_parse_reads_only_read_guard_block():
     read_guard без явного значения берут умолчание модели.
     """
     parsed = parse_read_guard_config(
-        make_settings({"command_moderation": {"mode": "deny"}})
+        make_settings({"security.command_moderation": {"mode": "deny"}})
     )
     assert parsed.enabled is True
     assert parsed.mode == "ask"
 
     parsed = parse_read_guard_config(
-        make_settings({"read_guard": {"mode": "deny"}})
+        make_settings({"security.read_guard": {"mode": "deny"}})
     )  # без enabled
     assert parsed.enabled is True
     assert parsed.mode == "deny"
 
     parsed = parse_read_guard_config(
-        make_settings({"read_guard": {"enabled": False}})
+        make_settings({"security.read_guard": {"enabled": False}})
     )
     assert parsed.enabled is False
 
@@ -214,7 +214,7 @@ def test_parse_respects_explicit_config():
     parsed = parse_read_guard_config(
         make_settings(
             {
-                "read_guard": {
+                "security.read_guard": {
                     "enabled": False,
                     "mode": "ask",
                     "denied_read_paths": ["/secret"],
@@ -282,5 +282,5 @@ def test_resolve_skills_root_default_and_custom(tmp_path):
     # С явным skills_data_path → возвращается он.
     custom = str(tmp_path / "my_skills")
     assert _resolve_skills_root(
-        make_settings({"skills_data_path": custom})
+        make_settings({"paths.skills_data_path": custom})
     ) == os.path.abspath(custom)

@@ -36,7 +36,7 @@ async def test_push_session_copy_buffer_writes_meta(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(pilot.app, "copy_to_clipboard", lambda t: None)
@@ -59,7 +59,7 @@ async def test_push_session_copy_buffer_no_store_noop(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         # store is None на старте — не должно падать
@@ -99,7 +99,7 @@ async def test_ctrl_c_with_selection_pushes_session_buffer(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -159,7 +159,7 @@ async def test_ctrl_c_without_selection_stops_no_push(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -207,7 +207,7 @@ async def test_push_session_buffer_blocked_on_copy_buffer_screen(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(pilot.app, "copy_to_clipboard", lambda t: None)

@@ -76,19 +76,19 @@ class TestTraceHeaderName:
         )
         assert (
             trace_header_name(
-                make_settings({"trace_id_header_name": None}), "trace_id"
+                make_settings({"agent.trace_id_header_name": None}), "trace_id"
             )
             == "trace_id"
         )
         assert (
             trace_header_name(
-                make_settings({"trace_id_header_name": "  "}), "trace_id"
+                make_settings({"agent.trace_id_header_name": "  "}), "trace_id"
             )
             == "trace_id"
         )
 
     def test_override(self):
-        cfg = make_settings({"trace_id_header_name": "X-Trace-Id"})
+        cfg = make_settings({"agent.trace_id_header_name": "X-Trace-Id"})
         assert trace_header_name(cfg, "x_trace_id") == "X-Trace-Id"
         assert trace_header_name(cfg, "trace_id") == "X-Trace-Id"
 

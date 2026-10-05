@@ -400,7 +400,7 @@ def _cases() -> list[_Case]:
         from gc_testkit.settings import make_settings
 
         return discover_subagent_definitions(
-            make_settings({"subagents_dir": str(Path(path).parent)}),
+            make_settings({"agent.subagents_dir": str(Path(path).parent)}),
             builtin_names=(),
         )
 

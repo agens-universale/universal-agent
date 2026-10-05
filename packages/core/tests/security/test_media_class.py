@@ -66,7 +66,10 @@ def layout(tmp_path, monkeypatch):
         / "cache"
         / "mcp-media"
         / "browser_take_screenshot_1.png",
-        config={"launch_root": str(proj), "threads_data_path": str(threads)},
+        config={
+            "launch_root": str(proj),
+            "paths.threads_data_path": str(threads),
+        },
     )
 
 
@@ -175,7 +178,7 @@ def outside(request, tmp_path, monkeypatch):
     proj.mkdir(exist_ok=True)
     config = {"launch_root": str(proj)}
     if request.param == "custom_threads_dir":
-        config["threads_data_path"] = str(tmp_path / "custom-threads")
+        config["paths.threads_data_path"] = str(tmp_path / "custom-threads")
         root = tmp_path / "custom-threads" / IMAGES_DIRNAME
     else:
         root = Path(ImageStore.for_threads_dir("").root)
@@ -237,8 +240,8 @@ def test_foreign_staging_outside_gc_state_is_denied_for_read_write_and_commands(
 ):
     config = {
         **outside.config,
-        "read_guard": {"enabled": False},
-        "write_guard": {"enabled": False},
+        "security.read_guard": {"enabled": False},
+        "security.write_guard": {"enabled": False},
     }
     ctx = fake_ctx(config, is_tui=False, tui_confirm=None, logger=None)
     read = json.loads(_ReadTool(ctx).read(path=str(outside.foreign_staged)))
@@ -277,7 +280,7 @@ def test_perimeter_does_not_allow_foreign_staging_through_the_media_root(
 
     config = {
         **outside.config,
-        "read_guard": {"enabled": True, "mode": "ask"},
+        "security.read_guard": {"enabled": True, "mode": "ask"},
     }
     settings = make_settings(config)
     media = media_roots(settings)
@@ -329,8 +332,8 @@ def test_symlink_into_a_foreign_pocket_is_classified_by_its_own_path(
         pytest.skip("symlink недоступен (Windows без прав)")
     config = {
         "launch_root": str(proj),
-        "threads_data_path": str(threads),
-        "read_guard": {"enabled": True, "mode": "ask"},
+        "paths.threads_data_path": str(threads),
+        "security.read_guard": {"enabled": True, "mode": "ask"},
     }
     ps = protected_paths(
         cwd=str(proj), media=media_roots(make_settings(config))
@@ -365,7 +368,7 @@ def test_a_planted_temp_root_symlink_opens_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(store.tempfile, "gettempdir", lambda: str(shared_tmp))
     config = {
         "launch_root": str(proj),
-        "read_guard": {"enabled": True, "mode": "ask"},
+        "security.read_guard": {"enabled": True, "mode": "ask"},
     }
     ctx, asked = _tui_ctx(config, "deny")
     assert (
@@ -394,14 +397,14 @@ def test_callers_without_config_keep_today_classes(layout):
 
 def test_media_read_passes_the_floor(layout):
     """Пол `read_guard` пропускает media, хотя корень лежит под operational `<gc_state>`."""
-    config = {**layout.config, "read_guard": {"enabled": False}}
+    config = {**layout.config, "security.read_guard": {"enabled": False}}
     ctx = fake_ctx(config, logger=None)
     for target in (layout.image, layout.own_staged, layout.mcp_shot):
         assert json.loads(_ReadTool(ctx).read(path=str(target)))["ok"] is True
 
 
 def test_foreign_staging_read_is_denied(layout):
-    config = {**layout.config, "read_guard": {"enabled": False}}
+    config = {**layout.config, "security.read_guard": {"enabled": False}}
     ctx = fake_ctx(config, logger=None)
     result = json.loads(_ReadTool(ctx).read(path=str(layout.foreign_staged)))
     assert result["ok"] is False
@@ -411,7 +414,10 @@ def test_foreign_staging_read_is_denied(layout):
 def test_media_read_is_inside_the_perimeter(layout):
     """Периметр (`ask`) не спрашивает на каждый просмотр: корни media разрешены, как
     каталог скиллов. Для сравнения файл рядом, вне проекта, спрашивается."""
-    config = {**layout.config, "read_guard": {"enabled": True, "mode": "ask"}}
+    config = {
+        **layout.config,
+        "security.read_guard": {"enabled": True, "mode": "ask"},
+    }
     ctx, asked = _tui_ctx(config, "deny")
     assert (
         json.loads(_ReadTool(ctx).read(path=str(layout.image)))["ok"] is True
@@ -445,7 +451,7 @@ def test_media_write_decision_is_deny(layout):
 
 
 def test_media_write_is_denied(layout):
-    config = {**layout.config, "write_guard": {"enabled": False}}
+    config = {**layout.config, "security.write_guard": {"enabled": False}}
     ctx = fake_ctx(config, is_tui=False, tui_confirm=None, logger=None)
     for target in (layout.image, layout.own_staged, layout.mcp_shot):
         result = json.loads(
@@ -465,9 +471,9 @@ def test_custom_threads_dir_from_config_is_media(tmp_path, monkeypatch):
     image = threads / IMAGES_DIRNAME / f"cli_t1_{SHA16}.png"
     config = {
         "launch_root": str(proj),
-        "threads_data_path": str(threads),
-        "read_guard": {"enabled": True, "mode": "ask"},
-        "write_guard": {"enabled": False},
+        "paths.threads_data_path": str(threads),
+        "security.read_guard": {"enabled": True, "mode": "ask"},
+        "security.write_guard": {"enabled": False},
     }
     ctx, asked = _tui_ctx(config, "deny")
     assert json.loads(_ReadTool(ctx).read(path=str(image)))["ok"] is True
@@ -536,7 +542,7 @@ def test_command_on_media_declined_is_blocked(layout):
 
 def test_command_on_media_without_a_head_is_blocked(layout):
     """Без головы подтверждать некому: существующий путь confirm отдаёт отказ."""
-    config = {**layout.config, "stop_tools": [ASK_HUMAN_TOOL_NAME]}
+    config = {**layout.config, "agent.stop_tools": [ASK_HUMAN_TOOL_NAME]}
     ctx = fake_ctx(config, is_tui=False, tui_confirm=None, logger=None)
     result = json.loads(_ExecTool(ctx).run(command=f"cp {layout.image} docs/"))
     assert result["ok"] is False

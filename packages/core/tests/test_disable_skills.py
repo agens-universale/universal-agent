@@ -71,7 +71,7 @@ def test_disable_skills_overlay_concat_and_dedup() -> None:
 
 
 async def test_get_skills_registry_reads_disable_from_config_dict() -> None:
-    config_dict = {"disable_skills": ["computer-use"]}
+    config_dict = {"agent.disable_skills": ["computer-use"]}
     reg = get_skills_registry(make_settings(config_dict))
     cat = await reg.skill_catalog()
     assert "computer-use" not in cat.canonical_ids
@@ -81,7 +81,7 @@ async def test_get_skills_registry_reads_disable_from_config_dict() -> None:
 async def test_get_skills_registry_reads_pack_disable_from_config_dict() -> (
     None
 ):
-    config_dict = {"disable_skills": ["science-article-creator"]}
+    config_dict = {"agent.disable_skills": ["science-article-creator"]}
     reg = get_skills_registry(make_settings(config_dict))
     cat = await reg.skill_catalog()
     # The new science pack must not be visible when listed in disable_skills.

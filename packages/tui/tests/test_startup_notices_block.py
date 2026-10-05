@@ -13,12 +13,12 @@ async def test_startup_block_collapsed_shows_max_three(tmp_path):
 
     # agent_md_path задан + agentsmd_override → notice agentsmd_override_ignored в TUI
     cfg = {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "stop_tools": ["bogus1", "bogus2"],
-        "agentsmd_override": True,
-        "agent_md_path": "/some/agent.md",
-        "stream": True,  # устаревший ключ задан явно → deprecated_key
+        "agent.model": "M",
+        "backend.api_mode": "chat_completions",
+        "agent.stop_tools": ["bogus1", "bogus2"],
+        "tui.agentsmd_override": True,
+        "paths.agent_md_path": "/some/agent.md",
+        "backend.stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
@@ -40,9 +40,9 @@ async def test_notices_summary_in_card_not_trace(tmp_path):
     from textual.widgets import Static
 
     cfg = {
-        "model": "M",
-        "stop_tools": ["bogus1"],
-        "stream": True,  # устаревший ключ задан явно → deprecated_key
+        "agent.model": "M",
+        "agent.stop_tools": ["bogus1"],
+        "backend.stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
@@ -71,10 +71,10 @@ async def test_notices_line_format_b_glyph_and_breakdown(tmp_path):
 
     # stop_tools_unknown + agentsmd_override_ignored — оба warning, без info: чистый warn-only случай.
     cfg = {
-        "model": "M",
-        "stop_tools": ["bogus1"],
-        "agentsmd_override": True,
-        "agent_md_path": "/some/agent.md",
+        "agent.model": "M",
+        "agent.stop_tools": ["bogus1"],
+        "tui.agentsmd_override": True,
+        "paths.agent_md_path": "/some/agent.md",
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
@@ -110,7 +110,7 @@ async def test_no_notices_line_when_clean_config(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
 
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
@@ -129,7 +129,7 @@ async def test_update_available_line_in_card_teal(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.palette import ACCENT
 
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
@@ -158,7 +158,7 @@ async def test_notices_screen_includes_update_available(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.notices import NoticesScreen, _notice_text
 
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
@@ -209,7 +209,7 @@ async def test_auto_check_updates_main_card_when_other_screen_on_top(
     monkeypatch.setattr(check_mod, "check_for_update", _slow_check)
     cfg_file = tmp_path / "c.yml"
     cfg_file.write_text("backend: {}\n", encoding="utf-8")
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     app = TuiApp(threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg))
     async with app.run_test() as pilot:
         scr = SettingsScreen(
@@ -245,9 +245,9 @@ async def test_warning_toasts_fire_on_change_then_silent(
     state_path = tmp_path / "agent_state.json"
     monkeypatch.setattr(upgrade_gate, "_state_path", lambda: state_path)
     cfg = {
-        "model": "M",
-        "stop_tools": ["bogus1"],
-        "stream": True,  # устаревший ключ задан явно → deprecated_key
+        "agent.model": "M",
+        "agent.stop_tools": ["bogus1"],
+        "backend.stream": True,  # устаревший ключ задан явно → deprecated_key
     }
 
     t1 = []
@@ -282,9 +282,9 @@ async def test_card_readiness_always_plain(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "model": "M",
-        "stop_tools": ["bogus1"],
-        "stream": True,  # устаревший ключ задан явно → deprecated_key
+        "agent.model": "M",
+        "agent.stop_tools": ["bogus1"],
+        "backend.stream": True,  # устаревший ключ задан явно → deprecated_key
     }
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)

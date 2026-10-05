@@ -381,9 +381,9 @@ def _agent_state(*, max_steps: int = 5):
 
 def _agent_ctx(**overrides):
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": False,
-        "no_tool_call_max_count": 5,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": False,
+        "agent.no_tool_call_max_count": 5,
     }
     cfg.update(overrides)
     return fake_ctx(
@@ -580,7 +580,7 @@ def test_run_agent_invalid_finish_keeps_work_and_stays_open(monkeypatch):
 
     monkeypatch.setattr(pr, "aprocess_user_ask", _stub_user_ask)
     spec = _finish_spec()
-    ctx = _agent_ctx(strict_turn_finish_validation=False)
+    ctx = _agent_ctx(**{"agent.strict_turn_finish_validation": False})
     ctx.tools_data = {
         "turn_finish": {
             "spec": spec,
@@ -639,8 +639,8 @@ def test_run_agent_rejected_finish_output_keeps_turn_open(
     monkeypatch.setattr(pr, "aprocess_user_ask", _stub_user_ask)
     state = _agent_state(max_steps=0)
     ctx = _agent_ctx(
-        backend_api_mode=backend,
-        strict_turn_finish_validation=False,
+        **{"backend.api_mode": backend},
+        **{"agent.strict_turn_finish_validation": False},
     )
     ctx.tools_data = {
         "turn_finish": {
@@ -720,7 +720,7 @@ def test_run_agent_gate_reject_keeps_work_in_trace(monkeypatch):
         arun_agent(
             [memory, finish],
             state,
-            _agent_ctx(strict_turn_finish_validation=True),
+            _agent_ctx(**{"agent.strict_turn_finish_validation": True}),
         )
     )
     assert result != finish["arguments"]
@@ -821,7 +821,7 @@ def test_run_agent_same_order_on_responses_backend(monkeypatch):
         arun_agent(
             [finish, memory],
             state,
-            _agent_ctx(backend_api_mode="responses"),
+            _agent_ctx(**{"backend.api_mode": "responses"}),
         )
     )
     assert result == finish["arguments"]
@@ -870,7 +870,7 @@ def test_finish_output_reaches_the_thread_on_responses_backend(monkeypatch):
         arun_agent(
             [finish, memory],
             state,
-            _agent_ctx(backend_api_mode="responses"),
+            _agent_ctx(**{"backend.api_mode": "responses"}),
             persist_messages_callback=persisted.extend,
         )
     )
@@ -888,7 +888,7 @@ def test_nothing_in_state_is_missing_from_the_thread(monkeypatch):
     Ловит не конкретную забытую строку, а расхождение как класс — включая
     ветки, до которых сегодняшние сценарии не доходят.
     """
-    for kw in ({}, {"backend_api_mode": "responses"}):
+    for kw in ({}, {"backend.api_mode": "responses"}):
         applied: list[str] = []
         _patch_run_agent_apply(monkeypatch, applied)
         state = _agent_state()

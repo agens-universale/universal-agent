@@ -100,13 +100,13 @@ def test_no_state_is_error():
 def test_registered_in_both_backend_modes():
     for mode in ("responses", "chat_completions"):
         tools = get_builtin_tools_data(
-            make_settings({"backend_api_mode": mode})
+            make_settings({"backend.api_mode": mode})
         )
         assert "session_todo" in tools, mode
 
 
 def test_respects_stop_tools():
     tools = get_builtin_tools_data(
-        make_settings({"stop_tools": ["session_todo"]})
+        make_settings({"agent.stop_tools": ["session_todo"]})
     )
     assert "session_todo" not in tools

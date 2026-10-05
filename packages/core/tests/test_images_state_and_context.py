@@ -99,7 +99,11 @@ async def test_context_image_store_root_is_the_media_root_of_the_guards(
 ):
     _no_tools(monkeypatch)
     cfg = make_settings(
-        {"model": "M", "threads_data_path": str(tmp_path), "save_logs": False}
+        {
+            "agent.model": "M",
+            "paths.threads_data_path": str(tmp_path),
+            "logging.save_logs": False,
+        }
     )
     ctx = await rc.acreate_run_context(cfg)
     assert (
@@ -111,7 +115,7 @@ async def test_context_image_store_root_is_the_media_root_of_the_guards(
 async def test_context_without_a_threads_dir_keeps_images_in_temp(monkeypatch):
     _no_tools(monkeypatch)
     ctx = await rc.acreate_run_context(
-        make_settings({"model": "M", "save_logs": False})
+        make_settings({"agent.model": "M", "logging.save_logs": False})
     )
     assert ctx.image_store.root == ImageStore.for_threads_dir("").root
 
@@ -123,7 +127,11 @@ async def test_embedder_thread_store_does_not_move_images_off_the_guarded_root(
     что охрана считает ``media`` (часть B, ``media_roots``)."""
     _no_tools(monkeypatch)
     cfg = make_settings(
-        {"model": "M", "threads_data_path": str(tmp_path), "save_logs": False}
+        {
+            "agent.model": "M",
+            "paths.threads_data_path": str(tmp_path),
+            "logging.save_logs": False,
+        }
     )
     ctx = await rc.acreate_run_context(cfg, thread_store=MemoryThreadStore())
     assert Path(ctx.image_store.root) == media_roots(cfg)[0]

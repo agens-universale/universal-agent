@@ -1,12 +1,15 @@
 """Настройки и контексты для тестов — без плоского словаря в коде агента.
 
-Тест описывает конфиг как удобно: прежними плоскими именами (``max_steps``,
-``write_guard``) и/или путями (``agent.max_steps``). Коду агента уходят
-настоящие ``AppConfig``/``RuntimeEnv`` — строго провалидированные, как из файла.
+Тест описывает конфиг путями через точку (``agent.max_steps``) и/или
+вложенными секциями (``{"agent": {"max_steps": 3}}``) — так же, как
+``--param`` и ``config.yml``. Коду агента уходят настоящие
+``AppConfig``/``RuntimeEnv`` — строго провалидированные, как из файла.
+Прежних плоских имён (``max_steps``) нет: такой ключ — ``ValidationError``.
 """
 
 from __future__ import annotations
 
+import copy
 from types import SimpleNamespace
 from typing import Any, Mapping, Optional
 
@@ -14,8 +17,8 @@ from gc_core.config_modules.provenance import Provenance
 from gc_core.config_modules.root import AppConfig
 from gc_core.settings import LoadedSettings, RuntimeEnv, _nested
 
-#: Плоские ключи рантайма → поле ``RuntimeEnv``.
-_RUNTIME_FLAT = {
+#: Ключи теста, которые не настройки, а рантайм → поле ``RuntimeEnv``.
+_RUNTIME_KEYS = {
     "launch_root": "launch_root",
     "project_root": "project_root",
     "trace_id": "trace_id",
@@ -26,30 +29,12 @@ _RUNTIME_FLAT = {
     "os_backend": "os_backend",
     "run_mode": "run_mode",
 }
-#: Вычисляемые плоские ключи: в настройки не переносятся.
-_COMPUTED_FLAT = {
-    "compat_notices",
-    "voice_overridden_by_managed",
-    "deprecated_keys_used",
-    "cli_explicit_keys",
-}
 
 
-def _flat_key_is_set(flat: Mapping[str, Any], key: str) -> bool:
-    """Задан ли ключ явно — там, где плоский вид сам это помнит.
-
-    Плоский вид кладёт ``stream`` и ``tui_finish_gate_mode`` всегда; явность
-    хранят ``deprecated_keys_used`` и ``tui_finish_gate_mode_explicit``. Без
-    этих признаков (словарь собран руками) ключ считается заданным.
-    """
-    if key == "stream" and "deprecated_keys_used" in flat:
-        return "backend.stream" in (flat.get("deprecated_keys_used") or ())
-    if (
-        key == "tui_finish_gate_mode"
-        and "tui_finish_gate_mode_explicit" in flat
-    ):
-        return bool(flat.get("tui_finish_gate_mode_explicit"))
-    return True
+def _runtime_value(key: str, value: Any) -> Any:
+    if key.startswith("subagent_tools_") and value is not None:
+        return tuple(value)
+    return value
 
 
 def _model_entry_input(entry: Any) -> Any:
@@ -74,87 +59,45 @@ def _model_entry_input(entry: Any) -> Any:
     return {key: value for key, value in entry.items() if value is not None}
 
 
-def settings_from_flat(
-    flat: Mapping[str, Any],
-    *,
-    profile_meta: Any = None,
-    config_dir: Optional[str] = None,
-    layer: str = "base",
+def make_settings(
+    config: Optional[Mapping[str, Any]] = None, **dotted: Any
 ) -> LoadedSettings:
-    """Словарь теста (прежние плоские имена ``config_dict``) → ``LoadedSettings``.
+    """``LoadedSettings`` из описания теста: пути через точку и/или секции.
 
-    Только для тестов: код агента словарей не принимает. Ключи переводятся
-    по ``FLAT_TO_PATH`` (путь с точкой — как есть) и проходят валидацию модели;
-    секции накладываются раньше своих листьев. Вычисляемые признаки
-    (``*_explicit``, ``compat_notices``) пропускаются — их даёт происхождение.
+    ``make_settings({"agent.max_steps": 3})``,
+    ``make_settings({"agent": {"max_steps": 3}})``,
+    ``make_settings(**{"agent.max_steps": 3})``. Рантайм-ключи
+    (``launch_root``, ``trace_id``, ``os_backend``…) уходят в ``RuntimeEnv``;
+    ``profile`` — и указатель, и действующий профиль. Неизвестный ключ (в том
+    числе прежнее плоское имя) или негодное значение — ``ValidationError``.
+    Секции накладываются раньше своих листьев.
     """
-    import copy
-
-    from gc_core.config_modules.flat_keys import FLAT_TO_PATH, setting_path
-
     runtime: dict[str, Any] = {}
     updates: dict[str, Any] = {}
-    for key, value in flat.items():
+    for key, value in {**dict(config or {}), **dotted}.items():
         if key == "profile":
-            # Плоский `profile` — действующий профиль; он же указатель.
             runtime["active_profile"] = updates["profile"] = value or ""
             continue
-        if key in _RUNTIME_FLAT:
-            if key.startswith("subagent_tools_") and value is not None:
-                value = tuple(value)
-            runtime[_RUNTIME_FLAT[key]] = value
+        if key in _RUNTIME_KEYS:
+            runtime[_RUNTIME_KEYS[key]] = _runtime_value(key, value)
             continue
-        if key.startswith("_"):
-            continue  # служебный ключ (кэш), не настройка
-        if key in _COMPUTED_FLAT or key.endswith(
-            ("_explicit", "_explicit_false")
-        ):
-            continue
-        if not _flat_key_is_set(flat, key):
-            continue
-        path = setting_path(key)
         value = copy.deepcopy(value)
         if key == "models" and isinstance(value, dict):
             value = {
                 alias: _model_entry_input(entry)
                 for alias, entry in value.items()
             }
-        if isinstance(value, dict) and path != key:
-            # В секции плоского вида бывают плоские имена соседей
-            # (`logging_params.logging_format` рядом с `format`) — переводим их.
-            value = {
-                (
-                    FLAT_TO_PATH[sub][len(path) + 1 :]
-                    if FLAT_TO_PATH.get(sub, "").startswith(path + ".")
-                    else sub
-                ): item
-                for sub, item in value.items()
-            }
-        updates[path] = value
+        updates[key] = value
     updates = dict(sorted(updates.items(), key=lambda kv: kv[0].count(".")))
-    # Без resolve_paths: пути плоского вида либо уже абсолютны (вид собран из
-    # загруженных настроек), либо пусты — «умолчание при использовании», как
-    # их и читал прежний код. Резолв подменил бы пустой путь путём от cwd и
-    # полез бы в home — в песочнице workflow Temporal это запрещено.
+    # Без resolve_paths: пути теста либо уже абсолютны, либо пусты —
+    # «умолчание при использовании». Резолв подменил бы пустой путь путём от
+    # cwd и полез бы в home — в песочнице workflow Temporal это запрещено.
     settings = AppConfig.model_validate(_nested(updates) if updates else {})
     return LoadedSettings(
         settings=settings,
-        runtime=RuntimeEnv(config_dir=config_dir, **runtime),
-        provenance=Provenance().with_layer(layer, updates),
-        profile_meta=profile_meta,
+        runtime=RuntimeEnv(**runtime),
+        provenance=Provenance().with_layer("base", updates),
     )
-
-
-def make_settings(
-    config: Optional[Mapping[str, Any]] = None, **dotted: Any
-) -> LoadedSettings:
-    """``LoadedSettings`` из словаря теста: плоские имена и пути через точку.
-
-    ``make_settings({"max_steps": 3})``, ``make_settings(**{"agent.max_steps": 3})``.
-    Рантайм-ключи (``launch_root``, ``trace_id``, ``profile``…) уходят в
-    ``RuntimeEnv``. Неизвестный ключ или негодное значение — ``ValidationError``.
-    """
-    return settings_from_flat({**dict(config or {}), **dotted})
 
 
 def fake_ctx(
@@ -176,20 +119,17 @@ def update_ctx(
 ) -> None:
     """Правка настроек готового тестового контекста — вместо ``ctx.config_dict[k] = v``.
 
-    Ключи — как у :func:`make_settings` (плоские имена и пути через точку),
-    рантайм-ключи (``launch_root``, ``run_mode``…) уходят в ``RuntimeEnv``.
-    Значение-словарь сливается с текущей секцией: незаданные листья остаются
-    прежними. Негодное значение — ``ValidationError``.
+    Ключи — как у :func:`make_settings` (пути через точку), рантайм-ключи
+    (``launch_root``, ``run_mode``…) уходят в ``RuntimeEnv``. Значение-словарь
+    по пути секции заменяет её значение. Негодное значение — ``ValidationError``.
     """
-    from gc_core.config_modules.flat_keys import setting_path
-
     runtime: dict[str, Any] = {}
     updates: dict[str, Any] = {}
     for key, value in {**dict(config or {}), **dotted}.items():
-        if key in _RUNTIME_FLAT:
-            runtime[_RUNTIME_FLAT[key]] = value
+        if key in _RUNTIME_KEYS:
+            runtime[_RUNTIME_KEYS[key]] = value
         else:
-            updates[setting_path(key)] = value
+            updates[key] = value
     loaded = LoadedSettings(settings=ctx.settings, runtime=ctx.runtime)
     if updates:
         loaded = loaded.with_overrides(updates, layer="test")
@@ -199,4 +139,4 @@ def update_ctx(
     ctx.runtime = loaded.runtime
 
 
-__all__ = ["fake_ctx", "make_settings", "settings_from_flat", "update_ctx"]
+__all__ = ["fake_ctx", "make_settings", "update_ctx"]

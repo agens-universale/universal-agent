@@ -138,7 +138,10 @@ async def test_search_warms_the_probes_off_loop(monkeypatch, tmp_path):
         tool,
         "_ctx",
         fake_ctx(
-            {"launch_root": str(tmp_path), "read_guard": {"enabled": False}}
+            {
+                "launch_root": str(tmp_path),
+                "security.read_guard": {"enabled": False},
+            }
         ),
     )
     monkeypatch.setattr(

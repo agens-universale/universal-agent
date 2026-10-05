@@ -65,7 +65,8 @@ def _app(tmp_path):
 
     facade = CompletionsFacade(
         settings=make_settings(
-            model="agent-model", threads_data_path=str(threads)
+            **{"agent.model": "agent-model"},
+            **{"paths.threads_data_path": str(threads)},
         ),
         agent_factory=factory,
     )

@@ -62,7 +62,7 @@ async def test_main_render_segments_dedupes_preserved_reply(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -104,7 +104,7 @@ async def test_render_segments_renders_all_not_just_last_two(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

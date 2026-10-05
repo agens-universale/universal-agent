@@ -42,7 +42,7 @@ def _ctx(
     fallback: bool = False,
 ):
     return fake_ctx(
-        {"backend_api_mode": backend},
+        {"backend.api_mode": backend},
         intent_scope=IntentScopeConfig(
             tools=tools or {},
             fallback_raw_on_llm_error=fallback,
@@ -85,7 +85,7 @@ def test_hook_skipped_without_intent_scope_on_ctx():
             tool_output_raw='{"response":"hi"}',
             state=state,
             ctx=fake_ctx(
-                {"backend_api_mode": "chat_completions"},
+                {"backend.api_mode": "chat_completions"},
                 logger=None,
             ),
         )

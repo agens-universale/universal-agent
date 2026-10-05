@@ -21,7 +21,7 @@ from gc_testkit.helpers.tool_ctx import local_ctx, with_local_ctx
 def _ctx(tmp_path, *, protection_enabled=True, command_moderation=False):
     cfg = {
         "launch_root": str(tmp_path),
-        "write_guard": {"enabled": False},
+        "security.write_guard": {"enabled": False},
     }
     if protection_enabled:
         cfg["security.protected_paths"] = {"enabled": True}

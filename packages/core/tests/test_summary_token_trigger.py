@@ -121,11 +121,11 @@ def test_both_exceeded_is_one_compaction_and_log_names_both(
     logger, path, _ = create_run_logger(
         make_settings(
             {
-                "logs_dump_dir": str(tmp_path),
-                "save_logs": True,
-                "console_trace": False,
-                "logging_format": "jsonl",
-                "log_level": "info",
+                "paths.logs_dump_dir": str(tmp_path),
+                "logging.save_logs": True,
+                "logging.console_trace": False,
+                "logging.format": "jsonl",
+                "logging.log_level": "info",
             }
         ),
         run_id="t",
@@ -307,7 +307,7 @@ async def test_compact_writes_null_prompt_fields_to_meta():
             },
         )
         session = await ThreadSession.afrom_config(
-            settings=make_settings({"threads_data_path": tmp_dir}),
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )

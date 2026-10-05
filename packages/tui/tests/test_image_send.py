@@ -102,7 +102,7 @@ def _app(threads: Path) -> TuiApp:
     return TuiApp(
         threads_dir=str(threads),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
 
 

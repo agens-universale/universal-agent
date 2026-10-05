@@ -62,7 +62,7 @@ async def test_ctrl_click_tool_row_opens_detail_screen(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -100,7 +100,7 @@ async def test_enter_on_focused_row_opens_detail_screen(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -177,7 +177,7 @@ async def test_ctrl_click_on_agent_prose_opens_correct_event(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -280,7 +280,7 @@ async def test_ctrl_click_on_agent_code_panel_opens_correct_event(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -328,7 +328,7 @@ async def test_single_click_does_not_open_viewer(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)

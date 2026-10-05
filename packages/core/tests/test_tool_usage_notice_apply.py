@@ -32,7 +32,7 @@ async def test_apply_appends_notice_when_threshold_reached():
                     "notice_message": "You have not used session_memory for some steps.",
                 }
             ],
-            "stop_tools": [],
+            "agent.stop_tools": [],
         }
     )
     out = await aapply_tool_usage_notice_before_llm(
@@ -51,7 +51,7 @@ async def test_apply_no_notice_when_rules_empty():
     state = _state()
     state.tool_usage_notice_cnt = {"session_memory": 100}
     meta: dict = {}
-    ctx = fake_ctx({"stop_tools": []})
+    ctx = fake_ctx({"agent.stop_tools": []})
     out = await aapply_tool_usage_notice_before_llm(
         [{"role": "user", "content": "hi", "id": "u1"}],
         state,
@@ -69,9 +69,9 @@ async def test_apply_long_changed_hint_on_k_tick(monkeypatch):
     meta: dict = {}
     ctx = fake_ctx(
         {
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 2},
-            "stop_tools": [],
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 2},
+            "agent.stop_tools": [],
         }
     )
     from gc_core.message_policy.tool_usage_notice.state import (
@@ -104,8 +104,8 @@ async def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
     meta: dict = {}
     ctx = fake_ctx(
         {
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 2},
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 2},
             "tool_usage_notice": [
                 {
                     "tool_name": "session_memory",
@@ -113,7 +113,7 @@ async def test_apply_long_hint_does_not_reset_tool_usage_counter(monkeypatch):
                     "notice_message": "You have not used session_memory for some steps.",
                 }
             ],
-            "stop_tools": [],
+            "agent.stop_tools": [],
         }
     )
     from gc_core.message_policy.tool_usage_notice.state import (

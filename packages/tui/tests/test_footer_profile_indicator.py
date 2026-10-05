@@ -31,7 +31,8 @@ async def test_footer_profile_name_truncated_to_ceiling_even_on_wide_screen(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -55,7 +56,8 @@ async def test_footer_profile_name_shrinks_toward_floor_under_width_deficit(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -81,7 +83,8 @@ async def test_footer_profile_name_dropped_entirely_below_floor_dot_stays(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -107,7 +110,8 @@ async def test_footer_dot_present_across_truncation_ladder(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -132,7 +136,8 @@ async def test_footer_dot_present_without_active_profile(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -151,7 +156,8 @@ async def test_footer_shows_profile_name_before_dot_when_active(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -174,7 +180,7 @@ async def test_footer_dot_color_matches_active_level_from_toggles(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "level": "light"}),
+        settings=tui_settings({"agent.model": "m", "level": "light"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -205,7 +211,8 @@ async def test_footer_drops_profile_name_first_on_narrow_width_keeps_dot(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -232,7 +239,8 @@ async def test_footer_keeps_profile_name_when_width_allows(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -286,7 +294,7 @@ async def test_footer_stacks_usage_before_dropping_profile(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "pricing": pricing}),
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -391,7 +399,8 @@ async def test_footer_shows_transition_with_dot_when_level_changes_mid_turn(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -428,7 +437,8 @@ async def test_footer_shows_new_profile_name_and_dotted_transition_when_both_cha
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -472,7 +482,8 @@ async def test_footer_shows_transition_without_dot_when_only_profile_changes(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -510,7 +521,8 @@ async def test_footer_no_arrow_when_future_model_matches_fact(
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -540,7 +552,8 @@ async def test_footer_no_arrow_when_turn_finished(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -588,7 +601,8 @@ async def test_footer_drops_profile_name_before_dropping_transition_block(
     from rich.cells import cell_len
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -634,7 +648,8 @@ async def test_footer_drops_transition_block_when_still_too_narrow_without_profi
     from rich.cells import cell_len
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -707,7 +722,7 @@ async def test_footer_two_line_layout_keeps_profile_and_transition(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "pricing": pricing}),
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -789,7 +804,7 @@ async def test_footer_two_line_layout_drops_profile_before_transition(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "pricing": pricing}),
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -878,7 +893,7 @@ async def test_footer_drops_transition_last_when_two_line_still_too_narrow(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "pricing": pricing}),
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(100, 30)) as pilot:
@@ -944,7 +959,7 @@ async def test_footer_one_line_priority_kept_with_profile_transition_and_usage(
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "pricing": pricing}),
+        settings=tui_settings({"agent.model": "m", "pricing": pricing}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1139,7 +1154,7 @@ async def test_footer_moves_prices_down_where_profile_used_to_be_dropped(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "pricing": _PRICING}),
+        settings=tui_settings({"agent.model": "m", "pricing": _PRICING}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1199,7 +1214,8 @@ async def test_footer_moves_left_to_two_rows_before_shrinking_profile(
     from rich.cells import cell_len
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1240,7 +1256,8 @@ async def test_footer_keeps_full_profile_when_left_goes_two_rows(
     from rich.cells import cell_len
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1282,7 +1299,8 @@ async def test_footer_shrinks_profile_on_the_two_row_pass(
     from rich.cells import cell_len
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1340,7 +1358,8 @@ async def test_footer_ladder_order_holds_across_terminal_widths(
     from gc_tui.screens.main import _PROFILE_NAME_MIN_COLS
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "m"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "m"}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1411,7 +1430,7 @@ async def test_footer_ladder_is_monotone_prices_never_come_back_up(
 
     app = TuiApp(
         threads_dir=str(tmp_path / "t"),
-        settings=tui_settings({"model": "m", "pricing": _PRICING}),
+        settings=tui_settings({"agent.model": "m", "pricing": _PRICING}),
     )
     app._config_path = str(tmp_path / "config.yml")
     async with app.run_test(size=(200, 30)) as pilot:
@@ -1477,12 +1496,10 @@ async def test_footer_context_meter_stays_on_the_first_line_at_every_step(
         system="cli",
         settings=tui_settings(
             {
-                "model": "m",
+                "agent.model": "m",
                 "pricing": _PRICING,
-                "backend_api_mode": "chat_completions",
-                "summary_params": {
-                    "chat_completions_summary_trigger_chars": 1000
-                },
+                "backend.api_mode": "chat_completions",
+                "summary": {"chat_completions_summary_trigger_chars": 1000},
             }
         ),
     )
@@ -1536,12 +1553,10 @@ async def test_footer_resolves_context_meter_once_per_frame(
         system="cli",
         settings=tui_settings(
             {
-                "model": "m",
+                "agent.model": "m",
                 "pricing": _PRICING,
-                "backend_api_mode": "chat_completions",
-                "summary_params": {
-                    "chat_completions_summary_trigger_chars": 1000
-                },
+                "backend.api_mode": "chat_completions",
+                "summary": {"chat_completions_summary_trigger_chars": 1000},
             }
         ),
     )

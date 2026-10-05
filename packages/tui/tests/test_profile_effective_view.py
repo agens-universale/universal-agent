@@ -111,9 +111,12 @@ def _screen_config(*, file_view: bool = True) -> dict:
     `file_view=False` — выключенный просмотрщик (`tui.file_view.enabled: false`,
     ключ конфига `tui_file_view`): под-вид профиля обязан замолчать про `v`
     (§11a). Ключа нет вовсе — просмотрщик включён (дефолт `FileViewSettings`)."""
-    config = {"completions_url": _MERGED_URL, "model": "test-model"}
+    config = {
+        "backend.completions_url": _MERGED_URL,
+        "agent.model": "test-model",
+    }
     if not file_view:
-        config["tui_file_view"] = {"enabled": False}
+        config["tui.file_view"] = {"enabled": False}
     return config
 
 

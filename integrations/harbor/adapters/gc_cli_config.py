@@ -11,11 +11,11 @@ merge (``config_modules.merge.deep_merge``) every other override path uses:
 Every layer is validated by ``AppConfig``: a misspelt key or a bad value in a profile
 fails the trial at build time instead of being silently ignored by the agent.
 
-The profile's ``gc_cli_config`` keeps its historical shape — the old flat
-``config_dict`` names (``max_steps``, ``summary_params``, ``mcp-servers``) — and is
-translated through ``FLAT_TO_PATH``; a dotted path (``agent.max_steps``) is taken as
-is. Keys that are runtime facts rather than settings (``os_backend``) go to
-``RuntimeEnv``.
+The profile's ``gc_cli_config`` keys are setting paths — dotted (``agent.max_steps``)
+and/or nested sections (``summary: {max_message_chars: …}``), exactly as in
+``config.yml``. The old flat ``config_dict`` names (``max_steps``, ``summary_params``)
+are gone: an unknown name fails the build with a path hint. Keys that are runtime
+facts rather than settings (``os_backend``) go to ``RuntimeEnv``.
 
 Kept free of any ``harbor`` import on purpose: the config contract is testable without
 the harbor runtime installed.
@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Optional, Tuple
 
 from gc_core.config_modules.env_interpolation import resolve_env_placeholders
-from gc_core.config_modules.flat_keys import setting_path
+from gc_core.config_modules.path_hints import check_setting_path
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.settings import (
     LoadedSettings,
@@ -96,10 +96,13 @@ def profile_updates(
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Профильный ``gc_cli_config`` → (правки настроек по путям, поля ``RuntimeEnv``).
 
-    Плоские имена прежнего ``config_dict`` переводятся по ``FLAT_TO_PATH``, путь
-    с точкой берётся как есть. Секции (``summary_params``) накладываются раньше
-    своих листьев (``summary.max_message_chars``), иначе лист затёрла бы секция.
-    Значения копируются: сборка не должна менять словарь профиля.
+    Ключ — путь через точку (``agent.max_steps``) или вложенная секция
+    (``summary: {...}``). Профиль сливается с умолчаниями бенча (правка по
+    пути заменяет значение), поэтому секции раскладываются на листья
+    (``expand_section_updates``): заданное заменяется, прочее остаётся.
+    Незнакомое схеме имя (прежнее плоское ``max_steps``) —
+    ``UnknownSettingError`` с подсказкой пути. Значения копируются: сборка не
+    должна менять словарь профиля.
     """
     updates: Dict[str, Any] = {}
     runtime: Dict[str, Any] = {}
@@ -107,11 +110,30 @@ def profile_updates(
         if key in _RUNTIME_KEYS:
             runtime[key] = value
             continue
-        updates[setting_path(key)] = copy.deepcopy(value)
-    ordered = dict(sorted(updates.items(), key=lambda kv: kv[0].count(".")))
-    # Профиль сливается с умолчаниями бенча (правка по пути заменяет значение):
-    # секция профиля раскладывается на листья.
-    return expand_section_updates(ordered), runtime
+        updates[key] = copy.deepcopy(value)
+    expanded = expand_section_updates(updates)
+    for path in expanded:
+        check_setting_path(path)
+    return expanded, runtime
+
+
+def profile_value(overrides: Mapping[str, Any], path: str) -> Any:
+    """Значение настройки ``path`` из профильного ``gc_cli_config`` (путь через
+    точку или вложенная секция); не задано — ``None``. Без валидации: адаптеру
+    нужно сырое значение профиля (``agent.model``, ``paths.skills_data_path``)."""
+    if path in overrides:
+        return overrides[path]
+    parts = path.split(".")
+    for depth in range(len(parts) - 1, 0, -1):
+        node: Any = overrides.get(".".join(parts[:depth]))
+        for part in parts[depth:]:
+            if not isinstance(node, Mapping) or part not in node:
+                node = None
+                break
+            node = node[part]
+        if node is not None:
+            return node
+    return None
 
 
 def build_gc_cli_settings(

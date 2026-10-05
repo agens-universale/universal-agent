@@ -34,14 +34,14 @@ def _make_orchestrator_state():
 
 def _make_config():
     return {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
-        "finish_gate_max_iterations": 10,
-        "subagent_finish_gate_max_iterations": 3,
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
+        "agent.finish_gate_max_iterations": 10,
+        "agent.subagent_finish_gate_max_iterations": 3,
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
     }
 
 

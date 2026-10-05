@@ -41,9 +41,11 @@ def test_default_config_is_unconfigured(tmp_path, monkeypatch):
 def test_configured_when_url_token_model_set():
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": "gigacode_agent_v1.6_rc",
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     assert onboarding.is_unconfigured(cfg) is False
@@ -52,11 +54,11 @@ def test_configured_when_url_token_model_set():
 def test_unconfigured_if_token_still_placeholder():
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     assert onboarding.is_unconfigured(cfg) is True
@@ -68,8 +70,8 @@ def test_unconfigured_if_token_still_placeholder():
 def test_agent_auth_satisfies_auth_without_token():
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "model": "gigacode_agent_v1.6_rc",
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "agent.model": "gigacode_agent_v1.6_rc",
             "agent_auth": {"auth_endpoint": "https://auth.local/token"},
         }
     )
@@ -79,10 +81,10 @@ def test_agent_auth_satisfies_auth_without_token():
 def test_agent_auth_set_drops_token_from_guide():
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "model": "gigacode_agent_v1.6_rc",
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "agent.model": "gigacode_agent_v1.6_rc",
             "agent_auth": {"auth_endpoint": "https://auth.local/token"},
-            "chat_completion_headers": {
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
         }
@@ -99,8 +101,8 @@ def test_no_token_and_no_complete_agent_auth_is_configured():
     `agent_auth: {}` — то, во что config.py:277 разворачивает отсутствие секции."""
     cfg = make_settings(
         {
-            "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
-            "model": "MiniMaxAI/MiniMax-M2.7",
+            "backend.completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+            "agent.model": "MiniMaxAI/MiniMax-M2.7",
             "agent_auth": {},
         }
     )
@@ -115,9 +117,11 @@ def test_registry_closes_model_requirement():
     `agent.model` при нём не блокирует (мастер его и не пишет с волны B)."""
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         }
     )
@@ -131,9 +135,11 @@ def test_registry_does_not_close_endpoint_requirement():
     а следующий старт больше не предложил бы настройку."""
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         }
     )
@@ -143,11 +149,11 @@ def test_registry_does_not_close_endpoint_requirement():
 def test_registry_does_not_close_auth_requirement():
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         }
     )
@@ -158,9 +164,11 @@ def test_flat_model_without_endpoint_is_unconfigured():
     """Тот же страж в плоском мире — симметрия детекта (§11)."""
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": "qwen3-coder",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": "qwen3-coder",
         }
     )
     assert onboarding.is_unconfigured(cfg) is True
@@ -173,12 +181,12 @@ def test_self_sufficient_registry_closes_endpoint_and_auth_in_chat_completions()
     при каждом старте было бы ложной тревогой."""
     cfg = make_settings(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {
                 "flash": {
                     "model": "g",
@@ -196,12 +204,12 @@ def test_self_sufficient_registry_does_not_close_endpoint_in_responses():
     ушёл бы на плоский плейсхолдер — «не настроено»."""
     cfg = make_settings(
         {
-            "backend_api_mode": "responses",
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.api_mode": "responses",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {
                 "flash": {
                     "model": "g",
@@ -220,12 +228,12 @@ def test_registry_with_one_entry_without_url_does_not_close_endpoint():
     (объявить готовым конфиг, который уйдёт на `your-backend:PORT`) невозможно."""
     cfg = make_settings(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {
                 "flash": {
                     "model": "g",
@@ -245,12 +253,12 @@ def test_registry_with_own_url_but_no_token_is_rejected():
     from pydantic import ValidationError
 
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": onboarding.URL_SENTINEL,
+        "backend.chat_completion_headers": {
             "Authorization": onboarding.TOKEN_SENTINEL
         },
-        "model": onboarding.MODEL_SENTINEL,
+        "agent.model": onboarding.MODEL_SENTINEL,
         "models": {"flash": {"model": "g", "url": "https://x/v1"}},
     }
     # Отказ — уже на сборке настроек: до детекта такой конфиг не доходит.
@@ -266,12 +274,12 @@ def test_registry_of_local_servers_without_auth_closes_auth():
     в мастер на каждом старте."""
     cfg = make_settings(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {
                 "glm-local": {
                     "model": "g",
@@ -379,9 +387,11 @@ def test_setup_guide_on_registry_config_does_not_demand_model():
     без TTY и стоп-гайд `gc-ua` печатали бы «не заполнено» настроенному человеку)."""
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         }
     )
@@ -395,11 +405,11 @@ def test_setup_guide_preset_note_is_about_flat_key_only():
     плейсхолдером она печатала бы «agent.model = <ВПИШИТЕ_МОДЕЛЬ>»."""
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
             "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         }
     )
@@ -414,9 +424,11 @@ def test_setup_guide_preset_note_is_about_flat_key_only():
 def test_model_sentinel_is_pending():
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     text = onboarding.setup_guide("/p", cfg)
@@ -426,11 +438,11 @@ def test_model_sentinel_is_pending():
 def test_filled_model_not_in_guide():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     text = onboarding.setup_guide("/p", cfg)
@@ -443,11 +455,11 @@ def test_filled_model_not_in_guide():
 def test_setup_guide_notes_preset_model_when_pending():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     text = onboarding.setup_guide("/p", cfg)
@@ -458,11 +470,11 @@ def test_setup_guide_notes_preset_model_when_pending():
 def test_setup_guide_no_preset_model_note_when_model_pending():
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     text = onboarding.setup_guide("/p", cfg)
@@ -476,9 +488,11 @@ def test_setup_guide_no_preset_model_note_when_model_pending():
 def test_setup_guide_positive_when_all_covered():
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": "gigacode_agent_v1.6_rc",
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     text = onboarding.setup_guide("/home/u/.gc/config.yml", cfg)
@@ -508,9 +522,11 @@ def test_setup_guide_on_the_without_profile_stage_does_not_say_ready():
     профиль сломан, запуск с ним не поднимется; без него — `--profile ""`."""
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": "gigacode_agent_v1.6_rc",
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": "gigacode_agent_v1.6_rc",
             "profile": "",
         }
     )
@@ -541,11 +557,11 @@ def test_setup_guide_notes_the_degradation_next_to_the_pending_fields():
     что профиль сломан и запуск с ним не поднимется."""
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     on_template = onboarding.setup_guide(
@@ -577,18 +593,20 @@ def test_setup_guide_names_a_nameless_dropped_profile_without_empty_quotes():
     вести себя так же."""
     ready = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer real-token"},
-            "model": "gigacode_agent_v1.6_rc",
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real-token"
+            },
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     pending = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     for cfg in (ready, pending):
@@ -665,11 +683,11 @@ def test_setup_guide_offers_init_config_helper_with_program():
     """pending-подсказка называет команду помощника с именем бинаря (program)."""
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     assert "gc-cli --init-config" in onboarding.setup_guide(
@@ -684,11 +702,11 @@ def test_setup_guide_marks_config_created_when_just_created():
     """just_created=True → явно сообщает о создании файла; False → «Конфигурация:»."""
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     created = onboarding.setup_guide("/p", cfg, just_created=True)
@@ -701,11 +719,11 @@ def test_setup_guide_marks_config_created_when_just_created():
 def _pending_cfg():
     return make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
 
@@ -1328,7 +1346,7 @@ def test_effective_model_reads_registry_not_the_flat_key():
         {
             "models": {"fast": {"model": "qwen/qwen3-8b"}},
             "slots": {"default": "fast"},
-            "model": "MiniMax-M2.7",
+            "agent.model": "MiniMax-M2.7",
         }
     )
     assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
@@ -1340,7 +1358,7 @@ def test_effective_model_resolves_single_entry_without_a_slot():
         {
             "models": {"fast": {"model": "qwen/qwen3-8b"}},
             "slots": {},
-            "model": "MiniMax-M2.7",
+            "agent.model": "MiniMax-M2.7",
         }
     )
     assert onboarding.effective_model(cfg) == "qwen/qwen3-8b"
@@ -1348,7 +1366,7 @@ def test_effective_model_resolves_single_entry_without_a_slot():
 
 def test_effective_model_falls_back_to_the_legacy_key():
     cfg = make_settings(
-        {"models": {}, "slots": {}, "model": "vllm/Qwen3-Coder"}
+        {"models": {}, "slots": {}, "agent.model": "vllm/Qwen3-Coder"}
     )
     assert onboarding.effective_model(cfg) == "vllm/Qwen3-Coder"
 
@@ -1360,7 +1378,7 @@ def test_effective_model_survives_a_slot_pointing_nowhere():
         {
             "models": {"fast": {"model": "qwen/qwen3-8b"}},
             "slots": {"default": "нет-такой"},
-            "model": "vllm/Qwen3-Coder",
+            "agent.model": "vllm/Qwen3-Coder",
         }
     )
     assert onboarding.effective_model(cfg) == "vllm/Qwen3-Coder"
@@ -1368,7 +1386,7 @@ def test_effective_model_survives_a_slot_pointing_nowhere():
 
 def test_effective_model_is_empty_on_the_template_sentinel():
     cfg = make_settings(
-        {"models": {}, "slots": {}, "model": onboarding.MODEL_SENTINEL}
+        {"models": {}, "slots": {}, "agent.model": onboarding.MODEL_SENTINEL}
     )
     assert onboarding.effective_model(cfg) == ""
 
@@ -1427,7 +1445,9 @@ def test_model_step_current_keeps_the_model_of_a_config_without_slots():
     жил в отброшенном профиле — живой стенд чинилки): резолв там от уровня не
     зависит, и «сейчас» обязана назвать модель — иначе строка пропадает у всех
     конфигов до волны B."""
-    flat = make_settings({"model": "gigacode_agent_v1.6_rc", "level": "max"})
+    flat = make_settings(
+        {"agent.model": "gigacode_agent_v1.6_rc", "level": "max"}
+    )
     assert onboarding.model_step_current(flat) == "gigacode_agent_v1.6_rc"
     registry = make_settings(
         {
@@ -1488,7 +1508,9 @@ def test_model_step_display_is_plain_when_the_default_slot_is_assigned():
 def test_model_step_display_keeps_the_slotless_config_behaviour():
     """Ни одного слота — прежнее правило `model_step_current` (легаси/одна запись
     реестра), без подписи: там резолв от уровня не зависит."""
-    flat = make_settings({"model": "gigacode_agent_v1.6_rc", "level": "max"})
+    flat = make_settings(
+        {"agent.model": "gigacode_agent_v1.6_rc", "level": "max"}
+    )
     assert onboarding.model_step_display(flat) == (
         "gigacode_agent_v1.6_rc",
         "",

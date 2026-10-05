@@ -25,19 +25,25 @@ from gc_tui.form_frame import FOOTER_SCROLL
 
 def _cfg():
     return {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer secret-token"},
-        "model": "test-model",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer secret-token"
+        },
+        "agent.model": "test-model",
     }
 
 
 @pytest.mark.parametrize("verify", [True, False, "/corp/root.pem"])
 def test_connection_probe_preserves_tls_mode(verify):
-    screen = _mk_screen(config={**_cfg(), "use_ssl": verify})
+    screen = _mk_screen(config={**_cfg(), "backend.use_ssl": verify})
     assert screen._probe_args_from_config()[2] == verify
     assert (
+        # Подключение, собранное по документам (`dict`): ключи — поля backend.
         screen._probe_args_from_config(
-            {**_cfg(), "use_ssl": "/profile/root.pem"}
+            {
+                "completions_url": "http://host/v1/chat/completions",
+                "use_ssl": "/profile/root.pem",
+            }
         )[2]
         == "/profile/root.pem"
     )
@@ -94,15 +100,20 @@ def _write_cfg(
 
 def _loaded(cfg_file):
     """Конфиг, как его видит приложение: YAML файла + резолв ${ENV:VAR} — тот же
-    resolve_env_placeholders, что и в config.load_settings (секции backend/agent — плоско)."""
+    resolve_env_placeholders, что и в config.load_settings (секции backend/agent —
+    путями через точку)."""
     import yaml
     from gc_core.config_modules.env_interpolation import (
         resolve_env_placeholders,
     )
 
     raw = yaml.safe_load(cfg_file.read_text(encoding="utf-8")) or {}
-    flat = {**(raw.get("backend") or {}), **(raw.get("agent") or {})}
-    return resolve_env_placeholders(flat)
+    dotted = {
+        f"{section}.{key}": value
+        for section in ("backend", "agent")
+        for key, value in (raw.get(section) or {}).items()
+    }
+    return resolve_env_placeholders(dotted)
 
 
 async def _to_update_section(pilot):
@@ -310,7 +321,7 @@ async def test_open_section_picks_up_default_changed_by_other_window(tmp_path):
     from gc_tui import app as app_mod
 
     cfg_file = _write_cfg(tmp_path, model='"old-model"')
-    app = app_mod.TuiApp(settings=tui_settings({"model": "placeholder"}))
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "placeholder"}))
     app._config_path = str(cfg_file)
     app.reload_config()  # база + снимок mtime — как в проде
     async with app.run_test() as pilot:
@@ -339,7 +350,7 @@ async def test_open_section_noop_when_file_unchanged(tmp_path, monkeypatch):
     from gc_tui import app as app_mod
 
     cfg_file = _write_cfg(tmp_path)
-    app = app_mod.TuiApp(settings=tui_settings({"model": "placeholder"}))
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "placeholder"}))
     app._config_path = str(cfg_file)
     app.reload_config()
 
@@ -439,7 +450,7 @@ async def test_config_stack_texts_tracks_a_profile_pointed_from_the_project_laye
         encoding="utf-8",
     )
 
-    app = app_mod.TuiApp(settings=tui_settings({"model": "placeholder"}))
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "placeholder"}))
     app._config_path = str(cfg_file)
     app.reload_config()  # мерж слоёв — как в проде
     assert (
@@ -500,7 +511,7 @@ async def test_config_stack_texts_follows_the_project_layer_when_it_conflicts_wi
         encoding="utf-8",
     )
 
-    app = app_mod.TuiApp(settings=tui_settings({"model": "placeholder"}))
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "placeholder"}))
     app._config_path = str(cfg_file)
     app.reload_config()
     assert (
@@ -837,9 +848,9 @@ async def test_settings_auth_no_auth_writes_empty_header(tmp_path):
     )
     applied = []
     cfg = {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer old"},
-        "model": "m",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer old"},
+        "agent.model": "m",
     }
     app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
@@ -1587,12 +1598,12 @@ async def test_apply_model_writes_and_returns_to_hub(tmp_path, monkeypatch):
     app = app_mod.TuiApp(settings=tui_settings(_cfg()))
     async with app.run_test() as pilot:
         cfg = dict(_cfg())
-        cfg["model"] = "old-model"
+        cfg["agent.model"] = "old-model"
 
         def _on_apply():
             # Эмулирует reload_config: новая база окна (экран заберёт её через
             # base_settings()).
-            app._settings = tui_settings({**cfg, "model": "new-model"})
+            app._settings = tui_settings({**cfg, "agent.model": "new-model"})
 
         app.push_screen(
             SettingsScreen(
@@ -2122,9 +2133,9 @@ async def test_draft_probe_no_auth_choice_probes_without_old_token(tmp_path):
         encoding="utf-8",
     )
     cfg = {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer old"},
-        "model": "m",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer old"},
+        "agent.model": "m",
     }
     captured = []
 
@@ -2162,8 +2173,8 @@ async def test_ctrl_space_in_auth_without_saved_address_hints_locally(
     from gc_tui.screens.settings import SettingsScreen
 
     cfg = {
-        "chat_completion_headers": {"Authorization": "Bearer x"},
-        "model": "m",
+        "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+        "agent.model": "m",
     }
     cfg_file = tmp_path / "config.yml"
     cfg_file.write_text(
@@ -2350,9 +2361,11 @@ async def test_model_dirty_state_manual_entry_reacts_to_typing(
     from textual.widgets import Input
 
     cfg = {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer secret-token"},
-        "model": "",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer secret-token"
+        },
+        "agent.model": "",
     }
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **kw: [])
     cfg_file = _write_cfg(
@@ -2394,9 +2407,9 @@ async def test_draft_probe_no_auth_401_shows_requires_auth_hint(tmp_path):
         encoding="utf-8",
     )
     cfg = {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer old"},
-        "model": "m",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer old"},
+        "agent.model": "m",
     }
     app = app_mod.TuiApp(settings=tui_settings(cfg))
     async with app.run_test() as pilot:
@@ -2437,9 +2450,11 @@ async def test_auth_draft_probe_server_ignores_token(tmp_path):
         encoding="utf-8",
     )
     cfg = {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer whatever"},
-        "model": "m",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer whatever"
+        },
+        "agent.model": "m",
     }
     captured = []
 
@@ -2753,7 +2768,8 @@ async def test_env_ref_token_survives_save_without_changes(
     original = cfg_file.read_text(encoding="utf-8")
     cfg = _loaded(cfg_file)
     assert (
-        cfg["chat_completion_headers"]["Authorization"] == "sk-REALSECRET123"
+        cfg["backend.chat_completion_headers"]["Authorization"]
+        == "sk-REALSECRET123"
     )  # резолв сработал
     from gc_tui import app as app_mod
 
@@ -2781,7 +2797,7 @@ async def test_env_ref_missing_var_not_shown_as_token_set(
     original = cfg_file.read_text(encoding="utf-8")
     cfg = _loaded(cfg_file)
     assert (
-        cfg["chat_completion_headers"]["Authorization"] == "Bearer "
+        cfg["backend.chat_completion_headers"]["Authorization"] == "Bearer "
     )  # резолв в пустоту
     from gc_tui import app as app_mod
 
@@ -2810,7 +2826,7 @@ async def test_env_ref_missing_var_is_not_reported_as_no_auth(
     monkeypatch.delenv("GC_API_KEY", raising=False)
     cfg_file = _write_cfg(tmp_path, auth='"${ENV:GC_API_KEY}"')
     cfg = _loaded(cfg_file)
-    assert cfg["chat_completion_headers"]["Authorization"] == ""
+    assert cfg["backend.chat_completion_headers"]["Authorization"] == ""
     from gc_tui import app as app_mod
 
     app = app_mod.TuiApp(settings=tui_settings(cfg))
@@ -2926,7 +2942,10 @@ async def test_env_ref_endpoint_shown_as_ref_and_not_rewritten(
     cfg_file = _write_cfg(tmp_path, url='"${ENV:GC_URL}"')
     original = cfg_file.read_text(encoding="utf-8")
     cfg = _loaded(cfg_file)
-    assert cfg["completions_url"] == "http://real-host/v1/chat/completions"
+    assert (
+        cfg["backend.completions_url"]
+        == "http://real-host/v1/chat/completions"
+    )
     from gc_tui import app as app_mod
 
     app = app_mod.TuiApp(settings=tui_settings(cfg))
@@ -5170,7 +5189,7 @@ async def test_the_models_section_names_the_level_that_is_really_acting(
         encoding="utf-8",
     )
     cfg = {
-        "completions_url": "http://host/v1/chat/completions",
+        "backend.completions_url": "http://host/v1/chat/completions",
         "level": "default",
     }
     app = app_mod.TuiApp(settings=tui_settings(cfg))

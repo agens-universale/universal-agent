@@ -48,7 +48,9 @@ def skill_with_script(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(env_vars, "env", EnvVars(gc_home=tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
-    return get_skills_registry(make_settings({"skills_data_path": str(root)}))
+    return get_skills_registry(
+        make_settings({"paths.skills_data_path": str(root)})
+    )
 
 
 def _tool(registry):

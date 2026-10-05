@@ -12,7 +12,7 @@ from gc_testkit.settings import fake_ctx
 
 def _make_ctx(backend_mode: str = "chat_completions") -> SimpleNamespace:
     return fake_ctx(
-        {"backend_api_mode": backend_mode, "model": "test-model"},
+        {"backend.api_mode": backend_mode, "agent.model": "test-model"},
         auth_connector=None,
         logger=None,
     )

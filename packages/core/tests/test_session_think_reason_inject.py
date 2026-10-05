@@ -29,11 +29,11 @@ def _ensure_real_tools_module():
 
 def _inject_config(**overrides):
     cfg = {
-        "use_local_subagents": False,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "stop_tools": [],
-        "inject_tool_fields": {
+        "agent.use_local_subagents": False,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.stop_tools": [],
+        "agent.inject_tool_fields": {
             "reason": "Brief rationale (1–2 sentences): goal, why now, expected outcome."
         },
     }

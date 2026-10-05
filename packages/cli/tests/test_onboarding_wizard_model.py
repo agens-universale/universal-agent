@@ -15,9 +15,9 @@ def _io(answers):
 def test_model_pick_from_list():
     cfg = make_settings(
         {
-            "completions_url": "https://h/api/v2/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/api/v2/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     fake = lambda url, auth, **k: [
@@ -33,9 +33,9 @@ def test_model_pick_from_list():
 def test_model_manual_fallback_when_no_list():
     cfg = make_settings(
         {
-            "completions_url": "https://h/api/v2/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/api/v2/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     fake = lambda url, auth, **k: None  # список не получен
@@ -48,9 +48,9 @@ def test_model_manual_fallback_when_no_list():
 def test_model_warning_shown_only_with_non_tool():
     cfg = make_settings(
         {
-            "completions_url": "https://h/api/v2/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/api/v2/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     io, out = _io(["1"])
@@ -64,9 +64,9 @@ def test_model_manual_fallback_when_empty_list():
     """fetch_models -> [] (пустой список) → ручной ввод, не пустое меню."""
     cfg = make_settings(
         {
-            "completions_url": "https://h/api/v2/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/api/v2/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     fake = lambda url, auth, **k: []  # пустой список
@@ -82,8 +82,8 @@ def test_choice_is_confirmed_after_a_pick_and_silent_on_skip():
     его уже не отменить не заметив. Подтверждение печатается сразу."""
     cfg = make_settings(
         {
-            "completions_url": "https://h/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
+            "backend.completions_url": "https://h/v1/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
         }
     )
     io, out = _io(["1"])
@@ -100,9 +100,9 @@ def test_choice_is_confirmed_after_manual_entry_when_no_list():
     финальной сводке — после записи в файл — если бы не эта строка."""
     cfg = make_settings(
         {
-            "completions_url": "https://h/api/v2/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/api/v2/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     io, out = _io(["vllm/Qwen3-Coder-Next-262k"])
@@ -119,8 +119,8 @@ def test_network_is_reached_only_after_the_header_is_printed():
     io = wz.WizardIO(reader=lambda p, s: "", printer=out.append)
     cfg = make_settings(
         {
-            "completions_url": "https://h/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
+            "backend.completions_url": "https://h/v1/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
         }
     )
 
@@ -137,9 +137,9 @@ def test_model_warning_shown_when_non_tool_present():
     """⚠-подсказка появляется, если хотя бы одна модель tool_capable is False."""
     cfg = make_settings(
         {
-            "completions_url": "https://h/api/v2/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/api/v2/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     io, out = _io(["1"])
@@ -159,9 +159,9 @@ def test_model_section_header_and_marker_consistent_when_no_list():
     # единый плоский стиль: заголовок «  Модель» даже без списка, приглашение «  > », без labeled-текста
     cfg = make_settings(
         {
-            "completions_url": "https://h/api/v2/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/api/v2/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     prompts, out = [], []
@@ -483,8 +483,8 @@ def test_star_prints_the_whole_list():
 def test_model_step_names_its_level():
     cfg = make_settings(
         {
-            "completions_url": "https://h/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
+            "backend.completions_url": "https://h/v1/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
         }
     )
     io, out = _io([""])
@@ -497,8 +497,8 @@ def test_model_step_names_its_level():
 
 def _two_level_registry() -> dict:
     return {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer x"},
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer x"},
         "models": {
             "fast": {"model": "qwen/qwen3-8b"},
             "brain": {"model": "qwen/qwen3-235b"},
@@ -537,9 +537,9 @@ def test_the_model_step_keeps_showing_the_legacy_model_on_a_flat_config():
     Не показать её значило бы отнять «сейчас» у всех конфигов до волны B."""
     cfg = make_settings(
         {
-            "completions_url": "https://h/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": "gigacode_agent_v1.6_rc",
+            "backend.completions_url": "https://h/v1/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": "gigacode_agent_v1.6_rc",
             "level": "max",
         }
     )

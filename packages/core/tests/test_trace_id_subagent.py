@@ -11,16 +11,16 @@ from gc_testkit.settings import make_settings
 async def test_child_ctx_inherits_trace_id(tmp_path):
     config = make_settings(
         {
-            "logs_dump_dir": str(tmp_path),
-            "save_logs": True,
-            "logging_format": "jsonl",
-            "console_trace": False,
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://localhost:1/v1/chat/completions",
-            "model": "test-model",
+            "paths.logs_dump_dir": str(tmp_path),
+            "logging.save_logs": True,
+            "logging.format": "jsonl",
+            "logging.console_trace": False,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://localhost:1/v1/chat/completions",
+            "agent.model": "test-model",
             "launch_root": str(tmp_path),
             "trace_id": "wf-42",
-            "use_local_subagents": True,
+            "agent.use_local_subagents": True,
         }
     )
     parent_ctx = await acreate_run_context(config)

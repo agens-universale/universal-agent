@@ -119,7 +119,9 @@ async def test_enter_opens_skill_viewer(monkeypatch):
 
     async with TuiApp().run_test() as pilot:
         pilot.app.push_screen(
-            SkillsScreen(skills=_SKILLS, settings=as_settings({"model": "M"}))
+            SkillsScreen(
+                skills=_SKILLS, settings=as_settings({"agent.model": "M"})
+            )
         )
         await pilot.pause()
         await pilot.press("down")  # выбрать hello-world

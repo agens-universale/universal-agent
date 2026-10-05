@@ -324,8 +324,8 @@ async def test_rephrase_transport_error_stays_structured(monkeypatch):
 @pytest.mark.parametrize(
     "config",
     [
-        {"logging_format": "text", "console_trace": True},
-        {"logging_format": "jsonl", "console_trace": False},
+        {"logging.format": "text", "logging.console_trace": True},
+        {"logging.format": "jsonl", "logging.console_trace": False},
     ],
 )
 async def test_emit_prints_text_when_stdout_is_not_jsonl(
@@ -371,7 +371,7 @@ async def test_emit_jsonl_stream_keeps_stdout_free_of_raw_text(
     code = await aemit_structured_result(
         response=_finish(),
         settings=make_settings(
-            {"logging_format": "jsonl", "console_trace": True}
+            {"logging.format": "jsonl", "logging.console_trace": True}
         ),
         ctx=ctx,
         state=object(),
@@ -391,7 +391,7 @@ async def test_emit_failure_leaves_stdout_empty(capsys):
     ctx = _Ctx()
     code = await aemit_structured_result(
         response="не итог",
-        settings=make_settings({"logging_format": "text"}),
+        settings=make_settings({"logging.format": "text"}),
         ctx=ctx,
         state=object(),
         terminal_outcome="tool_errors",
@@ -430,7 +430,7 @@ async def test_emit_failure_logs_raw_answer_then_rephrase_error(
     raw = _finish()
     code = await aemit_structured_result(
         response=raw,
-        settings=make_settings({"logging_format": "text"}),
+        settings=make_settings({"logging.format": "text"}),
         ctx=ctx,
         state=object(),
         terminal_outcome=None,
@@ -495,11 +495,11 @@ def _executor_with_open_accounting():
     logger = _RunLogger()
     ctx = fake_ctx(
         {
-            "console_trace": True,
-            "logging_format": "text",
-            "model": "m",
-            "completions_url": "http://llm/v1/chat/completions",
-            "backend_request_timeout_sec": 30,
+            "logging.console_trace": True,
+            "logging.format": "text",
+            "agent.model": "m",
+            "backend.completions_url": "http://llm/v1/chat/completions",
+            "backend.request_timeout_sec": 30,
         },
         logger=logger,
         auxiliary_llm=_Aux(),

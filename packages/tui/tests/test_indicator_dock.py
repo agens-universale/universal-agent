@@ -34,7 +34,7 @@ async def test_indicator_docked_not_in_trace(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     async with app.run_test() as pilot:
@@ -64,7 +64,7 @@ async def test_trace_row_lands_in_trace_with_indicator_docked(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     async with app.run_test() as pilot:

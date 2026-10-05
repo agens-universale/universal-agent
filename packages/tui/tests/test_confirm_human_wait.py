@@ -163,7 +163,7 @@ async def test_cancel_confirm_always_on_reset_even_without_banner():
         is_running=lambda: False,
     )
     async with TuiApp(
-        settings=tui_settings({"model": "M"})
+        settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         pilot.app.active_runner = runner

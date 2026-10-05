@@ -20,7 +20,7 @@ async def test_trace_screen_has_freeze_field(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         assert hasattr(pilot.app.screen, "_select_freeze_since")
@@ -35,7 +35,7 @@ async def test_ui_frozen_for_select_predicate(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -53,7 +53,7 @@ async def test_poll_freeze_skips_stick(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -86,7 +86,7 @@ async def test_poll_freeze_sets_since(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -108,7 +108,7 @@ async def test_poll_freeze_timeout_clears(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -139,7 +139,7 @@ async def test_thinking_indicator_tick_gated_by_selecting(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         ind = ThinkingIndicator()
@@ -169,7 +169,7 @@ async def test_tool_call_row_pulse_gated_by_selecting(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         row = ToolCallRow(call_id="c1", tool_name="tool", args_summary="x=1")
@@ -204,7 +204,7 @@ async def test_refresh_stream_content_gated_by_selecting(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -274,7 +274,7 @@ async def test_poll_freeze_does_not_cut_footer_and_tail(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

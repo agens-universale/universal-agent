@@ -28,7 +28,7 @@ async def _open(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"mcp-servers": {}}),
+        settings=tui_settings({"mcp.servers": {}}),
     )
     scr = McpScreen(settings=as_settings({}), tools_snapshot=dict(SNAP))
     return app, scr
@@ -133,7 +133,7 @@ async def test_keys_on_empty_screen_do_not_crash(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"mcp-servers": {}}),
+        settings=tui_settings({"mcp.servers": {}}),
     )
     scr = McpScreen(settings=as_settings({}), tools_snapshot={})
     async with app.run_test() as pilot:

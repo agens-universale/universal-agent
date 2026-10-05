@@ -78,7 +78,7 @@ async def _to_voice_step(pilot, screen):
 async def test_voice_step_default_cursor_and_options(monkeypatch):
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     async with app.run_test() as pilot:
         screen = _screen(app, voice)
@@ -106,7 +106,7 @@ async def test_voice_step_local_option_desc_shows_short_model(
         "gc_tui.voice_runtime.state.voice_state_path",
         lambda: tmp_path / "state.json",
     )
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -138,7 +138,7 @@ async def test_voice_step_local_confirm_shows_short_model(
         "gc_tui.voice_runtime.state.voice_state_path",
         lambda: tmp_path / "state.json",
     )
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -199,7 +199,7 @@ async def test_voice_space_selects_stays_then_enter_advances(monkeypatch):
     выбор уже сделан, — просто далее (канон MCP-шага, перенесённый на радио голоса)."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -222,7 +222,7 @@ async def test_voice_pagedown_after_space_ignores_cursor_drift(monkeypatch):
     угодно) коммитит уже сделанный выбор, даже если курсор ушёл на другую опцию."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -243,7 +243,7 @@ async def test_voice_enter_on_other_option_reselects(monkeypatch):
     """Enter на ДРУГОЙ (непомеченной) строке — перевыбор: пометка переезжает, шаг тот же."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -267,7 +267,7 @@ async def test_voice_enter_marks_then_advances(monkeypatch):
     второй (курсор на помеченном) — далее."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -290,7 +290,7 @@ async def test_voice_pagedown_without_choice_takes_cursor_option(monkeypatch):
     """PgDn без пометки — тот же фолбэк, что у Enter-далее: берём вариант под курсором."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -312,7 +312,7 @@ async def test_voice_variants_cursor_never_holds_focus_in_fields(monkeypatch):
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -342,7 +342,7 @@ async def test_voice_reselect_away_from_cloud_collapses_fields_and_keeps_draft(
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -378,7 +378,7 @@ async def test_voice_space_on_cloud_reveals_fields_and_stays(monkeypatch):
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -398,7 +398,7 @@ async def test_voice_step_cloud_reveals_fields_and_confirm_line(monkeypatch):
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -422,7 +422,7 @@ async def test_voice_step_cloud_reveals_fields_and_confirm_line(monkeypatch):
 async def test_commit_local_calls_switch_to_local(monkeypatch, tmp_path):
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     async with app.run_test() as pilot:
         screen = _screen(app, voice)
@@ -447,7 +447,7 @@ async def test_pageup_after_cloud_confirm_not_stuck(monkeypatch):
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -479,7 +479,7 @@ async def test_pageup_from_live_cloud_fields_not_stuck(monkeypatch):
     повисший после ремонтирования фокус и должен был бы стать no-op."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -503,7 +503,7 @@ async def test_commit_local_starts_service_after_reload(monkeypatch, tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import autostart as autostart
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     async with app.run_test() as pilot:
         seen = []
@@ -546,7 +546,7 @@ async def test_commit_cloud_unwires_managed(monkeypatch, tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import wire as wire_mod
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         calls = []
         monkeypatch.setattr(
@@ -574,7 +574,7 @@ async def test_commit_local_does_not_unwire(monkeypatch, tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import wire as wire_mod
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         calls = []
         monkeypatch.setattr(
@@ -599,7 +599,7 @@ async def test_voice_cloud_field_placeholders(monkeypatch):
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -624,7 +624,7 @@ async def test_voice_cloud_draft_survives_pageup(monkeypatch):
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -657,7 +657,7 @@ async def test_voice_cloud_fields_are_framed_editor(monkeypatch):
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -706,7 +706,7 @@ async def test_editor_lookup_survives_a_pending_removal(monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -744,7 +744,7 @@ async def test_voice_cloud_invalid_url_error_inside_editor(monkeypatch):
     from gc_tui.editors.voice_endpoint import VoiceEndpointEditor
     from textual.widgets import Input, Static
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -778,7 +778,7 @@ async def test_service_start_does_not_block_wizard_finish(
     from gc_tui.app import TuiApp
     from gc_tui.voice_runtime import autostart as autostart
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     async with app.run_test() as pilot:
         entered = threading.Event()
@@ -864,7 +864,7 @@ async def test_model_field_loads_the_list_from_the_endpoint():
     не вписывают вслепую, а ошибка в адресе/токене видна сразу, а не при первой диктовке."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -889,7 +889,7 @@ async def test_the_list_stays_shut_without_a_url():
     """Адреса нет — в сеть не ходим и молчим (то же правило, что в /settings)."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -908,7 +908,7 @@ async def test_arrows_walk_an_open_list_not_the_mode_rows():
     endpoint» и свернули поля прямо во время выбора модели."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -935,7 +935,7 @@ async def test_enter_on_an_open_list_picks_a_model_instead_of_advancing():
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -959,7 +959,7 @@ async def test_escape_on_an_open_list_only_shuts_it():
     """Esc сворачивает список и НЕ выходит из мастера — модалка выхода не появляется."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -984,7 +984,7 @@ async def test_alt_down_reopens_the_list_only_from_the_model_field():
     (§2.5, §5.1 спеки) — про список она больше не спрашивает."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -1029,7 +1029,7 @@ async def test_alt_down_on_a_preset_url_opens_the_full_list_with_the_match_highl
     )
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1059,7 +1059,7 @@ async def test_enter_on_a_foreign_url_preset_substitutes_and_clears_the_model():
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1090,7 +1090,7 @@ async def test_escape_on_the_url_list_only_shuts_it_and_keeps_the_typed_value():
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1114,7 +1114,7 @@ async def test_alt_down_on_the_url_field_reopens_a_closed_list():
     после Esc/своего адреса, а не no-op (симметрично списку моделей)."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1136,7 +1136,7 @@ async def test_advancing_after_a_url_pick_with_empty_model_shows_the_form_error(
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1171,7 +1171,7 @@ async def test_fields_follow_the_cursor_not_the_mark():
     Иначе поля чужой опции висят под «Локальным сервисом» и выглядят как его."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1196,7 +1196,7 @@ async def test_typed_values_survive_a_trip_off_the_option():
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1223,7 +1223,7 @@ async def test_marking_keeps_the_fields_and_what_was_typed():
     from gc_tui.app import TuiApp
     from textual.widgets import Input
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1465,7 +1465,7 @@ async def test_field_cursor_resets_with_the_group_on_leaving_the_step(
     from textual.widgets import Input
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -1540,7 +1540,7 @@ async def test_click_on_a_field_moves_the_cursor_there(monkeypatch, tmp_path):
     from gc_tui.app import TuiApp
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(120, 55)) as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1563,7 +1563,7 @@ async def test_modal_screens_keep_focus_moves_but_not_global_nav():
     глобальная навигация — нет (ради неё гейт и заведён)."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1583,7 +1583,7 @@ async def test_local_option_always_shows_its_cost():
     from gc_tui.app import TuiApp
     from gc_tui.screens.onboarding import _VOICE_LOCAL_COST
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1611,7 +1611,7 @@ async def test_no_key_hints_inside_the_step_body():
     роль Tab; теперь Tab водит курсор по группам, как и везде."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1658,7 +1658,7 @@ async def test_desc_column_moves_left_without_the_installed_mark(
         "gc_tui.voice_runtime.state.voice_state_path",
         lambda: tmp_path / "state.json",
     )
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test() as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1679,7 +1679,7 @@ async def test_cost_line_sits_tight_under_its_option_with_air_before_the_next():
     со следующей опцией."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(
         size=(150, 40)
     ) as pilot:  # шире строки: проверяем раскладку, не перенос
@@ -1725,7 +1725,7 @@ async def test_cost_line_keeps_its_column_when_it_wraps():
     левому краю: поэтому колонка задана отступом виджета."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(85, 40)) as pilot:
         screen = _screen(app, FakeVoice())
         await app.push_screen(screen)
@@ -1832,7 +1832,7 @@ async def test_voice_step_prefills_cloud_from_config(tmp_path, monkeypatch):
     from textual.widgets import Input
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False,
@@ -1890,7 +1890,7 @@ async def test_ctrl_u_clears_the_saved_voice_token_in_the_wizard(
     from textual.widgets import Input
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False,
@@ -1950,7 +1950,7 @@ async def test_voice_step_prefills_local_from_config(tmp_path, monkeypatch):
     from gc_tui.services.voice_setup import VoiceStatus
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice(installed=True)
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=True,
@@ -1983,7 +1983,7 @@ async def test_prefill_reads_raw_document_not_merged_config(
     from textual.widgets import Input
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False,
@@ -2042,7 +2042,7 @@ async def test_voice_step_prefill_noop_when_nothing_configured(
     from gc_tui.services.voice_setup import VoiceStatus
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False, service_alive=False, port=None, model=None, mode="off"
@@ -2068,7 +2068,7 @@ async def test_prefill_reads_snapshot_only_once_per_step_visit(
     from gc_tui.services.voice_setup import VoiceStatus
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     calls = []
 
@@ -2107,7 +2107,7 @@ async def test_passing_through_voice_step_keeps_cloud_backend(
     from gc_tui.services.voice_setup import VoiceStatus
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False,
@@ -2157,7 +2157,7 @@ async def test_commit_cloud_empty_token_keeps_saved_secret(
     from gc_tui.services.voice_setup import VoiceStatus
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False,
@@ -2214,7 +2214,7 @@ async def test_pagedown_recovers_cloud_fields_when_cursor_drifted_away(
     from gc_tui.services.voice_setup import VoiceStatus
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False,
@@ -2259,7 +2259,7 @@ async def test_model_list_uses_saved_token_when_field_empty(
     from gc_tui.app import TuiApp
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     cfg_path = _write_cloud_config(
@@ -2305,7 +2305,7 @@ async def test_voice_cloud_draft_token_does_not_leak_saved_secret(
     from textual.widgets import Input
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.status_cheap = lambda cfg: VoiceStatus(
         installed=False,
@@ -2364,8 +2364,11 @@ async def test_model_list_carries_verify_ssl_and_proxy_from_config(
     from gc_tui.app import TuiApp
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    config = {"proxy": "http://corp:3128", "voice": {"verify_ssl": False}}
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    config = {
+        "backend.proxy": "http://corp:3128",
+        "voice": {"verify_ssl": False},
+    }
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -2399,9 +2402,9 @@ async def test_model_list_prefers_typed_connection_proxy_over_config(
 
     _isolate_voice_state(monkeypatch, tmp_path)
     config = {
-        "proxy": "http://stale-config-proxy:1"
+        "backend.proxy": "http://stale-config-proxy:1"
     }  # в конфиге — ДРУГОЙ прокси
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -2429,8 +2432,8 @@ async def test_model_list_falls_back_to_config_proxy_when_connection_step_not_vi
     from gc_tui.app import TuiApp
 
     _isolate_voice_state(monkeypatch, tmp_path)
-    config = {"proxy": "http://corp:3128"}
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    config = {"backend.proxy": "http://corp:3128"}
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:
@@ -2453,7 +2456,7 @@ async def test_list_hints_stand_under_every_field_from_the_first_frame():
     from gc_tui.editors.field_list import LIST_CLOSED_HINT
     from gc_tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
     voice.models = _MODELS
     async with app.run_test() as pilot:

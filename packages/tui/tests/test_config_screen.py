@@ -8,7 +8,7 @@ def test_profile_header_hides_unset_model_sentinel():
     from gc_core import onboarding
     from gc_tui.screens.config import _profile_header_text
 
-    cfg = {"model": onboarding.MODEL_SENTINEL}
+    cfg = {"agent.model": onboarding.MODEL_SENTINEL}
     text = _profile_header_text(as_settings(cfg), profile_source=None).plain
     assert onboarding.MODEL_SENTINEL not in text
 
@@ -21,7 +21,7 @@ def test_profile_header_shows_registry_model_not_flat_key():
     from gc_tui.screens.config import _profile_header_text
 
     cfg = {
-        "model": onboarding.MODEL_SENTINEL,
+        "agent.model": onboarding.MODEL_SENTINEL,
         "level": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
@@ -36,7 +36,7 @@ def test_profile_header_prefers_resolved_model_over_stale_flat_key():
     from gc_tui.screens.config import _profile_header_text
 
     cfg = {
-        "model": "stale-legacy-model",
+        "agent.model": "stale-legacy-model",
         "level": "default",
         "models": {"flash": {"model": "google/gemini-2.5-flash"}},
         "slots": {"default": "flash"},
@@ -51,7 +51,7 @@ def test_profile_header_falls_back_to_flat_model_in_legacy_mode():
     from gc_tui.screens.config import _profile_header_text
 
     text = _profile_header_text(
-        as_settings({"model": "qwen3-coder"}), profile_source=None
+        as_settings({"agent.model": "qwen3-coder"}), profile_source=None
     ).plain
     assert "модель: qwen3-coder" in text
 
@@ -62,12 +62,12 @@ async def test_config_screen_yaml_redacts_secret_and_shows_paths(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "model": "M",
-        "chat_completion_headers": {"Authorization": "Bearer sk-REAL"},
-        "agent_md_path": "/p/agent.md",
-        "threads_data_path": "/p/threads",
-        "logs_dump_dir": "/p/logs",
-        "mcp-servers": {},
+        "agent.model": "M",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk-REAL"},
+        "paths.agent_md_path": "/p/agent.md",
+        "paths.threads_data_path": "/p/threads",
+        "paths.logs_dump_dir": "/p/logs",
+        "mcp.servers": {},
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -98,7 +98,7 @@ async def test_command_config_opens_screen(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -118,7 +118,7 @@ async def test_config_screen_esc_returns_to_main(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -140,7 +140,7 @@ async def test_config_screen_has_header_and_footer(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -160,7 +160,9 @@ def test_paths_block_is_rich_text_without_pseudo_comment():
     from rich.text import Text
 
     t = _paths_block(
-        as_settings({"agent_md_path": "/p/agent.md"}), "/p/config.yml", None
+        as_settings({"paths.agent_md_path": "/p/agent.md"}),
+        "/p/config.yml",
+        None,
     )
     assert isinstance(t, Text)
     plain = t.plain
@@ -190,7 +192,7 @@ async def test_config_screen_fieldset_panels(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -218,7 +220,7 @@ async def test_config_screen_snapshot_hint_caption(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -246,7 +248,7 @@ async def test_config_trace_quiet_focus_keeps_keyboard_scroll(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._config_path = "/p/config.yml"
     async with app.run_test() as pilot:
@@ -280,9 +282,9 @@ def test_quiet_focus_and_panel_rules_in_tcss():
 def test_filter_config_by_key_matches_key_keeps_subtree():
     from gc_tui.screens.config import _filter_config_by_key
 
-    cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
+    cfg = {"agent.model": "M", "mcp.servers": {"srv": {"transport": "http"}}}
     assert _filter_config_by_key(cfg, "mcp") == {
-        "mcp-servers": {"srv": {"transport": "http"}}
+        "mcp.servers": {"srv": {"transport": "http"}}
     }
 
 
@@ -311,8 +313,8 @@ def test_filtered_yaml_text_filters_full_and_no_match():
     scr = ConfigScreen(
         settings=as_settings(
             {
-                "model": "M",
-                "mcp-servers": {"s": {"transport": "http", "url": "http://x"}},
+                "agent.model": "M",
+                "mcp.servers": {"s": {"transport": "http", "url": "http://x"}},
             }
         )
     )
@@ -333,7 +335,7 @@ async def test_config_filter_input_focused_and_filters(tmp_path):
     from gc_tui.screens.config import ConfigScreen
     from textual.widgets import Input
 
-    cfg = {"model": "M", "mcp-servers": {"srv": {"transport": "http"}}}
+    cfg = {"agent.model": "M", "mcp.servers": {"srv": {"transport": "http"}}}
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
     )

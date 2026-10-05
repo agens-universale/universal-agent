@@ -34,7 +34,7 @@ def _app(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
 

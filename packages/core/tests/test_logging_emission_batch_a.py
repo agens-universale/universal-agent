@@ -22,10 +22,10 @@ from gc_testkit.settings import make_settings
 
 def _jsonl_cfg(tmp_path, **extra):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "console_trace": False,
-        "logging_format": "jsonl",
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "logging.format": "jsonl",
     }
     cfg.update(extra)
     return make_settings(cfg)
@@ -152,10 +152,10 @@ def minimal_config_dict(monkeypatch, tmp_path):
     )
     return _jsonl_cfg(
         tmp_path,
-        model="qwen2.5",
-        completions_url="http://backend/v1/chat",
-        backend_api_mode="chat_completions",
-        log_level="debug",
+        **{"agent.model": "qwen2.5"},
+        **{"backend.completions_url": "http://backend/v1/chat"},
+        **{"backend.api_mode": "chat_completions"},
+        **{"logging.log_level": "debug"},
     )
 
 

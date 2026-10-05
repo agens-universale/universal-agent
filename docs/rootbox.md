@@ -306,7 +306,7 @@ gc-cli -q "..." --command-moderation deny
 
 # Включить сам слой можно generic-override'ом (заменяет секцию целиком,
 # поэтому allowed/denied_command_examples из конфига теряются):
-gc-cli -q "..." --command_moderation "{enabled: true, mode: deny}"
+gc-cli -q "..." --security.command_moderation "{enabled: true, mode: deny}"
 ```
 
 Секции `protected_paths` и `url_policy` из CLI не переключаются вовсе.

@@ -74,7 +74,7 @@ async def test_confirm_full_chain_via_run_test():
     from gc_tui.services.agent_runner import AgentRunner
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     # Фабрика не нужна — executor не строим.
     app._executor_factory = lambda: None
 
@@ -144,7 +144,7 @@ async def test_confirm_reentrant_decline_then_approve():
     from gc_tui.services.agent_runner import AgentRunner
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     app._executor_factory = lambda: None
 
     stub_executor = types.SimpleNamespace(
@@ -230,7 +230,7 @@ async def test_confirm_arrow_down_then_enter_selects_allow_once():
     from gc_tui.services.agent_runner import AgentRunner
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     app._executor_factory = lambda: None
 
     stub_executor = types.SimpleNamespace(
@@ -287,7 +287,7 @@ async def test_confirm_enter_default_selects_y():
     from gc_tui.services.agent_runner import AgentRunner
     from gc_tui.widgets.confirm_banner import ConfirmBanner
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     app._executor_factory = lambda: None
 
     stub_executor = types.SimpleNamespace(

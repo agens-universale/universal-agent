@@ -30,10 +30,10 @@ def _state(*, backend_api_mode="chat_completions", messages=None):
 
 def test_registered_only_for_chat_completions():
     assert "session_compact" not in get_builtin_tools_data(
-        make_settings({"backend_api_mode": "responses"})
+        make_settings({"backend.api_mode": "responses"})
     )
     tools = get_builtin_tools_data(
-        make_settings({"backend_api_mode": "chat_completions"})
+        make_settings({"backend.api_mode": "chat_completions"})
     )
     assert "session_compact" in tools
     assert tools["session_compact"]["tool_fabric"] is SessionCompact

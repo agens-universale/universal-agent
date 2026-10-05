@@ -14,7 +14,7 @@ async def test_intermediate_reply_renders_as_dot_prose(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -46,7 +46,7 @@ async def test_error_msg_renders_red_bang(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen

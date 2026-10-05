@@ -248,9 +248,9 @@ async def test_store_reaches_the_context_and_session(tmp_path):
     ctx = await acreate_run_context(
         make_settings(
             {
-                "stop_tools": [],
-                "backend_api_mode": "chat_completions",
-                "save_logs": False,
+                "agent.stop_tools": [],
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
             }
         ),
         thread_store=store,
@@ -280,7 +280,7 @@ async def test_session_writes_go_through_the_store(tmp_path, monkeypatch):
     store = MemoryThreadStore()
     session = await ThreadSession.afrom_config(
         settings=make_settings(
-            {"threads_data_path": str(tmp_path / "threads")}
+            {"paths.threads_data_path": str(tmp_path / "threads")}
         ),
         system_id=SYS,
         thread_id=TID,

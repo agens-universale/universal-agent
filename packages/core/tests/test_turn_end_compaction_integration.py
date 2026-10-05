@@ -63,12 +63,12 @@ def _make_ctx(**overrides):
     }
     summary_params.update(summary_overrides)
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": True,
-        "summary_params": summary_params,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": True,
+        "summary": summary_params,
     }
     cfg.update(overrides)
     return fake_ctx(
@@ -326,7 +326,7 @@ def test_turn_end_runs_on_fail_open_when_volume_high(monkeypatch):
         pr.arun_agent(
             [_submit_solution_call()],
             state,
-            _make_ctx(strict_turn_finish_validation=True),
+            _make_ctx(**{"agent.strict_turn_finish_validation": True}),
             turn_end_compaction_hook=coord.aturn_end_compact_if_needed,
         )
     )
@@ -451,18 +451,18 @@ def test_turn_end_working_memory_in_summary_message(monkeypatch):
 
 def _agent_executor_config() -> dict:
     return {
-        "verbose": False,
-        "model": "CodeChat",
-        "max_steps": 5,
-        "system_prompt_id": "v1",
-        "use_server_subagents": False,
-        "agent_md_path": "",
-        "limit_project_metadata": True,
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": True,
-        "summary_params": {
+        "agent.verbose": False,
+        "agent.model": "CodeChat",
+        "agent.max_steps": 5,
+        "agent.system_prompt_id": "v1",
+        "agent.use_server_subagents": False,
+        "paths.agent_md_path": "",
+        "agent.limit_project_metadata": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": True,
+        "summary": {
             "chat_completions_summary_trigger_chars": 0,
             "chat_completions_summary_turn_end_trigger_chars": 1,
             "incremental_batch_chars": 100,

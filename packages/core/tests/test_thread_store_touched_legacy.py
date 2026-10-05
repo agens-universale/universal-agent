@@ -63,7 +63,7 @@ async def test_summary_leaves_touched_journal_intact(tmp_path):
     )
 
     session = await ThreadSession.afrom_config(
-        settings=make_settings({"threads_data_path": str(threads)}),
+        settings=make_settings({"paths.threads_data_path": str(threads)}),
         system_id="tui",
         thread_id=tid,
     )

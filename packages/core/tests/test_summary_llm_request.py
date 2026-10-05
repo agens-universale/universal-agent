@@ -161,9 +161,9 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
 
     ctx = fake_ctx(
         {
-            "completions_url": "http://example.test/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "chat_completion_kwargs": {
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.chat_completion_kwargs": {
                 "temperature": 1.0,
                 "separate_reasoning": True,
                 "chat_template_kwargs": {"enable_thinking": True},

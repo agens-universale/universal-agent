@@ -186,7 +186,7 @@ def test_wrapper_threads_ctx_to_confirm_port(monkeypatch, tmp_path):
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "deny"},
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
         },
         logger=None,
     )

@@ -7,13 +7,13 @@ from gc_testkit.settings import make_settings
 
 def _base_config(tmp_path, **extra):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
         "launch_root": str(tmp_path),
     }
     cfg.update(extra)
@@ -58,7 +58,9 @@ async def test_trace_binding_event_records_header_names(tmp_path):
 async def test_trace_binding_reflects_header_override(tmp_path):
     ctx = await acreate_run_context(
         _base_config(
-            tmp_path, trace_id="wf-42", trace_id_header_name="X-Trace-Id"
+            tmp_path,
+            trace_id="wf-42",
+            **{"agent.trace_id_header_name": "X-Trace-Id"},
         )
     )
     binding = [

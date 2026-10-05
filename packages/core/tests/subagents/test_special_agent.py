@@ -37,15 +37,17 @@ def _make_orchestrator_state():
 
 def _make_config(**overrides):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "completions_url": "http://fake-llm/v1/chat/completions",
-        "use_ssl": False,
-        "backend_request_timeout_sec": 600,
-        "chat_completion_headers": {"Authorization": "Bearer test-token"},
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "backend.completions_url": "http://fake-llm/v1/chat/completions",
+        "backend.use_ssl": False,
+        "backend.request_timeout_sec": 600,
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer test-token"
+        },
     }
     cfg.update(overrides)
     return cfg

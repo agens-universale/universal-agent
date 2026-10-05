@@ -82,9 +82,9 @@ async def test_stream_block_mounts_then_clears_on_canonical_row(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
             }
         ),
     )
@@ -144,9 +144,9 @@ async def test_reset_render_state_clears_stream_block_and_sink(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
             }
         ),
     )
@@ -189,9 +189,9 @@ async def test_stream_block_cleared_when_run_not_running(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
             }
         ),
     )
@@ -235,9 +235,9 @@ async def test_reasoning_line_below_committed_rows(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer_reasoning",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer_reasoning",
             }
         ),
     )
@@ -309,9 +309,9 @@ async def test_reasoning_block_cleared_when_tool_row_renders(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer_reasoning",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer_reasoning",
             }
         ),
     )
@@ -365,7 +365,7 @@ async def test_no_reasoning_block_in_validating_phase(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     async with app.run_test() as pilot:
@@ -405,9 +405,9 @@ async def test_stream_answer_preview_false_hides_answer_block(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "minimal",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "minimal",
             }
         ),
     )
@@ -451,9 +451,9 @@ async def test_stream_answer_preview_false_shows_reasoning_line(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer_reasoning",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer_reasoning",
             }
         ),
     )
@@ -495,9 +495,9 @@ async def test_show_reasoning_line_false_hides_reasoning_block(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
             }
         ),
     )

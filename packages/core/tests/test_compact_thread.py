@@ -72,10 +72,10 @@ def test_compact_thread_calls_force_compact(monkeypatch, tmp_path):
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = fake_ctx(
         {
-            "model": "M",
-            "max_steps": 30,
-            "system_prompt_id": "x",
-            "backend_api_mode": "chat_completions",
+            "agent.model": "M",
+            "agent.max_steps": 30,
+            "agent.system_prompt_id": "x",
+            "backend.api_mode": "chat_completions",
         },
         tools_spec=[],
         tools_description=[],
@@ -131,10 +131,10 @@ def _make_compact_executor(
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = fake_ctx(
         {
-            "model": "M",
-            "max_steps": 30,
-            "system_prompt_id": "x",
-            "backend_api_mode": "chat_completions",
+            "agent.model": "M",
+            "agent.max_steps": 30,
+            "agent.system_prompt_id": "x",
+            "backend.api_mode": "chat_completions",
         },
         tools_spec=[],
         tools_description=[],
@@ -250,10 +250,10 @@ def test_compact_thread_noop_in_responses(monkeypatch, tmp_path):
     ex = ae.AgentExecutor.__new__(ae.AgentExecutor)
     ex._ctx = fake_ctx(
         {
-            "model": "M",
-            "max_steps": 30,
-            "system_prompt_id": "x",
-            "backend_api_mode": "responses",
+            "agent.model": "M",
+            "agent.max_steps": 30,
+            "agent.system_prompt_id": "x",
+            "backend.api_mode": "responses",
         },
         tools_spec=[],
         tools_description=[],

@@ -75,14 +75,14 @@ def _settings(
     tmp_path, model: str = "backend-model", **extra
 ) -> LoadedSettings:
     config = {
-        "model": model,
-        "threads_data_path": str(tmp_path / "threads"),
-        "completions_url": _URL,
-        "backend_request_timeout_sec": 12,
-        "use_ssl": False,
-        "proxy": "http://proxy.test:8080",
-        "backend_api_mode": "chat_completions",
-        "chat_completion_headers": {"X-Corp": "yes"},
+        "agent.model": model,
+        "paths.threads_data_path": str(tmp_path / "threads"),
+        "backend.completions_url": _URL,
+        "backend.request_timeout_sec": 12,
+        "backend.use_ssl": False,
+        "backend.proxy": "http://proxy.test:8080",
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completion_headers": {"X-Corp": "yes"},
         "chat_api.auth_token": "client-secret",
     }
     return make_settings({**config, **extra})
@@ -182,7 +182,7 @@ def test_joint_and_responses_list_the_same_ids(tmp_path):
 def test_config_model_gc_ua_exits_before_bind(monkeypatch, capsys):
     def load(path, profile_override=None):
         del path, profile_override
-        return make_settings(os_backend="local", model="GC-UA")
+        return make_settings(os_backend="local", **{"agent.model": "GC-UA"})
 
     def run(coro):
         coro.close()
@@ -279,7 +279,10 @@ def test_direct_forwards_body_and_backend_headers(tmp_path, monkeypatch):
     cert.write_text("cert")
     key.write_text("key")
     app, created, threads = _completions(
-        tmp_path, auth=_Auth(), cert_path=str(cert), key_path=str(key)
+        tmp_path,
+        auth=_Auth(),
+        **{"backend.cert_path": str(cert)},
+        **{"backend.key_path": str(key)},
     )
     client = TestClient(app, base_url=LOOPBACK)
     messages = [
@@ -450,7 +453,8 @@ def test_responses_rejects_other_models_without_a_thread(tmp_path):
 
     facade = ResponsesFacade(
         settings=make_settings(
-            model="backend-model", threads_data_path=str(threads)
+            **{"agent.model": "backend-model"},
+            **{"paths.threads_data_path": str(threads)},
         ),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),

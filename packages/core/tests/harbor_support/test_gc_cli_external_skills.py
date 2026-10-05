@@ -38,13 +38,17 @@ def test_resolve_profile_skill_dirs_includes_packs():
 
 
 def test_apply_injected_skills_uses_container_path():
-    settings = make_settings(skills_data_path="/opt/gc-harbor-adapters/skills")
+    settings = make_settings(
+        **{"paths.skills_data_path": "/opt/gc-harbor-adapters/skills"}
+    )
     applied = GcCliExternal._apply_injected_skills(settings, "/harbor/skills")
     assert applied.settings.paths.skills_data_path == "/harbor/skills"
 
 
 def test_apply_injected_skills_without_container_skills_uses_empty_sentinel():
-    settings = make_settings(skills_data_path="/opt/gc-harbor-adapters/skills")
+    settings = make_settings(
+        **{"paths.skills_data_path": "/opt/gc-harbor-adapters/skills"}
+    )
     applied = GcCliExternal._apply_injected_skills(settings, None)
     assert applied.settings.paths.skills_data_path == "/harbor/.gc_no_skills"
 

@@ -171,7 +171,7 @@ def test_empty_register_missing_register():
 
 
 def test_register_limit_exceeded():
-    ctx = fake_ctx({"working_memory_params": {"max_chars_goal": 10}})
+    ctx = fake_ctx({"working_memory": {"max_chars_goal": 10}})
     tool = CallableTool(WorkingMemory(ctx=ctx, state=_make_state()))
     res = json.loads(
         tool(
@@ -190,9 +190,7 @@ def test_total_budget_limit_exceeded():
     assert DEFAULT_TOTAL_BUDGET_CHARS == 20_000
     tool = CallableTool(
         WorkingMemory(
-            ctx=fake_ctx(
-                {"working_memory_params": {"total_budget_chars": 50}}
-            ),
+            ctx=fake_ctx({"working_memory": {"total_budget_chars": 50}}),
             state=state,
         )
     )

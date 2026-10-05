@@ -155,7 +155,7 @@ def test_load_config_timeout_default_when_omitted(tmp_path: Path):
 
 def test_factory_applies_capture_max_from_config():
     backend = resolve_os_backend(
-        make_settings({"exec_output_capture_max_chars": 1500})
+        make_settings({"agent.exec_output_capture_max_chars": 1500})
     )
     assert backend.exec_output_capture_max_chars == 1500
     assert (
@@ -166,7 +166,7 @@ def test_factory_applies_capture_max_from_config():
 
 def test_local_ctx_applies_capture_max_from_config():
     tool = with_local_ctx(
-        ExecuteCommand, {"exec_output_capture_max_chars": 777}
+        ExecuteCommand, {"agent.exec_output_capture_max_chars": 777}
     )
     assert tool._backend.exec_output_capture_max_chars == 777
 
@@ -195,7 +195,7 @@ def test_execute_command_uses_config_default(monkeypatch):
         "gc_core.backends.local.LocalFsBackend.aexec",
         _fake_exec,
     )
-    tool = with_local_ctx(ExecuteCommand, {"exec_timeout_sec": 600})
+    tool = with_local_ctx(ExecuteCommand, {"agent.exec_timeout_sec": 600})
     env = json.loads(tool(command="true"))
     assert env["ok"] is True
     assert seen["timeout"] == 600
@@ -216,7 +216,7 @@ def test_run_python_uses_config_default(monkeypatch):
         "gc_core.backends.local.LocalFsBackend.arun_python",
         _fake_run_python,
     )
-    tool = with_local_ctx(RunPythonCode, {"exec_timeout_sec": 600})
+    tool = with_local_ctx(RunPythonCode, {"agent.exec_timeout_sec": 600})
     env = json.loads(tool(code="print(1)"))
     assert env["ok"] is True
     assert seen["timeout"] == 600
@@ -224,13 +224,15 @@ def test_run_python_uses_config_default(monkeypatch):
 
 def test_tool_schema_timeout_default_comes_from_config():
     for cls in (ExecuteCommand, RunPythonCode):
-        spec = cls.tool_description(make_settings({"exec_timeout_sec": 600}))
+        spec = cls.tool_description(
+            make_settings({"agent.exec_timeout_sec": 600})
+        )
         timeout = spec["parameters"]["properties"]["timeout"]
         assert timeout["default"] == 600
         assert "600" in timeout["description"]
         assert "120" not in timeout["description"]
         assert '"default": 600' in cls.prompt_description(
-            make_settings({"exec_timeout_sec": 600})
+            make_settings({"agent.exec_timeout_sec": 600})
         )
 
         omitted = cls.tool_description()
@@ -258,8 +260,8 @@ def test_preview_edge_from_flat_config_is_clamped_to_capture_tail():
     )
 
     cfg = {
-        "exec_output_capture_max_chars": 1000,
-        "exec_output_preview_edge_chars": 3000,
+        "agent.exec_output_capture_max_chars": 1000,
+        "agent.exec_output_preview_edge_chars": 3000,
     }
     assert (
         exec_output_preview_edge_chars_from_config_dict(make_settings(cfg))
@@ -268,7 +270,7 @@ def test_preview_edge_from_flat_config_is_clamped_to_capture_tail():
     assert exec_output_preview_edge_chars_from_config_dict(None) == 3000
     assert (
         exec_output_preview_edge_chars_from_config_dict(
-            make_settings({"exec_output_capture_max_chars": 0})
+            make_settings({"agent.exec_output_capture_max_chars": 0})
         )
         == 0
     )

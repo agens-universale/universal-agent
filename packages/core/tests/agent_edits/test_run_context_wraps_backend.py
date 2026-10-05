@@ -17,7 +17,7 @@ from gc_core.backends.local import LocalFsBackend
 from gc_core.run_context import acreate_run_context
 from gc_testkit.settings import make_settings
 
-_CFG = {"backend_api_mode": "chat_completions", "save_logs": False}
+_CFG = {"backend.api_mode": "chat_completions", "logging.save_logs": False}
 
 
 async def test_outside_tui_the_backend_is_not_wrapped_by_default():

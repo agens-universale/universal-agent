@@ -5,23 +5,15 @@
 
 - типизированные настройки (``AppConfig``, экран /config) — ``redact_settings``:
   только метаданные, без угадывания по именам;
-- произвольные сырые словари — ``redact_secrets``: известные плоские имена
-  ключей (``FLAT_TO_PATH``) маскируются по
-  метаданным схемы, а поверх работает эвристика по подстроке имени ключа. Её
-  место — только словари, где схемы нет: вычисленные ключи плоского вида
+- произвольные сырые словари — ``redact_secrets``: эвристика по подстроке
+  имени ключа. Её место — только словари, где схемы нет: вычисленные ключи
   (``authorization_header`` записи реестра), секции с произвольными ключами,
   чужие сырые документы.
 """
 
 from typing import Any
 
-from gc_core.config_modules.field_meta import (
-    meta_for,
-    paths_where,
-    redact,
-    redacted_dump,
-)
-from gc_core.config_modules.flat_keys import FLAT_TO_PATH
+from gc_core.config_modules.field_meta import redacted_dump
 from pydantic import BaseModel
 
 # Важно: под ключи конфига, отображаемые в TUI.
@@ -58,31 +50,9 @@ def _redact_by_name(value: Any) -> Any:
     return value
 
 
-def _carries_secrets(path: str) -> bool:
-    """Секрет сам путь или что-то под ним (по метаданным схемы)."""
-    return meta_for(path).secret or any(
-        secret.startswith(path + ".") for secret in paths_where("secret")
-    )
-
-
-def _redact_flat_value(key: str, value: Any) -> Any:
-    """Значение плоского ключа — по метаданным его пути в схеме; ключи без
-    секретов в схеме возвращаются как есть."""
-    path = FLAT_TO_PATH.get(key)
-    if path is None or not _carries_secrets(path):
-        return value
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    *parent, leaf = path.split(".")
-    return redact({leaf: value}, tuple(parent))[leaf]
-
-
 def redact_secrets(value: Any) -> Any:
-    """Рекурсивная копия плоского/сырого value с замаскированными секретами:
-    известные плоские ключи — по метаданным схемы, затем эвристика по имени.
-    Не мутирует вход."""
-    if isinstance(value, dict):
-        value = {k: _redact_flat_value(str(k), v) for k, v in value.items()}
+    """Рекурсивная копия сырого value с замаскированными секретами — эвристика
+    по имени ключа (схемы у сырого словаря нет). Не мутирует вход."""
     return _redact_by_name(value)
 
 

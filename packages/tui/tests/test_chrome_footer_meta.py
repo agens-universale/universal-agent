@@ -24,7 +24,7 @@ async def test_footer_right_shows_model(tmp_path, monkeypatch):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._settings = tui_settings({"model": "MiniMaxAI/MiniMax-M2.7"})
+        app._settings = tui_settings({"agent.model": "MiniMaxAI/MiniMax-M2.7"})
         right = scr._compose_footer_right().plain
         # не chat_completions → только имя модели, без метра (+ точка-индикатор уровня)
         assert right == "● MiniMaxAI/MiniMax-M2.7"
@@ -39,7 +39,7 @@ async def test_footer_right_model_meter_sep_compact(tmp_path, monkeypatch):
     app = TuiApp(threads_dir=str(tmp_path / "threads"))
     async with app.run_test() as pilot:
         scr = pilot.app.screen
-        app._settings = tui_settings({"model": "M"})
+        app._settings = tui_settings({"agent.model": "M"})
         monkeypatch.setattr(scr, "_context_meter", lambda: Text("CTX"))
         assert scr._compose_footer_right().plain == "● M · CTX"
 

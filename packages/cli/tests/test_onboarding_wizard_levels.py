@@ -109,9 +109,9 @@ def test_the_model_list_is_fetched_once_for_both_steps(monkeypatch):
     monkeypatch.setattr("gc_core.model_picker.fetch_models", fake)
     cfg = make_settings(
         {
-            "completions_url": "https://h/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer x"},
-            "model": onboarding.MODEL_SENTINEL,
+            "backend.completions_url": "https://h/v1/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer x"},
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     # адрес · авторизация · модель · уровни: да · light=1 · max — пропуск

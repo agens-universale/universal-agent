@@ -1,6 +1,8 @@
 import logging
 import os
 
+import pytest
+
 from gc_core.config import cli_forces_legacy_model
 from gc_core.config_modules import env_vars
 from gc_core.config_modules.env_vars import EnvVars
@@ -96,14 +98,14 @@ def test_agent_overrides_model_with_registry_forces_legacy(monkeypatch):
             {
                 "models": {"flash": {}},
                 "slots": {"default": "flash"},
-                "model": "flash",
-                "completions_url": "http://127.0.0.1:8014/v1/chat/completions",
+                "agent.model": "flash",
+                "backend.completions_url": "http://127.0.0.1:8014/v1/chat/completions",
             }
         ),
     )
 
     loaded = server_config.build_agent_settings_for_server(
-        {"agent_overrides": {"model": "forced-model"}}
+        {"agent_overrides": {"agent.model": "forced-model"}}
     )
 
     # agent_overrides видны легаси-форсу как заданные из CLI.
@@ -128,7 +130,7 @@ def test_agent_overrides_without_model_is_not_forced(monkeypatch):
     )
 
     loaded = server_config.build_agent_settings_for_server(
-        {"agent_overrides": {"stop_tools": ["write_to_file"]}}
+        {"agent_overrides": {"agent.stop_tools": ["write_to_file"]}}
     )
 
     assert cli_forces_legacy_model(loaded) is False
@@ -139,15 +141,54 @@ def test_agent_overrides_other_keys_still_applied(monkeypatch):
     monkeypatch.setattr(
         server_config,
         "load_settings",
-        lambda: make_settings({"model": "m"}),
+        lambda: make_settings({"agent.model": "m"}),
     )
 
     settings = server_config.build_agent_settings_for_server(
-        {"agent_overrides": {"stop_tools": ["write_to_file"], "max_steps": 7}}
+        {
+            "agent_overrides": {
+                "agent.stop_tools": ["write_to_file"],
+                "agent.max_steps": 7,
+            }
+        }
     ).settings
 
     assert settings.agent.stop_tools == ["write_to_file"]
     assert settings.agent.max_steps == 7
+
+
+def test_agent_overrides_section_overrides_only_its_fields(monkeypatch):
+    """Вложенная секция перекрывает только заданные поля — как deep-merge у
+    swarm; прочие значения config.yml остаются."""
+    monkeypatch.setattr(
+        server_config,
+        "load_settings",
+        lambda: make_settings({"agent.model": "m", "agent.max_steps": 3}),
+    )
+
+    settings = server_config.build_agent_settings_for_server(
+        {"agent_overrides": {"agent": {"stop_tools": ["write_to_file"]}}}
+    ).settings
+
+    assert settings.agent.stop_tools == ["write_to_file"]
+    assert settings.agent.max_steps == 3
+    assert settings.agent.model == "m"
+
+
+def test_agent_overrides_flat_name_fails_with_path_hint(monkeypatch):
+    """Плоских имён нет: сервер не стартует, сообщение подсказывает путь."""
+    monkeypatch.setattr(server_config, "load_settings", make_settings)
+
+    with pytest.raises(ValueError) as exc:
+        server_config.build_agent_settings_for_server(
+            {"agent_overrides": {"max_steps": 7}}
+        )
+    message = str(exc.value)
+    assert message.startswith(
+        "agent_overrides: неизвестная настройка max_steps"
+    )
+    assert "agent.max_steps" in message
+    assert "--" not in message
 
 
 def _agent_md(server_agentmd_path, cfg_path):

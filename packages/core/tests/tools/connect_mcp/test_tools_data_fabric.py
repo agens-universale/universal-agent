@@ -31,7 +31,7 @@ _REGISTRY = {
     }
 }
 _CONFIG = {
-    "mcp-servers": {
+    "mcp.servers": {
         "srv": {"transport": "stream_http", "url": "http://srv.invalid/mcp"}
     },
 }

@@ -182,7 +182,7 @@ def test_sessions_picker_full_snapshot(snap_compare, tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
 
     async def setup(pilot):

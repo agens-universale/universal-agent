@@ -40,7 +40,10 @@ async def test_get_project_data_allowed_paths_skip_non_writable_project_dir(
         cfg = make_settings(
             {
                 "launch_root": str(root),
-                "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
+                "security.write_guard": {
+                    "enabled": True,
+                    "extra_paths": [str(extra)],
+                },
             }
         )
         data = await get_project_data(cfg)
@@ -62,7 +65,10 @@ async def test_get_project_data_merges_config_roots(tmp_path):
     cfg = make_settings(
         {
             "launch_root": str(root),
-            "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
+            "security.write_guard": {
+                "enabled": True,
+                "extra_paths": [str(extra)],
+            },
         }
     )
     data = await get_project_data(cfg)

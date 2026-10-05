@@ -26,7 +26,10 @@ def _app(tmp_path, monkeypatch, *, scenario: str, tid: str, message: str):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+            {
+                "agent.model": "CodeAgent",
+                "backend.api_mode": "chat_completions",
+            }
         ),
     )
 

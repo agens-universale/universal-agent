@@ -9,7 +9,10 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 from gc_core.config import resolve_base_config_path
 from gc_core.config_modules import env_vars
+from gc_core.config_modules.compat import map_legacy_path
 from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.path_hints import check_setting_path
+from gc_core.settings import _nested
 from gc_core.utils.user_text import read_user_text_or_none
 
 from gc_server.swarm import storage as storage
@@ -17,46 +20,26 @@ from gc_server.swarm import storage as storage
 logger = logging.getLogger(__name__)
 
 
-# Известные top-level секции в config.yml. Если agent_overrides содержит хотя бы
-# одну из них на верхнем уровне — считаем его raw-структурой; иначе — flat
-# (legacy формат для webhook'а) и оборачиваем в {"agent": ...}.
-_KNOWN_RAW_SECTIONS = frozenset(
-    {
-        "backend",
-        "agent",
-        "agent_auth",
-        "logging",
-        "paths",
-        "mcp",
-        "security",
-        "summary",
-        "chat_completions",
-        "working_memory",
-        "quality_gate",
-        "tool_usage_notice",
-        "project_memory",
-        "intent_scope",
-    }
-)
-
-
 def _normalize_agent_overrides_to_raw(
     overrides: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Привести agent_overrides к raw-структуре YAML.
 
-    - Если на верхнем уровне есть хотя бы одна известная секция — считаем raw,
-      возвращаем как есть.
-    - Иначе flat (legacy формат) — оборачиваем в {"agent": ...}. В webhook'е
-      `cfg.update(agent_overrides)` работает на flat dict; чтобы тот же
-      `agent_overrides: {stop_tools: [...]}` дотянулся до swarm'а через raw
-      YAML, нужно положить эти ключи под секцию `agent:`.
+    Ключ — путь настройки через точку (``agent.max_steps``) или секция
+    верхнего уровня (``agent: {max_steps: 100}``), как у webhook'а
+    (``build_agent_settings_for_server``). Путь раскладывается во вложенные
+    секции; дальше слой ложится deep-merge'ем. Незнакомое схеме имя (прежнее
+    плоское ``max_steps``) — ``UnknownSettingError`` с подсказкой пути.
     """
     if not isinstance(overrides, dict) or not overrides:
         return {}
-    if any(k in _KNOWN_RAW_SECTIONS for k in overrides):
-        return dict(overrides)
-    return {"agent": dict(overrides)}
+    raw: Dict[str, Any] = {}
+    for key, value in overrides.items():
+        mapped = map_legacy_path(str(key))
+        if mapped is not None:
+            check_setting_path(mapped)
+        raw = deep_merge(raw, _nested({str(key): value}))
+    return raw
 
 
 def _apply_swarm_env_to_raw(raw: Dict[str, Any], config_dir: str) -> None:
@@ -160,9 +143,9 @@ def _materialize_runtime_config(
          skills_data_path}. Параллель с config_modules.common.apply_swarm_env_overrides
          для raw YAML.
       4. agent_overrides — переопределения из config_server.yml::agent_overrides.
-         Flat-формат (legacy для webhook'а, типа `stop_tools: [...]`) авто-
-         оборачивается в {"agent": ...}. Raw-формат (с секциями `agent:`,
-         `paths:` и т.п.) применяется как есть.
+         Пути через точку (`agent.stop_tools: [...]`) раскладываются во
+         вложенные секции, секции (`agent:`, `paths:` и т.п.) применяются как
+         есть. Плоское имя (`stop_tools`) — ошибка с подсказкой пути.
       5. Swarm-specific overrides — ВСЕГДА применяются последними и
          перезаписывают предыдущие слои для критичных sandbox-полей:
            paths.threads_data_path = "/work/.gc/threads"

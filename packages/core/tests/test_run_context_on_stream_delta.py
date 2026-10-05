@@ -11,7 +11,7 @@ def minimal_settings(monkeypatch):
         "abuild_tools_data",
         as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
-    return make_settings({"model": "M", "save_logs": False})
+    return make_settings({"agent.model": "M", "logging.save_logs": False})
 
 
 async def test_on_stream_delta_defaults_none(minimal_settings):

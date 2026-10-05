@@ -27,16 +27,16 @@ def _patch_chat_completion(monkeypatch, fake):
 def _ctx():
     return fake_ctx(
         {
-            "model": "test-model",
-            "completions_url": "http://example.test/v1/chat/completions",
-            "summary_params": {
+            "agent.model": "test-model",
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "summary": {
                 "chat_completions_summary_trigger_chars": 1,
                 "incremental_batch_chars": 2,
                 "max_accumulated_summary_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {
                     "max_tokens": 8192,
                     "completion_kwargs": {},
@@ -91,7 +91,7 @@ async def test_e2e_two_sequential_summaries_keep_user_log_order_and_no_original_
             start_seq=0,
         )
         session = await ThreadSession.afrom_config(
-            settings=make_settings({"threads_data_path": tmp_dir}),
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )
@@ -238,7 +238,7 @@ async def test_e2e_user_log_skips_technical_and_tool_messages(monkeypatch):
             start_seq=0,
         )
         session = await ThreadSession.afrom_config(
-            settings=make_settings({"threads_data_path": tmp_dir}),
+            settings=make_settings({"paths.threads_data_path": tmp_dir}),
             system_id=system_id,
             thread_id=thread_id,
         )

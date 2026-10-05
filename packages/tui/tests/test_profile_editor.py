@@ -945,9 +945,9 @@ def _active_profile_runtime() -> dict:
     свой токен. Именно он подставлялся, когда стек ОТКРЫТОГО профиля не собрался, —
     и именно ему нельзя попадать в витрину чужого файла."""
     return {
-        "completions_url": "https://active-profile/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer ACTIVE"},
-        "model": "test-model",
+        "backend.completions_url": "https://active-profile/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer ACTIVE"},
+        "agent.model": "test-model",
         "profile": "home",
     }
 

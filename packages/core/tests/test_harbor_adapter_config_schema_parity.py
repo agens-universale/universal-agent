@@ -9,7 +9,8 @@ defaults, so the guarantee is stated in typed terms:
 * the result validates as ``AppConfig`` — every field exists by construction;
 * nothing differs from the schema defaults except what the bench and the profile
   meant to change (no hidden values sneak in, no field goes missing);
-* profile keys (old flat names) land on their setting paths; a typo fails loudly.
+* profile keys (setting paths, nested sections) land on their paths; a typo or an
+  old flat name fails loudly with a path hint.
 
 Layering under test: schema defaults < bench defaults < profile overrides < runtime.
 """
@@ -18,10 +19,10 @@ import sys
 
 import pytest
 import yaml
+from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.config_modules.root import AppConfig, resolve_paths
 from gc_core.settings import LoadedSettings
 from gc_testkit.paths import HARBOR
-from pydantic import ValidationError
 
 _HARBOR_DIR = HARBOR
 if str(_HARBOR_DIR) not in sys.path:
@@ -100,13 +101,13 @@ def test_only_intended_fields_differ_from_schema_defaults():
 
 
 def test_profile_overrides_land_on_their_setting_paths():
-    """Old flat names are translated, and only the named fields change."""
+    """Paths and nested sections land on their paths; only the named fields change."""
     base = _config()
     config = _config(
         {
-            "max_steps": 20,
-            "chat_completion_kwargs": {"tool_choice": "auto"},
-            "summary_params": {"max_message_chars": 1234},
+            "agent.max_steps": 20,
+            "backend.chat_completion_kwargs": {"tool_choice": "auto"},
+            "summary": {"max_message_chars": 1234},
             "agent.no_tool_call_max_count": 7,
         }
     )
@@ -121,8 +122,17 @@ def test_profile_overrides_land_on_their_setting_paths():
 
 def test_unknown_profile_key_fails_loudly():
     """A misspelt key used to ride along unread; now the schema rejects it."""
-    with pytest.raises(ValidationError):
+    with pytest.raises(UnknownSettingError):
         _config({"max_stepz": 5})
+    with pytest.raises(UnknownSettingError):
+        _config({"summary": {"max_message_charz": 5}})
+
+
+def test_old_flat_profile_key_fails_with_path_hint():
+    """Old flat ``config_dict`` names are gone; the error names the path."""
+    with pytest.raises(UnknownSettingError) as exc:
+        _config({"max_steps": 5})
+    assert "agent.max_steps" in str(exc.value)
 
 
 def test_keys_consumers_read_hard_are_present():
@@ -173,7 +183,10 @@ def test_bench_does_not_override_generation_token_settings():
     )
 
     explicit = _config(
-        {"chat_completions_max_tokens": 4096, "use_max_tokens_param": True}
+        {
+            "backend.chat_completions_max_tokens": 4096,
+            "backend.use_max_tokens_param": True,
+        }
     )
     assert explicit.backend.chat_completions_max_tokens == 4096
     assert explicit.backend.use_max_tokens_param is True
@@ -192,9 +205,9 @@ def test_bench_does_not_override_agent_run_policy():
 
     config = _config(
         {
-            "max_steps": 20,
-            "no_tool_call_max_count": 7,
-            "use_local_subagents": True,
+            "agent.max_steps": 20,
+            "agent.no_tool_call_max_count": 7,
+            "agent.use_local_subagents": True,
         }
     )
     assert config.agent.max_steps == 20
@@ -205,9 +218,9 @@ def test_bench_does_not_override_agent_run_policy():
 def test_profile_overrides_win_over_bench_defaults():
     config = _config(
         {
-            "max_steps": 1000,
-            "stop_tools": ["turn_ask_human"],
-            "exec_timeout_sec": 30,
+            "agent.max_steps": 1000,
+            "agent.stop_tools": ["turn_ask_human"],
+            "agent.exec_timeout_sec": 30,
         }
     )
 
@@ -277,7 +290,7 @@ def test_stock_text_profiles_exclude_image_viewing(profile_name):
 
 
 def test_a_vision_experiment_can_explicitly_enable_images():
-    audience, _tools = _bench_audience(_config({"backend_vision": True}))
+    audience, _tools = _bench_audience(_config({"backend.vision": True}))
 
     assert audience.native is None  # true permits a probe, not pixels
     assert audience.tool_visible is True
@@ -286,8 +299,8 @@ def test_a_vision_experiment_can_explicitly_enable_images():
 def test_runtime_url_and_model_win_over_profile():
     config = _config(
         {
-            "completions_url": "http://stale/v1/chat/completions",
-            "model": "stale-model",
+            "backend.completions_url": "http://stale/v1/chat/completions",
+            "agent.model": "stale-model",
         }
     )
 
@@ -298,7 +311,7 @@ def test_runtime_url_and_model_win_over_profile():
 def test_nested_override_merges_instead_of_replacing():
     config = _config(
         {
-            "chat_completion_kwargs": {
+            "backend.chat_completion_kwargs": {
                 "tool_choice": "required",
                 "chat_template_kwargs": {"enable_thinking": True},
             }
@@ -312,7 +325,7 @@ def test_nested_override_merges_instead_of_replacing():
 
 
 def test_provenance_names_the_layer_of_each_override():
-    loaded = _loaded({"max_steps": 20})
+    loaded = _loaded({"agent.max_steps": 20})
 
     assert loaded.provenance.source("agent.max_steps").layer == "bench_profile"
     assert loaded.provenance.source("agent.exec_timeout_sec").layer == "bench"
@@ -320,10 +333,10 @@ def test_provenance_names_the_layer_of_each_override():
 
 
 def test_profile_dict_is_not_mutated():
-    overrides = {"summary_params": {"max_message_chars": 1234}}
+    overrides = {"summary": {"max_message_chars": 1234}}
     _config(overrides)
 
-    assert overrides == {"summary_params": {"max_message_chars": 1234}}
+    assert overrides == {"summary": {"max_message_chars": 1234}}
 
 
 @pytest.mark.parametrize(
@@ -406,7 +419,7 @@ async def test_custom_image_bench_requires_successful_probe(
             else OK,
         ),
     )
-    config = _loaded({"backend_vision": True})
+    config = _loaded({"backend.vision": True})
     ctx = _ctx(tmp_path, config, [])
     att, message = _user_with_image(ctx.image_store)
     state = _state(

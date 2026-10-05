@@ -24,8 +24,8 @@ def test_run_python_validation_and_truncation():
     trunc_tool = with_local_ctx(
         RunPythonCode,
         {
-            "exec_output_capture_max_chars": 10,
-            "exec_output_preview_edge_chars": 5,
+            "agent.exec_output_capture_max_chars": 10,
+            "agent.exec_output_preview_edge_chars": 5,
         },
     )
     # Байтами, а не print: на Windows print кончает строку \r\n.
@@ -87,8 +87,8 @@ def test_sanitize_env():
 def _allow_config(project_dir):
     return {
         "launch_root": project_dir,
-        "command_moderation": {"mode": "allow"},
-        "write_guard": {"enabled": True, "extra_paths": []},
+        "security.command_moderation": {"mode": "allow"},
+        "security.write_guard": {"enabled": True, "extra_paths": []},
     }
 
 
@@ -118,8 +118,11 @@ def test_run_python_cwd_invalid_returns_allowed_paths(tmp_path):
         RunPythonCode,
         {
             "launch_root": str(workspace),
-            "command_moderation": {"mode": "allow"},
-            "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
+            "security.command_moderation": {"mode": "allow"},
+            "security.write_guard": {
+                "enabled": True,
+                "extra_paths": [str(extra)],
+            },
         },
     )
     missing = str(workspace / "nope_missing")
@@ -148,8 +151,11 @@ def test_run_python_cwd_invalid_omits_non_writable_launch_root(tmp_path):
             RunPythonCode,
             {
                 "launch_root": str(ro_launch),
-                "command_moderation": {"mode": "allow"},
-                "write_guard": {"enabled": True, "extra_paths": [str(extra)]},
+                "security.command_moderation": {"mode": "allow"},
+                "security.write_guard": {
+                    "enabled": True,
+                    "extra_paths": [str(extra)],
+                },
             },
         )
         missing = str(ro_launch / "no_such_subdir")

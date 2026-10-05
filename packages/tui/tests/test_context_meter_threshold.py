@@ -43,9 +43,9 @@ def _meter_percent(meter) -> int:
 
 def _cfg(trigger, turn_end):
     return {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "summary_params": {
+        "agent.model": "M",
+        "backend.api_mode": "chat_completions",
+        "summary": {
             "chat_completions_summary_trigger_chars": trigger,
             "chat_completions_summary_turn_end_trigger_chars": turn_end,
         },
@@ -100,9 +100,9 @@ async def test_meter_falls_back_to_turn_end_when_no_hard_threshold(tmp_path):
 
 def _cfg_tokens(trigger, turn_end, *, chars=0, chars_end=0):
     return {
-        "model": "M",
-        "backend_api_mode": "chat_completions",
-        "summary_params": {
+        "agent.model": "M",
+        "backend.api_mode": "chat_completions",
+        "summary": {
             "chat_completions_summary_trigger_chars": chars,
             "chat_completions_summary_turn_end_trigger_chars": chars_end,
             "chat_completions_summary_trigger_tokens": trigger,

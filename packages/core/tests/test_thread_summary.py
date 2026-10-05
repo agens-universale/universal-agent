@@ -90,7 +90,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             session = await ThreadSession.afrom_config(
-                settings=make_settings({"threads_data_path": tmp_dir}),
+                settings=make_settings({"paths.threads_data_path": tmp_dir}),
                 system_id=system_id,
                 thread_id=thread_id,
             )
@@ -176,7 +176,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             session = await ThreadSession.afrom_config(
-                settings=make_settings({"threads_data_path": tmp_dir}),
+                settings=make_settings({"paths.threads_data_path": tmp_dir}),
                 system_id=system_id,
                 thread_id=thread_id,
             )
@@ -213,7 +213,7 @@ class ThreadSummaryTest(unittest.IsolatedAsyncioTestCase):
             )
 
             session = await ThreadSession.afrom_config(
-                settings=make_settings({"threads_data_path": tmp_dir}),
+                settings=make_settings({"paths.threads_data_path": tmp_dir}),
                 system_id=system_id,
                 thread_id=thread_id,
             )

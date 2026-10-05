@@ -77,7 +77,8 @@ async def test_palette_footer_hidden_when_no_toggle_commands(tmp_path):
     reg.register(Command("help", (), "", "справка"))
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(reg, initial_filter="")
@@ -100,7 +101,8 @@ async def test_palette_footer_shows_docked_toggle_row(tmp_path):
     reg.register(Command("rigor", (), "", "строгость: пресет", is_toggle=True))
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
@@ -137,7 +139,8 @@ async def test_palette_footer_vertical_order(tmp_path):
     reg.register(Command("rigor", (), "", "строгость: пресет", is_toggle=True))
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
@@ -176,7 +179,8 @@ async def test_palette_toggle_row_visible_when_filter_empties_top_zone(
     reg.register(Command("gate", (), "", "финиш-гейт", is_toggle=True))
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
@@ -217,7 +221,8 @@ async def test_palette_footer_not_hanging_below_border_with_full_list(
     reg = build_default_registry()
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
@@ -1026,7 +1031,8 @@ async def test_slider_narrow_terminal_truncation_keeps_common_column(
 
     reg = _reg_with_gate_answers(monkeypatch)
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(64, 24)) as pilot:
         pal = _mk_palette(reg, {"gate": "on", "answers": "judge"})
@@ -1305,7 +1311,8 @@ async def test_palette_navigation_does_not_change_footer_row_count(tmp_path):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -1383,7 +1390,8 @@ async def test_group_separator_between_two_preset_groups(
     state = {"zzgroupa": "x", "zzgroupb": "p"}
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
@@ -1418,7 +1426,8 @@ async def test_palette_filter_reveals_hidden_gate(tmp_path):
 
     reg = build_default_registry()
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(
@@ -1441,7 +1450,8 @@ async def test_regular_row_hint_unaffected_by_visible_toggles(tmp_path):
 
     reg = build_default_registry()
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(

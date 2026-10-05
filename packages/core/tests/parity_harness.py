@@ -326,8 +326,8 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> Any:
     настоящие ``~/.gc/config.local.yml`` и ``<cwd>/.gc/config.yml``, и
     воспроизводимость зависела бы от машины.
 
-    ``overrides`` — прежние плоские имена (``max_steps=1``, ``model="m"``) и
-    точечные пути внутри секций; см. ``with_flat_overrides``.
+    ``overrides`` — пути через точку (``**{"agent.max_steps": 1}``); см.
+    ``with_path_overrides``.
     """
     from gc_core import config as cfgmod
 
@@ -341,7 +341,7 @@ def parity_config(tmp_path: Path, monkeypatch, **overrides: Any) -> Any:
             "logging.console_trace": False,
         }
     ).with_runtime(launch_root=str(tmp_path))
-    return with_flat_overrides(loaded, overrides)
+    return with_path_overrides(loaded, overrides)
 
 
 def _parity_files(tmp_path: Path, monkeypatch) -> tuple:
@@ -378,7 +378,7 @@ def _parity_files(tmp_path: Path, monkeypatch) -> tuple:
     return conf, prompt
 
 
-#: Плоские имена рантайм-ключей (то, что вычисляет запуск, а не задаёт файл).
+#: Рантайм-ключи (то, что вычисляет запуск, а не задаёт файл).
 _RUNTIME_KEYS = {
     "launch_root",
     "project_root",
@@ -389,28 +389,10 @@ _RUNTIME_KEYS = {
 }
 
 
-def setting_update_path(key: str) -> str:
-    """Путь настройки для правки прежним плоским именем.
-
-    ``max_steps`` → ``agent.max_steps``; секция с листом
-    (``summary_params.max_message_chars``) → ``summary.max_message_chars``.
-    Лист секции — тоже прежнее плоское имя, если оно ведёт внутрь этой секции.
-    """
-    from gc_core.config_modules.flat_keys import FLAT_TO_PATH, setting_path
-
-    first, *rest = key.split(".")
-    base = setting_path(first)
-    if not rest:
-        return base
-    mapped = FLAT_TO_PATH.get(rest[0], "")
-    sub = mapped[len(base) + 1 :] if mapped.startswith(base + ".") else rest[0]
-    return ".".join([base, sub, *rest[1:]])
-
-
-def with_flat_overrides(loaded: Any, overrides: dict) -> Any:
-    """``LoadedSettings`` с правками прежними плоскими именами (и точечными
-    путями внутри секций): рантайм-ключи — в ``RuntimeEnv``, остальное — в
-    настройки с валидацией схемы (негодное значение — ``ValidationError``).
+def with_path_overrides(loaded: Any, overrides: dict) -> Any:
+    """``LoadedSettings`` с правками по путям через точку: рантайм-ключи — в
+    ``RuntimeEnv``, остальное — в настройки с валидацией схемы (негодное
+    значение — ``ValidationError``).
 
     Правка ЗАМЕНЯЕТ значение по пути (как прежняя правка плоского словаря) и
     идёт без ``resolve_paths``: производные значения загрузки (например
@@ -425,11 +407,7 @@ def with_flat_overrides(loaded: Any, overrides: dict) -> Any:
     from gc_core.settings import _alias_path
 
     runtime = {k: v for k, v in overrides.items() if k in _RUNTIME_KEYS}
-    updates = {
-        setting_update_path(k): v
-        for k, v in overrides.items()
-        if k not in _RUNTIME_KEYS
-    }
+    updates = {k: v for k, v in overrides.items() if k not in _RUNTIME_KEYS}
     if updates:
         document = loaded.settings.model_dump(by_alias=True)
         for dotted, value in updates.items():

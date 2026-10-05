@@ -103,7 +103,10 @@ class CommandModerationConfigTest(unittest.TestCase):
 
             settings = apply_cli_overrides(
                 load_settings(cfg_path),
-                extra_overrides={"model": "cli-model", "max_steps": 77},
+                extra_overrides={
+                    "agent.model": "cli-model",
+                    "agent.max_steps": 77,
+                },
                 write_guard_enabled=True,
                 no_write_guard=True,
                 command_moderation_mode="deny",
@@ -122,7 +125,7 @@ class CommandModerationConfigTest(unittest.TestCase):
             self.assertTrue(loaded.settings.logging.save_logs)
             # Прежнее плоское имя `save_logs` доезжает до секции logging.
             overridden = apply_cli_overrides(
-                loaded, extra_overrides={"save_logs": False}
+                loaded, extra_overrides={"logging.save_logs": False}
             )
             self.assertFalse(overridden.settings.logging.save_logs)
             self.assertEqual(

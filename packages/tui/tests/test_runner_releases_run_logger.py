@@ -29,7 +29,9 @@ def _registered(logger) -> bool:
 
 def _run_logger(tmp_path, run_id):
     logger, _, _ = create_run_logger(
-        make_settings({"logs_dump_dir": str(tmp_path), "save_logs": True}),
+        make_settings(
+            {"paths.logs_dump_dir": str(tmp_path), "logging.save_logs": True}
+        ),
         run_id=run_id,
     )
     return logger
@@ -92,11 +94,11 @@ def test_exited_app_is_collected(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "model": "M",
-        "agent_md_path": str(tmp_path / "agent.md"),
-        "threads_data_path": str(tmp_path / "threads"),
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "mcp-servers": {},
+        "agent.model": "M",
+        "paths.agent_md_path": str(tmp_path / "agent.md"),
+        "paths.threads_data_path": str(tmp_path / "threads"),
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "mcp.servers": {},
     }
 
     async def _session():

@@ -18,8 +18,8 @@ async def test_native_path_guard_matches_local_without_local_probe_io(
     root = str(tmp_path)
     config = {
         "launch_root": root,
-        "write_guard": {"enabled": True, "mode": "deny"},
-        "read_guard": {"enabled": True, "mode": "deny"},
+        "security.write_guard": {"enabled": True, "mode": "deny"},
+        "security.read_guard": {"enabled": True, "mode": "deny"},
     }
     path = str(tmp_path / "file.txt")
     ctx = fake_ctx(config=config)

@@ -41,7 +41,7 @@ class TestAbsence:
 class TestWithCustom:
     def test_custom_appears_next_to_builtins(self, tmp_path):
         _write(tmp_path, "a.md", "subagent_alpha")
-        cfg = make_settings({"subagents_dir": str(tmp_path)})
+        cfg = make_settings({"agent.subagents_dir": str(tmp_path)})
         data = get_subagents_tools_data(cfg)
         assert len(data) == BUILTIN_COUNT + 1
         assert (
@@ -51,7 +51,7 @@ class TestWithCustom:
 
     def test_custom_is_recognized_and_resolvable(self, tmp_path):
         _write(tmp_path, "a.md", "subagent_alpha")
-        cfg = make_settings({"subagents_dir": str(tmp_path)})
+        cfg = make_settings({"agent.subagents_dir": str(tmp_path)})
         assert is_subagent_tool("subagent_alpha", cfg) is True
         factory = get_subagent_class("subagent_alpha", cfg)
         assert factory is not None
@@ -64,7 +64,7 @@ class TestWithCustom:
     def test_definitions_are_memoized_on_run_context(self, tmp_path):
         # Реестр дёргается на каждый вызов тула; читать папку каждый раз нельзя.
         _write(tmp_path, "a.md", "subagent_alpha")
-        cfg = {"subagents_dir": str(tmp_path)}
+        cfg = {"agent.subagents_dir": str(tmp_path)}
         ctx = fake_ctx(cfg)
         first = resolve_subagent_definitions(ctx)
         assert ctx.subagent_definitions is first
@@ -76,7 +76,7 @@ class TestWithCustom:
     def test_seeded_definitions_skip_discovery(self, tmp_path):
         # Durable-исполнитель кладёт готовые определения в ctx — диск не читается.
         _write(tmp_path, "a.md", "subagent_alpha")
-        ctx = fake_ctx({"subagents_dir": str(tmp_path)})
+        ctx = fake_ctx({"agent.subagents_dir": str(tmp_path)})
         ctx.subagent_definitions = {}
         assert resolve_subagent_definitions(ctx) == {}
         assert is_subagent_tool("subagent_alpha", ctx) is False
@@ -89,7 +89,7 @@ class TestRequiredToolsAlwaysGranted:
             tmp_path, "a.md", "subagent_alpha", extra="tools: [fs_read_file]\n"
         )
         data = get_subagents_tools_data(
-            make_settings({"subagents_dir": str(tmp_path)})
+            make_settings({"agent.subagents_dir": str(tmp_path)})
         )
         assert "subagent_alpha" in data
 
@@ -102,7 +102,7 @@ class TestRequiredToolsAlwaysGranted:
         )
         with caplog.at_level(logging.WARNING):
             defs = resolve_subagent_definitions(
-                make_settings({"subagents_dir": str(tmp_path)})
+                make_settings({"agent.subagents_dir": str(tmp_path)})
             )
         assert "subagent_alpha" in defs
         msgs = [r.getMessage() for r in caplog.records]

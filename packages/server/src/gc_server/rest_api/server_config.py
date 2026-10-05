@@ -12,7 +12,9 @@ from gc_core.config import (
 from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
+from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.config_modules.root import schema_error_details
+from gc_core.settings import expand_section_updates
 from gc_core.utils.user_text import read_user_text
 from pydantic import ValidationError
 
@@ -206,8 +208,13 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
     - База — обычная загрузка ``config.yml`` со слоями.
     - Секция ``logging`` сервера → правки ``logging.*``.
     - ``agent.server_agentmd_path`` (относительно PROJECT_ROOT) → ``paths.agent_md_path``.
-    - ``agent_overrides`` → тем же путём, что CLI-аргументы: их ``model``/
-      ``completions_url`` видны легаси-форсу (§2) как заданные из CLI.
+    - ``agent_overrides`` → тем же путём, что CLI-аргументы: их
+      ``agent.model``/``backend.completions_url`` видны легаси-форсу (§2) как
+      заданные из CLI. Ключ — путь через точку (``agent.max_steps``) или
+      вложенная секция (``agent: {max_steps: 100}``): секция раскладывается на
+      листья и перекрывает только заданные поля — как deep-merge у swarm.
+      Незнакомое схеме имя (прежнее плоское ``max_steps``) — ``ValueError``
+      с подсказкой пути.
     """
     loaded = load_settings()
     updates: Dict[str, Any] = {}
@@ -225,7 +232,13 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
     overrides = server_cfg.get("agent_overrides") or {}
     if isinstance(overrides, dict) and overrides:
         try:
-            loaded = apply_cli_overrides(loaded, extra_overrides=overrides)
+            loaded = apply_cli_overrides(
+                loaded,
+                extra_overrides=expand_section_updates(overrides),
+                param_prefix="",
+            )
+        except UnknownSettingError as exc:
+            raise ValueError(f"agent_overrides: {exc}") from None
         except ValidationError as exc:
             # Координата и причина без значения: в нём может быть токен.
             raise ValueError(

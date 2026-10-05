@@ -31,16 +31,16 @@ def _agent_file(tmp_path, name="subagent_alpha", tools=None, stop_tools=()):
 
 def _config(tmp_path, agents_dir, **extra):
     cfg = {
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
         "launch_root": str(tmp_path),
-        "use_local_subagents": True,
-        "subagents_dir": agents_dir,
+        "agent.use_local_subagents": True,
+        "agent.subagents_dir": agents_dir,
     }
     cfg.update(extra)
     return cfg
@@ -90,7 +90,9 @@ class TestChildConfig:
         # Глобальный вычитается внутри get_builtin_tools_data, файловый — поверх
         # полного набора. Снять глобальный запрет из файла нельзя.
         agents = _agent_file(tmp_path, stop_tools=("exec_command",))
-        cfg = _config(tmp_path, agents, stop_tools=["exec_python"])
+        cfg = _config(
+            tmp_path, agents, **{"agent.stop_tools": ["exec_python"]}
+        )
         _ctx, runner = await _runner(tmp_path, cfg)
         child = runner._build_child_config()
         assert list(child.settings.agent.stop_tools) == ["exec_python"]

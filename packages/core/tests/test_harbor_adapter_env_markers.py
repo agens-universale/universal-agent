@@ -47,7 +47,7 @@ def test_env_marker_in_a_header_is_resolved(tmp_path, monkeypatch):
     config = _build(
         tmp_path,
         {
-            "chat_completion_headers": {
+            "backend.chat_completion_headers": {
                 "X-Api-Key": "${ENV:GC_TEST_STAND_KEY}"
             },
         },
@@ -66,10 +66,10 @@ def test_marker_never_leaks_as_a_literal(tmp_path, monkeypatch):
     config = _build(
         tmp_path,
         {
-            "chat_completion_headers": {
+            "backend.chat_completion_headers": {
                 "X-Api-Key": "${ENV:GC_TEST_STAND_KEY}"
             },
-            "proxy": "${ENV:GC_TEST_STAND_KEY}",
+            "backend.proxy": "${ENV:GC_TEST_STAND_KEY}",
         },
     )
 
@@ -86,7 +86,9 @@ def test_file_marker_reads_the_secret_from_disk(tmp_path):
     config = _build(
         tmp_path,
         {
-            "chat_completion_headers": {"X-Api-Key": f"${{FILE:{secret}}}"},
+            "backend.chat_completion_headers": {
+                "X-Api-Key": f"${{FILE:{secret}}}"
+            },
         },
     )
 

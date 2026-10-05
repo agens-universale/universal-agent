@@ -18,7 +18,9 @@ def _codes(notices):
 
 
 def test_stop_tools_unknown_flagged():
-    cfg = make_settings({"stop_tools": ["turn_ask_human", "write_to_file"]})
+    cfg = make_settings(
+        {"agent.stop_tools": ["turn_ask_human", "write_to_file"]}
+    )
     ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
     stop = [n for n in ns if n.code == "stop_tools_unknown"]
     assert len(stop) == 1 and stop[0].level == "warning"
@@ -27,14 +29,16 @@ def test_stop_tools_unknown_flagged():
 
 
 def test_stop_tools_all_valid_no_notice():
-    cfg = make_settings({"stop_tools": ["turn_ask_human", "fs_write_file"]})
+    cfg = make_settings(
+        {"agent.stop_tools": ["turn_ask_human", "fs_write_file"]}
+    )
     ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
     assert "stop_tools_unknown" not in _codes(ns)
 
 
 def test_stop_tools_skills_names_known_only_from_registry():
     # Без каталога сборки skills_* — не «вечно известные». С каталогом — не опечатка.
-    cfg = make_settings({"stop_tools": ["skills_list", "write_to_file"]})
+    cfg = make_settings({"agent.stop_tools": ["skills_list", "write_to_file"]})
     bare = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
     bare_stop = [n for n in bare if n.code == "stop_tools_unknown"]
     assert len(bare_stop) == 1
@@ -54,7 +58,7 @@ def test_stop_tools_skills_names_known_only_from_registry():
 
 
 def test_stop_tools_registered_mcp_name_is_not_a_typo():
-    cfg = make_settings({"stop_tools": ["mcp_jira_search", "nope"]})
+    cfg = make_settings({"agent.stop_tools": ["mcp_jira_search", "nope"]})
     ns = collect_startup_notices(
         cfg,
         _BUILTIN,
@@ -95,14 +99,14 @@ def test_deprecated_key_info():
 
 def test_agentsmd_override_ignored_when_path_and_flag():
     cfg = make_settings(
-        {"agent_md_path": "/p/AGENTS.md", "agentsmd_override": True}
+        {"paths.agent_md_path": "/p/AGENTS.md", "tui.agentsmd_override": True}
     )
     ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=True)
     assert "agentsmd_override_ignored" in _codes(ns)
 
 
 def test_agentsmd_override_cli_noop_when_not_tui():
-    cfg = make_settings({"agentsmd_override": True})
+    cfg = make_settings({"tui.agentsmd_override": True})
     ns = collect_startup_notices(cfg, _BUILTIN, None, is_tui=False)
     assert "agentsmd_override_cli_noop" in _codes(ns)
     # в TUI без пути — не no-op
@@ -111,7 +115,7 @@ def test_agentsmd_override_cli_noop_when_not_tui():
 
 
 def test_warnings_before_infos():
-    cfg = make_settings({"stop_tools": ["bogus"]})
+    cfg = make_settings({"agent.stop_tools": ["bogus"]})
     ns = collect_startup_notices(
         cfg,
         _BUILTIN,
@@ -128,7 +132,7 @@ def test_pricing_no_rates_info_when_enabled():
         make_settings(
             {
                 "pricing": {"enabled": True, "input": 0, "output": 0},
-                "model": "m",
+                "agent.model": "m",
             }
         ),
         _BUILTIN,

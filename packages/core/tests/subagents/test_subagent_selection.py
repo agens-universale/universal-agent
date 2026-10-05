@@ -91,9 +91,9 @@ class TestIntegration:
     def _cfg(self, tmp_path, agents_dir, value, **extra):
         cfg = {
             "launch_root": str(tmp_path),
-            "backend_api_mode": "chat_completions",
-            "use_local_subagents": value,
-            "subagents_dir": agents_dir,
+            "backend.api_mode": "chat_completions",
+            "agent.use_local_subagents": value,
+            "agent.subagents_dir": agents_dir,
         }
         cfg.update(extra)
         return cfg
@@ -192,10 +192,10 @@ class TestLimitFollowsListOrder:
             make_settings(
                 {
                     "launch_root": str(tmp_path),
-                    "backend_api_mode": "chat_completions",
-                    "use_local_subagents": value,
-                    "subagents_dir": agents,
-                    "subagents_max_count": limit,
+                    "backend.api_mode": "chat_completions",
+                    "agent.use_local_subagents": value,
+                    "agent.subagents_dir": agents,
+                    "agent.subagents_max_count": limit,
                 }
             )
         )
@@ -223,10 +223,10 @@ class TestLimitFollowsListOrder:
             make_settings(
                 {
                     "launch_root": str(tmp_path),
-                    "backend_api_mode": "chat_completions",
-                    "use_local_subagents": True,
-                    "subagents_dir": agents,
-                    "subagents_max_count": 1,
+                    "backend.api_mode": "chat_completions",
+                    "agent.use_local_subagents": True,
+                    "agent.subagents_dir": agents,
+                    "agent.subagents_max_count": 1,
                 }
             )
         )

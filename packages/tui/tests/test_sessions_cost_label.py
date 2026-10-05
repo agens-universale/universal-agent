@@ -44,8 +44,16 @@ def _billed_meta(cost: float) -> dict:
 
 def test_card_cost_uses_endpoint_currency():
     pytest.importorskip("textual")
-    ru = {"model": "m", "pricing": _PRICING, "completions_url": _RU_URL}
-    usd = {"model": "m", "pricing": _PRICING, "completions_url": _USD_URL}
+    ru = {
+        "agent.model": "m",
+        "pricing": _PRICING,
+        "backend.completions_url": _RU_URL,
+    }
+    usd = {
+        "agent.model": "m",
+        "pricing": _PRICING,
+        "backend.completions_url": _USD_URL,
+    }
     assert _cost_label(ru, _billed_meta(7.5)) == "7.50 ₽"
     assert _cost_label(usd, _billed_meta(7.5)) == "7.50 $"
 
@@ -56,10 +64,14 @@ def test_card_cost_without_fact_uses_tariff():
     acc.add(
         CATEGORY_MAIN, 1_000_000, 100_000
     )  # факта нет — считается по тарифу
-    config = {"model": "m", "pricing": _PRICING, "completions_url": _RU_URL}
+    config = {
+        "agent.model": "m",
+        "pricing": _PRICING,
+        "backend.completions_url": _RU_URL,
+    }
     assert _cost_label(config, acc.to_meta()) == "120.0 ₽"
 
 
 def test_card_without_usage_gives_none():
     pytest.importorskip("textual")
-    assert _cost_label({"model": "m", "pricing": _PRICING}, None) is None
+    assert _cost_label({"agent.model": "m", "pricing": _PRICING}, None) is None

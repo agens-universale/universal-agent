@@ -104,7 +104,7 @@ async def test_confirm_banner_y_answers_allow_remember(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -146,7 +146,7 @@ async def test_confirm_banner_o_answers_allow_once(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -176,7 +176,7 @@ async def test_confirm_banner_n_answers_deny_remember(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -207,7 +207,7 @@ async def test_confirm_banner_escape_answers_deny_remember(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -239,7 +239,7 @@ async def test_confirm_banner_enter_default_answers_allow_remember(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -269,7 +269,7 @@ async def test_confirm_banner_down_then_enter_answers_allow_once(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -309,7 +309,7 @@ async def test_confirm_enter_not_open_tool_detail_when_row_focused(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -381,7 +381,7 @@ async def test_confirm_ctrl_click_not_open_tool_detail(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -430,7 +430,7 @@ async def test_ctrl_click_opens_tool_detail_without_confirm(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
 
@@ -467,7 +467,7 @@ async def test_confirm_ctrl_click_not_open_viewer_for_trace_row(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -522,7 +522,7 @@ async def test_confirm_click_does_not_toggle_summary_body(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -576,7 +576,7 @@ async def test_click_toggles_summary_body_without_confirm(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
 
@@ -620,7 +620,7 @@ async def test_confirm_banner_receives_focus_on_show(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
 
@@ -658,7 +658,7 @@ async def test_ctrl_c_during_init_style_confirm_cancels_and_hides_banner(
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -703,7 +703,7 @@ async def test_ctrl_c_during_live_agent_confirm_cancels_and_stops_run(
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner
@@ -745,7 +745,7 @@ async def test_reset_render_state_clears_confirm_banner(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     app.active_runner = runner

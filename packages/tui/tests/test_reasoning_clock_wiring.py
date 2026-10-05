@@ -46,7 +46,7 @@ async def test_cognitive_call_lights_reasoning_and_accumulates(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path), settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -66,7 +66,7 @@ async def test_non_cognitive_call_ignored(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path), settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -84,7 +84,7 @@ async def test_worldly_call_interrupts_episode(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path), settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -113,7 +113,7 @@ async def test_cognitive_call_without_call_id_does_not_interrupt(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path), settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -138,7 +138,7 @@ async def test_reset_on_user_send_clears_clock(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path), settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -157,7 +157,7 @@ async def test_stream_source_pump_edge(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path), settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         fc = _FakeClock()
@@ -179,7 +179,7 @@ async def test_indicator_gets_clock(tmp_path):
     from gc_tui.app import TuiApp
 
     async with TuiApp(
-        threads_dir=str(tmp_path), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path), settings=tui_settings({"agent.model": "M"})
     ).run_test() as pilot:
         scr = pilot.app.screen
         scr._show_thinking_indicator(state="thinking")

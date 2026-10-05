@@ -121,7 +121,7 @@ def test_session_todo_survives_compaction_payload():
             session_todo=list(ITEMS),
         ),
     )
-    ctx = fake_ctx({"summary_params": {}}, logger=None)
+    ctx = fake_ctx({"summary": {}}, logger=None)
     captured: dict = {}
 
     async def _fake_summarize(**_kw):

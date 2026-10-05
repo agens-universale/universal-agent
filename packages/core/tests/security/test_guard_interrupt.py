@@ -215,7 +215,7 @@ def _write_to_instructions(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(project),
-                "write_guard": {"enabled": False},
+                "security.write_guard": {"enabled": False},
             }
         )
 
@@ -236,7 +236,7 @@ def _write_outside_the_project(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(project),
-                "write_guard": {"enabled": True, "mode": "ask"},
+                "security.write_guard": {"enabled": True, "mode": "ask"},
             }
         )
 
@@ -257,7 +257,7 @@ def _read_outside_the_project(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(project),
-                "read_guard": {
+                "security.read_guard": {
                     "enabled": True,
                     "mode": "ask",
                     "allowed_read_roots": [str(project)],
@@ -279,7 +279,7 @@ def _fetch_a_listed_url(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(tmp_path),
-                "url_policy": {
+                "security.url_policy": {
                     "enabled": True,
                     "mode": "ask",
                     "allowed_schemes": ["https"],
@@ -302,7 +302,10 @@ def _run_without_a_judge(tmp_path):
         _ctx = _ctx(
             {
                 "launch_root": str(tmp_path),
-                "command_moderation": {"enabled": True, "mode": "ask"},
+                "security.command_moderation": {
+                    "enabled": True,
+                    "mode": "ask",
+                },
             }
         )
 

@@ -26,10 +26,10 @@ def _joint(tmp_path, *, token: str = "", launch_root: str | None = None):
     threads.mkdir(exist_ok=True)
     settings = make_settings(
         {
-            "model": "agent-model",
+            "agent.model": "agent-model",
             "chat_api.auth_token": token,
             "chat_api.launch_root": launch_root,
-            "threads_data_path": str(threads),
+            "paths.threads_data_path": str(threads),
         }
     )
 

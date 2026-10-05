@@ -396,7 +396,9 @@ async def test_single_source_loads_packs(tmp_path):
     # И flat-скилл
     _write_flat_skill(custom, "flat-skill", "")
 
-    reg = get_skills_registry(make_settings({"skills_data_path": str(custom)}))
+    reg = get_skills_registry(
+        make_settings({"paths.skills_data_path": str(custom)})
+    )
     items = {i["id"] for i in await reg.list_skills()}
     # Flat-скилл виден, пак загрузился: bootstrap доступен по canonical id
     assert "flat-skill" in items

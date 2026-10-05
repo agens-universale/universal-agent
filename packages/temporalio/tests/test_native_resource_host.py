@@ -187,7 +187,7 @@ async def test_real_mcp_registry_reuses_live_session_across_effects(
             "persistent_session": True,
             "url": f"http://127.0.0.1:{port}",
         }
-    config = {"launch_root": str(tmp_path), "mcp-servers": {"counter": server}}
+    config = {"launch_root": str(tmp_path), "mcp.servers": {"counter": server}}
     host = WorkerResourceHost("worker")
     registry = {}
 

@@ -40,6 +40,6 @@ def test_protection_enabled_flag_does_not_disable_floor():
     доходил — плоский вид настроек секцию не проецировал. Выключить её мог
     только плоский тест-словарь, а его больше нет.
     """
-    settings = make_settings({"protected_paths": {"enabled": False}})
+    settings = make_settings({"security.protected_paths": {"enabled": False}})
     assert settings.settings.security.protected_paths.enabled is False
     assert protection_enabled(settings) is True

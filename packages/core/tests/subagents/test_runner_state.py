@@ -33,12 +33,12 @@ def _make_orchestrator_state(**overrides):
 
 def _make_config(**overrides):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "subagent_max_steps": 30,
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "agent.subagent_max_steps": 30,
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
     }
     cfg.update(overrides)
     return cfg
@@ -113,7 +113,7 @@ class TestBuildChildState:
     @pytest.mark.asyncio
     async def test_max_steps_from_config(self):
         orch = _make_orchestrator_state()
-        cfg = _make_config(subagent_max_steps=25)
+        cfg = _make_config(**{"agent.subagent_max_steps": 25})
         runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("test role")
         assert child.max_steps == 25
@@ -122,7 +122,7 @@ class TestBuildChildState:
     async def test_max_steps_default_when_not_in_config(self):
         orch = _make_orchestrator_state()
         cfg = _make_config()
-        del cfg["subagent_max_steps"]
+        del cfg["agent.subagent_max_steps"]
         runner = SubagentRunner(_make_ctx(cfg), orch)
         child = await runner._build_child_state("test role")
         # Умолчание — из модели настроек (agent.subagent_max_steps), а не

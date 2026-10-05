@@ -55,7 +55,7 @@ async def test_write_runs_guards_and_human_before_leaf(tmp_path):
     ctx, _, events = setup_ports(
         {
             "launch_root": str(project),
-            "write_guard": {"enabled": True, "mode": "ask"},
+            "security.write_guard": {"enabled": True, "mode": "ask"},
         },
         WriteToFile,
     )
@@ -77,7 +77,10 @@ async def test_changed_guard_facts_prevent_effect(tmp_path):
     project.mkdir()
     dest = project / "file.txt"
     ctx, worker, _ = setup_ports(
-        {"launch_root": str(project), "write_guard": {"enabled": True}},
+        {
+            "launch_root": str(project),
+            "security.write_guard": {"enabled": True},
+        },
         WriteToFile,
     )
 
@@ -104,8 +107,8 @@ async def test_download_uses_native_human_before_download_effect(
     ctx, _, events = setup_ports(
         {
             "launch_root": str(project),
-            "write_guard": {"enabled": True, "mode": "ask"},
-            "download": {"download_dir": str(tmp_path / "outside")},
+            "security.write_guard": {"enabled": True, "mode": "ask"},
+            "security.download": {"download_dir": str(tmp_path / "outside")},
         },
         DownloadFile,
     )
@@ -138,8 +141,8 @@ async def test_command_judge_human_and_effect_are_separate(
     ctx, _, events = setup_ports(
         {
             "launch_root": str(tmp_path),
-            "completions_url": "https://model.invalid",
-            "command_moderation": {"enabled": True, "mode": "ask"},
+            "backend.completions_url": "https://model.invalid",
+            "security.command_moderation": {"enabled": True, "mode": "ask"},
         },
         ExecuteCommand,
     )

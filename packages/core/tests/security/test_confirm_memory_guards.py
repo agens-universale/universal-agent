@@ -71,7 +71,7 @@ def test_write_guard_decline_caches_run_and_instructs(monkeypatch, tmp_path):
         ctx,
         {
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True, "mode": "ask"},
+            "security.write_guard": {"enabled": True, "mode": "ask"},
         },
     )
 
@@ -118,7 +118,7 @@ def test_url_policy_decline_caches_and_instructs(monkeypatch, tmp_path):
         ctx,
         {
             "launch_root": str(tmp_path),
-            "url_policy": {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "ask",
                 "allowed_schemes": ["https"],
@@ -186,7 +186,7 @@ def test_read_guard_decline_caches_and_instructs(monkeypatch, tmp_path):
         ctx,
         {
             "launch_root": str(launch_root),
-            "read_guard": {
+            "security.read_guard": {
                 "enabled": True,
                 "mode": "ask",
                 "allowed_read_roots": [str(launch_root)],
@@ -244,7 +244,7 @@ def test_command_moderation_decline_caches_and_instructs(
         ctx,
         {
             "launch_root": str(tmp_path),
-            "command_moderation": {
+            "security.command_moderation": {
                 "enabled": True,
                 "mode": "ask",
             },

@@ -25,13 +25,13 @@ _WAIT_SEC = 10.0
 
 def _cfg(tmp_path):
     return {
-        "save_logs": False,  # без каталога логов: умолчание модели — писать
-        "threads_data_path": str(tmp_path),
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://test",
-        "model": "x",
-        "max_steps": 1,
-        "system_prompt_id": "v1",
+        "logging.save_logs": False,  # без каталога логов: умолчание модели — писать
+        "paths.threads_data_path": str(tmp_path),
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://test",
+        "agent.model": "x",
+        "agent.max_steps": 1,
+        "agent.system_prompt_id": "v1",
     }
 
 

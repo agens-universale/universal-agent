@@ -152,11 +152,14 @@ def resolve_base_config_path(config_path: Optional[str] = None) -> str:
 
 def _cli_updates(
     extra_overrides: Dict[str, Any],
+    *,
+    prefix: str = "--",
 ) -> tuple[Dict[str, Any], Optional[str], list[str]]:
     """``--param`` → точечные пути настроек; ``trace_id`` — не настройка, а рантайм.
 
-    Плоские имена прежнего ``config_dict`` (``max_steps``) переводятся по таблице,
-    путь с точкой (``agent.max_steps``) берётся как есть.
+    Ключ — путь схемы через точку (``agent.max_steps``). Незнакомое схеме имя
+    (в том числе прежнее плоское ``max_steps``) — ``UnknownSettingError`` с
+    подсказкой пути; ``prefix`` — как имя пишется у источника (``--`` у CLI).
 
     ``${ENV:…}``/``${FILE:…}`` — строго, как у файлов при старте: незаданная
     обязательная переменная → ``UnresolvedPlaceholdersError`` (``ValueError``) с
@@ -167,7 +170,7 @@ def _cli_updates(
     мёртвым. Третье значение — факты compat для стартовых уведомлений.
     """
     from gc_core.config_modules.compat import map_legacy_path
-    from gc_core.config_modules.flat_keys import setting_path
+    from gc_core.config_modules.path_hints import check_setting_path
 
     resolved = resolve_env_placeholders_strict(
         extra_overrides, source="--param"
@@ -180,15 +183,16 @@ def _cli_updates(
         )
     updates: Dict[str, Any] = {}
     facts: list[str] = []
-    for key, value in resolved.items():
-        path = setting_path(key)
+    for path, value in resolved.items():
         mapped = map_legacy_path(path)
+        if mapped is not None:
+            check_setting_path(mapped, prefix=prefix)
         if mapped is None:
-            facts.append(f"перекрытие: {key} устарел и игнорируется")
+            facts.append(f"перекрытие: {path} устарел и игнорируется")
             continue
         if mapped != path and not isinstance(value, dict):
             # Секцию-словарь проведёт compat ниже — со своими фактами.
-            facts.append(f"перекрытие: {key} переименован в {mapped}")
+            facts.append(f"перекрытие: {path} переименован в {mapped}")
         if isinstance(value, dict):
             # Внутри секции могут быть старые листья (`diff_tui.cache_max_orig`).
             document: Dict[str, Any] = {}
@@ -230,11 +234,15 @@ def apply_cli_overrides(
     read_guard_mode: Optional[str] = None,
     agentsmd_override: bool = False,
     trace_id: Optional[str] = None,
+    param_prefix: str = "--",
 ):
     """CLI поверх загруженного: новый ``LoadedSettings`` (слой ``cli``).
 
     Значения проходят валидацию схемы; источник каждой правки помечается в
-    происхождении — по нему, например, видно легаси-форс модели.
+    происхождении — по нему, например, видно легаси-форс модели. Ключ
+    ``extra_overrides`` — путь через точку; незнакомое схеме имя —
+    ``UnknownSettingError`` с подсказкой пути (``param_prefix`` — как имя
+    пишется у источника: ``--`` у CLI, пусто у ``agent_overrides``).
     """
     from gc_core.config_modules.security import (
         validate_command_moderation_mode,
@@ -242,7 +250,7 @@ def apply_cli_overrides(
     )
 
     updates, param_trace_id, override_facts = _cli_updates(
-        dict(extra_overrides or {})
+        dict(extra_overrides or {}), prefix=param_prefix
     )
     write_guard = False if no_write_guard else write_guard_enabled
     read_guard = False if no_read_guard else read_guard_enabled

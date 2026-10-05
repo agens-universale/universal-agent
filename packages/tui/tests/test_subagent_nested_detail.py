@@ -171,7 +171,7 @@ async def test_ctrl_click_nested_opens_detail_from_sidecar(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -254,7 +254,7 @@ async def test_ctrl_click_nested_from_persisted_sidecar(tmp_path):
     app = TuiApp(
         threads_dir=threads,
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

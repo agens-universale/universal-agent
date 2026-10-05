@@ -101,7 +101,7 @@ def test_gc_cli_config_explain_json(monkeypatch, tmp_path, capsys):
             "--config",
             str(base),
             "--json",
-            "max_steps",
+            "agent.max_steps",
         ],
     )
     assert cli.main() == 0

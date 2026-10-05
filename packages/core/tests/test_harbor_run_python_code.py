@@ -85,7 +85,7 @@ def test_default_timeout_is_schema_default():
 
 def test_default_timeout_flows_from_exec_timeout_sec_config():
     b = _RecordingFakeBackend()
-    _tool(b, config={"exec_timeout_sec": 600})(code="x=1")
+    _tool(b, config={"agent.exec_timeout_sec": 600})(code="x=1")
     assert b.calls[0]["timeout"] == 600
 
 
@@ -108,8 +108,8 @@ def test_truncation():
         _tool(
             _RecordingFakeBackend(stdout="A" * 9000, capture_max_chars=50),
             config={
-                "exec_output_capture_max_chars": 50,
-                "exec_output_preview_edge_chars": 5,
+                "agent.exec_output_capture_max_chars": 50,
+                "agent.exec_output_preview_edge_chars": 5,
             },
         )(code="x")
     )

@@ -17,7 +17,7 @@ async def test_create_run_context_accepts_environment_and_builds_backend(
     monkeypatch.chdir(tmp_path)
     sentinel_env = object()
     cfg = make_settings(
-        {"backend_api_mode": "chat_completions", "save_logs": False}
+        {"backend.api_mode": "chat_completions", "logging.save_logs": False}
     )
     ctx = await acreate_run_context(cfg, environment=sentinel_env)
     assert ctx.environment is sentinel_env

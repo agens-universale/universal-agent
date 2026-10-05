@@ -459,7 +459,7 @@ def test_walk_does_not_descend_into_denied_dir_via_nested_override():
     }
     cfg = {
         "launch_root": "/work",
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "allowed_read_roots": ["*"],
             "denied_read_paths": ["/work/secret"],

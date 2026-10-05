@@ -56,7 +56,11 @@ def launch_root(tmp_path, monkeypatch):
 def _cfg(launch_root: Path) -> dict:
     return {
         "launch_root": str(launch_root),
-        "write_guard": {"enabled": False, "mode": "deny", "extra_paths": []},
+        "security.write_guard": {
+            "enabled": False,
+            "mode": "deny",
+            "extra_paths": [],
+        },
         "agent_edits": {},
     }
 

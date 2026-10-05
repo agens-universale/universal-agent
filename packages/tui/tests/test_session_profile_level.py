@@ -86,7 +86,7 @@ async def test_level_restored_on_attach(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "level": "default"}),
+        settings=tui_settings({"agent.model": "M", "level": "default"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-level")
@@ -101,7 +101,7 @@ def test_level_change_does_not_invalidate_runner(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "level": "default"}),
+        settings=tui_settings({"agent.model": "M", "level": "default"}),
     )
     calls = {"n": 0}
     app.invalidate_runner = lambda: calls.__setitem__("n", calls["n"] + 1)
@@ -113,7 +113,7 @@ def test_level_provider_reflects_session_override_without_rebuild(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "level": "default"}),
+        settings=tui_settings({"agent.model": "M", "level": "default"}),
     )
     assert app._level_provider() == "default"
     app.set_session_override("level", "max")
@@ -419,7 +419,7 @@ def test_circuit_breaker_persists_and_restores_across_windows(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.tui_state.active_task_id = "t-breaker"
     app._circuit_breaker.trip("flash", "недоступна")
@@ -432,7 +432,7 @@ def test_circuit_breaker_persists_and_restores_across_windows(tmp_path):
     app2 = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app2.load_circuit_breaker(snapshot)
     assert app2._circuit_breaker.is_open("flash") is True
@@ -444,7 +444,7 @@ def test_run_completion_persists_circuit_breaker(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.tui_state.active_task_id = "t-run"
 
@@ -478,7 +478,7 @@ def test_run_failure_persists_circuit_breaker(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.tui_state.active_task_id = "t-fail"
 
@@ -512,7 +512,7 @@ def test_run_persists_circuit_breaker_even_after_runner_replaced(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.tui_state.active_task_id = "t-stop"
 
@@ -548,7 +548,7 @@ def test_breaker_persist_is_marshalled_to_ui_thread(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.tui_state.active_task_id = "t-thread"
     marshalled = []
@@ -614,7 +614,7 @@ def test_load_circuit_breaker_restores_in_place_keeping_executor_wired(
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.tui_state.active_task_id = "t-2"
 
@@ -650,7 +650,7 @@ async def test_footer_model_name_survives_open_active_alias(tmp_path):
     """Important-3: открытый активный алиас не должен молча замораживать футер —
     `_footer_model_name` показывает модель честно, без AliasCircuitOpenError."""
     cfg = {
-        "backend_api_mode": "chat_completions",
+        "backend.api_mode": "chat_completions",
         "models": {"flash": {}},
         "slots": {"default": "flash"},
         "level": "default",
@@ -673,8 +673,8 @@ async def test_footer_model_name_hides_unset_sentinel(tmp_path):
     from gc_core import onboarding
 
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "model": onboarding.MODEL_SENTINEL,
+        "backend.api_mode": "chat_completions",
+        "agent.model": onboarding.MODEL_SENTINEL,
     }
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
@@ -690,7 +690,7 @@ async def test_footer_model_name_hides_unset_sentinel(tmp_path):
 async def test_status_survives_open_active_alias(tmp_path):
     """Important-3: `/status` при открытом активном алиасе не должен ломаться."""
     cfg = {
-        "backend_api_mode": "chat_completions",
+        "backend.api_mode": "chat_completions",
         "models": {"flash": {}},
         "slots": {"default": "flash"},
         "level": "default",
@@ -714,7 +714,7 @@ async def test_new_session_thread_gets_fresh_breaker(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.tui_state.active_task_id = "t-old"
     app._circuit_breaker.trip("flash", "недоступна")

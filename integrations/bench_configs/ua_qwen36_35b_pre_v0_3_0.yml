@@ -1,10 +1,10 @@
 # UA pre-v0.3.0 profile: copy of uag_minimal_no_skills (summary ON, subagents OFF, no skills)
 # plus the agent config keys new in v0.3.0. Image: gc-cli-harbor:v0.3.0_260910.
-# Keys are deep-merged into gc-cli config_dict without schema validation: a typo is silently ignored.
+# Keys are setting paths validated by the AppConfig schema: a typo fails the trial at build time.
 # Шаблон gc-cli External для config_bench (Hydra group agent_configs).
 # В config_bench: agent_profile.model_name: ${model_name}
 #
-# gc_cli_config — плоские ключи config_dict. Сборка:
+# gc_cli_config — пути настроек через точку (agent.max_steps) и секции. Сборка:
 #   schema defaults < bench defaults адаптера < этот блок < runtime (url/model).
 # Здесь перечислены поведенческие ключи живых тулов/цикла, чтобы слой схемы/bench
 # не подмешивал скрытых значений. Не пишем: completions_url, model (runtime), пути
@@ -18,32 +18,32 @@ model: openai/${model_name}
 agent_kwargs:
   gc_cli_config:
     # --- backend ---
-    backend_api_mode: chat_completions
+    backend.api_mode: chat_completions
     os_backend: harbor
-    chat_completions_max_tokens: 32768
-    chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
-    use_max_tokens_param: true
-    openai_strict_tools_schema: false    # не требовать все properties в required (GigaCode / non-OpenAI)
-    send_tool_strict: true               # слать function.strict на провод
-    retry_embedded_choice_errors: true   # ретрай, если бэкенд вернул choice с ошибкой внутри
-    claude_prompt_cache: null            # авто по id модели; Qwen не claude
-    use_ssl: false
-    cert_path: null
-    key_path: null
-    use_retry: true
-    backend_request_timeout_sec: 600         # таймаут одного HTTP-запроса к LLM (длинные генерации на медленном vllm)
-    proxy: null
-    stream: true                             # legacy; CLI/harbor non-stream, канон — tui_stream
-    chat_completion_headers: {}
+    backend.chat_completions_max_tokens: 32768
+    backend.chat_completions_min_response_tokens: 1024  # минимум лимита для ретраев
+    backend.use_max_tokens_param: true
+    backend.openai_strict_tools_schema: false    # не требовать все properties в required (GigaCode / non-OpenAI)
+    backend.send_tool_strict: true               # слать function.strict на провод
+    backend.retry_embedded_choice_errors: true   # ретрай, если бэкенд вернул choice с ошибкой внутри
+    backend.claude_prompt_cache: null            # авто по id модели; Qwen не claude
+    backend.use_ssl: false
+    backend.cert_path: null
+    backend.key_path: null
+    backend.use_retry: true
+    backend.request_timeout_sec: 600         # таймаут одного HTTP-запроса к LLM (длинные генерации на медленном vllm)
+    backend.proxy: null
+    backend.stream: true                             # legacy; CLI/harbor non-stream, канон — tui.stream
+    backend.chat_completion_headers: {}
     # Основной агент (tool-цикл). Уходит в payload chat/completions как есть.
-    chat_completion_kwargs:
+    backend.chat_completion_kwargs:
       separate_reasoning: true               # мысль модели → reasoning_content, не в content
       chat_template_kwargs:
         enable_thinking: true                # чат-шаблон Qwen: генерировать thinking
       tool_choice: auto
     # Вспомогательные LLM (summary, finish-gate, command_moderation, intent-scope).
     # Плоский ключ рядом с chat_completion_kwargs; completion_kwargs мержится ПОВЕРХ агентских.
-    auxiliary_llm_params:
+    chat_completions.auxiliary_llm:
       max_tokens: 24576                     # лимит ответа: summary / intent-scope (потолок)
       judge_max_tokens: 24576              # лимит ответа: finish-gate / command_moderation
       subagent_role_max_tokens: 24576       # лимит ответа: special_agent role draft; субагенты выкл
@@ -53,41 +53,41 @@ agent_kwargs:
           enable_thinking: false           # aux: thinking выкл, даже если у агента вкл
 
     # --- agent loop ---
-    system_prompt_id: v1
-    max_steps: 1000                          # потолок шагов (tool-вызовов) агента за ран; предохранитель от бесконечных запусков
-    no_tool_call_max_count: 1000             # бюджет подряд идущих «плохих» ответов (нет tool call / ошибка аргументов); исчерпан → ран завершается
-    max_unknown_tool_repeats: 1000           # dsv4 пинит 1000
-    session_token_limit: null                # выкл
-    max_tool_calls: null                     # выкл
-    limit_trace_summary: true                # аварийная LLM-сводка трейса при step/tool/token limit
-    use_server_subagents: false              # серверные субагенты (через REST) выключены
-    use_local_subagents: false               # локальные in-process субагенты выключены; оркестратор-прелюдия не подмешивается в промпт
-    subagent_max_steps: 100                  # лимит шагов одного субагента (действует только при включённых субагентах)
-    subagents_dir: null
-    subagents_max_count: 20
-    strict_turn_finish_validation: true      # вкл finish-gate: LLM-судья на turn_finish (нужен backend_api_mode: chat_completions)
-    finish_gate_max_iterations: 10           # макс. reject основного агента; дальше fail-open, отчёт принимается
-    subagent_finish_gate_max_iterations: 3   # то же для субагента (здесь субагенты выкл)
-    finish_gate_use_rule_hints: false        # зарезервировано, код не читает; rule-layer без LLM вне v1
-    client_name: mini_cli_pub_agent_1
-    x_cl_id: "12345"
-    trace_id_header_name: null
-    trace_header_enabled: false
-    verbose: true
-    server_tool_prefix: system
-    limit_project_metadata: false
-    model_steering: ""
-    exec_timeout_sec: 600                    # дефолт timeout_seconds для exec_command / exec_python, если модель не передала
-    tool_output_inline_max_chars: 20000      # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
-    exec_output_capture_max_chars: 40000     # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
-    exec_output_preview_edge_chars: 3000     # каждый край front-loaded preview длинного потока; 0 — без preview
-    walk_output_max_chars: 50000000          # потолок внутренних walk/grep каналов, fail-closed
-    stored_tool_outputs_max_entries: 50      # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
-    inject_tool_fields:                      # инжект синтетического поля в JSON Schema КАЖДОГО тула
+    agent.system_prompt_id: v1
+    agent.max_steps: 1000                          # потолок шагов (tool-вызовов) агента за ран; предохранитель от бесконечных запусков
+    agent.no_tool_call_max_count: 1000             # бюджет подряд идущих «плохих» ответов (нет tool call / ошибка аргументов); исчерпан → ран завершается
+    agent.max_unknown_tool_repeats: 1000           # dsv4 пинит 1000
+    agent.session_token_limit: null                # выкл
+    agent.max_tool_calls: null                     # выкл
+    agent.limit_trace_summary: true                # аварийная LLM-сводка трейса при step/tool/token limit
+    agent.use_server_subagents: false              # серверные субагенты (через REST) выключены
+    agent.use_local_subagents: false               # локальные in-process субагенты выключены; оркестратор-прелюдия не подмешивается в промпт
+    agent.subagent_max_steps: 100                  # лимит шагов одного субагента (действует только при включённых субагентах)
+    agent.subagents_dir: null
+    agent.subagents_max_count: 20
+    agent.strict_turn_finish_validation: true      # вкл finish-gate: LLM-судья на turn_finish (нужен backend.api_mode: chat_completions)
+    agent.finish_gate_max_iterations: 10           # макс. reject основного агента; дальше fail-open, отчёт принимается
+    agent.subagent_finish_gate_max_iterations: 3   # то же для субагента (здесь субагенты выкл)
+    agent.finish_gate_use_rule_hints: false        # зарезервировано, код не читает; rule-layer без LLM вне v1
+    agent.client_name: mini_cli_pub_agent_1
+    agent.x_cl_id: "12345"
+    agent.trace_id_header_name: null
+    agent.trace_header_enabled: false
+    agent.verbose: true
+    agent.server_tool_prefix: system
+    agent.limit_project_metadata: false
+    agent.model_steering: ""
+    agent.exec_timeout_sec: 600                    # дефолт timeout_seconds для exec_command / exec_python, если модель не передала
+    agent.tool_output_inline_max_chars: 20000      # столько символов вывода тула инлайнится в диалог; остальное — в стор полных выводов
+    agent.exec_output_capture_max_chars: 40000     # потолок захвата stdout/stderr на поток: 20k головы + 20k настоящего хвоста
+    agent.exec_output_preview_edge_chars: 3000     # каждый край front-loaded preview длинного потока; 0 — без preview
+    agent.walk_output_max_chars: 50000000          # потолок внутренних walk/grep каналов, fail-closed
+    agent.stored_tool_outputs_max_entries: 50      # ёмкость стора полных выводов (агент может дочитать через session_read_stored_tool_output)
+    agent.inject_tool_fields:                      # инжект синтетического поля в JSON Schema КАЖДОГО тула
       reason: "One short, concrete sentence explaining the immediate purpose of this tool call, why this tool is the right next step, and what observation/change/deliverable you expect; avoid generic filler."
-    loop_detector:
+    agent.loop_detector:
       enabled: true                          # notice модели на повтор идентичного tool call
-    stop_tools:  # убрать тулы из реестра: спрашивать человека в автономном бенче нельзя, межзапусковая память не нужна
+    agent.stop_tools:  # убрать тулы из реестра: спрашивать человека в автономном бенче нельзя, межзапусковая память не нужна
       - turn_ask_human
       - project_memory
       - fs_save_base64_file
@@ -105,7 +105,7 @@ agent_kwargs:
       - skills_read_reference
       - skills_read_asset
       - download_file
-    disable_skills:  # скрыть все скиллы
+    agent.disable_skills:  # скрыть все скиллы
       - articles
       - autonomous-benchmark-agent
       - codebase
@@ -118,7 +118,7 @@ agent_kwargs:
       - topic-research
 
     # --- summary ---
-    summary_params:                          # компакция истории (работает только в chat_completions-режиме)
+    summary:                          # компакция истории (работает только в chat_completions-режиме)
       chat_completions_summary_trigger_chars: 0   # объём диалога (символы), после которого запускается суммаризация
       chat_completions_summary_trigger_tokens: 200000  # input последнего главного запроса плюс хвост // 2
       chat_completions_summary_turn_end_trigger_chars: 0  # порог компакции на границе хода (turn end)
@@ -132,19 +132,19 @@ agent_kwargs:
       intent_log_preview_chars: 10000
 
     # --- quality / memory / notices ---
-    quality_gate_params:
+    quality_gate:
       max_dialogue_chars: 200000
       max_message_chars: 5000
-    working_memory_params:
+    working_memory:
       max_chars_goal: 2000
       max_chars_constraints: 4000
       max_chars_state: 6000
       max_chars_knowledge: 8000
       total_budget_chars: 20000
-    todo_params:
+    todo:
       reminder_steps: 10                     # каждые N шагов без session_todo при открытых пунктах; 0 = выкл
     tool_usage_notice: []
-    intent_scope_params:
+    intent_scope:
       tools: {}
       max_summary_chars: 500
       max_tool_output_chars: 8000
@@ -154,16 +154,16 @@ agent_kwargs:
 
     # --- security ---
     # Гарды OFF явно: иначе контейнерные пути режутся по ФС раннера.
-    command_moderation:
+    security.command_moderation:
       enabled: false
       mode: allow
       allowed_command_examples: []
       denied_command_examples: []
-    write_guard:
+    security.write_guard:
       enabled: false
       mode: ask
       extra_paths: []
-    read_guard:
+    security.read_guard:
       enabled: false
       mode: allow
       allowed_read_roots: []
@@ -184,7 +184,7 @@ agent_kwargs:
         - .png
         - .jpg
         - .jpeg
-    protected_paths:
+    security.protected_paths:
       enabled: false
       extra: []
 
@@ -211,8 +211,8 @@ agent_kwargs:
         default_max_matches: 100
         hard_max_matches: 300
         max_visited: 500000
-    mcp-servers: {}
-    mcp-meta:
+    mcp.servers: {}
+    mcp.meta:
       tools-cache-ttl: 3600
       request_timeout_sec: 600               # адаптер поднимает до max(это, 600)
       discovery_timeout_sec: 120             # адаптер поднимает до max(это, 120); схема была 30
@@ -224,15 +224,15 @@ agent_kwargs:
       output: null
       cache_read: null
       models: {}
-    save_logs: false
-    console_trace: false
-    logging_format: text
-    log_level: info
-    redact_secrets:
+    logging.save_logs: false
+    logging.console_trace: false
+    logging.format: text
+    logging.log_level: info
+    logging.redact_secrets:
       enabled: false
       extra_keys: []
       extra_patterns: []
-    logging_params:
+    logging:
       full_log_backend: false
     strip_tags_projection:
       strip_think: true                      # не класть reasoning_content в messages; false = вернуть модели

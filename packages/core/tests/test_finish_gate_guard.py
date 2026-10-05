@@ -20,8 +20,8 @@ class ResolveFinishGateMaxRejectionsTest(unittest.TestCase):
         sub_state = SimpleNamespace(parent_state_id="p1")
         cfg = make_settings(
             {
-                "finish_gate_max_iterations": 7,
-                "subagent_finish_gate_max_iterations": 2,
+                "agent.finish_gate_max_iterations": 7,
+                "agent.subagent_finish_gate_max_iterations": 2,
             }
         )
         self.assertEqual(
@@ -33,7 +33,7 @@ class ResolveFinishGateMaxRejectionsTest(unittest.TestCase):
         state = SimpleNamespace(parent_state_id=None)
         self.assertEqual(
             resolve_finish_gate_max_rejections(
-                make_settings({"finish_gate_max_iterations": 0}), state
+                make_settings({"agent.finish_gate_max_iterations": 0}), state
             ),
             10,
         )
@@ -45,11 +45,11 @@ class JudgeAvailableTest(unittest.TestCase):
 
         self.assertTrue(
             judge_available(
-                make_settings({"backend_api_mode": "chat_completions"})
+                make_settings({"backend.api_mode": "chat_completions"})
             )
         )
         self.assertFalse(
-            judge_available(make_settings({"backend_api_mode": "responses"}))
+            judge_available(make_settings({"backend.api_mode": "responses"}))
         )
         self.assertFalse(judge_available(make_settings()))
         self.assertFalse(judge_available(None))
@@ -59,8 +59,8 @@ class JudgeAvailableTest(unittest.TestCase):
             judge_available(
                 make_settings(
                     {
-                        "backend_api_mode": "chat_completions",
-                        "strict_turn_finish_validation": False,
+                        "backend.api_mode": "chat_completions",
+                        "agent.strict_turn_finish_validation": False,
                     }
                 )
             )
@@ -74,8 +74,8 @@ class FinishGateGuardEnabledMatrixTest(unittest.TestCase):
     def _enabled(self, *, strict: bool, backend: str) -> bool:
         ctx = fake_ctx(
             {
-                "backend_api_mode": backend,
-                "strict_turn_finish_validation": strict,
+                "backend.api_mode": backend,
+                "agent.strict_turn_finish_validation": strict,
             }
         )
         state = SimpleNamespace(parent_state_id=None)
@@ -100,8 +100,8 @@ class FinishGateGuardTest(unittest.TestCase):
     def test_disabled_returns_skipped(self) -> None:
         ctx = fake_ctx(
             {
-                "backend_api_mode": "responses",
-                "strict_turn_finish_validation": True,
+                "backend.api_mode": "responses",
+                "agent.strict_turn_finish_validation": True,
             }
         )
         state = SimpleNamespace(parent_state_id=None)
@@ -113,9 +113,9 @@ class FinishGateGuardTest(unittest.TestCase):
     def test_iteration_limit_skips_llm(self) -> None:
         ctx = fake_ctx(
             {
-                "backend_api_mode": "chat_completions",
-                "strict_turn_finish_validation": True,
-                "finish_gate_max_iterations": 2,
+                "backend.api_mode": "chat_completions",
+                "agent.strict_turn_finish_validation": True,
+                "agent.finish_gate_max_iterations": 2,
             }
         )
         state = SimpleNamespace(
@@ -132,9 +132,9 @@ class FinishGateGuardTest(unittest.TestCase):
     def test_reject_increments_counter(self) -> None:
         ctx = fake_ctx(
             {
-                "backend_api_mode": "chat_completions",
-                "strict_turn_finish_validation": True,
-                "finish_gate_max_iterations": 10,
+                "backend.api_mode": "chat_completions",
+                "agent.strict_turn_finish_validation": True,
+                "agent.finish_gate_max_iterations": 10,
             }
         )
         state = SimpleNamespace(
@@ -173,9 +173,9 @@ class FinishGateGuardTest(unittest.TestCase):
     def test_fail_open_error_does_not_increment_rejection_count(self) -> None:
         ctx = fake_ctx(
             {
-                "backend_api_mode": "chat_completions",
-                "strict_turn_finish_validation": True,
-                "finish_gate_max_iterations": 10,
+                "backend.api_mode": "chat_completions",
+                "agent.strict_turn_finish_validation": True,
+                "agent.finish_gate_max_iterations": 10,
             }
         )
         state = SimpleNamespace(
@@ -204,9 +204,9 @@ class FinishGateGuardTest(unittest.TestCase):
     def test_validate_receives_jsonl_intent_lines(self) -> None:
         ctx = fake_ctx(
             {
-                "backend_api_mode": "chat_completions",
-                "strict_turn_finish_validation": True,
-                "finish_gate_max_iterations": 10,
+                "backend.api_mode": "chat_completions",
+                "agent.strict_turn_finish_validation": True,
+                "agent.finish_gate_max_iterations": 10,
             }
         )
         closed_turn = append_user_ask([], "closed ask", user_turn_seq=0)

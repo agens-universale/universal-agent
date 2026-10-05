@@ -29,7 +29,7 @@ def eyes_config(
     if main_backend is not None:
         main["backend"] = main_backend
     return _cfg(
-        backend_api_mode=mode,
+        **{"backend.api_mode": mode},
         models={
             "main": main,
             "eyes": {

@@ -168,6 +168,6 @@ async def test_persistence_failure_is_not_swallowed_or_bounced():
         await pr.arun_agent(
             [{"id": "u", "role": "user", "content": "hi"}],
             value,
-            fake_ctx({"backend_api_mode": "chat_completions"}),
+            fake_ctx({"backend.api_mode": "chat_completions"}),
             persist_messages_callback=persist,
         )

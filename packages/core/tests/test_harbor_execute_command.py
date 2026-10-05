@@ -76,7 +76,7 @@ def test_envelope_shape_matches_base_contract():
 def test_default_timeout_flows_from_exec_timeout_sec_config():
     """When timeout is omitted, agent.exec_timeout_sec from config is used."""
     b = _RecordingFakeBackend()
-    _tool(b, config={"exec_timeout_sec": 600})(command="x")
+    _tool(b, config={"agent.exec_timeout_sec": 600})(command="x")
     assert b.calls[0]["timeout"] == 600
 
 
@@ -98,8 +98,8 @@ def test_output_truncated_by_capture_cap():
         _tool(
             b,
             config={
-                "exec_output_capture_max_chars": 100,
-                "exec_output_preview_edge_chars": 10,
+                "agent.exec_output_capture_max_chars": 100,
+                "agent.exec_output_preview_edge_chars": 10,
             },
         )(command="x")
     )

@@ -1,9 +1,9 @@
 """Мост к настройкам: потребители читают ``settings_of``/``runtime_of``.
 
 Мост принимает только контекст рана, ``LoadedSettings``, ``AppConfig`` или
-``None``; плоский словарь — ``TypeError``. Тестовый ``settings_from_flat``
-обязан давать те же настройки, что и типизированный путь, — без потерь,
-включая признаки «задано явно».
+``None``; плоский словарь — ``TypeError``. Тестовый ``make_settings``
+(пути через точку и секции) обязан давать те же настройки, что и
+типизированный путь, — без потерь, включая признаки «задано явно».
 """
 
 from types import SimpleNamespace
@@ -16,7 +16,7 @@ from gc_core.settings import (
     runtime_of,
     settings_of,
 )
-from gc_testkit.settings import settings_from_flat
+from gc_testkit.settings import make_settings
 from pydantic import ValidationError
 
 
@@ -43,11 +43,11 @@ def _rich_settings():
 
 
 @pytest.mark.parametrize("settings", [default_settings(), _rich_settings()])
-def test_settings_from_flat_round_trip_is_lossless(settings):
+def test_make_settings_round_trip_is_lossless(settings):
     # Явно заданное (dump с exclude_unset) → тестовый мост → те же настройки
     # и та же явность полей; рантайм-ключи уходят в RuntimeEnv.
     explicit = settings.model_dump(by_alias=True, exclude_unset=True)
-    back = settings_from_flat({**explicit, "launch_root": "/w"})
+    back = make_settings({**explicit, "launch_root": "/w"})
     assert back.settings == settings
     assert back.settings.model_dump(exclude_unset=True) == settings.model_dump(
         exclude_unset=True
@@ -55,40 +55,8 @@ def test_settings_from_flat_round_trip_is_lossless(settings):
     assert back.runtime.launch_root == "/w"
 
 
-def test_round_trip_keeps_implicit_defaults_implicit():
-    # Прежний плоский вид всегда нёс `stream` и `tui_finish_gate_mode` с
-    # признаками явности; обратный путь не имеет права сделать их явными —
-    # иначе ложное предупреждение об устаревшем ключе и другое правило /gate.
-    defaults = default_settings()
-    back = settings_from_flat(
-        {
-            "stream": defaults.backend.stream,
-            "deprecated_keys_used": [],
-            "tui_finish_gate_mode": defaults.tui.finish_gate_mode,
-            "tui_finish_gate_mode_explicit": False,
-        }
-    ).settings
-    assert not is_explicit(back, "backend.stream")
-    assert not is_explicit(back, "tui.finish_gate_mode")
-
-
-def test_explicit_markers_make_fields_explicit():
-    back = settings_from_flat(
-        {
-            "stream": False,
-            "deprecated_keys_used": ["backend.stream"],
-            "tui_finish_gate_mode": "on",
-            "tui_finish_gate_mode_explicit": True,
-        }
-    ).settings
-    assert is_explicit(back, "backend.stream")
-    assert back.backend.stream is False
-    assert is_explicit(back, "tui.finish_gate_mode")
-    assert back.tui.finish_gate_mode == "on"
-
-
 def test_settings_of_reads_every_source_the_same_way():
-    loaded = settings_from_flat({"max_steps": 3, "launch_root": "/r"})
+    loaded = make_settings({"agent.max_steps": 3, "launch_root": "/r"})
     ctx = SimpleNamespace(settings=loaded.settings, runtime=loaded.runtime)
     for source in (loaded, ctx):
         assert settings_of(source).agent.max_steps == 3
@@ -99,22 +67,31 @@ def test_settings_of_reads_every_source_the_same_way():
 def test_settings_of_rejects_flat_dicts():
     # Плоский словарь больше не источник настроек — ни сам, ни в контексте.
     with pytest.raises(TypeError):
-        settings_of({"max_steps": 3})
+        settings_of({"agent.max_steps": 3})
     with pytest.raises(TypeError):
         runtime_of({"launch_root": "/r"})
     with pytest.raises(TypeError):
-        settings_of(SimpleNamespace(config_dict={"max_steps": 3}))
+        settings_of(SimpleNamespace(config_dict={"agent.max_steps": 3}))
 
 
-def test_test_flat_dict_is_validated_strictly():
+def test_test_settings_are_validated_strictly():
     with pytest.raises(ValidationError):
-        settings_from_flat({"max_steps": "много"})
+        make_settings({"agent.max_steps": "много"})
     with pytest.raises(ValidationError):
-        settings_from_flat({"no_such_setting": 1})
+        make_settings({"no_such_setting": 1})
+    # Прежних плоских имён нет: `max_steps` — неизвестный ключ.
+    with pytest.raises(ValidationError):
+        make_settings({"max_steps": 3})
+
+
+def test_test_settings_accept_paths_and_sections():
+    by_path = make_settings({"agent.max_steps": 3}).settings
+    by_section = make_settings({"agent": {"max_steps": 3}}).settings
+    assert by_path.agent.max_steps == by_section.agent.max_steps == 3
 
 
 def test_subagent_tool_scope_lives_in_runtime():
-    loaded = settings_from_flat(
+    loaded = make_settings(
         {"subagent_tools_allow": ["a"], "subagent_tools_stop": ["b"]}
     )
     assert loaded.runtime.subagent_tools_allow == ("a",)

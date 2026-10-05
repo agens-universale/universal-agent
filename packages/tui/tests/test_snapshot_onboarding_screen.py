@@ -26,11 +26,11 @@ def _unconfigured() -> dict:
     from gc_core import onboarding
 
     return {
-        "completions_url": onboarding.URL_SENTINEL,
-        "chat_completion_headers": {
+        "backend.completions_url": onboarding.URL_SENTINEL,
+        "backend.chat_completion_headers": {
             "Authorization": onboarding.TOKEN_SENTINEL
         },
-        "model": onboarding.MODEL_SENTINEL,
+        "agent.model": onboarding.MODEL_SENTINEL,
     }
 
 

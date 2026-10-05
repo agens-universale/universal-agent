@@ -24,7 +24,7 @@ from gc_testkit.settings import make_settings
 
 
 def _cfg(servers: Dict[str, Any]) -> Dict[str, Any]:
-    return {"mcp-servers": servers, "mcp-meta": {"tools-cache-ttl": 3600}}
+    return {"mcp.servers": servers, "mcp.meta": {"tools-cache-ttl": 3600}}
 
 
 def test_rebind_keeps_the_payload():
@@ -141,6 +141,6 @@ async def test_default_is_unchanged_behaviour():
     )
 
     tools, status = await aget_mcp_tools_data_for_config(
-        make_settings({"mcp-servers": {}})
+        make_settings({"mcp.servers": {}})
     )
     assert tools == {} and status == {}

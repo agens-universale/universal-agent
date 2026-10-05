@@ -33,7 +33,7 @@ def test_returns_prefilter_names_ignoring_stop_tools():
     # stop_tools НЕ влияет на состав имён (проверка против полного набора)
     names_no_stop = all_builtin_tool_names(make_settings())
     names_with_stop = all_builtin_tool_names(
-        make_settings({"stop_tools": ["fs_write_file"]})
+        make_settings({"agent.stop_tools": ["fs_write_file"]})
     )
     assert names_no_stop == names_with_stop
     assert "fs_write_file" in names_no_stop

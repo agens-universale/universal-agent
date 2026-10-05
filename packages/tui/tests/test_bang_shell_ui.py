@@ -48,7 +48,7 @@ async def test_bang_echo_mounts_trace_not_agent(tmp_path, monkeypatch):
 
     app = TuiApp(
         threads_dir=str(tmp_path),
-        settings=tui_settings({"tui_bang_shell": {"enabled": True}}),
+        settings=tui_settings({"tui.bang_shell": {"enabled": True}}),
     )
     app._executor_factory = lambda: None
 
@@ -153,7 +153,7 @@ async def test_bang_clear_all(tmp_path, monkeypatch):
 
     app = TuiApp(
         threads_dir=str(tmp_path),
-        settings=tui_settings({"tui_bang_shell": {"enabled": True}}),
+        settings=tui_settings({"tui.bang_shell": {"enabled": True}}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -197,7 +197,7 @@ async def test_bang_clear_last_n(tmp_path, monkeypatch):
 
     app = TuiApp(
         threads_dir=str(tmp_path),
-        settings=tui_settings({"tui_bang_shell": {"enabled": True}}),
+        settings=tui_settings({"tui.bang_shell": {"enabled": True}}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

@@ -9,8 +9,8 @@ from gc_testkit.settings import fake_ctx
 
 def _cfg(**overrides):
     cfg = {
-        "completions_url": "http://example.test/v1/chat/completions",
-        "backend_request_timeout_sec": 600,
+        "backend.completions_url": "http://example.test/v1/chat/completions",
+        "backend.request_timeout_sec": 600,
     }
     cfg.update(overrides)
     return cfg
@@ -71,7 +71,7 @@ def test_request_chat_completion_text_raw_logging_controlled_by_config(
     assert len(raw_entries) == 0
 
     ctx_raw = fake_ctx(
-        _cfg(logging_params={"full_log_backend": True}),
+        _cfg(**{"logging": {"full_log_backend": True}}),
         logger=_Log(),
     )
     run_coro(
@@ -99,10 +99,12 @@ def test_request_chat_completion_text_uses_max_completion_tokens_and_safe_kwargs
 
     ctx = fake_ctx(
         _cfg(
-            chat_completion_kwargs={
-                "temperature": 0.3,
-                "model": "must_not_override",
-                "max_tokens": 123,
+            **{
+                "backend.chat_completion_kwargs": {
+                    "temperature": 0.3,
+                    "model": "must_not_override",
+                    "max_tokens": 123,
+                }
             },
         ),
         logger=None,
@@ -133,7 +135,7 @@ def test_request_chat_completion_text_uses_max_tokens_when_flag_enabled(
     captured = _patch_policy(monkeypatch)
 
     ctx = fake_ctx(
-        _cfg(use_max_tokens_param=True),
+        _cfg(**{"backend.use_max_tokens_param": True}),
         logger=None,
     )
     state = SimpleNamespace(default_model="test-model")

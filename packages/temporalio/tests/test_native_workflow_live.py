@@ -43,19 +43,19 @@ async def test_native_executor_uses_real_file_session_and_replays(
     (tmp_path / "example.txt").write_text("file from native workflow")
     config = make_settings(
         {
-            "model": "scripted",
-            "backend_api_mode": "chat_completions",
-            "completions_url": url,
-            "chat_completion_kwargs": {"stream": False},
-            "system_prompt_id": "native-test",
-            "max_steps": 10,
+            "agent.model": "scripted",
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": url,
+            "backend.chat_completion_kwargs": {"stream": False},
+            "agent.system_prompt_id": "native-test",
+            "agent.max_steps": 10,
             "launch_root": str(tmp_path),
-            "save_logs": False,
-            "console_trace": False,
-            "use_local_subagents": False,
-            "strict_turn_finish_validation": False,
-            "tui_text_answer_mode": "deny",
-            "thread_store_persist": persist,
+            "logging.save_logs": False,
+            "logging.console_trace": False,
+            "agent.use_local_subagents": False,
+            "agent.strict_turn_finish_validation": False,
+            "tui.text_answer_mode": "deny",
+            "thread_store.persist": persist,
         }
     )
     contexts = {}

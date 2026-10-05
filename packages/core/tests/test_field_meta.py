@@ -13,7 +13,7 @@ from gc_core.config_modules.field_meta import (
 )
 from gc_core.config_modules.root import AppConfig
 from gc_core.model_router import serialize_model_entry
-from gc_testkit.settings import settings_from_flat
+from gc_testkit.settings import make_settings
 from pydantic import SecretStr
 
 _SECRETS = {
@@ -186,12 +186,12 @@ def test_plain_dumps_carry_secrets_and_test_bridge_round_trips():
     projected = serialize_model_entry(settings.models["m1"])
     assert projected["authorization_header"] == "Bearer model-SECRET"
     revealed = settings.model_dump(by_alias=True, context=REVEAL_SECRETS)
-    back = settings_from_flat(revealed).settings
+    back = make_settings(revealed).settings
     assert back == settings
     assert back.voice.token.get_secret_value() == "voice-SECRET"
     assert back.mcp.servers["srv"] == settings.mcp.servers["srv"]
     # Прежняя форма записи модели (проекция роутера) переводится обратно в token.
-    from_projection = settings_from_flat({"models": {"m1": projected}})
+    from_projection = make_settings({"models": {"m1": projected}})
     assert (
         serialize_model_entry(from_projection.settings.models["m1"])
         == projected

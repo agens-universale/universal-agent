@@ -34,9 +34,11 @@ def test_run_prints_rule_header_and_final_check(tmp_path, monkeypatch):
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": "https://x/v1",
-                "chat_completion_headers": {"Authorization": "Bearer sk"},
-                "model": "m",
+                "backend.completions_url": "https://x/v1",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk"
+                },
+                "agent.model": "m",
             }
         ),
     )
@@ -45,9 +47,11 @@ def test_run_prints_rule_header_and_final_check(tmp_path, monkeypatch):
     wz.run(
         make_settings(
             {
-                "completions_url": "https://x/v1",
-                "chat_completion_headers": {"Authorization": "Bearer sk"},
-                "model": "m",
+                "backend.completions_url": "https://x/v1",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk"
+                },
+                "agent.model": "m",
             }
         ),
         cfg,
@@ -80,9 +84,11 @@ def test_endpoint_rendered_as_section(tmp_path, monkeypatch):
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": "https://x/v1",
-                "chat_completion_headers": {"Authorization": "Bearer sk"},
-                "model": "m",
+                "backend.completions_url": "https://x/v1",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk"
+                },
+                "agent.model": "m",
             }
         ),
     )
@@ -94,9 +100,11 @@ def test_endpoint_rendered_as_section(tmp_path, monkeypatch):
     wz.run(
         make_settings(
             {
-                "completions_url": "http://your-backend:PORT/v1/chat/completions",
-                "chat_completion_headers": {"Authorization": "Bearer sk"},
-                "model": "m",
+                "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk"
+                },
+                "agent.model": "m",
             }
         ),
         cfg,
@@ -120,9 +128,11 @@ def test_blank_line_separates_blocks(tmp_path, monkeypatch):
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": "https://x/v1",
-                "chat_completion_headers": {"Authorization": "Bearer sk"},
-                "model": "m",
+                "backend.completions_url": "https://x/v1",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk"
+                },
+                "agent.model": "m",
             }
         ),
     )
@@ -136,9 +146,11 @@ def test_blank_line_separates_blocks(tmp_path, monkeypatch):
     wz.run(
         make_settings(
             {
-                "completions_url": "https://x/v1",
-                "chat_completion_headers": {"Authorization": "Bearer sk"},
-                "model": "m",
+                "backend.completions_url": "https://x/v1",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk"
+                },
+                "agent.model": "m",
             }
         ),
         cfg,

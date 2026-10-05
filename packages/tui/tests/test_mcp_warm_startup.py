@@ -10,7 +10,7 @@ async def test_on_mount_triggers_warm(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     calls = {"n": 0}
 
@@ -39,7 +39,7 @@ async def test_poll_renders_indicator_without_active_task(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Ex()
     async with app.run_test() as pilot:

@@ -17,7 +17,7 @@ def _ctx(cwd):
     return fake_ctx(
         config={
             "launch_root": str(cwd),
-            "read_guard": {"enabled": False},
+            "security.read_guard": {"enabled": False},
         },
         ctx=None,
         logger=None,
@@ -33,7 +33,7 @@ def test_operational_gc_read_denied_even_when_readguard_off(
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "read_guard": {"enabled": False},
+            "security.read_guard": {"enabled": False},
         },
         logger=None,
     )
@@ -52,7 +52,7 @@ def test_skills_read_allowed(tmp_path, monkeypatch):
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "read_guard": {"enabled": False},
+            "security.read_guard": {"enabled": False},
         },
         logger=None,
     )

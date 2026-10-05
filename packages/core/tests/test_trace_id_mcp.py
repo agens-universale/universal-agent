@@ -95,7 +95,10 @@ class TestPresentTrace:
         out = _servers_cfg_with_trace(
             _servers(),
             make_settings(
-                {"trace_id": "wf-42", "trace_id_header_name": "X-Trace-Id"}
+                {
+                    "trace_id": "wf-42",
+                    "agent.trace_id_header_name": "X-Trace-Id",
+                }
             ),
         )
         assert out["http_srv"]["headers"]["X-Trace-Id"] == "wf-42"

@@ -564,7 +564,7 @@ async def test_extra_paths_no_longer_buy_a_baseline(roots):
     target.write_bytes(b"x = 1\n")
 
     ctx = _ctx(launch_root, threads_dir)
-    update_ctx(ctx, write_guard={"extra_paths": [str(extra)]})
+    update_ctx(ctx, **{"security.write_guard": {"extra_paths": [str(extra)]}})
 
     await record_edit(
         ctx,

@@ -19,7 +19,7 @@ def test_rows_merge_installable_wired_manual(monkeypatch):
         config=None,
         settings=make_settings(
             {
-                "mcp-servers": {
+                "mcp.servers": {
                     "corp-jira": {"transport": "stdio", "command": "x"}
                 }
             }
@@ -52,7 +52,7 @@ def test_rows_manual_excludes_managed_names(monkeypatch):
         "manual_server_names",
         lambda uc: ["office", "duckduckgo_search", "corp-jira"],
     )
-    m = McpManager(config=None, settings=make_settings({"mcp-servers": {}}))
+    m = McpManager(config=None, settings=make_settings({"mcp.servers": {}}))
     rows = m.rows()
     manual = [r.name for r in rows if r.manual]
     assert manual == [

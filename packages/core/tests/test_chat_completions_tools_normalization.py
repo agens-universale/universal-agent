@@ -186,7 +186,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
             [{"role": "user", "content": "hi"}],
             state=state,
             max_tokens=12000,
-            settings=make_settings({"use_max_tokens_param": True}),
+            settings=make_settings({"backend.use_max_tokens_param": True}),
         )
         self.assertEqual(data["max_tokens"], 12000)
         self.assertNotIn("max_completion_tokens", data)
@@ -198,7 +198,9 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
             state=state,
-            settings=make_settings({"chat_completions_max_tokens": 7777}),
+            settings=make_settings(
+                {"backend.chat_completions_max_tokens": 7777}
+            ),
         )
         self.assertEqual(data["max_completion_tokens"], 7777)
         self.assertNotIn("max_tokens", data)
@@ -212,8 +214,8 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
             state=state,
             settings=make_settings(
                 {
-                    "chat_completions_max_tokens": 5555,
-                    "use_max_tokens_param": True,
+                    "backend.chat_completions_max_tokens": 5555,
+                    "backend.use_max_tokens_param": True,
                 }
             ),
         )
@@ -229,7 +231,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
             state=state,
             settings=make_settings(
                 {
-                    "chat_completion_kwargs": {
+                    "backend.chat_completion_kwargs": {
                         "temperature": 0.2,
                         "top_p": 0.9,
                         "model": "must_not_override",
@@ -254,7 +256,7 @@ class ChatCompletionsToolsNormalizationTest(unittest.TestCase):
         data = create_call_data_completions(
             [{"role": "user", "content": "hi"}],
             state=state,
-            settings=make_settings({"chat_completion_kwargs": {}}),
+            settings=make_settings({"backend.chat_completion_kwargs": {}}),
         )
 
         self.assertNotIn("tool_choice", data)

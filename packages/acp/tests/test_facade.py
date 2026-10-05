@@ -102,7 +102,7 @@ def _open(tmp_path, factory=None):
     writer = MemoryWriter()
     facade = AcpFacade(
         settings=make_settings(
-            {"threads_data_path": str(tmp_path), "os_backend": "local"}
+            {"paths.threads_data_path": str(tmp_path), "os_backend": "local"}
         ),
         writer=writer,
         agent_factory=factory or default_factory,

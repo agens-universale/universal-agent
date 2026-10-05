@@ -41,11 +41,11 @@ def app(tmp_path):
     from gc_tui.app import TuiApp
 
     cfg = {
-        "model": "M",
-        "agent_md_path": str(tmp_path / "agent.md"),
-        "threads_data_path": str(tmp_path / "threads"),
-        "logs_dump_dir": str(tmp_path / "logs"),
-        "mcp-servers": {},
+        "agent.model": "M",
+        "paths.agent_md_path": str(tmp_path / "agent.md"),
+        "paths.threads_data_path": str(tmp_path / "threads"),
+        "paths.logs_dump_dir": str(tmp_path / "logs"),
+        "mcp.servers": {},
     }
     return TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)

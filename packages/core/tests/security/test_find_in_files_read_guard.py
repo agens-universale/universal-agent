@@ -29,7 +29,7 @@ _HAS_GREP_CASES = [
 def _cfg(root):
     return {
         "launch_root": str(root),
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "mode": "deny",
             "denied_file_patterns": [".env", ".env.*", "*.pem", "*id_rsa*"],

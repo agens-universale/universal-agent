@@ -43,7 +43,7 @@ def _load_adapter():
 
 
 def _agent(GcCliExternal, **gc_cli_config):
-    cfg = {"completions_url": _TEST_URL, **gc_cli_config}
+    cfg = {"backend.completions_url": _TEST_URL, **gc_cli_config}
     return GcCliExternal(
         logs_dir=Path("/tmp"), model_name="openai/m", gc_cli_config=cfg
     )
@@ -110,7 +110,7 @@ def test_no_model_fails_fast(monkeypatch):
     a = GcCliExternal(
         logs_dir=Path("/tmp"),
         model_name=None,
-        gc_cli_config={"completions_url": _TEST_URL},
+        gc_cli_config={"backend.completions_url": _TEST_URL},
     )
     with pytest.raises(RuntimeError, match="No model configured"):
         a._build_settings()
@@ -140,8 +140,8 @@ def test_url_and_model_sources_resolve(monkeypatch):
         logs_dir=Path("/tmp"),
         model_name=None,
         gc_cli_config={
-            "completions_url": _TEST_URL,
-            "model": "openai/VendorX/M1",
+            "backend.completions_url": _TEST_URL,
+            "agent.model": "openai/VendorX/M1",
         },
     )
     assert b._build_settings().settings.agent.model == "VendorX/M1"
@@ -152,8 +152,10 @@ def test_profile_overrides_still_win(monkeypatch):
     GcCliExternal = _load_adapter()
     a = _agent(
         GcCliExternal,
-        use_local_subagents=True,
-        summary_params={"chat_completions_summary_trigger_chars": 150000},
+        **{
+            "agent.use_local_subagents": True,
+            "summary": {"chat_completions_summary_trigger_chars": 150000},
+        },
     )
     c = a._build_settings().settings
     assert c.agent.use_local_subagents is True

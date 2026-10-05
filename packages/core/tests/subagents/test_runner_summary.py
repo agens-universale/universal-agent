@@ -27,15 +27,15 @@ def _make_orchestrator_state():
 
 def _make_config(trigger=100):
     return {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
-        "summary_params": {
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
+        "summary": {
             "chat_completions_summary_trigger_chars": trigger,
         },
-        "chat_completions_params": {
+        "chat_completions": {
             "auxiliary_llm": {
                 "max_tokens": 8192,
                 "completion_kwargs": {},
@@ -149,7 +149,7 @@ class TestRunnerSummary:
     async def test_summary_enabled_when_only_token_trigger(self):
         orch = _make_orchestrator_state()
         cfg = _make_config(trigger=0)
-        cfg["summary_params"]["chat_completions_summary_trigger_tokens"] = 1000
+        cfg["summary"]["chat_completions_summary_trigger_tokens"] = 1000
         runner = SubagentRunner(_make_ctx(cfg), orch)
         captured = {}
 

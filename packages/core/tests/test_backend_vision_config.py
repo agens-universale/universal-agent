@@ -12,9 +12,9 @@ def test_the_general_flag_is_in_settings():
     assert AppConfig(backend={"vision": False}).backend.vision is False
 
 
-def test_the_flat_name_lands_on_the_setting_path():
+def test_the_setting_path_sets_the_flag():
     assert (
-        make_settings({"backend_vision": False}).settings.backend.vision
+        make_settings({"backend.vision": False}).settings.backend.vision
         is False
     )
 
@@ -53,5 +53,5 @@ def test_declared_blind_reads_the_general_flag():
         tariff=None,
         source="legacy",
     )
-    assert _declared_blind(resolved, make_settings({"backend_vision": False}))
+    assert _declared_blind(resolved, make_settings({"backend.vision": False}))
     assert not _declared_blind(resolved, make_settings())

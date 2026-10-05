@@ -85,7 +85,7 @@ async def test_summary_trace_sink_receives_data_without_resolving_local_path(
     monkeypatch,
 ):
     sink = AsyncMock()
-    ctx = fake_ctx({"save_logs": True}, summary_trace_sink=sink)
+    ctx = fake_ctx({"logging.save_logs": True}, summary_trace_sink=sink)
     monkeypatch.setattr("os.getcwd", forbidden)
     monkeypatch.setattr("builtins.open", forbidden)
     await aappend_summary_trace_record(

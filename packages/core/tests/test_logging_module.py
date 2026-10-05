@@ -7,7 +7,7 @@ from gc_testkit.settings import make_settings
 
 
 def test_build_run_log_paths_include_agent_kind_and_run_id(tmp_path):
-    cfg = make_settings({"logs_dump_dir": str(tmp_path)})
+    cfg = make_settings({"paths.logs_dump_dir": str(tmp_path)})
     run_id = "run123"
 
     logging_path, summary_path = build_run_log_paths(
@@ -19,7 +19,9 @@ def test_build_run_log_paths_include_agent_kind_and_run_id(tmp_path):
 
 
 def test_create_run_logger_uses_unique_logger_name_and_files(tmp_path):
-    cfg = make_settings({"save_logs": True, "logs_dump_dir": str(tmp_path)})
+    cfg = make_settings(
+        {"logging.save_logs": True, "paths.logs_dump_dir": str(tmp_path)}
+    )
     run_id_1 = generate_run_id()
     run_id_2 = generate_run_id()
 

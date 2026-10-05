@@ -138,7 +138,7 @@ async def test_view_arrow_hold_coalesces_moves(tmp_path):
 
     app = TuiApp(
         threads_dir=str(tmp_path),
-        settings=tui_settings({"tui_file_view": {"page_lines": 10}}),
+        settings=tui_settings({"tui.file_view": {"page_lines": 10}}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen._cmd_view(str(f))
@@ -173,7 +173,7 @@ async def test_view_pagedown_changes_window(tmp_path):
 
     app = TuiApp(
         threads_dir=str(tmp_path),
-        settings=tui_settings({"tui_file_view": {"page_lines": 10}}),
+        settings=tui_settings({"tui.file_view": {"page_lines": 10}}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen._cmd_view(str(f))
@@ -280,7 +280,7 @@ async def test_view_get_selected_text_after_pagedown(tmp_path):
 
     app = TuiApp(
         threads_dir=str(tmp_path),
-        settings=tui_settings({"tui_file_view": {"page_lines": 5}}),
+        settings=tui_settings({"tui.file_view": {"page_lines": 5}}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen._cmd_view(str(f))

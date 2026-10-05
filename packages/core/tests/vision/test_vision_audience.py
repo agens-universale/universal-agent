@@ -237,7 +237,12 @@ def test_request_url_prefers_the_model_address():
 def test_legacy_request_model_is_keyed_by_its_model_id():
     """Легаси (пустой реестр): алиаса нет, ключ — адрес и id модели."""
     router = ModelRouter(
-        make_settings({"model": "legacy-model", "completions_url": _GLM_URL}),
+        make_settings(
+            {
+                "agent.model": "legacy-model",
+                "backend.completions_url": _GLM_URL,
+            }
+        ),
         level_provider=lambda: "default",
     )
     rejects = ImageRejects()
@@ -289,7 +294,7 @@ def test_the_general_backend_flag_applies_to_every_model():
     router = _router({"vision": "qwen"})
 
     audience = _audience(
-        router, ImageRejects(), config={"backend_vision": False}
+        router, ImageRejects(), config={"backend.vision": False}
     )
 
     assert audience.nobody is True
@@ -299,7 +304,7 @@ def test_a_model_value_beats_the_general_flag():
     router = _router({"vision": "qwen"}, backend={"qwen": {"vision": True}})
 
     audience = _audience(
-        router, ImageRejects(), config={"backend_vision": False}
+        router, ImageRejects(), config={"backend.vision": False}
     )
 
     assert audience.native is None

@@ -48,9 +48,9 @@ async def test_stream_autoscrolls_on_growth_when_at_bottom(
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
             }
         ),
     )
@@ -88,9 +88,9 @@ async def test_stream_no_autoscroll_when_scrolled_up(tmp_path, monkeypatch):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "tui_stream_display": "answer",
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "tui.stream_display": "answer",
             }
         ),
     )

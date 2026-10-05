@@ -16,7 +16,7 @@ def _ctx(cwd, confirm=False):
     return fake_ctx(
         config={
             "launch_root": str(cwd),
-            "write_guard": {"enabled": True, "mode": "deny"},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         is_tui=False,
         tui_confirm=None,
@@ -44,7 +44,7 @@ def test_operational_gc_write_denied_even_when_guard_disabled(
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "write_guard": {"enabled": False},
+            "security.write_guard": {"enabled": False},
         },
         is_tui=False,
         tui_confirm=None,
@@ -81,7 +81,7 @@ def _ctx_ask_tui(launch_root, tui_confirm):
     return fake_ctx(
         config={
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True, "mode": "ask"},
+            "security.write_guard": {"enabled": True, "mode": "ask"},
         },
         is_tui=True,
         tui_confirm=tui_confirm,
@@ -108,7 +108,7 @@ def test_instruction_file_confirm_cached_by_decision_key(
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "write_guard": {"enabled": True, "mode": "deny"},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         is_tui=True,
         tui_confirm=tui_confirm,

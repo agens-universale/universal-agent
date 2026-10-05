@@ -217,7 +217,7 @@ async def test_submit_solution_event_switches_indicator_to_validating(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -250,7 +250,7 @@ async def test_poll_active_keeps_validating_state_until_runner_exits(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -299,7 +299,7 @@ async def test_synthetic_submit_solution_output_does_not_reset_sentinel(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -345,7 +345,7 @@ async def test_policy_event_after_finalized_switches_back_to_thinking(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -379,7 +379,7 @@ async def test_new_user_send_clears_finalized(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -409,7 +409,7 @@ async def test_reset_render_state_clears_finalized(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -441,7 +441,7 @@ async def test_ask_human_active_hides_thinking_indicator(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:
@@ -482,7 +482,7 @@ async def test_runner_not_running_shows_terminal_state_after_finalized(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: fake
     async with app.run_test() as pilot:

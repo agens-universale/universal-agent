@@ -94,18 +94,18 @@ def _orch_state():
 
 def _runner_cfg(tmp_path, *, trigger=0):
     return {
-        "save_logs": True,
-        "logs_dump_dir": str(tmp_path),
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "subagent_max_steps": 30,
-        "skills_data_path": "",
-        "model": "m",
-        "system_prompt_id": "p",
-        "summary_params": {
+        "logging.save_logs": True,
+        "paths.logs_dump_dir": str(tmp_path),
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "agent.subagent_max_steps": 30,
+        "paths.skills_data_path": "",
+        "agent.model": "m",
+        "agent.system_prompt_id": "p",
+        "summary": {
             "chat_completions_summary_trigger_chars": trigger,
         },
-        "chat_completions_params": {
+        "chat_completions": {
             "auxiliary_llm": {"max_tokens": 128, "completion_kwargs": {}},
         },
     }

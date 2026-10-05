@@ -24,9 +24,11 @@ async def test_unconfigured_app_shows_onboarding(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -52,9 +54,9 @@ async def test_configured_app_no_onboarding(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -80,9 +82,9 @@ async def test_review_mode_shows_onboarding_review_all(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -115,9 +117,9 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     configured = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
     from dataclasses import replace
@@ -138,9 +140,11 @@ async def test_finish_onboarding_auto_switches_to_main(tmp_path, monkeypatch):
     )
 
     unconf = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(unconf)
@@ -177,9 +181,9 @@ async def test_finish_onboarding_review_switches_to_main(
     from gc_tui.screens.onboarding import OnboardingScreen
 
     configured = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     from gc_core.config_modules.profiles import ProfileMeta
     from dataclasses import replace
@@ -238,9 +242,11 @@ async def test_onboarding_is_modal_for_help_and_notices(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -276,9 +282,9 @@ async def test_review_mode_forwards_the_deactivation_flag(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -302,9 +308,11 @@ async def test_onboarding_does_not_deactivate_by_default(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -327,9 +335,9 @@ async def test_review_mode_forwards_the_degradation_message(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -353,9 +361,11 @@ async def test_onboarding_has_no_degradation_message_by_default(tmp_path):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
@@ -392,9 +402,11 @@ async def test_finish_onboarding_survives_a_config_that_stopped_loading(
         "backend: [this is not, valid: yaml:", encoding="utf-8"
     )
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)

@@ -133,15 +133,15 @@ def _make_state(*, max_steps: int = 5):
 
 def _make_ctx(**overrides):
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "chat_completions_max_tokens": 100,
-        "chat_completions_min_response_tokens": 30,
-        "use_ssl": True,
-        "use_retry": False,
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "backend.chat_completions_max_tokens": 100,
+        "backend.chat_completions_min_response_tokens": 30,
+        "backend.use_ssl": True,
+        "backend.use_retry": False,
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": False,
     }
     cfg.update(overrides)
     return fake_ctx(
@@ -392,7 +392,7 @@ def test_run_agent_responses_mode_does_not_call_pre_backend_hook(monkeypatch):
         arun_agent(
             [{"role": "user", "content": "hello", "id": "m1"}],
             _make_state(),
-            _make_ctx(backend_api_mode="responses"),
+            _make_ctx(**{"backend.api_mode": "responses"}),
             pre_backend_compaction_hook=_pre_backend_hook,
         )
     )
@@ -519,7 +519,7 @@ def test_turn_finish_commits_current_user_intent_on_success():
         arun_agent(
             [_submit_solution_call()],
             state,
-            _make_ctx(strict_turn_finish_validation=False),
+            _make_ctx(**{"agent.strict_turn_finish_validation": False}),
         )
     )
 
@@ -562,7 +562,7 @@ def test_turn_finish_validation_failure_fails_open(monkeypatch):
         arun_agent(
             [_submit_solution_call()],
             state,
-            _make_ctx(strict_turn_finish_validation=True),
+            _make_ctx(**{"agent.strict_turn_finish_validation": True}),
         )
     )
 
@@ -586,7 +586,7 @@ def test_finish_batch_executes_neighbor_tools_not_cycle_stop_stubs():
         arun_agent(
             [_submit_solution_call(), _generic_tool_call()],
             state,
-            _make_ctx(strict_turn_finish_validation=False),
+            _make_ctx(**{"agent.strict_turn_finish_validation": False}),
         )
     )
 
@@ -645,7 +645,7 @@ def test_turn_finish_validation_receives_context_and_current_scope(
         arun_agent(
             [_submit_solution_call()],
             state,
-            _make_ctx(strict_turn_finish_validation=True),
+            _make_ctx(**{"agent.strict_turn_finish_validation": True}),
         )
     )
 
@@ -695,7 +695,7 @@ def test_finish_gate_builds_trace_digest_from_state_messages(monkeypatch):
                 arun_agent(
                     [_submit_solution_call()],
                     state,
-                    _make_ctx(strict_turn_finish_validation=True),
+                    _make_ctx(**{"agent.strict_turn_finish_validation": True}),
                 )
             )
 
@@ -752,7 +752,7 @@ def test_finish_gate_rejection_keeps_batch_outputs_in_trace(monkeypatch):
         arun_agent(
             [_submit_solution_call(), _generic_tool_call()],
             state,
-            _make_ctx(strict_turn_finish_validation=True),
+            _make_ctx(**{"agent.strict_turn_finish_validation": True}),
         )
     )
 

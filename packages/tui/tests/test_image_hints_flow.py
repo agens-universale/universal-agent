@@ -32,7 +32,7 @@ def _app(tmp_path) -> TuiApp:
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "threads_data_path": str(tmp_path)}
+            {"agent.model": "M", "paths.threads_data_path": str(tmp_path)}
         ),
     )
 
@@ -293,8 +293,8 @@ async def test_the_open_tip_yields_to_a_refusal_and_waits(
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "threads_data_path": str(tmp_path),
+                "agent.model": "M",
+                "paths.threads_data_path": str(tmp_path),
                 "images": {"max_per_message": 1},
             }
         ),

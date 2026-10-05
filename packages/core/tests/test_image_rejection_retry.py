@@ -83,15 +83,15 @@ def _rejects_images(request: httpx.Request) -> httpx.Response:
 
 def _cfg(**extra) -> dict:
     return {
-        "model": "blind-model",
-        "completions_url": URL,
-        "backend_api_mode": "chat_completions",
-        "chat_completions_max_tokens": 256,
-        "chat_completions_min_response_tokens": 64,
-        "backend_request_timeout_sec": 30,
-        "use_ssl": False,
-        "use_retry": False,
-        "x_cl_id": "test-cl-id",
+        "agent.model": "blind-model",
+        "backend.completions_url": URL,
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completions_max_tokens": 256,
+        "backend.chat_completions_min_response_tokens": 64,
+        "backend.request_timeout_sec": 30,
+        "backend.use_ssl": False,
+        "backend.use_retry": False,
+        "agent.x_cl_id": "test-cl-id",
         **extra,
     }
 
@@ -581,12 +581,12 @@ def test_an_inferred_limit_is_rechecked_after_its_scope_changes(
         state.messages = [message]
     elif reset == "model":
         ctx.model_router = ModelRouter(
-            make_settings(_cfg(model="another-model")),
+            make_settings(_cfg(**{"agent.model": "another-model"})),
             level_provider=lambda: "default",
         )
     else:
         ctx.model_router = ModelRouter(
-            make_settings(_cfg(completions_url=URL + "/other")),
+            make_settings(_cfg(**{"backend.completions_url": URL + "/other"})),
             level_provider=lambda: "default",
         )
     state.vision_routes.update(warm_routes(ctx))

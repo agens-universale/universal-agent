@@ -147,7 +147,7 @@ def test_reminder_uses_own_checklist():
     parent.session_todo = list(PARENT_ITEMS)
     child = _child_of(parent)
     child.session_todo = [{"content": "Готово", "status": "completed"}]
-    config = make_settings({"todo_params": {"reminder_steps": 1}})
+    config = make_settings({"todo": {"reminder_steps": 1}})
 
     out = apply_todo_reminder([], child, config, step_messages=[])
 

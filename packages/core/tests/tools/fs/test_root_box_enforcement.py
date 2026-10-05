@@ -12,7 +12,7 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def _config(launch_root, extra_paths=None, enabled=True):
     return {
         "launch_root": str(launch_root),
-        "write_guard": {
+        "security.write_guard": {
             "enabled": enabled,
             "extra_paths": [str(path) for path in (extra_paths or [])],
         },
@@ -22,7 +22,7 @@ def _config(launch_root, extra_paths=None, enabled=True):
 def _read_config(launch_root, enabled=True):
     return {
         "launch_root": str(launch_root),
-        "read_guard": {
+        "security.read_guard": {
             "enabled": enabled,
             "mode": "deny",
         },

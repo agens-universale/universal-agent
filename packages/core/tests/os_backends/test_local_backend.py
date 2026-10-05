@@ -153,7 +153,7 @@ async def test_tool_backend_resolution():
     from gc_testkit.settings import make_settings
 
     cfg = make_settings(
-        {"backend_api_mode": "chat_completions", "save_logs": False}
+        {"backend.api_mode": "chat_completions", "logging.save_logs": False}
     )
     ctx = await acreate_run_context(cfg, is_tui=True)
     t = CallableTool(ReadFile(ctx=ctx))

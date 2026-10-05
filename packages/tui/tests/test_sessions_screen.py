@@ -212,7 +212,7 @@ async def test_card_shows_nonzero_session_cost(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"pricing": pricing, "model": "m"}),
+        settings=tui_settings({"pricing": pricing, "agent.model": "m"}),
     )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(
@@ -240,7 +240,9 @@ async def test_card_hides_zero_or_disabled_cost(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"pricing": {"enabled": False}, "model": "m"}),
+        settings=tui_settings(
+            {"pricing": {"enabled": False}, "agent.model": "m"}
+        ),
     )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(

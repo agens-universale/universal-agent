@@ -31,30 +31,32 @@ def test_masks_secret_keys_deeply():
     assert cfg["chat_completions_auth_token"] == "sk-REAL"
 
 
-def test_flat_view_secrets_masked_by_schema_metadata():
-    """Сырой словарь с плоскими именами ключей: секреты схемы маскируются по
-    метаданным, даже когда имя ключа на секрет не похоже (proxy, X-Tenant, env)."""
-    flat = {
-        "proxy": "http://u:pass-REAL@proxy:3128",
-        "chat_completion_headers": {"X-Tenant": "tenant-REAL"},
-        "mcp-servers": {
-            "s": {
-                "transport": "stdio",
-                "command": "srv",
-                "env": {"GH": "env-REAL"},
-            }
+def test_raw_dicts_are_masked_by_key_name_only():
+    """Сырой словарь — без схемы: маскировка только по имени ключа. Плоских имён
+    прежнего config_dict больше нет, и имя, не похожее на секрет (proxy,
+    X-Tenant, env), сырой словарь не прячет — секреты схемы маскирует
+    ``redact_settings`` по метаданным."""
+    raw = {
+        "proxy": "http://u:pass@proxy:3128",
+        "chat_completion_headers": {
+            "X-Tenant": "tenant",
+            "Authorization": "Bearer REAL",
         },
-        "agent_auth": {"auth_endpoint": "http://a", "login": "login-REAL"},
+        "agent_auth": {"auth_endpoint": "http://a", "password": "pw-REAL"},
     }
-    out = redact_secrets(flat)
-    assert out["proxy"] == "***"
-    assert out["chat_completion_headers"] == {"X-Tenant": "***"}
-    assert out["mcp-servers"]["s"]["env"] == {"GH": "***"}
-    assert out["mcp-servers"]["s"]["command"] == "srv"
-    assert out["agent_auth"] == {"auth_endpoint": "***", "login": "***"}
+    out = redact_secrets(raw)
+    assert out["proxy"] == raw["proxy"]
+    assert out["chat_completion_headers"] == {
+        "X-Tenant": "tenant",
+        "Authorization": "***",
+    }
+    assert out["agent_auth"] == {
+        "auth_endpoint": "http://a",
+        "password": "***",
+    }
     assert "REAL" not in repr(out)
     # оригинал не мутирован
-    assert flat["proxy"] == "http://u:pass-REAL@proxy:3128"
+    assert raw["agent_auth"]["password"] == "pw-REAL"
 
 
 def test_redact_settings_uses_schema_metadata():

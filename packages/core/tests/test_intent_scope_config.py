@@ -38,7 +38,7 @@ def test_intent_scope_from_config_dict_from_params():
     cfg = intent_scope_from_config_dict(
         make_settings(
             {
-                "intent_scope_params": {
+                "intent_scope": {
                     "tools": {"turn_ask_human": {"record": "aggregated"}},
                     "max_summary_chars": 400,
                 }
@@ -63,7 +63,7 @@ def test_intent_scope_from_config_dict_defaults():
 
 def test_intent_scope_read_page_record_limit_from_config():
     cfg = intent_scope_from_config_dict(
-        make_settings({"intent_scope_params": {"read_page_record_limit": 25}})
+        make_settings({"intent_scope": {"read_page_record_limit": 25}})
     )
     assert cfg.read_page_record_limit == 25
 
@@ -86,10 +86,10 @@ def test_normalize_intent_scope_config_clamps_invalid_max_raw_record_chars():
 
 def test_backend_allows_intent_scope_hook_only_chat_completions():
     assert not backend_allows_intent_scope_hook(
-        make_settings({"backend_api_mode": "responses"})
+        make_settings({"backend.api_mode": "responses"})
     )
     assert backend_allows_intent_scope_hook(
-        make_settings({"backend_api_mode": "chat_completions"})
+        make_settings({"backend.api_mode": "chat_completions"})
     )
 
 

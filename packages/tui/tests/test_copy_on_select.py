@@ -34,7 +34,7 @@ async def test_ctrl_shift_c_copies_without_stop(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app._executor_factory = lambda: _Fake()
 
@@ -90,7 +90,7 @@ async def test_text_selected_calls_copy_out(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(clipboard_ops, "copy_out", fake_copy_out)
@@ -124,7 +124,7 @@ async def test_text_selected_debounce_keeps_last(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
@@ -157,7 +157,7 @@ async def test_text_selected_empty_noop(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
@@ -191,7 +191,7 @@ async def test_copy_block_request_wins_race_with_pending_select_copy(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr("gc_tui.app.copy_out", fake_copy_out)
@@ -229,7 +229,7 @@ async def test_clipboard_payload_appends_diff_cite(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         view = EditsView(

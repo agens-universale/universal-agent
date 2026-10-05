@@ -114,7 +114,10 @@ async def test_download_file_guard_carries_the_abandoned_mark(
         DownloadFile,
         {
             "launch_root": str(launch_root),
-            "download": {"download_dir": "downloads", "max_bytes": 52_428_800},
+            "security.download": {
+                "download_dir": "downloads",
+                "max_bytes": 52_428_800,
+            },
         },
     )
 

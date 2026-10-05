@@ -73,7 +73,7 @@ def _state(**overrides) -> SimpleNamespace:
 
 async def test_create_call_headers_authorization_none_inherits_effective_header():
     ctx = fake_ctx(
-        {"backend_api_mode": "chat_completions", "x_cl_id": "1"},
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = await acreate_call_headers(
@@ -84,7 +84,7 @@ async def test_create_call_headers_authorization_none_inherits_effective_header(
 
 def test_create_call_headers_authorization_empty_string_omits_header():
     ctx = fake_ctx(
-        {"backend_api_mode": "chat_completions", "x_cl_id": "1"},
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = build_call_headers(
@@ -95,7 +95,7 @@ def test_create_call_headers_authorization_empty_string_omits_header():
 
 def test_create_call_headers_authorization_value_used_as_is():
     ctx = fake_ctx(
-        {"backend_api_mode": "chat_completions", "x_cl_id": "1"},
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = build_call_headers(
@@ -107,7 +107,7 @@ def test_create_call_headers_authorization_value_used_as_is():
 async def test_create_call_headers_responses_mode_ignores_resolved_authorization():
     # спека §4: per-model token/url/backend-квирки — chat_completions-only.
     ctx = fake_ctx(
-        {"backend_api_mode": "responses", "x_cl_id": "1"},
+        {"backend.api_mode": "responses", "agent.x_cl_id": "1"},
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
     headers = await acreate_call_headers(
@@ -122,9 +122,9 @@ def test_create_call_headers_model_token_survives_global_chat_completion_headers
     # перебивать per-model token — иначе корп-токен уезжает на чужой хост.
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
                 "Authorization": "Bearer corp-token",
                 "X-Custom": "keep-me",
             },
@@ -142,9 +142,11 @@ def test_create_call_headers_empty_token_not_revived_by_global_headers():
     # authorization="" — «явно без Authorization» (напр. локальная модель).
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"Authorization": "Bearer corp-token"},
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer corp-token"
+            },
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
@@ -157,9 +159,11 @@ def test_create_call_headers_empty_token_not_revived_by_global_headers():
 def test_create_call_headers_lowercase_global_authorization_also_yields_to_model_token():
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"authorization": "Bearer corp-token"},
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "authorization": "Bearer corp-token"
+            },
         },
         auth_connector=None,
     )
@@ -175,9 +179,11 @@ async def test_create_call_headers_global_authorization_applies_without_model_to
     # статический заголовок конфига выигрывает у токена коннектора.
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"Authorization": "Bearer corp-token"},
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer corp-token"
+            },
         },
         auth_connector=SimpleNamespace(get_token=lambda: "tok-123"),
     )
@@ -192,9 +198,11 @@ def test_create_call_headers_model_backend_overlay_authorization_wins_over_token
     # конкретное: он уточняет token, а не перебивается им.
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "x_cl_id": "1",
-            "chat_completion_headers": {"Authorization": "Bearer corp-token"},
+            "backend.api_mode": "chat_completions",
+            "agent.x_cl_id": "1",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer corp-token"
+            },
         },
         auth_connector=None,
     )
@@ -260,8 +268,8 @@ def test_request_chat_completion_text_uses_resolved_url_and_model(monkeypatch):
     )
     ctx = fake_ctx(
         {
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         logger=None,
@@ -291,9 +299,9 @@ def test_create_call_data_completions_backend_overrides_apply_on_top():
         _state(),
         settings=make_settings(
             {
-                "use_max_tokens_param": False,
-                "chat_completions_max_tokens": 100,
-                "chat_completion_kwargs": {"temperature": 0.1},
+                "backend.use_max_tokens_param": False,
+                "backend.chat_completions_max_tokens": 100,
+                "backend.chat_completion_kwargs": {"temperature": 0.1},
             }
         ),
         resolved=_resolved(
@@ -312,8 +320,8 @@ def test_create_call_data_completions_backend_overrides_apply_on_top():
 def test_create_call_headers_backend_overrides_chat_completion_headers():
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "chat_completion_headers": {"X-Base": "base"},
+            "backend.api_mode": "chat_completions",
+            "backend.chat_completion_headers": {"X-Base": "base"},
         },
         auth_connector=None,
     )
@@ -360,9 +368,9 @@ def test_request_chat_completion_text_backend_overrides_apply_to_transport_param
     )
     ctx = fake_ctx(
         {
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "use_ssl": True,
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.use_ssl": True,
         },
         model_router=router,
         logger=None,
@@ -402,9 +410,9 @@ _JUDGE_JSON = json.dumps(
 def _router_ctx(**cfg_overrides):
     router = SimpleNamespace(resolve=Mock(return_value=_resolved()))
     cfg = {
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "backend_request_timeout_sec": 600,
-        "backend_api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "backend.request_timeout_sec": 600,
+        "backend.api_mode": "chat_completions",
     }
     cfg.update(cfg_overrides)
     ctx = fake_ctx(
@@ -642,16 +650,16 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
 
     ctx = fake_ctx(
         {
-            "model": "test-model",
-            "completions_url": "http://example.test/v1/chat/completions",
-            "summary_params": {
+            "agent.model": "test-model",
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "summary": {
                 "chat_completions_summary_trigger_chars": 999999,
                 "incremental_batch_chars": int(999999 * 1.4),
                 "max_accumulated_summary_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {"max_tokens": 8192, "completion_kwargs": {}},
             },
         },
@@ -708,11 +716,11 @@ def test_main_trace_resolves_and_declares_main_consumer(monkeypatch):
     )
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         auth_connector=None,
@@ -783,11 +791,11 @@ def test_main_trace_backend_overrides_apply_to_network_params(monkeypatch):
     )
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         auth_connector=None,
@@ -840,11 +848,11 @@ def test_main_trace_legacy_network_params_without_overrides(monkeypatch):
 
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         auth_connector=None,
         logger=None,
@@ -907,11 +915,11 @@ def test_main_trace_responses_mode_ignores_network_overrides(monkeypatch):
     )
     ctx = fake_ctx(
         {
-            "backend_api_mode": "responses",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+            "backend.api_mode": "responses",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         model_router=router,
         auth_connector=None,
@@ -936,7 +944,7 @@ def test_legacy_create_call_data_completions_keeps_state_default_model_without_r
     data = create_call_data_completions(
         [{"role": "user", "content": "hi"}],
         _state(default_model="legacy-model"),
-        settings=make_settings({"chat_completions_max_tokens": 999}),
+        settings=make_settings({"backend.chat_completions_max_tokens": 999}),
     )
     assert data["model"] == "legacy-model"
     assert data["max_completion_tokens"] == 999
@@ -952,7 +960,7 @@ def test_legacy_create_call_data_responses_keeps_state_default_model_without_res
 
 async def test_legacy_create_call_headers_uses_auth_connector_without_resolved():
     ctx = fake_ctx(
-        {"backend_api_mode": "chat_completions", "x_cl_id": "7"},
+        {"backend.api_mode": "chat_completions", "agent.x_cl_id": "7"},
         auth_connector=SimpleNamespace(get_token=lambda: "legacy-token"),
     )
     headers = await acreate_call_headers(_state(), ctx)
@@ -984,8 +992,8 @@ def test_legacy_request_chat_completion_text_without_model_router(monkeypatch):
 
     ctx = fake_ctx(
         {
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
         },
         logger=None,
     )
@@ -1053,14 +1061,14 @@ def test_main_trace_backend_overrides_reach_retry_policy_and_token_limits(
     )
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
-            "retry_embedded_choice_errors": True,
-            "chat_completions_max_tokens": 32768,
-            "chat_completions_min_response_tokens": 1024,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
+            "backend.retry_embedded_choice_errors": True,
+            "backend.chat_completions_max_tokens": 32768,
+            "backend.chat_completions_min_response_tokens": 1024,
         },
         model_router=router,
         auth_connector=None,
@@ -1109,9 +1117,9 @@ def test_service_funnel_backend_override_reaches_retry_policy(monkeypatch):
     )
     ctx = fake_ctx(
         {
-            "completions_url": "http://legacy.local/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "retry_embedded_choice_errors": True,
+            "backend.completions_url": "http://legacy.local/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.retry_embedded_choice_errors": True,
         },
         model_router=router,
         logger=None,
@@ -1328,14 +1336,14 @@ def test_prompt_cache_global_false_disables_and_per_model_true_overrides():
     off = create_call_data_completions(
         _HISTORY,
         _state(),
-        settings=make_settings({"claude_prompt_cache": False}),
+        settings=make_settings({"backend.claude_prompt_cache": False}),
         resolved=_resolved(model="anthropic/claude-opus-5"),
     )
     assert _marked_indexes(off) == []
     on = create_call_data_completions(
         _HISTORY,
         _state(),
-        settings=make_settings({"claude_prompt_cache": False}),
+        settings=make_settings({"backend.claude_prompt_cache": False}),
         resolved=_resolved(
             model="anthropic/claude-opus-5",
             backend_overrides={"claude_prompt_cache": True},
@@ -1351,7 +1359,7 @@ def test_chat_completion_kwargs_cannot_inject_top_level_cache_control(caplog):
         _state(),
         settings=make_settings(
             {
-                "chat_completion_kwargs": {
+                "backend.chat_completion_kwargs": {
                     "cache_control": {"type": "ephemeral", "ttl": "1h"}
                 }
             }
@@ -1366,7 +1374,9 @@ def test_chat_completion_kwargs_cannot_inject_top_level_cache_control(caplog):
 def test_chat_completion_kwargs_cache_control_passes_when_marks_are_off():
     """Пока разметка не наша, поле верхнего уровня — рабочая настройка пользователя."""
     kwargs = {
-        "chat_completion_kwargs": {"cache_control": {"type": "ephemeral"}}
+        "backend.chat_completion_kwargs": {
+            "cache_control": {"type": "ephemeral"}
+        }
     }
     gemini = create_call_data_completions(
         _HISTORY,

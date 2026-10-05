@@ -106,7 +106,10 @@ def test_cli_prints_full_summary_texts(capsys):
 def test_resolve_summary_trace_path_prefers_ctx(tmp_path):
     custom = tmp_path / "custom_trace.jsonl"
     ctx = fake_ctx(
-        {"save_logs": True, "logs_dump_dir": str(tmp_path / "ignored")},
+        {
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path / "ignored"),
+        },
         summary_trace_path=str(custom),
     )
     assert resolve_summary_trace_path(ctx) == str(custom)

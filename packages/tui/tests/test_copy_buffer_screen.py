@@ -38,7 +38,7 @@ async def test_copy_buffer_screen_chrome(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore()
@@ -71,7 +71,7 @@ async def test_copy_buffer_screen_loads_existing(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый буфер")
@@ -91,7 +91,7 @@ async def test_copy_buffer_screen_no_store_opens_empty(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         await pilot.app.push_screen(CopyBufferScreen(store=None, task_id=None))
@@ -108,7 +108,7 @@ async def test_esc_no_change_no_write(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="не меняли")
@@ -129,7 +129,7 @@ async def test_esc_with_change_saves(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="старый")
@@ -153,7 +153,7 @@ async def test_esc_empty_clears_buffer(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="было")
@@ -177,7 +177,7 @@ async def test_save_clamps_to_max(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         store = _MockStore(existing_buffer="")
@@ -203,7 +203,7 @@ async def test_paste_os_first(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(
@@ -228,7 +228,7 @@ async def test_ctrl_shift_v_binding_pastes(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(
@@ -256,7 +256,7 @@ async def test_paste_falls_back_to_internal(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         monkeypatch.setattr(

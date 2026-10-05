@@ -15,7 +15,10 @@ class _S:
 
 
 def _ctx(mode=None, backend="chat_completions", strict=True):
-    cd = {"backend_api_mode": backend, "strict_turn_finish_validation": strict}
+    cd = {
+        "backend.api_mode": backend,
+        "agent.strict_turn_finish_validation": strict,
+    }
     if mode is not None:
         cd["text_answer_mode"] = mode
     return fake_ctx(cd, logger=None)
@@ -331,10 +334,10 @@ def _state():
 
 def _run_ctx(mode):
     cd = {
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 3,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 3,
+        "agent.strict_turn_finish_validation": True,
     }
     if mode is not None:
         cd["text_answer_mode"] = mode

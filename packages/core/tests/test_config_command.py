@@ -180,13 +180,13 @@ def test_explain_show_defaults_prints_default_next_to_value(stack):
     assert "(по умолчанию: " in _line(out, "agent.max_steps")
 
 
-def test_explain_keys_accept_flat_name_section_and_dict_key(stack):
+def test_explain_keys_accept_path_section_and_dict_key(stack):
     code, out, _ = _run(
         [
             "explain",
             "--config",
             str(stack["base"]),
-            "max_steps",
+            "agent.max_steps",
             "models.fast",
             "backend.chat_completion_headers.X-Api-Key",
         ]
@@ -206,6 +206,18 @@ def test_explain_unknown_key_suggests_and_exits_2(stack):
     assert code == EXIT_USAGE
     assert out == ""
     assert "agent.max_stesp" in err
+    assert "agent.max_steps" in err
+
+
+def test_explain_flat_name_is_unknown_with_path_hint(stack):
+    # Плоских имён прежнего config_dict нет: `max_steps` — неизвестный ключ,
+    # а подсказка ведёт к пути с тем же последним сегментом.
+    code, out, err = _run(
+        ["explain", "--config", str(stack["base"]), "max_steps"]
+    )
+    assert code == EXIT_USAGE
+    assert out == ""
+    assert "неизвестная настройка: max_steps" in err
     assert "agent.max_steps" in err
 
 

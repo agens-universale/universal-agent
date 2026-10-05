@@ -56,7 +56,7 @@ def test_ensure_starts_only_configured_http_mcp(tmp_path: Path) -> None:
         """,
     )
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "science": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -98,7 +98,7 @@ def test_ensure_skips_ready_wait_when_daemon_already_running(
         """,
     )
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "science": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -181,7 +181,7 @@ def test_wired_but_not_installed_daemon_does_not_kill_the_frontend(
         """,
     )
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "science": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -232,7 +232,7 @@ def test_broken_daemon_does_not_block_its_healthy_neighbour(
         """,
     )
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "broken": {
                 "transport": "stream_http",
                 "url": "http://127.0.0.1:8765/mcp",
@@ -359,7 +359,7 @@ def _raise_supervisor_error(entry, root, supervisor):
 
 
 _SCIENCE_CONFIG = {
-    "mcp-servers": {
+    "mcp.servers": {
         "science": {
             "transport": "stream_http",
             "url": "http://127.0.0.1:8765/mcp",

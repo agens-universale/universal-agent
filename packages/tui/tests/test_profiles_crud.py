@@ -50,8 +50,8 @@ _PROFILE_BODY = "models:\n  glm:\n    url: http://y\n    token: sk\nslots:\n  de
 
 def _base_dict() -> dict:
     return {
-        "completions_url": "http://host/v1/chat/completions",
-        "model": "test-model",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "agent.model": "test-model",
     }
 
 

@@ -58,7 +58,7 @@ async def test_prose_only_reply_renders_one_static_with_bullet(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -87,7 +87,7 @@ async def test_reply_with_fenced_block_mounts_separate_panels(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -120,7 +120,7 @@ async def test_continuation_widgets_have_cont_class(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -152,7 +152,7 @@ async def test_unknown_lang_falls_back_to_code_block_color(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)

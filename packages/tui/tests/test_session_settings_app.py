@@ -12,9 +12,9 @@ def _app(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "tui_finish_gate_mode": "on",
-                "tui_text_answer_mode": "judge",
+                "agent.model": "M",
+                "tui.finish_gate_mode": "on",
+                "tui.text_answer_mode": "judge",
             }
         ),
     )
@@ -40,10 +40,10 @@ def test_overrides_survive_config_reload(tmp_path, monkeypatch):
     app.set_session_override("tui.text_answer_mode", "allow")
 
     fresh = {
-        "model": "fresh-model",
-        "tui_finish_gate_mode": "on",
-        "tui_text_answer_mode": "judge",
-        "threads_data_path": str(tmp_path / "threads"),
+        "agent.model": "fresh-model",
+        "tui.finish_gate_mode": "on",
+        "tui.text_answer_mode": "judge",
+        "paths.threads_data_path": str(tmp_path / "threads"),
         "profile": "",
     }
     from gc_core.config_modules.profiles import ProfileMeta

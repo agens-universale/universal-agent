@@ -14,7 +14,7 @@ async def test_mcp_screen_prefers_boot_snapshot(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -38,7 +38,7 @@ async def test_mcp_screen_snapshot_none_without_boot_or_task(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -55,7 +55,7 @@ def test_build_real_executor_stores_mcp_snapshot(tmp_path, monkeypatch):
         system="cli",
         settings=tui_settings(
             {
-                "mcp-servers": {
+                "mcp.servers": {
                     "office": {
                         "transport": "stdio",
                         "command": "x",

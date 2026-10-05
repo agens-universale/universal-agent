@@ -85,7 +85,7 @@ def _sandbox_tool(tmp_path, backend, *, state):
     # Периметр чтения выключен, как в плоском словаре теста на develop (секции
     # `read_guard` там не было): здесь проверяется выбор хоста или контейнера.
     cfg = make_settings(
-        {"launch_root": "/work", "read_guard": {"enabled": False}}
+        {"launch_root": "/work", "security.read_guard": {"enabled": False}}
     )
     ctx = fake_ctx(
         loaded=cfg,
@@ -344,7 +344,7 @@ async def test_path_outside_the_read_perimeter_is_read_denied(tmp_path):
     src.write_bytes(_png())
     cfg = {
         "launch_root": str(project),
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "mode": "deny",
             "allowed_read_roots": [str(project)],

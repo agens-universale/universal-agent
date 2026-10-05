@@ -287,10 +287,10 @@ def test_run_agent_sends_loop_notice_tail_as_function_call_output(monkeypatch):
     state.backend_api_mode = "chat_completions"
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "console_trace": False,
-            "no_tool_call_max_count": 5,
-            "strict_turn_finish_validation": False,
+            "backend.api_mode": "chat_completions",
+            "logging.console_trace": False,
+            "agent.no_tool_call_max_count": 5,
+            "agent.strict_turn_finish_validation": False,
         },
         tools_data={"fs_read_file": {LOOP_WARN_KEY: READ_PROFILE}},
         logger=_LOG,

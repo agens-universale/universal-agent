@@ -85,8 +85,8 @@ async def _cli_ctx(
     ctx = await acreate_run_context(
         make_settings(
             {
-                "backend_api_mode": "chat_completions",
-                "save_logs": False,
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
                 "launch_root": str(launch_root),
                 "run_mode": "cli",
                 "agent_edits": {"record": {"cli": True}},

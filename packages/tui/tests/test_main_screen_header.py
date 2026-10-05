@@ -15,7 +15,10 @@ async def test_header_shows_session_id_and_meta_shows_model(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+            {
+                "agent.model": "CodeAgent",
+                "backend.api_mode": "chat_completions",
+            }
         ),
     )
     async with app.run_test() as pilot:
@@ -50,7 +53,7 @@ async def test_attach_active_task_mirrors_into_tui_state(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     (tmp_path / "meta_cli_t1.json").write_text(
         '{"thread_id":"t1","status":"stopped","updated_at":"...","messages_count":0}',

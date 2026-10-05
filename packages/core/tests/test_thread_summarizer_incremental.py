@@ -53,16 +53,16 @@ def _ctx(
     )
     return fake_ctx(
         {
-            "model": "test-model",
-            "completions_url": "http://example.test/v1/chat/completions",
-            "summary_params": {
+            "agent.model": "test-model",
+            "backend.completions_url": "http://example.test/v1/chat/completions",
+            "summary": {
                 "chat_completions_summary_trigger_chars": trigger_chars,
                 "incremental_batch_chars": incremental_batch_chars,
                 "max_accumulated_summary_chars": max_accumulated_summary_chars,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,
             },
-            "chat_completions_params": {
+            "chat_completions": {
                 "auxiliary_llm": {
                     "max_tokens": 8192,
                     "completion_kwargs": {},

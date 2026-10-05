@@ -17,13 +17,13 @@ def _make_config(tmp_path, raw: dict, **extra):
     return make_settings(
         {
             **raw,
-            "use_local_subagents": True,
-            "backend_api_mode": "chat_completions",
-            "subagent_max_steps": 30,
-            "skills_data_path": "",
-            "system_prompt_id": "test-prompt",
-            "save_logs": True,
-            "logs_dump_dir": str(tmp_path),
+            "agent.use_local_subagents": True,
+            "backend.api_mode": "chat_completions",
+            "agent.subagent_max_steps": 30,
+            "paths.skills_data_path": "",
+            "agent.system_prompt_id": "test-prompt",
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path),
             **extra,
         }
     )
@@ -73,7 +73,11 @@ class TestChildConfigMutationIsolation:
         cfg = _make_config(
             tmp_path,
             raw,
-            chat_completion_headers={"Authorization": "Bearer parent-token"},
+            **{
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer parent-token"
+                }
+            },
         )
         ctx = _parent_ctx(cfg, level="default")
         runner = SubagentRunner(ctx, _make_orchestrator_state())

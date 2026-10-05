@@ -837,8 +837,8 @@ def test_materialize_applies_swarm_env_paths(tmp_path, monkeypatch):
     assert written["paths"]["skills_data_path"] == "/swarm/skills"
 
 
-def test_materialize_applies_agent_overrides_flat(tmp_path):
-    """Flat agent_overrides (legacy webhook-формат) → авто-обёртка в agent: ."""
+def test_materialize_applies_agent_overrides_dotted(tmp_path):
+    """agent_overrides путями через точку → вложенные секции raw YAML."""
     import yaml as _yaml
 
     host_cfg = tmp_path / "host.yml"
@@ -848,20 +848,38 @@ def test_materialize_applies_agent_overrides_flat(tmp_path):
 
     swarm_cfg = {
         "agent_overrides": {
-            "stop_tools": ["write_to_file", "execute_command"],
-            "max_steps": 50,
+            "agent.stop_tools": ["write_to_file", "execute_command"],
+            "agent.max_steps": 50,
+            "backend.api_mode": "responses",
         },
     }
     runner._materialize_runtime_config(str(host_cfg), str(sandbox), swarm_cfg)
     written = _yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
 
-    # Flat overrides осели под agent: благодаря auto-wrap.
     # stop_tools — список → deep_merge конкатенирует + dedup; "write_to_file"
     # и "execute_command" должны присутствовать.
     assert "write_to_file" in written["agent"]["stop_tools"]
     assert "execute_command" in written["agent"]["stop_tools"]
     # max_steps скаляр → перезаписан overrides'ом.
     assert written["agent"]["max_steps"] == 50
+    assert written["backend"]["api_mode"] == "responses"
+
+
+def test_materialize_rejects_flat_agent_overrides_with_path_hint(tmp_path):
+    """Плоских имён (прежний webhook-формат) больше нет: ошибка с подсказкой."""
+    from gc_core.config_modules.path_hints import UnknownSettingError
+
+    host_cfg = tmp_path / "host.yml"
+    host_cfg.write_text("agent:\n  max_steps: 100\n")
+    sandbox = tmp_path / "sb"
+    sandbox.mkdir()
+
+    swarm_cfg = {"agent_overrides": {"max_steps": 50}}
+    with pytest.raises(UnknownSettingError) as exc:
+        runner._materialize_runtime_config(
+            str(host_cfg), str(sandbox), swarm_cfg
+        )
+    assert "agent.max_steps" in str(exc.value)
 
 
 def test_materialize_applies_agent_overrides_raw(tmp_path):

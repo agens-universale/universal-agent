@@ -51,7 +51,9 @@ def test_apply_acp_runtime_defaults_respects_overrides():
 
 def test_apply_acp_runtime_defaults_keeps_existing_stop_tools():
     loaded = apply_acp_runtime_defaults(
-        make_settings({"stop_tools": ["project_memory", "turn_ask_human"]})
+        make_settings(
+            {"agent.stop_tools": ["project_memory", "turn_ask_human"]}
+        )
     )
     assert loaded.settings.agent.stop_tools == [
         "project_memory",
@@ -125,7 +127,7 @@ async def _no_lines():
 def test_local_config_is_silent_on_stdout(monkeypatch, capsys, tmp_path):
     def load(path, profile_override=None):
         return make_settings(
-            {"os_backend": "local", "threads_data_path": str(tmp_path)}
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
         )
 
     monkeypatch.setattr("gc_acp.main.load_settings", load)
@@ -140,7 +142,7 @@ def test_local_start_applies_runtime_defaults(monkeypatch, tmp_path):
 
     def load(path, profile_override=None):
         return make_settings(
-            {"os_backend": "local", "threads_data_path": str(tmp_path)}
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
         )
 
     async def serve(config, protocol_out):
@@ -163,7 +165,7 @@ def test_local_start_applies_runtime_defaults(monkeypatch, tmp_path):
 def test_core_print_stays_off_protocol_stdout(monkeypatch, capsys, tmp_path):
     def load(path, profile_override=None):
         return make_settings(
-            {"os_backend": "local", "threads_data_path": str(tmp_path)}
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
         )
 
     async def serve(_config, protocol_out):
@@ -217,7 +219,7 @@ def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
         held["path"] = path
         held["profile"] = profile_override
         return make_settings(
-            {"os_backend": "local", "threads_data_path": str(tmp_path)}
+            {"os_backend": "local", "paths.threads_data_path": str(tmp_path)}
         )
 
     async def serve(config, protocol_out):

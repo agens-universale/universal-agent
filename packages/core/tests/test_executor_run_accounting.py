@@ -58,10 +58,10 @@ def _executor(state, session):
     logger = _Logger()
     ctx = fake_ctx(
         {
-            "console_trace": True,
-            "logging_format": "text",
-            "model": "m",
-            "completions_url": "http://llm",
+            "logging.console_trace": True,
+            "logging.format": "text",
+            "agent.model": "m",
+            "backend.completions_url": "http://llm",
         },
         logger=logger,
     )

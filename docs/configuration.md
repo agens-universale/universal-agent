@@ -195,7 +195,7 @@ managed → project → профиль, `${ENV:…}`). Общие парамет
 
 ```bash
 gc-cli config explain                    # заданные настройки (не умолчания), по секциям
-gc-cli config explain agent.max_steps    # одна настройка; секция (agent) и старое плоское имя (max_steps) тоже
+gc-cli config explain agent.max_steps    # одна настройка; секция (agent) тоже, плоское имя (max_steps) — ошибка с подсказкой пути
 gc-cli config explain --all --show-defaults --json
 gc-cli config validate                   # ok + notices загрузки, иначе объяснение и код 1
 gc-cli config schema --output config.schema.json
@@ -207,7 +207,7 @@ gc-cli config schema --output config.schema.json
   `default` — значение по умолчанию. В шапке — действующий профиль и файлы слоёв.
   Без `KEY` выводятся только заданные настройки, `--all` добавляет умолчания,
   `--show-defaults` показывает умолчание рядом с заданным значением. Опечатка в ключе
-  даёт код 2 и близкие варианты. Флаги командной строки (`--param`, `--model`, `--level`)
+  даёт код 2 и близкие варианты; прежнее плоское имя (`max_steps`) — тоже, с подсказкой пути (`agent.max_steps`). Флаги командной строки (`--param`, `--model`, `--level`)
   и правки сессии в выводе не учитываются — показан конфиг уровня файлов и окружения.
 - **Секреты** (поля с флагом `secret` в схеме: токены, заголовки, `agent_auth`…)
   всегда заменяются на `***`, в том числе в `--json`; у словаря-секрета (заголовки)
@@ -755,22 +755,32 @@ OpenRouter даже `404` «No endpoints found that support image input», — �
 ## Переопределение настроек из CLI
 
 Любую настройку можно переопределить при запуске дополнительными аргументами
-командной строки — прежним плоским именем (`--max_steps`) или путём настройки
-(`--agent.max_steps`).
+командной строки — **путём настройки через точку** (`--agent.max_steps 50`,
+`--security.read_guard.mode ask`). Путь — тот же, что в `config.yml` и в
+`gc-cli config explain`.
+
+- Прежние плоские имена (`--max_steps`, `--summary_params`) **не принимаются**:
+  это ошибка при старте. Если у схемы есть настройка с тем же последним сегментом
+  имени, сообщение подсказывает путь:
+  `неизвестная настройка --max_steps (возможно, --agent.max_steps)`.
+- Объявленные флаги CLI остаются флагами: `--model` (`agent.model`),
+  `--completions_url` (`backend.completions_url`), `--profile`, `--level`,
+  `--write-guard`/`--no-write-guard`, `--read-guard`/`--no-read-guard`,
+  `--read-guard-mode`, `--command-moderation`, `--trace-id` и др. (`gc-cli --help`).
 
 - Значения из CLI **всегда имеют приоритет** над файлами и профилем; в
   `config explain` их источник — слой `cli`.
 - Поддерживаются формы `--param value`, `--param=value` и `--flag` (без
   значения — `true`).
 - Значение приводится к типу через `yaml.safe_load` и проходит ту же
-  валидацию, что и файл: `--max_steps 50` → `agent.max_steps == 50`,
-  `--verbose true` → `agent.verbose is True`, `--client_name "my_client"` →
-  `agent.client_name == "my_client"`.
+  валидацию, что и файл: `--agent.max_steps 50` → `agent.max_steps == 50`,
+  `--agent.verbose true` → `agent.verbose is True`,
+  `--agent.client_name "my_client"` → `agent.client_name == "my_client"`.
 - В отличие от файла, **неизвестное имя или негодное значение — ошибка**
   сразу при старте: опечатка в команде не должна молча ничего не менять.
 - Значение **заменяет** настройку целиком, а не сливается с файлом: список
-  (`--read_guard '{allowed_read_roots: [/repo]}'`) сужает, словарь
-  `--mcp-servers '{}'` отключает все серверы, запись `--models` заменяется
+  (`--security.read_guard.allowed_read_roots '[/repo]'`) сужает, словарь
+  `--mcp.servers '{}'` отключает все серверы, запись `--models` заменяется
   вместе с адресом и токеном. Так же работают `agent_overrides` сервера и
   сессионные правки TUI. Объединение списков — только у файловых слоёв.
 
@@ -788,7 +798,7 @@ OpenRouter даже `404` «No endpoints found that support image input», — �
 
 - Переопределить существующие ключи:
   ```bash
-  gc-cli -q "..." --agent_md_path "my path" --max_steps 50
+  gc-cli -q "..." --paths.agent_md_path "my path" --agent.max_steps 50
   ```
   В рантайме будет использовано `paths.agent_md_path == "my path"` и
   `agent.max_steps == 50`, даже если в `config.yml` заданы другие значения.
@@ -816,8 +826,8 @@ gc-cli -q "..." --level max               # уровень на этот зап�
 гварды, суммаризация и прочие его секции продолжают действовать. Форс решает только
 вопрос «какой моделью идёт вызов».
 
-Если реестр пуст, ничего особенного не происходит: это обычное переопределение плоских
-ключей, как и раньше.
+Если реестр пуст, ничего особенного не происходит: это обычное переопределение
+`agent.model` и `backend.completions_url`, как и раньше.
 
 ## Изображения (`images:`)
 
@@ -1163,7 +1173,7 @@ mcp:
 
 Файл `.gc/config.yml` следует той же схеме, что и глобальный `config.yml` — указывайте только те поля, которые хотите переопределить или дополнить. Папка `.gc/` создаётся автоматически при первом запуске `gc-cli` (та же папка, что и для project-скиллов).
 
-CLI-флаги (`--max_steps 999` и т.п.) перебивают и global, и project. Файл опционален; если его нет — используется только global.
+CLI-флаги (`--agent.max_steps 999` и т.п.) перебивают и global, и project. Файл опционален; если его нет — используется только global.
 
 Если через `--config` явно передан тот же файл, что и `<repo>/.gc/config.yml` — gc-cli применяет его как обычный config без второго слоя (особый случай для запусков с явным путём).
 

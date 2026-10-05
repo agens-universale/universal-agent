@@ -62,18 +62,18 @@ def test_resolve_rigor_state_reads_effective_pair():
 
     # medium: explicit smart + judge
     cfg = make_settings(
-        {"tui_finish_gate_mode": "smart", "tui_text_answer_mode": "judge"}
+        {"tui.finish_gate_mode": "smart", "tui.text_answer_mode": "judge"}
     )
     assert resolve_rigor_state(cfg) == "medium"
     # нестандартная сессионная пара on+allow → custom
     cfg2 = make_settings(
-        {"tui_finish_gate_mode": "on", "tui_text_answer_mode": "allow"}
+        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
     )
     assert resolve_rigor_state(cfg2) == PRESET_CUSTOM
     # дефолты (нет ключей) → smart + judge → medium
     assert resolve_rigor_state(make_settings()) == "medium"
     # low через явный off + allow
     cfg3 = make_settings(
-        {"tui_finish_gate_mode": "off", "tui_text_answer_mode": "allow"}
+        {"tui.finish_gate_mode": "off", "tui.text_answer_mode": "allow"}
     )
     assert resolve_rigor_state(cfg3) == "low"

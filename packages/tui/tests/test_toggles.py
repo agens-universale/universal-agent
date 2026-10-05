@@ -245,7 +245,7 @@ def test_next_toggle_value_generic_for_single_key():
 
     class _App:
         def effective_settings(self):
-            return make_settings({"tui_text_answer_mode": "judge"})
+            return make_settings({"tui.text_answer_mode": "judge"})
 
     assert next_toggle_value(_App(), "answers", 1) == "deny"
     assert next_toggle_value(_App(), "answers", -1) == "allow"
@@ -336,7 +336,7 @@ def test_next_toggle_value_displayed_custom_falls_back_to_idx_zero():
         def effective_settings(self):
             # пара нестандартна -> эффективное "custom"
             return make_settings(
-                {"tui_finish_gate_mode": "on", "tui_text_answer_mode": "allow"}
+                {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "allow"}
             )
 
     assert next_toggle_value(_App(), "rigor", 1) == "medium"  # idx0 +1

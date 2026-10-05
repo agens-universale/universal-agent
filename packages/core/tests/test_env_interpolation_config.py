@@ -1,7 +1,7 @@
 import yaml
 from gc_core.config import apply_cli_overrides, load_settings
 from gc_core.config_modules.field_meta import plain_dump
-from gc_testkit.settings import settings_from_flat
+from gc_testkit.settings import make_settings
 
 
 def _write_cfg(tmp_path, body: dict) -> str:
@@ -44,9 +44,9 @@ def test_load_settings_resolves_env_in_mcp_and_headers(tmp_path, monkeypatch):
 
 def test_cli_override_resolves_env(monkeypatch):
     monkeypatch.setenv("U", "http://h/v1/chat")
-    loaded = settings_from_flat({"completions_url": "orig"})
+    loaded = make_settings({"backend.completions_url": "orig"})
     settings = apply_cli_overrides(
-        loaded, extra_overrides={"completions_url": "${ENV:U}"}
+        loaded, extra_overrides={"backend.completions_url": "${ENV:U}"}
     ).settings
     assert settings.backend.completions_url == "http://h/v1/chat"
 
@@ -55,9 +55,9 @@ def test_cli_override_file_placeholder(tmp_path):
     f = tmp_path / "tok"
     f.write_text("cli-secret\n")
     settings = apply_cli_overrides(
-        settings_from_flat({}),
+        make_settings({}),
         extra_overrides={
-            "chat_completion_headers": {
+            "backend.chat_completion_headers": {
                 "Authorization": f"Bearer ${{FILE:{f}}}"
             }
         },

@@ -81,7 +81,7 @@ async def test_no_probe_without_need_or_when_disabled(
         monkeypatch, lambda request: httpx.Response(200, json=OK)
     )
     ctx = _ctx(
-        tmp_path, _cfg(backend_vision=False) if disabled else _cfg(), []
+        tmp_path, _cfg(**{"backend.vision": False}) if disabled else _cfg(), []
     )
     _, message = _user_with_image(ctx.image_store)
     if not image:
@@ -212,7 +212,9 @@ async def test_explicit_header_replaces_automatic_value_and_reuses_probe(
         ),
     )
     ctx = _ctx(
-        tmp_path, _cfg(chat_completion_headers={header: "static-route"}), []
+        tmp_path,
+        _cfg(**{"backend.chat_completion_headers": {header: "static-route"}}),
+        [],
     )
     _, message = _user_with_image(ctx.image_store)
     st = _state([message])
@@ -246,7 +248,12 @@ async def test_changed_duplicate_routing_headers_require_new_probe(
     ctx = _ctx(
         tmp_path,
         _cfg(
-            chat_completion_headers={"X-Target": "text", "x-target": "vision"}
+            **{
+                "backend.chat_completion_headers": {
+                    "X-Target": "text",
+                    "x-target": "vision",
+                }
+            }
         ),
         [],
     )

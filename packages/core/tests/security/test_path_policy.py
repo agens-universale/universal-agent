@@ -101,7 +101,7 @@ def test_enforce_write_guard_returns_structured_error(tmp_path):
     ctx = fake_ctx(
         {
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True, "mode": "deny"},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         }
     )
 
@@ -122,7 +122,7 @@ def test_enforce_write_guard_audits_blocked_decision(tmp_path):
     ctx = fake_ctx(
         {
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True, "mode": "deny"},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         logger=logger,
     )
@@ -155,7 +155,7 @@ def test_enforce_write_guard_uses_explicit_logger_when_provided(tmp_path):
             ctx=fake_ctx(
                 {
                     "launch_root": str(launch_root),
-                    "write_guard": {"enabled": True, "mode": "deny"},
+                    "security.write_guard": {"enabled": True, "mode": "deny"},
                 }
             ),
         )
@@ -176,7 +176,7 @@ def test_enforce_write_guard_prefers_explicit_logger_over_context_logger(
     ctx = fake_ctx(
         {
             "launch_root": str(launch_root),
-            "write_guard": {"enabled": True, "mode": "deny"},
+            "security.write_guard": {"enabled": True, "mode": "deny"},
         },
         logger=context_logger,
     )

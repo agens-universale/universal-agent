@@ -36,7 +36,7 @@ from parity_harness import (
     install_many,
     judge_accept,
     parity_config,
-    with_flat_overrides,
+    with_path_overrides,
 )
 
 
@@ -110,11 +110,11 @@ def compacting_config(tmp_path, monkeypatch, **overrides):
     cfg = parity_config(tmp_path, monkeypatch, **overrides)
     # Правка поверх загруженного — как прежде в плоском виде: производные
     # значения загрузки (``incremental_batch_chars``) не пересчитываются.
-    return with_flat_overrides(
+    return with_path_overrides(
         cfg,
         {
-            "summary_params.chat_completions_summary_trigger_chars": 200,
-            "summary_params.chat_completions_summary_turn_end_trigger_chars": 120,
+            "summary.chat_completions_summary_trigger_chars": 200,
+            "summary.chat_completions_summary_turn_end_trigger_chars": 120,
         },
     )
 
@@ -352,8 +352,12 @@ async def test_two_agents_compact_concurrently(tmp_path, monkeypatch):
     ВЫЗОВОВ, и второй забрал бы финализатор первого. Поэтому у каждого свой
     сценарий, привязанный к его ``model``.
     """
-    cfg_a = compacting_config(tmp_path / "a", monkeypatch, model="агент-а")
-    cfg_b = compacting_config(tmp_path / "b", monkeypatch, model="агент-б")
+    cfg_a = compacting_config(
+        tmp_path / "a", monkeypatch, **{"agent.model": "агент-а"}
+    )
+    cfg_b = compacting_config(
+        tmp_path / "b", monkeypatch, **{"agent.model": "агент-б"}
+    )
     install_many(monkeypatch, {"агент-а": script(), "агент-б": script()})
 
     a = await AsyncAgent.create(cfg_a)
@@ -398,7 +402,9 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
     """
     from gc_testkit import quiet_gc_for_loop_timing
 
-    solo_cfg = compacting_config(tmp_path / "solo", monkeypatch, model="соло")
+    solo_cfg = compacting_config(
+        tmp_path / "solo", monkeypatch, **{"agent.model": "соло"}
+    )
     install_many(monkeypatch, {"соло": slow_script()})
     # Оба замера под заглушенным сборщиком: замерено 18 пауз на 1311 мс в окне
     # этого теста при собственной работе около 0,8 с. Отношение мерило долю
@@ -412,8 +418,12 @@ async def test_compaction_does_not_serialize_agents(tmp_path, monkeypatch):
             await solo.aclose()
         alone = time.monotonic() - started
 
-        cfg_a = compacting_config(tmp_path / "pa", monkeypatch, model="пара-а")
-        cfg_b = compacting_config(tmp_path / "pb", monkeypatch, model="пара-б")
+        cfg_a = compacting_config(
+            tmp_path / "pa", monkeypatch, **{"agent.model": "пара-а"}
+        )
+        cfg_b = compacting_config(
+            tmp_path / "pb", monkeypatch, **{"agent.model": "пара-б"}
+        )
         install_many(
             monkeypatch, {"пара-а": slow_script(), "пара-б": slow_script()}
         )

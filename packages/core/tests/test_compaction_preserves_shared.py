@@ -62,7 +62,7 @@ class CompactionPreservesSharedTest(unittest.TestCase):
     @patch("gc_core.summarize.compaction.log_compaction_started")
     def test_summary_payload_carries_whole_shared_block(self, *_logs) -> None:
         state = _state_with_full_shared()
-        ctx = fake_ctx({"summary_params": {}}, logger=None)
+        ctx = fake_ctx({"summary": {}}, logger=None)
         captured: dict = {}
 
         with (

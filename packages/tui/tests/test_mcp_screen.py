@@ -51,7 +51,7 @@ async def test_mcp_screen_with_snapshot(tmp_path):
     from gc_tui.screens.mcp import McpScreen
 
     cfg = {
-        "mcp-servers": {
+        "mcp.servers": {
             "search": {"transport": "sse", "url": "http://x", "token": "T"}
         }
     }
@@ -86,7 +86,7 @@ async def test_mcp_screen_no_snapshot_shows_note(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
+    cfg = {"mcp.servers": {"search": {"transport": "sse", "url": "http://x"}}}
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
     )
@@ -107,11 +107,11 @@ async def test_mcp_screen_empty(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"mcp-servers": {}}),
+        settings=tui_settings({"mcp.servers": {}}),
     )
     async with app.run_test() as pilot:
         scr = McpScreen(
-            settings=as_settings({"mcp-servers": {}}), tools_snapshot={}
+            settings=as_settings({"mcp.servers": {}}), tools_snapshot={}
         )
         await app.push_screen(scr)
         await pilot.pause()
@@ -128,7 +128,7 @@ async def test_mcp_screen_esc_returns_to_main(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"mcp-servers": {}}),
+        settings=tui_settings({"mcp.servers": {}}),
     )
     async with app.run_test() as pilot:
         await pilot.app.screen._handle_command("mcp")
@@ -148,7 +148,7 @@ async def test_mcp_screen_has_header_and_footer(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.screens.mcp import McpScreen
 
-    cfg = {"mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}}
+    cfg = {"mcp.servers": {"search": {"transport": "sse", "url": "http://x"}}}
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings(cfg)
     )

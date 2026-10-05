@@ -16,7 +16,10 @@ from gc_testkit.settings import fake_ctx, make_settings
 @pytest.fixture()
 def coordinator_ctx(tmp_path):
     return fake_ctx(
-        {"save_logs": True, "logs_dump_dir": str(tmp_path / "logs")},
+        {
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path / "logs"),
+        },
         summary_trace_path="",
         logger=None,
     )
@@ -28,7 +31,10 @@ async def test_summary_trace_prefers_ctx_path_over_logs_dump_dir(
     custom = tmp_path / "custom_trace.jsonl"
     coordinator_ctx.summary_trace_path = str(custom)
     coordinator_ctx.settings = make_settings(
-        {"save_logs": True, "logs_dump_dir": str(tmp_path / "ignored_logs")}
+        {
+            "logging.save_logs": True,
+            "paths.logs_dump_dir": str(tmp_path / "ignored_logs"),
+        }
     ).settings
 
     state = SimpleNamespace(

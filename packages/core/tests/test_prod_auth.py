@@ -158,8 +158,8 @@ def test_build_auth_connector_passes_proxy():
     c = build_auth_connector(
         make_settings(
             {
-                "use_ssl": True,
-                "proxy": "socks5h://127.0.0.1:1080",
+                "backend.use_ssl": True,
+                "backend.proxy": "socks5h://127.0.0.1:1080",
                 "agent_auth": {"auth_endpoint": "https://auth.example/config"},
             }
         )
@@ -170,5 +170,6 @@ def test_build_auth_connector_passes_proxy():
 
 def test_build_auth_connector_none_without_agent_auth():
     assert (
-        build_auth_connector(make_settings({"proxy": "socks5h://x:1"})) is None
+        build_auth_connector(make_settings({"backend.proxy": "socks5h://x:1"}))
+        is None
     )

@@ -60,7 +60,7 @@ async def test_call_then_output_mutates_in_place(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -169,7 +169,7 @@ async def test_active_calls_cleared_on_task_switch(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     app.active_runner = (
         _StubLiveRunner()
@@ -237,7 +237,7 @@ async def test_ask_human_placeholder_shows_question(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     # Fix D: без живого runner-а recovery-блок снял бы banner. Здесь мы тестируем
     # именно рендер banner-а с вопросом → подсовываем live-stub.
@@ -309,7 +309,7 @@ async def test_resume_orphan_call_finalized_as_interrupted(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -344,7 +344,7 @@ async def test_local_stop_finalizes_running_rows(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     runner = _ToggleRunner()
     app.active_runner = runner

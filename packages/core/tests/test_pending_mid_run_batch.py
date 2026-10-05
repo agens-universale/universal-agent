@@ -69,10 +69,10 @@ def _state() -> State:
 def _ctx() -> SimpleNamespace:
     return fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "console_trace": False,
-            "no_tool_call_max_count": 5,
-            "strict_turn_finish_validation": False,
+            "backend.api_mode": "chat_completions",
+            "logging.console_trace": False,
+            "agent.no_tool_call_max_count": 5,
+            "agent.strict_turn_finish_validation": False,
         },
         tools_data={"fs_read_file": {LOOP_WARN_KEY: READ_PROFILE}},
         logger=logging.getLogger("test_pending_mid_run_batch"),

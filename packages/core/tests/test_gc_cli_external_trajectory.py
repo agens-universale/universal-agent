@@ -165,9 +165,9 @@ def test_gc_cli_config_overrides_merge_into_build_settings():
         model_name="openai/m",
         session_id="s",
         gc_cli_config={
-            "completions_url": "http://test/v1/chat/completions",
-            "no_tool_call_max_count": 5,
-            "chat_completion_kwargs": {"temperature": 0.7},
+            "backend.completions_url": "http://test/v1/chat/completions",
+            "agent.no_tool_call_max_count": 5,
+            "backend.chat_completion_kwargs": {"temperature": 0.7},
         },
     )
     cfg = agent._build_settings().settings
@@ -208,7 +208,9 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
         logs_dir=tmp_path,
         model_name="openai/m",
         session_id="s",
-        gc_cli_config={"completions_url": "http://test/v1/chat/completions"},
+        gc_cli_config={
+            "backend.completions_url": "http://test/v1/chat/completions"
+        },
     )
     context = SimpleNamespace(metadata=None)
 
@@ -223,7 +225,7 @@ def test_partial_trajectory_written_when_run_aborts(tmp_path, monkeypatch):
 def _agent(**kwargs) -> GcCliExternal:
     kwargs.setdefault("gc_cli_config", {})
     kwargs["gc_cli_config"].setdefault(
-        "completions_url", "http://test/v1/chat/completions"
+        "backend.completions_url", "http://test/v1/chat/completions"
     )
     return GcCliExternal(
         logs_dir=Path("/tmp"), model_name="openai/m", **kwargs
@@ -245,7 +247,9 @@ def test_profile_authorization_wins_over_session_bearer(monkeypatch):
         _agent(
             session_id="task-1",
             gc_cli_config={
-                "chat_completion_headers": {"Authorization": "Bearer real-key"}
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer real-key"
+                }
             },
         )
         ._build_settings()
@@ -287,7 +291,10 @@ def test_runtime_url_and_model_beat_profile_overrides(monkeypatch):
     agent = GcCliExternal(
         logs_dir=Path("/tmp"),
         model_name="openai/real-model",
-        gc_cli_config={"completions_url": "http://stale", "model": "stale"},
+        gc_cli_config={
+            "backend.completions_url": "http://stale",
+            "agent.model": "stale",
+        },
     )
     cfg = agent._build_settings().settings
     assert (

@@ -38,7 +38,8 @@ def _parse_unknown_args(args: List[str]) -> Dict[str, Any]:
     --param=value
     --flag
 
-    Возвращает словарь переопределений настроек (плоские имена или пути).
+    Возвращает словарь переопределений настроек: ключ — путь настройки через
+    точку (``--agent.max_steps 50``). Имя проверяет ``apply_cli_overrides``.
     """
     overrides: Dict[str, Any] = {}
     i = 0
@@ -76,7 +77,9 @@ parser = argparse.ArgumentParser(
 Примеры использования:
   agent -q "напиши функцию сортировки списка"
   agent --query "как оптимизировать этот код?" --verbose
-  agent -q "..." --model CodeChat --max_steps 50
+  agent -q "..." --model CodeChat --agent.max_steps 50
+
+Любая настройка — путём через точку: --agent.max_steps 50, --security.read_guard.mode ask
 
 Конфиг (агент не запускается):
   gc-cli config explain [KEY ...]   значение и источник настроек
@@ -262,6 +265,36 @@ parser.add_argument(
     ),
 )
 
+#: Объявленные флаги-настройки → путь в схеме. Легаси-форс
+#: (``config.cli_forces_legacy_model``) узнаёт их по слою ``cli`` этих путей.
+SETTING_FLAGS = {
+    "model": "agent.model",
+    "completions_url": "backend.completions_url",
+}
+
+parser.add_argument(
+    "--model",
+    type=str,
+    default=None,
+    dest="model",
+    help=(
+        "Модель на этот запуск (agent.model). При непустом реестре моделей — "
+        "легаси-форс: уровни и алиасы отключаются на этот запуск"
+    ),
+)
+
+parser.add_argument(
+    "--completions_url",
+    "--completions-url",
+    type=str,
+    default=None,
+    dest="completions_url",
+    help=(
+        "Адрес chat/completions на этот запуск (backend.completions_url); "
+        "при непустом реестре моделей — легаси-форс, как у --model"
+    ),
+)
+
 parser.add_argument(
     "--profile",
     type=str,
@@ -396,6 +429,9 @@ if not CONFIG_COMMAND:
     _check_combinations(parsed_args)
 run_args = parsed_args
 extra_config_overrides = _parse_unknown_args(list(unknown_args))
+for _flag, _path in SETTING_FLAGS.items():
+    if getattr(parsed_args, _flag, None) is not None:
+        extra_config_overrides[_path] = getattr(parsed_args, _flag)
 if parsed_args.level is not None:
     extra_config_overrides["level"] = parsed_args.level
 

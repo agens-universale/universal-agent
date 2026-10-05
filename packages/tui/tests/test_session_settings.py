@@ -23,7 +23,7 @@ def test_session_layer_sets_value_and_makes_it_explicit():
     правило коллизии сочло бы значение неявным и могло вернуть не его."""
     from gc_core.settings import is_explicit
 
-    base = make_settings({"tui_finish_gate_mode": "on"})
+    base = make_settings({"tui.finish_gate_mode": "on"})
     loaded = base.with_overrides(
         {"tui.finish_gate_mode": "off"}, layer="session"
     )
@@ -36,14 +36,14 @@ def test_session_layer_ignores_unknown_keys():
     """Ключ вне белого списка не применяется (переопределять можно не всё)."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"threads_data_path": "/base"}))
+    app = TuiApp(settings=tui_settings({"paths.threads_data_path": "/base"}))
     app.set_session_override("paths.threads_data_path", "/hacked")
     assert app.effective_settings().settings.paths.threads_data_path == "/base"
 
 
 def test_diff_vs_base_returns_only_changed():
     base = make_settings(
-        {"tui_finish_gate_mode": "on", "tui_text_answer_mode": "judge"}
+        {"tui.finish_gate_mode": "on", "tui.text_answer_mode": "judge"}
     )
     overrides = {
         "tui.finish_gate_mode": "off",
@@ -96,9 +96,9 @@ def test_new_session_key_works_without_code_changes(monkeypatch):
         "agent.max_steps",
         ss.SessionKey("agent.max_steps"),
     )
-    app = TuiApp(settings=tui_settings({"max_steps": 3}))
+    app = TuiApp(settings=tui_settings({"agent.max_steps": 3}))
     app.set_session_override("agent.max_steps", 5)
     assert app.effective_settings().settings.agent.max_steps == 5
     assert ss.diff_vs_base(
-        make_settings({"max_steps": 3}), {"agent.max_steps": 5}
+        make_settings({"agent.max_steps": 3}), {"agent.max_steps": 5}
     ) == {"agent.max_steps": 5}

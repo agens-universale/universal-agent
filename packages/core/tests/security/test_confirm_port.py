@@ -45,7 +45,9 @@ def test_cli_disabled_when_ask_human_in_stop_tools(monkeypatch):
         "sys.stdin", types.SimpleNamespace(isatty=lambda: True)
     )
     ctx = _ctx(
-        settings=make_settings({"stop_tools": ["turn_ask_human"]}).settings
+        settings=make_settings(
+            {"agent.stop_tools": ["turn_ask_human"]}
+        ).settings
     )
     assert confirm_available(ctx) is False
 

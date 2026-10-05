@@ -60,7 +60,7 @@ def test_apply_finish_gate_mode_projects_smart():
     from gc_tui.toggles import tui_agent_settings
 
     loaded = tui_agent_settings(
-        make_settings({"tui_finish_gate_mode": "smart"})
+        make_settings({"tui.finish_gate_mode": "smart"})
     )
     assert (
         loaded.settings.agent.strict_turn_finish_validation is True
@@ -72,12 +72,12 @@ def test_apply_finish_gate_mode_on_off_unchanged():
     from gc_testkit.settings import make_settings
     from gc_tui.toggles import tui_agent_settings
 
-    on = tui_agent_settings(make_settings({"tui_finish_gate_mode": "on"}))
+    on = tui_agent_settings(make_settings({"tui.finish_gate_mode": "on"}))
     assert (
         on.settings.agent.strict_turn_finish_validation is True
         and on.runtime.finish_gate_smart is False
     )
-    off = tui_agent_settings(make_settings({"tui_finish_gate_mode": "off"}))
+    off = tui_agent_settings(make_settings({"tui.finish_gate_mode": "off"}))
     assert (
         off.settings.agent.strict_turn_finish_validation is False
         and off.runtime.finish_gate_smart is False
@@ -97,8 +97,8 @@ def _guard(cfg, turn_tool_calls):
 
 def test_smart_skips_judge_without_tool_calls():
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
         "finish_gate_smart": True,
     }
     assert _guard(cfg, 0).enabled is False
@@ -109,15 +109,15 @@ def test_cli_server_unaffected_no_smart_key():
     """CLI/server: tui_agent_settings не зовётся → сигнала finish_gate_smart нет →
     guard работает как прежде (strict AND chat_completions), счётчик не читается."""
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
     }
     assert (
         _guard(cfg, 0).enabled is True
     )  # 0 вызовов не гасит судью без smart-ключа
     off = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": False,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": False,
     }
     assert _guard(off, 5).enabled is False
 
@@ -303,10 +303,10 @@ def test_run_agent_mid_turn_pending_preserves_counter_smart_gate_runs(
 
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "strict_turn_finish_validation": True,
+            "backend.api_mode": "chat_completions",
+            "agent.strict_turn_finish_validation": True,
             "finish_gate_smart": True,
-            "no_tool_call_max_count": 5,
+            "agent.no_tool_call_max_count": 5,
         },
         logger=logging.getLogger("test_finish_gate_smart_mid_turn"),
         auth_connector=None,

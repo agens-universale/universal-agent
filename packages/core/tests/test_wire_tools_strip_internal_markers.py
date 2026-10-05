@@ -18,11 +18,11 @@ from gc_testkit.settings import make_settings
 
 CONFIG = make_settings(
     {
-        "inject_tool_fields": {
+        "agent.inject_tool_fields": {
             "reason": "One short sentence explaining this call."
         },
-        "stop_tools": [],
-        "openai_strict_tools_schema": False,
+        "agent.stop_tools": [],
+        "backend.openai_strict_tools_schema": False,
     }
 )
 

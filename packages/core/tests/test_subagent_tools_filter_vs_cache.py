@@ -51,9 +51,9 @@ def shared_discovery(monkeypatch):
 
 def _cfg(**extra: Any) -> LoadedSettings:
     cfg: Dict[str, Any] = {
-        "mcp-servers": {"srv": {"transport": "stdio", "command": "x"}},
-        "backend_api_mode": "chat_completions",
-        "use_local_subagents": False,
+        "mcp.servers": {"srv": {"transport": "stdio", "command": "x"}},
+        "backend.api_mode": "chat_completions",
+        "agent.use_local_subagents": False,
     }
     cfg.update(extra)
     return make_settings(cfg)

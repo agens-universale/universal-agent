@@ -121,7 +121,11 @@ class _Workspace:
 
     @property
     def config(self) -> dict:
-        return {"launch_root": str(self.root), "model": "M", "agent_edits": {}}
+        return {
+            "launch_root": str(self.root),
+            "agent.model": "M",
+            "agent_edits": {},
+        }
 
     def write(self, rel: str, text: str) -> None:
         path = self.root / rel

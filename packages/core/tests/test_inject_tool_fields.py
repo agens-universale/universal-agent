@@ -47,10 +47,10 @@ def _ensure_real_tools_module():
 
 def _base_config(**overrides):
     cfg = {
-        "use_local_subagents": False,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "stop_tools": [],
+        "agent.use_local_subagents": False,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.stop_tools": [],
     }
     cfg.update(overrides)
     return cfg
@@ -78,13 +78,13 @@ class TestResolveInjectToolFields:
     def test_empty_dict_disables_inject(self):
         assert (
             resolve_inject_tool_fields(
-                make_settings({"inject_tool_fields": {}})
+                make_settings({"agent.inject_tool_fields": {}})
             )
             == {}
         )
 
     def test_custom_field_from_config(self):
-        cfg = {"inject_tool_fields": {"why": "Explain why."}}
+        cfg = {"agent.inject_tool_fields": {"why": "Explain why."}}
         assert resolve_inject_tool_fields(make_settings(cfg)) == {
             "why": "Explain why."
         }
@@ -154,7 +154,7 @@ class TestStripInjectedToolArgs:
 class TestBuildToolsData:
     async def test_disabled_leaves_spec_unchanged(self):
         tools_data, _, _, _ = await abuild_tools_data(
-            make_settings(_base_config(inject_tool_fields={}))
+            make_settings(_base_config(**{"agent.inject_tool_fields": {}}))
         )
         entry = tools_data["fs_write_file"]
         assert _REASON not in entry["spec"]["parameters"]["properties"]
@@ -162,7 +162,9 @@ class TestBuildToolsData:
 
     async def test_enabled_injects_from_config_dict(self):
         tools_data, _, _, _ = await abuild_tools_data(
-            make_settings(_base_config(inject_tool_fields=_reason_fields()))
+            make_settings(
+                _base_config(**{"agent.inject_tool_fields": _reason_fields()})
+            )
         )
         entry = tools_data["fs_write_file"]
         props = entry["spec"]["parameters"]["properties"]
@@ -171,9 +173,9 @@ class TestBuildToolsData:
 
     async def test_subagent_with_native_reason_not_injected(self):
         cfg = _base_config(
-            inject_tool_fields=_reason_fields(),
-            use_local_subagents=True,
-            backend_api_mode="chat_completions",
+            **{"agent.inject_tool_fields": _reason_fields()},
+            **{"agent.use_local_subagents": True},
+            **{"backend.api_mode": "chat_completions"},
         )
         tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         assert tools_data["subagent_worker"]["injected_fields"] == []
@@ -182,8 +184,8 @@ class TestBuildToolsData:
         tools_data, _, _, _ = await abuild_tools_data(
             make_settings(
                 _base_config(
-                    inject_tool_fields=_reason_fields(),
-                    openai_strict_tools_schema=True,
+                    **{"agent.inject_tool_fields": _reason_fields()},
+                    **{"backend.openai_strict_tools_schema": True},
                 )
             )
         )
@@ -194,7 +196,7 @@ class TestBuildToolsData:
 class TestApplyTool:
     def _make_ctx(self, tools_data):
         return fake_ctx(
-            _base_config(inject_tool_fields=_reason_fields()),
+            _base_config(**{"agent.inject_tool_fields": _reason_fields()}),
             tools_data=tools_data,
             logger=None,
         )
@@ -273,7 +275,9 @@ class TestApplyTool:
     async def test_missing_reason_is_accepted(self):
         """Omitted injected reason no longer rejects the call (it is semantically optional)."""
         tools_data, _, _, _ = await abuild_tools_data(
-            make_settings(_base_config(inject_tool_fields=_reason_fields()))
+            make_settings(
+                _base_config(**{"agent.inject_tool_fields": _reason_fields()})
+            )
         )
 
         received = {}
@@ -351,9 +355,9 @@ class TestApplyTool:
         apply_injected_fields_to_spec(spec, _reason_fields())
         ctx = fake_ctx(
             _base_config(
-                inject_tool_fields=_reason_fields(),
-                use_local_subagents=True,
-                backend_api_mode="chat_completions",
+                **{"agent.inject_tool_fields": _reason_fields()},
+                **{"agent.use_local_subagents": True},
+                **{"backend.api_mode": "chat_completions"},
             ),
             tools_data={
                 "subagent_stub": {
@@ -396,8 +400,8 @@ class TestApplyTool:
 
 class TestSubagentChildBuild:
     async def test_child_config_inherits_decoration(self):
-        parent = _base_config(inject_tool_fields=_reason_fields())
-        child = {**parent, "use_local_subagents": False}
+        parent = _base_config(**{"agent.inject_tool_fields": _reason_fields()})
+        child = {**parent, "agent.use_local_subagents": False}
         tools_data, _, _, _ = await abuild_tools_data(make_settings(child))
         assert tools_data["fs_read_file"]["injected_fields"] == [_REASON]
 
@@ -411,7 +415,7 @@ class TestInjectDoesNotPolluteClassSchema:
         build then skips inject (field already present) and leaves
         injected_fields empty — apply_tool forwards reason → TypeError.
         """
-        cfg = _base_config(inject_tool_fields=_reason_fields())
+        cfg = _base_config(**{"agent.inject_tool_fields": _reason_fields()})
         first, _, _, _ = await abuild_tools_data(make_settings(cfg))
         second, _, _, _ = await abuild_tools_data(make_settings(cfg))
 
@@ -426,7 +430,7 @@ class TestInjectDoesNotPolluteClassSchema:
             )
 
     async def test_second_build_strips_reason_on_apply(self):
-        cfg = _base_config(inject_tool_fields=_reason_fields())
+        cfg = _base_config(**{"agent.inject_tool_fields": _reason_fields()})
         await abuild_tools_data(
             make_settings(cfg)
         )  # first build (pollution attempt)

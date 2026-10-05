@@ -187,7 +187,7 @@ async def test_hotkey_column_does_not_drift_with_the_window_width():
     from gc_tui.screens.help import HelpScreen
 
     async def _hotkey_col(width: int) -> int:
-        app = TuiApp(settings=tui_settings({"model": "M"}))
+        app = TuiApp(settings=tui_settings({"agent.model": "M"}))
         async with app.run_test(size=(width, 60)) as pilot:
             await app.push_screen(HelpScreen())
             await pilot.pause()
@@ -222,7 +222,7 @@ async def test_long_description_without_hotkey_does_not_break_in_two():
     from gc_tui.screens.help import HelpScreen
 
     names = {"/" + c.name for c in build_default_registry().list_commands()}
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(
         size=(130, 60)
     ) as pilot:  # ширины хватает, потолок не при чём
@@ -264,7 +264,7 @@ async def test_quickstart_mentions_voice_input():
     from gc_tui.app import TuiApp
     from gc_tui.screens.help import HelpScreen
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(170, 60)) as pilot:
         await app.push_screen(HelpScreen())
         await pilot.pause()

@@ -48,7 +48,7 @@ def _app(tmp_path, *, token: str = "", origins: list[str] | None = None):
     facade = ResponsesFacade(
         settings=make_settings(
             {
-                "model": "agent-model",
+                "agent.model": "agent-model",
                 "chat_api.auth_token": token,
                 "chat_api.cors_origins": list(origins or []),
             }
@@ -148,7 +148,7 @@ def test_non_stream_failure_is_500(tmp_path):
         return Boom()
 
     facade = ResponsesFacade(
-        settings=make_settings(model="m"),
+        settings=make_settings(**{"agent.model": "m"}),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )
@@ -188,8 +188,8 @@ def test_local_bind_uses_loopback_and_warns(monkeypatch, capsys, tmp_path):
         return make_settings(
             {
                 "os_backend": "local",
-                "threads_data_path": str(tmp_path),
-                "model": "m",
+                "paths.threads_data_path": str(tmp_path),
+                "agent.model": "m",
                 "agent.strict_turn_finish_validation": True,
                 "todo.reminder_steps": 9,
             }
@@ -285,7 +285,9 @@ def test_wide_bind_skips_host_check(tmp_path):
         return _Agent()
 
     facade = ResponsesFacade(
-        settings=make_settings(**{"model": "m", "chat_api.host": "0.0.0.0"}),
+        settings=make_settings(
+            **{"agent.model": "m", "chat_api.host": "0.0.0.0"}
+        ),
         agent_factory=factory,
         index=ResponseIndex(str(threads)),
     )

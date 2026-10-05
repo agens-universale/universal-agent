@@ -32,7 +32,7 @@ async def test_picker_opens_on_skill_space(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -51,7 +51,7 @@ async def test_picker_filters_by_id_substring(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -77,7 +77,7 @@ async def test_picker_closes_when_space_removed(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -104,7 +104,7 @@ async def test_palette_and_picker_mutually_exclusive(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -137,7 +137,7 @@ async def test_tab_completes_id_into_input_and_closes_picker(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -160,7 +160,7 @@ async def test_esc_closes_picker_keeps_input(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -183,7 +183,7 @@ async def test_empty_filter_result_shows_no_match_line(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -217,7 +217,7 @@ async def test_skills_loaded_only_once_per_session(tmp_path, monkeypatch):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -247,7 +247,7 @@ async def test_hint_has_keys_margin_and_honest_desired_height(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -287,7 +287,7 @@ async def test_hint_visible_on_open_with_long_list_no_scroll(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 24)) as pilot:
         inp = pilot.app.query_one("#cmdinput")

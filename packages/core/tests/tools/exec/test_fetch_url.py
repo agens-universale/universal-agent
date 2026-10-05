@@ -75,7 +75,7 @@ def _call(tool, **kwargs) -> str:
 
 def _url_policy_config(allowed_schemes=None, url_blacklist=None):
     return {
-        "url_policy": {
+        "security.url_policy": {
             "enabled": True,
             "allowed_schemes": allowed_schemes or ["http", "https"],
             "url_blacklist": url_blacklist or [],

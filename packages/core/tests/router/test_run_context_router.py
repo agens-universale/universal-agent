@@ -22,7 +22,9 @@ def minimal_settings(monkeypatch):
         "abuild_tools_data",
         as_coro(lambda cfg, on_progress=None, **_kwargs: ({}, [], [], {})),
     )
-    return make_settings({"model": "M", "level": "max", "save_logs": False})
+    return make_settings(
+        {"agent.model": "M", "level": "max", "logging.save_logs": False}
+    )
 
 
 def _snapshot(raw: dict) -> AppConfig:
@@ -113,7 +115,7 @@ def test_begin_turn_sets_default_model_from_router_resolve_main(
 def test_begin_turn_is_noop_without_model_router():
     """Легаси-совместимость: ctx без model_router (тестовые двойники) не должен падать —
     default_model остаётся тем, что уже стоит на state."""
-    ctx = fake_ctx({"model": "X"})
+    ctx = fake_ctx({"agent.model": "X"})
     state = _make_state()
 
     begin_turn(state, ctx)

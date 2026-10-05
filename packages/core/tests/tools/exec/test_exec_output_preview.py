@@ -21,8 +21,8 @@ def _state():
 
 def _cfg(cap: int = CAP, edge: int = EDGE) -> dict:
     return {
-        "exec_output_capture_max_chars": cap,
-        "exec_output_preview_edge_chars": edge,
+        "agent.exec_output_capture_max_chars": cap,
+        "agent.exec_output_preview_edge_chars": edge,
     }
 
 

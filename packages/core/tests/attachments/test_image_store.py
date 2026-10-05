@@ -133,14 +133,18 @@ def test_a_foreign_owned_temp_root_is_not_used(tmp_path, monkeypatch):
 
 def test_for_config_takes_the_absolute_threads_dir(tmp_path):
     store = ImageStore.for_config(
-        make_settings({"threads_data_path": str(tmp_path)})
+        make_settings({"paths.threads_data_path": str(tmp_path)})
     )
     assert store.root == os.path.join(str(tmp_path), IMAGES_DIRNAME)
 
 
 @pytest.mark.parametrize(
     "config",
-    [{}, {"threads_data_path": ""}, {"threads_data_path": "rel/threads"}],
+    [
+        {},
+        {"paths.threads_data_path": ""},
+        {"paths.threads_data_path": "rel/threads"},
+    ],
 )
 def test_for_config_without_an_absolute_threads_dir_uses_the_temp_root(config):
     assert (
@@ -156,7 +160,11 @@ def test_for_config_root_is_the_media_root(tmp_path, threads):
     config = (
         {}
         if threads is None
-        else {"threads_data_path": str(tmp_path / threads) if threads else ""}
+        else {
+            "paths.threads_data_path": str(tmp_path / threads)
+            if threads
+            else ""
+        }
     )
     config = make_settings(config)
     store = ImageStore.for_config(config)

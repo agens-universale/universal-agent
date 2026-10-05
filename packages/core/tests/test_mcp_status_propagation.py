@@ -47,7 +47,7 @@ async def test_get_mcp_tools_data_returns_status(monkeypatch):
     tools_data, status = await aget_mcp_tools_data_for_config(
         make_settings(
             {
-                "mcp-servers": {
+                "mcp.servers": {
                     "office": {"transport": "stdio", "command": "office-mcp"}
                 }
             }
@@ -80,7 +80,7 @@ async def test_build_tools_data_returns_mcp_status(monkeypatch):
     monkeypatch.setattr(_at, "aget_mcp_tools_data_for_config", fake_mcp)
     result = await tools_pkg.abuild_tools_data(
         make_settings(
-            {"mcp-servers": {"x": {"transport": "stdio", "command": "x"}}}
+            {"mcp.servers": {"x": {"transport": "stdio", "command": "x"}}}
         )
     )
     assert len(result) == 4

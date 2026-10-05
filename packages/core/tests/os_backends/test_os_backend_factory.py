@@ -50,7 +50,7 @@ def test_resolve_harbor_with_env_and_loop():
     try:
         be = resolve_os_backend(
             make_settings(
-                {"os_backend": "harbor", "harbor_exec_init": "bashrc"}
+                {"os_backend": "harbor", "agent.harbor_exec_init": "bashrc"}
             ),
             environment=env,
             loop=loop,
@@ -69,7 +69,10 @@ def test_resolve_harbor_rejects_non_string_exec_init():
         with pytest.raises(ValueError, match="harbor_exec_init"):
             resolve_os_backend(
                 make_settings(
-                    {"os_backend": "harbor", "harbor_exec_init": ["bashrc"]}
+                    {
+                        "os_backend": "harbor",
+                        "agent.harbor_exec_init": ["bashrc"],
+                    }
                 ),
                 environment=object(),
                 loop=loop,
@@ -83,7 +86,10 @@ async def test_create_run_context_leaves_local_bare_where_recording_is_off():
     оборачивается: трекер зовёт `git status` вокруг каждой команды зря."""
     ctx = await acreate_run_context(
         make_settings(
-            {"backend_api_mode": "chat_completions", "save_logs": False}
+            {
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
+            }
         )
     )
     assert isinstance(ctx.os_backend, LocalFsBackend)
@@ -95,7 +101,10 @@ async def test_create_run_context_tui_wraps_tracking():
 
     ctx = await acreate_run_context(
         make_settings(
-            {"backend_api_mode": "chat_completions", "save_logs": False}
+            {
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
+            }
         ),
         is_tui=True,
     )
@@ -107,7 +116,7 @@ async def test_create_run_context_tui_wraps_tracking():
 async def test_create_run_context_explicit_override():
     sentinel = object()
     ctx = await acreate_run_context(
-        make_settings({"save_logs": False}),
+        make_settings({"logging.save_logs": False}),
         os_backend=sentinel,  # type: ignore[arg-type]
         is_tui=True,
     )
@@ -136,7 +145,10 @@ async def test_workspace_is_assembled_once_even_when_wrapped(monkeypatch):
 
     ctx = await acreate_run_context(
         make_settings(
-            {"backend_api_mode": "chat_completions", "save_logs": False}
+            {
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
+            }
         ),
         is_tui=True,
     )

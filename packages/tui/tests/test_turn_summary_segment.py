@@ -309,7 +309,7 @@ async def test_turn_with_edits_shows_summary_from_journal(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "launch_root": str(tmp_path / "proj")}
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
         ),
     )
     async with app.run_test() as pilot:
@@ -355,7 +355,7 @@ async def test_turn_summary_shows_net_delta_not_sum_of_records(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "launch_root": str(tmp_path / "proj")}
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
         ),
     )
     async with app.run_test() as pilot:
@@ -378,7 +378,7 @@ async def test_turn_without_edits_has_no_segment(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -409,7 +409,7 @@ async def test_second_stamp_does_not_move_the_turn_boundary(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -432,7 +432,7 @@ async def test_empty_journal_has_no_segment(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -453,7 +453,7 @@ async def test_config_switch_off_hides_segment(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
+                "agent.model": "M",
                 "agent_edits": {"turn_summary_in_status": False},
             }
         ),
@@ -477,7 +477,7 @@ async def test_no_cta_block_in_trace_after_turn_with_edits(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -566,7 +566,7 @@ async def _app_with_turn_edits(tmp_path, tid):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "launch_root": str(tmp_path / "proj")}
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
         ),
     )
 
@@ -588,7 +588,7 @@ async def test_click_inside_summary_span_opens_screen_in_turn_source(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "launch_root": str(tmp_path / "proj")}
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
         ),
     )
     async with app.run_test() as pilot:
@@ -618,7 +618,7 @@ async def test_click_outside_span_does_nothing(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "launch_root": str(tmp_path / "proj")}
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
         ),
     )
     async with app.run_test() as pilot:
@@ -649,7 +649,7 @@ async def test_hover_over_segment_lightens_it_and_leaving_dims_back(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "launch_root": str(tmp_path / "proj")}
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
         ),
     )
     async with app.run_test() as pilot:
@@ -796,7 +796,7 @@ async def test_click_on_indicator_without_summary_is_inert(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "launch_root": str(tmp_path / "proj")}
+            {"agent.model": "M", "launch_root": str(tmp_path / "proj")}
         ),
     )
     async with app.run_test() as pilot:
@@ -821,7 +821,7 @@ async def test_resume_shows_summary_saved_with_indicator(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -859,7 +859,7 @@ async def test_resume_without_saved_summary_shows_no_stale_numbers(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

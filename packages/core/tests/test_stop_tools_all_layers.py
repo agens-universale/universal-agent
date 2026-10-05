@@ -39,8 +39,8 @@ def test_stop_tools_removes_skills_and_mcp_from_spec(monkeypatch):
     )
     registered: list[str] = []
     cfg = {
-        "stop_tools": ["skills_list", "mcp_jira_search"],
-        "backend_api_mode": "responses",
+        "agent.stop_tools": ["skills_list", "mcp_jira_search"],
+        "backend.api_mode": "responses",
     }
     data, spec, _, _ = run_coro(
         abuild_tools_data(make_settings(cfg), registered_names=registered)
@@ -68,8 +68,8 @@ def test_global_stop_is_not_restored_by_subagent_core(monkeypatch):
         _no_mcp,
     )
     cfg = {
-        "stop_tools": ["turn_finish"],
-        "backend_api_mode": "responses",
+        "agent.stop_tools": ["turn_finish"],
+        "backend.api_mode": "responses",
         "subagent_tools_allow": ("fs_read_file", *REQUIRED_TOOL_NAMES),
     }
     data, spec, _, _ = run_coro(abuild_tools_data(make_settings(cfg)))

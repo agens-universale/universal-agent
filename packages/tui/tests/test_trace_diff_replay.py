@@ -114,7 +114,7 @@ def _write_journal(tmp_path, tid: str, records: list[EditRecord]) -> None:
 
 @asynccontextmanager
 async def _pilot(tmp_path, tid: str, config: dict | None = None):
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     if config:
         cfg.update(config)
     app = TuiApp(

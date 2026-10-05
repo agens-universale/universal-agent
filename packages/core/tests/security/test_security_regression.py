@@ -10,8 +10,8 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def _config(tmp_path):
     return {
         "launch_root": str(tmp_path),
-        "command_moderation": {"enabled": True, "mode": "deny"},
-        "write_guard": {"enabled": True, "extra_paths": []},
+        "security.command_moderation": {"enabled": True, "mode": "deny"},
+        "security.write_guard": {"enabled": True, "extra_paths": []},
     }
 
 

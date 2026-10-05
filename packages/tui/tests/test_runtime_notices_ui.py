@@ -17,7 +17,7 @@ async def test_runtime_notice_appears_in_card(tmp_path):
     from gc_tui.app import TuiApp
 
     clear_runtime_notices()
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     async with TuiApp(
         threads_dir=str(tmp_path / "t"), settings=tui_settings(cfg)
     ).run_test() as pilot:
@@ -55,7 +55,8 @@ async def test_runtime_notice_footer_on_sessions_disappears_after_view(
 
     clear_runtime_notices()
     async with TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     ).run_test() as pilot:
         push_runtime_notice(Notice("warning", "w1", "тест"))
         await pilot.press("ctrl+s")

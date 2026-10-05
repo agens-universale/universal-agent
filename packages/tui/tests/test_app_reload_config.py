@@ -21,7 +21,9 @@ def _mk_app(tmp_path):
     cfg_file.write_text(
         'backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8"
     )
-    app = app_mod.TuiApp(settings=tui_settings({"completions_url": "old"}))
+    app = app_mod.TuiApp(
+        settings=tui_settings({"backend.completions_url": "old"})
+    )
     app._config_path = str(cfg_file)
     return app
 
@@ -107,9 +109,9 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
     from gc_tui.runtime_config import apply_tui_runtime
 
     on_disk = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
     }
     meta = ProfileMeta(active_name=None, ref=None, mtime_set={})
     # файл: без launch_root
@@ -145,7 +147,9 @@ async def test_reload_config_preserves_runtime_fields(tmp_path, monkeypatch):
 def test_reload_config_if_changed_noop_without_config_path():
     """_config_path не задан (типично для тестов/раннего старта) — тихий
     no-op, ни чтения, ни падения."""
-    app = app_mod.TuiApp(settings=tui_settings({"completions_url": "old"}))
+    app = app_mod.TuiApp(
+        settings=tui_settings({"backend.completions_url": "old"})
+    )
     app.reload_config_if_changed()
     assert _url(app.base_settings()) == "old"
 
@@ -165,7 +169,7 @@ def test_reload_config_if_changed_first_check_after_startup_is_noop(
         'backend:\n  completions_url: "http://x/v1"\n', encoding="utf-8"
     )
     app = app_mod.TuiApp(
-        settings=tui_settings({"completions_url": "http://x/v1"})
+        settings=tui_settings({"backend.completions_url": "http://x/v1"})
     )
     app.set_config_path(
         str(cfg_file)
@@ -315,7 +319,7 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     seen_cfg = {}
 
     async def _fake_acreate_run_context(loaded, **kw):
-        seen_cfg["completions_url"] = _url(loaded)
+        seen_cfg["backend.completions_url"] = _url(loaded)
         return _Ctx()
 
     monkeypatch.setattr(
@@ -329,7 +333,7 @@ def test_build_real_executor_does_not_reload_config(tmp_path, monkeypatch):
     app._build_real_executor()
 
     assert (
-        seen_cfg["completions_url"] == "http://x/v1"
+        seen_cfg["backend.completions_url"] == "http://x/v1"
     )  # база НЕ перечитана из файла
 
 

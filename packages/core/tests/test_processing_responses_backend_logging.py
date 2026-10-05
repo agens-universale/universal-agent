@@ -108,11 +108,11 @@ def test_chat_completions_logs_raw_backend_payload_on_conversion_error(
     logger = logging.getLogger("test_backend_payload_logging")
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": "http://backend.local/v1/chat/completions",
-            "use_ssl": True,
-            "use_retry": False,
-            "backend_request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": "http://backend.local/v1/chat/completions",
+            "backend.use_ssl": True,
+            "backend.use_retry": False,
+            "backend.request_timeout_sec": 600,
         },
         logger=logger,
     )

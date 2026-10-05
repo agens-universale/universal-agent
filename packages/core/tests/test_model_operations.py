@@ -45,9 +45,9 @@ def _state():
 def _ctx(with_port, **config):
     ctx = fake_ctx(
         {
-            "completions_url": "https://model.test/v1/chat/completions",
-            "backend_request_timeout_sec": 600,
-            "backend_api_mode": "chat_completions",
+            "backend.completions_url": "https://model.test/v1/chat/completions",
+            "backend.request_timeout_sec": 600,
+            "backend.api_mode": "chat_completions",
             **config,
         },
         auth_connector=None,
@@ -92,7 +92,9 @@ async def test_aux_outcome_retains_finish_reason_and_usage(
 
     monkeypatch.setattr(llm, "arequest_chat_completions_with_policy", policy)
     state = _state()
-    ctx = _ctx(with_port, chat_completion_kwargs={"temperature": 0.1})
+    ctx = _ctx(
+        with_port, **{"backend.chat_completion_kwargs": {"temperature": 0.1}}
+    )
     outcome = await llm.arequest_chat_completion_outcome(
         ctx=ctx,
         state=state,
@@ -269,7 +271,7 @@ async def test_responses_items_and_agent_metadata_survive_the_boundary(
     result = await pr._arequest_backend_canonical(
         state.messages,
         state,
-        _ctx(with_port, backend_api_mode="responses"),
+        _ctx(with_port, **{"backend.api_mode": "responses"}),
         set_previous_response_id=False,
     )
     messages, response_id, metadata = result
@@ -489,7 +491,8 @@ async def test_native_finish_gate_only_fails_open_on_provider_errors(
     state.user_intent_log = ["finish the task"]
     state.finish_gate_rejection_count = 0
     guard = guard_module.FinishGateGuard(
-        ctx=_ctx(with_port, strict_turn_finish_validation=True), state=state
+        ctx=_ctx(with_port, **{"agent.strict_turn_finish_validation": True}),
+        state=state,
     )
     if kind == "domain":
         decision = await guard.aevaluate_turn_finish(

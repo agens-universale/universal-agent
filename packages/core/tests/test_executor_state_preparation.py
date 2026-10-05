@@ -26,11 +26,11 @@ async def build_state(executor):
 def context(preparer):
     return fake_ctx(
         {
-            "model": "test-model",
-            "max_steps": 10,
-            "system_prompt_id": "test-prompt",
-            "agent_md_path": "/worker/instructions.md",
-            "chat_completion_headers": {
+            "agent.model": "test-model",
+            "agent.max_steps": 10,
+            "agent.system_prompt_id": "test-prompt",
+            "paths.agent_md_path": "/worker/instructions.md",
+            "backend.chat_completion_headers": {
                 "Authorization": "Bearer credential-not-to-be-sent"
             },
         },
@@ -107,11 +107,11 @@ async def test_sdk_passes_state_preparer_to_native_executor(
 
     cfg = make_settings(
         {
-            "save_logs": False,
-            "backend_api_mode": "chat_completions",
-            "model": "test-model",
-            "system_prompt_id": "test-prompt",
-            "max_steps": 10,
+            "logging.save_logs": False,
+            "backend.api_mode": "chat_completions",
+            "agent.model": "test-model",
+            "agent.system_prompt_id": "test-prompt",
+            "agent.max_steps": 10,
         }
     )
     ctx = await acreate_run_context(cfg, state_preparer=prepare)

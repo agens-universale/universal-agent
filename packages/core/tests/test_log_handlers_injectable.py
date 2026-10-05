@@ -31,7 +31,11 @@ class _Capture(logging.Handler):
         self.records.append(record.getMessage())
 
 
-_CFG = {"save_logs": False, "console_trace": False, "logs_dump_dir": "/tmp"}
+_CFG = {
+    "logging.save_logs": False,
+    "logging.console_trace": False,
+    "paths.logs_dump_dir": "/tmp",
+}
 
 
 def test_custom_handler_receives_records():
@@ -61,7 +65,9 @@ def test_core_handlers_are_not_replaced():
     """Свой хендлер ДОБАВЛЯЕТСЯ, а не вытесняет файловый вывод ядра."""
     cap = _Capture()
     with_files = dict(_CFG)
-    with_files["save_logs"] = False  # файла нет, но stderr-хендлер остаётся
+    with_files["logging.save_logs"] = (
+        False  # файла нет, но stderr-хендлер остаётся
+    )
     logger, *_ = create_run_logger(
         make_settings(with_files),
         run_id="t3",
@@ -84,7 +90,7 @@ def test_propagate_is_off_by_default():
 def test_propagate_can_be_enabled():
     """С флагом записи всплывают в корневой логгер приложения."""
     cfg = dict(_CFG)
-    cfg["logging_params"] = {"propagate": True}
+    cfg["logging"] = {"propagate": True}
     logger, *_ = create_run_logger(
         make_settings(cfg), run_id="t5", agent_kind="main"
     )
@@ -117,9 +123,9 @@ async def test_handlers_reach_the_context_logger():
     ctx = await acreate_run_context(
         make_settings(
             {
-                "stop_tools": [],
-                "backend_api_mode": "chat_completions",
-                "save_logs": False,
+                "agent.stop_tools": [],
+                "backend.api_mode": "chat_completions",
+                "logging.save_logs": False,
             }
         ),
         log_handlers=[cap],

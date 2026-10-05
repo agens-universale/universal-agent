@@ -38,9 +38,9 @@ def test_collect_hints_empty_before_k_tick():
     meta: dict = {}
     cfg = make_settings(
         {
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 5},
-            "stop_tools": [],
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 5},
+            "agent.stop_tools": [],
         }
     )
     on_persist_steps(meta, steps=4)
@@ -55,9 +55,9 @@ def test_collect_exists_hint_on_k_tick_first_hash():
     meta: dict = {}
     cfg = make_settings(
         {
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 3},
-            "stop_tools": [],
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 3},
+            "agent.stop_tools": [],
         }
     )
     on_persist_steps(meta, steps=3)
@@ -80,9 +80,9 @@ def test_collect_changed_hint_when_baseline_differs():
     meta: dict = {}
     cfg = make_settings(
         {
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 2},
-            "stop_tools": [],
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 2},
+            "agent.stop_tools": [],
         }
     )
     on_persist_steps(meta, steps=2)
@@ -110,8 +110,8 @@ def test_touch_project_memory_baseline_updates_state():
 def test_hints_disabled_when_long_memory_stopped():
     cfg = make_settings(
         {
-            "enable_project_memory_notice": True,
-            "stop_tools": ["project_memory"],
+            "project_memory.enable_project_memory_notice": True,
+            "agent.stop_tools": ["project_memory"],
         }
     )
     assert not project_memory_hints_enabled(cfg)

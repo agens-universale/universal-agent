@@ -65,7 +65,7 @@ def test_t6_judge_safe_does_not_write_store(tmp_path, monkeypatch):
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "ask"},
+            "security.command_moderation": {"enabled": True, "mode": "ask"},
         },
         permission_store=store,
         is_tui=True,

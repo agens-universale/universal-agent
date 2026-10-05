@@ -18,7 +18,7 @@ from gc_testkit.settings import make_settings
 def _loaded(tmp_path):
     """Загруженные настройки старта: каталог тредов и пустой профиль."""
     return replace(
-        make_settings({"threads_data_path": str(tmp_path / "threads")}),
+        make_settings({"paths.threads_data_path": str(tmp_path / "threads")}),
         profile_meta=ProfileMeta(active_name=None, ref=None, mtime_set={}),
     )
 

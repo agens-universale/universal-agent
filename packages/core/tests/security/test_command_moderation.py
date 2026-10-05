@@ -202,7 +202,7 @@ def test_moderate_command_execution_blocks_dangerous_payload(tmp_path):
     ctx = fake_ctx(
         {
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "deny"},
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
         }
     )
 
@@ -235,7 +235,7 @@ def test_moderate_command_execution_fail_closed_when_judge_unavailable_in_deny(
     ctx = fake_ctx(
         {
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "deny"},
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
         }
     )
 
@@ -260,7 +260,7 @@ def test_moderate_command_execution_logs_judge_failure(tmp_path):
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "deny"},
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
         },
         logger=logger,
     )
@@ -296,7 +296,7 @@ def test_moderate_command_execution_asks_when_judge_unavailable_in_ask(
     ctx = fake_ctx(
         {
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "ask"},
+            "security.command_moderation": {"enabled": True, "mode": "ask"},
         }
     )
     monkeypatch.setattr(
@@ -322,7 +322,7 @@ def test_moderate_command_execution_audits_without_payload_leak(tmp_path):
     ctx = fake_ctx(
         config={
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "deny"},
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
         },
         logger=logger,
     )
@@ -435,7 +435,7 @@ def test_moderate_command_execution_blocks_when_json_and_regex_fail(tmp_path):
     ctx = fake_ctx(
         {
             "launch_root": str(tmp_path),
-            "command_moderation": {"enabled": True, "mode": "deny"},
+            "security.command_moderation": {"enabled": True, "mode": "deny"},
         }
     )
 

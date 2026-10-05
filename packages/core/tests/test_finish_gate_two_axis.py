@@ -168,9 +168,9 @@ def _make_state(*, max_steps: int = 5, parent_state_id=None):
 
 def _make_ctx(**overrides):
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
-        "finish_gate_max_iterations": 10,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
+        "agent.finish_gate_max_iterations": 10,
     }
     cfg.update(overrides)
     return fake_ctx(

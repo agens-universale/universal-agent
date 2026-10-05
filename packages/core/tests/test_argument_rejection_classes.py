@@ -8,10 +8,10 @@ from gc_core.tools.arguments_validation import (
 from gc_testkit.settings import make_settings
 
 CONFIG = {
-    "inject_tool_fields": {
+    "agent.inject_tool_fields": {
         "reason": "One short, concrete sentence explaining the purpose of this tool call."
     },
-    "stop_tools": [],
+    "agent.stop_tools": [],
 }
 
 

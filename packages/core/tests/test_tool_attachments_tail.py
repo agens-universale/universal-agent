@@ -122,7 +122,7 @@ def _ptc_state():
 
 def _ptc_ctx(tools_data=None):
     return fake_ctx(
-        {"loop_detector": {"enabled": True}},
+        {"agent.loop_detector": {"enabled": True}},
         tools_data=tools_data or {},
         logger=None,
         run_id="run",
@@ -376,9 +376,9 @@ def _finish_call():
 def _agent_ctx():
     return fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "strict_turn_finish_validation": False,
-            "no_tool_call_max_count": 5,
+            "backend.api_mode": "chat_completions",
+            "agent.strict_turn_finish_validation": False,
+            "agent.no_tool_call_max_count": 5,
         },
         logger=None,
         auth_connector=None,

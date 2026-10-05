@@ -7,7 +7,7 @@ from gc_testkit.settings import make_settings
 
 
 def test_cli_pipeline_flags_stop_tools_typo():
-    cfg = make_settings({"stop_tools": ["write_to_file"]})
+    cfg = make_settings({"agent.stop_tools": ["write_to_file"]})
     notices = collect_startup_notices(
         cfg,
         all_builtin_tool_names(cfg),

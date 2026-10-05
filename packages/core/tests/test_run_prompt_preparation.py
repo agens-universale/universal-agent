@@ -22,9 +22,9 @@ def test_local_prompt_files_and_steering_keep_existing_order(tmp_path):
     request = PromptPreparationRequest.from_config(
         make_settings(
             {
-                "chat_completions_system_prompt_path": str(system),
-                "chat_completions_special_instructions_path": f" {special} ",
-                "model_steering": "  be concise  ",
+                "paths.chat_completions_system_prompt_path": str(system),
+                "paths.chat_completions_special_instructions_path": f" {special} ",
+                "agent.model_steering": "  be concise  ",
             }
         ),
         verbose=False,
@@ -89,9 +89,9 @@ async def test_executor_uses_prepared_prompts_without_local_io(monkeypatch):
         return PreparedPrompts("remote system", "remote special")
 
     config = {
-        "chat_completions_system_prompt_path": "/worker/system.md",
-        "model_steering": "concise",
-        "chat_completion_headers": {
+        "paths.chat_completions_system_prompt_path": "/worker/system.md",
+        "agent.model_steering": "concise",
+        "backend.chat_completion_headers": {
             "Authorization": "Bearer credential-not-to-be-sent"
         },
     }
@@ -126,7 +126,7 @@ async def test_injected_loader_error_never_falls_back_to_local_files():
 
     executor = AgentExecutor(
         fake_ctx(
-            {"chat_completions_system_prompt_path": "/missing"},
+            {"paths.chat_completions_system_prompt_path": "/missing"},
             prompt_loader=loader,
         )
     )
@@ -146,7 +146,10 @@ async def test_sdk_context_accepts_prompt_loader(tmp_path, monkeypatch):
 
     ctx = await acreate_run_context(
         make_settings(
-            {"save_logs": False, "backend_api_mode": "chat_completions"}
+            {
+                "logging.save_logs": False,
+                "backend.api_mode": "chat_completions",
+            }
         ),
         prompt_loader=loader,
     )
@@ -160,7 +163,7 @@ async def test_sdk_context_accepts_prompt_loader(tmp_path, monkeypatch):
 @pytest.mark.parametrize("steering", ["", "  be concise  "])
 async def test_model_steering_reader_matches_local_and_prepared_port(steering):
     """Exercise the current config reader through both executor boundaries."""
-    config = {"model_steering": steering}
+    config = {"agent.model_steering": steering}
 
     async def loader(request):
         return load_run_prompts(request)

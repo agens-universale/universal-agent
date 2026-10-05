@@ -72,15 +72,15 @@ def _config(
 ):
     cfg = {
         "launch_root": str(launch_root),
-        "download": {
+        "security.download": {
             "download_dir": download_dir,
             "max_bytes": max_bytes,
         },
     }
     if write_guard is not None:
-        cfg["write_guard"] = write_guard
+        cfg["security.write_guard"] = write_guard
     if url_policy is not None:
-        cfg["url_policy"] = url_policy
+        cfg["security.url_policy"] = url_policy
     return cfg
 
 

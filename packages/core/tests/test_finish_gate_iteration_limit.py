@@ -40,7 +40,8 @@ class FinishGateIterationLimitTest(unittest.TestCase):
         main_state = SimpleNamespace(parent_state_id=None)
         self.assertEqual(
             resolve_finish_gate_max_rejections(
-                make_settings({"finish_gate_max_iterations": 0}), main_state
+                make_settings({"agent.finish_gate_max_iterations": 0}),
+                main_state,
             ),
             10,
         )
@@ -48,9 +49,9 @@ class FinishGateIterationLimitTest(unittest.TestCase):
     def test_third_submit_fail_open_after_two_rejects(self) -> None:
         ctx = fake_ctx(
             {
-                "backend_api_mode": "chat_completions",
-                "strict_turn_finish_validation": True,
-                "finish_gate_max_iterations": 2,
+                "backend.api_mode": "chat_completions",
+                "agent.strict_turn_finish_validation": True,
+                "agent.finish_gate_max_iterations": 2,
             }
         )
         state = SimpleNamespace(

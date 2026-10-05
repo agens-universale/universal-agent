@@ -584,10 +584,10 @@ async def test_entry_without_any_address_is_shown_as_problematic(tmp_path):
     )
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(settings=tui_settings({"model": "test-model"}))
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "test-model"}))
     async with app.run_test() as pilot:
         scr = _mk_screen(
-            config={"model": "test-model"}, config_path=str(cfg_file)
+            config={"agent.model": "test-model"}, config_path=str(cfg_file)
         )
         app.push_screen(scr)
         await pilot.pause()
@@ -2666,10 +2666,10 @@ async def test_a_dead_entry_dims_its_level_pointer_too(tmp_path):
     )
     from gc_tui import app as app_mod
 
-    app = app_mod.TuiApp(settings=tui_settings({"model": "test-model"}))
+    app = app_mod.TuiApp(settings=tui_settings({"agent.model": "test-model"}))
     async with app.run_test() as pilot:
         scr = _mk_screen(
-            config={"model": "test-model"}, config_path=str(cfg_file)
+            config={"agent.model": "test-model"}, config_path=str(cfg_file)
         )
         app.push_screen(scr)
         await pilot.pause()

@@ -74,8 +74,8 @@ def _make_state() -> State:
 def test_wrap_short_output_returns_original_text():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res = maybe_store_and_wrap_tool_output(
         "abc",
@@ -91,8 +91,8 @@ def test_wrap_short_output_returns_original_text():
 def test_wrap_long_output_stores_and_returns_envelope():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res = maybe_store_and_wrap_tool_output(
         "abcdefghij",
@@ -121,8 +121,8 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
     state = _make_state()
     state.tool_call_outputs_store.set_max_entries(0)
     off_cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res_off = maybe_store_and_wrap_tool_output(
         "abcdefghij",
@@ -134,8 +134,8 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
     assert res_off == "abcdefghij"
 
     on_cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     res_self = maybe_store_and_wrap_tool_output(
         '{"tool":"session_read_stored_tool_output"}',
@@ -150,8 +150,8 @@ def test_wrap_respects_feature_off_and_skip_self_tool():
 def test_wrap_never_replaces_turn_finish_status_with_stored_envelope():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 5,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 5,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     rejected = json.dumps(
         {
@@ -176,8 +176,8 @@ def test_wrap_never_replaces_turn_finish_status_with_stored_envelope():
 def test_wrap_fs_read_file_long_output_goes_to_store():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 80,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 80,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     tool_res = json.dumps(
         {
@@ -208,8 +208,8 @@ def test_wrap_fs_read_file_long_output_goes_to_store():
 def test_wrap_fs_read_file_short_line_window_stays_inline():
     state = _make_state()
     cfg = {
-        "tool_output_inline_max_chars": 20_000,
-        "stored_tool_outputs_max_entries": 10,
+        "agent.tool_output_inline_max_chars": 20_000,
+        "agent.stored_tool_outputs_max_entries": 10,
     }
     content = "\n".join(f"code {i}" for i in range(60))
     tool_res = json.dumps(
@@ -267,7 +267,7 @@ def test_session_read_stored_tool_output_pagination_and_unicode():
     tool = CallableTool(
         ReadStoredToolOutput(
             state=state,
-            settings=make_settings({"tool_output_inline_max_chars": 2}),
+            settings=make_settings({"agent.tool_output_inline_max_chars": 2}),
         )
     )
     page1 = json.loads(tool(output_ref="ref-1", offset=0, limit=10))
@@ -312,7 +312,7 @@ def test_session_read_stored_tool_output_updates_lru_recency_before_next_put():
     tool = CallableTool(
         ReadStoredToolOutput(
             state=state,
-            settings=make_settings({"tool_output_inline_max_chars": 5}),
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     page = json.loads(tool(output_ref="r1", offset=0, limit=2))
@@ -341,7 +341,7 @@ def test_session_read_stored_tool_output_invalid_and_not_found():
     tool = CallableTool(
         ReadStoredToolOutput(
             state=state,
-            settings=make_settings({"tool_output_inline_max_chars": 5}),
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     bad = json.loads(tool(output_ref="", offset=0, limit=1))
@@ -361,7 +361,7 @@ def test_session_read_stored_tool_output_not_found_when_store_missing_has_recove
     tool = CallableTool(
         ReadStoredToolOutput(
             state=state,
-            settings=make_settings({"tool_output_inline_max_chars": 5}),
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="missing", offset=0, limit=1))
@@ -381,7 +381,7 @@ def test_session_read_stored_tool_output_error_paths_have_zero_next_offset():
     tool = CallableTool(
         ReadStoredToolOutput(
             state=state,
-            settings=make_settings({"tool_output_inline_max_chars": 5}),
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
 
@@ -427,7 +427,7 @@ def test_not_found_after_real_lru_eviction_has_expected_error_envelope():
     tool = CallableTool(
         ReadStoredToolOutput(
             state=state,
-            settings=make_settings({"tool_output_inline_max_chars": 5}),
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="evicted_ref", offset=0, limit=5))
@@ -452,8 +452,8 @@ def test_process_tool_calls_wraps_long_tool_output(monkeypatch):
     state = _make_state()
     ctx = fake_ctx(
         {
-            "tool_output_inline_max_chars": 5,
-            "stored_tool_outputs_max_entries": 10,
+            "agent.tool_output_inline_max_chars": 5,
+            "agent.stored_tool_outputs_max_entries": 10,
         }
     )
 
@@ -555,7 +555,7 @@ def test_feature_off_k_zero_clears_store_and_disables_read():
     tool = CallableTool(
         ReadStoredToolOutput(
             state=state,
-            settings=make_settings({"tool_output_inline_max_chars": 5}),
+            settings=make_settings({"agent.tool_output_inline_max_chars": 5}),
         )
     )
     payload = json.loads(tool(output_ref="ref-1", offset=0, limit=1))

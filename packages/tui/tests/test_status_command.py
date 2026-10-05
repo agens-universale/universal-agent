@@ -67,7 +67,7 @@ async def test_status_with_active_task_opens_viewer_with_meta_and_runtime(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -95,7 +95,7 @@ async def test_status_without_active_task_shows_idle(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -118,7 +118,7 @@ async def test_status_dash_dash_raw_accepted_no_crash(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")

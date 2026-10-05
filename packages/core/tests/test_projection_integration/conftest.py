@@ -58,15 +58,15 @@ def dirty_canonical_history() -> list[dict]:
 
 def make_ctx_state(*, history: list[dict] | None = None):
     cfg = {
-        "completions_url": "http://test-host/v1/chat/completions",
-        "stream": False,
-        "backend_api_mode": "chat_completions",
-        "chat_completions_max_tokens": 256,
-        "chat_completions_min_response_tokens": 64,
-        "backend_request_timeout_sec": 600,
-        "use_ssl": False,
-        "use_retry": False,
-        "x_cl_id": "test-cl-id",
+        "backend.completions_url": "http://test-host/v1/chat/completions",
+        "backend.stream": False,
+        "backend.api_mode": "chat_completions",
+        "backend.chat_completions_max_tokens": 256,
+        "backend.chat_completions_min_response_tokens": 64,
+        "backend.request_timeout_sec": 600,
+        "backend.use_ssl": False,
+        "backend.use_retry": False,
+        "agent.x_cl_id": "test-cl-id",
     }
     ctx = fake_ctx(
         cfg,

@@ -32,7 +32,9 @@ async def test_opening_thread_applies_its_settings(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "tui_finish_gate_mode": "on"}),
+        settings=tui_settings(
+            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+        ),
     )
     async with app.run_test() as pilot:
         pilot.app.screen.attach_active_task("t-own")
@@ -50,7 +52,9 @@ async def test_opening_thread_without_settings_falls_back_to_default(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "tui_finish_gate_mode": "on"}),
+        settings=tui_settings(
+            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+        ),
     )
     async with app.run_test() as pilot:
         app.set_session_override("tui.finish_gate_mode", "off")
@@ -71,7 +75,9 @@ async def test_init_auto_create_inherits_session_overrides(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "tui_finish_gate_mode": "on"}),
+        settings=tui_settings(
+            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+        ),
     )
     rec = _StubRunner()
     app.active_runner = rec
@@ -106,7 +112,9 @@ async def test_freetext_auto_create_inherits_session_overrides(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "tui_finish_gate_mode": "on"}),
+        settings=tui_settings(
+            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+        ),
     )
     rec = _StubRunner()
     app.active_runner = rec
@@ -147,7 +155,9 @@ async def test_attach_without_settings_change_keeps_warm_runner(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "tui_finish_gate_mode": "on"}),
+        settings=tui_settings(
+            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+        ),
     )
     async with app.run_test() as pilot:
         app.set_session_override("tui.finish_gate_mode", "off")
@@ -168,7 +178,9 @@ async def test_attach_with_other_settings_invalidates_runner(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"model": "M", "tui_finish_gate_mode": "on"}),
+        settings=tui_settings(
+            {"agent.model": "M", "tui.finish_gate_mode": "on"}
+        ),
     )
     async with app.run_test() as pilot:
         calls = []
@@ -195,7 +207,7 @@ async def test_two_windows_with_different_threads_are_independent(tmp_path):
 
     _mk_thread(tmp_path, "t-a", {"tui.finish_gate_mode": "off"})
     _mk_thread(tmp_path, "t-b", {"tui.finish_gate_mode": "on"})
-    cfg = {"model": "M", "tui_finish_gate_mode": "on"}
+    cfg = {"agent.model": "M", "tui.finish_gate_mode": "on"}
 
     app_a = TuiApp(
         threads_dir=str(tmp_path / "threads"),
@@ -246,7 +258,7 @@ async def test_settings_screen_open_picks_up_default_saved_by_other_window(
     app_b = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"tui_finish_gate_mode": "on"}),
+        settings=tui_settings({"tui.finish_gate_mode": "on"}),
     )
     app_b.set_config_path(str(cfg_file))
 
@@ -284,7 +296,7 @@ async def test_entering_settings_section_picks_up_other_window_default(
     app_b = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"tui_finish_gate_mode": "on"}),
+        settings=tui_settings({"tui.finish_gate_mode": "on"}),
     )
     app_b.set_config_path(str(cfg_file))
 
@@ -330,7 +342,7 @@ async def test_config_screen_open_does_not_reload_other_window_default(
     app_b = TuiApp(
         threads_dir=str(tmp_path / "threads"),
         system="cli",
-        settings=tui_settings({"tui_finish_gate_mode": "on"}),
+        settings=tui_settings({"tui.finish_gate_mode": "on"}),
     )
     app_b.set_config_path(str(cfg_file))
 

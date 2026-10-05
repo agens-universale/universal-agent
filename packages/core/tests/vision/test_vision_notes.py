@@ -55,7 +55,7 @@ def no_tools(monkeypatch):
 
 async def test_context_factory_has_no_hook_by_default(no_tools):
     ctx = await rc.acreate_run_context(
-        make_settings({"model": "M", "save_logs": False})
+        make_settings({"agent.model": "M", "logging.save_logs": False})
     )
     assert ctx.on_trace_note is None
 
@@ -63,7 +63,7 @@ async def test_context_factory_has_no_hook_by_default(no_tools):
 async def test_context_factory_stores_the_hook(no_tools):
     sink: list = []
     ctx = await rc.acreate_run_context(
-        make_settings({"model": "M", "save_logs": False}),
+        make_settings({"agent.model": "M", "logging.save_logs": False}),
         on_trace_note=sink.append,
     )
     assert ctx.on_trace_note == sink.append
@@ -72,15 +72,15 @@ async def test_context_factory_stores_the_hook(no_tools):
 async def test_subagent_context_inherits_the_hook(tmp_path):
     """Отказ «глаз» внутри субагента обязан дойти до ленты родителя."""
     config = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "logging_format": "jsonl",
-        "console_trace": False,
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://localhost:1/v1/chat/completions",
-        "model": "test-model",
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.format": "jsonl",
+        "logging.console_trace": False,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://localhost:1/v1/chat/completions",
+        "agent.model": "test-model",
         "launch_root": str(tmp_path),
-        "use_local_subagents": True,
+        "agent.use_local_subagents": True,
     }
     sink: list = []
     parent_ctx = await rc.acreate_run_context(

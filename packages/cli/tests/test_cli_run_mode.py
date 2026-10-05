@@ -17,7 +17,7 @@ def test_cli_declares_the_cli_run_mode():
 
     from gc_testkit.settings import make_settings
 
-    fake_settings = make_settings({"console_trace": False})
+    fake_settings = make_settings({"logging.console_trace": False})
     captured = {}
 
     async def _capture(settings, *args, **kwargs):

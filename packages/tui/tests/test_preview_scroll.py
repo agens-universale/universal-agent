@@ -31,7 +31,7 @@ async def test_preview_trace_scrolls_when_overflow(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 24)) as pilot:
         screen = PreviewScreen(
@@ -68,7 +68,7 @@ async def test_main_trace_still_follows_content(tmp_path):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     async with app.run_test(

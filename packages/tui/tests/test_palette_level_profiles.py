@@ -210,7 +210,7 @@ def test_level_hint_legacy_mode(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
     from gc_tui.toggles import level_value_hint
 
-    app = TuiApp(settings=tui_settings({"model": "glm-5.2-fp8"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "glm-5.2-fp8"}))
     app._config_path = str(tmp_path / "config.yml")
 
     hint = level_value_hint(app, "default")
@@ -423,7 +423,7 @@ async def test_footer_shows_router_model_not_stale_flat_key(
         threads_dir=str(tmp_path / "t"),
         settings=tui_settings(
             {
-                "model": "STALE-LEGACY-NAME",
+                "agent.model": "STALE-LEGACY-NAME",
                 "models": {"glm-local": {}},
                 "slots": {"default": "glm-local"},
                 "level": "default",
@@ -450,7 +450,7 @@ async def test_footer_updates_on_level_switch(tmp_path, monkeypatch):
         threads_dir=str(tmp_path / "t"),
         settings=tui_settings(
             {
-                "model": "STALE",
+                "agent.model": "STALE",
                 "models": {"glm-local": {}, "glm-max": {}},
                 "slots": {"default": "glm-local", "max": "glm-max"},
                 "level": "default",

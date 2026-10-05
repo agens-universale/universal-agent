@@ -33,7 +33,7 @@ class _Host:
 
 def _cfg(execute_on: str = "os_backend") -> dict:
     return {
-        "mcp-servers": {
+        "mcp.servers": {
             "fs": {
                 "transport": "stdio",
                 "command": "srv",

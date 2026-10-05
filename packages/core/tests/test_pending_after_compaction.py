@@ -37,11 +37,11 @@ def _make_state(*, max_steps: int = 5) -> State:
 
 def _make_ctx(**overrides):
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "completions_url": "http://backend.local/v1/chat/completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 5,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "backend.completions_url": "http://backend.local/v1/chat/completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 5,
+        "agent.strict_turn_finish_validation": True,
     }
     cfg.update(overrides)
     return fake_ctx(
@@ -240,7 +240,7 @@ def test_continued_turn_passes_through_finish_gate(monkeypatch):
         pr.arun_agent(
             [_submit_solution_call()],
             _make_state(),
-            _make_ctx(strict_turn_finish_validation=True),
+            _make_ctx(**{"agent.strict_turn_finish_validation": True}),
             turn_end_compaction_hook=_hook,
             get_pending_messages=_pending_once(compacted),
         )

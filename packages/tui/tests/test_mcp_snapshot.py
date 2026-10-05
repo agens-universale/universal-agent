@@ -3,7 +3,7 @@ def test_build_mcp_tools_snapshot_groups_by_server():
     from gc_testkit.settings import make_settings
 
     config = {
-        "mcp-servers": {"search": {"transport": "sse", "url": "http://x"}}
+        "mcp.servers": {"search": {"transport": "sse", "url": "http://x"}}
     }
     # Реальная форма tools_data: ключ тула = mcp_<server>_<base>; значение содержит "description".
     tools_data = {
@@ -31,7 +31,7 @@ def test_build_mcp_tools_snapshot_empty_servers():
     assert build_mcp_tools_snapshot(make_settings({}), {}) == {}
     assert (
         build_mcp_tools_snapshot(
-            make_settings({"mcp-servers": {}}),
+            make_settings({"mcp.servers": {}}),
             {"read_file": {"description": "x"}},
         )
         == {}
@@ -43,7 +43,7 @@ def test_snapshot_includes_status_and_description():
     from gc_testkit.settings import make_settings
 
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "office": {
                 "transport": "stdio",
                 "command": "office-mcp",
@@ -89,7 +89,7 @@ def test_snapshot_without_status_defaults_unknown():
     from gc_testkit.settings import make_settings
 
     config = {
-        "mcp-servers": {
+        "mcp.servers": {
             "office": {"transport": "stdio", "command": "office-mcp"}
         }
     }

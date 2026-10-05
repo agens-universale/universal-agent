@@ -33,7 +33,7 @@ async def test_build_tools_data_hands_the_backend_to_mcp_discovery(
     await tools_pkg.abuild_tools_data(
         make_settings(
             {
-                "mcp-servers": {
+                "mcp.servers": {
                     "x": {
                         "transport": "stdio",
                         "command": "x",

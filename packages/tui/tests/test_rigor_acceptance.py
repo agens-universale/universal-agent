@@ -137,8 +137,8 @@ def test_smart_gate_counts_failed_and_subagent_calls():
     from gc_testkit.settings import fake_ctx
 
     cfg = {
-        "backend_api_mode": "chat_completions",
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "agent.strict_turn_finish_validation": True,
         "finish_gate_smart": True,
     }
     g0 = FinishGateGuard(

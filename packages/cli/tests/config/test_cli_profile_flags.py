@@ -81,6 +81,52 @@ def test_level_flag_absent_does_not_add_override(monkeypatch):
     assert "level" not in ap.extra_config_overrides
 
 
+def test_model_and_completions_url_flags_land_on_their_paths(monkeypatch):
+    # Объявленные флаги — не плоские имена: путь задан рядом с флагом, и
+    # легаси-форс узнаёт их по слою `cli` этих путей.
+    ap = _parse(
+        [
+            "gc-cli",
+            "-q",
+            "hi",
+            "--model",
+            "X",
+            "--completions_url",
+            "http://x/v1",
+        ],
+        monkeypatch,
+    )
+    assert ap.extra_config_overrides == {
+        "agent.model": "X",
+        "backend.completions_url": "http://x/v1",
+    }
+    loaded = apply_cli_overrides(
+        make_settings({"models": {"flash": {}}}),
+        extra_overrides=ap.extra_config_overrides,
+    )
+    assert cli_forces_legacy_model(loaded) is True
+
+
+def test_dotted_param_and_flat_name_hint(monkeypatch):
+    ap = _parse(
+        ["gc-cli", "-q", "hi", "--agent.max_steps", "50", "--max_steps", "7"],
+        monkeypatch,
+    )
+    assert ap.extra_config_overrides == {
+        "agent.max_steps": 50,
+        "max_steps": 7,
+    }
+    from gc_core.config_modules.path_hints import UnknownSettingError
+
+    with pytest.raises(UnknownSettingError) as exc:
+        apply_cli_overrides(
+            make_settings(), extra_overrides=ap.extra_config_overrides
+        )
+    assert "--max_steps" in str(exc.value)
+    assert "--agent.max_steps" in str(exc.value)
+    assert "--agent.max_steps" in str(exc.value)
+
+
 def test_level_flag_rejects_invalid_choice(monkeypatch):
     monkeypatch.setattr("sys.argv", ["gc-cli", "-q", "hi", "--level", "bogus"])
     import importlib
@@ -94,7 +140,9 @@ def test_level_flag_rejects_invalid_choice(monkeypatch):
 
 def test_apply_cli_overrides_tracks_explicit_keys():
     loaded = make_settings({"models": {"flash": {}}})
-    overridden = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    overridden = apply_cli_overrides(
+        loaded, extra_overrides={"agent.model": "X"}
+    )
     assert overridden.provenance.source("agent.model").layer == "cli"
     # Не заданное CLI — не помечено как cli; исходный объект не изменён.
     assert overridden.provenance.source("level").layer != "cli"
@@ -103,7 +151,7 @@ def test_apply_cli_overrides_tracks_explicit_keys():
 
 def test_apply_cli_overrides_accumulates_explicit_keys_across_calls():
     loaded = make_settings({"models": {"flash": {}}})
-    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"agent.model": "X"})
     loaded = apply_cli_overrides(loaded, extra_overrides={"level": "light"})
     assert loaded.provenance.source("agent.model").layer == "cli"
     assert loaded.provenance.source("level").layer == "cli"
@@ -111,27 +159,29 @@ def test_apply_cli_overrides_accumulates_explicit_keys_across_calls():
 
 def test_force_legacy_true_when_model_override_and_registry_nonempty():
     loaded = make_settings({"models": {"flash": {}}})
-    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"agent.model": "X"})
     assert cli_forces_legacy_model(loaded) is True
 
 
 def test_force_legacy_true_when_completions_url_override_and_registry_nonempty():
     loaded = make_settings({"models": {"flash": {}}})
     loaded = apply_cli_overrides(
-        loaded, extra_overrides={"completions_url": "http://x/v1"}
+        loaded, extra_overrides={"backend.completions_url": "http://x/v1"}
     )
     assert cli_forces_legacy_model(loaded) is True
 
 
 def test_force_legacy_false_when_registry_empty():
     loaded = make_settings({"models": {}})
-    loaded = apply_cli_overrides(loaded, extra_overrides={"model": "X"})
+    loaded = apply_cli_overrides(loaded, extra_overrides={"agent.model": "X"})
     assert cli_forces_legacy_model(loaded) is False
 
 
 def test_force_legacy_false_without_model_or_url_override():
     loaded = make_settings({"models": {"flash": {}}})
-    loaded = apply_cli_overrides(loaded, extra_overrides={"max_steps": 5})
+    loaded = apply_cli_overrides(
+        loaded, extra_overrides={"agent.max_steps": 5}
+    )
     assert cli_forces_legacy_model(loaded) is False
 
 
@@ -255,7 +305,7 @@ def test_model_override_with_registry_forces_legacy_all_consumers_keeps_profile_
 
     loaded = apply_cli_overrides(
         load_settings(str(base_config)),
-        extra_overrides={"model": "forced-model"},
+        extra_overrides={"agent.model": "forced-model"},
     )
 
     assert cli_forces_legacy_model(loaded) is True
@@ -289,7 +339,7 @@ def test_model_override_without_registry_is_plain_legacy_not_forced(
 
     loaded = apply_cli_overrides(
         load_settings(str(base_config)),
-        extra_overrides={"model": "forced-model"},
+        extra_overrides={"agent.model": "forced-model"},
     )
 
     assert cli_forces_legacy_model(loaded) is False
@@ -316,8 +366,10 @@ def test_cli_models_override_carries_its_own_token_to_the_router():
     есть, а до сети доезжает половина."""
     loaded = make_settings(
         {
-            "completions_url": "https://common/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer sk-common"},
+            "backend.completions_url": "https://common/v1/chat/completions",
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer sk-common"
+            },
         }
     )
     cfg = apply_cli_overrides(

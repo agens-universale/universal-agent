@@ -23,9 +23,11 @@ def _screen():
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     return OnboardingScreen(
         settings=as_settings(cfg),

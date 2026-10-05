@@ -19,7 +19,7 @@ from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders_strict,
 )
 from gc_core.config_raw import missing_env_refs
-from gc_testkit.settings import settings_from_flat
+from gc_testkit.settings import make_settings
 
 
 @pytest.fixture
@@ -304,16 +304,18 @@ def test_missing_file_ref_is_strict_too(stack, tmp_path):
 def test_cli_param_is_strict():
     with pytest.raises(UnresolvedPlaceholdersError) as info:
         apply_cli_overrides(
-            settings_from_flat({}),
-            extra_overrides={"completions_url": "${ENV:GC_T_A}"},
+            make_settings({}),
+            extra_overrides={"backend.completions_url": "${ENV:GC_T_A}"},
         )
-    assert "--param: completions_url" in str(info.value)
+    assert "--param: backend.completions_url" in str(info.value)
 
 
 def test_cli_param_optional_default():
     loaded = apply_cli_overrides(
-        settings_from_flat({}),
-        extra_overrides={"completions_url": "${ENV:GC_T_A:-http://d/v1}"},
+        make_settings({}),
+        extra_overrides={
+            "backend.completions_url": "${ENV:GC_T_A:-http://d/v1}"
+        },
     )
     assert loaded.settings.backend.completions_url == "http://d/v1"
 

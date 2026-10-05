@@ -28,7 +28,7 @@ FORBIDDEN = "http://169.254.169.254/latest/meta-data/"
 
 def _policy_config(launch_root=None):
     cfg = {
-        "url_policy": {
+        "security.url_policy": {
             "enabled": True,
             "allowed_schemes": ["http", "https"],
             "url_blacklist": ["169.254.169.254"],
@@ -36,7 +36,10 @@ def _policy_config(launch_root=None):
     }
     if launch_root is not None:
         cfg["launch_root"] = str(launch_root)
-        cfg["download"] = {"download_dir": "downloads", "max_bytes": 1_000_000}
+        cfg["security.download"] = {
+            "download_dir": "downloads",
+            "max_bytes": 1_000_000,
+        }
     return cfg
 
 

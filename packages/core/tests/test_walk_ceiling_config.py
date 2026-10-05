@@ -17,13 +17,13 @@ def test_walk_ceiling_accessor_defaults_and_parses():
     )
     assert (
         walk_output_max_chars_from_config_dict(
-            make_settings({"walk_output_max_chars": -5})
+            make_settings({"agent.walk_output_max_chars": -5})
         )
         == WALK_OUTPUT_MAX_CHARS
     )
     assert (
         walk_output_max_chars_from_config_dict(
-            make_settings({"walk_output_max_chars": 1000})
+            make_settings({"agent.walk_output_max_chars": 1000})
         )
         == 1000
     )
@@ -34,7 +34,7 @@ def test_factory_passes_walk_ceiling_to_harbor():
     try:
         backend = resolve_os_backend(
             make_settings(
-                {"os_backend": "harbor", "walk_output_max_chars": 1234}
+                {"os_backend": "harbor", "agent.walk_output_max_chars": 1234}
             ),
             environment=object(),
             loop=loop,

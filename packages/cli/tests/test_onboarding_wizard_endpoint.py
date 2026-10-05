@@ -38,9 +38,9 @@ def test_invalid_endpoint_reprompts_until_valid():
     # опечатка «ttp://…» → предупреждение + переспрос → валидный ввод принимается
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+            "agent.model": "m",
         }
     )
     io, printed = _io(
@@ -61,9 +61,9 @@ def test_invalid_endpoint_then_enter_skips():
     # невалид → Enter = явный пропуск (поле остаётся pending), НЕ застревает
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+            "agent.model": "m",
         }
     )
     io, _ = _io(["garbage-no-scheme", ""])  # невалид, затем Enter
@@ -78,9 +78,9 @@ def test_review_all_hides_current_for_placeholder_endpoint(monkeypatch):
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: None)
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+            "agent.model": "m",
         }
     )
     io, printed = _io(
@@ -94,9 +94,9 @@ def test_endpoint_prompt_uses_flat_indent_ascii_marker():
     # единый стиль: endpoint-приглашение = «  > » (2 отступа, ASCII '>'), без старого '›'
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+            "agent.model": "m",
         }
     )
     prompts = []
@@ -114,8 +114,8 @@ def test_fetch_models_does_not_dial_the_placeholder_endpoint():
     «список не получен». Шаг обязан вести себя как на чистой установке — без адреса."""
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
         }
@@ -138,8 +138,8 @@ def test_fetch_models_preserves_custom_ca_path():
     fetch = Mock(return_value=[])
     cfg = make_settings(
         {
-            "completions_url": "https://model.example/v1/chat/completions",
-            "use_ssl": "/corp/root.pem",
+            "backend.completions_url": "https://model.example/v1/chat/completions",
+            "backend.use_ssl": "/corp/root.pem",
         }
     )
     assert wz._fetch_models(cfg, {}, fetch) == []
@@ -154,11 +154,11 @@ def test_model_step_on_placeholder_endpoint_offers_manual_input():
 
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": onboarding.MODEL_SENTINEL,
+            "agent.model": onboarding.MODEL_SENTINEL,
         }
     )
     io, printed = _io(["gpt-5.6-terra"])
@@ -177,9 +177,9 @@ def test_review_all_shows_current_for_real_endpoint(monkeypatch):
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: None)
     cfg = make_settings(
         {
-            "completions_url": "https://real/v1/chat/completions",
-            "chat_completion_headers": {"Authorization": "Bearer sk"},
-            "model": "m",
+            "backend.completions_url": "https://real/v1/chat/completions",
+            "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+            "agent.model": "m",
         }
     )
     io, printed = _io(["", "3", ""])
@@ -199,9 +199,9 @@ def test_review_all_does_not_show_placeholder_as_current(monkeypatch):
     monkeypatch.setattr(model_picker, "fetch_models", lambda *a, **k: None)
     cfg = make_settings(
         {
-            "backend_api_mode": "chat_completions",
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.api_mode": "chat_completions",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
             "models": {

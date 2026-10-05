@@ -38,7 +38,7 @@ from harbor.models.trajectories import (
 )
 from harbor.utils.trajectory_utils import format_trajectory_json
 
-from adapters.gc_cli_config import build_gc_cli_settings
+from adapters.gc_cli_config import build_gc_cli_settings, profile_value
 from adapters.step_timings import StepTimings
 
 if TYPE_CHECKING:
@@ -308,12 +308,12 @@ class GcCliExternal(BaseAgent):
         m = (
             self.model_name
             or os.environ.get("GC_CLI_MODEL")
-            or self._overrides.get("model")
+            or profile_value(self._overrides, "agent.model")
         )
         if not m:
             raise RuntimeError(
                 "No model configured: pass --model to the runner, set GC_CLI_MODEL, "
-                "or provide gc_cli_config.model in the agent profile."
+                "or provide gc_cli_config agent.model in the agent profile."
             )
         if m.startswith("openai/"):
             m = m[len("openai/") :]
@@ -330,14 +330,14 @@ class GcCliExternal(BaseAgent):
                 if base.endswith("/chat/completions")
                 else base + "/chat/completions"
             )
-        url = os.environ.get("GC_CLI_BACKEND_URL") or self._overrides.get(
-            "completions_url"
+        url = os.environ.get("GC_CLI_BACKEND_URL") or profile_value(
+            self._overrides, "backend.completions_url"
         )
         if not url:
             raise RuntimeError(
                 "No LLM backend configured: the runner passed no api_base, "
                 "GC_CLI_BACKEND_URL is unset, and the profile has no "
-                "gc_cli_config.completions_url. For local runs: "
+                "gc_cli_config backend.completions_url. For local runs: "
                 "export GC_CLI_BACKEND_URL=http://127.0.0.1:<port>/v1/chat/completions"
             )
         return url
@@ -440,17 +440,19 @@ class GcCliExternal(BaseAgent):
         survive. A name already in the container wins: benchmark skills are part of
         the measurement, so the profile copy is skipped rather than overwriting it.
         """
-        skills_data_path = self._overrides.get("skills_data_path")
+        skills_data_path = profile_value(
+            self._overrides, "paths.skills_data_path"
+        )
         if not skills_data_path:
             raise RuntimeError(
-                "gc_cli_config.skills_data_path is missing or empty — the profile "
+                "gc_cli_config paths.skills_data_path is missing or empty — the profile "
                 "must set it to a directory on the runner filesystem before calling "
                 "_merge_profile_skills."
             )
         local_root = Path(str(skills_data_path))
         if not local_root.is_dir():
             raise RuntimeError(
-                f"gc_cli_config.skills_data_path does not exist on the runner: "
+                f"gc_cli_config paths.skills_data_path does not exist on the runner: "
                 f"{local_root}. It must be a directory on the runner filesystem — "
                 "the adapter uploads it into the task container."
             )
@@ -748,7 +750,9 @@ class GcCliExternal(BaseAgent):
             else None
         )
         skill_sources: dict[str, str] = {}
-        profile_skills = self._overrides.get("skills_data_path")
+        profile_skills = profile_value(
+            self._overrides, "paths.skills_data_path"
+        )
         if profile_skills:
             container_skills, skill_sources = await self._merge_profile_skills(
                 environment, container_skills

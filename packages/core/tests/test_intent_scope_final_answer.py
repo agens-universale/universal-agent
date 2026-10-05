@@ -53,7 +53,7 @@ class _FakeState:
 class _FakeCtx:
     def __init__(self, scope, backend="chat_completions"):
         self.intent_scope = scope
-        loaded = make_settings({"backend_api_mode": backend})
+        loaded = make_settings({"backend.api_mode": backend})
         self.settings = loaded.settings
         self.runtime = loaded.runtime
         self.logger = logging.getLogger("test.final_answer")

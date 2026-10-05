@@ -14,7 +14,7 @@ async def test_summary_marker_renders(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -52,7 +52,7 @@ async def test_summary_body_toggles_on_request(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -92,7 +92,7 @@ async def test_summary_marker_arrow_flips_on_toggle(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -131,7 +131,7 @@ async def test_open_summary_event_shows_synthesis_not_empty(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen
@@ -165,7 +165,7 @@ async def test_summary_expand_scrolls_body_into_view(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = pilot.app.screen

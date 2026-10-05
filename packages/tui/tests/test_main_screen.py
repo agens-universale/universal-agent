@@ -9,7 +9,8 @@ async def test_ctrl_c_idle_requests_exit_not_stop(tmp_path, monkeypatch):
     from gc_tui.app import TuiApp
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = app.screen
@@ -44,7 +45,7 @@ async def test_brand_card_shows_the_version_under_the_tagline(monkeypatch):
     monkeypatch.setattr(app_version, "agent_version", lambda: "9.9.9")
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(120, 30)) as pilot:
         await pilot.pause()
         rows = [
@@ -63,7 +64,7 @@ async def test_stacked_brand_card_keeps_air_before_the_status_column():
     строка липнет к бренду (сбоку, в широком режиме, отступ не нужен и его нет)."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(
         size=(74, 34)
     ) as pilot:  # колонка сбоку не влезает
@@ -93,7 +94,7 @@ async def test_brand_card_relayouts_when_the_window_is_resized():
         return found[0]
 
     logo_parts = ("█", "╚")  # куски псевдографики логотипа
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(110, 34)) as pilot:
         await pilot.pause()
         # старт в широком окне: статусы сбоку — делят строку экрана с логотипом
@@ -129,7 +130,7 @@ async def test_status_column_goes_under_the_logo_when_a_line_does_not_fit():
         line = next(r for r in rows if "готов к работе" in r)
         return not any(ch in line for ch in ("█", "╚"))  # нет логотипа рядом
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(96, 30)) as pilot:
         await pilot.pause()
         assert not _stacked(app)  # коротким строкам места хватает
@@ -147,7 +148,7 @@ async def test_stacked_status_column_has_no_left_indent():
     сдвиг вправо (сбоку он отделяет её от логотипа и нужен)."""
     from gc_tui.app import TuiApp
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(70, 30)) as pilot:
         await pilot.pause()
         rows = [

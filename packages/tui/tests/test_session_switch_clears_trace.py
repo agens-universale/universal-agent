@@ -99,7 +99,7 @@ async def test_switch_session_clears_previous_trace(tmp_path):
     app = TuiApp(
         threads_dir=str(threads_dir),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         screen = app.screen

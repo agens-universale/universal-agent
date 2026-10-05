@@ -5,7 +5,7 @@ from gc_testkit.settings import fake_ctx
 
 def test_compact_thread_noop_in_responses_mode():
     ctx = fake_ctx(
-        {"backend_api_mode": "responses"},
+        {"backend.api_mode": "responses"},
         tools_spec=[],
         tools_description="",
         logger=None,
@@ -15,7 +15,7 @@ def test_compact_thread_noop_in_responses_mode():
 
 def test_compact_thread_noop_on_empty_thread_id():
     ctx = fake_ctx(
-        {"backend_api_mode": "chat_completions"},
+        {"backend.api_mode": "chat_completions"},
         tools_spec=[],
         tools_description="",
         logger=None,

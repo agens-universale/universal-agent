@@ -114,7 +114,9 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
     """Критерий 2: два прогона идут внахлёст, а не друг за другом."""
     from gc_testkit import quiet_gc_for_loop_timing
 
-    cfg_solo = parity_config(tmp_path / "solo", monkeypatch, model="solo")
+    cfg_solo = parity_config(
+        tmp_path / "solo", monkeypatch, **{"agent.model": "solo"}
+    )
     install_many(monkeypatch, {"solo": ScriptedBackend(list(TURNS))})
     # Оба замера — под заглушенным сборщиком. Иначе тест сравнивает не
     # параллельность, а то, сколько пауз поколения 2 попало в каждую фазу:
@@ -129,8 +131,12 @@ async def test_two_agents_run_concurrently(tmp_path, monkeypatch):
         # По сценарию на агента: общий раздаёт ходы в порядке вызовов, и второй
         # агент забрал бы финализатор первого — тест мерил бы очередь, а не
         # параллельность.
-        cfg_a = parity_config(tmp_path / "a", monkeypatch, model="агент-а")
-        cfg_b = parity_config(tmp_path / "b", monkeypatch, model="агент-б")
+        cfg_a = parity_config(
+            tmp_path / "a", monkeypatch, **{"agent.model": "агент-а"}
+        )
+        cfg_b = parity_config(
+            tmp_path / "b", monkeypatch, **{"agent.model": "агент-б"}
+        )
         install_many(
             monkeypatch,
             {

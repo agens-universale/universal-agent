@@ -43,7 +43,7 @@ def _state():
 class Preparation:
     def __init__(self):
         # Настройки ребёнка, подготовленные исполнителем заранее.
-        self.config = make_settings({"subagent_max_steps": 5})
+        self.config = make_settings({"agent.subagent_max_steps": 5})
         self.child_ctx = SimpleNamespace(
             run_id="child-run",
             logger=None,

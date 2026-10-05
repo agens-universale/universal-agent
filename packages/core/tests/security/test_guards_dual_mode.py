@@ -139,7 +139,7 @@ def test_double_yield_is_a_loud_error():
 def _url_ctx():
     return fake_ctx(
         {
-            "url_policy": {
+            "security.url_policy": {
                 "enabled": True,
                 "mode": "deny",
                 "allowed_schemes": ["https"],

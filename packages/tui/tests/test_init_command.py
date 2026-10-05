@@ -28,7 +28,7 @@ async def test_cmd_init_busy_guard(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     rec = _RecRunner(running=True)
     app.active_runner = rec
@@ -50,7 +50,7 @@ async def test_cmd_init_starts_run_with_init_prompt(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     rec = _RecRunner(running=False)
     # get_runner() должен вернуть наш стаб

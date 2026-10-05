@@ -14,7 +14,7 @@ def _close(logger):
 class TestFileNames:
     def test_absent_trace_keeps_current_names(self, tmp_path):
         log_path, summary_path = build_run_log_paths(
-            settings=make_settings({"logs_dump_dir": str(tmp_path)}),
+            settings=make_settings({"paths.logs_dump_dir": str(tmp_path)}),
             run_id="abc",
             agent_kind="main",
         )
@@ -24,7 +24,7 @@ class TestFileNames:
     def test_empty_trace_keeps_current_names(self, tmp_path):
         log_path, summary_path = build_run_log_paths(
             settings=make_settings(
-                {"logs_dump_dir": str(tmp_path), "trace_id": "  "}
+                {"paths.logs_dump_dir": str(tmp_path), "trace_id": "  "}
             ),
             run_id="abc",
             agent_kind="main",
@@ -35,7 +35,7 @@ class TestFileNames:
     def test_trace_is_prepended_to_run_id_in_both_names(self, tmp_path):
         log_path, summary_path = build_run_log_paths(
             settings=make_settings(
-                {"logs_dump_dir": str(tmp_path), "trace_id": "wf-42"}
+                {"paths.logs_dump_dir": str(tmp_path), "trace_id": "wf-42"}
             ),
             run_id="abc",
             agent_kind="main",
@@ -47,7 +47,7 @@ class TestFileNames:
         log_path, _ = build_run_log_paths(
             settings=make_settings(
                 {
-                    "logs_dump_dir": str(tmp_path),
+                    "paths.logs_dump_dir": str(tmp_path),
                     "trace_id": "../../etc/x",
                 }
             ),
@@ -63,10 +63,10 @@ class TestJsonlRecords:
         logger, log_path, _ = create_run_logger(
             settings=make_settings(
                 {
-                    "logs_dump_dir": str(tmp_path),
-                    "save_logs": True,
-                    "logging_format": "jsonl",
-                    "console_trace": False,
+                    "paths.logs_dump_dir": str(tmp_path),
+                    "logging.save_logs": True,
+                    "logging.format": "jsonl",
+                    "logging.console_trace": False,
                 }
             ),
             run_id="abc",
@@ -83,10 +83,10 @@ class TestJsonlRecords:
         logger, log_path, _ = create_run_logger(
             settings=make_settings(
                 {
-                    "logs_dump_dir": str(tmp_path),
-                    "save_logs": True,
-                    "logging_format": "jsonl",
-                    "console_trace": False,
+                    "paths.logs_dump_dir": str(tmp_path),
+                    "logging.save_logs": True,
+                    "logging.format": "jsonl",
+                    "logging.console_trace": False,
                     "trace_id": "wf-42",
                 }
             ),
@@ -103,10 +103,10 @@ class TestJsonlRecords:
         logger, log_path, _ = create_run_logger(
             settings=make_settings(
                 {
-                    "logs_dump_dir": str(tmp_path),
-                    "save_logs": True,
-                    "logging_format": "jsonl",
-                    "console_trace": False,
+                    "paths.logs_dump_dir": str(tmp_path),
+                    "logging.save_logs": True,
+                    "logging.format": "jsonl",
+                    "logging.console_trace": False,
                     "trace_id": "wf/123",
                 }
             ),
@@ -124,10 +124,10 @@ class TestJsonlRecords:
         logger, log_path, _ = create_run_logger(
             settings=make_settings(
                 {
-                    "logs_dump_dir": str(tmp_path),
-                    "save_logs": True,
-                    "logging_format": "jsonl",
-                    "console_trace": False,
+                    "paths.logs_dump_dir": str(tmp_path),
+                    "logging.save_logs": True,
+                    "logging.format": "jsonl",
+                    "logging.console_trace": False,
                     "trace_id": "wf-42",
                 }
             ),
@@ -146,7 +146,10 @@ class TestTextRecords:
     def test_absent_trace_keeps_plain_format(self, tmp_path):
         logger, log_path, _ = create_run_logger(
             settings=make_settings(
-                {"logs_dump_dir": str(tmp_path), "save_logs": True}
+                {
+                    "paths.logs_dump_dir": str(tmp_path),
+                    "logging.save_logs": True,
+                }
             ),
             run_id="abc",
             agent_kind="main",
@@ -161,8 +164,8 @@ class TestTextRecords:
         logger, log_path, _ = create_run_logger(
             settings=make_settings(
                 {
-                    "logs_dump_dir": str(tmp_path),
-                    "save_logs": True,
+                    "paths.logs_dump_dir": str(tmp_path),
+                    "logging.save_logs": True,
                     "trace_id": "wf-42",
                 }
             ),

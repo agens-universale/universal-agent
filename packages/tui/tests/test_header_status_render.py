@@ -28,7 +28,7 @@ async def test_badge_completed_from_meta_tui(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -48,7 +48,7 @@ async def test_header_left_is_str_with_session_id(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -73,7 +73,9 @@ async def test_meter_hidden_in_header_responses_mode(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M", "backend_api_mode": "responses"}),
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "responses"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -97,7 +99,7 @@ async def test_badge_failed_read_via_task_status_badge(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -131,11 +133,9 @@ async def test_meter_in_header_not_shown_chat_mode(tmp_path):
         system="cli",
         settings=tui_settings(
             {
-                "model": "M",
-                "backend_api_mode": "chat_completions",
-                "summary_params": {
-                    "chat_completions_summary_trigger_chars": 1000
-                },
+                "agent.model": "M",
+                "backend.api_mode": "chat_completions",
+                "summary": {"chat_completions_summary_trigger_chars": 1000},
             }
         ),
     )

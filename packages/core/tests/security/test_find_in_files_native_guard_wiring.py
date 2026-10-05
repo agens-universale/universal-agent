@@ -17,7 +17,7 @@ from gc_testkit.helpers.tool_ctx import with_local_ctx
 def _cfg(root):
     return {
         "launch_root": str(root),
-        "read_guard": {
+        "security.read_guard": {
             "enabled": True,
             "mode": "deny",
             "denied_file_patterns": [".env"],

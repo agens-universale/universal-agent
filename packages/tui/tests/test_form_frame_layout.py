@@ -29,9 +29,11 @@ _TINY = (80, 14)
 
 def _cfg():
     return {
-        "completions_url": "http://host/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer secret-token"},
-        "model": "test-model",
+        "backend.completions_url": "http://host/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer secret-token"
+        },
+        "agent.model": "test-model",
     }
 
 
@@ -195,11 +197,11 @@ async def test_onboarding_footer_survives_overflowing_step(tmp_path):
         scr = OnboardingScreen(
             settings=as_settings(
                 {
-                    "completions_url": "http://your-backend:PORT/v1/chat/completions",
-                    "chat_completion_headers": {
+                    "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+                    "backend.chat_completion_headers": {
                         "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
                     },
-                    "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+                    "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
                 }
             ),
             config_path=str(tmp_path / "config.yml"),
@@ -610,7 +612,7 @@ async def test_voice_remove_confirm_is_pulled_into_view(tmp_path):
     from gc_tui.app import TuiApp
     from test_settings_voice import LOCAL_OUTDATED, _mk_screen, _open_voice
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(80, 16)) as pilot:
         scr, _fake = _mk_screen(tmp_path, LOCAL_OUTDATED)
         await _open_voice(app, scr, pilot)
@@ -801,7 +803,7 @@ async def test_manual_voice_probe_verdict_is_pulled_into_view(tmp_path):
     from gc_tui.app import TuiApp
     from gc_tui.services.voice_setup import ProbeResult
 
-    app = TuiApp(settings=tui_settings({"model": "M"}))
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     async with app.run_test(size=(80, 12)) as pilot:
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         fake.probe_result = ProbeResult(ok=True, latency_ms=42, error=None)

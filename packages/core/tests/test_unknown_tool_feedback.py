@@ -263,11 +263,11 @@ def test_run_agent_stops_after_unknown_tool_streak(monkeypatch):
     state = _make_state(max_steps=50)
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "console_trace": False,
-            "no_tool_call_max_count": 50,
-            "max_unknown_tool_repeats": 5,
-            "strict_turn_finish_validation": False,
+            "backend.api_mode": "chat_completions",
+            "logging.console_trace": False,
+            "agent.no_tool_call_max_count": 50,
+            "agent.max_unknown_tool_repeats": 5,
+            "agent.strict_turn_finish_validation": False,
         },
         logger=None,
     )
@@ -337,11 +337,11 @@ def test_run_agent_unknown_increments_tool_error_without_reset(monkeypatch):
     state = _make_state(max_steps=50)
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "console_trace": False,
-            "no_tool_call_max_count": 2,
-            "max_unknown_tool_repeats": 100,
-            "strict_turn_finish_validation": False,
+            "backend.api_mode": "chat_completions",
+            "logging.console_trace": False,
+            "agent.no_tool_call_max_count": 2,
+            "agent.max_unknown_tool_repeats": 100,
+            "agent.strict_turn_finish_validation": False,
         },
         logger=None,
     )

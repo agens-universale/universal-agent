@@ -95,7 +95,7 @@ async def test_on_progress_threads_through_build_tools_data(monkeypatch):
     )
     await tools_pkg.abuild_tools_data(
         make_settings(
-            {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}}
+            {"mcp.servers": {"srv": {"transport": "stdio", "command": "x"}}}
         ),
         on_progress=lambda s, st: captured.__setitem__(s, st["status"]),
     )
@@ -116,7 +116,7 @@ async def test_create_run_context_accepts_on_progress(monkeypatch):
         ),
     )
     await rc.acreate_run_context(
-        make_settings({"model": "M", "save_logs": False}),
+        make_settings({"agent.model": "M", "logging.save_logs": False}),
         on_progress=lambda s, st: None,
     )
     assert captured and callable(captured[0])

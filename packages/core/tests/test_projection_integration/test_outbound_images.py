@@ -72,18 +72,18 @@ def capture_responses(monkeypatch):
 
 def _cfg(mode: str = "chat_completions") -> dict:
     return {
-        "model": MODEL,
+        "agent.model": MODEL,
         # Адрес обоих режимов API — `backend.completions_url` (прежнего
         # плоского `agent_url` в схеме нет).
-        "completions_url": URL,
-        "stream": False,
-        "backend_api_mode": mode,
-        "chat_completions_max_tokens": 256,
-        "chat_completions_min_response_tokens": 64,
-        "backend_request_timeout_sec": 600,
-        "use_ssl": False,
-        "use_retry": False,
-        "x_cl_id": "test-cl-id",
+        "backend.completions_url": URL,
+        "backend.stream": False,
+        "backend.api_mode": mode,
+        "backend.chat_completions_max_tokens": 256,
+        "backend.chat_completions_min_response_tokens": 64,
+        "backend.request_timeout_sec": 600,
+        "backend.use_ssl": False,
+        "backend.use_retry": False,
+        "agent.x_cl_id": "test-cl-id",
     }
 
 
@@ -322,7 +322,7 @@ def test_a_model_declared_text_only_gets_notes_without_a_rejection(
     """`backend.vision: false` — прокси молча выбрасывает картинку, отказа не
     будет: картинка не уходит с первого же запроса, без пометки процесса."""
     cfg = _cfg()
-    cfg["backend_vision"] = False
+    cfg["backend.vision"] = False
     ctx = _ctx(tmp_path, cfg)
     att, message = _user_with_image(ctx.image_store)
     state = _state([message], tools=[READ_TOOL, VIEW_TOOL])

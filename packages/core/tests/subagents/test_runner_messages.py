@@ -26,11 +26,11 @@ def _make_orchestrator_state(system_prompt=None):
 
 def _make_config(**overrides):
     cfg = {
-        "use_local_subagents": True,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
+        "agent.use_local_subagents": True,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
     }
     cfg.update(overrides)
     return cfg

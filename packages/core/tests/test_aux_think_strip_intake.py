@@ -322,7 +322,7 @@ async def test_summarizer_history_strips_think_even_when_config_disables_it(
     ctx = fake_ctx(
         {
             "strip_tags_projection": {"strip_think": False, "tags": []},
-            "summary_params": {
+            "summary": {
                 "chat_completions_summary_trigger_chars": 999999,
                 "incremental_batch_chars": 999999,
                 "max_accumulated_summary_chars": 20000,

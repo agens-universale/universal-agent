@@ -306,7 +306,7 @@ async def wizard_voice_step(
 
     keys = [k for k, _t, _d in _VOICE_OPTIONS]
     with _isolated_voice_data(tmp_path):
-        app = TuiApp(settings=tui_settings({"model": "M"}))
+        app = TuiApp(settings=tui_settings({"agent.model": "M"}))
         async with app.run_test() as pilot:
             voice = FakeVoice(installed=installed)
             voice.models = models
@@ -345,7 +345,7 @@ async def wizard_connection_step(tmp_path):
         # реальный `voice_setup`, когда его не передали, — снимок «Подключения»
         # зависел бы от того, стоит ли на машине батарейка.
         with _isolated_voice_data(tmp_path):
-            app = TuiApp(settings=tui_settings({"model": "M"}))
+            app = TuiApp(settings=tui_settings({"agent.model": "M"}))
             async with app.run_test() as pilot:
                 screen = _screen(voice=FakeVoice())
                 await app.push_screen(screen)

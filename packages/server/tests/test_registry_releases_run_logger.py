@@ -32,7 +32,9 @@ class _FailingExecutor(_Executor):
 @pytest.mark.parametrize("executor_cls", [_Executor, _FailingExecutor])
 async def test_finished_run_releases_its_logger(tmp_path, executor_cls):
     logger, _, _ = create_run_logger(
-        make_settings({"logs_dump_dir": str(tmp_path), "save_logs": True}),
+        make_settings(
+            {"paths.logs_dump_dir": str(tmp_path), "logging.save_logs": True}
+        ),
         run_id=f"srv-{executor_cls.__name__}",
     )
     registry = AgentRunRegistry()

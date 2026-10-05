@@ -67,9 +67,7 @@ def test_app_config_rejects_unknown_keys_in_notice_sections():
 
 def test_project_memory_notice_from_config_dict_from_params():
     cfg = project_memory_from_config_dict(
-        make_settings(
-            {"project_memory_params": {"check_interval_messages": 3}}
-        )
+        make_settings({"project_memory": {"check_interval_messages": 3}})
     )
     assert cfg.check_interval_messages == 3
 
@@ -108,7 +106,7 @@ def test_active_tool_usage_notice_rules_respects_stop_tools():
                     notice_message="nudge",
                 )
             ],
-            "stop_tools": ["working_memory"],
+            "agent.stop_tools": ["working_memory"],
         }
     )
     assert active_tool_usage_notice_rules(cfg) == []
@@ -132,11 +130,11 @@ def test_project_memory_notice_enabled_from_nested_and_flat_config():
     assert not project_memory_notice_enabled(make_settings())
     assert project_memory_notice_enabled(
         make_settings(
-            {"project_memory_params": {"enable_project_memory_notice": True}}
+            {"project_memory": {"enable_project_memory_notice": True}}
         )
     )
     assert project_memory_notice_enabled(
-        make_settings({"enable_project_memory_notice": True})
+        make_settings({"project_memory.enable_project_memory_notice": True})
     )
 
 

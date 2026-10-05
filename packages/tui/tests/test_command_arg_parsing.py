@@ -12,7 +12,7 @@ async def test_arg_preserves_backslashes_and_spaces(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         # Прямой вызов диспетчера — фокус на парсинге остатка строки,

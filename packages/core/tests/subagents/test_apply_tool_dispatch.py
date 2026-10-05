@@ -28,11 +28,11 @@ def _make_state():
 
 def _make_ctx(tools_data, use_local=True):
     cfg = {
-        "use_local_subagents": use_local,
-        "backend_api_mode": "chat_completions",
-        "skills_data_path": "",
-        "model": "test-model",
-        "system_prompt_id": "test-prompt",
+        "agent.use_local_subagents": use_local,
+        "backend.api_mode": "chat_completions",
+        "paths.skills_data_path": "",
+        "agent.model": "test-model",
+        "agent.system_prompt_id": "test-prompt",
     }
     return fake_ctx(
         cfg,

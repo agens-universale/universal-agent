@@ -160,7 +160,7 @@ class TestReachesSpec:
 
         cfg = {
             "launch_root": str(tmp_path),
-            "backend_api_mode": "chat_completions",
+            "backend.api_mode": "chat_completions",
             SUBAGENT_TOOLS_ALLOW_KEY: ("fs_read_file", *REQUIRED),
         }
         _data, spec, _descr, _mcp = await abuild_tools_data(make_settings(cfg))

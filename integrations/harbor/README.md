@@ -3,11 +3,10 @@
 Адаптеры для запуска gc-cli под харнессом [Harbor](https://www.harborframework.com).
 
 Штатные четыре профиля — текстовые: просмотр изображений исключён из набора
-инструментов, а `backend_vision` в конфигурации адаптера по умолчанию равен `false`.
-Для отдельного эксперимента со зрением задайте `backend_vision: true` в
-`agent_kwargs.gc_cli_config` и уберите `fs_view_image` из `stop_tools` своего
-профиля. Адаптер принимает плоские ключи конфигурации, поэтому вложенная секция
-`backend.vision` здесь не заменяет `backend_vision`.
+инструментов, а `backend.vision` в конфигурации адаптера по умолчанию равен `false`.
+Для отдельного эксперимента со зрением задайте `backend.vision: true` в
+`agent_kwargs.gc_cli_config` и уберите `fs_view_image` из `agent.stop_tools` своего
+профиля.
 
 ## `gc_cli_external.py` — External-агент
 
@@ -79,7 +78,7 @@ uv pip install --python "$(dirname "$(readlink -f "$(command -v harbor)")")/pyth
 ```bash
 cd harbor
 # ОБЯЗАТЕЛЬНО для локальных запусков: хардкод-дефолта URL нет. Источники:
-# api_base от раннера → env GC_CLI_BACKEND_URL → gc_cli_config.completions_url
+# api_base от раннера → env GC_CLI_BACKEND_URL → gc_cli_config backend.completions_url
 # из профиля; без всех трёх адаптер падает с понятной ошибкой (fail-fast).
 export GC_CLI_BACKEND_URL=http://127.0.0.1:<port>/v1/chat/completions   # бэкенд на хосте
 harbor run \
@@ -99,10 +98,12 @@ harbor run \
 ## Конфигурация из профиля (без правки кода)
 
 Любая настройка gc-cli задаётся из harbor-профиля через `agent_kwargs.gc_cli_config`
-(deep-merge поверх дефолтов адаптера). Ключи — прежние **плоские** имена (`max_steps`,
-`summary_params`, `mcp-servers`; перевод — `gc_core.config_modules.flat_keys.FLAT_TO_PATH`)
-или путь через точку (`agent.max_steps`). Итог валидируется схемой `AppConfig`: опечатка
-в ключе или негодное значение роняет трайл на сборке, а не теряется молча. `os_backend`
+(deep-merge поверх дефолтов адаптера). Ключи — **пути настроек через точку**
+(`agent.max_steps`) и/или вложенные секции (`summary: {...}`), как в `config.yml`. Прежние
+плоские имена (`max_steps`, `summary_params`, `mcp-servers`) не принимаются: трайл падает на
+сборке, а сообщение подсказывает путь (`неизвестная настройка max_steps (возможно,
+agent.max_steps)`). Итог валидируется схемой `AppConfig`: опечатка в ключе или негодное
+значение роняет трайл на сборке, а не теряется молча. `os_backend`
 — не настройка, а рантайм (`RuntimeEnv`), адаптер ставит `harbor` сам:
 
 ```yaml
@@ -110,30 +111,30 @@ import_path: adapters.gc_cli_external:GcCliExternal
 model: openai/MiniMaxAI/MiniMax-M2.7
 agent_kwargs:
   gc_cli_config:
-    max_steps: 300                      # дефолт схемы: 1000
-    no_tool_call_max_count: 3           # дефолт схемы: 5 (0 = обрыв с первой ошибки тула)
-    chat_completion_kwargs:             # сэмплинг агента
+    agent.max_steps: 300                # дефолт схемы: 1000
+    agent.no_tool_call_max_count: 3     # дефолт схемы: 5 (0 = обрыв с первой ошибки тула)
+    backend.chat_completion_kwargs:     # сэмплинг агента
       temperature: 1.0
       top_p: 0.95
       top_k: 40
-    auxiliary_llm_params:               # summary / finish-gate / judges (отдельно от агента)
+    chat_completions.auxiliary_llm:     # summary / finish-gate / judges (отдельно от агента)
       max_tokens: 24576
       # Schema default — {}. Vendor-ключи (enable_thinking) только если бэкенд их знает;
       # иначе OpenAI/Azure → 400. Когда у агента thinking вкл — гасите явно здесь.
       completion_kwargs:
         chat_template_kwargs:
           enable_thinking: false
-    summary_params:                     # суммаризация (по умолчанию ВЫКЛ)
+    summary:                            # суммаризация (по умолчанию ВЫКЛ)
       chat_completions_summary_trigger_chars: 200000
 ```
 
 - `api_base` (URL Polar) и `session_id` раннер впрыскивает **конструктором** (как Terminus) —
   в профиль не пишутся.
-- `completions_url`/`model` runtime-авторитетны (из `api_base`/`model`) — профильный override
-  их не перебивает.
-- **Два профиля сэмплинга:** `chat_completion_kwargs` — tool-цикл агента (thinking обычно вкл);
-  `auxiliary_llm_params.completion_kwargs` — summary / finish-gate / judges (thinking обычно выкл).
-  В harbor пишите `auxiliary_llm_params` (или путь `chat_completions.auxiliary_llm`).
+- `backend.completions_url`/`agent.model` runtime-авторитетны (из `api_base`/`model`) —
+  профильный override их не перебивает.
+- **Два профиля сэмплинга:** `backend.chat_completion_kwargs` — tool-цикл агента (thinking
+  обычно вкл); `chat_completions.auxiliary_llm.completion_kwargs` — summary / finish-gate /
+  judges (thinking обычно выкл).
 
 ## Замечания
 

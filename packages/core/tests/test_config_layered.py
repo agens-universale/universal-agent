@@ -283,7 +283,7 @@ def test_cli_extra_overrides_win_over_layered(
 
     # CLI перебивает: max_steps == 12345.
     overridden = apply_cli_overrides(
-        loaded, extra_overrides={"max_steps": 12345}
+        loaded, extra_overrides={"agent.max_steps": 12345}
     )
     assert overridden.settings.agent.max_steps == 12345
     assert overridden.provenance.source("agent.max_steps").layer == "cli"
@@ -391,9 +391,9 @@ def test_empty_project_config_falls_back_to_global(
 def test_apply_cli_overrides_sets_agentsmd_override():
     """apply_cli_overrides(agentsmd_override=True) выставляет agentsmd_override в True."""
     from gc_core.config import apply_cli_overrides
-    from gc_testkit.settings import settings_from_flat
+    from gc_testkit.settings import make_settings
 
-    loaded = settings_from_flat({"agentsmd_override": False})
+    loaded = make_settings({"tui.agentsmd_override": False})
     settings = apply_cli_overrides(loaded, agentsmd_override=True).settings
     assert settings.tui.agentsmd_override is True
 
@@ -401,9 +401,9 @@ def test_apply_cli_overrides_sets_agentsmd_override():
 def test_apply_cli_overrides_leaves_agentsmd_override_false_by_default():
     """apply_cli_overrides() без флага НЕ трогает agentsmd_override."""
     from gc_core.config import apply_cli_overrides
-    from gc_testkit.settings import settings_from_flat
+    from gc_testkit.settings import make_settings
 
-    loaded = settings_from_flat({"agentsmd_override": False})
+    loaded = make_settings({"tui.agentsmd_override": False})
     settings = apply_cli_overrides(loaded).settings
     assert settings.tui.agentsmd_override is False
 

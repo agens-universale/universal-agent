@@ -30,10 +30,10 @@ def _state():
 
 def _run_ctx(**extra):
     cd = {
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 1,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 1,
+        "agent.strict_turn_finish_validation": True,
         "text_answer_mode": "allow",
         **extra,
     }
@@ -174,7 +174,7 @@ def _run_two_bad_turns(monkeypatch, apply_tool, tool_name):
     )
 
     # повтор одного имени — отдельный сторож, не о нём
-    ctx = _run_ctx(max_unknown_tool_repeats=100)
+    ctx = _run_ctx(**{"agent.max_unknown_tool_repeats": 100})
     state = _state()
     result = run_coro(
         pr.arun_agent(

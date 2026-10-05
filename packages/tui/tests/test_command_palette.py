@@ -46,7 +46,7 @@ async def test_palette_opens_on_dot_only_and_closes_on_more_typing(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -76,7 +76,7 @@ async def test_palette_dot_enter_executes_selected(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -99,7 +99,7 @@ async def test_palette_dot_tab_completes_with_slash(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         inp = pilot.app.query_one("#cmdinput")
@@ -136,7 +136,7 @@ async def test_palette_enter_inserts_command_with_args(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         await pilot.press("/")
@@ -175,7 +175,7 @@ async def test_palette_enter_inserts_export_then_field_enter_runs(
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen
@@ -236,7 +236,7 @@ async def test_palette_closes_after_space_after_command_name(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
 
     async with app.run_test() as pilot:
@@ -270,7 +270,7 @@ async def test_palette_first_row_selected_on_open(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test() as pilot:
         pilot.app.query_one("#cmdinput").text = "/"
@@ -380,7 +380,8 @@ async def test_palette_hugs_content(tmp_path):
     from gc_tui.widgets.command_palette import CommandPalette
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         reg = build_default_registry()
@@ -413,7 +414,8 @@ async def test_palette_keys_hint_has_air_above(tmp_path):
     from gc_tui.widgets.command_palette import CommandPalette
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(build_default_registry(), initial_filter="se")
@@ -453,7 +455,8 @@ async def test_long_description_row_stays_one_line(tmp_path):
     )
 
     app = TuiApp(
-        threads_dir=str(tmp_path / "t"), settings=tui_settings({"model": "M"})
+        threads_dir=str(tmp_path / "t"),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(80, 40)) as pilot:
         pal = CommandPalette(reg, initial_filter="")

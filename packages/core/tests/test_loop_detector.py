@@ -62,9 +62,9 @@ def _entry(consecutive: int, in_window: int, *, injected=("reason",)):
 
 
 def _ctx(tools_data, *, enabled=True, inject_tool_fields=None):
-    config = {"loop_detector": {"enabled": enabled}}
+    config = {"agent.loop_detector": {"enabled": enabled}}
     if inject_tool_fields is not None:
-        config["inject_tool_fields"] = inject_tool_fields
+        config["agent.inject_tool_fields"] = inject_tool_fields
     return fake_ctx(config, tools_data=tools_data, logger=None)
 
 
@@ -312,7 +312,7 @@ def test_disabled_config_does_not_record_or_notice():
     assert flush(state) is None
     assert state.loop_detector_window == []
     assert (
-        is_enabled(make_settings({"loop_detector": {"enabled": False}}))
+        is_enabled(make_settings({"agent.loop_detector": {"enabled": False}}))
         is False
     )
     assert is_enabled(make_settings()) is True
@@ -403,7 +403,7 @@ async def test_mcp_tools_data_has_no_loop_warn_by_default(monkeypatch):
     )
     tools_data, _status = await aget_mcp_tools_data_for_config(
         make_settings(
-            {"mcp-servers": {"srv": {"transport": "stdio", "command": "x"}}}
+            {"mcp.servers": {"srv": {"transport": "stdio", "command": "x"}}}
         )
     )
     assert LOOP_WARN_KEY not in tools_data["mcp_srv_search"]
@@ -428,7 +428,7 @@ async def test_mcp_loop_control_tools_all_and_list(monkeypatch):
     listed, _ = await aget_mcp_tools_data_for_config(
         make_settings(
             {
-                "mcp-servers": {
+                "mcp.servers": {
                     "srv": {
                         "transport": "stdio",
                         "command": "x",
@@ -444,7 +444,7 @@ async def test_mcp_loop_control_tools_all_and_list(monkeypatch):
     all_tools, _ = await aget_mcp_tools_data_for_config(
         make_settings(
             {
-                "mcp-servers": {
+                "mcp.servers": {
                     "srv": {
                         "transport": "stdio",
                         "command": "x",
@@ -544,7 +544,7 @@ def _ptc_state(**extra):
 
 def _ptc_ctx(tools_data, *, enabled=True):
     return fake_ctx(
-        {"loop_detector": {"enabled": enabled}},
+        {"agent.loop_detector": {"enabled": enabled}},
         tools_data=tools_data,
         logger=None,
         run_id="run",
@@ -666,9 +666,9 @@ def test_run_agent_check_stop_clears_window():
             state,
             fake_ctx(
                 {
-                    "backend_api_mode": "chat_completions",
-                    "console_trace": False,
-                    "no_tool_call_max_count": 50,
+                    "backend.api_mode": "chat_completions",
+                    "logging.console_trace": False,
+                    "agent.no_tool_call_max_count": 50,
                 },
                 logger=None,
                 auth_connector=None,
@@ -781,7 +781,7 @@ def test_compaction_clears_loop_window():
             confirm_rules={},
         ),
     )
-    ctx = fake_ctx({"summary_params": {}}, logger=None)
+    ctx = fake_ctx({"summary": {}}, logger=None)
 
     def _fake_summarize(**_kwargs):
         return {
@@ -874,9 +874,9 @@ def test_accepted_turn_finish_clears_window(monkeypatch):
             state,
             fake_ctx(
                 {
-                    "backend_api_mode": "chat_completions",
-                    "strict_turn_finish_validation": True,
-                    "finish_gate_max_iterations": 10,
+                    "backend.api_mode": "chat_completions",
+                    "agent.strict_turn_finish_validation": True,
+                    "agent.finish_gate_max_iterations": 10,
                 },
                 logger=None,
                 auth_connector=None,
@@ -911,10 +911,10 @@ def test_accepted_text_response_clears_window():
             state,
             fake_ctx(
                 {
-                    "backend_api_mode": "chat_completions",
+                    "backend.api_mode": "chat_completions",
                     "text_answer_mode": "allow",
-                    "console_trace": False,
-                    "no_tool_call_max_count": 50,
+                    "logging.console_trace": False,
+                    "agent.no_tool_call_max_count": 50,
                 },
                 logger=None,
                 auth_connector=None,
@@ -1022,11 +1022,11 @@ def test_finish_gate_reject_keeps_window(monkeypatch):
     state.loop_detector_window = ["fp"]
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "strict_turn_finish_validation": True,
-            "finish_gate_max_iterations": 10,
-            "console_trace": False,
-            "no_tool_call_max_count": 50,
+            "backend.api_mode": "chat_completions",
+            "agent.strict_turn_finish_validation": True,
+            "agent.finish_gate_max_iterations": 10,
+            "logging.console_trace": False,
+            "agent.no_tool_call_max_count": 50,
         },
         logger=None,
         auth_connector=None,

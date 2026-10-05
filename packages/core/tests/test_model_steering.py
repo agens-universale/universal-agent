@@ -24,7 +24,7 @@ def test_agent_config_rejects_non_string_steering():
 def test_resolve_model_steering_text():
     assert (
         resolve_model_steering_text(
-            make_settings({"model_steering": "Cap exploratory reads."})
+            make_settings({"agent.model_steering": "Cap exploratory reads."})
         )
         == "Cap exploratory reads."
     )
@@ -32,7 +32,9 @@ def test_resolve_model_steering_text():
 
 def test_resolve_model_steering_empty_is_none():
     assert (
-        resolve_model_steering_text(make_settings({"model_steering": ""}))
+        resolve_model_steering_text(
+            make_settings({"agent.model_steering": ""})
+        )
         is None
     )
     assert resolve_model_steering_text(make_settings({})) is None
@@ -41,7 +43,7 @@ def test_resolve_model_steering_empty_is_none():
 def test_merge_appends_steering_after_base():
     out = merge_special_instructions_with_model_steering(
         "TUI rules",
-        settings=make_settings({"model_steering": "Prefer act."}),
+        settings=make_settings({"agent.model_steering": "Prefer act."}),
     )
     assert out is not None
     assert out.startswith("TUI rules")
@@ -51,7 +53,7 @@ def test_merge_appends_steering_after_base():
 def test_merge_steering_only():
     out = merge_special_instructions_with_model_steering(
         None,
-        settings=make_settings({"model_steering": "Act."}),
+        settings=make_settings({"agent.model_steering": "Act."}),
     )
     assert out == "### Model steering\nAct."
 
@@ -74,7 +76,7 @@ def test_merge_none_when_empty():
 def test_render_injects_merged_steering_into_slot():
     merged = merge_special_instructions_with_model_steering(
         "BASE",
-        settings=make_settings({"model_steering": "Prefer act."}),
+        settings=make_settings({"agent.model_steering": "Prefer act."}),
     )
     tmpl = "H\n<special_instructions></special_instructions>\nF"
     out = render_system_prompt(

@@ -20,7 +20,7 @@ def _facade(tmp_path, made: list[_Agent]) -> ResponsesFacade:
         return made[-1]
 
     return ResponsesFacade(
-        settings=make_settings(model="m"),
+        settings=make_settings(**{"agent.model": "m"}),
         agent_factory=factory,
         index=ResponseIndex(str(tmp_path)),
     )

@@ -24,8 +24,8 @@ def _make_tool(tmp_path) -> ProjectMemory:
     ctx = fake_ctx(
         project_gc_dir=tmp_path / ".gc",
         config={
-            "backend_api_mode": "chat_completions",
-            "model": "test-model",
+            "backend.api_mode": "chat_completions",
+            "agent.model": "test-model",
         },
         auth_connector=None,
         logger=None,
@@ -318,7 +318,7 @@ def test_project_memory_registered_by_default():
 
 def test_project_memory_filtered_by_stop_tools():
     data = get_builtin_tools_data(
-        make_settings({"stop_tools": ["project_memory"]})
+        make_settings({"agent.stop_tools": ["project_memory"]})
     )
     assert "project_memory" not in data
 
@@ -327,8 +327,8 @@ def _make_tool_with_limits(tmp_path, *, max_chars: int) -> ProjectMemory:
     ctx = fake_ctx(
         project_gc_dir=tmp_path / ".gc",
         config={
-            "backend_api_mode": "chat_completions",
-            "project_memory_params": {"max_chars": max_chars},
+            "backend.api_mode": "chat_completions",
+            "project_memory": {"max_chars": max_chars},
         },
         auth_connector=None,
         logger=None,
@@ -375,8 +375,8 @@ def test_tool_uses_custom_limits_from_config(tmp_path):
     ctx = fake_ctx(
         project_gc_dir=tmp_path / ".gc",
         config={
-            "backend_api_mode": "chat_completions",
-            "project_memory_params": {
+            "backend.api_mode": "chat_completions",
+            "project_memory": {
                 "max_chars": 100,
                 "max_append_chars": 40,
             },

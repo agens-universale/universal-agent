@@ -13,7 +13,7 @@ from gc_testkit.settings import fake_ctx
 
 
 def _ctx(mode=None, backend="chat_completions"):
-    cfg = {"backend_api_mode": backend}
+    cfg = {"backend.api_mode": backend}
     if mode is not None:
         cfg["text_answer_mode"] = mode
     return fake_ctx(cfg, logger=None)

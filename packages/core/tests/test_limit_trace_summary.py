@@ -29,9 +29,9 @@ def _make_state(max_steps=2):
 
 def _make_ctx(**overrides):
     cfg = {
-        "limit_trace_summary": True,
-        "max_tool_calls": None,
-        "session_token_limit": None,
+        "agent.limit_trace_summary": True,
+        "agent.max_tool_calls": None,
+        "agent.session_token_limit": None,
     }
     cfg.update(overrides)
     return fake_ctx(
@@ -85,7 +85,7 @@ def test_tool_call_limit_envelope_shape(monkeypatch):
     state.messages = [{"role": "user", "content": "hi"}]
     result = run_coro(
         lts.abuild_limit_envelope(
-            state, "tool_call_limit", _make_ctx(max_tool_calls=5)
+            state, "tool_call_limit", _make_ctx(**{"agent.max_tool_calls": 5})
         )
     )
     env = json.loads(result)
@@ -106,7 +106,9 @@ def test_token_limit_envelope_shape(monkeypatch):
     state.messages = [{"role": "user", "content": "hi"}]
     result = run_coro(
         lts.abuild_limit_envelope(
-            state, "token_limit", _make_ctx(session_token_limit=100)
+            state,
+            "token_limit",
+            _make_ctx(**{"agent.session_token_limit": 100}),
         )
     )
     env = json.loads(result)
@@ -183,7 +185,9 @@ def test_kill_switch_disables_llm_call(monkeypatch):
     state.messages = [{"role": "user", "content": "hi"}]
     result = run_coro(
         lts.abuild_limit_envelope(
-            state, "step_limit", _make_ctx(limit_trace_summary=False)
+            state,
+            "step_limit",
+            _make_ctx(**{"agent.limit_trace_summary": False}),
         )
     )
     env = json.loads(result)

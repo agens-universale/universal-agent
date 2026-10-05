@@ -27,6 +27,7 @@ from gc_core.config_modules.env_interpolation import (
     UnresolvedPlaceholdersError,
 )
 from gc_core.config_modules.images import read_images_config
+from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.config_modules.root import schema_error_details
 from gc_core.message_policy.user_message_policy import (
     wrap_skill_resolution_technical_instruction,
@@ -772,6 +773,11 @@ async def arun_cli() -> int:
         # старте (`_cli_updates` резолвит строго), а не traceback.
         print(f"[gc] {exc}", file=sys.stderr)
         return 1
+    except UnknownSettingError as exc:
+        # Незнакомое схеме имя (в том числе прежнее плоское `--max_steps`):
+        # сообщение подсказывает путь (`--agent.max_steps`).
+        print(f"[gc] {exc}", file=sys.stderr)
+        return 2
     except ValidationError as exc:
         # Негодное значение параметра: координата и причина, без значения
         # (в нём может быть токен).

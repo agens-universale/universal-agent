@@ -108,7 +108,7 @@ def _write_journal(tmp_path, tid: str, records: list[EditRecord]) -> None:
 
 @asynccontextmanager
 async def _pilot(tmp_path, tid: str, config: dict | None = None):
-    cfg = {"model": "M"}
+    cfg = {"agent.model": "M"}
     if config:
         cfg.update(config)
     app = TuiApp(
@@ -266,7 +266,7 @@ async def test_row_fill_reaches_the_block_edge(tmp_path, width):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M"}),
+        settings=tui_settings({"agent.model": "M"}),
     )
     async with app.run_test(size=(width, 30)) as pilot:
         pilot.app.screen.attach_active_task(tid)
@@ -527,7 +527,10 @@ def _focus_fixture(tmp_path, tid: str) -> None:
 
 
 #: Лимит для тестов фокуса: блок обрезан (сноска есть) и при этом короток.
-_FOCUS_CONFIG = {"model": "M", "agent_edits": {"trace_inline_max_lines": 5}}
+_FOCUS_CONFIG = {
+    "agent.model": "M",
+    "agent_edits": {"trace_inline_max_lines": 5},
+}
 
 
 @pytest.mark.asyncio
@@ -629,7 +632,7 @@ async def test_tail_follows_the_width(tmp_path):
     async with _pilot(
         tmp_path,
         tid,
-        {"model": "M", "agent_edits": {"trace_inline_max_lines": 30}},
+        {"agent.model": "M", "agent_edits": {"trace_inline_max_lines": 30}},
     ) as pilot:
         block = pilot.app.screen.query_one(DiffBlock)
 

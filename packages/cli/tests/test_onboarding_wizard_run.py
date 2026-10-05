@@ -42,19 +42,21 @@ def test_run_writes_fields_installs_selected_and_returns_configured(
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": "https://x/v1",
-                "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-                "model": "gigacode_agent_v1.6_rc",
+                "backend.completions_url": "https://x/v1",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk-1"
+                },
+                "agent.model": "gigacode_agent_v1.6_rc",
             }
         ),
     )
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     mcp = _FakeMcp()
@@ -84,19 +86,21 @@ def test_run_returns_false_when_still_pending(tmp_path, monkeypatch):
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": onboarding.URL_SENTINEL,  # так и не задан
-                "chat_completion_headers": {"Authorization": "Bearer sk-1"},
-                "model": "gigacode_agent_v1.6_rc",
+                "backend.completions_url": onboarding.URL_SENTINEL,  # так и не задан
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk-1"
+                },
+                "agent.model": "gigacode_agent_v1.6_rc",
             }
         ),
     )
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
                 "Authorization": onboarding.TOKEN_SENTINEL
             },
-            "model": "gigacode_agent_v1.6_rc",
+            "agent.model": "gigacode_agent_v1.6_rc",
         }
     )
     # endpoint пропущен (Enter), auth-меню «1» (ввести токен), токен, MCP пропустить «3»
@@ -121,9 +125,11 @@ def test_run_without_mcp_skips_mcp(tmp_path, monkeypatch):
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": "https://x/v1",
-                "chat_completion_headers": {"Authorization": "Bearer sk"},
-                "model": "m",
+                "backend.completions_url": "https://x/v1",
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer sk"
+                },
+                "agent.model": "m",
             }
         ),
     )
@@ -134,11 +140,11 @@ def test_run_without_mcp_skips_mcp(tmp_path, monkeypatch):
         wz.run(
             make_settings(
                 {
-                    "completions_url": "http://your-backend:PORT/v1/chat/completions",
-                    "chat_completion_headers": {
+                    "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+                    "backend.chat_completion_headers": {
                         "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
                     },
-                    "model": "m",
+                    "agent.model": "m",
                 }
             ),
             cfg_file,
@@ -433,9 +439,11 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": onboarding.URL_SENTINEL,
-                "chat_completion_headers": {"Authorization": "Bearer real"},
-                "model": "m",
+                "backend.completions_url": onboarding.URL_SENTINEL,
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer real"
+                },
+                "agent.model": "m",
             }
         ),
     )
@@ -448,9 +456,11 @@ def test_run_reports_validation_error_without_traceback(tmp_path, monkeypatch):
     )
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer real"},
-            "model": "m",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real"
+            },
+            "agent.model": "m",
         }
     )
     wz.run(cfg, cfg_file, review_all=False, io=io)
@@ -487,9 +497,11 @@ def test_run_reports_an_oserror_without_traceback(tmp_path, monkeypatch):
         "_reload_config",
         lambda: make_settings(
             {
-                "completions_url": onboarding.URL_SENTINEL,
-                "chat_completion_headers": {"Authorization": "Bearer real"},
-                "model": "m",
+                "backend.completions_url": onboarding.URL_SENTINEL,
+                "backend.chat_completion_headers": {
+                    "Authorization": "Bearer real"
+                },
+                "agent.model": "m",
             }
         ),
     )
@@ -500,9 +512,11 @@ def test_run_reports_an_oserror_without_traceback(tmp_path, monkeypatch):
     )
     cfg = make_settings(
         {
-            "completions_url": onboarding.URL_SENTINEL,
-            "chat_completion_headers": {"Authorization": "Bearer real"},
-            "model": "m",
+            "backend.completions_url": onboarding.URL_SENTINEL,
+            "backend.chat_completion_headers": {
+                "Authorization": "Bearer real"
+            },
+            "agent.model": "m",
         }
     )
     wz.run(cfg, cfg_file, review_all=False, io=io)
@@ -600,7 +614,7 @@ def test_summary_of_an_empty_registry_says_nothing_is_set():
     # Плоский `agent.model` в загруженном конфиге есть всегда; «пусто» —
     # плейсхолдер шаблона.
     assert wz._summary_lines(
-        make_settings({"model": onboarding.MODEL_SENTINEL})
+        make_settings({"agent.model": onboarding.MODEL_SENTINEL})
     ) == [
         "    модель       не задан",
         "    light        не задан",

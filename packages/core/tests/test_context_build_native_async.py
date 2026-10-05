@@ -24,9 +24,9 @@ from gc_testkit.paths import REPO
 from gc_testkit.settings import make_settings
 
 _CFG = {
-    "stop_tools": [],
-    "backend_api_mode": "chat_completions",
-    "save_logs": False,
+    "agent.stop_tools": [],
+    "backend.api_mode": "chat_completions",
+    "logging.save_logs": False,
 }
 
 
@@ -83,7 +83,7 @@ async def test_loop_stays_free_during_build(monkeypatch):
     cfg = make_settings(
         {
             **_CFG,
-            "mcp-servers": {
+            "mcp.servers": {
                 "srv": {"transport": "stream_http", "url": "http://x"}
             },
         }

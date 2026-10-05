@@ -20,7 +20,7 @@ from gc_core.utils.connect_backend import (
 )
 from gc_testkit.settings import make_settings
 
-_CONFIG = {"stop_tools": [], "openai_strict_tools_schema": False}
+_CONFIG = {"agent.stop_tools": [], "backend.openai_strict_tools_schema": False}
 
 
 def _specs(send_tool_strict: bool) -> list:
@@ -30,7 +30,7 @@ def _specs(send_tool_strict: bool) -> list:
     # поднимаем его здесь одним `asyncio.run`.
     async def _build():
         return await abuild_tools_data(
-            make_settings({**_CONFIG, "send_tool_strict": send_tool_strict})
+            make_settings({**_CONFIG, "backend.send_tool_strict": send_tool_strict})
         )
 
     _, specs, *_ = asyncio.run(_build())

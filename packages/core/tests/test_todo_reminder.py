@@ -28,7 +28,7 @@ def _state(items) -> State:
     )
 
 
-CFG = make_settings({"todo_params": {"reminder_steps": 3}})
+CFG = make_settings({"todo": {"reminder_steps": 3}})
 
 
 def _tick(state, cfg=CFG, step_messages=None):
@@ -91,7 +91,7 @@ def test_counter_resets_when_tool_used_in_batch():
 
 def test_zero_steps_disables():
     state = _state(OPEN_ITEMS)
-    cfg = make_settings({"todo_params": {"reminder_steps": 0}})
+    cfg = make_settings({"todo": {"reminder_steps": 0}})
     for _ in range(20):
         assert _tick(state, cfg=cfg) == []
     assert state.todo_reminder_cnt == 0
@@ -101,8 +101,8 @@ def test_stop_tools_disables():
     state = _state(OPEN_ITEMS)
     cfg = make_settings(
         {
-            "todo_params": {"reminder_steps": 1},
-            "stop_tools": ["session_todo"],
+            "todo": {"reminder_steps": 1},
+            "agent.stop_tools": ["session_todo"],
         }
     )
     assert _tick(state, cfg=cfg) == []
@@ -176,7 +176,7 @@ def test_reminder_counter_survives_meta_merge_to_base():
 
 
 def _cfg(steps: int = 1) -> LoadedSettings:
-    return make_settings({"todo_params": {"reminder_steps": steps}})
+    return make_settings({"todo": {"reminder_steps": steps}})
 
 
 def _state(todos=None, cnt: int = 0):

@@ -55,7 +55,7 @@ class _Runner:
 
 
 def _chat_cfg():
-    return {"model": "M", "backend_api_mode": "chat_completions"}
+    return {"agent.model": "M", "backend.api_mode": "chat_completions"}
 
 
 @pytest.mark.asyncio
@@ -185,7 +185,9 @@ async def test_compact_blocked_in_responses(tmp_path):
     app = TuiApp(
         threads_dir=str(tmp_path),
         system="cli",
-        settings=tui_settings({"model": "M", "backend_api_mode": "responses"}),
+        settings=tui_settings(
+            {"agent.model": "M", "backend.api_mode": "responses"}
+        ),
     )
     async with app.run_test() as pilot:
         scr = pilot.app.screen

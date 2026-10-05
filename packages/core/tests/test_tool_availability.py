@@ -43,7 +43,7 @@ def _notice_cfg(**extra):
                 "notice_message": "You have not used session_memory for some steps.",
             }
         ],
-        "stop_tools": [],
+        "agent.stop_tools": [],
     }
     cfg.update(extra)
     return cfg
@@ -127,9 +127,9 @@ class TestProjectMemoryGate:
 
         monkeypatch.setattr(project_memory, "get_hash", lambda _ctx: "hash-1")
         cfg = {
-            "enable_project_memory_notice": True,
-            "project_memory_params": {"check_interval_messages": 1},
-            "stop_tools": [],
+            "project_memory.enable_project_memory_notice": True,
+            "project_memory": {"check_interval_messages": 1},
+            "agent.stop_tools": [],
         }
         absent = fake_ctx(cfg, tools_data={"fs_read_file": {}})
         present = fake_ctx(
@@ -157,7 +157,7 @@ class TestTodoReminderGate:
             [],
             state,
             make_settings(
-                {"todo_params": {"reminder_steps": 10}, "stop_tools": []}
+                {"todo": {"reminder_steps": 10}, "agent.stop_tools": []}
             ),
             step_messages=[],
             available_tools=available,

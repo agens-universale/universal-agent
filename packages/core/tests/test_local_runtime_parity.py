@@ -170,7 +170,7 @@ def scenarios():
         },
         "finish_judge_accept": {
             "turns": [calc, finish(), judge_accept()],
-            "config": {"strict_turn_finish_validation": True},
+            "config": {"agent.strict_turn_finish_validation": True},
         },
         "finish_judge_reject": {
             "turns": [
@@ -182,7 +182,7 @@ def scenarios():
                 finish("Проверено: 1350", "finish-fixed"),
                 judge_accept(),
             ],
-            "config": {"strict_turn_finish_validation": True},
+            "config": {"agent.strict_turn_finish_validation": True},
         },
         "human_boundary": {
             "turns": [
@@ -275,13 +275,13 @@ async def run_scenario(name, workspace, monkeypatch, *, streaming=False):
     )
     scenario = deepcopy(scenarios()[name])
     config = {
-        "max_steps": 15,
-        "strict_turn_finish_validation": False,
+        "agent.max_steps": 15,
+        "agent.strict_turn_finish_validation": False,
         "text_answer_mode": "deny",
         # Intent-scope выключен: ключа ``enabled`` в схеме нет, активность —
         # непустой ``intent_scope.tools``.
         "intent_scope.tools": {},
-        "tui_stream": streaming,
+        "tui.stream": streaming,
         **scenario.get("config", {}),
     }
     cfg = parity_config(workspace, monkeypatch, **config)

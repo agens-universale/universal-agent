@@ -62,7 +62,7 @@ def _make_state(*, log=None, current=None):
 
 
 def _call(state, **kwargs):
-    ctx = fake_ctx({"backend_api_mode": "chat_completions"})
+    ctx = fake_ctx({"backend.api_mode": "chat_completions"})
     tool = CallableTool(ReadUserIntentLog(ctx=ctx, state=state))
     return json.loads(tool(**kwargs))
 
@@ -115,8 +115,8 @@ def test_read_default_limit_from_config():
     state = _make_state(log=records)
     ctx = fake_ctx(
         {
-            "backend_api_mode": "chat_completions",
-            "intent_scope_params": {"read_page_record_limit": 123},
+            "backend.api_mode": "chat_completions",
+            "intent_scope": {"read_page_record_limit": 123},
         }
     )
     tool = CallableTool(ReadUserIntentLog(ctx=ctx, state=state))
@@ -165,10 +165,10 @@ def test_invalid_action_and_missing_state():
 
 def test_registered_only_for_chat_completions():
     assert "session_read_user_intent_log" not in get_builtin_tools_data(
-        make_settings({"backend_api_mode": "responses"})
+        make_settings({"backend.api_mode": "responses"})
     )
     tools = get_builtin_tools_data(
-        make_settings({"backend_api_mode": "chat_completions"})
+        make_settings({"backend.api_mode": "chat_completions"})
     )
     assert "session_read_user_intent_log" in tools
     assert (

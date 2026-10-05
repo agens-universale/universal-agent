@@ -16,9 +16,9 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_generic_chat_completion_headers(self):
         ctx = fake_ctx(
             {
-                "x_cl_id": "12345",
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "HTTP-Referer": "https://example.org",
                     "X-OpenRouter-Title": "mini-cli",
                     "X-Custom": "v1",
@@ -34,9 +34,9 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
     def test_uses_chat_completions_token_and_generic_headers(self):
         ctx = fake_ctx(
             {
-                "x_cl_id": "12345",
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "Authorization": "Bearer sk-or-v1-token",
                     "HTTP-Referer": "https://example.org",
                     "X-OpenRouter-Title": "mini-cli",
@@ -58,9 +58,9 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
 
         ctx = fake_ctx(
             {
-                "x_cl_id": "12345",
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "Authorization": "Bearer chat-token"
                 },
             },
@@ -78,9 +78,9 @@ class ChatCompletionsHeadersTest(unittest.IsolatedAsyncioTestCase):
         """
         ctx = fake_ctx(
             {
-                "x_cl_id": "12345",
-                "backend_api_mode": "chat_completions",
-                "chat_completion_headers": {
+                "agent.x_cl_id": "12345",
+                "backend.api_mode": "chat_completions",
+                "backend.chat_completion_headers": {
                     "x-session-id": "sympy__sympy-12419"
                 },
             },
@@ -101,7 +101,7 @@ if __name__ == "__main__":
 def test_explicit_chat_mode_uses_model_headers_in_responses():
     from gc_core.model_router import ResolvedModel
 
-    ctx = fake_ctx({"backend_api_mode": "responses"}, auth_connector=None)
+    ctx = fake_ctx({"backend.api_mode": "responses"}, auth_connector=None)
     resolved = ResolvedModel(
         alias="eyes",
         model="vision-model",

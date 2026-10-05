@@ -18,10 +18,10 @@ def _state():
 
 def _run_ctx():
     cd = {
-        "backend_api_mode": "chat_completions",
-        "console_trace": False,
-        "no_tool_call_max_count": 3,
-        "strict_turn_finish_validation": True,
+        "backend.api_mode": "chat_completions",
+        "logging.console_trace": False,
+        "agent.no_tool_call_max_count": 3,
+        "agent.strict_turn_finish_validation": True,
         "text_answer_mode": "allow",
     }
     return fake_ctx(cd, logger=None)

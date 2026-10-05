@@ -22,11 +22,11 @@ MASKED = "data:image/png;base64,<4000 bytes>"
 
 def _jsonl_logger(tmp_path):
     cfg = {
-        "logs_dump_dir": str(tmp_path),
-        "save_logs": True,
-        "console_trace": False,
-        "logging_format": "jsonl",
-        "log_level": "debug",
+        "paths.logs_dump_dir": str(tmp_path),
+        "logging.save_logs": True,
+        "logging.console_trace": False,
+        "logging.format": "jsonl",
+        "logging.log_level": "debug",
     }
     logger, path, _ = create_run_logger(
         make_settings(cfg), run_id="mask", agent_kind="main"

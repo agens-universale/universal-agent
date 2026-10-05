@@ -16,7 +16,7 @@ def test_default_is_10():
 def test_reads_todo_params():
     assert (
         todo_reminder_steps_from_config(
-            make_settings({"todo_params": {"reminder_steps": 5}})
+            make_settings({"todo": {"reminder_steps": 5}})
         )
         == 5
     )
@@ -25,7 +25,7 @@ def test_reads_todo_params():
 def test_zero_disables():
     assert (
         todo_reminder_steps_from_config(
-            make_settings({"todo_params": {"reminder_steps": 0}})
+            make_settings({"todo": {"reminder_steps": 0}})
         )
         == 0
     )
@@ -34,7 +34,7 @@ def test_zero_disables():
 def test_negative_clamped_to_zero():
     assert (
         todo_reminder_steps_from_config(
-            make_settings({"todo_params": {"reminder_steps": -3}})
+            make_settings({"todo": {"reminder_steps": -3}})
         )
         == 0
     )
@@ -47,12 +47,10 @@ def test_garbage_is_rejected_by_schema():
 
     with pytest.raises(ValidationError):
         todo_reminder_steps_from_config(
-            make_settings({"todo_params": {"reminder_steps": "x"}})
+            make_settings({"todo": {"reminder_steps": "x"}})
         )
     with pytest.raises(ValidationError):
-        todo_reminder_steps_from_config(
-            make_settings({"todo_params": "not a dict"})
-        )
+        todo_reminder_steps_from_config(make_settings({"todo": "not a dict"}))
 
 
 def test_normalize_clamps_negative():

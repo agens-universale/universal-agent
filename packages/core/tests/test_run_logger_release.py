@@ -17,9 +17,9 @@ from gc_testkit.settings import make_settings
 def _cfg(tmp_path):
     return make_settings(
         {
-            "save_logs": True,
-            "console_trace": False,
-            "logs_dump_dir": str(tmp_path),
+            "logging.save_logs": True,
+            "logging.console_trace": False,
+            "paths.logs_dump_dir": str(tmp_path),
         }
     )
 

@@ -37,7 +37,10 @@ def test_ask_human_banner_snapshot(snap_compare, tmp_path, monkeypatch):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "CodeAgent", "backend_api_mode": "chat_completions"}
+            {
+                "agent.model": "CodeAgent",
+                "backend.api_mode": "chat_completions",
+            }
         ),
     )
     app._executor_factory = lambda: fake

@@ -11,9 +11,11 @@ def _screen(**over):
     from gc_tui.screens.onboarding import OnboardingScreen
 
     cfg = {
-        "completions_url": "http://your-backend:PORT/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"},
-        "model": "<ВПИШИТЕ_МОДЕЛЬ>",
+        "backend.completions_url": "http://your-backend:PORT/v1/chat/completions",
+        "backend.chat_completion_headers": {
+            "Authorization": "Bearer <ВПИШИТЕ_ТОКЕН>"
+        },
+        "agent.model": "<ВПИШИТЕ_МОДЕЛЬ>",
     }
     kw = dict(
         config=cfg,
@@ -24,10 +26,10 @@ def _screen(**over):
         mcp=_FakeMcp(),
     )
     kw.update(over)
-    if isinstance(kw["config"], dict) and "model" not in kw["config"]:
+    if isinstance(kw["config"], dict) and "agent.model" not in kw["config"]:
         # В загруженном конфиге `agent.model` есть всегда; словарь теста без
         # него означает шаблон — плейсхолдер, а не умолчание схемы.
-        kw["config"] = {**kw["config"], "model": cfg["model"]}
+        kw["config"] = {**kw["config"], "agent.model": cfg["agent.model"]}
     kw["settings"] = as_settings(kw.pop("config"))
     return OnboardingScreen(**kw)
 
@@ -90,11 +92,13 @@ def _resolved_conn_cfg(cfg_path):
     backend = raw.get("backend") or {}
     return resolve_env_placeholders(
         {
-            "completions_url": backend.get("completions_url"),
-            "chat_completion_headers": backend.get("chat_completion_headers")
+            "backend.completions_url": backend.get("completions_url"),
+            "backend.chat_completion_headers": backend.get(
+                "chat_completion_headers"
+            )
             or {},
-            "proxy": backend.get("proxy"),
-            "model": (raw.get("agent") or {}).get("model"),
+            "backend.proxy": backend.get("proxy"),
+            "agent.model": (raw.get("agent") or {}).get("model"),
         }
     )
 
@@ -237,9 +241,9 @@ async def test_connection_step_walks_three_fields_with_arrows(tmp_path):
         scr = _screen(
             config_path=str(cfg_path),
             config={
-                "completions_url": "https://custom.example/v1/chat/completions",
-                "chat_completion_headers": {},
-                "model": "",
+                "backend.completions_url": "https://custom.example/v1/chat/completions",
+                "backend.chat_completion_headers": {},
+                "agent.model": "",
             },
         )
         await pilot.app.push_screen(scr)
@@ -498,9 +502,9 @@ async def test_final_summary_shows_a_level_assigned_in_the_config(tmp_path):
     from gc_tui.screens.onboarding import STEP_CONFIRM
 
     cfg = {
-        "completions_url": "https://h/v1/chat/completions",
-        "chat_completion_headers": {"Authorization": "Bearer sk"},
-        "model": "m",
+        "backend.completions_url": "https://h/v1/chat/completions",
+        "backend.chat_completion_headers": {"Authorization": "Bearer sk"},
+        "agent.model": "m",
         "models": {"fast": {"model": "qwen/qwen3-8b"}},
         "slots": {"light": "fast"},
     }
@@ -780,9 +784,9 @@ async def test_wizard_ctrl_down_opens_the_field_list_before_scrolling(
         scr = _screen(
             config_path=str(cfg_path),
             config={
-                "completions_url": own_url,
-                "chat_completion_headers": {},
-                "model": "",
+                "backend.completions_url": own_url,
+                "backend.chat_completion_headers": {},
+                "agent.model": "",
             },
         )
         await pilot.app.push_screen(scr)
@@ -818,9 +822,9 @@ async def test_wizard_alt_down_over_own_address_opens_without_a_highlight(
         scr = _screen(
             config_path=str(cfg_path),
             config={
-                "completions_url": own_url,
-                "chat_completion_headers": {},
-                "model": "",
+                "backend.completions_url": own_url,
+                "backend.chat_completion_headers": {},
+                "agent.model": "",
             },
         )
         await pilot.app.push_screen(scr)
@@ -1378,7 +1382,9 @@ async def test_connection_auto_probe_preserves_ca_path(tmp_path):
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
     )
     async with app.run_test() as pilot:
-        screen = _screen(config={"use_ssl": "/corp/root.pem"}, probe=probe)
+        screen = _screen(
+            config={"backend.use_ssl": "/corp/root.pem"}, probe=probe
+        )
         await pilot.app.push_screen(screen)
         await pilot.pause()
         editor = screen.query_one(ConnectionEditor)
@@ -1557,8 +1563,8 @@ async def test_filter_fragment_does_not_become_the_model(tmp_path):
     async with app.run_test() as pilot:
         scr = _screen(
             config={
-                "completions_url": "https://h/v1/chat/completions",
-                "chat_completion_headers": {},
+                "backend.completions_url": "https://h/v1/chat/completions",
+                "backend.chat_completion_headers": {},
             },
             fetch=lambda *a, **k: [
                 ModelInfo("glm-5.2-fp8", tool_capable=True),
@@ -1951,9 +1957,9 @@ async def test_model_footer_follows_filter_reselect(tmp_path):
     async with app.run_test() as pilot:
         scr = _screen(
             config={
-                "completions_url": "https://h/v1/chat/completions",
-                "chat_completion_headers": {},
-                "model": "Qwen",
+                "backend.completions_url": "https://h/v1/chat/completions",
+                "backend.chat_completion_headers": {},
+                "agent.model": "Qwen",
             },
             fetch=lambda *a, **k: [
                 ModelInfo("Qwen", tool_capable=True),
@@ -2049,9 +2055,9 @@ async def test_model_footer_marked_after_list_loads(tmp_path):
     async with app.run_test() as pilot:
         scr = _screen(
             config={
-                "completions_url": "https://h/v1/chat/completions",
-                "chat_completion_headers": {},
-                "model": "Qwen",
+                "backend.completions_url": "https://h/v1/chat/completions",
+                "backend.chat_completion_headers": {},
+                "agent.model": "Qwen",
             },
             fetch=lambda *a, **k: [
                 ModelInfo("Qwen", tool_capable=True),
@@ -2111,9 +2117,9 @@ async def test_summary_line_fills_as_steps_complete(tmp_path):
     app = app_mod.TuiApp(
         settings=tui_settings(
             {
-                "completions_url": "",
-                "chat_completion_headers": {},
-                "model": "",
+                "backend.completions_url": "",
+                "backend.chat_completion_headers": {},
+                "agent.model": "",
             }
         )
     )
@@ -2609,7 +2615,7 @@ async def test_env_refs_survive_untouched_connection_step(
     original = cfg_path.read_text(encoding="utf-8")
     cfg = _resolved_conn_cfg(cfg_path)
     assert (
-        cfg["completions_url"]
+        cfg["backend.completions_url"]
         == "https://real-server.example/v1/chat/completions"
     )
     app = TuiApp(
@@ -2654,7 +2660,7 @@ async def test_env_ref_token_survives_when_var_unset(tmp_path, monkeypatch):
     )
     cfg = _resolved_conn_cfg(cfg_path)
     assert (
-        cfg["chat_completion_headers"]["Authorization"] == "Bearer "
+        cfg["backend.chat_completion_headers"]["Authorization"] == "Bearer "
     )  # резолв в пустоту
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
@@ -3108,8 +3114,8 @@ async def test_alt_down_on_the_model_step_reloads_the_list(tmp_path):
     async with app.run_test() as pilot:
         scr = _screen(
             config={
-                "completions_url": "https://h/v1/chat/completions",
-                "chat_completion_headers": {},
+                "backend.completions_url": "https://h/v1/chat/completions",
+                "backend.chat_completion_headers": {},
             },
             fetch=fetch,
         )
@@ -3158,8 +3164,8 @@ async def test_ctrl_space_on_the_model_step_does_nothing(tmp_path):
     async with app.run_test() as pilot:
         scr = _screen(
             config={
-                "completions_url": "https://h/v1/chat/completions",
-                "chat_completion_headers": {},
+                "backend.completions_url": "https://h/v1/chat/completions",
+                "backend.chat_completion_headers": {},
             },
             fetch=fetch,
         )
@@ -3301,8 +3307,8 @@ async def test_alt_down_on_the_model_step_goes_past_the_session_cache(
     async with app.run_test() as pilot:
         scr = _screen(
             config={
-                "completions_url": "https://h/v1/chat/completions",
-                "chat_completion_headers": {},
+                "backend.completions_url": "https://h/v1/chat/completions",
+                "backend.chat_completion_headers": {},
             },
             fetch=fetch,
         )
@@ -3914,9 +3920,9 @@ def _active_profile_screen(tmp_path, **over):
     kw = dict(
         config_path=str(cfg_path),
         config={
-            "completions_url": "https://h/v1/chat/completions",
-            "chat_completion_headers": {},
-            "model": "profile-layer-model",
+            "backend.completions_url": "https://h/v1/chat/completions",
+            "backend.chat_completion_headers": {},
+            "agent.model": "profile-layer-model",
             "profile": "work",
         },
     )
@@ -4667,8 +4673,8 @@ async def test_both_wizards_name_the_landed_writes_from_one_place(
     wz.run(
         make_settings(
             {
-                "completions_url": onboarding.URL_SENTINEL,
-                "model": onboarding.MODEL_SENTINEL,
+                "backend.completions_url": onboarding.URL_SENTINEL,
+                "agent.model": onboarding.MODEL_SENTINEL,
             }
         ),
         tmp_path / "nowhere.yml",

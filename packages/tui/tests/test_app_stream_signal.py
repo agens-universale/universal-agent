@@ -29,7 +29,7 @@ async def test_stream_signal_delegates_to_active_screen(tmp_path, monkeypatch):
         threads_dir=str(tmp_path),
         system="cli",
         settings=tui_settings(
-            {"model": "M", "backend_api_mode": "chat_completions"}
+            {"agent.model": "M", "backend.api_mode": "chat_completions"}
         ),
     )
     async with app.run_test() as pilot:

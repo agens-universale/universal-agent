@@ -639,7 +639,7 @@ def test_invalid_param_value_is_reported_without_the_value(
             "gc-cli",
             "--config",
             str(base),
-            "--max_steps=Bearer sk-SECRET-123",
+            "--agent.max_steps=Bearer sk-SECRET-123",
             "-q",
             "x",
         ],
@@ -655,3 +655,23 @@ def test_invalid_param_value_is_reported_without_the_value(
     captured = capsys.readouterr()
     assert "agent.max_steps" in captured.err
     assert "sk-SECRET-123" not in captured.err + captured.out
+
+
+def test_flat_param_name_fails_with_path_hint(monkeypatch, tmp_path, capsys):
+    """Плоских имён `--param` нет: `--max_steps` — код 2 и подсказка пути."""
+    base = tmp_path / "base.yml"
+    base.write_text("agent: {model: m}\n", encoding="utf-8")
+    ap = _reload_arg_parser_with_argv(
+        ["gc-cli", "--config", str(base), "--max_steps", "50", "-q", "x"],
+        monkeypatch,
+    )
+    monkeypatch.setattr(cli, "arg_parser", ap)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    rc = cli.main()
+
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "неизвестная настройка --max_steps" in err
+    assert "--agent.max_steps" in err
