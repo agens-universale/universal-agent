@@ -251,3 +251,27 @@ def test_auto_workdir_follows_configured_launch_root(tmp_path, monkeypatch):
     assert be.auto_workdir == str(
         tmp_path / "sandboxes" / project_slug(str(tmp_path / "proj"))
     )
+
+
+def test_raw_dict_rejects_option_like_values():
+    # Фабрика на сыром dict (мимо pydantic) повторяет запрет ведущего `-`.
+    import pytest
+
+    with pytest.raises(ValueError, match="ssh.host"):
+        resolve_os_backend(
+            {
+                "os_backend": {
+                    "kind": "ssh",
+                    "ssh": {"host": "-oProxyCommand=x"},
+                }
+            }
+        )
+    with pytest.raises(ValueError, match="docker.name"):
+        resolve_os_backend(
+            {
+                "os_backend": {
+                    "kind": "docker",
+                    "docker": {"name": "--privileged"},
+                }
+            }
+        )

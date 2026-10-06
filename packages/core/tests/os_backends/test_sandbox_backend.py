@@ -186,11 +186,13 @@ async def test_background_spawn_outlives_parent_thread(tmp_path, monkeypatch):
     # запущенный из рабочего потока хода, умирал бы вместе с ходом.
     seen = {}
 
-    async def fake_spawn(self, command, *, cwd=None, env=None):
+    async def fake_spawn(self, command, *, cwd=None, env_full=None):
         seen["cmd"] = command
+        seen["env"] = env_full
         return {"pid": 1, "exit_code": None}
 
-    monkeypatch.setattr(LocalFsBackend, "aspawn_background", fake_spawn)
+    monkeypatch.setattr(LocalFsBackend, "_aspawn_detached", fake_spawn)
+    monkeypatch.setenv("GC_SB_BG_SECRET", "leak")
     wrap = bwrap_wrapper(
         str(tmp_path), network=True, extra_ro=[], home_to_root=False
     )
@@ -200,6 +202,9 @@ async def test_background_spawn_outlives_parent_thread(tmp_path, monkeypatch):
         seen["cmd"].startswith("bwrap ")
         and "--die-with-parent" not in seen["cmd"]
     )
+    # фон получает тот же allowlist, что передний план, а не os.environ целиком
+    assert seen["env"] is not None and "GC_SB_BG_SECRET" not in seen["env"]
+    assert "PATH" in seen["env"]
 
 
 def test_default_cwd_is_root_when_no_auto_workdir(tmp_path):
@@ -288,3 +293,16 @@ async def test_shell_does_not_inherit_agent_process_env(tmp_path, monkeypatch):
         timeout=20,
     )
     assert res.stdout.strip() == "absent/ok"
+
+
+async def test_exec_refreshes_root_mtime_for_janitor(tmp_path):
+    import time
+
+    wrap = bwrap_wrapper(
+        str(tmp_path), network=True, extra_ro=[], home_to_root=False
+    )
+    be = SandboxBackend(wrapper=wrap, root=str(tmp_path))
+    old = time.time() - 3 * 24 * 3600
+    os.utime(tmp_path, (old, old))
+    be._touch_root()
+    assert os.path.getmtime(tmp_path) > old + 24 * 3600

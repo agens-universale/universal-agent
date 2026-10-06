@@ -130,9 +130,22 @@ async def test_listdir_parses_find_output():
 
 
 async def test_listdir_raises_on_nonzero_rc():
-    be = RecordingShell(answers={"-maxdepth 1": ExecResult(return_code=1)})
+    # «Каталога нет» — только когда так сказала та сторона; молчаливый отказ
+    # (убитый find, пустой stderr) — OSError, иначе модель создаёт каталог заново.
+    gone = RecordingShell(
+        answers={
+            "-maxdepth 1": ExecResult(
+                return_code=1,
+                stderr="find: '/nope': No such file or directory",
+            )
+        }
+    )
     with pytest.raises(FileNotFoundError):
-        await be.listdir("/nope")
+        await gone.listdir("/nope")
+    silent = RecordingShell(answers={"-maxdepth 1": ExecResult(return_code=1)})
+    with pytest.raises(OSError) as ei:
+        await silent.listdir("/nope")
+    assert not isinstance(ei.value, FileNotFoundError)
 
 
 async def test_aprime_default_cwd_runs_pwd_once():
@@ -190,3 +203,67 @@ async def test_busybox_find_is_reported_not_treated_as_empty_dir():
     )
     with pytest.raises(FileNotFoundError):
         await gone.listdir("/nope")
+
+
+async def test_stat_and_find_timeouts_are_errors_not_missing_files():
+    hung = RecordingShell(
+        answers={
+            "stat -c": ExecResult(return_code=None, timed_out=True),
+            "-printf": ExecResult(return_code=None, timed_out=True),
+        }
+    )
+    with pytest.raises(OSError, match="timed out"):
+        await hung.stat("/w/a.txt")
+    with pytest.raises(OSError, match="timed out"):
+        await hung.listdir("/w")
+    denied = RecordingShell(
+        answers={
+            "stat -c": ExecResult(
+                return_code=1,
+                stderr="stat: cannot statx '/w/a': Permission denied",
+            )
+        }
+    )
+    with pytest.raises(PermissionError):
+        await denied.stat("/w/a")
+    gone = RecordingShell(
+        answers={
+            "stat -c": ExecResult(
+                return_code=1,
+                stderr="stat: cannot statx '/w/a': No such file or directory",
+            )
+        }
+    )
+    with pytest.raises(FileNotFoundError):
+        await gone.stat("/w/a")
+    silent = RecordingShell(
+        answers={"stat -c": ExecResult(return_code=1, stderr="")}
+    )
+    with pytest.raises(OSError) as ei:
+        await silent.stat("/w/a")
+    assert not isinstance(ei.value, FileNotFoundError)
+
+
+async def test_head_bytes_rejects_non_base64_noise():
+    noisy = RecordingShell(
+        answers={
+            "| base64": ExecResult(return_code=0, stdout="Welcome!\naGk=\n")
+        }
+    )
+    with pytest.raises(OSError, match="non-base64"):
+        await noisy.read_head_bytes("/w/a", 10)
+    clean = RecordingShell(
+        answers={"| base64": ExecResult(return_code=0, stdout="aGlo\naQ==\n")}
+    )
+    assert await clean.read_head_bytes("/w/a", 10) == b"hihi"
+
+
+async def test_readable_writable_ask_the_remote_side():
+    be = RecordingShell(
+        answers={
+            "test -r": ExecResult(return_code=0, stdout="1\n"),
+            "test -w": ExecResult(return_code=0, stdout="0\n"),
+        }
+    )
+    assert await be.readable("/etc/shadow") is True
+    assert await be.writable("/etc/shadow") is False

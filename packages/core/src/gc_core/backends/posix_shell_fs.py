@@ -129,10 +129,16 @@ class PosixShellFsMixin:
             raise OSError(res.stderr.strip() or f"head failed: {path}")
         if res.stdout_hit_capture_cap:
             raise OSError(f"head output exceeded capture ceiling: {path}")
+        # Как у полного скачивания: переводы строк снимаем явно, остальное строго —
+        # чужой текст в stdout иначе вклеивался бы в байты пробы бинарности.
         try:
-            return base64.b64decode(res.stdout or "", validate=False)
-        except Exception as exc:
-            raise OSError(f"base64 decode failed for head of {path}") from exc
+            return base64.b64decode(
+                "".join((res.stdout or "").split()), validate=True
+            )
+        except ValueError as exc:
+            raise OSError(
+                f"head of {path} returned non-base64 data on stdout: {exc}"
+            ) from exc
 
     async def sha256_bytes(self, path: str) -> str:
         return await self.sha256(path)
@@ -173,10 +179,12 @@ class PosixShellFsMixin:
         return res.stdout.strip() if res.return_code == 0 else path
 
     async def readable(self, path: str) -> bool:
-        return True  # remote-root perspective (current harbor pack behavior)
+        # Права пользователя той стороны, а не «всегда да»: иначе file_info
+        # обещал модели чтение/запись, которых у пользователя контейнера нет.
+        return await self._test("test -r {p}", path)
 
     async def writable(self, path: str) -> bool:
-        return True
+        return await self._test("test -w {p}", path)
 
     async def is_hidden(self, path: str) -> bool:
         return path.rstrip("/").rsplit("/", 1)[-1].startswith(".")
@@ -198,7 +206,7 @@ class PosixShellFsMixin:
             f"stat -c '%s|%Y|%a|%F' {shlex.quote(path)}"
         )
         if res.return_code != 0:
-            raise FileNotFoundError(path)
+            raise self._fs_failure(path, res, what="stat")
         size, mtime, mode, kind = res.stdout.strip().split("|", 3)
         return {
             "size": int(size),
@@ -252,9 +260,26 @@ class PosixShellFsMixin:
         return [(e.rel, e.is_dir) for e in await self.walk_entries(path)]
 
     @staticmethod
-    def _find_failure(path: str, res: Any) -> OSError:
-        """Отказ ``find``: нет каталога — ``FileNotFoundError``; busybox без
-        ``-printf`` или мёртвый транспорт — ``OSError`` с текстом, а не «пусто»."""
+    def _fs_failure(path: str, res: Any, *, what: str) -> OSError:
+        """Отказ команды ФС: «файла нет» — только когда так сказала та сторона.
+        Таймаут (код ``None``), пустой stderr, permission denied — ``OSError``:
+        иначе модель решала бы, что файла нет, и шла его создавать."""
+        err = (res.stderr or "").strip()
+        low = err.lower()
+        if getattr(res, "timed_out", False):
+            return OSError(f"{what} timed out: {path}")
+        if "no such file" in low:
+            return FileNotFoundError(path)
+        if "permission denied" in low:
+            return PermissionError(err)
+        return OSError(
+            err or f"{what} failed (exit {res.return_code}): {path}"
+        )
+
+    @classmethod
+    def _find_failure(cls, path: str, res: Any) -> OSError:
+        """Отказ ``find``: busybox без ``-printf`` — ``OSError`` с подсказкой,
+        остальное — как у любой команды ФС (``_fs_failure``)."""
         err = (res.stderr or "").strip()
         low = err.lower()
         if any(
@@ -270,9 +295,7 @@ class PosixShellFsMixin:
             return OSError(
                 f"GNU find with -printf is required on the backend: {err}"
             )
-        if "no such file" in low or not err:
-            return FileNotFoundError(path)
-        return OSError(err)
+        return cls._fs_failure(path, res, what="find")
 
     async def listdir(self, path: str) -> list:
         """Immediate children via private traverse channel (same ceiling as walk)."""

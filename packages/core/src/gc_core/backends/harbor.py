@@ -10,6 +10,7 @@ read/list use shell through exec (``PosixShellFsMixin``); здесь тольк�
 
 import asyncio
 import contextlib
+import re
 import shlex
 import tempfile
 from pathlib import Path
@@ -40,9 +41,16 @@ set +e
 """
 
 
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def _env_assignment_prefix(env: Optional[dict]) -> str:
     if not env:
         return ""
+    bad = [k for k in env if not _ENV_NAME_RE.fullmatch(str(k))]
+    if bad:
+        # Имя уходит в строку `env K=V` без кавычек: не идентификатор — команда.
+        raise ValueError(f"invalid environment variable name(s): {bad}")
     assignments = " ".join(
         f"{k}={shlex.quote(str(v))}" for k, v in env.items()
     )

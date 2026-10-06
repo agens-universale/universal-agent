@@ -226,6 +226,7 @@ class SandboxBackend(LocalFsBackend):
         # Не через LocalFsBackend.aexec_argv: тот доливает os.environ целиком, и
         # токены процесса агента утекали бы в shell модели. Окружение — тот же
         # allowlist, что у arun_python (`_sanitize_env`), поверх него env вызова.
+        self._touch_root()
         return await _arun_bounded_process(
             [*self._wrap(cwd), "sh", "-c", command],
             shell=False,
@@ -246,6 +247,7 @@ class SandboxBackend(LocalFsBackend):
         env=None,
         capture_max_chars=None,
     ):
+        self._touch_root()
         return await _arun_bounded_process(
             [*self._wrap(cwd), *[str(a) for a in argv]],
             shell=False,
@@ -260,6 +262,7 @@ class SandboxBackend(LocalFsBackend):
         self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None
     ):
         # Окружение чистится так же, как у LocalFsBackend.arun_python (PYTHONPATH="").
+        self._touch_root()
         return await _arun_bounded_process(
             [*self._wrap(cwd), sys.executable, "-u", "-"],
             shell=False,
@@ -277,4 +280,17 @@ class SandboxBackend(LocalFsBackend):
         wrapped = " ".join(
             shlex.quote(a) for a in [*prefix, "sh", "-c", command]
         )
-        return await super().aspawn_background(wrapped, cwd=cwd, env=env)
+        # Тот же allowlist, что у переднего плана: `super().aspawn_background`
+        # отдал бы фону окружение процесса агента целиком.
+        self._touch_root()
+        return await self._aspawn_detached(
+            wrapped, cwd=cwd, env_full=_sanitize_env(env)
+        )
+
+    def _touch_root(self) -> None:
+        """Отметка «корень живой» для janitor: он судит по mtime каталога, а
+        правки файлов внутри его не меняют — долгая сессия выглядела старой."""
+        try:
+            os.utime(self.root, None)
+        except OSError:
+            pass

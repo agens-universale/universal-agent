@@ -56,6 +56,24 @@ def os_backend_section(config_dict: dict) -> dict:
     )
 
 
+def _reject_option_like_values(section: dict) -> None:
+    """Сырой dict мимо pydantic: значение с ведущим `-` уходит в argv отдельным
+    словом и читается клиентом как опция (`-oProxyCommand=…`, `--privileged`)."""
+    ssh = section.get("ssh") or {}
+    docker = section.get("docker") or {}
+    for label, value in (
+        ("ssh.host", ssh.get("host")),
+        ("ssh.user", ssh.get("user")),
+        ("docker.name", docker.get("name")),
+        ("docker.user", docker.get("user")),
+        ("docker.binary", docker.get("binary")),
+    ):
+        if value and str(value).startswith("-"):
+            raise ValueError(
+                f"os_backend.{label} не может начинаться с '-': {value!r}"
+            )
+
+
 def ssh_control_dir() -> Path:
     """Короткий каталог для ControlPath: unix-сокет ограничен ~104 байтами
     (macOS), а ssh добавляет к пути временный суффикс. ``<state>/ssh`` с длинным
@@ -149,6 +167,7 @@ def resolve_os_backend(
 
 def _remote_argv_prefix(kind: str, section: dict) -> list:
     """argv-префикс RemoteShellBackend; плоский dict мог обойти pydantic."""
+    _reject_option_like_values(section)
     if kind == "docker":
         if not (section.get("docker") or {}).get("name"):
             raise ValueError(
