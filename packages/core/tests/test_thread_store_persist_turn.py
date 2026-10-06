@@ -115,3 +115,55 @@ class _NoLock:
 
     def __exit__(self, *_args):
         return False
+
+
+async def test_store_with_operation_limit_gets_the_turn_in_parts(tmp_path):
+    """Durable-исполнитель ограничивает запись (у Temporal — 2 МБ на запись
+    истории): хранилище с ``max_operation_bytes`` получает ход частями, по
+    порядку, без потерь и дублей. Без потолка — одной операцией."""
+    store = CountingStore(str(tmp_path))
+    store.max_operation_bytes = 3_000
+    session = await _session(store, "turn")
+    for index in range(10):
+        await session.apersist_batch(
+            [{"id": f"m{index}", "role": "user", "content": "x" * 1_000}],
+            previous_response_id=None,
+        )
+    await session.aflush_deferred()
+    assert store.commits == ["persist"] * 5  # по 2 сообщения (~1 КБ каждое)
+    assert [m["id"] for m in store.load_messages("cli", "t")] == [
+        f"m{index}" for index in range(10)
+    ]
+    assert store.load_meta("cli", "t")["messages_count"] == 10
+    await session.aflush_deferred()
+    assert len(store.commits) == 5
+
+
+async def test_part_failure_keeps_only_unwritten_steps(tmp_path):
+    store = CountingStore(str(tmp_path))
+    store.max_operation_bytes = 3_000
+    session = await _session(store, "turn")
+    for index in range(6):
+        await session.apersist_batch(
+            [{"id": f"m{index}", "role": "user", "content": "x" * 1_000}],
+            previous_response_id=None,
+        )
+    original = store.commit_operation
+    calls = []
+
+    def fail_second(system_id, thread_id, operation):
+        calls.append(1)
+        if len(calls) == 2:
+            raise RuntimeError("store down")
+        return original(system_id, thread_id, operation)
+
+    store.commit_operation = fail_second
+    with pytest.raises(RuntimeError):
+        await session.aflush_deferred()
+    # Записана первая часть; вторая и дальше остались в буфере.
+    assert [m["id"] for m in store.load_messages("cli", "t")] == ["m0", "m1"]
+    store.commit_operation = original
+    await session.aflush_deferred()
+    assert [m["id"] for m in store.load_messages("cli", "t")] == [
+        f"m{index}" for index in range(6)
+    ]

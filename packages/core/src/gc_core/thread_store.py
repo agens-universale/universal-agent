@@ -830,6 +830,28 @@ def archive_and_replace_thread_files(
     }
 
 
+def _batches_by_bytes(messages, limit):
+    """Сообщения частями не больше ``limit`` байт JSON (хотя бы по одному);
+    без потолка или без сообщений — одной частью (запись меты тоже нужна)."""
+    if not limit or not messages:
+        return [messages]
+    import json
+
+    batches, batch, size = [], [], 0
+    for message in messages:
+        length = len(
+            json.dumps(message, ensure_ascii=False, default=str).encode()
+        )
+        if batch and size + length > limit:
+            batches.append(batch)
+            batch, size = [], 0
+        batch.append(message)
+        size += length
+    if batch:
+        batches.append(batch)
+    return batches
+
+
 class ThreadSession:
     def __init__(
         self,
@@ -1216,17 +1238,26 @@ class ThreadSession:
         )
 
     async def aflush_deferred(self) -> None:
-        """Записать накопленные шаги одной операцией (persist: turn)."""
+        """Записать накопленные шаги (persist: turn).
+
+        Одной операцией; хранилище с потолком операции
+        (``max_operation_bytes``, у durable-исполнителя запись истории
+        ограничена) — частями по этому потолку, по порядку.
+        """
         if not self._deferred_pending:
             return
         # Буфер очищается только после записи: при сбое коммита шаги
         # остаются для повторного сброса (дубли отсекают ключи сообщений).
         messages = list(self._deferred_messages)
         mark = self._deferred_mark
-        await self._apersist_now(
-            messages, previous_response_id=self._deferred_response_id
+        limit = getattr(self.port, "max_operation_bytes", None) or getattr(
+            self.store, "max_operation_bytes", None
         )
-        del self._deferred_messages[: len(messages)]
+        for batch in _batches_by_bytes(messages, limit):
+            await self._apersist_now(
+                batch, previous_response_id=self._deferred_response_id
+            )
+            del self._deferred_messages[: len(batch)]
         if self._deferred_mark == mark:
             self._deferred_pending = False
 

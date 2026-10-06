@@ -67,6 +67,10 @@ class TemporalThreadStore:
         self._metadata_acks = {}
         #: (система, тред) → хэши сообщений последнего чтения треда.
         self.message_hashes = {}
+        #: Потолок одной операции: вход activity — запись истории Temporal
+        #: (лимит 2 МБ). Отложенные шаги хода (persist: turn) ядро пишет
+        #: частями по нему.
+        self.max_operation_bytes = PAGE_BYTES
 
     async def aread_snapshot(
         self, system_id, thread_id, *, include_state=True

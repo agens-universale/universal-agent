@@ -372,3 +372,37 @@ def test_tool_output_cap_keeps_valid_utf8_and_marks_the_cut():
     assert "вывод обрезан воркером Temporal" in big.output
     assert "из 2000000 байт" in big.output
     big.output.encode()  # без разорванных символов
+
+
+async def test_long_turn_written_at_the_end_in_parts(
+    tmp_path, monkeypatch, growing_model
+):
+    """persist: turn (умолчание в Temporal) пишет шаги хода в конце. Ход на
+    120 шагов — больше 2 МБ новых сообщений — уходит в тред частями: одна
+    операция больше лимита записи навсегда валила бы задачу workflow."""
+    monkeypatch.chdir(tmp_path)
+    url, bodies, plan = growing_model
+    plan["steps"] = 120
+    (tmp_path / "big.txt").write_text("y" * 40_000)
+    async with runtime(tmp_path, url, persist="turn") as (env, _native):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            _request(),
+            id="refs-turn-parts",
+            task_queue="refs",
+        )
+        await asyncio.wait_for(handle.result(), 600)
+        largest, _, total = await _payload_sizes(handle)
+        history = await handle.fetch_history()
+    assert largest < LIMIT
+    messages = DurableFileThreadStore(str(tmp_path / "threads")).load_messages(
+        "test", "refs"
+    )
+    outputs = [
+        m
+        for m in messages
+        if m.get("type") == "function_call_output" or m.get("role") == "tool"
+    ]
+    assert len(outputs) >= 120
+    assert len({m["id"] for m in messages}) == len(messages)
+    await Replayer(workflows=[NativeAgentWorkflow]).replay_workflow(history)
