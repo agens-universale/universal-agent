@@ -221,7 +221,15 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
             raise OSError(
                 f"file exceeds download ceiling ({self.walk_output_max_chars} chars): {path}"
             )
-        return base64.b64decode(res.stdout or "", validate=False)
+        # Переводы строк base64 снимаем явно, остальное — строго: чужой текст в
+        # stdout (эхо из профиля, предупреждение sh) иначе вклеивался бы в файл.
+        payload = "".join((res.stdout or "").split())
+        try:
+            return base64.b64decode(payload, validate=True)
+        except ValueError as exc:  # binascii.Error — его подкласс
+            raise OSError(
+                f"download of {path} returned non-base64 data on stdout: {exc}"
+            ) from exc
 
     # --- exec-семейство ---
     async def _awatchdog(self) -> Optional[str]:

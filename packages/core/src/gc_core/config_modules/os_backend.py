@@ -82,6 +82,19 @@ class OsBackendConfig(BaseModel):
             )
         if self.kind == "ssh" and not self.ssh.host:
             raise ValueError("os_backend.ssh.host обязателен при kind=ssh")
+        # Значение с ведущим `-` уходит в argv отдельным словом и читается
+        # клиентом как опция (`-oProxyCommand=…`, `--privileged`).
+        for label, value in (
+            ("ssh.host", self.ssh.host),
+            ("ssh.user", self.ssh.user),
+            ("docker.name", self.docker.name),
+            ("docker.user", self.docker.user),
+            ("docker.binary", self.docker.binary),
+        ):
+            if value and str(value).startswith("-"):
+                raise ValueError(
+                    f"os_backend.{label} не может начинаться с '-': {value!r}"
+                )
         if self.kind == "exec" and not self.exec.argv_prefix:
             raise ValueError(
                 "os_backend.exec.argv_prefix обязателен при kind=exec"

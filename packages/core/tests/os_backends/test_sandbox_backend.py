@@ -242,3 +242,23 @@ def test_build_wrapper_accepts_working_bwrap(tmp_path, monkeypatch):
         build_sandbox_wrapper(str(tmp_path), {"sandbox": {}})(None)[0]
         == "bwrap"
     )
+
+
+def test_bwrap_extra_ro_inside_root_stays_read_only(tmp_path):
+    # Поздний `--bind root` перекрывает ранний ro-bind пути внутри корня:
+    # extra_ro внутри launch_root молча становился записываемым.
+    inside = tmp_path / "ro"
+    inside.mkdir()
+    argv = bwrap_wrapper(
+        str(tmp_path), network=True, extra_ro=[str(inside)], home_to_root=False
+    )(str(tmp_path))
+    root_bind = argv.index("--bind")
+    ro_inside = [
+        i
+        for i, a in enumerate(argv)
+        if a == "--ro-bind" and argv[i + 1] == str(inside.resolve())
+    ]
+    assert ro_inside and ro_inside[0] > root_bind
+    # повторов одного ro-bind нет
+    pairs = [argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"]
+    assert len(pairs) == len(set(pairs))

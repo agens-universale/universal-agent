@@ -97,3 +97,14 @@ def test_fetch_url_locus_and_skills_defaults():
     )
     with pytest.raises(ValidationError):
         OsBackendConfig(fetch_url_execute_on="container")
+
+
+def test_argv_values_cannot_start_with_dash():
+    # Значение с ведущим `-` уходит в argv отдельным словом и читается как опция.
+    with pytest.raises(ValidationError, match="ssh.host"):
+        OsBackendConfig(kind="ssh", ssh={"host": "-oProxyCommand=evil"})
+    with pytest.raises(ValidationError, match="docker.name"):
+        OsBackendConfig(kind="docker", docker={"name": "--privileged"})
+    with pytest.raises(ValidationError, match="docker.binary"):
+        OsBackendConfig(kind="docker", docker={"name": "c", "binary": "-x"})
+    assert OsBackendConfig(kind="ssh", ssh={"host": "ecs3"}).ssh.host == "ecs3"

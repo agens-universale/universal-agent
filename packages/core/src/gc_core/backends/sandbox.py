@@ -38,15 +38,29 @@ def _python_root() -> Optional[str]:
     return None if root.startswith(_RO_SYSTEM_DIRS) else root
 
 
-def _bwrap_ro_binds(extra_ro: Sequence[str]) -> list[str]:
-    """``--ro-bind D D`` для системных каталогов, интерпретатора и extra_ro."""
-    dirs = [d for d in _RO_SYSTEM_DIRS if os.path.isdir(d)]
-    dirs += [
-        d
-        for d in (_python_root(), sys.prefix, *extra_ro)
-        if d and os.path.exists(d)
-    ]
-    return [arg for d in dirs for arg in ("--ro-bind", d, d)]
+def _ro_bind_args(paths: Sequence[str]) -> list[str]:
+    """``--ro-bind D D`` для существующих путей, без повторов."""
+    seen: list[str] = []
+    for d in paths:
+        if d and os.path.exists(d) and d not in seen:
+            seen.append(d)
+    return [arg for d in seen for arg in ("--ro-bind", d, d)]
+
+
+def _bwrap_ro_binds() -> list[str]:
+    """``--ro-bind D D`` для системных каталогов и интерпретатора.
+
+    ``extra_ro`` сюда НЕ входит: он биндится после rw-корня (см. wrapper) —
+    поздний ``--bind root`` перекрывает ранний ro-bind пути внутри корня,
+    и ``extra_ro: [<путь внутри launch_root>]`` молча становился записываемым.
+    """
+    return _ro_bind_args(
+        [
+            *(d for d in _RO_SYSTEM_DIRS if os.path.isdir(d)),
+            _python_root(),
+            sys.prefix,
+        ]
+    )
 
 
 def bwrap_wrapper(
@@ -59,13 +73,15 @@ def bwrap_wrapper(
     head += ["--dev", "/dev", "--proc", "/proc", "--tmpfs", "/tmp"]
     if network:
         head.append("--share-net")
-    head += _bwrap_ro_binds(extra_ro)
+    head += _bwrap_ro_binds()
     if home_to_root:
         head += ["--setenv", "HOME", root]
     elif os.path.isdir(home):
         # конфиги (~/.gitconfig); root ниже перекроет rw
         head += ["--ro-bind", home, home]
     head += ["--bind", root, root]
+    # После корня: ro-bind внутри него иначе перекрывается rw-биндом корня.
+    head += _ro_bind_args([os.path.realpath(d) for d in extra_ro])
 
     def wrap(cwd: Optional[str]) -> list[str]:
         return [*head, "--chdir", os.path.realpath(cwd) if cwd else root]

@@ -340,3 +340,43 @@ async def test_watchdog_probe_is_cached_and_reported():
     assert first in ("timeout", "gtimeout", "setsid", "perl", None)
     be._afs_exec = None  # вторая проба не должна исполняться
     assert await be._awatchdog() == first
+
+
+async def test_download_rejects_non_base64_noise():
+    # Чужой текст в stdout (эхо профиля, предупреждение sh) из букв алфавита
+    # base64 раньше вклеивался в байты файла при rc 0.
+    from types import SimpleNamespace
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+
+    class Noisy(RemoteShellBackend):
+        async def _run(self, *a, **k):
+            return SimpleNamespace(
+                stdout="Welcome to host!\naGk=\n",
+                stderr="",
+                return_code=0,
+                timed_out=False,
+                stdout_hit_capture_cap=False,
+            )
+
+    class Clean(Noisy):
+        async def _run(self, *a, **k):
+            # `base64` переносит строку каждые 76 символов: это одна строка данных
+            return SimpleNamespace(
+                stdout="aGlo\naQ==\n",
+                stderr="",
+                return_code=0,
+                timed_out=False,
+                stdout_hit_capture_cap=False,
+            )
+
+    kw = dict(
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+    with pytest.raises(OSError, match="non-base64"):
+        await Noisy(["env"], **kw)._adownload_bytes("/f")
+    assert await Clean(["env"], **kw)._adownload_bytes("/f") == b"hihi"

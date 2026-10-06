@@ -128,12 +128,15 @@ def resolve_os_backend(
         )
 
     if kind == "sandbox":
+        # Слаг — от launch_root конфига, а не от cwd процесса: TUI резолвит
+        # симлинки, явный launch_root может быть не там, где запущен процесс.
+        configured_root = launch_root_from_config(config_dict)
         auto = (
-            sandbox_auto_workdir()
+            sandbox_auto_workdir(configured_root)
             if (section.get("sandbox") or {}).get("workdir") == "auto"
             else None
         )
-        root = auto or launch_root_from_config(config_dict)
+        root = auto or configured_root
         return SandboxBackend(
             wrapper=build_sandbox_wrapper(root, section),
             root=root,

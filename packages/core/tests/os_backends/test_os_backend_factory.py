@@ -230,3 +230,24 @@ def test_resolve_ssh_joins_argv_docker_does_not():
         {"os_backend": {"kind": "docker", "docker": {"name": "b"}}}
     )
     assert ssh.joins_argv is True and docker.joins_argv is False
+
+
+def test_auto_workdir_follows_configured_launch_root(tmp_path, monkeypatch):
+    # Слаг — от launch_root конфига (TUI резолвит симлинки, явный корень может
+    # быть не там, где запущен процесс), а не от cwd процесса.
+    monkeypatch.setattr(
+        "gc_core.backends.sandbox.gc_paths", lambda: {"state": tmp_path}
+    )
+    (tmp_path / "elsewhere").mkdir()
+    (tmp_path / "proj").mkdir()
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    from gc_core.config_modules.env_vars import project_slug
+
+    cfg = {
+        "launch_root": str(tmp_path / "proj"),
+        "os_backend": {"kind": "sandbox", "sandbox": {"workdir": "auto"}},
+    }
+    be = resolve_os_backend(cfg)
+    assert be.auto_workdir == str(
+        tmp_path / "sandboxes" / project_slug(str(tmp_path / "proj"))
+    )
