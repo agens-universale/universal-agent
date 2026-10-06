@@ -12,7 +12,7 @@ import ast
 import logging
 import pathlib
 
-from gc_core.backends import harbor as harbor_backend
+from gc_core.backends import posix_shell_fs
 from gc_core.execution_workspace import aprime_backend_cwd
 
 
@@ -65,7 +65,7 @@ async def test_backend_without_prime_is_skipped():
 def test_prime_asks_with_a_timeout():
     """Структурно: у вопроса «где мы» есть потолок по времени."""
     tree = ast.parse(
-        pathlib.Path(harbor_backend.__file__).read_text(encoding="utf-8")
+        pathlib.Path(posix_shell_fs.__file__).read_text(encoding="utf-8")
     )
     fn = next(
         n
@@ -78,7 +78,7 @@ def test_prime_asks_with_a_timeout():
         n
         for n in ast.walk(fn)
         if isinstance(n, ast.Call)
-        and getattr(n.func, "attr", None) == "_aexec_impl"
+        and getattr(n.func, "attr", None) == "_afs_exec"
     ]
     assert exec_calls, (
         "проверка устарела: прогрев больше не спрашивает окружение"
@@ -89,5 +89,5 @@ def test_prime_asks_with_a_timeout():
         "прогрев рабочего каталога идёт без таймаута — медленный контейнер "
         "задержит сборку контекста на неопределённое время"
     )
-    assert isinstance(harbor_backend._CWD_PRIME_TIMEOUT_SEC, (int, float))
-    assert 0 < harbor_backend._CWD_PRIME_TIMEOUT_SEC <= 60
+    assert isinstance(posix_shell_fs.CWD_PRIME_TIMEOUT_SEC, (int, float))
+    assert 0 < posix_shell_fs.CWD_PRIME_TIMEOUT_SEC <= 60

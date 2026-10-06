@@ -67,6 +67,27 @@ EXPERT_ONLY_KEYS: set = {
     "endpoint_presets",
     # Голосовой каталог — тот же класс и то же правило.
     "voice_endpoint_presets",
+    # --- os_backend: где живут файлы и команды тулов ---
+    # Дефолт `local` подходит всем; в шаблоне секция лежит закомментированной
+    # (образец docker/ssh/exec/sandbox), чтобы не впечатываться в конфиг каждому.
+    "os_backend.kind",
+    "os_backend.cwd",
+    "os_backend.env",
+    "os_backend.docker.name",
+    "os_backend.docker.user",
+    "os_backend.docker.binary",
+    "os_backend.ssh.host",
+    "os_backend.ssh.port",
+    "os_backend.ssh.user",
+    "os_backend.ssh.key_path",
+    "os_backend.ssh.options",
+    "os_backend.ssh.control_master",
+    "os_backend.exec.argv_prefix",
+    "os_backend.sandbox.workdir",
+    "os_backend.sandbox.network",
+    "os_backend.sandbox.extra_ro",
+    "os_backend.fetch_url_execute_on",
+    "os_backend.provision_skills",
     # --- agent: тюнинги finish gate / output storage ---
     # Экспертные лимиты quality-gate цикла; дефолты подходят для большинства сценариев.
     "agent.finish_gate_max_iterations",

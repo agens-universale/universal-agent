@@ -62,7 +62,7 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
         },
         "use_ssl": False,
         "use_retry": True,
-        "os_backend": "harbor",
+        "os_backend": {"kind": "harbor"},
         "system_prompt_id": "v1",
         "save_logs": False,
         "console_trace": False,

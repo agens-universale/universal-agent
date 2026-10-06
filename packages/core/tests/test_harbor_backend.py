@@ -49,6 +49,9 @@ class FakeEnv:
 
     async def exec(self, command, **kw):
         self.calls.append(command)
+        if command.startswith("if test "):
+            # Проверки существования отвечают явными 0/1 (см. PosixShellFsMixin._test).
+            return FakeExecResult(stdout="1\n", return_code=0)
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
     async def upload_file(self, src, dst):
@@ -182,12 +185,15 @@ async def test_listdir_parses_find_output(loop_in_thread):
     assert result == [("a", False), ("b", True)]
 
 
-async def test_listdir_raises_file_not_found_on_nonzero_rc(loop_in_thread):
+async def test_listdir_raises_on_nonzero_rc(loop_in_thread):
+    # Ненулевой код без «No such file» в stderr — отказ транспорта/команды,
+    # а не отсутствие каталога: OSError, но не FileNotFoundError.
     env = FakeEnv()
     env.exec = _make_exec_returning(env, "", return_code=1)
     backend = HarborBackend(env, loop_in_thread)
-    with pytest.raises(FileNotFoundError):
+    with pytest.raises(OSError) as ei:
         await backend.listdir("/missing")
+    assert not isinstance(ei.value, FileNotFoundError)
 
 
 async def test_append_creates_file_if_missing(loop_in_thread):
@@ -707,7 +713,9 @@ async def test_fs_helpers_use_raw_channel(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     assert await backend.exists("/work/a.txt") is True
-    assert env.calls == ["test -e /work/a.txt"]
+    assert env.calls == [
+        "if test -e /work/a.txt; then echo 1; else echo 0; fi"
+    ]
     assert await backend.lexists("/work/a.txt") is True
     assert await backend.is_symlink("/work/a.txt") is True
     env.calls.clear()
@@ -744,3 +752,11 @@ async def test_workspace_root_is_the_container_workdir(loop_in_thread):
         "pwd — внутренний вызов: сырой канал, без профиля"
     )
     assert build_execution_workspace(backend, {}).root == "/testbed"
+
+
+def test_env_prefix_rejects_non_identifier_names():
+    from gc_core.backends.harbor import _env_assignment_prefix
+
+    with pytest.raises(ValueError, match="invalid environment variable name"):
+        _env_assignment_prefix({"X=1; touch /tmp/pwned; Y": "v"})
+    assert _env_assignment_prefix({"OK": "v"}) == "env OK=v "

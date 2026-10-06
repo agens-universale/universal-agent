@@ -129,3 +129,36 @@ def test_tls_material_is_fine_on_the_agent_locus():
         resolve_mcp_client("srv", cfg, os_backend=_SandboxBackend()),
         AgentRuntimeClient,
     )
+
+
+class _ExecIsolatedBackend:
+    # kind=sandbox: файлы хостовые, команды — под bwrap/sandbox-exec
+    is_sandbox = False
+    isolates_exec = True
+
+
+def test_exec_isolated_backend_routes_os_backend_locus_through_backend():
+    from gc_core.tools.connect_mcp.execute_on import runs_in_agent_runtime
+    from gc_core.tools.connect_mcp.os_backend_client import (
+        OsBackendStatelessClient,
+    )
+
+    cfg = {
+        "transport": "stream_http",
+        "url": "http://x",
+        "execute_on": "os_backend",
+    }
+    client = resolve_mcp_client("srv", cfg, os_backend=_ExecIsolatedBackend())
+    assert isinstance(client, OsBackendStatelessClient)
+    assert (
+        runs_in_agent_runtime(cfg, os_backend=_ExecIsolatedBackend()) is False
+    )
+    # locus agent не меняется
+    assert isinstance(
+        resolve_mcp_client(
+            "srv",
+            {"transport": "stream_http", "url": "http://x"},
+            os_backend=_ExecIsolatedBackend(),
+        ),
+        AgentRuntimeClient,
+    )

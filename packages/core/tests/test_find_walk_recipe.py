@@ -9,7 +9,7 @@
 import shlex
 
 from gc_core.backends.capabilities import parse_find_printf_entries
-from gc_core.backends.harbor import _build_find_walk_command
+from gc_core.backends.posix_shell_fs import build_find_walk_command
 from gc_core.backends.protocol import FIND_PRINTF_FORMAT
 from gc_core.utils.native_fs_search import (
     _build_find_prune_argv,
@@ -68,7 +68,7 @@ def test_prune_group_is_shared_by_both_builders():
 
 
 def test_walk_command_prints_the_pruned_dir_before_pruning_it():
-    cmd = _build_find_walk_command(
+    cmd = build_find_walk_command(
         "/w", prune_names=("node_modules",), prune_dot_dirs=True
     )
     printf = f"-printf {shlex.quote(FIND_PRINTF_FORMAT)}"
@@ -80,7 +80,7 @@ def test_walk_command_prints_the_pruned_dir_before_pruning_it():
 
 
 def test_walk_command_without_prunes_is_a_plain_listing():
-    cmd = _build_find_walk_command("/w")
+    cmd = build_find_walk_command("/w")
     assert (
         cmd
         == f"find -H /w -mindepth 1 -printf {shlex.quote(FIND_PRINTF_FORMAT)}"

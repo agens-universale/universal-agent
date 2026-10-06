@@ -486,6 +486,8 @@ def flatten_app_config(app_cfg: AppConfig) -> Dict[str, Any]:
         "fs_tools": app_cfg.fs_tools.model_dump(),
         "images": app_cfg.images.model_dump(),
         "strip_tags_projection": app_cfg.strip_tags_projection.model_dump(),
+        # Где живут файлы и команды тулов: kind + подсекция бэкенда (factory).
+        "os_backend": app_cfg.os_backend.model_dump(),
         # Секции моделей (спека §4/§5) — потребитель: ModelRouter (src/model_router.py).
         # Router работает от этого снимка, а не от app_cfg напрямую (§6.4).
         "models": {

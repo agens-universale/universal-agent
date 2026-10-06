@@ -205,6 +205,46 @@ async def aprime_backend_cwd(
     )
 
 
+async def areconcile_remote_root(
+    backend: Any, config: Optional[Dict[str, Any]] = None
+) -> None:
+    """Хостовый ``launch_root`` у удалённого бэкенда → cwd той стороны.
+
+    TUI/ACP кладут ``launch_root = cwd`` хоста до сборки контекста. У docker/ssh
+    такого каталога нет, а ``resolve_execution_root`` корень из конфига берёт
+    первым — env-блок промпта и guards смотрели бы на путь хоста. Явно заданный
+    путь, который на той стороне существует (``/testbed``), остаётся.
+    Звать после ``aprime_backend_cwd``: cwd той стороны к этому моменту известен.
+    """
+    if not getattr(backend, "is_sandbox", False) or not isinstance(
+        config, dict
+    ):
+        return
+    raw = _config_root_raw(config)
+    if raw is None:
+        return
+    try:
+        if await backend.is_dir(raw):
+            return
+    except Exception:  # окружение недоступно — корень не трогаем
+        return
+    default_cwd = getattr(backend, "default_cwd", None)
+    remote = (default_cwd() if callable(default_cwd) else None) or _primed_cwd(
+        backend
+    )
+    if not remote:
+        return
+    logging.getLogger(__name__).info(
+        "launch_root %s нет на стороне бэкенда %s — корень рабочей области: %s",
+        raw,
+        type(backend).__name__,
+        remote,
+    )
+    config["launch_root"] = remote
+    if config.get("project_root"):
+        config["project_root"] = remote
+
+
 def _config_root_raw(config: Optional[Dict[str, Any]]) -> Optional[str]:
     if not isinstance(config, dict):
         return None
