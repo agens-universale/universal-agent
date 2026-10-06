@@ -35,6 +35,7 @@
 - В ядре — базовый класс доменного отказа хода `TurnFailure` (`ExecutionFailure`, ошибка провайдера, `ContextWindowExceeded`): durable-исполнитель переводит его в FAILED, прочие исключения кода workflow — в повтор workflow task.
 - Сессия снимает владение тредом при закрытии после Continue-As-New и при падении; сбой коммита в режиме `persist: turn` не теряет шаги хода; сбой закрытия MCP не подменяет готовый ответ.
 - Слит develop 0.4.0 (`os_backend`, параметры запроса на алиасе `models.<алиас>.main`/`.auxiliary`, `strip_think` на алиасе, схема тулов под алиас, повтор авторизации другой формой токена на 401): код develop переведён на типизированные настройки. В снимок конфига, который уходит в историю Temporal, `models.*.main`/`.auxiliary` проходят ту же схему, что и `backend.chat_completion_kwargs` (неизвестный ключ — отказ без значения в тексте ошибки); `os_backend.env` — секрет и только для воркера. Под Temporal проверены `os_backend.kind: local` и `harbor`; `docker`/`ssh`/`exec`/`sandbox` в native-воркере не прогонялись.
+- Предел текста сообщения native-сессии — 1 000 000 байт UTF-8, а не символов: без хранилища payload миллион символов кириллицы (2 МБ) не помещался во вход activity модели.
 - `TrackingFsBackend` пробрасывает `isolates_exec`: без этого обёртка учёта правок скрывала изоляцию `os_backend.kind: sandbox`, и MCP-сервер с `execute_on: os_backend` поднимался в процессе агента вне песочницы.
 
 ### Feature — limit trace summary (LIMIT_TRACE_SUMMARY_SPEC)

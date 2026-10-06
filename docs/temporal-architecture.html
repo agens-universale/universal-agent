@@ -863,13 +863,18 @@ worker'а: несколько worker'ов на разных хостах тре�
 <li>Журнал правок агента (<code>agent_edits</code>: дифф, откат) в durable-исполнении не ведётся.</li>
 <li>Одновременно активен один субагент.</li>
 <li>Защиту системных путей (<code>protected_*</code>) конфигом не выключить.</li>
+<li><code>os_backend</code> под воркером проверен для <code>local</code> и <code>harbor</code>; <code>docker</code>, <code>ssh</code>,
+<code>exec</code> и <code>sandbox</code> в native-режиме не прогонялись.</li>
+<li>Параметры запроса алиаса (<code>models.&lt;алиас&gt;.main</code>/<code>.auxiliary</code>) уходят в
+историю вместе со снимком конфига и допускаются только из схемы параметров
+запроса; <code>os_backend.env</code> в историю не пишется.</li>
 <li>Дедупликация <code>message_id</code> — последние 1000 ID в пределах сессии; после
 закрытия сессии повтор того же ID обрабатывается снова.</li>
 <li>Workflow histories прежнего экспериментального протокола не поддерживаются и
 не мигрируются; этот протокол удалён.</li>
 </ul>
 <h2 id="12-проверки">12. Проверки</h2>
-<p>Прогоны 06.10.2026 (develop <code>45e05eea</code> слит; без своих баз воркера):</p>
+<p>Прогоны 07.10.2026 (develop 0.4.0 слит; без своих баз воркера):</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
 <thead>
 <tr>
@@ -880,11 +885,11 @@ worker'а: несколько worker'ов на разных хостах тре�
 <tbody>
 <tr>
 <td>Все наборы, кроме temporalio (core, cli, server, tui, mcp, acp, chat, testkit — по файлу, параллельно)</td>
-<td>1192 из 1193 файлов зелёные; 1 — тайминг-тест TUI под параллельной нагрузкой (отдельно проходит)</td>
+<td>1230 из 1230 файлов зелёные</td>
 </tr>
 <tr>
 <td><code>packages/temporalio/tests</code> (live с Temporal dev server)</td>
-<td>256 passed</td>
+<td>257 passed</td>
 </tr>
 <tr>
 <td>Ruff check / format</td>
@@ -892,7 +897,7 @@ worker'а: несколько worker'ов на разных хостах тре�
 </tr>
 </tbody>
 </table></div>
-<p>Нагрузка и хаос (скриптовая модель на локальном HTTP, настоящие Temporal, воркер и хранилища):</p>
+<p>Нагрузка и хаос (06.10, до слияния; скриптовая модель на локальном HTTP, настоящие Temporal, воркер и хранилища):</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
 <thead>
 <tr>
@@ -923,7 +928,7 @@ worker'а: несколько worker'ов на разных хостах тре�
 </tr>
 </tbody>
 </table></div>
-<p>Живые прогоны на реальной модели (litellm-прокси, <code>glm-5.3-flash-ctx262k</code>, по 1 повтору без параллели):</p>
+<p>Живые прогоны на реальной модели (07.10, после слияния; litellm-прокси, <code>glm-5.3-flash-ctx262k</code>, по 1 повтору без параллели):</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
 <thead>
 <tr>
@@ -934,19 +939,19 @@ worker'а: несколько worker'ов на разных хостах тре�
 <tbody>
 <tr>
 <td>Серия local vs native: 8 задач (файлы, память между ходами, отсутствующий файл, данные с ошибками, остатки, смена правила, делегирование, два субагента)</td>
-<td>local 7/8, native 6/8; все сбои — модель пишет вызов инструмента текстом вместо <code>tool_calls</code> (локально так же)</td>
+<td>local 8/8, native 8/8 (06.10: 7/8 и 6/8 — модель писала вызов инструмента текстом вместо <code>tool_calls</code>)</td>
 </tr>
 <tr>
 <td>Temporal без guard'ов, треды в S3 (MinIO, внешний модуль): 10 задач</td>
-<td>8/10 (те же сбои модели); вне S3 воркер не пишет ничего</td>
+<td>10/10; вне S3 воркер не пишет ничего</td>
 </tr>
 <tr>
 <td>MCP-сценарии в Temporal: UA native vs Deep Agents (<code>temporalio.contrib.deepagents</code>), 2–3 MCP-сервера</td>
-<td>2/2 у обоих; activities на прогон: UA 25 и 35, Deep Agents 9 и 18</td>
+<td>2/2 у обоих; activities на прогон: UA 35 и 29, Deep Agents 18 и 9</td>
 </tr>
 <tr>
-<td>Harbor, terminal-bench 2.0: 10 простых задач (04.10)</td>
-<td>6/10; остальные 4 — тайм-аут агента 900 с при отдельных вызовах модели до 668 с</td>
+<td>Harbor, terminal-bench 2.0 (локальный режим, <code>os_backend: harbor</code>): 5 самых простых задач (fix-git, prove-plus-comm, nginx-request-logging, overfull-hbox, cobol-modernization)</td>
+<td>3/5; overfull-hbox и cobol-modernization — тайм-аут агента при отдельных ответах модели 227 и 556 с (04.10 на другой модели: 6/10, та же причина)</td>
 </tr>
 </tbody>
 </table></div>

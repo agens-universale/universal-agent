@@ -19,7 +19,8 @@ Server включает Temporal явно: `execution_backend: temporal-native`;
 Сейчас native worker обслуживает workflow/model/resource queues одним процессом
 для одного workspace. Его cwd должен совпадать с `profiles.<name>.workspace`;
 worker проверяет это и не вызывает `os.chdir`. Отдельные очереди не означают
-поддержку раздельных model/resource процессов. Техническую receipts DB и каталог
-тредов размещайте вне workspace. Потерянные MCP/background владельцы не
+поддержку раздельных model/resource процессов. Своей базы у воркера нет
+(результаты activities хранит история Temporal); каталог тредов (`state_dir`)
+размещайте вне workspace. Потерянные MCP/background владельцы не
 пересоздаются автоматически; неопределённые эффекты требуют подтверждённого
 результата и явного операторского решения.
