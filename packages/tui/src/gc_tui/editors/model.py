@@ -76,6 +76,7 @@ class ModelEditor(Vertical):
             active_overridden  # модель из файла перекрыта оверлеем
         )
         self._current = current or ""
+        self.initial_value = self._current
         self._endpoint = endpoint
         self._auth = auth
         self._verify = verify
@@ -385,6 +386,15 @@ class ModelEditor(Vertical):
             )
             inp.focus()
             return
+        # A registry-less settings screen may provide no raw `agent.model` in the
+        # file while the resolved configuration still has an active model. Once the
+        # server list arrives, that effective model is the untouched baseline; it
+        # must not look like a user edit merely because the raw field was empty.
+        if not self.initial_value and not self._filter:
+            # The resolved settings config can supply a model even when the raw
+            # file has no `agent.model`. In that case the first server row is the
+            # untouched effective selection and forms the dirty baseline.
+            self.initial_value = self._active or self._models[0].id
         # Поле и его список — под одной рамкой (спека §3.1): поле само себе фильтр,
         # строки идут ПОД ним.
         #
@@ -558,9 +568,7 @@ class ModelEditor(Vertical):
             # (сперва пометить набранное, потом идти дальше) — механика, которой
             # владелец не просил (смок 2026-08-04).
             return None
-        value = self.submit()
-        if value is None:
-            return None
+        value = self._list.selected_item.model.id
         self._marked = value
         self._list.refresh_rows()  # ● переехала — перерисовать, ничего не выбирая
         return value
@@ -584,6 +592,14 @@ class ModelEditor(Vertical):
             # чего, а живой текст поля здесь — ФИЛЬТР, а не имя модели. Отдать его
             # значило бы записать в конфиг обрывок набора.
             return None
+        if self.has_models:
+            # The list cursor is only a preview until Enter explicitly marks a
+            # row. Ctrl+S must save the existing field value, rather than
+            # silently applying whichever row happened to be highlighted by
+            # navigation.
+            if self._typed_own_name():
+                return self._manual_value()
+            return self._marked or self.initial_value or self._manual_value()
         row = self._list.selected_item
         if row is None:
             return self._manual_value()  # сервера без списка → только своё имя

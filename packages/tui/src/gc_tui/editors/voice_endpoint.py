@@ -24,6 +24,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Input, Static
 
 from gc_tui.editors.field_list import (
+    LIST_CLOSED_HINT,
     LIST_EMPTY,
     LIST_FAILED,
     LIST_LOADING,
@@ -62,7 +63,8 @@ _FIELDS = {
 # (находка финального ревью 2026-08-05: канон-хинт пресет-листа звал ту же клавишу
 # «оставить свой адрес», и рамка спорила с футером о значении одного Enter'а). Формула
 # та же, что у `_LANG_HINT_NO_MATCH`/`_MODEL_HINT_NO_MATCH`.
-_URL_HINT_NO_MATCH = "свой адрес · Enter — сохранить как есть · Esc — свернуть"
+_URL_HINT_NO_MATCH = "свой адрес · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
+_URL_HINT_NO_MATCH_ONBOARDING = "свой адрес · Enter — оставить как есть · Esc — свернуть"
 
 # ВСЕ языки whisper (`whisper.tokenizer.LANGUAGES` модели large-v3: 99 базовых кодов +
 # добавленный в ней `yue`) с русскими названиями: сначала частые (их ищут чаще всего и
@@ -177,7 +179,8 @@ _LANG_HINT = (
 )
 # Фильтр не оставил строк: обещать «подставить» нечего — Enter уйдёт про введённое
 # (канон _LIST_NO_MATCH списка моделей — честная строка вместо залипшей).
-_LANG_HINT_NO_MATCH = "свой код · Enter — сохранить как есть · Esc — свернуть"
+_LANG_HINT_NO_MATCH = "свой код · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
+_LANG_HINT_NO_MATCH_ONBOARDING = "свой код · Enter — оставить как есть · Esc — свернуть"
 _LANG_ROW_CLASS = "voice-lang-row"
 _LANG_HINT_CLASS = "voice-lang-hint"
 # Рамка-скролл вокруг строк: канон-класс `.dropdown-scroll` + свой маркер (по нему список
@@ -197,8 +200,9 @@ _LANG_CODE_W = 6  # колонка кода: 2-3 символа + воздух �
 # («показать список»), а раскрытый — этой строкой («перечитать список»), и клавиша на
 # одном поле звалась двумя глаголами в зависимости от состояния, хотя делает одно и то
 # же — идёт на сервер).
-_MODEL_HINT = f"модели · печать — фильтр/свой id · Enter — подставить · Esc — свернуть · {_MODEL_RELOAD_HINT}"
-_MODEL_HINT_NO_MATCH = "свой id · Enter — сохранить как есть · Esc — свернуть"
+_MODEL_HINT = "модели · печать — фильтр/свой id · Enter — подставить · Esc — свернуть · Alt+↓ — перечитать список"
+_MODEL_HINT_NO_MATCH = "свой id · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
+_MODEL_HINT_NO_MATCH_ONBOARDING = "свой id · Enter — оставить как есть · Esc — свернуть"
 # LIST_LOADING/LIST_FAILED/LIST_EMPTY — статусы сетевого списка, общие с `model`
 # (`field_list.LIST_*`, спека 2026-08-06): своих формулировок здесь больше нет.
 _MODEL_ROW_CLASS = "voice-model-row"
@@ -268,7 +272,13 @@ def _lang_initial_index(items, value: str) -> int | None:
 
 
 def lang_list_controller(
-    host, *, input_id: str, langs=VOICE_LANGUAGES, on_pick=None
+    host,
+    *,
+    input_id: str,
+    langs=VOICE_LANGUAGES,
+    on_pick=None,
+    save_hint: bool = True,
+    closed_hint: str = LIST_CLOSED_HINT,
 ) -> FieldListController:
     """Раскрывающийся список кодов языка под полем «Язык» — общий контроллер со своими
     параметрами: строки-константа, две колонки (код и название), фильтр по обоим
@@ -289,9 +299,12 @@ def lang_list_controller(
         matches=lambda item, q: q in item[0] or q in item[1],
         value_of=lambda item: item[0],
         initial_index=_lang_initial_index,
-        hint=lambda ok: _LANG_HINT if ok else _LANG_HINT_NO_MATCH,
+        hint=lambda ok: _LANG_HINT if ok else (
+            _LANG_HINT_NO_MATCH if save_hint else _LANG_HINT_NO_MATCH_ONBOARDING
+        ),
         can_open=lambda value: not value,
         on_pick=on_pick,
+        closed_hint=closed_hint,
     )
 
 
@@ -317,6 +330,8 @@ class ModelListController(FieldListController):
         fetch,
         config_proxy: str | None = None,
         on_pick=None,
+        save_hint: bool = True,
+        closed_hint: str = _MODEL_RELOAD_HINT,
     ) -> None:
         super().__init__(
             host,
@@ -327,9 +342,11 @@ class ModelListController(FieldListController):
             render_row=self._model_row,
             matches=lambda item, q: q in item.lower(),
             initial_index=self._model_initial_index,
-            hint=self._model_hint,
+            hint=lambda has_selection: self._model_hint(
+                has_selection, save_hint=save_hint
+            ),
             on_pick=on_pick,
-            closed_hint=_MODEL_RELOAD_HINT,
+            closed_hint=closed_hint,
             # Сам раскрывается только на ПУСТОМ поле — то же правило, что у пресет-листа
             # адреса. Модель уже выбрана — раскрывать список поверх неё незачем, а цена
             # автораскрытия здесь выше, чем у локальных списков: каждый вход курсора на
@@ -488,10 +505,12 @@ class ModelListController(FieldListController):
             None,
         )
 
-    def _model_hint(self, has_selection: bool) -> str:
+    def _model_hint(self, has_selection: bool, *, save_hint: bool = True) -> str:
         if self._status:
             return self._status
-        return _MODEL_HINT if has_selection else _MODEL_HINT_NO_MATCH
+        if has_selection:
+            return _MODEL_HINT
+        return _MODEL_HINT_NO_MATCH if save_hint else _MODEL_HINT_NO_MATCH_ONBOARDING
 
     @staticmethod
     def _model_row(item, *, selected: bool) -> Text:
@@ -516,6 +535,9 @@ class VoiceEndpointEditor(Vertical):
         verify_ssl=True,
         config_proxy: str | None = None,
         url_presets: list | None = None,
+        save_hint: bool = True,
+        closed_list_hint: str = LIST_CLOSED_HINT,
+        closed_model_hint: str = _MODEL_RELOAD_HINT,
     ) -> None:
         # gap — зазор группы над первой подписью: в мастере воздух дают строки опций
         # (set-spaced), в /settings редактор идёт вплотную к подсказке действия.
@@ -558,6 +580,8 @@ class VoiceEndpointEditor(Vertical):
             self,
             input_id=_FIELDS["language"][1],
             on_pick=lambda value: self._write("language", value),
+            save_hint=save_hint,
+            closed_hint=closed_list_hint,
         )
         # Поле-факт списка не получает: в локальной панели модель задаёт установка сервиса.
         self.model_list = (
@@ -567,6 +591,8 @@ class VoiceEndpointEditor(Vertical):
                 fetch=fetch,
                 config_proxy=config_proxy,
                 on_pick=lambda value: self._write("model", value),
+                save_hint=save_hint,
+                closed_hint=closed_model_hint,
             )
             if fetch is not None
             and "model" in self._fields
@@ -585,8 +611,13 @@ class VoiceEndpointEditor(Vertical):
                 row_class="voice-url-preset-row",
                 input_id=_FIELDS["url"][1],
                 hint=PRESET_HINT,
-                no_match_hint=_URL_HINT_NO_MATCH,
+                no_match_hint=(
+                    _URL_HINT_NO_MATCH
+                    if save_hint
+                    else _URL_HINT_NO_MATCH_ONBOARDING
+                ),
                 on_pick=self._apply_url_preset,
+                closed_hint=closed_list_hint,
             )
             if presets
             and "url" in self._fields

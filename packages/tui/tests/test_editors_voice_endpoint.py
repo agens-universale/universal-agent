@@ -584,7 +584,7 @@ async def test_lang_list_hint_is_honest_when_nothing_matches():
         ed.lang_list.apply_filter("zz")
         assert _lang_rows(ed) == []
         assert str(ed.query_one(".voice-lang-hint").render()) == (
-            "свой код · Enter — сохранить как есть · Esc — свернуть"
+            "свой код · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
         )
 
 
@@ -1270,7 +1270,7 @@ async def test_model_list_hint_is_honest_when_the_filter_matches_nothing():
         assert _model_rows(ed) == []
         assert (
             _model_hint(ed)
-            == "свой id · Enter — сохранить как есть · Esc — свернуть"
+            == "свой id · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
         )
 
 

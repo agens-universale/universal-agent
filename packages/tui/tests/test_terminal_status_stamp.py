@@ -62,6 +62,27 @@ async def test_falling_edge_stamps_status(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("error,expected", [(None, "completed"), ("boom", "failed")])
+async def test_finished_before_first_poll_stamps_status(tmp_path, error, expected):
+    from gc_tui.app import TuiApp
+
+    tid = "fast00000000000000000000000000001"
+    _write_task(tmp_path, tid)
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={"model": "M"})
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        scr._prepare_for_new_run()
+        scr._was_running = False
+        runner = _Runner(running=False)
+        runner._last_target = (tid, "cli")
+        app.active_runner = runner
+        app.last_runner_error = error
+        scr._poll_active()
+        assert scr._store.get_task_meta(tid)["tui"]["status"] == expected
+
+
+@pytest.mark.asyncio
 async def test_compact_transition_does_not_stamp(tmp_path):
     """Завершение /compact (runner._thread_kind=='compact') НЕ перетирает
     терминальный статус: falling-edge должен пропустить compact-переход."""

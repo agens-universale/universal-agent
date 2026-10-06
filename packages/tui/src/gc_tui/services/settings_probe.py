@@ -69,7 +69,8 @@ class ProbeResult:
     # проверки модели), а мусорному «No connected db.» (застрял на поиске ключа).
     body_signature: str = ""
     # Форма Authorization, которую сервер принял (`authorization_attempts`).
-    # None — токен не принимали / auth не интерпретировался. Пишется в конфиг as-is.
+    # None — токен не принимали / auth не интерпретировался. Только результат пробы;
+    # исходный источник токена в форме и конфиге не меняется.
     accepted_auth: Optional[str] = None
 
     @property
@@ -100,7 +101,7 @@ def probe(
         )
     else:
         out = fetch_ex(endpoint, auth, verify=verify)
-    if out.models:
+    if out.models is not None:
         return ProbeResult(
             "ok", out.status, out.models, out.latency_ms, "доступен"
         )
@@ -388,13 +389,11 @@ def probe_connection(
     спорную ветку: сервер отказал не 401-м, и без неё пришлось бы гадать, отказ
     это про токен или уже про модель.
 
-    Токен пробуется в двух формах (`authorization_attempts`): как передан и
-    со схемой ``Bearer``, если её не было. Вторая форма уходит только когда
-    первая отвергнута 401 — принятый заголовок вторым запросом не проверяем.
+    Принятая форма заголовка возвращается вызывающему для рабочего запроса.
 
     Живёт здесь, а не в экранах: пробу зовут и /settings, и мастер, а скопированный
     differential-танец разъехался бы при первой правке одной из копий."""
-    from gc_core.onboarding import authorization_attempts
+    from gc_core.utils.http_auth import authorization_attempts
 
     run = probe_fn or probe_auth
     attempts = authorization_attempts(token)

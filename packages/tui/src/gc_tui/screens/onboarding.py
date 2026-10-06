@@ -710,6 +710,7 @@ class OnboardingScreen(Screen):
                 auth_header=auth,
                 proxy_current=proxy_cur or "",
                 create_mode=True,
+                closed_hint="Alt+↓ — показать список",
                 presets=endpoint_presets_from_config(self._config or {}),
             )
             body.mount(ed)
@@ -1460,6 +1461,9 @@ class OnboardingScreen(Screen):
                 url_presets=voice_endpoint_presets_from_config(
                     self._config or {}
                 ),
+                save_hint=False,
+                closed_list_hint="Alt+↓ — показать список",
+                closed_model_hint="Alt+↓ — перечитать список",
             )
         )
 
@@ -1901,10 +1905,6 @@ class OnboardingScreen(Screen):
             return  # протухший результат (правка/переход обесценили)
         from gc_tui.services.probe_presentation import connection_line_text
 
-        if result.auth_state == "accepted":
-            ed = self._connection_editor()
-            if ed is not None:
-                ed.apply_accepted_auth(result.accepted_auth)
         self._set_conn_probe_line(connection_line_text(result))
 
     def _set_conn_probe_line(self, text) -> None:
@@ -2380,7 +2380,7 @@ class OnboardingScreen(Screen):
             event.stop()
             if step == STEP_CONNECTION:
                 ed = self._connection_editor()
-                if ed is not None and ed.enter_presets():
+                if ed is not None and ed.enter_presets(open_closed=False):
                     # пресет-лист открыт — подставил/свернул, не сабмит; подстановка
                     # пресета — тоже триггер авто-пробы (спека §5.5).
                     self._auto_probe_if_changed()

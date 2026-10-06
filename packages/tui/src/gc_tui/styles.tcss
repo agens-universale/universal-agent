@@ -803,3 +803,18 @@ ModelsSectionEditor, VoiceEndpointEditor { height: auto; }
    вплотную к своей строке. Шортхенд и позиция ПОСЛЕ .set-spaced в файле: правило
    побеждает порядком при равной специфичности. */
 .models-picker-anchor { margin: 0; }
+
+/* Многострочные параметры модели используют палитру полей настроек. */
+ModelEntryForm TextArea.mef-yaml {
+    border: round $run-color; background: $bg; color: $ink; padding: 0 1;
+    scrollbar-size: 1 1;
+    scrollbar-background: $bg;
+    scrollbar-background-hover: $bg;
+    scrollbar-background-active: $bg;
+    scrollbar-color: $deep-dim;
+    scrollbar-color-hover: $accent;
+    scrollbar-color-active: $accent;
+}
+ModelEntryForm TextArea.mef-yaml:focus {
+    border: round $run-color; background: $band-bg; color: $ink;
+}

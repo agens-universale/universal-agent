@@ -680,7 +680,7 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
 async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     """Свернув пресет-лист адреса `Esc`, человек должен видеть, чем его вернуть
     (спека 2026-08-06 §4.4) — тот же хинт, что у голосовых списков (`show_closed_hint`,
-    дословно `LIST_CLOSED_HINT`). До правки `escape_presets` сворачивал список молча.
+    с клавишей раскрытия мастера). До правки `escape_presets` сворачивал список молча.
 
     Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает.
     Она ярлык способа, а не команда момента (как `Space — переключить` у галки,
@@ -691,7 +691,6 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import _PRESET_HINT_EMPTY
-    from gc_tui.editors.field_list import LIST_CLOSED_HINT
 
     app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
     async with app.run_test() as pilot:
@@ -705,18 +704,35 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
         await pilot.pause()
         assert scr._step == 0
         hints = scr.query(".conn-url-preset-hint")
-        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
+        assert hints and str(hints[-1].render()) == "Alt+↓ — показать список"
         await pilot.press("down")  # уйти с адреса на токен
         await pilot.pause()
         hints = scr.query(".conn-url-preset-hint")
         assert (
-            hints and str(hints[-1].render()) == LIST_CLOSED_HINT
+            hints and str(hints[-1].render()) == "Alt+↓ — показать список"
         )  # строка постоянна
         await pilot.press("up")  # вернуться на адрес
         await pilot.pause()
         assert scr.query(".conn-preset-row")  # список раскрылся заново
         hints = scr.query(".conn-url-preset-hint")
         assert hints and str(hints[-1].render()) == _PRESET_HINT_EMPTY
+
+
+@pytest.mark.asyncio
+async def test_custom_connection_url_keeps_onboarding_closed_list_hint(tmp_path):
+    from textual.widgets import Input
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr.query_one("#conn-url", Input).value = "https://custom.example/v1/chat/completions"
+        await pilot.pause()
+        assert not scr.query(".conn-preset-row")
+        hints = scr.query(".conn-url-preset-hint")
+        assert str(hints[-1].render()) == "в списке такого нет · Alt+↓ — показать список"
 
 
 @pytest.mark.asyncio
@@ -1441,8 +1457,11 @@ async def test_onboarding_model_step_filter_and_pick(tmp_path):
         # и до совпавшей модели приходилось доезжать ↑↓ (см. соседний тест на обрывок).
         from gc_tui.editors.model import ModelEditor
 
-        assert scr.query_one(ModelEditor).submit() == "openai/gpt-5.6-terra"
+        model_editor = scr.query_one(ModelEditor)
+        assert model_editor._list.selected_item.model.id == "openai/gpt-5.6-terra"
+        assert model_editor.submit() == "glm-5.2-fp8"
         await pilot.press("enter")  # Enter#1 — пометить подсвеченную
+        assert model_editor.submit() == "openai/gpt-5.6-terra"
         await pilot.press("enter")  # Enter#2 — далее, шаг уровней
         await pilot.pause()
         from gc_tui.screens.onboarding import STEP_LEVELS

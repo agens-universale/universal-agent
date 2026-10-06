@@ -448,15 +448,12 @@ def test_probe_connection_skips_canary_on_plain_401():
     r = probe_connection(
         "http://x/v1/chat/completions", "Bearer bad", True, "", probe_fn=fake
     )
-    # control + Bearer + голый ключ: 401 первой формы не приговор, пока не
-    # проверена вторая.
     assert calls == [None, "Bearer bad", "bad"]
     assert r.auth_state == "rejected"
 
 
-def test_probe_connection_accepts_the_other_token_shape():
-    """Сервер отвергает голый ключ и принимает Bearer — и наоборот.
-    Вторая форма уходит только после 401 первой."""
+def test_probe_connection_returns_the_accepted_token_shape():
+    """Подобранная форма возвращается хозяину формы для сохранения."""
     from gc_tui.services.settings_probe import probe_connection
 
     def scripted(accepted: str):
@@ -652,3 +649,20 @@ def test_auth_404_control_not_about_auth():
         and "404" in r.detail
         and "авторизаци" not in r.detail
     )
+
+
+def test_probe_reports_the_form_that_must_be_carried_into_runtime():
+    from gc_core.config_modules.model_registry import ModelEntry
+    from gc_tui.services.settings_probe import probe_connection
+
+    auth = ModelEntry(url="https://example.test/v1/chat/completions", token="secret").authorization_header
+
+    def bare_only(endpoint, header, verify, model, **kwargs):
+        if header == "secret":
+            return ProbeResult("ok", 200, None, 1, "доступен")
+        return ProbeResult("rejected", 401, None, 1, "отказ")
+
+    result = probe_connection("https://example.test/v1/chat/completions", auth, True, "m", probe_fn=bare_only)
+    assert result.auth_state == "accepted"
+    assert result.verdict == "ok"
+    assert result.accepted_auth == "secret"
