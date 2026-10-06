@@ -48,7 +48,9 @@ async def test_terminated_turn_context_is_released(
         )
         await handle.terminate("operator")
         assert provider.idle_owners(0)
-        await NativeMaintenance(env.client, provider, provider.stores).run_once()
+        await NativeMaintenance(
+            env.client, provider, provider.stores
+        ).run_once()
         assert provider.idle_owners(0) == []
 
 

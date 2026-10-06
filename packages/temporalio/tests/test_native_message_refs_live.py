@@ -66,8 +66,11 @@ def growing_model():
             else:
                 bodies.append(len(raw))
                 step = len(bodies)
+                name, arguments = plan.get(
+                    "tool", ("fs_read_file", {"path": "big.txt"})
+                )
                 tool = (
-                    call(f"r{step}", "fs_read_file", {"path": "big.txt"})
+                    call(f"r{step}", name, arguments)
                     if step <= plan["steps"]
                     else finish()
                 )
@@ -118,7 +121,7 @@ def growing_model():
 
 
 @asynccontextmanager
-async def runtime(tmp_path, url, *, persist="step"):
+async def runtime(tmp_path, url, *, persist="step", core_extra=None):
     binary = shutil.which("temporal")
     if binary is None:
         pytest.skip("Temporal CLI is required")
@@ -152,6 +155,7 @@ async def runtime(tmp_path, url, *, persist="step"):
                             "save_logs": False,
                             "console_trace": False,
                         },
+                        **(core_extra or {}),
                     },
                 }
             },
@@ -310,3 +314,63 @@ def test_hash_ignores_key_order():
         {"b": [1, 2], "a": 1}
     )
     assert message_hash({"a": 1}) != message_hash({"a": 2})
+
+
+async def test_huge_mcp_output_is_capped_below_the_record_limit(
+    tmp_path, monkeypatch, growing_model
+):
+    """Ответ MCP-сервера в 5 МБ: вывод через границу activity обрезается
+    воркером до 1 МБ с пометкой, ход доходит до конца, записи истории меньше
+    2 МБ (встроенные инструменты ограничивают вывод сами)."""
+    import sys
+    from pathlib import Path
+
+    monkeypatch.chdir(tmp_path)
+    url, bodies, plan = growing_model
+    plan["steps"] = 1
+    plan["tool"] = ("mcp_counter_big", {"size": 5_000_000})
+    server = Path(__file__).with_name("mcp_fixture_server.py")
+    mcp = {
+        "mcp": {
+            "servers": {
+                "counter": {
+                    "transport": "stdio",
+                    "persistent_session": True,
+                    "command": sys.executable,
+                    "args": [str(server), "stdio", "0"],
+                }
+            }
+        }
+    }
+    async with runtime(tmp_path, url, core_extra=mcp) as (env, _native):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            _request(),
+            id="refs-mcp-big",
+            task_queue="refs",
+        )
+        await asyncio.wait_for(handle.result(), 120)
+        largest, _, _ = await _payload_sizes(handle)
+    assert largest < LIMIT
+    messages = DurableFileThreadStore(str(tmp_path / "threads")).load_messages(
+        "test", "refs"
+    )
+    outputs = [
+        str(m.get("output") or m.get("content"))
+        for m in messages
+        if m.get("type") == "function_call_output" or m.get("role") == "tool"
+    ]
+    assert any("stored" in o for o in outputs), outputs[:1]
+
+
+def test_tool_output_cap_keeps_valid_utf8_and_marks_the_cut():
+    from gc_core.execution.contracts import ToolResult
+    from gc_ua_temporalio.native_activities import cap_tool_output
+
+    small = ToolResult("ok")
+    assert cap_tool_output(small).output == "ok"
+    big = cap_tool_output(ToolResult("я" * 1_000_000), limit=1001)
+    assert big.output.startswith("я" * 500)
+    assert "вывод обрезан воркером Temporal" in big.output
+    assert "из 2000000 байт" in big.output
+    big.output.encode()  # без разорванных символов

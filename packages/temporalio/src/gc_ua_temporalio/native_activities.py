@@ -48,6 +48,29 @@ from gc_ua_temporalio.native_contracts import (
     NativePreparedContext,
 )
 
+#: Потолок вывода инструмента через границу activity (байты UTF-8). Результат
+#: activity — запись истории Temporal (лимит 2 МБ). Встроенные инструменты
+#: ограничивают вывод сами (``exec_command`` — 40 000 символов); потолок
+#: нужен ответам MCP-серверов. Модель видит до
+#: ``agent.tool_output_inline_max_chars``, остальное листает через
+#: ``read_stored_tool_output`` — в пределах этого потолка.
+TOOL_OUTPUT_LIMIT_BYTES = 1024 * 1024
+
+
+def cap_tool_output(result, limit=TOOL_OUTPUT_LIMIT_BYTES):
+    """``ToolResult`` с выводом не больше ``limit`` байт и пометкой обрезки."""
+    output = result.output if isinstance(result.output, str) else ""
+    encoded = output.encode()
+    if len(encoded) <= limit:
+        return result
+    kept = encoded[:limit].decode(errors="ignore")
+    result.output = (
+        f"{kept}\n[вывод обрезан воркером Temporal: показано "
+        f"{len(kept.encode())} из {len(encoded)} байт — лимит записи истории]"
+    )
+    return result
+
+
 #: Владельцев хода с сообщениями в памяти воркера (``message_refs``).
 _MESSAGE_CACHE_OWNERS = 256
 
@@ -374,14 +397,20 @@ class NativeActivities:
                     owner = await ensure(call)
             if host is None or owner is None:
                 raise ExecutionFailure("Live tool requires a resource owner")
-            return (
-                await host.execute(
-                    owner,
-                    request,
-                    context_id=call.owner_id if call.child_context else None,
-                )
-            ).result
-        return await execute_native_tool_effect(request, ctx=ctx)
+            return cap_tool_output(
+                (
+                    await host.execute(
+                        owner,
+                        request,
+                        context_id=call.owner_id
+                        if call.child_context
+                        else None,
+                    )
+                ).result
+            )
+        return cap_tool_output(
+            await execute_native_tool_effect(request, ctx=ctx)
+        )
 
     @activity.defn(name="agent.memory.execute")
     async def memory(self, call: NativeCall) -> ProjectMemoryReply:

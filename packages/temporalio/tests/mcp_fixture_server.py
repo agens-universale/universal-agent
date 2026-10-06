@@ -47,4 +47,10 @@ async def value(ctx: Context) -> str:
     )
 
 
+@app.tool()
+async def big(size: int) -> str:
+    """Ответ заданного размера — для проверки лимитов записи истории."""
+    return "z" * size
+
+
 app.run(transport=transport)

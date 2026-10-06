@@ -400,9 +400,7 @@ async def test_worker_state_inside_workspace_is_protected(
     database = str(tmp_path / "state" / "threads.sqlite")
     paths = NativeWorkerConfig.model_validate(
         {
-            "thread_stores": {
-                "files": {"kind": "sqlite", "path": database}
-            },
+            "thread_stores": {"files": {"kind": "sqlite", "path": database}},
             "profiles": {},
         }
     ).state_paths()
