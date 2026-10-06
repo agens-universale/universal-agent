@@ -48,8 +48,9 @@ def wrap_local_for_tracking(inner: Any, ctx: Any) -> Any:
     """Local → TrackingFsBackend. Уже Tracking / не Local — без изменений."""
     if isinstance(inner, TrackingFsBackend):
         return inner
-    # LocalFsBackend по имени класса — без импорта tools.* на module load
-    if type(inner).__name__ != "LocalFsBackend":
+    # LocalFsBackend по имени класса (с наследниками: SandboxBackend) — без
+    # импорта tools.* на module load
+    if "LocalFsBackend" not in {c.__name__ for c in type(inner).__mro__}:
         return inner
     return TrackingFsBackend(inner, ctx)
 
@@ -322,6 +323,13 @@ class TrackingFsBackend:
     @is_sandbox.setter
     def is_sandbox(self, value: bool) -> None:
         self._inner.is_sandbox = value
+
+    @property
+    def isolates_exec(self) -> bool:
+        # Песочница (SandboxBackend наследует LocalFsBackend и поэтому
+        # оборачивается здесь) изолирует команды: без проброса MCP с
+        # execute_on: os_backend поднимался бы в процессе агента.
+        return getattr(self._inner, "isolates_exec", False)
 
     def isabs(self, path: str) -> bool:
         return self._inner.isabs(path)

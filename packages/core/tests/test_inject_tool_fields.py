@@ -180,7 +180,7 @@ class TestBuildToolsData:
         tools_data, _, _, _ = await abuild_tools_data(make_settings(cfg))
         assert tools_data["subagent_worker"]["injected_fields"] == []
 
-    async def test_strict_plus_inject_makes_all_required(self):
+    async def test_strict_flag_does_not_rewrite_canonical_required(self):
         tools_data, _, _, _ = await abuild_tools_data(
             make_settings(
                 _base_config(
@@ -190,7 +190,9 @@ class TestBuildToolsData:
             )
         )
         params = tools_data["fs_write_file"]["spec"]["parameters"]
-        assert set(params["required"]) == set(params["properties"].keys())
+        # Флаг больше не запекается в канон: семантически необязательные поля
+        # остаются вне required. Полный required — только на проводе.
+        assert set(params["required"]) != set(params["properties"].keys())
 
 
 class TestApplyTool:

@@ -4025,8 +4025,19 @@ class TraceScreen(Screen):
                     self._thinking.set_turn_summary(_turn_edits)
         # Спадающий фронт прогона True→False → зафиксировать терминальный статус
         # в meta.tui.status (TUI-owned), чтобы бейдж пережил переоткрытие сессии.
+        _finished_before_poll = (
+            runner is not None
+            and getattr(runner, "_last_target", None)
+            == (self._active_task_id, self.app._system)
+            and self._store is not None
+            and (
+                self._store.get_task_meta(self._active_task_id).get("tui")
+                or {}
+            ).get("status")
+            == "running"
+        )
         if (
-            self._was_running
+            (self._was_running or _finished_before_poll)
             and not is_running
             and self._store is not None
             and self._active_task_id is not None

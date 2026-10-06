@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from typing import Optional
 
 from gc_core import model_picker
+from gc_core.utils.http_auth import authorization_attempts
 
 # Заглушка для POST-проверки без заданной модели: инертное имя, которое сервер
 # гарантированно не знает — ответ (401 vs 400/404/5xx) судит только токен.
@@ -28,6 +29,20 @@ _DUMMY_MODEL = "gc-connection-probe"
 # него тем же, что на пользовательский, — он их не различает, и «принят» заявлять
 # нельзя (LiteLLM отдаёт 400 «No connected db.» на любой неизвестный ключ).
 _CANARY_TOKEN = "Bearer gc-probe-invalid-token"
+_CANARY_NAKED = "gc-probe-invalid-token"
+
+
+def accepted_literal_auth(
+    source: str | None, accepted: str | None
+) -> str | None:
+    """Принятая форма для черновика; ссылки на секреты не раскрываются и не заменяются."""
+    if not source or "${ENV:" in source or "${FILE:" in source:
+        return None
+    if accepted == source.strip() or accepted not in authorization_attempts(
+        source
+    ):
+        return None
+    return accepted
 
 
 def _non_latin1_reason(auth: Optional[str]) -> str:
@@ -67,6 +82,10 @@ class ProbeResult:
     # оба отвечает 400, но валидному говорит «Invalid model name» (дошёл до
     # проверки модели), а мусорному «No connected db.» (застрял на поиске ключа).
     body_signature: str = ""
+    # Форма Authorization, которую сервер принял (`authorization_attempts`).
+    # None — токен не принимали / auth не интерпретировался. Только результат пробы;
+    # исходный источник токена в форме и конфиге не меняется.
+    accepted_auth: Optional[str] = None
 
     @property
     def reachable(self) -> bool:
@@ -96,7 +115,7 @@ def probe(
         )
     else:
         out = fetch_ex(endpoint, auth, verify=verify)
-    if out.models:
+    if out.models is not None:
         return ProbeResult(
             "ok", out.status, out.models, out.latency_ms, "доступен"
         )
@@ -117,18 +136,23 @@ def probe(
     # с инертной заглушкой и судит только токен.
     dummy = not model
     probe_model = model or _DUMMY_MODEL
-    if post_ex is None:
-        status, net_err, lat, payload = model_picker.probe_post(
-            endpoint,
-            auth,
-            probe_model,
-            verify=verify,
-            config_proxy=config_proxy,
-        )
-    else:
-        status, net_err, lat, payload = post_ex(
-            endpoint, auth, probe_model, verify=verify
-        )
+    # Справочники и чат могут принимать разные схемы. Подбор для чата
+    # начинается с настроенного формата независимо от ответа справочников.
+    for variant in authorization_attempts(auth) or [auth]:
+        if post_ex is None:
+            status, net_err, lat, payload = model_picker.probe_post(
+                endpoint,
+                variant,
+                probe_model,
+                verify=verify,
+                config_proxy=config_proxy,
+            )
+        else:
+            status, net_err, lat, payload = post_ex(
+                endpoint, variant, probe_model, verify=verify
+            )
+        if status != 401:
+            break
     return _verdict_from_post(status, net_err, lat, payload, dummy)
 
 
@@ -357,6 +381,17 @@ def interpret_auth(
     return control
 
 
+def _canary_for(auth: str) -> str:
+    """Канарейка в той же форме, что и проверяемый заголовок.
+
+    Сервер, который отличает «голый ключ» от ``Bearer``, на чужой схеме
+    ответит одинаково и на рабочий токен, и на мусор — сравнение было бы
+    не про этот токен."""
+    if auth.lower().startswith("bearer "):
+        return _CANARY_TOKEN
+    return _CANARY_NAKED
+
+
 def probe_connection(
     endpoint: str,
     token: Optional[str],
@@ -373,28 +408,44 @@ def probe_connection(
     спорную ветку: сервер отказал не 401-м, и без неё пришлось бы гадать, отказ
     это про токен или уже про модель.
 
+    Принятая форма заголовка возвращается вызывающему для рабочего запроса.
+
     Живёт здесь, а не в экранах: пробу зовут и /settings, и мастер, а скопированный
     differential-танец разъехался бы при первой правке одной из копий."""
     run = probe_fn or probe_auth
-    has_token = bool(token)
+    attempts = authorization_attempts(token)
+    has_token = bool(attempts)
     control = run(endpoint, None, verify, model, config_proxy=config_proxy)
     with_token = canary = None
+    tried_variant: Optional[str] = None
     if (
         control.verdict == "rejected"
         and control.http_status == 401
         and has_token
     ):
-        with_token = run(
-            endpoint, token, verify, model, config_proxy=config_proxy
-        )
-        st = with_token.http_status
-        ambiguous = st is not None and st != 401 and not (200 <= st < 300)
-        if ambiguous:
-            canary = run(
-                endpoint,
-                _CANARY_TOKEN,
-                verify,
-                model,
-                config_proxy=config_proxy,
+        for index, variant in enumerate(attempts):
+            with_token = run(
+                endpoint, variant, verify, model, config_proxy=config_proxy
             )
-    return interpret_auth(control, with_token, has_token, canary=canary)
+            tried_variant = variant
+            status = with_token.http_status
+            if status == 401 and index + 1 < len(attempts):
+                continue
+            ambiguous = (
+                status is not None
+                and status != 401
+                and not (200 <= status < 300)
+            )
+            if ambiguous:
+                canary = run(
+                    endpoint,
+                    _canary_for(variant),
+                    verify,
+                    model,
+                    config_proxy=config_proxy,
+                )
+            break
+    result = interpret_auth(control, with_token, has_token, canary=canary)
+    if result.auth_state == "accepted" and tried_variant is not None:
+        return replace(result, accepted_auth=tried_variant)
+    return result

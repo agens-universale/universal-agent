@@ -23,6 +23,10 @@ from gc_core.tools.exec.redirect_policy import (
 from gc_core.tools.exec.redirect_policy import (
     TooManyRedirects as _TooManyRedirects,
 )
+from gc_core.tools.exec.remote_fetch import (
+    afetch_via_backend,
+    fetches_on_backend,
+)
 from gc_core.utils.async_http import get_async_client
 from gc_core.utils.http_proxy import resolve_proxies
 
@@ -220,6 +224,22 @@ class SimpleFetchUrl(FetchUrlBase):
         )
         for attempt in range(1, attempts + 1):
             try:
+                if fetches_on_backend(
+                    self._settings_source, self._backend_or_none()
+                ):
+                    # Сеть у среды исполнения (см. remote_fetch): политика та же.
+                    response = await afetch_via_backend(
+                        self._backend,
+                        normalized_url,
+                        headers,
+                        effective_timeout,
+                        normalized_proxy,
+                        allowed_schemes=_allowed_schemes,
+                        url_blacklist=_url_blacklist,
+                        max_redirects=_max_redirects,
+                    )
+                    response.raise_for_status()
+                    return response, None
                 # Общая петля из ``redirect_policy``: одно правило на три тула.
                 response = await fetch_validating_redirects(
                     session,

@@ -5,22 +5,22 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-ua"
 
-version = "0.3.1"
+version = "0.4.0"
 description = "GigaCode Universal Agent — полный агент (ядро + CLI + TUI + server)"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [
-    "gc-core==0.3.1",
-    "gc-cli==0.3.1",
-    "gc-tui==0.3.1",
-    "gc-server==0.3.1",
-    "gc-mcp==0.3.1",
-    "gc-acp==0.3.1",
-    "gc-chat==0.3.1",
+    "gc-core==0.4.0",
+    "gc-cli==0.4.0",
+    "gc-tui==0.4.0",
+    "gc-server==0.4.0",
+    "gc-mcp==0.4.0",
+    "gc-acp==0.4.0",
+    "gc-chat==0.4.0",
 ]
 
 [project.optional-dependencies]
-temporal = ["gc-ua-temporalio==0.3.1"]
+temporal = ["gc-ua-temporalio==0.4.0"]
 
 all = []
 
@@ -59,7 +59,7 @@ lint = [
 test = [
 
     "gc-testkit",
-    "gc-ua-temporalio==0.3.1",
+    "gc-ua-temporalio==0.4.0",
     "pytest>=9.0.3",
     "pytest-asyncio>=0.23",
     "office-mcp",

@@ -804,6 +804,20 @@ class SkillsRegistry:
         }
 
 
+def disabled_skills_from_config(settings: Any) -> List[str]:
+    """``agent.disable_skills``: id паков и скиллов, без пустых.
+
+    ``settings`` — всё, что принимает ``settings_of``; ``None`` — список пуст.
+    """
+    if settings is None:
+        return []
+    return [
+        item.strip()
+        for item in settings_of(settings).agent.disable_skills
+        if item.strip()
+    ]
+
+
 def get_skills_registry(
     settings: Any = None,
     *,
@@ -826,15 +840,11 @@ def get_skills_registry(
       + Project (<cwd>/.gc/skills/), приоритет project > user > system.
     """
     skills_root: Optional[str] = None
-    disable_skills: List[str] = []
+    disable_skills = disabled_skills_from_config(settings)
     if settings is not None:
-        app = settings_of(settings)
-        path = (app.paths.skills_data_path or "").strip()
+        path = (settings_of(settings).paths.skills_data_path or "").strip()
         if path:
             skills_root = path
-        disable_skills = [
-            item.strip() for item in app.agent.disable_skills if item.strip()
-        ]
 
     if skills_root is not None:
         return SkillsRegistry(
@@ -849,5 +859,6 @@ __all__ = [
     "AmbiguousSkillId",
     "Skill",
     "SkillsRegistry",
+    "disabled_skills_from_config",
     "get_skills_registry",
 ]

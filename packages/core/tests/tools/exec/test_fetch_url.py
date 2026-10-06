@@ -537,3 +537,73 @@ def test_simple_fetch_url_empty_proxy_is_direct(monkeypatch):
         assert data["ok"] is True, data
     for call in seen.get("calls", []):
         assert not call.get("proxies"), call
+
+
+def test_fetch_url_on_os_backend_uses_remote_carrier(monkeypatch):
+    # os_backend.fetch_url_execute_on: os_backend + sandbox-бэкенд → GET идёт
+    # через `arun_python` бэкенда, хостовый httpx не трогается.
+    import base64
+    from types import SimpleNamespace as NS
+
+    from gc_core.tools.exec.remote_fetch import RESULT_MARKER
+
+    _install(monkeypatch, RuntimeError("host network must not be used"))
+
+    class Remote:
+        is_sandbox = True
+        calls = []
+
+        async def arun_python(self, code, **kwargs):
+            self.calls.append(code)
+            payload = {
+                "status": 200,
+                "headers": [["Content-Type", "text/html; charset=utf-8"]],
+                "truncated": False,
+                "body": base64.b64encode(
+                    b"<html><body><article><p>remote page text here</p></article></body></html>"
+                ).decode(),
+                "url": "https://example.org/page",
+            }
+            return NS(
+                stdout=RESULT_MARKER + json.dumps(payload),
+                stderr="",
+                return_code=0,
+                timed_out=False,
+            )
+
+        async def aexec(self, *a, **k):
+            raise AssertionError
+
+        async def aexec_argv(self, *a, **k):
+            raise AssertionError
+
+    for cls in (FetchUrl, SimpleFetchUrl):
+        cfg = {
+            "os_backend.kind": "docker",
+            "os_backend.docker.name": "box",
+            "os_backend.fetch_url_execute_on": "os_backend",
+        }
+        tool = with_local_ctx(cls, cfg)
+        remote = Remote()
+        tool._ctx.os_backend = remote
+        data = json.loads(_call(tool, url="https://example.org/page"))
+        assert data["ok"] is True, data
+        # Короткая страница: экстрактор может уйти в preview — важно, что текст пришёл.
+        assert "remote page text here" in (data["content"] or data["preview"])
+        assert data["status_code"] == 200
+        assert remote.calls and "example.org/page" in remote.calls[0]
+
+
+def test_fetch_url_on_host_backend_ignores_os_backend_setting(monkeypatch):
+    # local-бэкенд не sandbox → качаем как раньше, хостом.
+    _install(monkeypatch, _resp("<html><body><p>host text</p></body></html>"))
+    cfg = {
+        "os_backend.kind": "local",
+        "os_backend.fetch_url_execute_on": "os_backend",
+    }
+    tool = with_local_ctx(SimpleFetchUrl, cfg)
+    data = json.loads(_call(tool, url="https://example.org/"))
+    assert data["ok"] is True
+    assert "host text" in data["content"] or "host text" in data.get(
+        "preview", ""
+    )

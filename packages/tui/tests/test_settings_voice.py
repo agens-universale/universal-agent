@@ -119,6 +119,49 @@ _URL = "https://s.x/v1/audio/transcriptions"
 _OURS = "http://127.0.0.1:8735/v1/audio/transcriptions"
 
 
+@pytest.mark.asyncio
+async def test_voice_ctrl_s_saves_without_focus_and_exits(tmp_path):
+    from gc_tui.app import TuiApp
+    from textual.widgets import Input
+
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
+    async with app.run_test() as pilot:
+        scr, fake = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        await _open_cloud(app, scr, pilot)
+        scr.query_one("#voice-url", Input).value = _URL
+        scr.query_one("#voice-model", Input).value = "whisper-1"
+        scr.set_focus(None)
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert fake.wired["url"] == _URL
+        assert scr._view == "menu"
+
+
+@pytest.mark.asyncio
+async def test_voice_enter_in_token_does_not_save_and_exit_asks(tmp_path):
+    from gc_tui.app import TuiApp
+    from textual.widgets import Input
+
+    app = TuiApp(settings=tui_settings({"agent.model": "M"}))
+    async with app.run_test() as pilot:
+        scr, fake = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
+        await _open_cloud(app, scr, pilot)
+        scr.query_one("#voice-token", Input).value = "changed"
+        scr._set_voice_cursor(group="fields", position=1)
+        await pilot.press("enter")
+        assert "wire_cloud" not in fake.calls
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr._dirty_exit_confirm
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr.query_one("#voice-token", Input).value == "changed"
+        await pilot.press("escape", "enter")
+        await pilot.pause()
+        assert scr._view == "menu"
+        assert "wire_cloud" not in fake.calls
+
+
 def _mk_screen(tmp_path, status, on_apply=None, config_text="model: m\n"):
     from gc_tui.screens.settings import SettingsScreen
 
@@ -789,7 +832,7 @@ async def test_ctrl_u_clears_the_saved_voice_token(tmp_path):
             _footer(scr) != _VOICE_FOOTER_CLOUD_TOKEN
         )  # и клавишу больше не обещаем
 
-        await pilot.press("enter")  # сохранить форму
+        await pilot.press("ctrl+s")  # сохранить форму и выйти
         await pilot.pause()
         assert fake.calls == ["wire_cloud"]
         assert fake.wired["token"] == "", (
@@ -1008,7 +1051,7 @@ async def test_footer_lists_real_keys_of_the_cloud_pane(tmp_path):
         await _open_cloud(app, scr, pilot)
         for part in (
             "↑/↓",
-            "Enter — сохранить и включить",
+            "Ctrl+S — сохранить и выйти",
             "Ctrl+Space — проверить",
             "PgUp/PgDn — секции",
             "Esc — меню",
@@ -1033,14 +1076,14 @@ async def test_footer_follows_the_pane_and_the_cursor(tmp_path):
         await _to_field(pilot)  # в поле «Язык» (список раскрылся)
         await pilot.press("escape")  # свернуть — футер снова про место
         await pilot.pause()
-        assert "Enter — сохранить язык" in _footer(scr)
+        assert "Ctrl+S — сохранить и выйти" in _footer(scr)
         assert "Ctrl+Space — проверить" not in _footer(scr)
         await pilot.press("tab")  # обратно на строку режима
         await pilot.press("up")  # на «Свой endpoint»
         await pilot.pause()
         assert "Ctrl+Space — проверить" in _footer(scr)
         # в облаке Enter делает два дела разом — футер обещает ровно это
-        assert "Enter — сохранить и включить" in _footer(scr)
+        assert "Ctrl+S — сохранить и выйти" in _footer(scr)
         # на строке (не на «Языке») футер облака — ровно _VOICE_FOOTER_CLOUD, без хинта
         # Ctrl+Space (он только на самих полях со списком, см. _VOICE_FOOTER_CLOUD_LIST)
         assert _footer(scr) == _VOICE_FOOTER_CLOUD
@@ -1130,17 +1173,11 @@ async def test_escape_after_a_pick_does_not_undo_the_saved_language(tmp_path):
         scr.query_one("#voice-lang", Input).value = ""
         await pilot.pause()
         await _type(pilot, "англ")  # фильтр → en
-        await pilot.press("enter")  # подставили и сохранили
+        await pilot.press("enter")  # подставили
+        await pilot.press("ctrl+s")  # сохранить форму и выйти
         await pilot.pause()
         assert fake.language == "en"
-        assert scr.query_one("#voice-lang", Input).value == "en"
-        await _type(pilot, "k")  # печать раскрывает список заново
-        await pilot.press("escape")  # откат фильтра
-        await pilot.pause()
-        assert scr.query_one("#voice-lang", Input).value == "en"
-        await pilot.press("enter")  # доверчивый Enter — язык тот же
-        await pilot.pause()
-        assert fake.language == "en"
+        assert scr._view == "menu"
 
 
 @pytest.mark.asyncio
@@ -1163,7 +1200,7 @@ async def test_footer_follows_a_mouse_click_into_the_field(tmp_path):
         assert "Esc — свернуть" in _footer(scr)
         await pilot.press("escape")
         await pilot.pause()
-        assert "Enter — сохранить язык" in _footer(scr)
+        assert "Ctrl+S — сохранить и выйти" in _footer(scr)
 
 
 # --- снимок статуса: один на кадр -------------------------------------------
@@ -1494,7 +1531,7 @@ async def test_enter_from_any_cloud_field_saves_endpoint(tmp_path):
             await _open_cloud(app, scr, pilot)
             await _to_field(pilot, steps)
             assert _focused_id(scr) == field
-            await pilot.press("enter")
+            await pilot.press("ctrl+s")
             await pilot.pause()
             assert fake.calls == ["wire_cloud"], field
             assert fake.wired["url"] == "https://old.x/v1/audio/transcriptions"
@@ -1860,7 +1897,7 @@ async def test_enter_on_cloud_row_saves_and_reloads(tmp_path):
         scr.query_one("#voice-url", Input).value = _URL
         scr.query_one("#voice-token", Input).value = "sk"
         scr.query_one("#voice-model", Input).value = "wh"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.wired == dict(
             url=_URL, token="sk", model="wh", language="ru"
@@ -1891,7 +1928,7 @@ async def test_cloud_save_blocked_on_a_readonly_config(tmp_path, monkeypatch):
         scr.query_one("#voice-url", Input).value = _URL
         scr.query_one("#voice-token", Input).value = "sk"
         scr.query_one("#voice-model", Input).value = "whisper-1"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert app.screen is scr  # приложение живо
         notice = " ".join(str(w.render()) for w in scr.query(Static))
@@ -1916,7 +1953,7 @@ async def test_cloud_save_survives_a_filesystem_refusal(tmp_path):
         scr.query_one("#voice-url", Input).value = _URL
         scr.query_one("#voice-token", Input).value = "sk"
         scr.query_one("#voice-model", Input).value = "whisper-1"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert app.screen is scr
         notice = " ".join(str(w.render()) for w in scr.query(Static))
@@ -1937,7 +1974,7 @@ async def test_enter_on_cloud_without_url_shows_error_and_focuses_url(
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF)
         await _open_cloud(app, scr, pilot)
-        await pilot.press("enter")  # URL пуст
+        await pilot.press("ctrl+s")  # URL пуст
         await pilot.pause()
         assert fake.calls == []
         ed = scr.query_one(VoiceEndpointEditor)
@@ -1956,7 +1993,7 @@ async def test_cloud_save_keeps_old_token_when_field_left_empty(tmp_path):
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
-        await pilot.press("enter")  # token не тронут
+        await pilot.press("ctrl+s")  # token не тронут
         await pilot.pause()
         assert fake.wired["token"] == "old-token"
         assert fake.wired["url"] == "https://old.x/v1/audio/transcriptions"
@@ -1975,7 +2012,7 @@ async def test_cloud_save_language_empty_falls_back_to_ru(tmp_path):
         await _open_cloud(app, scr, pilot)
         assert scr.query_one("#voice-lang", Input).value == "en"
         scr.query_one("#voice-lang", Input).value = ""
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.wired["language"] == "ru"
 
@@ -1998,9 +2035,9 @@ async def test_cloud_save_moves_the_mark(tmp_path):
         await _open_cloud(app, scr, pilot)
         scr.query_one("#voice-url", Input).value = _URL
         scr.query_one("#voice-model", Input).value = "whisper-1"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
-        assert "(●) Свой endpoint" in _rows(scr)[1]
+        assert scr._view == "menu"
 
 
 # --- Enter на «Языке» локального режима ---------------------------------------
@@ -2023,7 +2060,7 @@ async def test_enter_on_local_language_saves_it_to_managed(tmp_path):
         await _to_field(pilot)  # в единственное правимое поле
         assert _focused_id(scr) == "voice-lang"
         scr.query_one("#voice-lang", Input).value = "en"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == ["set_local_language"]
         assert fake.language == "en"
@@ -2043,7 +2080,7 @@ async def test_local_language_save_does_not_touch_the_endpoint(tmp_path):
         await _open_voice(app, scr, pilot)
         await _to_field(pilot)
         scr.query_one("#voice-lang", Input).value = "de"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert "wire_cloud" not in fake.calls
         assert (tmp_path / "config.yml").read_text(
@@ -2062,7 +2099,7 @@ async def test_local_language_empty_falls_back_to_ru(tmp_path):
         await _open_voice(app, scr, pilot)
         await _to_field(pilot)
         scr.query_one("#voice-lang", Input).value = ""
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.language == "ru"
 
@@ -2235,11 +2272,10 @@ async def test_enter_picks_the_code_and_saves_the_local_language(tmp_path):
         await pilot.pause()
         await _type(pilot, "тур")
         await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
-        assert scr.query_one("#voice-lang", Input).value == "tr"
         assert fake.calls == ["set_local_language"] and fake.language == "tr"
-        assert not _lang_rows(scr)  # список свернулся
-        assert _focused_id(scr) == "voice-lang"
+        assert scr._view == "menu"
 
 
 @pytest.mark.asyncio
@@ -2260,6 +2296,7 @@ async def test_enter_picks_the_code_and_saves_the_cloud_endpoint(tmp_path):
         await _type(pilot, "исп")
         assert _lang_rows(scr) == ["▸ es    испанский"]
         await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == ["wire_cloud"]
         assert fake.wired["language"] == "es"
@@ -2317,14 +2354,14 @@ async def test_own_code_is_saved_as_typed(tmp_path):
         await pilot.pause()
         await _type(pilot, "zz")
         assert _lang_rows(scr) == []
-        assert (
-            _lang_hint(scr)
-            == "свой код · Enter — сохранить как есть · Esc — свернуть"
+        assert _lang_hint(scr) == (
+            "свой код · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
         )
         await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.language == "zz"
-        assert scr.query_one("#voice-lang", Input).value == "zz"
+        assert scr._view == "menu"
 
 
 @pytest.mark.asyncio
@@ -2340,7 +2377,7 @@ async def test_saved_own_code_highlights_nothing_on_open(tmp_path):
         await _open_local(app, scr, pilot)
         await _to_field(pilot)
         assert len(_lang_rows(scr)) == 100 and _lang_selected(scr) == []
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.language == "zz"
 
@@ -2419,7 +2456,7 @@ async def test_escape_returns_the_previous_code_and_no_filter_leaks_into_the_con
         assert (
             scr.query_one("#voice-lang", Input).value == "ru"
         )  # фильтр отменён
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == ["set_local_language"] and fake.language == "ru"
 
@@ -2442,7 +2479,7 @@ async def test_a_bad_language_code_is_not_saved_locally(tmp_path):
         await pilot.pause()
         scr.query_one("#voice-lang", Input).value = "abcd"
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == [] and fake.language == "ru"
         assert "2-3 латинские буквы" in str(
@@ -2462,7 +2499,7 @@ async def test_a_bad_language_code_is_not_saved_to_the_cloud(tmp_path):
         await _open_cloud(app, scr, pilot)  # курсор на строке — списка нет
         scr.query_one("#voice-lang", Input).value = "нем"
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == [] and fake.wired == {}
         assert "2-3 латинские буквы" in str(
@@ -2485,20 +2522,10 @@ async def test_cloud_save_leaves_the_list_collapsed(tmp_path):
         await _to_field(pilot, 3)
         assert len(_lang_rows(scr)) == 100
         await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == ["wire_cloud"]
-        assert not _lang_rows(scr)
-        assert "Esc — свернуть" not in _footer(scr)
-        assert _focused_id(scr) == "voice-lang"
-        await pilot.press("up")  # стрелки свободны — ушли на «Модель»
-        await pilot.press("down")  # и вернулись на «Язык»
-        await pilot.pause()
-        assert scr.query_one("#voice-lang", Input).value == "ru"
-        # Код в поле есть — вход его список не раскрывает (канон 2026-08-20); показать
-        # список по-прежнему может Alt+↓.
-        assert not _lang_rows(scr)
-        await _expand_list(pilot)
-        assert len(_lang_rows(scr)) == 100
+        assert scr._view == "menu"
 
 
 @pytest.mark.asyncio
@@ -2568,14 +2595,12 @@ async def test_footer_matches_the_hint_when_nothing_matches(tmp_path):
         await pilot.pause()
         await _type(pilot, "zz")
         assert _footer(scr) == (
-            "↑/↓ · Enter — сохранить как есть · Esc — свернуть · PgUp/PgDn — секции"
+            "↑/↓ · Enter — оставить как есть · Ctrl+S — сохранить и выйти · Esc — свернуть"
         )
         await pilot.press("backspace")
         await pilot.press("backspace")  # вернули совпадения — футер списочный
         await pilot.pause()
-        assert _lang_rows(scr) and "Enter — подставить и сохранить" in _footer(
-            scr
-        )
+        assert _lang_rows(scr) and "Enter — подставить" in _footer(scr)
 
 
 @pytest.mark.asyncio
@@ -2590,11 +2615,11 @@ async def test_footer_talks_about_the_list_while_it_is_open(tmp_path):
         await _open_local(app, scr, pilot)
         await _to_field(pilot)
         assert _footer(scr) == (
-            "↑/↓ — выбор языка · Enter — подставить и сохранить · Esc — свернуть · PgUp/PgDn — секции"
+            "↑/↓ — выбор языка · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
         )
         await pilot.press("escape")
         await pilot.pause()
-        assert "Enter — сохранить язык" in _footer(scr)
+        assert "Ctrl+S — сохранить и выйти" in _footer(scr)
 
 
 @pytest.mark.asyncio
@@ -2704,7 +2729,7 @@ async def test_model_list_opens_on_alt_down_over_a_saved_id(tmp_path):
         ]
         assert (
             _model_hint(scr)
-            == "свой id · Enter — сохранить как есть · Esc — свернуть"
+            == "свой id · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
         )
         # адрес и сохранённый токен — из полей/файла, verify — дефолт схемы
         assert fake.model_calls == [
@@ -2795,7 +2820,7 @@ async def test_model_list_closed_hint_says_reread_not_show(tmp_path):
         await pilot.press("escape")  # свернуть список, курсор остаётся на поле
         await pilot.pause()
         hint = _model_hint(scr)
-        assert hint == "Alt+↓ — перечитать список"
+        assert hint == "Enter — показать список"
 
 
 @pytest.mark.asyncio
@@ -2816,7 +2841,7 @@ async def test_model_list_failure_does_not_break_the_section(tmp_path):
         )
         scr.query_one("#voice-model", Input).value = "my-own-stt"
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.wired["model"] == "my-own-stt"
 
@@ -2872,6 +2897,7 @@ async def test_enter_on_a_model_row_saves_the_endpoint(tmp_path):
         await _type(pilot, "faster")
         assert _model_rows(scr) == ["▸ Systran/faster-whisper-small"]
         await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == ["wire_cloud"]
         assert fake.wired["model"] == "Systran/faster-whisper-small"
@@ -2896,7 +2922,7 @@ async def test_saved_model_is_highlighted_and_kept_by_a_trusting_enter(
         assert len(_model_rows(scr)) == 2 and not [
             r for r in _model_rows(scr) if r.startswith("▸")
         ]
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.wired["model"] == "whisper-old"
 
@@ -2985,12 +3011,12 @@ async def test_footer_follows_the_model_field_and_its_list(tmp_path):
         fake.models = _MODELS
         await _open_model_field(app, scr, pilot)
         assert _footer(scr) == (
-            "↑/↓ · Enter — сохранить как есть · Esc — свернуть · Ctrl+Space — проверить связь · PgUp/PgDn — секции"
+            "↑/↓ · Enter — оставить как есть · Ctrl+S — сохранить и выйти · Esc — свернуть · Ctrl+Space — проверить связь"
         )
         await pilot.press("escape")  # свернуть список
         await pilot.pause()
         assert _MODEL_RELOAD_HINT in _footer(scr)
-        assert "Enter — сохранить" in _footer(scr)
+        assert "Ctrl+S — сохранить и выйти" in _footer(scr)
         assert "Ctrl+Space — проверить связь" in _footer(scr)
 
 
@@ -3021,7 +3047,7 @@ async def test_alt_down_over_a_filtered_model_list_keeps_the_saved_id(
         await pilot.press("escape")  # свернуть — откат фильтра
         await pilot.pause()
         assert scr.query_one("#voice-model", Input).value == "whisper-old"
-        await pilot.press("enter")  # доверчивый Enter — модель прежняя
+        await pilot.press("ctrl+s")  # сохранить модель прежнюю и выйти
         await pilot.pause()
         assert fake.wired["model"] == "whisper-old"
 
@@ -3334,7 +3360,8 @@ async def test_picking_a_foreign_url_preset_blocks_the_save_until_a_model_is_cho
         assert scr.query_one("#voice-model", Input).value == "whisper-old"
         await pilot.press("down")  # подсветка — на другом пресете
         await pilot.pause()
-        await pilot.press("enter")  # подставить и попытаться сохранить
+        await pilot.press("enter")  # подставить
+        await pilot.press("ctrl+s")  # попытаться сохранить
         await pilot.pause()
         assert scr.query_one("#voice-model", Input).value == ""
         assert fake.calls == []
@@ -3406,9 +3433,8 @@ async def test_footer_follows_the_url_field_and_its_list(tmp_path):
         # Глагол — тот же, что у языка/моделей (находка финального ревью 2026-08-05):
         # Enter здесь ТОЖЕ безусловно сохраняет панель, и молчать об этом — ложь.
         assert _footer(scr) == (
-            "↑/↓ — выбор адреса · Enter — подставить и сохранить · "
-            "Esc — свернуть · Ctrl+Space — проверить связь · "
-            "PgUp/PgDn — секции"
+            "↑/↓ — выбор адреса · Enter — подставить · Ctrl+S — сохранить и выйти · "
+            "Esc — свернуть · Ctrl+Space — проверить связь"
         )
         assert _footer(scr) == _VOICE_FOOTER_URL_LIST
         await _type(pilot, "-и-точно-больше-ничего-не-подходит")
@@ -3420,9 +3446,9 @@ async def test_footer_follows_the_url_field_and_its_list(tmp_path):
         # верно для обоих смыслов разом.
         assert (
             _url_hint(scr)
-            == "свой адрес · Enter — сохранить как есть · Esc — свернуть"
+            == "свой адрес · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
         )
-        assert "сохранить как есть" in _footer(scr)
+        assert "оставить как есть" in _footer(scr)
 
 
 @pytest.mark.asyncio
@@ -3543,7 +3569,7 @@ async def test_confirm_dropped_when_focus_goes_into_fields(tmp_path):
         assert not scr._voice_awaiting_remove
         assert "Enter — удалить" not in _hint(scr)
         lang.value = "en"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert fake.calls == ["set_local_language"]  # сохранение, а не снос
 
@@ -3973,7 +3999,7 @@ async def test_save_while_probe_in_flight_leaves_single_probe_line(tmp_path):
         await pilot.pause()
         scr._wave_tick()
         await pilot.pause()
-        assert len(scr.query(".set-probe")) == 1
+        assert scr._view == "menu"
 
 
 # --- плашка результата не теряется -------------------------------------------
@@ -4019,12 +4045,11 @@ async def test_save_flash_visible_after_install_and_mouse_click(
             "#voice-url", Input
         ).focus()  # клик мышью — БЕЗ нажатия клавиши
         await pilot.pause()
-        await pilot.press("enter")  # сохранить endpoint
+        await pilot.press("ctrl+s")  # сохранить endpoint
         await pilot.pause()
         await pilot.pause()
         assert fake.calls == ["switch_to_local", "wire_cloud"]
-        flash = [str(w.render()) for w in scr.query("#set-flash")]
-        assert flash and "свой endpoint подключён" in flash[-1]
+        assert scr._view == "menu"
 
 
 @pytest.mark.asyncio
@@ -4037,16 +4062,12 @@ async def test_second_save_flash_visible_without_keys_in_between(tmp_path):
     async with app.run_test() as pilot:
         scr, fake = _mk_screen(tmp_path, OFF, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
-        assert "свой endpoint подключён" in str(
-            scr.query_one("#set-flash", Static).render()
-        )
-        await pilot.press("enter")  # второе сохранение подряд
+        assert scr._view == "menu"
+        await _open_cloud(app, scr, pilot)
+        await pilot.press("ctrl+s")
         await pilot.pause()
-        await pilot.pause()
-        flash = [str(w.render()) for w in scr.query("#set-flash")]
-        assert flash and "свой endpoint подключён" in flash[-1]
         assert fake.calls == ["wire_cloud", "wire_cloud"]
 
 
@@ -4535,7 +4556,7 @@ async def test_footer_hints_alt_down_when_collapsed_on_the_local_language_field(
         await pilot.press("escape")
         await pilot.pause()
         assert LIST_CLOSED_HINT in _footer(scr)
-        assert "Enter — сохранить язык" in _footer(
+        assert "Ctrl+S — сохранить и выйти" in _footer(
             scr
         )  # прежний текст никуда не делся
         await pilot.press("alt+down")
@@ -4575,7 +4596,7 @@ async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_
         assert LIST_CLOSED_HINT not in _footer(scr)
         await pilot.press("down")  # model — сервер не ответил
         await pilot.pause()
-        assert LIST_CLOSED_HINT not in _footer(scr)
+        assert LIST_CLOSED_HINT in _footer(scr)
         await pilot.press("down")  # voice-lang
         await pilot.pause()
         assert _focused_id(scr) == "voice-lang"
@@ -4584,7 +4605,7 @@ async def test_footer_hints_alt_down_and_ctrl_space_when_collapsed_on_the_cloud_
         await pilot.press("escape")
         await pilot.pause()
         assert LIST_CLOSED_HINT in _footer(scr)
-        assert "Enter — сохранить" in _footer(scr)
+        assert "Ctrl+S — сохранить и выйти" in _footer(scr)
         assert "Ctrl+Space — проверить связь" in _footer(
             scr
         )  # проба работает и здесь
@@ -4681,7 +4702,7 @@ def test_open_list_hint_offers_refresh_not_reopen():
     assert (
         "Ctrl+Space" not in _LANG_HINT
     )  # локальный список перечитывать неоткуда
-    assert _LIST_CLOSED_HINT == "Alt+↓ — показать список"
+    assert _LIST_CLOSED_HINT == "Enter — показать список"
 
 
 def _hint_widgets(scr, cls):
@@ -4760,11 +4781,10 @@ async def test_both_modes_report_being_switched_on_the_same_way(tmp_path):
         scr, fake = _mk_screen(tmp_path, CLOUD, config_text=CLOUD_CONFIG)
         await _open_cloud(app, scr, pilot)
         scr.query_one("#voice-url", Input).value = _URL
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
-        assert "свой endpoint подключён" in str(
-            scr.query_one("#set-flash", Static).render()
-        )
+        assert fake.calls == ["wire_cloud"]
+        assert scr._view == "menu"
 
 
 @pytest.mark.asyncio

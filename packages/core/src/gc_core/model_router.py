@@ -17,6 +17,7 @@ Router читает секции `models`/`slots`/`assign` из снимка н�
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -43,6 +44,7 @@ CONSUMERS = (
     "vision",
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
+
 
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
 # кроме subagents-словаря и запрещённого main).
@@ -71,6 +73,11 @@ class ResolvedModel:
     backend_overrides: dict  # плоские ключи backend поверх эффективных
     tariff: object | None
     source: str  # человекочитаемое «почему» — питает витрины/футер/notices
+    # None — секция в записи не задана. {} — задана пустой (replace без ключей).
+    main: dict | None = None
+    auxiliary: dict | None = None
+    # None — у алиаса ключа нет, persist берёт глобальный strip_think.
+    strip_think: bool | None = None
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -135,13 +142,12 @@ def _level_phrase(requested_level: str, resolved_level: str) -> str:
 def serialize_model_entry(entry: ModelEntry) -> dict[str, Any]:
     """Проекция ``ModelEntry`` для роутера.
 
-    ``authorization_header`` — уже Bearer-нормализованное значение (None=наследовать,
-    ""=явно без, иначе значение) — потребителю нужен именно computed-результат, не
-    сырой ``token``. ``backend_overrides`` — только явно заданные ключи
+    ``authorization_header`` — token записи в настроенной форме (None=наследовать,
+    ""=явно без, иначе значение; форму с ``Bearer`` или без выбирает проба). ``backend_overrides`` — только явно заданные ключи
     (``exclude_unset``), чтобы Router накладывал поверх эффективного backend лишь то,
     что модель реально переопределяет, а не дефолты ``BackendConfig``.
     """
-    return {
+    projected = {
         "model": entry.model,
         "url": entry.url,
         "authorization_header": entry.authorization_header,
@@ -154,6 +160,15 @@ def serialize_model_entry(entry: ModelEntry) -> dict[str, Any]:
             else {}
         ),
     }
+    # Пустой dict тоже пишем: он заменяет глобальные kwargs, а отсутствие ключа —
+    # наследование. None (секция не задана) в снимок не кладём.
+    if isinstance(entry.main, dict):
+        projected["main"] = deepcopy(entry.main)
+    if isinstance(entry.auxiliary, dict):
+        projected["auxiliary"] = deepcopy(entry.auxiliary)
+    if isinstance(entry.strip_think, bool):
+        projected["strip_think"] = entry.strip_think
+    return projected
 
 
 class ModelRouter:
@@ -349,6 +364,17 @@ class ModelRouter:
             )
         backend_overrides = entry.get("backend_overrides") or {}
         model_id = entry.get("model") or alias
+        main = (
+            entry.get("main") if isinstance(entry.get("main"), dict) else None
+        )
+        auxiliary = (
+            entry.get("auxiliary")
+            if isinstance(entry.get("auxiliary"), dict)
+            else None
+        )
+        strip_think = entry.get("strip_think")
+        if not isinstance(strip_think, bool):
+            strip_think = None
         url = (
             entry.get("url")
             or backend_overrides.get("completions_url")
@@ -362,6 +388,9 @@ class ModelRouter:
             backend_overrides=backend_overrides,
             tariff=entry.get("pricing"),
             source=source,
+            main=main,
+            auxiliary=auxiliary,
+            strip_think=strip_think,
         )
         # Сессионный предохранитель (спека §8): открытый алиас — мгновенный отказ
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).

@@ -28,7 +28,7 @@ from gc_core.config_modules.env_interpolation import (
     resolve_env_placeholders,
     tag_layer,
 )
-from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.merge import merge_config_layers
 from gc_core.config_modules.migrations import migrate_document
 from gc_core.config_modules.model_registry import (
     RESERVED_WORDS,
@@ -253,7 +253,7 @@ def _overlay_layer(
             source=str(layer_path) if require_file else layer_path,
             raw_source=before_env,
         )
-    return deep_merge(raw_config, layer_raw), layer_raw, before_env
+    return merge_config_layers(raw_config, layer_raw), layer_raw, before_env
 
 
 def _overlay_profile(
@@ -290,7 +290,7 @@ def _overlay_profile(
     # кандидат из формы — нет; повторный проход идемпотентен.
     profile_raw = _compat_layer(profile_raw, ref.path, notices)
     # Контент профиля мержится ПОВЕРХ base/managed/project (ось 2).
-    return deep_merge(raw_config, profile_raw), ref, profile_raw
+    return merge_config_layers(raw_config, profile_raw), ref, profile_raw
 
 
 def _merge_layers(
@@ -720,7 +720,7 @@ def prospective_registry(
                 profile_raw = _compat_layer(
                     _raw_from_text(text, subject), subject, []
                 )
-                merged = deep_merge(layers.config, profile_raw)
+                merged = merge_config_layers(layers.config, profile_raw)
             cfg = _app_config_from_raw(merged)
             return cfg.models, cfg.slots
         except (OSError, ValueError):
@@ -874,7 +874,7 @@ def resolve_profile_pointer(base_path, *, candidates=None) -> str:
             continue
         raw = _document(path)
         if raw is not None:
-            merged = deep_merge(merged, raw)
+            merged = merge_config_layers(merged, raw)
     return resolve_pointer_value(merged.get("profile"))
 
 

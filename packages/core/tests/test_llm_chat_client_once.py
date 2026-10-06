@@ -26,7 +26,10 @@ def context():
             "backend.api_mode": "responses",
             "backend.request_timeout_sec": 3,
             "backend.use_retry": True,
-            "backend.chat_completion_kwargs": _kwargs("route-a"),
+            # Служебный one-shot берёт параметры auxiliary (не main).
+            "chat_completions.auxiliary_llm.completion_kwargs": _kwargs(
+                "route-a"
+            ),
         },
         auth_connector=None,
         logger=None,
@@ -102,7 +105,14 @@ async def test_snapshot_budget_finish_reason_and_usage(monkeypatch):
     ctx, st = context(), state()
     prepared = await client.aprepare_chat_completion(ctx, st, resolved=model())
     # Снимок уже сделан: правка настроек после него запрос не меняет.
-    update_ctx(ctx, **{"backend.chat_completion_kwargs": _kwargs("route-b")})
+    update_ctx(
+        ctx,
+        **{
+            "chat_completions.auxiliary_llm.completion_kwargs": _kwargs(
+                "route-b"
+            )
+        },
+    )
     result = await client.arequest_chat_completion_once(
         ctx,
         st,

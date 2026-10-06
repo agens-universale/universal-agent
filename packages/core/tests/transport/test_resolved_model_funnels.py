@@ -314,7 +314,8 @@ def test_create_call_data_completions_backend_overrides_apply_on_top():
     )
     assert data["max_tokens"] == 55
     assert "max_completion_tokens" not in data
-    assert data["temperature"] == 0.9
+    # Kwargs живут в main, не в backend алиаса: оверрайд backend их не подменяет.
+    assert data["temperature"] == 0.1
 
 
 def test_create_call_headers_backend_overrides_chat_completion_headers():
@@ -1152,7 +1153,6 @@ _HONORED_PER_MODEL = {
     "cert_path",
     "key_path",  # utils/connect_backend.effective_cert_config
     "chat_completion_headers",  # create_call_headers
-    "chat_completion_kwargs",  # сборка payload обеих воронок
     "chat_completions_max_tokens",  # потолок адаптивного цикла
     "chat_completions_min_response_tokens",  # пол адаптивного цикла
     "completions_url",  # model_router: адрес модели
@@ -1163,15 +1163,19 @@ _HONORED_PER_MODEL = {
     "use_ssl",  # resolve_network_params
     "retry_embedded_choice_errors",  # там же
     "use_max_tokens_param",  # выбор max_tokens/max_completion_tokens
+    "openai_strict_tools_schema",  # проекция схемы тулов: create_call_data_completions
+    "send_tool_strict",  # то же: снимать ли function.strict с копии на отправке
     "vision",  # vision/audience: модель заявлена слепой
 }
 
 # Остаются глобальными ОСОЗНАННО — с причиной у каждого.
 _GLOBAL_ONLY = {
+    "chat_completion_kwargs": (
+        "глобальный dict для main без своей секции; kwargs алиаса — "
+        "models.<alias>.main и auxiliary, backend алиаса их не несёт"
+    ),
     "api_mode": "режим прогона: responses/chat_completions выбирается один раз на ран",
     "stream": "флаг TUI-стрима, к модели отношения не имеет",
-    "openai_strict_tools_schema": "спека тулов собирается один раз на RunContext",
-    "send_tool_strict": "то же: abuild_tools_data не знает resolved (бэклог «tools-схема per-model»)",
 }
 
 

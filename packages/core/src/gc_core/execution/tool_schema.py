@@ -177,6 +177,28 @@ def apply_openai_strict_parameters(params: dict[str, Any]) -> None:
     apply_openai_strict_object(params)
 
 
+def apply_openai_strict_schema_tree(schema: Any) -> None:
+    """OpenAI strict на корне и на каждом вложенном object.
+
+    Корень и вложенные узлы: все properties в ``required``,
+    ``additionalProperties: false``. Повтор на том же узле идемпотентен.
+    """
+    seen: set[int] = set()
+
+    def _walk(node: Any) -> None:
+        if not isinstance(node, dict):
+            return
+        marker = id(node)
+        if marker in seen:
+            return
+        seen.add(marker)
+        apply_openai_strict_object(node)
+        for sub in _nested_schemas(node):
+            _walk(sub)
+
+    _walk(schema)
+
+
 def _rewrite_semantic_required(schema: Any) -> None:
     """In-place: on strict/optional-marked objects, set required to semantic keys only."""
     if not isinstance(schema, dict):
@@ -320,6 +342,7 @@ __all__ = [
     "X_SUPPRESS_OPTIONAL_HINT",
     "apply_openai_strict_object",
     "apply_openai_strict_parameters",
+    "apply_openai_strict_schema_tree",
     "augment_optional_property_descriptions",
     "coalesce_optional_string",
     "normalize_optional_empty_as_omit",

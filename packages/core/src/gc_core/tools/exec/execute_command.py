@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from gc_core.backends.async_protocol import aexec_port
@@ -14,6 +15,8 @@ from gc_core.tools.exec.exec_envelope import (
     build_exec_envelope,
 )
 from gc_core.tools.simple_tool_base import AbstractSimpleTool
+
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _parse_env_vars(env_vars) -> "tuple[dict[str, str], dict | None]":
@@ -35,10 +38,15 @@ def _parse_env_vars(env_vars) -> "tuple[dict[str, str], dict | None]":
                 "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
             }
         name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
+        # Только идентификатор: у remote-бэкендов имя попадает в `export K=V`
+        # той стороны, и `X=1; rm -rf /; Y` в имени — команда мимо модерации.
+        if not isinstance(name, str) or not _ENV_NAME_RE.fullmatch(
+            name.strip()
+        ):
             return {}, {
                 "type": "invalid_argument",
                 "field": f"env_vars[{idx}].name",
+                "message": "env_vars name must be a shell identifier: [A-Za-z_][A-Za-z0-9_]*",
             }
         value = item.get("value")
         if not isinstance(value, str):

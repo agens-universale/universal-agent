@@ -397,15 +397,28 @@ class LocalFsBackend(FsBackend):
         Отцепление от нас обязательно — см. `_background_detach_kwargs`: без
         него потомок получал бы адресованные нам сигналы и события консоли.
         """
-        import subprocess
-
-        from gc_core.utils.win_console import preserve_console_mode
-
         merged_env = (
             {**os.environ, **{str(k): str(v) for k, v in env.items()}}
             if env
             else None
         )
+        return await self._aspawn_detached(
+            command, cwd=cwd, env_full=merged_env
+        )
+
+    async def _aspawn_detached(
+        self,
+        command: str,
+        *,
+        cwd: Optional[str],
+        env_full: Optional[Dict[str, str]],
+    ) -> dict:
+        """Сам запуск: ``env_full`` уходит в ``Popen`` как есть (``None`` —
+        окружение процесса). Песочница даёт сюда уже очищенный allowlist."""
+        import subprocess
+
+        from gc_core.utils.win_console import preserve_console_mode
+
         # Уступка loop. `Popen` её не делает сам, а на этом пути нет больше ни
         # одного `await`: пачка фоновых запусков шла бы одним неразрывным куском.
         # Замерено на 20 запусках: 26–32 мс худшего разрыва против 3 мс у
@@ -433,7 +446,7 @@ class LocalFsBackend(FsBackend):
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 cwd=cwd,
-                env=merged_env,
+                env=env_full,
                 **_background_detach_kwargs(),
             )
         # Команда, упавшая сразу (опечатка в имени, нет файла), — не «запущена».

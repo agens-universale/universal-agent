@@ -620,7 +620,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
         self.assertNotIn("chat_template_kwargs", payload)
         self.assertNotIn("separate_reasoning", payload)
         self.assertNotIn("reasoning_effort", payload)
-        self.assertEqual(payload["temperature"], 1.0)
+        self.assertNotIn("temperature", payload)
 
     def test_dsv4_style_agent_thinking_does_not_leak_into_aux_payload(self):
         """DeepSeek-style: aux overlay гасит thinking/reasoning_effort агента."""

@@ -16,7 +16,6 @@ from gc_core.config_modules.backend import BackendConfig
 from gc_core.tools import abuild_tools_data
 from gc_core.utils.connect_backend import (
     create_call_data_responses,
-    normalize_chat_completions_tools,
 )
 from gc_testkit.settings import make_settings
 
@@ -30,7 +29,9 @@ def _specs(send_tool_strict: bool) -> list:
     # поднимаем его здесь одним `asyncio.run`.
     async def _build():
         return await abuild_tools_data(
-            make_settings({**_CONFIG, "backend.send_tool_strict": send_tool_strict})
+            make_settings(
+                {**_CONFIG, "backend.send_tool_strict": send_tool_strict}
+            )
         )
 
     _, specs, *_ = asyncio.run(_build())
@@ -64,17 +65,36 @@ def test_enabled_keeps_strict_in_specs(specs_on):
     assert any("strict" in spec for spec in specs_on)
 
 
-def test_disabled_drops_strict_from_every_spec(specs_off):
+def test_disabled_keeps_strict_in_canonical_specs(specs_off):
+    """Флаг не запекается в канон: strict исходной спеки остаётся в state.tools."""
     assert specs_off, "registry must not be empty"
-    assert [spec["name"] for spec in specs_off if "strict" in spec] == []
+    assert any("strict" in spec for spec in specs_off)
 
 
 def test_disabled_keeps_strict_out_of_chat_completions_payload(specs_off):
-    wire = normalize_chat_completions_tools(specs_off)
+    from gc_core.utils.connect_backend import create_call_data_completions
 
-    assert wire
+    state = SimpleNamespace(
+        messages=[],
+        default_model="test-model",
+        tools=specs_off,
+    )
+    data = create_call_data_completions(
+        [{"role": "user", "content": "hi"}],
+        state,
+        settings=make_settings(
+            {
+                "backend.send_tool_strict": False,
+                "backend.openai_strict_tools_schema": False,
+            }
+        ),
+    )
+
+    assert data["tools"]
     assert [
-        t["function"]["name"] for t in wire if "strict" in t["function"]
+        t["function"]["name"]
+        for t in data["tools"]
+        if "strict" in t["function"]
     ] == []
 
 
@@ -87,7 +107,9 @@ def test_disabled_keeps_strict_out_of_responses_payload(specs_off):
     )
 
     call_data = create_call_data_responses(
-        [{"role": "user", "content": "hi"}], state
+        [{"role": "user", "content": "hi"}],
+        state,
+        settings=make_settings({"backend.send_tool_strict": False}),
     )
 
     assert [t["name"] for t in call_data["tools"] if "strict" in t] == []

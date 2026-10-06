@@ -18,6 +18,12 @@ class ProtectedSet:
     instructions: frozenset[Path]
     operational: frozenset[Path]
     skills_exceptions: frozenset[Path]
+    #: Рабочая область рана, лежащая ВНУТРИ служебного корня gc (sandbox
+    #: ``workdir: auto`` → ``<state>/sandboxes/<slug>``). Сама она не
+    #: служебная — иначе каждая команда в ней ловила бы отказ; служебными
+    #: остаются её ``.gc`` и ``extra`` (``operational_hard``).
+    workspace_exception: Path | None = None
+    operational_hard: frozenset[Path] = frozenset()
     # Корни класса `media` (`security.media_roots`): чтение — да, запись тулами —
     # нет, команды — с подтверждением. Пусто — класса нет: так набор собирают
     # вызывающие без конфига (судья команд, diff-TUI).
@@ -34,18 +40,35 @@ def protected_paths(
     paths = gc_paths()
     instr = set(instruction_file_paths(cwd=str(proj)).values())
 
-    operational = {project_gc_dir(str(proj))}
-    for key in ("config", "state", "cache", "data"):
-        operational.add(paths[key])
+    hard = {project_gc_dir(str(proj))}
     for raw in extra or []:
-        operational.add(Path(os.path.abspath(raw)))
+        hard.add(Path(os.path.abspath(raw)))
+    gc_roots = {paths[key] for key in ("config", "state", "cache", "data")}
+    ci = os.name == "nt"
+    # Только каталог рана песочницы: cwd=~/.config/gc не снимает защиту с config.yml.
+    sandboxes = paths["state"] / "sandboxes"
+    workspace = (
+        proj
+        if is_within_root(str(proj), str(sandboxes), case_insensitive=ci)
+        and proj != sandboxes
+        else None
+    )
 
-    skills = {project_gc_dir(str(proj)) / "skills", paths["data"] / "skills"}
+    # skills_runtime — копия слоёв скиллов в среде исполнения remote-бэкенда
+    # (tools/skills/provision.py): для модели это те же скиллы, что и
+    # `.gc/skills`, иначе чтение скрипта скилла ловит protected_path_denied.
+    skills = {
+        project_gc_dir(str(proj)) / "skills",
+        project_gc_dir(str(proj)) / "skills_runtime",
+        paths["data"] / "skills",
+    }
 
     return ProtectedSet(
         instructions=frozenset(instr),
-        operational=frozenset(operational),
+        operational=frozenset(hard | gc_roots),
         skills_exceptions=frozenset(skills),
+        workspace_exception=workspace,
+        operational_hard=frozenset(hard),
         media=frozenset(
             Path(os.path.abspath(os.fspath(root))) for root in media
         ),
@@ -91,6 +114,14 @@ def classify_path(path, ps: ProtectedSet) -> str:
     # свой `threads_data_path` и временный корень SDK `<gc_state>` не накрывает.
     if _in_staging(p, ps.media, ci):
         return "operational"
+    if any(
+        is_within_root(p, r, case_insensitive=ci) for r in ps.operational_hard
+    ):
+        return "operational"
+    if ps.workspace_exception is not None and is_within_root(
+        p, ps.workspace_exception, case_insensitive=ci
+    ):
+        return "none"
     if any(is_within_root(p, r, case_insensitive=ci) for r in ps.operational):
         return "operational"
     return "none"

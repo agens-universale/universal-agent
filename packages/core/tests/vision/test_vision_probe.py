@@ -153,7 +153,6 @@ async def test_wrong_read_retries_with_new_larger_image(probe_http):
             httpx.Response(400, text="model does not support images"),
             ProbeStatus.UNSUPPORTED,
         ),
-        (httpx.Response(401), ProbeStatus.BLOCKED),
         (httpx.Response(413), ProbeStatus.BLOCKED),
         (
             httpx.Response(429, headers={"Retry-After": "60"}),
@@ -182,6 +181,72 @@ async def test_failures_stop_after_one_actual_request(
     assert len(requests) == 1
     if isinstance(response, httpx.Response) and response.status_code == 429:
         assert result.retry_after_sec == 60
+
+
+@pytest.mark.parametrize("second", ["success", "wrong", "401"])
+async def test_401_repeats_same_image_and_preserves_recognition_retry(
+    monkeypatch, probe_http, second
+):
+    from gc_core.vision import probe
+
+    challenge = make_challenge(retry=False)
+    retry_challenge = make_challenge(retry=True, previous_code=challenge.code)
+    monkeypatch.setattr(
+        probe,
+        "make_challenge",
+        lambda **kwargs: retry_challenge if kwargs["retry"] else challenge,
+    )
+    requests, responses = probe_http
+    responses.append(httpx.Response(401))
+    responses.append(
+        httpx.Response(401)
+        if second == "401"
+        else httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {
+                            "content": challenge.code
+                            if second == "success"
+                            else "wrong"
+                        },
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+    )
+    if second == "wrong":
+        responses.append(
+            httpx.Response(
+                200,
+                json={
+                    "choices": [
+                        {
+                            "message": {"content": retry_challenge.code},
+                            "finish_reason": "stop",
+                        }
+                    ]
+                },
+            )
+        )
+    ctx, st = context(), state()
+    prepared = await aprepare_chat_completion(ctx, st, resolved=model())
+    result = await aprobe_route(ctx, st, prepared)
+    assert result.status is (
+        ProbeStatus.BLOCKED if second == "401" else ProbeStatus.CONFIRMED
+    )
+    assert result.authorization_alternative is (second != "401")
+    assert [r.headers["Authorization"] for r in requests] == (
+        ["Bearer secret", "secret", "secret"]
+        if second == "wrong"
+        else ["Bearer secret", "secret"]
+    )
+    assert requests[0].content == requests[1].content
+    if second == "wrong":
+        assert requests[2].content != requests[1].content
+    assert prepared.headers["Authorization"] == "Bearer secret"
 
 
 async def test_retry_after_http_date(probe_http):

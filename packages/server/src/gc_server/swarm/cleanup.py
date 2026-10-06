@@ -27,7 +27,7 @@ import os
 import shutil
 import sys
 from datetime import UTC, datetime, timedelta
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 
 def _parse_iso_datetime(value: Any) -> Optional[datetime]:
@@ -144,9 +144,13 @@ def cleanup_threads(
     ttl_hours: float,
     *,
     dry_run: bool = False,
+    extra_sandbox_roots: Sequence[str] = (),
 ) -> dict:
     """Удалить каталоги старше TTL. threads/<id> чистится по timestamp из meta.json,
     sandboxes/<id> — независимо, по своему mtime (расцеплено).
+
+    ``extra_sandbox_roots`` — ещё корни песочниц тем же правилом: каталоги
+    ``os_backend=sandbox, workdir=auto`` из gc_core (``<GC_STATE_DIR>/sandboxes``).
 
     Возвращает {threads_removed, sandboxes_removed, kept, errors}.
     """
@@ -160,13 +164,13 @@ def cleanup_threads(
         "errors": 0,
     }
 
-    if not os.path.isdir(threads_dir):
-        return stats
+    # Sandboxes — независимо, по СОБСТВЕННОМУ mtime (а не по мете threads),
+    # и до проверки threads_dir: песочницам ядра каталог тредов swarm не нужен.
+    for root in (sandbox_root_dir, *extra_sandbox_roots):
+        _cleanup_sandbox_dirs(root, cutoff, dry_run, stats)
 
-    _cleanup_thread_dirs(threads_dir, cutoff, dry_run, stats)
-
-    # Sandboxes — независимо, по СОБСТВЕННОМУ mtime (а не по мете threads).
-    _cleanup_sandbox_dirs(sandbox_root_dir, cutoff, dry_run, stats)
+    if os.path.isdir(threads_dir):
+        _cleanup_thread_dirs(threads_dir, cutoff, dry_run, stats)
 
     return stats
 
@@ -190,6 +194,12 @@ def main() -> int:
         action="store_true",
         help="только посчитать, ничего не удалять",
     )
+    parser.add_argument(
+        "--core-sandboxes-dir",
+        action="append",
+        default=[],
+        help="<GC_STATE_DIR>/sandboxes/ (os_backend=sandbox, workdir=auto)",
+    )
     args = parser.parse_args()
 
     stats = cleanup_threads(
@@ -197,6 +207,7 @@ def main() -> int:
         args.sandbox_root_dir,
         args.ttl_hours,
         dry_run=args.dry_run,
+        extra_sandbox_roots=args.core_sandboxes_dir,
     )
 
     prefix = "[DRY RUN] " if args.dry_run else ""

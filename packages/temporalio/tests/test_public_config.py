@@ -83,8 +83,8 @@ RICH = {
             "backend": {
                 "proxy": "http://SECRET_LARGE_PROXY",
                 "use_ssl": False,
-                "chat_completion_kwargs": {"temperature": 0.2},
             },
+            "main": {"temperature": 0.2},
         },
     },
     "slots": {"light": "fast", "default": "fast", "max": "large"},
@@ -267,9 +267,9 @@ def test_routing_identity_and_currencies_survive_without_transport():
         )
         assert not workflow.url and not workflow.authorization
         assert workflow.tariff == worker.tariff
-    assert public_router.resolve("main").backend_overrides == {
-        "chat_completion_kwargs": {"temperature": 0.2}
-    }
+    # Параметры запроса алиаса (main) доходят до роутера workflow.
+    assert public_router.resolve("main").backend_overrides == {}
+    assert public_router.resolve("main").main == {"temperature": 0.2}
     assert public_router.resolve("command_judge").backend_overrides == {
         "chat_completions_max_tokens": 1234
     }
@@ -293,9 +293,7 @@ def test_routing_identity_and_currencies_survive_without_transport():
             "models": {
                 "m": {
                     "model": "x",
-                    "backend": {
-                        "chat_completion_kwargs": {"new_password": "SECRET"}
-                    },
+                    "main": {"new_password": "SECRET"},
                 }
             }
         },
@@ -362,3 +360,25 @@ def test_runtime_fields_require_classification_and_backend_kind():
                 settings=AppConfig(), runtime=RuntimeEnv(os_backend="custom")
             )
         )
+
+
+def test_model_auxiliary_and_os_backend_env_do_not_leak_into_history():
+    """Параметры алиаса проходят ту же схему, что и глобальные; переменные
+    окружения бэкенда (могут быть токены) в публичный снимок не идут."""
+    with pytest.raises(PublicConfigError) as error:
+        public_config_snapshot(
+            AppConfig.model_validate(
+                {
+                    "models": {
+                        "m": {"model": "x", "auxiliary": {"api_key": "SECRET"}}
+                    }
+                }
+            )
+        )
+    assert "SECRET" not in str(error.value)
+    snapshot = public_config_snapshot(
+        AppConfig.model_validate(
+            {"os_backend": {"kind": "local", "env": {"TOKEN": "SECRET"}}}
+        )
+    )
+    assert "SECRET" not in json.dumps(snapshot.settings)

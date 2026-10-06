@@ -12,7 +12,6 @@ from gc_core.config_modules.strip_tags_projection import (
 )
 from gc_core.execution.contracts import ExecutionFailure
 from gc_core.message_projection import project_text_for_model
-from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
 from gc_core.utils.backend_errors import (
     FINISH_KIND_LENGTH,
     classify_finish_kind,
@@ -167,7 +166,6 @@ async def _arequest_rephrase(
         max_tokens=max_tokens,
         request_label=REQUEST_LABEL,
         consumer=_CONSUMER,
-        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
     )
     logger = getattr(ctx, "logger", None)
     log_llm_prompt_and_result(

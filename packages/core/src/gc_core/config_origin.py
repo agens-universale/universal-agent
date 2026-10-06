@@ -6,7 +6,7 @@
 молчит, когда сохранённая правка не подействует, потому что поле перекрыто.
 
 Слияние слоёв НЕ дублируется: пути берём у тех же функций, что зовёт load_config,
-а семантику наложения — у того же deep_merge (config_modules.merge). Своих правил
+а семантику наложения — у того же merge_config_layers (config_modules.merge). Своих правил
 слияния здесь нет: иначе экран рассказывал бы про конфиг не то, что делает
 load_config (пустая секция в оверлее затирает узел, списки склеиваются, …).
 Модуль ничего не рисует и ничего не пишет.
@@ -15,12 +15,14 @@ load_config (пустая секция в оверлее затирает узе
 from __future__ import annotations
 
 import os
+from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 
 from gc_core import config_raw
-from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.merge import merge_config_layers
 from gc_core.config_modules.root import (
     PROFILE_SCHEMA_ERROR_PREFIX,
     SCHEMA_ERROR_PREFIX,
@@ -138,7 +140,7 @@ def origins(
 ) -> Dict[str, Origin]:
     """{dotted-путь: Origin} — что в базовом файле, чем перекрыто, что действует.
 
-    Действующее значение считаем ТЕМ ЖЕ deep_merge, что и load_config: накатываем
+    Действующее значение считаем ТЕМ ЖЕ merge_config_layers, что и load_config: накатываем
     слои на сырые документы и смотрим dotted-путь в результате. Перекрывшим слоем
     считается последний, после наложения которого значение изменилось.
 
@@ -161,14 +163,20 @@ def origins(
     merged = _document(base_path)
     raw = {dotted: config_raw.value_at(merged, dotted) for dotted in keys}
 
-    effective = dict(raw)
+    merged = deepcopy(merged)
+    apply_compat(merged)
+    effective = {
+        dotted: config_raw.value_at(merged, dotted) for dotted in keys
+    }
     kinds: Dict[str, str] = dict.fromkeys(keys, "")
     paths: Dict[str, Optional[str]] = dict.fromkeys(keys)
 
     for overlay_kind, overlay_path in _overlay_paths(
         base_path, profile_override=profile_override
     ):
-        merged = deep_merge(merged, _document(overlay_path))
+        overlay = deepcopy(_document(overlay_path))
+        apply_compat(overlay)
+        merged = merge_config_layers(merged, overlay)
         for dotted in keys:
             value = config_raw.value_at(merged, dotted)
             if value != effective[dotted]:

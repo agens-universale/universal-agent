@@ -11,10 +11,8 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
-
 from gc_core.agent_edits.journal import EditsJournal
 from gc_core.agent_edits.tracking import (
     TrackingFsBackend,
@@ -23,10 +21,10 @@ from gc_core.agent_edits.tracking import (
 from gc_core.backends.local import LocalFsBackend
 from gc_core.config_modules import env_vars
 from gc_core.execution_workspace import build_execution_workspace
-from gc_testkit.helpers.tool_ctx import local_ctx
-from gc_testkit.settings import fake_ctx
 from gc_core.thread_store import edits_journal_path, touched_journal_path
 from gc_core.tools.fs.write_to_file_tool import WriteToFile
+from gc_testkit.helpers.tool_ctx import local_ctx
+from gc_testkit.settings import fake_ctx
 
 
 def _has_git() -> bool:

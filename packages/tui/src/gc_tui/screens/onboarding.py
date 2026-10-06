@@ -721,6 +721,7 @@ class OnboardingScreen(Screen):
                 auth_header=auth,
                 proxy_current=proxy_cur or "",
                 create_mode=True,
+                closed_hint="Alt+↓ — показать список",
                 presets=endpoint_presets_from_config(self._settings),
             )
             body.mount(ed)
@@ -1462,6 +1463,9 @@ class OnboardingScreen(Screen):
                 # источник, что у /settings: дефолты (OpenAI/Groq/
                 # Mistral) или кастомизация из config.yml.
                 url_presets=voice_endpoint_presets_from_config(self._settings),
+                save_hint=False,
+                closed_list_hint="Alt+↓ — показать список",
+                closed_model_hint="Alt+↓ — перечитать список",
             )
         )
 
@@ -1836,7 +1840,7 @@ class OnboardingScreen(Screen):
             )
             return
         if token_raw:
-            auth = onboarding.authorization_header(token_raw)
+            auth = token_raw  # сырой — probe_connection перебирает формы
         elif ed.token_cleared:
             auth = None  # Ctrl+U: сохранённый стёрт ещё до записи
         else:
@@ -1905,6 +1909,10 @@ class OnboardingScreen(Screen):
             return  # протухший результат (правка/переход обесценили)
         from gc_tui.services.probe_presentation import connection_line_text
 
+        if result.auth_state == "accepted":
+            ed = self._connection_editor()
+            if ed is not None and ed.apply_accepted_auth(result.accepted_auth):
+                self._last_probed_snapshot = ed.probe_snapshot()
         self._set_conn_probe_line(connection_line_text(result))
 
     def _set_conn_probe_line(self, text) -> None:
@@ -2140,10 +2148,14 @@ class OnboardingScreen(Screen):
         сворачивает список, как только совпадений не осталось, и раскрывает обратно,
         как только они появились), а футер шага именно от раскрытости списка и
         зависит (`_footer_text`)."""
-        if (
-            self._step_id() in _MARK_STEPS
-            or self._step_id() == STEP_CONNECTION
-        ):
+        if self._step_id() == STEP_CONNECTION:
+            # Любая ручная правка подключения обесценивает летящую пробу и её
+            # снимок. Программная подстановка принятой формы использует
+            # `write_field`, поэтому сюда не попадает.
+            self._probe_gen += 1
+            self._last_probed_snapshot = None
+            self._refresh_footer()
+        elif self._step_id() in _MARK_STEPS:
             self._refresh_footer()
 
     def on_key(self, event: events.Key) -> None:
@@ -2161,6 +2173,8 @@ class OnboardingScreen(Screen):
             if ed is not None and ed.clear_token():
                 event.prevent_default()
                 event.stop()
+                self._probe_gen += 1
+                self._last_probed_snapshot = None
                 self._refresh_footer()
             return
         if event.key == "ctrl+u" and self._voice_clear_token():
@@ -2380,7 +2394,7 @@ class OnboardingScreen(Screen):
             event.stop()
             if step == STEP_CONNECTION:
                 ed = self._connection_editor()
-                if ed is not None and ed.enter_presets():
+                if ed is not None and ed.enter_presets(open_closed=False):
                     # пресет-лист открыт — подставил/свернул, не сабмит; подстановка
                     # пресета — тоже триггер авто-пробы (спека §5.5).
                     self._auto_probe_if_changed()

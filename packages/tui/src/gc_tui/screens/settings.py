@@ -16,7 +16,7 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.css.query import NoMatches
 from textual.screen import Screen
-from textual.widgets import Input, Rule, Static
+from textual.widgets import Input, Rule, Static, TextArea
 
 from gc_tui.editors.field_list import LIST_CLOSED_HINT
 from gc_tui.editors.models_section import FOOTER_PROFILE_BACK
@@ -100,17 +100,17 @@ _FOOTERS = {
     # что у `_VOICE_FOOTER_CLOUD_LIST`, §5.7 спеки), а не третьей (не называть клавишу) —
     # до неё дело не дошло, снятого сегмента хватило.
     _CONNECTION: (
-        "Enter — сохранить  ·  Alt+↓ — показать список  ·  "
-        "Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню"
+        "Ctrl+S — сохранить/выйти · Alt+↓ — показать список · "
+        "Ctrl+Space — проверить связь · Esc — меню"
     ),
     # Футера секции «Модели» здесь нет: он позиционный и живёт в самой секции
     # (`tui/editors/models_section.py`) — Enter значит разное на строке записи,
     # строке резервной модели и в каждой из её под-форм.
     # «Обновить версию», а не просто «обновить»: Ctrl+U ставит пакет заново (меняет
     # систему), а Alt+↓ только перечитывает — одним словом на двоих они неразличимы (§5.4).
-    _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · PgUp/PgDn — секции · Esc",
+    _MCP: "↑/↓ · Enter — установить · Space — вкл/выкл · Ctrl+U — обновить версию · Del — удалить · Esc",
     _MODES: "↑/↓ — выбор · ←/→/Enter — переключить · PgUp/PgDn — секции · Esc — меню",
-    _UPDATE: "↑/↓ · Enter — выполнить · PgUp/PgDn — секции · Esc — меню",
+    _UPDATE: "↑/↓ · Enter — выполнить · Esc — меню",
     # Раскладка — решение юзера В1 (`docs/specs/2026-08-10-profiles-b-plan.md`),
     # выведенное из канона базы: Enter = «войти внутрь» (меню «открыть», MCP
     # «установить»), Space = переключение состояния (MCP «вкл/выкл», post-update
@@ -121,7 +121,7 @@ _FOOTERS = {
     # 64 колонках (бюджет `_FOOTER_MIN_COLS`).
     _PROFILES: (
         "↑/↓ · Enter — открыть · Space — активировать · n — создать · "
-        "r — переименовать · Del — удалить · PgUp/PgDn — секции"
+        "r — переименовать · Del — удалить"
     ),
 }
 _FOOTER_READONLY = "PgUp/PgDn — секции  ·  Esc — меню"
@@ -149,7 +149,9 @@ _FOOTER_PRESET_LIST_NO_MATCH = "↑/↓  ·  Enter — оставить свой
 # `ConnectionEditor.on_url_field` гейтит ровно позицию адреса (`reload_presets`), и
 # `_FOOTERS[_CONNECTION]` в этом состоянии обещал бы неработающую клавишу (находка
 # финального ревью 2026-08-06, D). Тот же текст без сегмента про Alt+↓.
-_FOOTER_CONNECTION_FIELD = "Enter — сохранить  ·  Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню"
+_FOOTER_CONNECTION_FIELD = (
+    "Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — меню"
+)
 # Голосовая секция: у неё свой билдер футера (`_voice_footer_text`), в общем словаре
 # записи нет. Бюджет ширины у неё общий со всеми футерами форм — `_FOOTER_MIN_COLS`
 # ниже (то же число и тот же способ замера: не длина строки, а перенос на самом узком
@@ -171,28 +173,28 @@ _TAB_TO_VARIANTS = "Tab — вверх к выбору"
 # хвоста): в развёрнутой форме версия с Ctrl+U не влезала в две строки бюджета футера
 # на 64 колонках (сторож test_all_footers_fit_the_two_line_budget), а два состояния
 # ОДНОЙ строки обязаны звать одни клавиши одними словами.
-_VOICE_FOOTER_LOCAL = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del — удалить · PgUp/PgDn — секции · Esc"
+_VOICE_FOOTER_LOCAL = (
+    f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Del — удалить · Esc"
+)
 # Тот же футер, когда движок отстал от версии сборки: клавиша обещается ТОЛЬКО тогда
 # (канон секции — не звать клавишу, которая здесь ничего не делает). Глагол и клавиша —
 # как у MCP («Ctrl+U — обновить версию»), там этот сценарий уже живёт.
-_VOICE_FOOTER_LOCAL_UPDATE = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Ctrl+U — обновить версию · Del — удалить · PgUp/PgDn — секции · Esc"
+_VOICE_FOOTER_LOCAL_UPDATE = f"↑/↓ · {_TAB_TO_FIELDS} · Enter — включить · Ctrl+U — обновить версию · Del — удалить · Esc"
 # Тот же футер, когда удалять нечего: сервиса нет, и Del молчит (`_voice_request_remove`).
 # Полей у такой строки тоже нет — переходить некуда, и Tab здесь не обещан (§6.1).
-_VOICE_FOOTER_LOCAL_FRESH = (
-    "↑/↓ · Enter — установить · PgUp/PgDn — секции · Esc — меню"
-)
+_VOICE_FOOTER_LOCAL_FRESH = "↑/↓ · Enter — установить · Esc — меню"
 # Облачная панель: Del здесь не работает вовсе — он стреляет только на строке
 # «Локальный сервис». Обещать его значит врать (та же причина, по которой из локального
 # футера убран Ctrl+Space).
 _VOICE_FOOTER_CLOUD = (
-    f"↑/↓ · {_TAB_TO_FIELDS} · Enter — сохранить и включить · "
+    f"↑/↓ · {_TAB_TO_FIELDS} · Ctrl+S — сохранить и выйти · "
     "Ctrl+Space — проверить связь · PgUp/PgDn — секции · Esc — меню"
 )
 # Та же облачная панель, но курсор уже в поле БЕЗ списка (осталось одно — «Токен»,
 # у URL/«Модели»/«Языка» свой футер ниже, `_VOICE_FOOTER_CLOUD_LIST`): клавиши те же,
 # а Tab ведёт в обратную сторону — ради одного этого слова футер и раздваивается.
 _VOICE_FOOTER_CLOUD_FIELD = (
-    f"↑/↓ · {_TAB_TO_VARIANTS} · Enter — сохранить и включить · "
+    f"↑/↓ · {_TAB_TO_VARIANTS} · Ctrl+S — сохранить и выйти · "
     "Ctrl+Space — проверить связь · PgUp/PgDn — секции · Esc — меню"
 )
 # Тот же «Токен», но под маской лежит СОХРАНЁННЫЙ секрет — Ctrl+U его стирает (канон
@@ -202,9 +204,9 @@ _VOICE_FOOTER_CLOUD_FIELD = (
 # так пробует первым, а не работающей клавишей; в две строки на 64 колонках иначе не
 # уложиться (сторож `test_all_footers_fit_the_two_line_budget`).
 _VOICE_FOOTER_CLOUD_TOKEN = (
-    f"{_TAB_TO_VARIANTS} · Enter — сохранить · "
+    f"{_TAB_TO_VARIANTS} · Ctrl+S — сохранить и выйти · "
     "Ctrl+U — очистить · Ctrl+Space — проверить связь · "
-    "PgUp/PgDn — секции · Esc — меню"
+    "Esc — меню"
 )
 # Список свёрнут, курсор в поле «Язык»: раскрыть нечем стрелками — Alt+↓ делает это
 # явно (второй путь после печати, см. FieldListController.reopen_for_typing; роль
@@ -215,7 +217,7 @@ _VOICE_FOOTER_CLOUD_TOKEN = (
 # Глагол — дословно `LIST_CLOSED_HINT`: эта самая строка стоит сейчас под полем
 # (её держит `FieldListController._sync_hint`), и звать одну клавишу двумя словами
 # на одном экране нельзя (§5.4).
-_VOICE_FOOTER_LOCAL_LANG = f"↑/↓ · {_TAB_TO_VARIANTS} · Enter — сохранить язык · {LIST_CLOSED_HINT} · PgUp/PgDn — секции · Esc — меню"
+_VOICE_FOOTER_LOCAL_LANG = f"↑/↓ · {_TAB_TO_VARIANTS} · Ctrl+S — сохранить и выйти · {LIST_CLOSED_HINT} · Esc — меню"
 # То же для полей со списком («Язык», «Модель», «URL» — спека 2026-08-05 §3) облачной
 # панели. Про Del здесь НЕ говорим: во-первых, футер — две строки без скролла, и место
 # тесное; во-вторых, на этих полях Del и не сносит сервис — `_voice_request_remove`
@@ -233,7 +235,7 @@ _VOICE_FOOTER_LOCAL_LANG = f"↑/↓ · {_TAB_TO_VARIANTS} · Enter — сохр
 # единственный источник о ней) — постоянное, а не временное отклонение, записано §5.7
 # спеки.
 _VOICE_FOOTER_CLOUD_LIST = (
-    f"{_TAB_TO_VARIANTS} · Enter — сохранить и включить · "
+    f"{_TAB_TO_VARIANTS} · Ctrl+S — сохранить и выйти · "
     f"{LIST_CLOSED_HINT} · Ctrl+Space — проверить связь · "
     "Esc — меню"
 )
@@ -244,7 +246,7 @@ _VOICE_FOOTER_CLOUD_LIST = (
 # рассогласование, что чинит `closed_hint` у `ModelListController`, — здесь его
 # двойник в футере секции).
 _VOICE_FOOTER_CLOUD_LIST_MODEL = (
-    f"{_TAB_TO_VARIANTS} · Enter — сохранить и включить · "
+    f"{_TAB_TO_VARIANTS} · Ctrl+S — сохранить и выйти · "
     f"{_MODEL_RELOAD_HINT} · Ctrl+Space — проверить связь · "
     "Esc — меню"
 )
@@ -259,16 +261,14 @@ _VOICE_FOOTER_CLOUD_LIST_MODEL = (
 # там значило бы соврать. Языковое поле — единственное общее между панелями (модели и
 # URL раскрываются только у облака), поэтому константа и раздвоена: без раздвоения
 # локальная панель получила бы чужое обещание проверки связи.
-_VOICE_FOOTER_LANG_LIST_LOCAL = "↑/↓ — выбор языка · Enter — подставить и сохранить · Esc — свернуть · PgUp/PgDn — секции"
+_VOICE_FOOTER_LANG_LIST_LOCAL = "↑/↓ — выбор языка · Enter — подставить · Ctrl+S — сохранить и выйти · Esc — свернуть"
 _VOICE_FOOTER_LANG_LIST_CLOUD = (
-    "↑/↓ — выбор языка · Enter — подставить и сохранить · "
-    "Esc — свернуть · Ctrl+Space — проверить связь · "
-    "PgUp/PgDn — секции"
+    "↑/↓ — выбор языка · Enter — подставить · Ctrl+S — сохранить и выйти · "
+    "Esc — свернуть · Ctrl+Space — проверить связь"
 )
 _VOICE_FOOTER_MODEL_LIST = (
-    "↑/↓ — выбор модели · Enter — подставить и сохранить · "
-    "Esc — свернуть · Ctrl+Space — проверить связь · "
-    "PgUp/PgDn — секции"
+    "↑/↓ — выбор модели · Enter — подставить · Ctrl+S — сохранить и выйти · "
+    "Esc — свернуть · Ctrl+Space — проверить связь"
 )
 # Пресеты адреса (спека 2026-08-05 §3): глагол — тот же, что у языка/моделей выше,
 # «подставить и сохранить» — Enter после подстановки так же безусловно доезжает до
@@ -281,18 +281,15 @@ _VOICE_FOOTER_MODEL_LIST = (
 # пробы у локальной панели нет), поэтому эти два футера раздваивать не на что —
 # Ctrl+Space здесь всегда честен.
 _VOICE_FOOTER_URL_LIST = (
-    "↑/↓ — выбор адреса · Enter — подставить и сохранить · "
-    "Esc — свернуть · Ctrl+Space — проверить связь · "
-    "PgUp/PgDn — секции"
+    "↑/↓ — выбор адреса · Enter — подставить · Ctrl+S — сохранить и выйти · "
+    "Esc — свернуть · Ctrl+Space — проверить связь"
 )
 # Строк под фильтром нет (или список ещё грузится / не загрузился): подставлять нечего
 # (футер не спорит с хинтом списка), а ↑/↓ снова про курсор секции — ходить нечем.
 # Раздвоена по той же причине, что и языковой список выше: состояние «без совпадений»
 # достижимо и у локального языка (пустой фильтр), и там пробы по-прежнему нет.
-_VOICE_FOOTER_LIST_NO_MATCH_LOCAL = (
-    "↑/↓ · Enter — сохранить как есть · Esc — свернуть · PgUp/PgDn — секции"
-)
-_VOICE_FOOTER_LIST_NO_MATCH_CLOUD = "↑/↓ · Enter — сохранить как есть · Esc — свернуть · Ctrl+Space — проверить связь · PgUp/PgDn — секции"
+_VOICE_FOOTER_LIST_NO_MATCH_LOCAL = "↑/↓ · Enter — оставить как есть · Ctrl+S — сохранить и выйти · Esc — свернуть"
+_VOICE_FOOTER_LIST_NO_MATCH_CLOUD = "↑/↓ · Enter — оставить как есть · Ctrl+S — сохранить и выйти · Esc — свернуть · Ctrl+Space — проверить связь"
 _VOICE_LANG_ERROR = "не сохранено: код языка — 2-3 латинские буквы, напр. ru"
 
 # Секция «Голосовой ввод»: две строки режима (язык радио-опций мастера).
@@ -346,7 +343,8 @@ _VOICE_OVERRIDE_CLASSES = "set-hint set-dyn set-warnflash set-voiceoverride"
 # Курсор на токене и есть что стирать. Сегмент занимает место «Alt+↓ — показать
 # список» — тот обещается только на адресе, эти двое на разных полях и в одной
 # строке не встречаются, поэтому бюджету ширины ничего не грозит.
-_FOOTER_CONNECTION_TOKEN = "Enter — сохранить  ·  Ctrl+U — очистить  ·  Ctrl+Space — проверить связь  ·  PgUp/PgDn — секции  ·  Esc — меню"
+_FOOTER_CONNECTION_TOKEN = "Ctrl+S — сохранить/выйти · Ctrl+U — очистить · Ctrl+Space — проверить связь · Esc — меню"
+_FOOTER_DIRTY_CONFIRM = "Enter — выйти без сохранения  ·  Esc — остаться"
 # Строка «— без профиля» — не объект, а действие «снять текущий выбор», и глагол
 # у неё СВОЙ. Общий футер секции обещал здесь «активировать», пока подсказка под
 # списком в том же кадре говорила «деактивировать»; курсор при входе в секцию
@@ -475,6 +473,9 @@ class SettingsScreen(Screen):
         )  # происхождение полей: чем перекрыто, что действует
         self._on_apply = on_apply
         self._pending_env_save = None  # (section, values, warn_detail, back_to_menu) — ждёт confirm перезаписи ссылки
+        self._dirty_exit_confirm = False
+        self._dirty_exit_focus = None
+        self._pending_section_delta = None
         self._view: object = "menu"  # "menu" | int(0..5)
         self._menu_idx = 0
         self._modes_idx = 0  # курсор строки подэкрана «Режимы работы»
@@ -636,6 +637,8 @@ class SettingsScreen(Screen):
         return f"Настройки · {SECTIONS[self._view]}"
 
     def _footer_base(self) -> str:
+        if self._dirty_exit_confirm:
+            return _FOOTER_DIRTY_CONFIRM
         if self._report_open():
             # Отчёт держит экран: единственное, что сейчас работает, — его закрытие.
             return _FOOTER_REPORT
@@ -897,6 +900,14 @@ class SettingsScreen(Screen):
             endpoint
         )  # первый кадр меню сразу с …, без — → ✓ мелькания
         self._render_view()
+        # Каждое открытие секции начинается сверху. `VerticalScroll` сохраняет
+        # собственное смещение между пересборками тела, поэтому без явного сброса
+        # ползунок мог оставаться внизу при уже отрисованном верхе формы.
+        self.call_after_refresh(
+            lambda: self.query_one(
+                _SEL_SET_SCROLL, VerticalScroll
+            ).scroll_home(animate=False)
+        )
         self._start_config_probe()
         # Живость порта батарейки — первый замер сразу (глиф меню судит по ней) и
         # тихий интервал: пока открыта голосовая секция, статус «запущен/не запущен»
@@ -1777,14 +1788,13 @@ class SettingsScreen(Screen):
 
         Endpoint и token берутся из ПОЛЯ (ConnectionEditor.peek(), draft), а не из
         сохранённого конфига — иначе проверялась бы несуществующая комбинация
-        «новый адрес + старый токен».
+        «новый адрес + старый токен». Сырой токен из поля уходит в probe_connection
+        без Bearer-нормализации: проба сама перебирает формы.
 
         `manual` — проверку запустил человек (`Ctrl+Space`, `Enter`): её строки —
         ответ на клавишу и подводятся в кадр. Автопроверка кадр не двигает (см.
         `_set_probe_line`)."""
         show = self._show_probe_line if manual else self._set_probe_line
-        from gc_core.onboarding import authorization_header
-
         endpoint_cfg, auth_cfg, verify, model, proxy_cfg = (
             self._probe_args_from_config()
         )
@@ -1803,7 +1813,7 @@ class SettingsScreen(Screen):
         if auth_idx == 1:
             token = None  # без авторизации
         elif token_raw:
-            token = authorization_header(token_raw)  # введённый токен
+            token = token_raw  # сырой — probe_connection перебирает формы
         elif self._connection_editor().token_cleared:
             token = None  # Ctrl+U: сохранённый стёрт ещё до записи
         else:
@@ -1863,6 +1873,15 @@ class SettingsScreen(Screen):
             or self._view != section
         ):
             return
+        if result.auth_state == "accepted":
+            ed = self._connection_editor()
+            if ed.apply_accepted_auth(result.accepted_auth):
+                # Принятая форма меняет черновик программно. Старое
+                # подтверждение ENV/FILE-сохранения держит прежний снимок и
+                # после такой правки могло записать уже не показанное значение.
+                self._cancel_env_confirm()
+                self._last_probed_snapshot = ed.probe_snapshot()
+                self._update_dirty()
         self._draft_checked = result
         show = self._show_probe_line if manual else self._set_probe_line
         show(connection_line_text(result))
@@ -2163,13 +2182,34 @@ class SettingsScreen(Screen):
         # (ссылка остаётся в файле), а следующий Enter поднимет баннер заново.
         # (В профиле снимку взяться неоткуда — плоских полей у него нет; вызов
         # там безобиден и правило остаётся одним на обе цели.)
-        self._cancel_env_confirm()
         if ed.awaiting_confirm:
             event.stop()
             if event.key == "enter":
-                ed.confirm_pending()  # escape снят выше, глобальным гейтом
+                leaving = ed._dirty_exit_pending
+                ed.enter()  # подтверждение удаления или перезаписи ссылки
+                if leaving and self._pending_section_delta is not None:
+                    delta = self._pending_section_delta
+                    self._pending_section_delta = None
+                    self._switch_section(delta)
                 self._refresh_footer()
             return True
+        self._cancel_env_confirm()
+        if event.key == "f1" and ed.open_form_help():
+            event.stop()
+            event.prevent_default()
+            self._refresh_footer()
+            return True
+        if event.key == "ctrl+s" and ed.save_form():
+            event.stop()
+            event.prevent_default()
+            self._refresh_footer()
+            return True
+        if event.key in ("up", "down", "enter") and ed.form_keeps_key(
+            event.key
+        ):
+            # YAML-поле main/auxiliary: Enter — перевод строки, ↑/↓ ходят по
+            # тексту, пока курсор не у края. Клавишу виджету, не форме.
+            return False
         if event.key in ("up", "down"):
             event.stop()
             ed.move(-1 if event.key == "up" else 1)
@@ -2218,7 +2258,9 @@ class SettingsScreen(Screen):
             ed.enter()
             self._refresh_footer()
             return True
-        if event.key == "delete" and not isinstance(self.focused, Input):
+        if event.key == "delete" and not isinstance(
+            self.focused, (Input, TextArea)
+        ):
             event.stop()
             ed.request_remove()
             self._refresh_footer()
@@ -2229,7 +2271,7 @@ class SettingsScreen(Screen):
             return True
         if event.key in ("alt+n", "alt+т", "alt+N", "alt+Т") or (
             event.key in ("n", "т", "N", "Т")
-            and not isinstance(self.focused, Input)
+            and not isinstance(self.focused, (Input, TextArea))
         ):
             event.stop()
             ed.new_entry()
@@ -2292,12 +2334,14 @@ class SettingsScreen(Screen):
         if values is None:
             return
         if not values:
-            # Своим каналом секции, а не репликой в слоте заголовка: заголовка у
-            # «Моделей» нет (`_section_title`), и трёхсекундная реплика поднимала бы
-            # его вместе с отступом — тело прыгнуло бы на два ряда вниз и обратно
-            # прямо под курсором, которым только что нажали Enter. Отказом записи
-            # двумя строками выше секция отвечает тем же `_notice`.
-            self._notice(_MSG_NOTHING_CHANGED)
+            # Ctrl+S всегда завершает форму. Если значение не менялось, файл не
+            # трогаем, но возвращаемся туда же, откуда форма была открыта.
+            editor = self._models_editor()
+            if editor is not None and not editor.registry_empty:
+                editor._legacy_open = False
+                editor._rebuild()
+            else:
+                self._close_or_back()
             return
         # Пустое состояние — это САМА секция, и запись из неё завершает работу с ней
         # (возврат в хаб, как у прежней «Модели»). Под-форма резервной открыта из
@@ -2617,6 +2661,7 @@ class SettingsScreen(Screen):
                 # облачная панель: локальная показывает адрес ФАКТОМ (readonly), и
                 # VoiceEndpointEditor сам не заводит список у readonly-поля.
                 url_presets=voice_endpoint_presets_from_config(self._settings),
+                save_hint=True,
             )
         )
         if self._cfg_settings().backend.proxy:
@@ -3133,6 +3178,9 @@ class SettingsScreen(Screen):
         в группу полей, на кликнутое (иначе следующая стрелка прыгнула бы из «прошлого»
         места), и гасим незавершённый confirm удаления — Enter в поле теперь про
         сохранение, а не про снос."""
+        if self._dirty_exit_confirm:
+            self.set_focus(None)
+            return
         if self._view != _VOICE or not self._voice_focus_in_editor(
             event.widget
         ):
@@ -3275,23 +3323,43 @@ class SettingsScreen(Screen):
         )  # _singleton обновит плашку «поднимаю сервис…»
 
     def _voice_enter(self) -> None:
-        """Enter — включение режима ПОД КУРСОРОМ. В облачной панели входов много: строка
-        режима, любое её поле и клик мышью в поле — все ведут в одно сохранение. В
-        локальной панели правимое поле одно, «Язык», и Enter в нём сохраняет язык.
+        """Enter выбирает/раскрывает список; на локальной строке включает сервис."""
+        if self._voice_pick_from_list():
+            return
+        ctrl = self._voice_list_ctrl()
+        if ctrl is not None:
+            ctrl.reload()
+            self._refresh_footer()
+            return
+        if (
+            self._voice_pane == "local"
+            and self._voice_cursor_group() == _VOICE_GROUP_VARIANTS
+        ):
+            self._voice_enable_local()
 
-        Раскрытый список поля Enter сперва «схлопывает в поле» (подставить значение), и
-        уже затем идёт штатное сохранение места — одна клавиша, один результат."""
-        picked = self._voice_pick_from_list()
-        if self._voice_pane != "local":
-            self._voice_list_reopen_gate = (
-                picked  # пересборка полей не раскроет список заново
-            )
-            self._voice_cloud_save()
-            return
-        if self._voice_cursor_group() == _VOICE_GROUP_FIELDS:
-            self._voice_local_language_save()
-            return
-        self._voice_enable_local()
+    def _voice_is_dirty(self) -> bool:
+        raw = self._voice_raw_cloud()
+        original = {
+            "url": str(raw.get("url") or ""),
+            "token": "",
+            "model": str(raw.get("model") or ""),
+            "language": str(raw.get("language") or "ru"),
+        }
+        if (
+            self._voice_cloud_draft is not None
+            and self._voice_cloud_draft != original
+        ):
+            return True
+        try:
+            editor = self._voice_editor()
+        except NoMatches:
+            return False
+        values = editor.values()
+        if self._voice_pane == "cloud":
+            return values != original or editor.token_cleared
+        return values.get(
+            "language", "ru"
+        ) != self._voice_setup.local_language(self._settings)
 
     def _voice_pick_from_list(self) -> bool:
         """Подставить подсвеченную строку списка ПОД КУРСОРОМ в его поле и свернуть
@@ -3335,7 +3403,7 @@ class SettingsScreen(Screen):
             self._flash("не сохранено: локального сервиса нет", outcome="warn")
             return
         reloaded = self._voice_hot_reload()
-        self._refresh_voice_section()
+        self._close_or_back()
         if reloaded:
             self._flash(f"язык распознавания: {language}")
         else:
@@ -3690,7 +3758,7 @@ class SettingsScreen(Screen):
             self._voice_probe_values = (url, "", model, language)
         # Сохранённое — уже не черновик: поля поднимутся из файла, а не из него.
         self._voice_cloud_draft = None
-        self._render_view()  # флэш — после ре-рендера (он сносит детей фрейма)
+        self._close_or_back()
         if reloaded:
             self._flash("свой endpoint подключён")
         else:
@@ -6773,6 +6841,20 @@ class SettingsScreen(Screen):
             self._menu_idx = new
             self._open_section(new)
 
+    def _ask_dirty_exit(self) -> None:
+        self._dirty_exit_confirm = True
+        self._dirty_exit_focus = self.focused
+        self.set_focus(None)
+        self._singleton(
+            "set-dirty-confirm",
+            Text(
+                "Выйти без сохранения? Enter — выйти без сохранения · Esc — остаться",
+                style=WARN,
+            ),
+            f"set-confirm set-dyn {KEEP_IN_VIEW}",
+        )
+        self._refresh_footer()
+
     def _close_or_back(self) -> None:
         if self._view == "menu":
             self.app.pop_screen()
@@ -6837,6 +6919,16 @@ class SettingsScreen(Screen):
             # редакторы ниже; здесь только заказ доводки после раскладки.
             reveal_focus(self)
         if event.key == "escape":
+            if self._dirty_exit_confirm:
+                self._dirty_exit_confirm = False
+                self._pending_section_delta = None
+                for widget in self.query("#set-dirty-confirm"):
+                    widget.remove()
+                self._refresh_footer()
+                self.set_focus(self._dirty_exit_focus)
+                self._dirty_exit_focus = None
+                event.stop()
+                return
             if self._dismiss_report():
                 # Первая ступень лестницы: открытый отчёт закрывается СВОИМ Esc,
                 # из секции уводит уже следующий (канон вложенности — как у
@@ -6872,6 +6964,10 @@ class SettingsScreen(Screen):
                     ctrl.close()  # `close` сам скажет строкой, чем вернуть
                     self._refresh_footer()
                     return
+                if self._voice_is_dirty():
+                    event.stop()
+                    self._ask_dirty_exit()
+                    return
             if (
                 self._view in _WRITE_GATED_SECTIONS
                 and self._pending_env_save is not None
@@ -6892,9 +6988,18 @@ class SettingsScreen(Screen):
                     event.stop()  # закрыт только пресет-лист адреса, секция жива
                     self._refresh_footer()  # клавиши вернулись секции — футер за ними
                     return
+                if ed is not None and ed.is_dirty():
+                    event.stop()
+                    self._ask_dirty_exit()
+                    return
             if self._view == _MODELS:
                 ed = self._models_editor()
+                if ed is not None and ed.legacy_dirty:
+                    event.stop()
+                    self._ask_dirty_exit()
+                    return
                 if ed is not None and ed.escape():
+                    self._pending_section_delta = None
                     event.stop()  # закрыто под-состояние секции, из неё не выходим
                     self._refresh_footer()
                     return
@@ -6907,6 +7012,7 @@ class SettingsScreen(Screen):
                 if ed is None or not ed.escape():
                     self._profiles_open = None
                     self._render_view()
+                self._pending_section_delta = None
                 self._refresh_footer()
                 return
             if (
@@ -6926,6 +7032,29 @@ class SettingsScreen(Screen):
             event.stop()
             self._close_or_back()
             return
+        if self._dirty_exit_confirm:
+            event.stop()
+            if event.key == "enter":
+                self._dirty_exit_confirm = False
+                for widget in self.query("#set-dirty-confirm"):
+                    widget.remove()
+                if self._pending_section_delta is not None:
+                    delta = self._pending_section_delta
+                    self._pending_section_delta = None
+                    self._switch_section(delta)
+                else:
+                    ed = self._models_editor()
+                    if (
+                        self._view == _MODELS
+                        and ed is not None
+                        and ed.legacy_open
+                        and not ed.registry_empty
+                    ):
+                        ed.escape()
+                        self._refresh_footer()
+                    else:
+                        self._close_or_back()
+            return
         if self._view == _MCP:
             ed = self._mcp_editor()
             if ed is not None and ed.awaiting_confirm and event.key != "enter":
@@ -6943,9 +7072,39 @@ class SettingsScreen(Screen):
             return  # прочие клавиши — no-op, пока висит confirm
         if event.key in ("pageup", "pagedown", "ctrl+pageup", "ctrl+pagedown"):
             event.stop()  # Ctrl+ — тихий алиас для мышечной памяти
-            self._switch_section(
-                -1 if event.key in ("pageup", "ctrl+pageup") else 1
-            )
+            # Любой вопрос блокирует переход секции. Раньше повторный PgDn попадал
+            # в `ed.escape()`, снимал подтверждение грязной формы и оставлял
+            # отложенный переход без явного решения пользователя.
+            if self._view == _MODELS:
+                ed = self._models_editor()
+                if ed is not None and ed._dirty_exit_pending:
+                    return
+            if self._view == _VOICE and self._voice_awaiting_confirm():
+                return
+            delta = -1 if event.key in ("pageup", "ctrl+pageup") else 1
+            ed = self._models_editor()
+            if ed is not None and ed.form_open and ed._form.is_dirty():
+                self._pending_section_delta = delta
+                while ed._form.escape():
+                    pass
+                ed.escape()
+                self._refresh_footer()
+                return
+            if self._view == _CONNECTION:
+                ed = self._connection_editor()
+                if ed is not None and ed.is_dirty():
+                    self._pending_section_delta = delta
+                    self._ask_dirty_exit()
+                    return
+            if self._view == _VOICE and self._voice_is_dirty():
+                self._pending_section_delta = delta
+                self._ask_dirty_exit()
+                return
+            if self._view == _MODELS and ed is not None and ed.legacy_dirty:
+                self._pending_section_delta = delta
+                self._ask_dirty_exit()
+                return
+            self._switch_section(delta)
             return
         if (
             event.key == "enter"
@@ -7050,12 +7209,21 @@ class SettingsScreen(Screen):
             ed = self._models_editor()
             if ed is not None and self._route_registry_editor(ed, event):
                 return
-        if event.key == "enter" and self._view in _PROBE_SECTIONS:
+        if event.key == "ctrl+s" and self._view == _CONNECTION:
             event.stop()
-            section = self._view
             if not self._writable():
                 self._notice("конфиг недоступен для записи")
                 return
+            values = self._collect_values(_CONNECTION)
+            if values is None:
+                return
+            if not values:
+                self._close_or_back()
+                return
+            self._do_save(_CONNECTION, values)
+            return
+        if event.key == "enter" and self._view in _PROBE_SECTIONS:
+            section = self._view
             if section == _CONNECTION:
                 try:
                     ed = self._connection_editor()
@@ -7068,26 +7236,9 @@ class SettingsScreen(Screen):
                 if ed is not None and ed.enter_presets():
                     self._refresh_footer()  # список свернулся — футер снова про секцию
                     return  # пресет-лист открыт — подставил/открыл, не сабмит
-            values = self._collect_values(section)
-            if values is None:
-                return
-            if not values:
-                self._title_note(_MSG_NOTHING_CHANGED)
-                return
-            if (
-                self._draft_checked is not None
-            ):  # уже проверено: решаем по вердикту
-                self._smart_enter_decide(section, values, self._draft_checked)
-                return
-            self._cancel_autoprobe()  # запускаем СВОЮ пробу — автопроба лишняя
-            self._start_draft_probe(
-                section,
-                on_done=lambda r: self._smart_enter_decide(
-                    section, self._collect_values(section) or {}, r
-                ),
-                manual=True,
-            )
-            return
+            # Enter в обычном поле принадлежит самому полю. Сохранение формы
+            # выполняется единообразно через Ctrl+S; список адресных пресетов
+            # остаётся единственным вложенным состоянием, которое Enter выбирает.
         if event.key == "enter" and self._view == _UPDATE:
             event.stop()
             self._run_update_action()
@@ -7115,6 +7266,13 @@ class SettingsScreen(Screen):
                         -1 if event.key == "up" else 1
                     )  # навигация отменяет
                 return  # прочие клавиши — no-op, пока висит confirm
+            if event.key == "ctrl+s":
+                event.stop()
+                if self._voice_pane == "cloud":
+                    self._voice_cloud_save()
+                elif self._voice_fields_shown():
+                    self._voice_local_language_save()
+                return
             if event.key in (_KEY_ALT_DOWN, _KEY_CTRL_DOWN):
                 # До общей навигации: явно раскрыть список поля, ничего не печатая —
                 # второй путь назад после Esc (первый — печать, см. reopen_for_typing).

@@ -14,6 +14,39 @@ def _harness(editor):
     return _App()
 
 
+@pytest.mark.parametrize(
+    "source,accepted,expected",
+    [
+        ("secret", "Bearer secret", "Bearer secret"),
+        ("Bearer secret", "secret", "secret"),
+        ("${ENV:TOKEN}", "Bearer secret", None),
+        ("${FILE:/secret}", "Bearer secret", None),
+        ("Basic secret", "Bearer secret", None),
+        ("secret", "Bearer different", None),
+    ],
+)
+@pytest.mark.parametrize("typed", [True, False])
+async def test_accepted_literal_auth_updates_draft_but_never_secret_references(
+    source, accepted, expected, typed
+):
+    from gc_tui.editors.connection import ConnectionEditor
+
+    ed = ConnectionEditor(
+        url_current="http://old/v1/chat/completions", auth_header=source
+    )
+    async with _harness(ed).run_test() as pilot:
+        if typed:
+            ed.query_one("#conn-token", Input).value = source
+        await pilot.pause()
+        assert ed.apply_accepted_auth(accepted) is (expected is not None)
+        assert ed.query_one("#conn-token", Input).value == (
+            expected if expected is not None else source if typed else ""
+        )
+        assert ed.submit()[1] == (
+            expected if expected is not None else source if typed else None
+        )
+
+
 async def test_url_prefilled_token_empty():
     """Адрес предзаполнен сырым значением; поле токена пустое (секрет не заезжает)."""
     from gc_tui.editors.connection import ConnectionEditor
@@ -74,6 +107,29 @@ async def test_submit_valid_pair():
         ed.move(1)  # курсор → токен
         await pilot.pause()
         ed.query_one("#conn-token", Input).value = "sk-NEW"
+        url, header, error, _proxy = ed.submit()
+        assert url == "https://new/v1/chat/completions"
+        assert header == "sk-NEW"
+        assert error is None
+
+
+async def test_submit_writes_bearer_when_field_shows_bearer():
+    """Явно введённый Bearer сохраняется без изменения."""
+    from gc_tui.editors.connection import ConnectionEditor
+
+    ed = ConnectionEditor(
+        url_current="http://old/v1/chat/completions", auth_header=None
+    )
+    app = _harness(ed)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        ed.query_one(
+            "#conn-url", Input
+        ).value = "https://new/v1/chat/completions"
+        ed.move(1)
+        await pilot.pause()
+        ed.query_one("#conn-token", Input).value = "Bearer sk-NEW"
+        assert ed.query_one("#conn-token", Input).value == "Bearer sk-NEW"
         url, header, error, _proxy = ed.submit()
         assert url == "https://new/v1/chat/completions"
         assert header == "Bearer sk-NEW"
@@ -371,7 +427,7 @@ async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
         await pilot.pause()
         assert (
             str(ed.query_one(".conn-url-preset-hint").render())
-            == "Alt+↓ — показать список"
+            == "Enter — показать список"
         )
 
         ed.reload_presets()  # Alt+↓
@@ -414,7 +470,7 @@ async def test_no_match_collapses_the_list_and_says_so():
         assert not ed.presets_open
         assert (
             _hint_under_address(ed)
-            == "в списке такого нет · Alt+↓ — показать список"
+            == "в списке такого нет · Enter — показать список"
         )
 
         # Стрелка — обычная навигация формы, список её не забирает.
@@ -455,7 +511,7 @@ async def test_arrow_keeps_walking_the_preset_list_while_it_has_rows():
         assert ed.query_one("#conn-url", Input).has_focus
 
 
-async def test_create_mode_typed_token_becomes_bearer_header():
+async def test_create_mode_typed_token_saved_as_is():
     from gc_tui.editors.connection import ConnectionEditor
 
     ed = ConnectionEditor(url_current="", auth_header=None, create_mode=True)
@@ -467,7 +523,7 @@ async def test_create_mode_typed_token_becomes_bearer_header():
         ed.query_one("#conn-token", Input).value = "sk-NEW"
         url, header, error, _proxy = ed.submit()
         assert error is None
-        assert header == "Bearer sk-NEW"
+        assert header == "sk-NEW"
 
 
 async def test_preset_list_opens_whole_not_filtered_by_the_prefilled_address():

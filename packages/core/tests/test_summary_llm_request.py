@@ -4,18 +4,28 @@ import pytest
 from gc_core.summarize import llm as summary_llm
 from gc_core.utils import llm_chat_client
 from gc_testkit import as_coro, run_coro
-from gc_testkit.settings import fake_ctx
+from gc_testkit.settings import fake_ctx, make_settings
 
 
-def test_auxiliary_llm_completion_kwargs_matches_auxiliary_llm():
-    ctx = SimpleNamespace(
-        auxiliary_llm=SimpleNamespace(
-            completion_kwargs={"reasoning_effort": "none"},
-        )
+def test_summary_payload_uses_global_auxiliary_when_section_is_absent():
+    ctx = make_settings(
+        {
+            "backend.chat_completion_kwargs": {"temperature": 0.2},
+            "chat_completions.auxiliary_llm.completion_kwargs": {
+                "separate_reasoning": False,
+                "chat_template_kwargs": {"enable_thinking": False},
+            },
+        }
     )
-    assert summary_llm.auxiliary_llm_completion_kwargs(ctx) == {
-        "reasoning_effort": "none"
-    }
+    payload = llm_chat_client._build_chat_completion_payload(
+        ctx=ctx,
+        state=SimpleNamespace(default_model="m"),
+        messages=[{"role": "user", "content": "hi"}],
+        max_tokens=32,
+    )
+    assert payload["separate_reasoning"] is False
+    assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+    assert "temperature" not in payload
 
 
 def test_auxiliary_llm_judge_max_tokens_from_auxiliary_llm():
@@ -40,21 +50,36 @@ def test_auxiliary_llm_judge_max_tokens_falls_back_to_default():
 def test_request_summary_text_uses_ctx_auxiliary_llm(monkeypatch):
     captured = {}
 
-    async def _fake_request(
-        *, max_tokens=None, payload_overrides=None, **kwargs
-    ):
-        captured["max_tokens"] = max_tokens
-        captured["payload_overrides"] = payload_overrides
-        return "<think>x</think>summary ok"
+    def _fake_policy(*, payload_factory, initial_max_tokens, **_kwargs):
+        captured["max_tokens"] = initial_max_tokens
+        captured["payload"] = payload_factory(initial_max_tokens)
+        return {
+            "choices": [{"message": {"content": "<think>x</think>summary ok"}}]
+        }, {}
 
     monkeypatch.setattr(
-        summary_llm, "arequest_chat_completion_text", _fake_request
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+    monkeypatch.setattr(
+        llm_chat_client,
+        "acreate_call_headers",
+        as_coro(lambda _s, _c, resolved=None: {}),
     )
 
     ctx = fake_ctx(
         auxiliary_llm=SimpleNamespace(
             max_tokens=7777,
-            completion_kwargs={"reasoning_effort": "none"},
+            completion_kwargs={"reasoning_effort": "high"},
+        ),
+        loaded=make_settings(
+            {
+                "backend.completions_url": "http://example.test/v1/chat/completions",
+                "chat_completions.auxiliary_llm.completion_kwargs": {
+                    "reasoning_effort": "none"
+                },
+            }
         ),
         logger=None,
     )
@@ -70,24 +95,39 @@ def test_request_summary_text_uses_ctx_auxiliary_llm(monkeypatch):
 
     assert out == "summary ok"
     assert captured["max_tokens"] == 7777
-    assert captured["payload_overrides"] == {"reasoning_effort": "none"}
+    assert captured["payload"]["reasoning_effort"] == "none"
 
 
 def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
     captured = {}
 
-    async def _fake_request(*, payload_overrides=None, **kwargs):
-        captured["payload_overrides"] = payload_overrides
-        return "ok"
+    def _fake_policy(*, payload_factory, initial_max_tokens, **_kwargs):
+        captured["payload"] = payload_factory(initial_max_tokens)
+        return {"choices": [{"message": {"content": "ok"}}]}, {}
 
     monkeypatch.setattr(
-        summary_llm, "arequest_chat_completion_text", _fake_request
+        llm_chat_client,
+        "arequest_chat_completions_with_policy",
+        as_coro(_fake_policy),
+    )
+    monkeypatch.setattr(
+        llm_chat_client,
+        "acreate_call_headers",
+        as_coro(lambda _s, _c, resolved=None: {}),
     )
 
     ctx = fake_ctx(
         auxiliary_llm=SimpleNamespace(
             max_tokens=100,
-            completion_kwargs={"reasoning_effort": "none"},
+            completion_kwargs={"reasoning_effort": "high"},
+        ),
+        loaded=make_settings(
+            {
+                "backend.completions_url": "http://example.test/v1/chat/completions",
+                "chat_completions.auxiliary_llm.completion_kwargs": {
+                    "reasoning_effort": "none"
+                },
+            }
         ),
     )
     run_coro(
@@ -100,10 +140,8 @@ def test_request_summary_text_merges_optional_payload_overrides(monkeypatch):
             payload_overrides={"temperature": 0.2},
         )
     )
-    assert captured["payload_overrides"] == {
-        "reasoning_effort": "none",
-        "temperature": 0.2,
-    }
+    assert captured["payload"]["reasoning_effort"] == "none"
+    assert captured["payload"]["temperature"] == 0.2
 
 
 def test_request_summary_text_requires_auxiliary_llm_on_ctx():
@@ -144,7 +182,7 @@ def test_request_chat_completion_text_merges_payload_overrides_after_global_kwar
 ):
     captured = {}
 
-    async def _fake_policy(*, payload_factory, initial_max_tokens, **kwargs):
+    async def _fake_policy(*, payload_factory, initial_max_tokens, **_kwargs):
         captured["payload"] = payload_factory(initial_max_tokens)
         return {"choices": [{"message": {"content": "ok"}}]}, {}
 

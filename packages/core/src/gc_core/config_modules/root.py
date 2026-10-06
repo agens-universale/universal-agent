@@ -46,6 +46,7 @@ from gc_core.config_modules.model_registry import (
     validate_level_value,
     validate_model_alias,
 )
+from gc_core.config_modules.os_backend import OsBackendConfig
 from gc_core.config_modules.paths import PathsConfig
 from gc_core.config_modules.pricing import PricingConfig
 from gc_core.config_modules.project_memory import (
@@ -158,6 +159,12 @@ class AppConfig(BaseModel):
     )
     agent_edits: AgentEditsConfig = Field(default_factory=AgentEditsConfig)
     fs_tools: FsToolsConfig = Field(default_factory=FsToolsConfig)
+    # Где живут файлы и команды тулов. Дефолт `local` подходит всем; в
+    # шаблоне секция лежит закомментированным образцом (docker/ssh/exec/sandbox).
+    os_backend: OsBackendConfig = Field(
+        default_factory=OsBackendConfig,
+        json_schema_extra=gc_meta(expert=True),
+    )
     images: ImagesConfig = Field(default_factory=ImagesConfig)
     strip_tags_projection: StripTagsProjectionConfig = Field(
         default_factory=StripTagsProjectionConfig

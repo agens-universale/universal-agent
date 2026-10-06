@@ -348,7 +348,7 @@ def test_model_inherits_url_and_token_from_effective_backend_when_unset():
     )  # None = наследовать эффективный заголовок
 
 
-def test_model_token_normalized_to_bearer():
+def test_model_token_preserves_configured_authorization_format():
     router = _router(
         {
             "models": {
@@ -357,7 +357,7 @@ def test_model_token_normalized_to_bearer():
             "slots": {"default": "secure"},
         }
     )
-    assert router.resolve("main").authorization == "Bearer sk-abc"
+    assert router.resolve("main").authorization == "sk-abc"
 
 
 def test_model_token_empty_string_means_explicitly_no_auth():
@@ -391,20 +391,16 @@ def test_model_url_inherited_from_own_backend_completions_url_override():
 
 
 def test_backend_overrides_only_explicitly_set_keys():
+    # chat_completion_kwargs на уровне алиаса схема отвергает (MODEL_LEVEL_UNSUPPORTED,
+    # kwargs алиаса — в `main`/`auxiliary`), поэтому явный ключ — таймаут.
     router = _router(
         {
-            "models": {
-                "flash": {
-                    "backend": {"chat_completion_kwargs": {"temperature": 0.2}}
-                }
-            },
+            "models": {"flash": {"backend": {"request_timeout_sec": 42}}},
             "slots": {"default": "flash"},
         }
     )
     resolved = router.resolve("main")
-    assert resolved.backend_overrides == {
-        "chat_completion_kwargs": {"temperature": 0.2}
-    }
+    assert resolved.backend_overrides == {"request_timeout_sec": 42}
 
 
 def test_tariff_passed_through_from_model_pricing():

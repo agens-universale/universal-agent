@@ -42,6 +42,9 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "tui.stream",  # true (явно), кодовый дефолт None (наследуется от backend.stream)
     # --- Preset суммаризации: включена в шаблоне, выключена в кодовом дефолте ---
     "summary.chat_completions_summary_trigger_chars",  # 200000 вместо 0 (выключено)
+    # Шаблон вырезает мысль: копирование reasoning_content даёт 400 у части бэкендов.
+    # Кодовый дефолт (ключа нет) — false, поле копируется.
+    "strip_tags_projection.strip_think",
     # --- Preset безопасности: SSRF-blacklist и файловые фильтры ---
     "security.url_policy.url_blacklist",  # SSRF-blacklist cloud metadata/loopback/RFC1918
     "security.read_guard.allowed_read_paths",  # whitelist путей навыков
@@ -280,6 +283,60 @@ DEMO_KNOWN_GAPS: set = {
     "tui.bang_shell.max_output_bytes",
     "tui.bang_shell.max_output_lines",
 }
+
+
+_RUNTIME_PAYLOAD_KEYS = frozenset(
+    {"model", "messages", "tools", "max_tokens", "max_completion_tokens"}
+)
+
+
+def test_shipped_template_kwargs_are_null_and_strip_think_stays_on():
+    """Поставка: оба глобальных словаря явно null (не {}), strip_think включён."""
+    raw = _template_raw()
+    assert raw["backend"]["chat_completion_kwargs"] is None
+    assert (
+        raw["chat_completions"]["auxiliary_llm"]["completion_kwargs"] is None
+    )
+    assert raw["strip_tags_projection"]["strip_think"] is True
+
+
+def test_demo_config_has_no_live_vendor_kwargs():
+    """Разобранный demo_config не несёт vendor-kwargs и непустых main/auxiliary."""
+    raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    assert raw["backend"]["chat_completion_kwargs"] is None
+    assert (
+        raw["chat_completions"]["auxiliary_llm"]["completion_kwargs"] is None
+    )
+    for alias, entry in (raw.get("models") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for section in ("main", "auxiliary"):
+            assert not entry.get(section), (
+                f"models.{alias}.{section} в demo_config.yml непустой"
+            )
+
+
+def test_default_template_payload_has_only_runtime_keys():
+    """Старт из шаблона: в тело запроса не попадает ни один vendor-ключ."""
+    from types import SimpleNamespace
+
+    from gc_core.config_modules.model_registry import (
+        effective_completion_kwargs,
+    )
+    from gc_core.utils.connect_backend import create_call_data_completions
+
+    cfg = AppConfig.model_validate(_template_raw())
+    assert cfg.backend.chat_completion_kwargs == {}
+    state = SimpleNamespace(messages=[], tools=[], default_model="m")
+    data = create_call_data_completions(
+        [{"role": "user", "content": "hi"}],
+        state=state,
+        settings=cfg,
+    )
+    assert set(data) <= _RUNTIME_PAYLOAD_KEYS
+    assert "max_tokens" in data or "max_completion_tokens" in data
+    assert effective_completion_kwargs(None, cfg, section="auxiliary") == {}
+    assert effective_completion_kwargs(None, cfg, section="main") == {}
 
 
 def test_demo_config_covers_the_same_keys_as_the_template():

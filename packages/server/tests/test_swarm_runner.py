@@ -995,3 +995,68 @@ def test_start_swarm_trace_id_not_in_payload_json(base_swarm_cfg, mock_popen):
     assert "wf-42" not in payload_json
     # `system` в payload дописывает хендлер /swarm/run, не runner.
     assert json.loads(payload_json) == {"q": "go"}
+
+
+def test_materialize_replaces_model_kwargs(tmp_path, monkeypatch):
+    import yaml
+
+    host = tmp_path / "host.yml"
+    host.write_text(
+        yaml.safe_dump(
+            {
+                "models": {
+                    "sample": {
+                        "main": {"temperature": 0.9},
+                        "auxiliary": {"temperature": 0.8},
+                    }
+                }
+            }
+        )
+    )
+    project = tmp_path / "project"
+    (project / ".gc").mkdir(parents=True)
+    (project / ".gc" / "config.yml").write_text(
+        yaml.safe_dump({"models": {"sample": {"main": {}}}})
+    )
+    monkeypatch.chdir(project)
+    sandbox = tmp_path / "sandbox"
+    runner._materialize_runtime_config(
+        str(host),
+        str(sandbox),
+        {
+            # Правка по пути заменяет значение; запись ``models.<alias>``
+            # секцией заменилась бы целиком — потому адресуем поле записи.
+            "agent_overrides": {"models.sample.auxiliary": {}},
+        },
+    )
+    written = yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
+    assert written["models"]["sample"] == {"main": {}, "auxiliary": {}}
+
+
+def test_materialize_migrates_legacy_kwargs_before_overlay(
+    tmp_path, monkeypatch
+):
+    import yaml
+
+    host = tmp_path / "host.yml"
+    host.write_text(
+        yaml.safe_dump({"models": {"sample": {"main": {"temperature": 0.9}}}})
+    )
+    project = tmp_path / "project"
+    (project / ".gc").mkdir(parents=True)
+    (project / ".gc" / "config.yml").write_text(
+        yaml.safe_dump(
+            {
+                "models": {
+                    "sample": {
+                        "backend": {"chat_completion_kwargs": {"top_p": 0.2}},
+                    }
+                }
+            }
+        )
+    )
+    monkeypatch.chdir(project)
+    sandbox = tmp_path / "sandbox"
+    runner._materialize_runtime_config(str(host), str(sandbox), {})
+    written = yaml.safe_load((sandbox / ".gc" / "config.yml").read_text())
+    assert written["models"]["sample"]["main"] == {"top_p": 0.2}

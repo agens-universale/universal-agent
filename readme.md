@@ -16,6 +16,8 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 - Профили и уровни моделей (`light`/`default`/`max`): реестр `models`/`slots`/`assign` в конфиге, переключаемые YAML-профили, CLI `--profile`/`--level`, палитра `/level`/`/profiles`.
 - Защита файловой системы: `write_guard` ограничивает запись в `launch_root`, `security.protected_paths` включена по умолчанию.
 - Серверный режим: REST-обёртка на FastAPI.
+- HTTP-фасады Responses и Chat Completions: отдельный процесс `gc-chat`.
+- IDE через Agent Client Protocol: процесс `gc-acp` (VS Code + ACP Client).
 - Swarm-режим (только Linux): изолированные песочницы (bubblewrap).
 - Подсчёт токенов и стоимости прогона: фактическая цена от провайдера, если он её сообщает (OpenRouter), иначе расчёт по тарифу; с учётом prompt-кэша.
 
@@ -36,19 +38,23 @@ Background и CLI-клиент для работы с агентом GigaCode: �
 
 | Команда установки | Что приезжает |
 |---|---|
-| `gc-ua` | полный агент: ядро + TUI + server |
+| `gc-ua` | полный агент: ядро + TUI + server + `gc-acp` + `gc-chat` |
 | `gc-cli` | только ядро (headless) |
 | `gc-tui` | ядро + TUI |
 | `gc-server` | ядро + FastAPI-режим и swarm |
+| `gc-acp` | ядро + ACP-фасад для IDE |
+| `gc-chat` | ядро + HTTP-фасады Responses / Chat Completions |
 
 ```bash
-# полный агент — все шесть команд сразу
+# полный агент — все команды сразу (включая gc-acp и gc-chat)
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 
 # узкий профиль: своя команда + менеджер MCP одной строкой
 uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli"       --with-executables-from gc-mcp
 uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui"       --with-executables-from gc-mcp
 uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
+uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/acp"
+uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
 
 gc-mcp install duckduckgo_search   # один MCP + авто-подключение в ~/.gc/config.local.yml
 # gc-mcp install                   # все MCP из манифеста
@@ -60,7 +66,8 @@ gc-mcp install duckduckgo_search   # один MCP + авто-подключен�
 
 > Каждый дистрибутив кладёт в PATH только свои команды: `gc-cli` → `gc-cli`,
 > `gc-tui` → `gc-ua` и `gc-voice`, `gc-server` → `gc-serve`, `gc-mcp` → `gc-mcp` и
-> `gc-mcp-install`; полный `gc-ua` — все шесть. `uv tool` не экспортирует команды зависимостей, поэтому у
+> `gc-mcp-install`, `gc-acp` → `gc-acp`, `gc-chat` → `gc-chat`; полный `gc-ua` —
+> все перечисленные. `uv tool` не экспортирует команды зависимостей, поэтому у
 > узкого профиля стоит `--with-executables-from gc-mcp` — менеджер MCP при этом
 > приезжает из того же коммита. Смена профиля — переустановка, нужен `--force`.
 
@@ -165,10 +172,12 @@ assign:
 - [Тесты](docs/testing.md) — наборы при пакетах (`packages/*/tests`), общий тест-кит, `external/*`, полный прогон.
 - [Temporal](docs/temporal-native.md) — opt-in runtime: настоящий агент в durable workflow, model/tool activities, MCP и child workflows.
 - [Конфигурация](docs/configuration.md) — `config.yml`, приоритет и переопределение, security policy, MCP-серверы, runtime-пути, project-local config.
+- [`os_backend` — справочник](docs/os_backends.md) — YAML-блоки для `local` / `sandbox` / `docker` / `ssh` / `exec` / `harbor`.
 - [Сабагенты](docs/subagents.md) — делегирование задач, кастомные сабагенты, лимиты и бюджет вызовов.
 - [Скиллы и пакеты скиллов](docs/skills.md) — трёхслойный поиск, манифест пакета, canonical IDs, встроенные паки.
 - [Серверный режим](docs/server.md) — REST-обёртка (FastAPI), конфиги сервера, эндпоинты, Swarm-режим (Linux).
-- [HTTP-фасад Responses и Chat Completions](docs/responses.md) — `gc-chat`, секция `chat_api` в общем `config.yml`, ходы через `POST /v1/responses` и `POST /v1/chat/completions`.
+- [HTTP-фасады (`gc-chat`)](docs/chat.md) — установка, `chat_api`, Responses и Chat Completions на одном порту; детальный контракт Responses — [responses.md](docs/responses.md).
+- [ACP-фасад (`gc-acp`)](docs/acp.md) — IDE через Agent Client Protocol, VS Code + ACP Client, секция `acp`.
 - [Swarm-режим](docs/swarm.md) — изолированные bubblewrap-песочницы для каждой задачи, pipeline запроса, эндпоинты, AR-1..AR-9, troubleshooting.
 - [TUI режим (gc-ua)](docs/tui.md) — кроссплатформенный TUI поверх агента: установка, запуск, основные команды и экраны.
 - [RootBox режим](docs/rootbox.md) — Roox box режим, конфиги (command_moderation, read_guard, root_box (write_guard), url_policy)

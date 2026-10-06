@@ -206,6 +206,50 @@ async def aprime_backend_cwd(backend: Any, settings: Any = None) -> None:
     )
 
 
+async def areconcile_remote_root(backend: Any, settings: Any) -> Any:
+    """Хостовый ``launch_root`` у удалённого бэкенда → cwd той стороны.
+
+    TUI/ACP кладут ``launch_root = cwd`` хоста до сборки контекста. У docker/ssh
+    такого каталога нет, а ``resolve_execution_root`` корень из рантайма берёт
+    первым — env-блок промпта и guards смотрели бы на путь хоста. Явно заданный
+    путь, который на той стороне существует (``/testbed``), остаётся.
+    Звать после ``aprime_backend_cwd``: cwd той стороны к этому моменту известен.
+
+    Настройки неизменяемы: возвращает новые (с исправленным корнем рантайма)
+    или те же. ``settings`` — ``LoadedSettings`` (есть ``with_runtime``).
+    """
+    if not getattr(backend, "is_sandbox", False) or not hasattr(
+        settings, "with_runtime"
+    ):
+        return settings
+    raw = _config_root_raw(settings)
+    if raw is None:
+        return settings
+    try:
+        if await backend.is_dir(raw):
+            return settings
+    except Exception:  # окружение недоступно — корень не трогаем
+        return settings
+    default_cwd = getattr(backend, "default_cwd", None)
+    remote = (default_cwd() if callable(default_cwd) else None) or _primed_cwd(
+        backend
+    )
+    if not remote:
+        return settings
+    logging.getLogger(__name__).info(
+        "launch_root %s нет на стороне бэкенда %s — корень рабочей области: %s",
+        raw,
+        type(backend).__name__,
+        remote,
+    )
+    from gc_core.settings import runtime_of
+
+    updates = {"launch_root": remote}
+    if runtime_of(settings).project_root:
+        updates["project_root"] = remote
+    return settings.with_runtime(**updates)
+
+
 def _config_root_raw(settings: Any) -> Optional[str]:
     """Явный корень рантайма (``launch_root``, иначе ``project_root``).
 

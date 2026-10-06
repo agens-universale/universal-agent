@@ -169,7 +169,8 @@ def test_scalar_secrets_are_secret_str_with_raw_value_on_request():
     assert isinstance(settings.voice.token, SecretStr)
     assert settings.voice.token.get_secret_value() == "voice-SECRET"
     entry = settings.models["m1"]
-    assert entry.authorization_header == "Bearer model-SECRET"
+    # Токен — как настроен: форму (с Bearer или без) выбирает проба подключения.
+    assert entry.authorization_header == "model-SECRET"
     assert settings.model_dump(mode="json")["voice"]["token"] != (
         "voice-SECRET"
     )
@@ -182,9 +183,9 @@ def test_scalar_secrets_are_secret_str_with_raw_value_on_request():
 
 def test_plain_dumps_carry_secrets_and_test_bridge_round_trips():
     settings = _settings()
-    # Проекция записи для ModelRouter несёт уже нормализованный заголовок.
+    # Проекция записи для ModelRouter несёт заголовок в настроенной форме.
     projected = serialize_model_entry(settings.models["m1"])
-    assert projected["authorization_header"] == "Bearer model-SECRET"
+    assert projected["authorization_header"] == "model-SECRET"
     revealed = settings.model_dump(by_alias=True, context=REVEAL_SECRETS)
     back = make_settings(revealed).settings
     assert back == settings

@@ -56,14 +56,14 @@ async def test_enter_before_autoprobe_still_saves(tmp_path):
             "#conn-url", Input
         ).value = "https://new-host/v1/chat/completions"
         await pilot.press(
-            "enter"
+            "ctrl+s"
         )  # применить — до срабатывания автопробы (50мс)
         await pilot.pause(
             0.3
         )  # заведомо дольше таймера — автопроба точно успела бы
         content = cfg_file.read_text(encoding="utf-8")
         assert "https://new-host/v1/chat/completions" in content, (
-            "Enter не сохранил: результат пользовательской пробы обесценен автопробой"
+            "Ctrl+S не сохранил: результат пользовательской пробы обесценен автопробой"
         )
 
 
@@ -257,7 +257,7 @@ async def test_user_enter_beats_autoprobe(tmp_path):
     async with settings_connection(tmp_path, probe=ok_probe()) as (pilot, scr):
         scr.query_one("#conn-url", Input).value = new_url
         await pilot.press("down")  # уход с поля → автопроба
-        await pilot.press("enter")  # человек тут же сохраняет
+        await pilot.press("ctrl+s")  # человек тут же сохраняет
         await wait_until(
             pilot,
             lambda: (
@@ -299,7 +299,7 @@ async def test_enter_reuses_autoprobe_verdict(tmp_path):
             "автопроба ухода с поля осела",
         )
         after_autoprobe = len(draft_calls())
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await wait_until(
             pilot,
             lambda: (
@@ -383,7 +383,9 @@ async def test_arrow_during_enter_probe_keeps_save(tmp_path):
         scr.query_one(
             "#conn-url", Input
         ).value = new_url  # правка гасит вердикт
-        await pilot.press("enter")  # Enter без вердикта → своя проба + on_done
+        await pilot.press(
+            "ctrl+s"
+        )  # Ctrl+S без вердикта → своя проба + on_done
         await wait_until(pilot, lambda: bool(calls), "проба Enter вылетела")
         await pilot.press("down")  # стрелка внутри латентности
         await pilot.pause()

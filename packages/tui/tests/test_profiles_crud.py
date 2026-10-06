@@ -793,10 +793,7 @@ async def test_esc_cancels_the_name_input_without_leaving_the_section(
 async def test_footer_names_the_v1_keys_on_a_profile_row(
     tmp_path, monkeypatch
 ):
-    """Футер строки профиля — вариант В1 ДОСЛОВНО И ЦЕЛИКОМ: с приездом редактора
-    (Task 6) заработал Enter, и сегмент «Enter — открыть» встал на своё место —
-    первым, сразу за «↑/↓» (бюджет проверен: 115 символов, две строки на 64
-    колонках — ровно из-за MCP-стиля разделителей)."""
+    """Футер строки профиля перечисляет основные действия списка."""
     from gc_tui import app as app_mod
 
     project_dir = tmp_path / "project"
@@ -814,7 +811,7 @@ async def test_footer_names_the_v1_keys_on_a_profile_row(
     assert footer == s._FOOTERS[s._PROFILES]
     assert footer == (
         "↑/↓ · Enter — открыть · Space — активировать · n — создать · "
-        "r — переименовать · Del — удалить · PgUp/PgDn — секции"
+        "r — переименовать · Del — удалить"
     )
 
 

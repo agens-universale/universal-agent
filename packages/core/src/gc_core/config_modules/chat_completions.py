@@ -29,16 +29,27 @@ DEFAULT_SUBAGENT_ROLE_MAX_TOKENS = 24576
 class ChatCompletionsLlmConfig(BaseModel):
     """LLM-профиль вспомогательных chat/completions-вызовов (summary, finish gate, intent scope, judges).
 
-    ``completion_kwargs`` — overlay поверх agent ``chat_completion_kwargs``.
-    Schema default ``{}`` (без vendor-ключей); thinking/anti-thinking задаются
-    в YAML/бенч-профиле, не в коде.
+    ``completion_kwargs`` — глобальный словарь служебного вызова, когда у алиаса
+    нет своей секции ``auxiliary`` (и в легаси-режиме без реестра). Явный
+    ``models.<alias>.auxiliary: {}`` его не подмешивает. ``max_tokens`` /
+    ``judge_max_tokens`` по-прежнему здесь.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    max_tokens: int = DEFAULT_AUXILIARY_LLM_MAX_TOKENS
-    judge_max_tokens: int = DEFAULT_JUDGE_MAX_TOKENS
-    subagent_role_max_tokens: int = DEFAULT_SUBAGENT_ROLE_MAX_TOKENS
+    # Тюнинг служебных вызовов; в шаблоне только completion_kwargs.
+    max_tokens: int = Field(
+        default=DEFAULT_AUXILIARY_LLM_MAX_TOKENS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    judge_max_tokens: int = Field(
+        default=DEFAULT_JUDGE_MAX_TOKENS,
+        json_schema_extra=gc_meta(expert=True),
+    )
+    subagent_role_max_tokens: int = Field(
+        default=DEFAULT_SUBAGENT_ROLE_MAX_TOKENS,
+        json_schema_extra=gc_meta(expert=True),
+    )
     completion_kwargs: dict[str, Any] = {}
 
     @field_validator("max_tokens", mode="before")
@@ -80,7 +91,6 @@ class ChatCompletionsConfig(BaseModel):
     auxiliary_llm: ChatCompletionsLlmConfig = Field(
         default_factory=ChatCompletionsLlmConfig,
         validation_alias=AliasChoices("auxiliary_llm", "llm"),
-        json_schema_extra=gc_meta(expert=True),
     )
 
 

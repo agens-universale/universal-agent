@@ -76,6 +76,7 @@ def bench_defaults(prompts_dir: Path, skills_dir: Path) -> Dict[str, Any]:
         ),
         "backend.use_ssl": False,
         "backend.use_retry": True,
+        "os_backend.kind": "harbor",
         "agent.system_prompt_id": "v1",
         "logging.save_logs": False,
         "logging.console_trace": False,

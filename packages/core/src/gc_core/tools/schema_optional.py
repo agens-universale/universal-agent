@@ -40,6 +40,9 @@ from gc_core.execution.tool_schema import (
     apply_openai_strict_parameters as apply_openai_strict_parameters,
 )
 from gc_core.execution.tool_schema import (
+    apply_openai_strict_schema_tree as apply_openai_strict_schema_tree,
+)
+from gc_core.execution.tool_schema import (
     augment_optional_property_descriptions as augment_optional_property_descriptions,
 )
 from gc_core.execution.tool_schema import (

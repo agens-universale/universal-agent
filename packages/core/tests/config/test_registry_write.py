@@ -1042,3 +1042,17 @@ def test_validate_profile_text_rejects_profile_key_and_bad_types():
 def test_validate_profile_text_rejects_broken_yaml():
     with pytest.raises(ValueError):
         validate_profile_text("models: [незакрытый\n  список")
+
+
+def test_explicit_null_is_distinct_from_removing_a_model_field(
+    tmp_path, template
+):
+    from gc_core.config_modules.registry_write import YAML_NULL
+
+    path = _cfg(tmp_path, _REGISTRY)
+    upsert_model(path, "flash", {"main": YAML_NULL, "auxiliary": {}}, template)
+    entry = _models(path)["flash"]
+    assert "main" in entry and entry["main"] is None
+    assert entry["auxiliary"] == {}
+    upsert_model(path, "flash", {"main": None}, template)
+    assert "main" not in _models(path)["flash"]

@@ -86,6 +86,19 @@ def env_refs_overwritten(
     written: List[str] = []
     erased: List[str] = []
     for key, value in new_values.items():
+        old = old_values.get(key)
+        if isinstance(old, dict):
+            # Значение ключа заменяется целиком: пропавшие вложенные ключи
+            # тоже стирают ссылки, в отличие от отсутствующего верхнего ключа.
+            replacement = value if isinstance(value, dict) else {}
+            nested_values = dict.fromkeys(old)
+            nested_values.update(replacement)
+            nested_written, nested_erased = env_refs_overwritten(
+                nested_values, old
+            )
+            written.extend(nested_written)
+            erased.extend(nested_erased)
+            continue
         if env_refs(value):
             continue
         refs = env_refs(old_values.get(key))

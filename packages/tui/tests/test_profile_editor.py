@@ -89,7 +89,7 @@ async def _fill_entry(pilot, scr, alias: str, model: str) -> None:
     form.query_one("#mef-model", Input).value = model
     form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
     await pilot.pause()
-    await pilot.press("enter")
+    await pilot.press("ctrl+s")
     await pilot.pause()
 
 
@@ -324,7 +324,7 @@ async def test_focus_returns_to_the_form_after_a_write_fails_past_the_env_confir
         form.query_one("#mef-token", Input).value = "literal-secret"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → баннер перезаписи ссылки
+        await pilot.press("ctrl+s")  # submit → баннер перезаписи ссылки
         await pilot.pause()
         assert ed._env_pending is not None, "баннер подтверждения не поднялся"
         await pilot.press("enter")  # подтвердить — запись должна упасть
@@ -1269,7 +1269,7 @@ async def test_renaming_in_an_inactive_profile_still_asks_for_a_default_slot(
         form.query_one("#mef-alias", Input).value = "newname"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → должен спросить дефолт
+        await pilot.press("ctrl+s")  # submit → должен спросить дефолт
         await pilot.pause()
 
         assert ed.picker_open, (

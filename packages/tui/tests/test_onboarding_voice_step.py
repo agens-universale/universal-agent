@@ -2453,8 +2453,6 @@ async def test_list_hints_stand_under_every_field_from_the_first_frame():
     """Шаг мастера — тот же контракт, что у секции /settings: строка «чем раскрыть
     список» стоит под каждым полем со списком сразу, а не после первого раскрытия."""
     from gc_tui.app import TuiApp
-    from gc_tui.editors.field_list import LIST_CLOSED_HINT
-    from gc_tui.editors.voice_endpoint import _MODEL_RELOAD_HINT
 
     app = TuiApp(settings=tui_settings({"agent.model": "M"}))
     voice = FakeVoice()
@@ -2465,5 +2463,11 @@ async def test_list_hints_stand_under_every_field_from_the_first_frame():
         await _to_voice_step(pilot, screen)
         await _to_cloud_fields(pilot, screen)
         await pilot.pause()
-        assert _list_hint(screen, "voice-url-preset-hint") == LIST_CLOSED_HINT
-        assert _list_hint(screen, "voice-model-hint") == _MODEL_RELOAD_HINT
+        assert (
+            _list_hint(screen, "voice-url-preset-hint")
+            == "Alt+↓ — показать список"
+        )
+        assert (
+            _list_hint(screen, "voice-model-hint")
+            == "Alt+↓ — перечитать список"
+        )

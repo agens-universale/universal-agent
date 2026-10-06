@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from rich.text import Text
 
-from gc_tui.editors.field_list import FieldListController
+from gc_tui.editors.field_list import LIST_CLOSED_HINT, FieldListController
 from gc_tui.palette import ACCENT, DEEP_DIM
 
 # Канон-хинт пресет-листа адреса (спека §2.1, дословно).
@@ -36,6 +36,7 @@ def preset_list_controller(
     hint: str,
     on_pick=None,
     no_match_hint: str = PRESET_HINT_NO_MATCH,
+    closed_hint: str = LIST_CLOSED_HINT,
 ) -> FieldListController:
     """Контроллер пресет-листа адреса под полем `#{input_id}`.
 
@@ -122,4 +123,5 @@ def preset_list_controller(
         hint=lambda ok: hint if ok else no_match_hint,
         on_pick=on_pick,
         restore_on_close=False,
+        closed_hint=closed_hint,
     )

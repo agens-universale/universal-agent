@@ -60,7 +60,8 @@ def test_current_child_fallback_identity_materializes_only_worker_transport():
         "active",
         "good",
         "https://active.example/v1",
-        "Bearer secret-active",
+        # Токен как настроен: форму (с Bearer или без) выбирает проба/401.
+        "secret-active",
     )
     assert ctx.model_router.resolve("main").alias == "pin"
 

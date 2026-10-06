@@ -229,8 +229,6 @@ class TestSpecialAgentWithRunner:
                         logger=None,
                         run_id="cr",
                         is_tui=False,
-                        # Профиль aux нужен: роль теперь зовёт
-                        # `auxiliary_llm_completion_kwargs(ctx)`.
                         auxiliary_llm=ChatCompletionsLlmConfig(),
                     )
                 ),

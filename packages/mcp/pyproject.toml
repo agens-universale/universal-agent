@@ -5,12 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "gc-mcp"
 
-version = "0.3.1"
+version = "0.4.0"
 description = "GigaCode Universal Agent — менеджер MCP-серверов и курируемые рецепты"
 readme = "readme.md"
 requires-python = ">=3.11"
 dependencies = [
-    "gc-core==0.3.1",
+    "gc-core==0.4.0",
     "pyyaml>=6.0.3",
 ]
 

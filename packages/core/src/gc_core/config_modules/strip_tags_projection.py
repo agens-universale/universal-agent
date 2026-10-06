@@ -18,17 +18,16 @@ _TAG_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 class StripTagsProjectionConfig(BaseModel):
     """``tags`` — extra-теги для саммари/intent/digest. ``strip_think`` — история.
 
-    ``strip_think: true`` (дефолт) — скрытое поле мысли бэкенда в историю не
-    копировать. Salvage ``<think>`` — только если кроме ризонинга ничего нет
-    (нет прозы и нет тулов). Смешанный ход (think + проза) кладёт в историю
-    только прозу.
-    ``strip_think: false`` — копировать поле как пришло и отдать as-is.
+    ``strip_think: false`` (дефолт) — копировать скрытое поле мысли в историю.
+    ``strip_think: true`` — не копировать. Salvage ``<think>`` — только если
+    кроме ризонинга ничего нет (нет прозы и нет тулов). Смешанный ход
+    (think + проза) кладёт в историю только прозу.
     Из саммари, intent, судей и памяти ``<think>`` вырезается всегда.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    strip_think: bool = True
+    strip_think: bool = False
     tags: list[str] = Field(default_factory=list)
 
 
@@ -69,10 +68,32 @@ def projection_tags_from_config(settings: object) -> tuple[str, ...]:
 def persist_reasoning_content_from_config(settings: object) -> bool:
     """Класть ли ``reasoning_content`` на канонический item в ``state.messages``.
 
-    Единственный потребитель — ``get_output_list`` / вход в канон.
-    YAML ``strip_think: false`` = persist True.
+    Глобальный флаг. Дефолт ``strip_think: false`` — поле копируется.
+    ``true`` в конфиге вырезание включает. Алиас со своим ``strip_think``
+    перекрывает его через ``persist_reasoning_content_for_model``. Служебные
+    вызовы этот флаг не читают: summary, судьи, finish_gate и intent режут
+    мысль всегда.
     """
     return not _section_from_config(settings).strip_think
+
+
+def persist_reasoning_content_for_model(
+    resolved: object, settings: object
+) -> bool:
+    """Persist мысли хода этой модели.
+
+    ``strip_think`` алиаса, если он задан булевым. Ключа нет — глобальный
+    ``strip_tags_projection.strip_think``. ``true`` не копирует поле в историю,
+    ``false`` копирует.
+    """
+    flag = (
+        getattr(resolved, "strip_think", None)
+        if resolved is not None
+        else None
+    )
+    if isinstance(flag, bool):
+        return not flag
+    return persist_reasoning_content_from_config(settings)
 
 
 def _clean_tag_name(item: object) -> str | None:

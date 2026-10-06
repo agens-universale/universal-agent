@@ -539,7 +539,7 @@ async def test_the_last_own_entry_does_not_promise_an_empty_registry(
         banner = _confirm_banner(ed)
         assert "Удалить запись «glm» из реестра?" in banner
         assert "Реестр станет пустым" not in banner
-        assert "Enter — удалить · Esc — отмена" in banner
+    assert "Enter — подтвердить · Esc — отмена" in banner
 
 
 async def test_a_shadowed_own_entry_does_not_promise_an_empty_registry_or_broken_links(
@@ -671,7 +671,7 @@ async def test_creating_an_entry_named_like_a_base_one_is_refused(
         form.query_one("#mef-model", Input).value = "zhipu/glm-4"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         error = str(form.query_one("#mef-error", _Static).render())
         assert "алиас занят записью основного конфига" in error
@@ -1583,7 +1583,7 @@ async def test_the_namesake_form_masks_the_shadowed_token_under_the_field(
     async with _namesake_view(tmp_path, monkeypatch) as (pilot, scr, ed):
         form = await _open_entry_form(pilot, scr, ed, "gpt")
         token = form.query_one("#mef-token", Input)
-        assert token.placeholder == "наследуется: Bearer BAS***"
+        assert token.placeholder == "наследуется: ***"
         assert "BASE-TOKEN" not in token.placeholder
         assert "SMO" not in token.placeholder
         assert token.has_class("has-saved")  # маска, не подсказка
@@ -1660,7 +1660,7 @@ async def test_the_namesake_form_keeps_inherited_fields_empty_and_writes_none_of
     tmp_path, monkeypatch
 ):
     """Форма говорит о тени, но не пишет её: поля унаследованного пусты, `submit()`
-    без правок не отдаёт ни одного ключа, и после Enter в файле профиля у тёзки
+    не отдаёт унаследованные значения, и после Enter в файле профиля у тёзки
     ровно то, что было, — унаследованное копией в профиль не уезжает. Основной
     файл не тронут байт-в-байт."""
     from textual.widgets import Input
@@ -1673,10 +1673,19 @@ async def test_the_namesake_form_keeps_inherited_fields_empty_and_writes_none_of
             assert form.query_one(f"#{field_id}", Input).value == "", field_id
         assert form.query_one("#mef-alias", Input).value == "gpt"
         assert form.is_dirty() is False
-        assert form.submit() == (True, "gpt", {})
+        assert form.submit() == (
+            True,
+            "gpt",
+            {
+                "main": None,
+                "auxiliary": None,
+                "backend": {"use_ssl": False},
+                "strip_think": None,
+            },
+        )
         form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert not _editor(scr).form_open
         assert base_file.read_bytes() == base_before
@@ -1713,11 +1722,18 @@ async def test_ctrl_u_on_a_namesake_returns_the_pair_to_the_shadowed_record(
             "Адрес и токен: наследуются из записи основного конфига"
         )
         assert _placeholder(form, "mef-url") == f"наследуется: {_SHADOWED_URL}"
-        assert _placeholder(form, "mef-token") == "наследуется: Bearer BAS***"
+        assert _placeholder(form, "mef-token") == "наследуется: ***"
         ok, alias, fields = form.submit()
         assert (ok, alias) == (True, "gpt")
-        assert fields == {"url": None, "token": None}
-        await pilot.press("enter")
+        assert fields == {
+            "url": None,
+            "token": None,
+            "main": None,
+            "auxiliary": None,
+            "backend": None,
+            "strip_think": None,
+        }
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert not _editor(scr).form_open
     entry = _doc(_profile_path(tmp_path))["models"]["gpt"]
@@ -1778,7 +1794,7 @@ async def _write_literal_token_entry(pilot, scr):
     form.query_one("#mef-token", Input).value = "sk-LITERAL-SECRET-999"
     form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
     await pilot.pause()
-    await pilot.press("enter")
+    await pilot.press("ctrl+s")
     await pilot.pause()
 
 

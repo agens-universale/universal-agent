@@ -29,6 +29,7 @@ from gc_core.execution.ports import AgentOperations
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
+    areconcile_remote_root,
     build_execution_workspace,
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
@@ -36,6 +37,7 @@ from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.run_preparation import PromptLoader
 from gc_core.state_preparation import StatePreparer
 from gc_core.tools import abuild_tools_data
+from gc_core.tools.skills.provision import aprovision_remote_skills
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
@@ -363,7 +365,18 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # Закрыть его раньше некому: снос фильтрует по владельцу, а контекста,
     # которому он принадлежит, так и не появилось.
     try:
+        # sandbox.workdir=auto мог сменить корень рантайма в подготовке.
+        source = prep.settings
         await aprime_backend_cwd(prep.backend, source)
+        source = await areconcile_remote_root(prep.backend, source)
+        prep.settings = source
+        # Remote-бэкенд: скиллы лежат на хосте, а реестр читает через бэкенд —
+        # копируем набор «туда» и пересобираем реестр по удалённым корням.
+        provisioned = await aprovision_remote_skills(
+            prep.backend, source, run_logger=prep.run_logger
+        )
+        if provisioned is not None:
+            prep.skills_registry = provisioned
         # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
         # успешно снятый тул снова считается опечаткой. Способность пришла с
         # develop, у нас её не было; тело, которое список заполняет, слилось
@@ -506,6 +519,15 @@ def _prepare_run_context(
         loop=loop,
         override=os_backend,
     )
+    # sandbox.workdir=auto: каталог рана обязан стать launch_root — его читают
+    # write_guard (`launch_root_from_config`) и workspace, а бэкенда у них нет.
+    # Побеждает безусловно: TUI/ACP ставят launch_root=cwd ещё до сборки, и
+    # без перезаписи guards пускали бы файловые тулы в реальный проект.
+    auto_workdir = getattr(backend, "auto_workdir", None)
+    if auto_workdir and hasattr(settings, "with_runtime"):
+        settings = settings.with_runtime(
+            launch_root=auto_workdir, project_root=auto_workdir
+        )
     skills_registry = get_skills_registry(settings, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в

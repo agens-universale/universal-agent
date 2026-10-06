@@ -725,6 +725,30 @@ NOT_IN_MATRIX = {
     # test_thread_store_persist_turn.py и native test_native_workflow_live.py.
     "thread_store.persist": "local допускает только step; turn проверяется в test_thread_store_persist_turn и native live",
     "agent.model_steering": "текст подготовленных инструкций; текущий reader и local/port parity покрыты test_run_prompt_preparation",
+    # --- os_backend: выбор физического бэкенда (docker/ssh/exec/sandbox) ------
+    #
+    # Ключи выбирают, ГДЕ исполняется I/O, а не путь async/sync внутри ядра:
+    # эталон матрицы снят на local, и случай с docker/ssh требовал бы живого
+    # контейнера или хоста. Покрытие: os_backends/test_os_backend_factory.py,
+    # test_remote_shell_backend.py, test_sandbox_backend.py.
+    "os_backend.kind": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.cwd": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.env": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.docker.name": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.docker.user": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.docker.binary": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.host": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.port": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.user": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.key_path": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.options": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.ssh.control_master": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.exec.argv_prefix": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.sandbox.workdir": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.sandbox.network": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.sandbox.extra_ro": "выбор бэкенда, не путь исполнения; покрытие в os_backends/",
+    "os_backend.fetch_url_execute_on": "где качает exec_fetch_url; покрытие в tools/exec/test_remote_fetch.py и test_fetch_url.py",
+    "os_backend.provision_skills": "копия скиллов в среду исполнения; покрытие в skills/test_remote_skills_provision.py",
     # Токенный порог автосжатия. Эталон матрицы снят на develop и случаев
     # с этим рычагом не содержит: новый случай нельзя сверить, не пересняв
     # эталон на этой же ветке. Паритет async/sync того же координатора уже

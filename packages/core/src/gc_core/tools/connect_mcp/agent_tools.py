@@ -233,10 +233,9 @@ def _normalize_schema_recursive(
     Рекурсивная нормализация фрагмента JSON Schema.
     Поддерживает объекты, массивы и простые типы.
 
-    openai_strict: применять OpenAI strict-mode (все поля -> required). Управляется
-    флагом backend.openai_strict_tools_schema; при False сохраняем исходный `required`
-    MCP-сервера (иначе не-strict модели вроде deepseek опускают "опциональные"
-    поля -> WrongFunctionArgumentsException).
+    openai_strict: развернуть required на всех полях (OpenAI strict). Сборка
+    канона вызывает это с False: флаг накладывается проекцией на отправке, не
+    здесь. При False сохраняем исходный `required` MCP-сервера.
     """
     if not isinstance(schema, dict):
         return {
@@ -598,7 +597,8 @@ def _assemble_mcp_tools_data(
     timeout = app.mcp.meta.request_timeout_sec or 600
 
     default_use_retry = app.backend.use_retry
-    openai_strict = app.backend.openai_strict_tools_schema
+    # Канон MCP без флагов схемы: openai_strict/send_tool_strict накладываются
+    # копией на отправке, не здесь.
 
     def make_fabric(full_tool_name: str):
         def fabric(**_kwargs: Any) -> MCPToolWrapper:
@@ -620,9 +620,7 @@ def _assemble_mcp_tools_data(
         if not isinstance(tool_entry, dict):
             continue
 
-        normalized_spec = normalize_tool_spec_for_agent(
-            tool_entry, openai_strict=openai_strict
-        )
+        normalized_spec = normalize_tool_spec_for_agent(tool_entry)
         server_key = (
             metadata.get("mcp_server_key")
             if isinstance(metadata, dict)

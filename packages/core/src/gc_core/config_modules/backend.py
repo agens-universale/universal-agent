@@ -153,9 +153,9 @@ class BackendConfig(_BackendNormalizers, BaseModel):
     chat_completion_headers: dict[str, str] = Field(
         default={}, json_schema_extra=gc_meta(secret=True, worker_only=True)
     )
-    chat_completion_kwargs: dict[str, Any] = Field(
-        default={}, json_schema_extra=gc_meta(expert=True)
-    )
+    # В шаблоне — явным null: глобальный словарь main, его перекрывает
+    # models.<alias>.main.
+    chat_completion_kwargs: dict[str, Any] = Field(default={})
     use_max_tokens_param: bool = False
     openai_strict_tools_schema: bool = False
     send_tool_strict: bool = True
@@ -211,8 +211,10 @@ class BackendConfig(_BackendNormalizers, BaseModel):
 #: Поля backend, которые на уровне модели не применяются: протокол и режим
 #: потока выбираются для всего бэкенда, строгость схем тулов — тоже. В
 #: ``models.<alias>.backend`` их нет: лишний ключ в YAML — предупреждение.
+#: ``chat_completion_kwargs`` модели — секции ``models.<alias>.main`` и
+#: ``.auxiliary`` (старый ключ переносит миграция ``compat``).
 MODEL_LEVEL_UNSUPPORTED = frozenset(
-    {"api_mode", "openai_strict_tools_schema", "send_tool_strict", "stream"}
+    {"api_mode", "chat_completion_kwargs", "stream"}
 )
 
 

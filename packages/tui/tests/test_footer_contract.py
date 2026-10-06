@@ -599,7 +599,7 @@ async def test_settings_connection_footer_when_no_preset_matches(tmp_path):
 async def test_settings_connection_footer_returns_to_the_section_after_esc(
     tmp_path,
 ):
-    """Esc свернул список — клавиши снова про секцию: Enter сохраняет, Esc уводит
+    """Esc свернул список — клавиши снова про секцию: Ctrl+S сохраняет, Esc уводит
     в меню. Футер, застрявший на обещаниях списка, врал бы теперь в другую сторону."""
     from form_harness import settings_connection
 
@@ -607,7 +607,7 @@ async def test_settings_connection_footer_returns_to_the_section_after_esc(
         await pilot.press("escape")
         await pilot.pause()
         footer = _set_footer_widget(scr)
-        assert "Enter — сохранить" in footer and "Esc — меню" in footer
+        assert "Ctrl+S — сохранить" in footer and "Esc — меню" in footer
         assert "Esc — свернуть" not in footer
 
 

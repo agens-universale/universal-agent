@@ -15,7 +15,7 @@
   managed-признаки.
 
 Произвольные словари параметров провайдера (``chat_completion_kwargs``,
-``completion_kwargs``) проходят явную схему: неизвестный ключ — отказ, и текст
+``completion_kwargs``, ``models.*.main``/``auxiliary``) проходят явную схему: неизвестный ключ — отказ, и текст
 отказа значения не содержит. Явность полей сохраняется (``exclude_unset``):
 workflow видит заданным ровно то, что задано у воркера.
 """
@@ -125,9 +125,13 @@ _COMPLETION_PARAMETERS = {
         "stream temperature top_p top_k min_p frequency_penalty presence_penalty repetition_penalty max_tokens max_completion_tokens reasoning_effort seed logprobs top_logprobs n parallel_tool_calls store verbosity enable_thinking thinking_budget max_output_tokens"
     ),
     "stop": "scalar_or_list",
+    # "auto" / "none" / {"type": "function", "function": {"name": …}}.
+    "tool_choice": "json",
     "reasoning": _fields("effort max_tokens exclude enabled summary"),
     "thinking": _fields("type budget_tokens"),
-    "chat_template_kwargs": _fields("enable_thinking thinking_budget"),
+    "chat_template_kwargs": _fields(
+        "enable_thinking thinking_budget thinking reasoning_effort"
+    ),
     "response_format": {
         **_fields("type"),
         "json_schema": {
@@ -141,12 +145,9 @@ _COMPLETION_PARAMETERS = {
 #: числе ключи и заголовки, — в снимок идут только известные параметры.
 _FREE_FORM_POLICY = {
     ("backend", "chat_completion_kwargs"): _COMPLETION_PARAMETERS,
-    (
-        "models",
-        "*",
-        "backend",
-        "chat_completion_kwargs",
-    ): _COMPLETION_PARAMETERS,
+    # Параметры запроса алиаса (main — ход агента, auxiliary — служебные).
+    ("models", "*", "main"): _COMPLETION_PARAMETERS,
+    ("models", "*", "auxiliary"): _COMPLETION_PARAMETERS,
     (
         "chat_completions",
         "auxiliary_llm",

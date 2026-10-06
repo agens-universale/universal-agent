@@ -19,7 +19,6 @@ from gc_core.intent_guard.validation_result import (
 from gc_core.settings import settings_of
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
-    auxiliary_llm_completion_kwargs,
     auxiliary_llm_judge_max_tokens,
 )
 from gc_core.utils.user_text import read_user_text
@@ -176,7 +175,6 @@ async def _arequest_finish_gate_once(
         max_tokens=auxiliary_llm_judge_max_tokens(ctx),
         request_label=request_label,
         consumer=consumer,
-        payload_overrides=auxiliary_llm_completion_kwargs(ctx),
     )
 
 

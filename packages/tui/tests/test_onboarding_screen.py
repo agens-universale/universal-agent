@@ -34,6 +34,94 @@ def _screen(**over):
     return OnboardingScreen(**kw)
 
 
+@pytest.mark.asyncio
+async def test_connection_step_submits_accepted_literal_auth(tmp_path):
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.onboarding import STEP_CONNECTION
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_path = _write_conn_cfg(
+        tmp_path, url="https://example.test/chat", auth="secret", model="m"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
+    async with app.run_test() as pilot:
+        scr = _screen(
+            config=_resolved_conn_cfg(cfg_path),
+            config_path=str(cfg_path),
+            probe=lambda *a, **k: ProbeResult(
+                "unknown", None, None, 0, "offline"
+            ),
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONNECTION)
+        await pilot.pause()
+        scr._on_auto_probe_done(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth="Bearer secret",
+            ),
+            scr._probe_gen,
+        )
+        assert scr.query_one("#conn-token", Input).value == "Bearer secret"
+        scr._submit_connection()
+        assert scr._values["Authorization"] == "Bearer secret"
+        assert "Bearer secret" not in cfg_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_connection_edit_invalidates_inflight_probe_before_accepted_auth(
+    tmp_path,
+):
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.onboarding import STEP_CONNECTION
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_path = _write_conn_cfg(
+        tmp_path, url="https://example.test/chat", auth="secret", model="m"
+    )
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
+    async with app.run_test() as pilot:
+        scr = _screen(
+            config=_resolved_conn_cfg(cfg_path), config_path=str(cfg_path)
+        )
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONNECTION)
+        await pilot.pause()
+        stale_gen = scr._probe_gen
+        token = scr.query_one("#conn-token", Input)
+        token.value = "new-secret"
+        await pilot.pause()
+        assert scr._probe_gen != stale_gen
+        assert scr._last_probed_snapshot is None
+
+        scr._on_auto_probe_done(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth="Bearer secret",
+            ),
+            stale_gen,
+        )
+        assert token.value == "new-secret"
+
+
 class _FakeMcp:
     def installable_names(self):
         return ["duckduckgo", "office"]
@@ -335,16 +423,14 @@ async def test_connection_token_placeholder_shows_masked_on_return(tmp_path):
         ed.query_one("#conn-token", Input).value = "sk-secret"
         await pilot.press("enter")
         await pilot.pause()
-        assert scr._values["Authorization"] == "Bearer sk-secret"
+        assert scr._values["Authorization"] == "sk-secret"
         assert scr._step == 1
         await pilot.press("pageup")
         await pilot.pause()
         assert scr._step == 0
         tok = scr.query_one(ConnectionEditor).query_one("#conn-token", Input)
         assert tok.value == ""  # секрет не лежит открытым текстом
-        assert (
-            tok.placeholder == "Bearer sk-***"
-        )  # но маска намекает, что он задан
+        assert tok.placeholder == "***"  # но маска намекает, что он задан
 
 
 @pytest.mark.asyncio
@@ -374,7 +460,7 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(
         ed.query_one("#conn-token", Input).value = "sk-secret"
         await pilot.press("enter")  # шаг без пометки — сразу сабмит
         await pilot.pause()
-        assert scr._values["Authorization"] == "Bearer sk-secret"
+        assert scr._values["Authorization"] == "sk-secret"
         assert scr._step == 1
         await pilot.press("pageup")  # вернулись поправить адрес
         await pilot.pause()
@@ -393,7 +479,7 @@ async def test_connection_token_not_cleared_on_revisit_without_retyping(
             scr._values["completions_url"] == "https://h2/v1/chat/completions"
         )
         assert (
-            scr._values["Authorization"] == "Bearer sk-secret"
+            scr._values["Authorization"] == "sk-secret"
         )  # не стёрт пустым полем
 
 
@@ -723,7 +809,7 @@ async def test_scaffold_shows_logo_stepper_and_esc_exits(tmp_path):
 async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     """Свернув пресет-лист адреса `Esc`, человек должен видеть, чем его вернуть
     (спека 2026-08-06 §4.4) — тот же хинт, что у голосовых списков (`show_closed_hint`,
-    дословно `LIST_CLOSED_HINT`). До правки `escape_presets` сворачивал список молча.
+    с клавишей раскрытия мастера). До правки `escape_presets` сворачивал список молча.
 
     Канон 2026-08-17: строка под адресом ПОСТОЯННА — уход курсора её не снимает.
     Она ярлык способа, а не команда момента (как `Space — переключить` у галки,
@@ -734,7 +820,6 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import _PRESET_HINT_EMPTY
-    from gc_tui.editors.field_list import LIST_CLOSED_HINT
 
     app = TuiApp(
         threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
@@ -750,18 +835,44 @@ async def test_connection_preset_hint_follows_the_cursor_after_esc(tmp_path):
         await pilot.pause()
         assert scr._step == 0
         hints = scr.query(".conn-url-preset-hint")
-        assert hints and str(hints[-1].render()) == LIST_CLOSED_HINT
+        assert hints and str(hints[-1].render()) == "Alt+↓ — показать список"
         await pilot.press("down")  # уйти с адреса на токен
         await pilot.pause()
         hints = scr.query(".conn-url-preset-hint")
         assert (
-            hints and str(hints[-1].render()) == LIST_CLOSED_HINT
+            hints and str(hints[-1].render()) == "Alt+↓ — показать список"
         )  # строка постоянна
         await pilot.press("up")  # вернуться на адрес
         await pilot.pause()
         assert scr.query(".conn-preset-row")  # список раскрылся заново
         hints = scr.query(".conn-url-preset-hint")
         assert hints and str(hints[-1].render()) == _PRESET_HINT_EMPTY
+
+
+@pytest.mark.asyncio
+async def test_custom_connection_url_keeps_onboarding_closed_list_hint(
+    tmp_path,
+):
+    from textual.widgets import Input
+    from gc_tui.app import TuiApp
+
+    app = TuiApp(
+        threads_dir=str(tmp_path), system="cli", settings=tui_settings({})
+    )
+    async with app.run_test() as pilot:
+        scr = _screen()
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr.query_one(
+            "#conn-url", Input
+        ).value = "https://custom.example/v1/chat/completions"
+        await pilot.pause()
+        assert not scr.query(".conn-preset-row")
+        hints = scr.query(".conn-url-preset-hint")
+        assert (
+            str(hints[-1].render())
+            == "в списке такого нет · Alt+↓ — показать список"
+        )
 
 
 @pytest.mark.asyncio
@@ -981,8 +1092,8 @@ async def test_connection_step_advances_with_one_enter_no_mark_needed(
 
 
 @pytest.mark.asyncio
-async def test_connection_token_becomes_bearer_header(tmp_path):
-    """Введённый токен уезжает в _values как Bearer-заголовок."""
+async def test_connection_token_saved_as_typed(tmp_path):
+    """Введённый токен уезжает в _values as-is (без тихой подстановки Bearer)."""
     pytest.importorskip("textual")
     from gc_tui.app import TuiApp
     from gc_tui.editors.connection import ConnectionEditor
@@ -1003,7 +1114,7 @@ async def test_connection_token_becomes_bearer_header(tmp_path):
         ed.query_one("#conn-token", Input).value = "sk-1"
         await pilot.press("enter")
         await pilot.pause()
-        assert scr._values["Authorization"] == "Bearer sk-1"
+        assert scr._values["Authorization"] == "sk-1"
         assert scr._step == 1
 
 
@@ -1530,8 +1641,13 @@ async def test_onboarding_model_step_filter_and_pick(tmp_path):
         # и до совпавшей модели приходилось доезжать ↑↓ (см. соседний тест на обрывок).
         from gc_tui.editors.model import ModelEditor
 
-        assert scr.query_one(ModelEditor).submit() == "openai/gpt-5.6-terra"
+        model_editor = scr.query_one(ModelEditor)
+        assert (
+            model_editor._list.selected_item.model.id == "openai/gpt-5.6-terra"
+        )
+        assert model_editor.submit() == "glm-5.2-fp8"
         await pilot.press("enter")  # Enter#1 — пометить подсвеченную
+        assert model_editor.submit() == "openai/gpt-5.6-terra"
         await pilot.press("enter")  # Enter#2 — далее, шаг уровней
         await pilot.pause()
         from gc_tui.screens.onboarding import STEP_LEVELS
@@ -2708,10 +2824,10 @@ async def test_connection_new_token_replaces_env_ref(tmp_path, monkeypatch):
         ed.escape_presets()
         ed.query_one("#conn-token", Input).value = "sk-typed-by-hand"
         scr._submit_connection()
-        assert scr._values["Authorization"] == "Bearer sk-typed-by-hand"
+        assert scr._values["Authorization"] == "sk-typed-by-hand"
         assert scr._commit_config() is True
         content = cfg_path.read_text(encoding="utf-8")
-        assert 'Authorization: "Bearer sk-typed-by-hand"' in content
+        assert 'Authorization: "sk-typed-by-hand"' in content
         assert "${ENV:GC_TOKEN}" not in content
 
 

@@ -151,6 +151,7 @@ def test_bench_defaults_win_over_schema_defaults():
 
     assert config.backend.api_mode == "chat_completions"
     assert loaded.runtime.os_backend == "harbor"
+    assert config.os_backend.kind == "harbor"
     assert config.security.read_guard.enabled is False
     assert config.security.command_moderation.mode == "allow"
     assert config.agent.exec_timeout_sec == 600

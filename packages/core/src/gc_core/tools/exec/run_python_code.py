@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -48,6 +49,9 @@ def _cwd_invalid_error(
     }
 
 
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
 def _parse_env_vars(
     env_vars,
 ) -> "tuple[Optional[Dict[str, str]], Optional[dict]]":
@@ -69,10 +73,15 @@ def _parse_env_vars(
                 "message": "Each env_vars item must be an object: {'name': 'KEY', 'value': 'VALUE'}",
             }
         name = item.get("name")
-        if not isinstance(name, str) or not name.strip():
+        # Только идентификатор: у remote-бэкендов имя попадает в `export K=V`
+        # той стороны, и `X=1; rm -rf /; Y` в имени — команда мимо модерации.
+        if not isinstance(name, str) or not _ENV_NAME_RE.fullmatch(
+            name.strip()
+        ):
             return None, {
                 "type": "invalid_argument",
                 "field": f"env_vars[{idx}].name",
+                "message": "env_vars name must be a shell identifier: [A-Za-z_][A-Za-z0-9_]*",
             }
         value = item.get("value")
         if not isinstance(value, str):
