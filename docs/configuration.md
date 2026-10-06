@@ -1009,6 +1009,8 @@ ddgs-mcp --http
 
 ## Секция `os_backend` — где живут файлы и команды тулов
 
+Готовые YAML-блоки для каждого `kind` — в [os_backends.md](os_backends.md).
+
 `kind`: `local` (по умолчанию) | `harbor` (только из Harbor-адаптера) | `docker` | `ssh` | `exec` | `sandbox`.
 Голая строка `os_backend: docker` эквивалентна `{kind: docker}`.
 
