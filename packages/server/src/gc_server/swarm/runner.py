@@ -9,7 +9,8 @@ from typing import Any, Dict, Optional, Tuple
 import yaml
 from gc_core.config import resolve_base_config_path
 from gc_core.config_modules import env_vars
-from gc_core.config_modules.merge import deep_merge
+from gc_core.config_modules.compat import apply_compat
+from gc_core.config_modules.merge import merge_config_layers
 from gc_core.utils.user_text import read_user_text_or_none
 
 from gc_server.swarm import storage as storage
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 # (legacy формат для webhook'а) и оборачиваем в {"agent": ...}.
 _KNOWN_RAW_SECTIONS = frozenset(
     {
+        "models",
+        "slots",
+        "assign",
         "backend",
         "agent",
         "agent_auth",
@@ -149,7 +153,7 @@ def _materialize_runtime_config(
     """Сгенерировать ${sandbox_path}/.gc/config.yml для CLI внутри bwrap.
 
     Реализует AR-1 (см. swarm_spec.md §10). Слои merge'а в порядке применения
-    (каждый последующий перезаписывает предыдущий через deep_merge):
+    (каждый последующий перезаписывает предыдущий через merge_config_layers):
 
       1. Base file — raw YAML из host_config_path (XDG / package default
          через resolve_base_config_path, либо явный swarm.host_config_path).
@@ -190,6 +194,7 @@ def _materialize_runtime_config(
         base = yaml.safe_load(base_text) or {}
         config_dir = os.path.dirname(os.path.abspath(host_config_path))
 
+    apply_compat(base)
     raw: Dict[str, Any] = base
 
     # === Слой 2: project overlay <cwd>/.gc/config.yml ===
@@ -212,7 +217,9 @@ def _materialize_runtime_config(
                 project_path,
             )
         else:
-            raw = deep_merge(raw, yaml.safe_load(project_text) or {})
+            project = yaml.safe_load(project_text) or {}
+            apply_compat(project)
+            raw = merge_config_layers(raw, project)
 
     # === Слой 3: SWARM_* env vars (raw paths.*) ===
     _apply_swarm_env_to_raw(raw, config_dir)
@@ -221,7 +228,8 @@ def _materialize_runtime_config(
     agent_overrides = swarm_cfg.get("agent_overrides") or {}
     if agent_overrides:
         wrapped = _normalize_agent_overrides_to_raw(agent_overrides)
-        raw = deep_merge(raw, wrapped)
+        apply_compat(wrapped)
+        raw = merge_config_layers(raw, wrapped)
 
     # === Слой 5: swarm-specific overrides (всегда последний, всегда побеждает) ===
     swarm_overrides: Dict[str, Any] = {
@@ -237,7 +245,7 @@ def _materialize_runtime_config(
 
     _copy_swarm_assets(sandbox_path, swarm_cfg, swarm_overrides)
 
-    merged = deep_merge(raw, swarm_overrides)
+    merged = merge_config_layers(raw, swarm_overrides)
 
     gc_dir = os.path.join(sandbox_path, ".gc")
     os.makedirs(gc_dir, exist_ok=True)

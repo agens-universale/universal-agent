@@ -16,6 +16,7 @@ Concat+dedup для списков выбран из-за security-семант�
 в permissions.allow/permissions.deny.
 """
 
+from copy import deepcopy
 from typing import Any
 
 
@@ -43,3 +44,20 @@ def _merge_lists(base: list, overlay: list) -> list:
         if item not in merged:
             merged.append(item)
     return merged
+
+
+def merge_config_layers(base: dict, overlay: dict) -> dict:
+    """Стопка конфигурации: kwargs алиаса — атомарные секции, прочее deep merge."""
+    result = deep_merge(base, overlay)
+    models = overlay.get("models")
+    if not isinstance(models, dict):
+        return result
+    result["models"] = dict(result["models"])
+    for alias, entry in models.items():
+        if not isinstance(entry, dict):
+            continue
+        result["models"][alias] = dict(result["models"][alias])
+        for section in ("main", "auxiliary"):
+            if section in entry:
+                result["models"][alias][section] = deepcopy(entry[section])
+    return result

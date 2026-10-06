@@ -17,6 +17,8 @@ level: default               # light | default | max
 # Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
 # раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
 # симметричный пример как обычных секций config.yml — demo_config.yml):
+# main/auxiliary заменяют словарь целиком: {} — без kwargs, null — общий словарь.
+# Отсутствующий ключ наследуется из нижнего слоя конфигурации.
 # models:
 #   glm-local:
 #     url: http://127.0.0.1:8014/v1/chat/completions
