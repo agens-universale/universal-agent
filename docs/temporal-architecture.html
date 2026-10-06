@@ -869,7 +869,7 @@ worker'а: несколько worker'ов на разных хостах тре�
 не мигрируются; этот протокол удалён.</li>
 </ul>
 <h2 id="12-проверки">12. Проверки</h2>
-<p>Прогоны 05.10.2026 после исправлений по ревью и слияния develop <code>8f43bf03</code>:</p>
+<p>Прогоны 06.10.2026 (develop <code>45e05eea</code> слит; без своих баз воркера):</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
 <thead>
 <tr>
@@ -879,16 +879,12 @@ worker'а: несколько worker'ов на разных хостах тре�
 </thead>
 <tbody>
 <tr>
-<td>Все наборы, кроме temporalio (<code>tests</code>, core, cli, server, tui, mcp, acp, chat — по файлу, параллельно)</td>
-<td>1211 из 1212 файлов зелёные; 1 — замер задержки event loop под параллельной нагрузкой (отдельно проходит)</td>
+<td>Все наборы, кроме temporalio (core, cli, server, tui, mcp, acp, chat, testkit — по файлу, параллельно)</td>
+<td>1192 из 1193 файлов зелёные; 1 — тайминг-тест TUI под параллельной нагрузкой (отдельно проходит)</td>
 </tr>
 <tr>
 <td><code>packages/temporalio/tests</code> (live с Temporal dev server)</td>
-<td>220 passed</td>
-</tr>
-<tr>
-<td>Эталон локального режима: 44 трассы develop <code>824870f6</code></td>
-<td>совпадают</td>
+<td>256 passed</td>
 </tr>
 <tr>
 <td>Ruff check / format</td>
@@ -896,7 +892,7 @@ worker'а: несколько worker'ов на разных хостах тре�
 </tr>
 </tbody>
 </table></div>
-<p>Живые прогоны на реальной модели (RouterAI, <code>qwen/qwen3.8-omni-flash</code>):</p>
+<p>Нагрузка и хаос (скриптовая модель на локальном HTTP, настоящие Temporal, воркер и хранилища):</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
 <thead>
 <tr>
@@ -906,16 +902,47 @@ worker'а: несколько worker'ов на разных хостах тре�
 </thead>
 <tbody>
 <tr>
-<td>Серия local vs native: 8 задач (файлы, память между ходами, отсутствующий файл, данные с ошибками, остатки, смена правила, делегирование, два субагента) × 3 повтора</td>
-<td>23/24 в каждом режиме; по одному обрыву соединения провайдера (<code>RemoteProtocolError</code>)</td>
+<td>Одна keep-alive-сессия, 300 ходов</td>
+<td>301 run (Continue-As-New после хода), run до 3,6 МБ, запись до 437 КБ; RSS воркера ровный (229 → 222 МБ); данные воркера — 13 МБ тредов (до переделки — 2,1 ГБ blob'ов)</td>
 </tr>
 <tr>
-<td>Temporal без guard'ов, треды в S3 (MinIO, внешний модуль): 10 задач × 3</td>
-<td>30/30; мимо S3 пишется только <code>receipts.sqlite</code>; 61 префикс, 1020 объектов — проверка целостности без проблем</td>
+<td>600 коротких сессий</td>
+<td>RSS +0,04 МБ на сессию (до исправления песочницы — +1,45), fds и задачи стабильны, потоки — до потолка пула SDK</td>
 </tr>
 <tr>
-<td>MCP-сценарии в Temporal: UA native vs Deep Agents (<code>temporalio.contrib.deepagents</code>), 2–3 MCP-сервера, × 3</td>
-<td>6/6 у обоих; activities на прогон: UA 25 и 34, Deep Agents 9 и 19</td>
+<td>100 сессий, 24 SIGKILL воркера</td>
+<td>100/100 ответов, 1000 эффектов без дублей</td>
+</tr>
+<tr>
+<td>Один ход на 300 шагов по 50 КБ вывода (<code>persist: turn</code>)</td>
+<td>завершён; история run 41 МБ (лимит 50 МБ), запись до 394 КБ</td>
+</tr>
+<tr>
+<td>Ход на треде 21 МБ</td>
+<td>завершён; история 21,6 МБ, запись до 400 КБ</td>
+</tr>
+</tbody>
+</table></div>
+<p>Живые прогоны на реальной модели (litellm-прокси, <code>glm-5.3-flash-ctx262k</code>, по 1 повтору без параллели):</p>
+<div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
+<thead>
+<tr>
+<th scope="col">Проверка</th>
+<th scope="col">Результат</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Серия local vs native: 8 задач (файлы, память между ходами, отсутствующий файл, данные с ошибками, остатки, смена правила, делегирование, два субагента)</td>
+<td>local 7/8, native 6/8; все сбои — модель пишет вызов инструмента текстом вместо <code>tool_calls</code> (локально так же)</td>
+</tr>
+<tr>
+<td>Temporal без guard'ов, треды в S3 (MinIO, внешний модуль): 10 задач</td>
+<td>8/10 (те же сбои модели); вне S3 воркер не пишет ничего</td>
+</tr>
+<tr>
+<td>MCP-сценарии в Temporal: UA native vs Deep Agents (<code>temporalio.contrib.deepagents</code>), 2–3 MCP-сервера</td>
+<td>2/2 у обоих; activities на прогон: UA 25 и 35, Deep Agents 9 и 18</td>
 </tr>
 <tr>
 <td>Harbor, terminal-bench 2.0: 10 простых задач (04.10)</td>
