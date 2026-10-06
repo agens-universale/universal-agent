@@ -64,7 +64,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(_missing_textual_msg(), file=sys.stderr)
         return 1
 
-    parser = argparse.ArgumentParser(prog="gc-ua", add_help=False)
+    parser = argparse.ArgumentParser(
+        prog="gc-ua", add_help=False, allow_abbrev=False
+    )
     parser.add_argument("--config", default=None)
     parser.add_argument("--task-root", default=None)
     parser.add_argument(

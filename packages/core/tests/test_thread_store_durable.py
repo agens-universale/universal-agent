@@ -537,3 +537,16 @@ def test_durable_reset_removes_images_edits_and_old_receipts(tmp_path):
     assert not image.exists() and not edits.exists()
     receipts = list(tmp_path.glob(".store/*/receipts/*.json"))
     assert not any("private title" in path.read_text() for path in receipts)
+
+
+def test_stale_prepare_stage_is_removed_under_the_thread_lock(tmp_path):
+    from gc_core.thread_store_file_durable import DurableFileThreadStore
+
+    store = DurableFileThreadStore(str(tmp_path))
+    store.append_messages(
+        "s", "t", [{"role": "user", "content": "x", "id": "m"}]
+    )
+    base = next(tmp_path.glob(".store/*/control.json")).parent
+    (base / "prepare-killed").mkdir()
+    store.read_snapshot("s", "t")
+    assert not list(base.glob("prepare-*"))

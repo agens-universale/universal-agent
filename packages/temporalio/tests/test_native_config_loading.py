@@ -121,3 +121,21 @@ def test_native_optional_env_default_is_honoured(tmp_path, monkeypatch):
         "X-Token"
         not in config.profiles["test"].core.backend.chat_completion_headers
     )
+
+
+def test_shipped_example_worker_config_loads(monkeypatch, tmp_path):
+    """Поставляемый пример проходит схему воркера (quickstart запускает его)."""
+    from pathlib import Path
+
+    from gc_ua_temporalio.native_provider import NativeWorkerConfig
+
+    example = Path(__file__).parents[1] / "examples" / "native-worker.json"
+    for name in (
+        "UA_NATIVE_STATE",
+        "UA_NATIVE_WORKSPACE",
+        "UA_MODEL_URL",
+        "UA_MODEL_API_TOKEN",
+        "UA_MODEL_NAME",
+    ):
+        monkeypatch.setenv(name, str(tmp_path))
+    NativeWorkerConfig.load(example)

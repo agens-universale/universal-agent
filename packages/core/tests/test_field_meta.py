@@ -241,3 +241,30 @@ def test_free_form_leaves_are_redacted_by_key_name():
     shown = repr(explain_entries(LoadedSettings(settings=settings)))
     for secret in ("sk-KWARGS", "sk-NESTED", "ghp-ENV"):
         assert secret not in shown
+
+
+def test_cookies_keys_mcp_args_and_url_passwords_are_masked():
+    from gc_core.config_modules.field_meta import redacted_dump
+    from gc_core.settings import default_settings, override_settings
+
+    settings = override_settings(
+        default_settings(),
+        {
+            "backend.chat_completion_kwargs": {
+                "Cookie": "sid=1",
+                "aws_access_key": "AK",
+                "private_key": "PK",
+            },
+            "mcp.servers": {
+                "gh": {
+                    "transport": "http",
+                    "url": "https://user:hunter2@mcp.example/mcp",
+                    "args": ["--api-key", "K1", "--token=K2", "--verbose"],
+                }
+            },
+        },
+    )
+    shown = repr(redacted_dump(settings))
+    for secret in ("sid=1", "AK", "PK", "hunter2", "K1", "K2"):
+        assert secret not in shown
+    assert "--verbose" in shown and "user:***@mcp.example" in shown

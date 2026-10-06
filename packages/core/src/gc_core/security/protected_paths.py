@@ -120,10 +120,21 @@ def protected_extra_paths(source: Any) -> list[str]:
     # durable-workflow, где обращение к ``os.path`` запрещено песочницей
     # (воркер раскрывает ``~`` профиля заранее).
     return [
-        os.path.expanduser(raw) if str(raw).startswith("~") else str(raw)
+        _expand_home(str(raw))
         for raw in settings_of(source).security.protected_paths.extra
         if str(raw).strip()
     ]
+
+
+def _expand_home(raw: str) -> str:
+    if not raw.startswith("~"):
+        return raw
+    try:
+        return os.path.expanduser(raw)
+    except Exception:
+        # Песочница workflow запрещает os.path (воркер раскрывает ~ заранее;
+        # ``~неизвестный`` остаётся как есть) — путь остаётся буквальным.
+        return raw
 
 
 def protection_enabled(settings: Any) -> bool:

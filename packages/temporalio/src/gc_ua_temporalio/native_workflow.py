@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 from dataclasses import asdict, replace
+from datetime import timedelta
 
 # Сторонние транспорты — из процесса воркера, до первого импорта ядра.
 from gc_ua_temporalio import sandbox_passthrough  # noqa: F401
@@ -39,6 +40,9 @@ from gc_ua_temporalio.native_operations import (
 )
 from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_ua_temporalio.thread_store_transport import ThreadStoreTransport
+
+#: Как часто простаивающая сессия делает Continue-As-New (см. _run_session).
+IDLE_REFRESH = timedelta(days=1)
 
 #: Сколько последних ID сообщений и ответов помнить для дедупликации.
 DEDUP_WINDOW = 1000
@@ -130,7 +134,11 @@ class NativeAgentWorkflow:
     @workflow.signal
     async def child_human(self, payload: dict):
         if self.children is not None:
-            await self.children.answer_child_human(payload)
+            try:
+                await self.children.answer_child_human(payload)
+            except Exception:
+                # Ответ мог не дойти до уже завершившегося ребёнка.
+                workflow.logger.warning("Human answer to the child failed")
 
     @workflow.signal
     def child_checkpoint(self, payload: dict):
@@ -146,7 +154,12 @@ class NativeAgentWorkflow:
             self.executor.stop_run()
         stop_child = getattr(self.operations, "stop_child", None)
         if stop_child is not None:
-            await stop_child()
+            try:
+                await stop_child()
+            except Exception:
+                # Ребёнок мог завершиться раньше сигнала. Исключение в
+                # обработчике сигнала повторяло бы workflow task вечно.
+                workflow.logger.warning("Stop signal to the child failed")
 
     @workflow.update
     async def stop_turn(self, turn_id: str) -> dict:
@@ -163,7 +176,6 @@ class NativeAgentWorkflow:
 
     @workflow.update
     async def submit_message(self, message: UserMessage) -> dict:
-        message.validate()
         await workflow.wait_condition(lambda: self.ready)
         digest = _message_digest(message.text)
         existing = self.accepted.get(message.message_id)
@@ -198,6 +210,12 @@ class NativeAgentWorkflow:
             for value in self.undelivered
             if value.get("message_id") != message_id
         ]
+
+    @submit_message.validator
+    def _validate_submit_message(self, message: UserMessage) -> None:
+        # Отказ до приёма update: исключение после приёма (не ApplicationError)
+        # роняло бы workflow task, а не update.
+        message.validate()
 
     @workflow.update
     async def answer_human(
@@ -514,9 +532,16 @@ class NativeAgentWorkflow:
             if ran and not self.closed and not self.pending_messages:
                 # Ход закончен: новый run начинается с почти пустой историей.
                 await self._continue(start, self.store)
-            await workflow.wait_condition(
-                lambda: bool(self.pending_messages) or self.closed
-            )
+            try:
+                await workflow.wait_condition(
+                    lambda: bool(self.pending_messages) or self.closed,
+                    timeout=IDLE_REFRESH,
+                )
+            except TimeoutError:
+                # Долго простаивающая сессия перезаписывает свой вход: blob'ы
+                # payload_storage обновляют mtime, и очистка по сроку их не
+                # удалит, пока сессия жива.
+                await self._continue(start, self.store)
         self.closed = True
         await workflow.wait_condition(workflow.all_handlers_finished)
         await self._release_owner(start)

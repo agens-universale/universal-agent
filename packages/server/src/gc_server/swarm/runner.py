@@ -1,3 +1,4 @@
+import copy
 import json
 import logging
 import os
@@ -12,7 +13,7 @@ from gc_core.config_modules import env_vars
 from gc_core.config_modules.compat import map_legacy_path
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.path_hints import check_setting_path
-from gc_core.settings import _nested
+from gc_core.settings import _replace_at, expand_section_updates
 from gc_core.utils.user_text import read_user_text_or_none
 
 from gc_server.swarm import storage as storage
@@ -20,26 +21,23 @@ from gc_server.swarm import storage as storage
 logger = logging.getLogger(__name__)
 
 
-def _normalize_agent_overrides_to_raw(
-    overrides: Dict[str, Any],
+def _apply_agent_overrides_to_raw(
+    raw: Dict[str, Any], overrides: Dict[str, Any]
 ) -> Dict[str, Any]:
-    """Привести agent_overrides к raw-структуре YAML.
-
-    Ключ — путь настройки через точку (``agent.max_steps``) или секция
-    верхнего уровня (``agent: {max_steps: 100}``), как у webhook'а
-    (``build_agent_settings_for_server``). Путь раскладывается во вложенные
-    секции; дальше слой ложится deep-merge'ем. Незнакомое схеме имя (прежнее
-    плоское ``max_steps``) — ``UnknownSettingError`` с подсказкой пути.
-    """
+    """``agent_overrides`` поверх сырого YAML с семантикой ``override_settings``."""
     if not isinstance(overrides, dict) or not overrides:
-        return {}
-    raw: Dict[str, Any] = {}
-    for key, value in overrides.items():
+        return raw
+    for key in overrides:
         mapped = map_legacy_path(str(key))
         if mapped is not None:
             check_setting_path(mapped)
-        raw = deep_merge(raw, _nested({str(key): value}))
-    return raw
+    updates = expand_section_updates(
+        {str(key): value for key, value in overrides.items()}
+    )
+    result = copy.deepcopy(raw)
+    for dotted, value in updates.items():
+        _replace_at(result, dotted, copy.deepcopy(value))
+    return result
 
 
 def _apply_swarm_env_to_raw(raw: Dict[str, Any], config_dir: str) -> None:
@@ -201,10 +199,11 @@ def _materialize_runtime_config(
     _apply_swarm_env_to_raw(raw, config_dir)
 
     # === Слой 4: agent_overrides из config_server.yml ===
+    # Как у CLI и webhook: правка заменяет значение по пути (списки сужаются),
+    # секция раскладывается на листья.
     agent_overrides = swarm_cfg.get("agent_overrides") or {}
     if agent_overrides:
-        wrapped = _normalize_agent_overrides_to_raw(agent_overrides)
-        raw = deep_merge(raw, wrapped)
+        raw = _apply_agent_overrides_to_raw(raw, agent_overrides)
 
     # === Слой 5: swarm-specific overrides (всегда последний, всегда побеждает) ===
     swarm_overrides: Dict[str, Any] = {

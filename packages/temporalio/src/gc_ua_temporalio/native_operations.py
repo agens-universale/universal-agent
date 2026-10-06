@@ -5,6 +5,7 @@ from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import timedelta
 
+from gc_core.constants.tool_names import EXEC_COMMAND_NAME, EXEC_PYTHON_NAME
 from gc_core.context_preparation import settings_from_snapshot
 from gc_core.execution.contracts import (
     ExecutionFailure,
@@ -67,10 +68,20 @@ _DOMAIN_ERRORS.update(
     }
 )
 
+TOOL_RETRIES_EXHAUSTED = (
+    "Инструмент не выполнен: сбой исполнителя и после повторов. Вызов можно "
+    "повторить."
+)
+
 #: Потолок activity по умолчанию; инструмент с долгим ``timeout`` получает
 #: свой (``timeout`` + запас), иначе Temporal обрывал бы его на 15 минутах.
 ACTIVITY_TIMEOUT = timedelta(minutes=15)
 TOOL_TIMEOUT_MARGIN = timedelta(minutes=5)
+#: Верхняя граница: огромный ``timeout`` модели не должен давать переполнение
+#: или Duration за пределами protobuf (вечный сбой workflow task).
+TOOL_TIMEOUT_CAP = timedelta(hours=24)
+#: Инструменты с ``timeout`` по умолчанию ``agent.exec_timeout_sec``.
+_EXEC_TOOLS = frozenset({EXEC_COMMAND_NAME, EXEC_PYTHON_NAME})
 
 #: Ход продолжается без этих activities только для эффекта инструмента:
 #: сбой исполнителя после единственной попытки становится ошибкой инструмента.
@@ -157,6 +168,7 @@ class NativeOperations:
         operation_id=None,
         model=False,
         effect=False,
+        tool=False,
         start_to_close=ACTIVITY_TIMEOUT,
     ):
         """Execute one activity.
@@ -189,10 +201,12 @@ class NativeOperations:
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
             )
         except ActivityError as exc:
-            raise self._activity_error(exc, name, effect=effect) from exc
+            raise self._activity_error(
+                exc, name, effect=effect, tool=tool
+            ) from exc
 
     @staticmethod
-    def _activity_error(exc, name, *, effect):
+    def _activity_error(exc, name, *, effect, tool=False):
         cause = exc.cause
         if isinstance(cause, CancelledError):
             return asyncio.CancelledError(str(cause))
@@ -217,6 +231,10 @@ class NativeOperations:
                 return failures[cause.type](cause.message)
         if effect:
             return ToolOutcomeUnknown(INTERRUPTED_EFFECT)
+        if tool:
+            # Чтение не удалось и после повторов: ошибка инструмента, модель
+            # может повторить или обойтись, сессия не падает (как в local).
+            return RuntimeError(TOOL_RETRIES_EXHAUSTED)
         return InfrastructureFailure(f"Native activity failed: {name}")
 
     async def model(self, request):
@@ -246,18 +264,20 @@ class NativeOperations:
             ToolResult,
             operation_id=request.operation_id,
             effect=effect,
+            tool=True,
             start_to_close=self._tool_timeout(request),
         )
 
     def _tool_timeout(self, request):
-        """Лимит activity инструмента: его ``timeout`` (или умолчание
-        ``agent.exec_timeout_sec`` для команд) плюс запас, не меньше 15 минут."""
+        """Лимит activity инструмента: его ``timeout`` (у команд без него —
+        умолчание ``agent.exec_timeout_sec``) плюс запас, от 15 минут до суток."""
         seconds = request.arguments.get("timeout")
-        if not isinstance(seconds, int) and request.name == "exec_command":
+        if not isinstance(seconds, int) and request.name in _EXEC_TOOLS:
             settings = self._prepared_settings()
             seconds = settings.agent.exec_timeout_sec if settings else None
         if not isinstance(seconds, int) or seconds <= 0:
             return ACTIVITY_TIMEOUT
+        seconds = min(seconds, int(TOOL_TIMEOUT_CAP.total_seconds()))
         return max(
             ACTIVITY_TIMEOUT,
             timedelta(seconds=seconds) + TOOL_TIMEOUT_MARGIN,

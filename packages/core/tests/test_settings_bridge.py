@@ -174,3 +174,28 @@ def test_expand_section_updates_keeps_dict_leaves_and_model_entries():
         "backend.chat_completion_kwargs": {"temperature": 0},
         "models": {"m": {"model": "x"}},
     }
+
+
+def test_section_override_keeps_other_fields_and_pair_rule_holds(tmp_path):
+    """Секция раскладывается на листья (allowed_read_roots не сбрасывается),
+    а половина пары адрес/токен записи реестра — ошибка, как в файле."""
+    base = override_settings(
+        default_settings(),
+        {
+            "security.read_guard.allowed_read_roots": [str(tmp_path)],
+            "models": {
+                "ds": {
+                    "model": "x",
+                    "url": "https://a.example/v1/chat/completions",
+                    "token": "t",
+                }
+            },
+        },
+    )
+    changed = override_settings(base, {"security.read_guard": {"mode": "ask"}})
+    assert changed.security.read_guard.mode == "ask"
+    assert changed.security.read_guard.allowed_read_roots == [str(tmp_path)]
+    with pytest.raises(ValueError, match="models.ds"):
+        override_settings(
+            base, {"models.ds.url": "https://evil.example/v1/chat/completions"}
+        )

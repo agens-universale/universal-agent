@@ -538,7 +538,8 @@ replay восстанавливает буфер; при сбое коммита
 продолжает тот же тред. Статусы: `idle`/`completed` → `completed`,
 `stopped` → `cancelled`, `failed` → `failed`.
 
-Команды клиента: `gc-temporal-native start | status | result | stop | answer | close | send`;
+Команды клиента: `gc-temporal-native start | status | result | stop | answer | close | send | unlock`
+(`unlock` снимает владение тредом у сессии, которой больше нет — для локального TUI/CLI);
 `--config` (JSON воркера) нужен, чтобы читать крупные payload из `payload_storage`.
 Ошибки update и query сессии (устаревший ход, сессия ещё не готова) API отдаёт
 как 409. Повтор сообщения с тем же `message_id` — `duplicate: true`, кроме

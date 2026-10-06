@@ -77,6 +77,11 @@ class TechnicalStore:
             ).fetchall()
         return [row[0] for row in rows]
 
+    def delete_operations(self, owner):
+        """Квитанции результатов операций владельца (preview остаются)."""
+        with self.transaction() as db:
+            db.execute("DELETE FROM operations WHERE owner=?", (owner,))
+
     def delete_owner(self, owner):
         """Квитанции и preview владельца, чей workflow Temporal уже удалил."""
         with self.transaction() as db:

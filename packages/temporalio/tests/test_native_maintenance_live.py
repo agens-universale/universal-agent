@@ -79,3 +79,46 @@ def test_old_store_receipts_are_pruned(tmp_path):
             (stale, time.time()),
         )
     assert store.prune_receipts(max_age_seconds=3600) == 1
+
+
+def test_owner_state_is_unknown_without_reliable_facts():
+    from gc_ua_temporalio.native_maintenance import owner_state
+
+    workflows = {"wf": ("running", None), "old": ("running", "run-2")}
+    # Сервер не дал first_run_id — живой ход не трогать.
+    assert owner_state("wf/run-1/turn-1", workflows) == "running"
+    assert owner_state("old/run-1/turn-3", workflows) == "closed"
+    # describe не удался — состояние неизвестно.
+    assert owner_state("missing/run/turn-1", workflows) is None
+
+
+async def test_finished_turn_receipts_of_live_session_are_dropped(
+    tmp_path, monkeypatch, scripted_http
+):
+    monkeypatch.chdir(tmp_path)
+    url, _, script = scripted_http
+    script.extend([[finish("first")]])
+    async with runtime(tmp_path, url) as (env, provider, config):
+        technical = TechnicalStore(config.receipts_database)
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(keep_alive=True),
+            id="controls",
+            task_queue="native-controls",
+        )
+        await wait_status(
+            handle, lambda s: s["turns"] == 1 and s["phase"] == "idle"
+        )
+        chain = handle.first_execution_run_id
+        finished = f"controls/{chain}/turn-1"
+        assert finished in technical.owners()
+        await NativeMaintenance(
+            env.client, provider, technical, provider.stores
+        ).run_once()
+        with technical.transaction(readonly=True) as db:
+            left = db.execute(
+                "SELECT count(*) FROM operations WHERE owner=?", (finished,)
+            ).fetchone()[0]
+        assert left == 0
+        await handle.signal(NativeAgentWorkflow.close_session)
+        await handle.result()

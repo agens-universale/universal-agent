@@ -8,6 +8,7 @@ import argparse
 import asyncio
 import logging
 from contextlib import AsyncExitStack
+from pathlib import Path
 
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.thread_store_file_durable import DurableFileThreadStore
@@ -30,15 +31,28 @@ from gc_ua_temporalio.storage.technical import TechnicalStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
 
 
+def build_stores(config):
+    """Хранилища тредов из конфига воркера (их же открывает клиент unlock).
+
+    Файловые треды, чей коммит прервало падение процесса, доводятся до конца
+    сразу: иначе их видел бы незавершёнными список тредов до первого
+    обращения к каждому.
+    """
+    from gc_core.thread_store_journal import recover_pending_threads
+
+    stores = {}
+    for name, spec in config.thread_stores.items():
+        if spec.kind == "file":
+            if Path(spec.path).is_dir():
+                recover_pending_threads(spec.path)
+            stores[name] = DurableFileThreadStore(spec.path)
+        else:
+            stores[name] = SQLiteThreadStore(spec.path)
+    return stores
+
+
 def build_native_runtime(config):
-    stores = {
-        name: (
-            DurableFileThreadStore(spec.path)
-            if spec.kind == "file"
-            else SQLiteThreadStore(spec.path)
-        )
-        for name, spec in config.thread_stores.items()
-    }
+    stores = build_stores(config)
     receipts = TechnicalStore(config.receipts_database)
     provider = NativeContextProvider(
         profiles=config.profiles,
@@ -117,7 +131,11 @@ async def serve(config):
             # Брошенные контексты (terminate посреди хода) и служебные данные
             # закрытых сессий — фоном, пока работает воркер.
             await NativeMaintenance(
-                client, provider, native.receipts, provider.stores
+                client,
+                provider,
+                native.receipts,
+                provider.stores,
+                payloads=config.payload_storage,
             ).serve()
     finally:
         await provider.aclose()

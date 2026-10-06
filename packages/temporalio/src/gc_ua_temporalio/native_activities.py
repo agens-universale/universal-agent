@@ -372,8 +372,12 @@ class NativeActivities:
 
     @activity.defn(name="agent.memory.execute")
     async def memory(self, call: NativeCall) -> ProjectMemoryReply:
+        # Чтение памяти повторяемо, как и решил workflow; запись — эффект.
         return await self._recorded(
-            call, ProjectMemoryReply, self._memory, effect=True
+            call,
+            ProjectMemoryReply,
+            self._memory,
+            effect=call.data.get("action") != "read",
         )
 
     async def _memory(self, call, ctx):

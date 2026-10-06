@@ -71,6 +71,9 @@ def _parse_unknown_args(args: List[str]) -> Dict[str, Any]:
 
 
 parser = argparse.ArgumentParser(
+    # Без сокращений: «--mod x» не должен молча стать --model, а «--agent …» —
+    # флагом --agentsmd-override. Пути настроек (--agent.max_steps) — целиком.
+    allow_abbrev=False,
     description="CLI-агент для взаимодействия с AI-сервером",
     formatter_class=argparse.RawDescriptionHelpFormatter,
     epilog="""

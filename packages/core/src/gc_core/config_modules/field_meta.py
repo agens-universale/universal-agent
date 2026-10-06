@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, fields, replace
 from functools import lru_cache
 from typing import Annotated, Any, Iterator, Mapping, get_args, get_origin
@@ -222,7 +223,17 @@ _SECRET_NAME_PARTS = (
     "password",
     "passwd",
     "credential",
+    "cookie",
+    "access_key",
+    "private_key",
 )
+
+#: Логин и пароль в URL (``https://user:pass@host``): пароль скрывается.
+_URL_USERINFO = re.compile(r"(?P<head>[A-Za-z][\w+.-]*://[^/@\s:]+):[^/@\s]+@")
+
+
+def _mask_url(value: str) -> str:
+    return _URL_USERINFO.sub(r"\g<head>:***@", value)
 
 
 def is_secret_name(key: Any) -> bool:
@@ -233,7 +244,11 @@ def is_secret_name(key: Any) -> bool:
 
 
 def redact_free_form(value: Any) -> Any:
-    """Содержимое словаря-листа без схемы: секреты — по имени ключа."""
+    """Содержимое словаря-листа без схемы: секреты — по имени ключа.
+
+    В списках (``args`` MCP-сервера) скрывается значение после флага с
+    секретным именем (``--api-key VALUE``) и после ``=`` (``--token=VALUE``);
+    в строках — пароль в URL."""
     if isinstance(value, Mapping):
         return {
             key: (
@@ -242,7 +257,25 @@ def redact_free_form(value: Any) -> Any:
             for key, item in value.items()
         }
     if isinstance(value, list):
-        return [redact_free_form(item) for item in value]
+        out: list = []
+        hide_next = False
+        for item in value:
+            if hide_next and item not in (None, ""):
+                out.append(MASK)
+                hide_next = False
+                continue
+            hide_next = False
+            if isinstance(item, str) and item.startswith("-"):
+                name, sep, _rest = item.lstrip("-").partition("=")
+                if is_secret_name(name):
+                    if sep:
+                        out.append(item.split("=", 1)[0] + "=" + MASK)
+                        continue
+                    hide_next = True
+            out.append(redact_free_form(item))
+        return out
+    if isinstance(value, str):
+        return _mask_url(value)
     return value
 
 
@@ -282,6 +315,8 @@ def redact(document: Any, parts: tuple[str, ...] = ()) -> Any:
             elif isinstance(value, (Mapping, list)) and _is_leaf(path):
                 # Словарь-лист без схемы (kwargs, env): по имени ключа.
                 out[key] = redact_free_form(value)
+            elif isinstance(value, str):
+                out[key] = _mask_url(value)
             else:
                 out[key] = redact(value, path)
         return out

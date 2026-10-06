@@ -168,17 +168,53 @@ async def _claim(store, request):
         return replace(receipt, operation_id=operation.operation_id)
 
 
-async def _owner_alive(workflow_id):
+async def _owner_alive(workflow_id, client=None):
     """Workflow владельца ещё исполняется (без клиента — считать живым)."""
-    try:
-        client = activity.client()
-    except RuntimeError:
-        return True
+    if client is None:
+        try:
+            client = activity.client()
+        except RuntimeError:
+            return True
     try:
         description = await client.get_workflow_handle(workflow_id).describe()
     except RPCError as exc:
-        return exc.status != RPCStatusCode.NOT_FOUND
+        if exc.status == RPCStatusCode.NOT_FOUND:
+            return False
+        # Транзиентный сбой Temporal (UNAVAILABLE, DEADLINE…): повтор activity,
+        # а не отказ захвата.
+        raise
     return description.status == WorkflowExecutionStatus.RUNNING
+
+
+async def release_stale_owner(store, system_id, thread_id, client):
+    """Снять владельца треда, чей workflow уже не исполняется.
+
+    Для локального TUI/CLI после terminate или падения сессии: иначе тред
+    закрыт, пока его не займёт новая сессия. Живой владелец не снимается.
+    Возвращает снятого владельца или ``None``.
+    """
+    import uuid
+
+    snapshot = await _invoke(
+        store, "read_snapshot", system_id, thread_id, include_state=False
+    )
+    owner = snapshot.owner_id
+    if owner is None or await _owner_alive(owner, client):
+        return None
+    await _invoke(
+        store,
+        "commit_operation",
+        system_id,
+        thread_id,
+        ThreadStoreOperation(
+            f"unlock/{uuid.uuid4().hex}",
+            "release_owner",
+            generation=snapshot.generation,
+            owner_id=owner,
+            owner_epoch=snapshot.owner_epoch,
+        ),
+    )
+    return owner
 
 
 def _application_error(exc):

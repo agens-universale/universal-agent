@@ -47,6 +47,11 @@ class PayloadStorageConfig(BaseModel):
     bucket: str | None = None
     #: Payload меньше порога остаются прямо в истории (их видно в Temporal UI).
     threshold_bytes: int = Field(default=DEFAULT_THRESHOLD, ge=0)
+    #: ``kind=file``: воркер сам удаляет blob'ы старше стольких дней. Срок —
+    #: больше retention namespace и самого долгого ожидания человека внутри
+    #: хода; простаивающая сессия обновляет свои blob'ы раз в сутки.
+    #: ``None`` — не удалять (lifecycle S3 или своя очистка).
+    prune_after_days: float | None = Field(default=None, gt=0)
 
 
 class FileStorageDriver(StorageDriver):

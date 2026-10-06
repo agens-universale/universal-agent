@@ -97,6 +97,25 @@ class NativeAgentClient:
         )
 
 
+async def _unlock(args, temporal):
+    """``unlock``: снять владение тредом у сессии, которой больше нет."""
+    from gc_ua_temporalio.native_provider import NativeWorkerConfig
+    from gc_ua_temporalio.native_worker import build_stores
+    from gc_ua_temporalio.thread_store_activities import release_stale_owner
+
+    if not args.config:
+        raise SystemExit(
+            "unlock: нужен --config (JSON воркера с thread_stores)"
+        )
+    stores = build_stores(NativeWorkerConfig.load(args.config))
+    released = await release_stale_owner(
+        stores[args.store], args.system, args.thread, temporal
+    )
+    if released is None:
+        return "Тред свободен или его сессия ещё исполняется: ничего не снято"
+    return f"Снято владение сессии {released}"
+
+
 async def _run(args):
     from gc_ua_temporalio.payload_storage import data_converter
 
@@ -113,6 +132,9 @@ async def _run(args):
         ),
         workflow_queue=args.workflow_queue,
     )
+    if args.command == "unlock":
+        print(await _unlock(args, client.client))
+        return
     if args.command == "start":
         handle = await client.start(
             NativeRunRequest(
@@ -174,6 +196,13 @@ def main():
     start.add_argument("--workflow-id")
     start.add_argument("--structured-output-format")
     start.add_argument("--keep-alive", action="store_true")
+    unlock = commands.add_parser(
+        "unlock",
+        help="снять владение тредом у завершённой или снятой сессии",
+    )
+    unlock.add_argument("--thread", required=True)
+    unlock.add_argument("--system", default="default")
+    unlock.add_argument("--store", default="files")
     for name in (
         "status",
         "result",

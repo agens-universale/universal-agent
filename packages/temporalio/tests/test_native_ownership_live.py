@@ -236,3 +236,32 @@ async def test_live_owner_is_not_taken_over(
         assert owner(tmp_path) == "controls"
         await handle.signal(NativeAgentWorkflow.close_session)
         await handle.result()
+
+
+async def test_unlock_releases_only_a_dead_owner(
+    tmp_path, monkeypatch, scripted_http
+):
+    """unlock для локального TUI/CLI: живого владельца не снимает, снятого
+    terminate — снимает."""
+    from gc_ua_temporalio.thread_store_activities import release_stale_owner
+
+    monkeypatch.chdir(tmp_path)
+    url, _, script = scripted_http
+    script.append([finish("first")])
+    async with runtime(tmp_path, url) as (env, provider, _):
+        store = provider.stores["files"]
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(keep_alive=True),
+            id="controls",
+            task_queue="native-controls",
+        )
+        await wait_status(
+            handle, lambda s: s["turns"] == 1 and s["phase"] == "idle"
+        )
+        args = (store, "test", "controls", env.client)
+        assert await release_stale_owner(*args) is None
+        assert owner(tmp_path) == "controls"
+        await handle.terminate("operator")
+        assert await release_stale_owner(*args) == "controls"
+        assert owner(tmp_path) is None

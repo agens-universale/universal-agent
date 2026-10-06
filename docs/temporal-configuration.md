@@ -135,6 +135,10 @@ uv run --project "$UA_REPO" --extra temporal gc-temporal-native \
 Старт с `--keep-alive` сохраняет сессию для `send WORKFLOW_ID --message-id UNIQUE_ID
 --text TEXT`; `close WORKFLOW_ID` закрывает её после принятой работы.
 `answer WORKFLOW_ID --request-id REQUEST_ID --answer TEXT` отвечает человеку.
+`unlock --config native-worker.json --system SYSTEM --thread THREAD` снимает
+владение тредом у сессии, которой больше нет (terminate, падение процесса):
+после этого тред снова открывается локально в TUI/CLI. Живую сессию команда
+не трогает.
 Structured output включается `start --structured-output-format /absolute/format.txt`.
 О поведении при сбоях — [ошибки и восстановление](#ошибки-и-восстановление).
 
@@ -285,11 +289,12 @@ Payload больше порога хранятся в каталоге (или `
 с пакетом `aioboto3`), в истории остаётся sha256-ссылка. `"payload_storage": null`
 выключает хранилище — тогда большой файл или длинный ход упрётся в лимиты
 Temporal. Хранилище нужно worker'у, серверу и клиенту (`gc-temporal-native
---config` с тем же JSON). Temporal blob'ы не удаляет: настройте lifecycle S3 или
-периодически вызывайте
-`gc_ua_temporalio.payload_storage.prune_file_payloads(path, max_age_seconds=...)`
-со сроком больше retention namespace. Каждая новая ссылка на blob и его чтение
-обновляют mtime, поэтому очистка по возрасту не удаляет blob'ы живых сессий.
+--config` с тем же JSON). Temporal blob'ы не удаляет: для `kind: file` задайте
+`"prune_after_days": N` — воркер сам удаляет blob'ы старше срока; для S3 —
+lifecycle-правило. Срок — больше retention namespace и самого долгого ожидания
+человека внутри хода. Каждая новая ссылка на blob и его чтение обновляют mtime,
+а простаивающая сессия раз в сутки делает Continue-As-New и обновляет свои
+blob'ы, поэтому очистка по возрасту не удаляет blob'ы живых сессий.
 
 После каждого хода workflow делает Continue-As-New: новый run получает только
 состояние доставки (последние 1000 ID сообщений и ответов), диалог остаётся в

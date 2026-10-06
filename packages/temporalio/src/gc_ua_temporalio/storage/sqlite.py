@@ -97,10 +97,16 @@ class SQLiteThreadStore(SQLiteDurableOperations, ThreadStoreBase):
                 for row in db.execute("PRAGMA table_info(durable_receipts)")
             }
             if "created" not in columns:
-                # Время квитанции — для очистки (prune_receipts).
-                db.execute(
-                    "ALTER TABLE durable_receipts ADD COLUMN created REAL"
-                )
+                # Время квитанции — для очистки (prune_receipts). Два воркера,
+                # стартующие вместе после обновления, могут добавить колонку
+                # наперегонки: второй получает «duplicate column».
+                try:
+                    db.execute(
+                        "ALTER TABLE durable_receipts ADD COLUMN created REAL"
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc):
+                        raise
 
     def prune_receipts(self, *, max_age_seconds):
         """Удалить квитанции операций старше срока; нужны они только окну

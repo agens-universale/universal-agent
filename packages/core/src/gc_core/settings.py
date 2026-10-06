@@ -147,6 +147,23 @@ def expand_section_updates(updates: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
+def _check_registry_pairs(updates: Mapping[str, Any]) -> None:
+    """Правило пары «адрес + токен» для правок записей реестра моделей.
+
+    ``models.ds.url`` без токена оставил бы токен файла и отправил его на
+    новый адрес — как половина пары в файловом слое (``validate_registry_
+    pairs``). Правка всей записи без адреса и токена наследует пару целиком.
+    """
+    if not any(dotted.split(".", 1)[0] == "models" for dotted in updates):
+        return
+    from gc_core.config_modules.model_registry import validate_registry_pairs
+
+    document = _nested(
+        {k: v for k, v in updates.items() if k.split(".", 1)[0] == "models"}
+    )
+    validate_registry_pairs(document, source="override")
+
+
 def override_settings(
     settings: AppConfig,
     updates: Mapping[str, Any],
@@ -160,12 +177,17 @@ def override_settings(
     Явно заданные поля исходных настроек остаются явными.
 
     Правка ЗАМЕНЯЕТ значение по своему пути, а не сливается с ним: CLI,
-    сервер и сессия сужают списки и словари (``--mcp-servers '{}'``
+    сервер и сессия сужают списки и словари (``--mcp.servers '{}'``
     отключает серверы, ``allowed_read_roots`` не расширяется файловым
-    значением). Объединение списков — только у файловых слоёв.
+    значением). Словарь на месте секции схемы раскладывается на её листья:
+    ``--security.read_guard '{"mode": "ask"}'`` меняет только режим и не
+    сбрасывает остальные поля секции к умолчаниям. Объединение списков —
+    только у файловых слоёв.
     """
     if not updates:
         return settings
+    updates = expand_section_updates(updates)
+    _check_registry_pairs(updates)
     merged = settings.model_dump(by_alias=True, exclude_unset=True)
     for dotted, value in updates.items():
         _replace_at(merged, dotted, value)

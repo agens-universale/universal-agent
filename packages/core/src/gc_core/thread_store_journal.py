@@ -15,6 +15,7 @@ import hashlib
 import inspect
 import json
 import os
+import shutil
 import tempfile
 import threading
 import time
@@ -166,6 +167,10 @@ def _recover_image(path, change):
 
 
 def _recover(directory: Path, base: Path):
+    # Stage прерванного коммита (SIGKILL внутри транзакции): под блокировкой
+    # треда активного коммита нет, каталог можно убрать.
+    for stage in base.glob("prepare-*"):
+        shutil.rmtree(stage, ignore_errors=True)
     pending = base / "pending.json"
     if not pending.exists():
         return

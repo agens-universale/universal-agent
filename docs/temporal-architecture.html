@@ -814,7 +814,8 @@ replay восстанавливает буфер; при сбое коммита
 открыв сессию». Закрытая или упавшая сессия с тем же ID начинается новым run и
 продолжает тот же тред. Статусы: <code>idle</code>/<code>completed</code> → <code>completed</code>,
 <code>stopped</code> → <code>cancelled</code>, <code>failed</code> → <code>failed</code>.</p>
-<p>Команды клиента: <code>gc-temporal-native start | status | result | stop | answer | close | send</code>;
+<p>Команды клиента: <code>gc-temporal-native start | status | result | stop | answer | close | send | unlock</code>
+(<code>unlock</code> снимает владение тредом у сессии, которой больше нет — для локального TUI/CLI);
 <code>--config</code> (JSON воркера) нужен, чтобы читать крупные payload из <code>payload_storage</code>.
 Ошибки update и query сессии (устаревший ход, сессия ещё не готова) API отдаёт
 как 409. Повтор сообщения с тем же <code>message_id</code> — <code>duplicate: true</code>, кроме
