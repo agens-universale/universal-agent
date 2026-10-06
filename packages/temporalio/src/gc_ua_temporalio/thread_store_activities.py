@@ -2,6 +2,8 @@
 
 import asyncio
 import inspect
+import json
+from collections import OrderedDict
 from dataclasses import replace
 
 from gc_core.execution.contracts import ExecutionFailure
@@ -17,9 +19,43 @@ from temporalio.exceptions import ApplicationError
 from temporalio.service import RPCError, RPCStatusCode
 
 from gc_ua_temporalio.thread_store_contracts import (
+    ThreadStatePage,
     ThreadStoreCall,
     ThreadStoreReply,
 )
+
+#: Снимков треда в кэше воркера для страничного чтения.
+_SNAPSHOT_CACHE_SIZE = 16
+
+
+def _size(value):
+    return len(json.dumps(value, ensure_ascii=False, default=str).encode())
+
+
+def _take(items, start, budget):
+    """Записи с ``start``, пока суммарно не больше ``budget`` байт (хотя бы
+    одна). → (кусок, позиция после него, остаток бюджета)."""
+    end, used = start, 0
+    while end < len(items):
+        size = _size(items[end])
+        if end > start and used + size > budget:
+            break
+        used += size
+        end += 1
+    return items[start:end], end, budget - used
+
+
+def _state_page(messages, keys, cursor, budget):
+    """Страница состояния: сначала сообщения, затем ключи идемпотентности."""
+    m_start, k_start = cursor or (0, 0)
+    page_messages, m_end, budget = _take(messages, m_start, budget)
+    page_keys, k_end = [], k_start
+    if m_end == len(messages) and (budget > 0 or not page_messages):
+        page_keys, k_end, _ = _take(keys, k_start, max(budget, 1))
+    done = m_end == len(messages) and k_end == len(keys)
+    return ThreadStatePage(
+        page_messages, page_keys, None if done else [m_end, k_end]
+    )
 
 
 async def _invoke(store, name, *args, **kwargs):
@@ -37,6 +73,8 @@ async def _invoke(store, name, *args, **kwargs):
 class ThreadStoreActivities:
     def __init__(self, stores):
         self.raw = dict(stores)
+        #: (хранилище, система, тред) → снимок для следующих страниц чтения.
+        self._snapshots = OrderedDict()
         self.stores = {
             name: athread_store(store) for name, store in stores.items()
         }
@@ -60,16 +98,69 @@ class ThreadStoreActivities:
     async def load(self, request: ThreadStoreCall) -> ThreadStoreReply:
         store = self._port(request)
         try:
-            snapshot = await _invoke(
-                store,
-                "read_snapshot",
-                request.system_id,
-                request.thread_id,
-                include_state=request.include_state,
+            if not (request.include_state and request.page_bytes > 0):
+                snapshot = await _invoke(
+                    store,
+                    "read_snapshot",
+                    request.system_id,
+                    request.thread_id,
+                    include_state=request.include_state,
+                )
+                return ThreadStoreReply(snapshot=snapshot)
+            snapshot, messages, keys = await self._paged_snapshot(
+                store, request
             )
-            return ThreadStoreReply(snapshot=snapshot)
+            if snapshot.state is None:
+                # Хранилище не отдало состояние — как без страниц.
+                return ThreadStoreReply(snapshot=snapshot)
+            page = _state_page(
+                messages, keys, request.cursor, request.page_bytes
+            )
+            page.max_seq = snapshot.state.max_seq
+            first = request.cursor is None
+            return ThreadStoreReply(
+                snapshot=replace(snapshot, state=None) if first else None,
+                page=page,
+            )
         except ExecutionFailure as exc:
             raise _application_error(exc) from exc
+
+    async def _paged_snapshot(self, store, request):
+        """Снимок для страницы: первая читает заново, следующие — из кэша
+        воркера, если версия совпадает с ``expect`` (иначе читают сами).
+        Тред изменился между страницами — ``ThreadStoreConflict``: workflow
+        начнёт чтение заново."""
+        key = (request.store_id, request.system_id, request.thread_id)
+        cached = self._snapshots.get(key)
+        expect = request.expect
+        if (
+            request.cursor is not None
+            and cached is not None
+            and expect == [cached[0].revision, cached[0].generation]
+        ):
+            self._snapshots.move_to_end(key)
+            return cached
+        snapshot = await _invoke(
+            store,
+            "read_snapshot",
+            request.system_id,
+            request.thread_id,
+            include_state=True,
+        )
+        if request.cursor is not None and expect != [
+            snapshot.revision,
+            snapshot.generation,
+        ]:
+            raise ThreadStoreConflict("Thread changed between page reads")
+        state = snapshot.state
+        messages = list(state.messages) if state is not None else []
+        keys = sorted(state.known_keys, key=repr) if state is not None else []
+        entry = (snapshot, messages, keys)
+        self._snapshots[key] = entry
+        self._snapshots.move_to_end(key)
+        while len(self._snapshots) > _SNAPSHOT_CACHE_SIZE:
+            self._snapshots.popitem(last=False)
+        return entry
 
     @activity.defn(name="agent.thread.commit")
     async def commit(self, request: ThreadStoreCall) -> ThreadStoreReply:
@@ -91,6 +182,9 @@ class ThreadStoreActivities:
 
     @activity.defn(name="agent.thread.read_trace")
     async def read_trace(self, request: ThreadStoreCall) -> ThreadStoreReply:
+        """Трасса субагента; с ``page_bytes`` — страница с ``cursor[0]``.
+
+        Трасса только дописывается, поэтому позиция в ней стабильна."""
         try:
             records = await _invoke(
                 self._port(request),
@@ -98,7 +192,13 @@ class ThreadStoreActivities:
                 request.system_id,
                 request.thread_id,
             )
-            return ThreadStoreReply(trace=records)
+            if request.page_bytes <= 0:
+                return ThreadStoreReply(trace=records)
+            start = request.cursor[0] if request.cursor else 0
+            page, end, _ = _take(list(records), start, request.page_bytes)
+            return ThreadStoreReply(
+                trace=page, trace_next=end if end < len(records) else None
+            )
         except ExecutionFailure as exc:
             raise _application_error(exc) from exc
 

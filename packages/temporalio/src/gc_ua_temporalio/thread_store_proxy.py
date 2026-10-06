@@ -8,11 +8,17 @@ from copy import deepcopy
 from dataclasses import replace
 
 from gc_core.execution.contracts import ExecutionFailure
-from gc_core.thread_store_durable import ThreadStoreOperation
+from gc_core.thread_store_durable import (
+    ThreadStoreConflict,
+    ThreadStoreOperation,
+)
 from gc_core.thread_store_types import ThreadState
 from gc_core.utils.generate_message_id import generate_msg_id_sha256
 
-from gc_ua_temporalio.thread_store_contracts import ThreadStoreCall
+from gc_ua_temporalio.thread_store_contracts import (
+    PAGE_BYTES,
+    ThreadStoreCall,
+)
 
 # Only these operations acknowledge metadata without changing thread history.
 _METADATA_OPERATIONS = frozenset(
@@ -27,6 +33,13 @@ _METADATA_OPERATIONS = frozenset(
 
 def _history_fence(value):
     return (value.generation, value.owner_id, value.owner_epoch, value.max_seq)
+
+
+def _hashable(value):
+    """JSON-массив обратно в кортеж: ключ идемпотентности — элемент множества."""
+    if isinstance(value, list):
+        return tuple(_hashable(item) for item in value)
+    return value
 
 
 class TemporalThreadStore:
@@ -55,39 +68,80 @@ class TemporalThreadStore:
     async def aread_snapshot(
         self, system_id, thread_id, *, include_state=True
     ):
-        reply = await self._call(
-            "agent.thread.load",
-            ThreadStoreCall(
-                self.store_id,
-                system_id,
-                thread_id,
-                include_state=include_state,
-            ),
-        )
-        if reply.snapshot is None:
+        if include_state:
+            snapshot = await self._read_paged(system_id, thread_id)
+        else:
+            reply = await self._call(
+                "agent.thread.load",
+                ThreadStoreCall(
+                    self.store_id, system_id, thread_id, include_state=False
+                ),
+            )
+            snapshot = reply.snapshot
+        if snapshot is None:
             raise ExecutionFailure("Thread store did not return a snapshot")
-        if reply.snapshot.state is not None:
-            # NamedTuple fields arrive as JSON arrays with the default
-            # converter; restore the core contract's mutable key set here.
-            messages, keys, max_seq = reply.snapshot.state
-            reply.snapshot.state = ThreadState(messages, set(keys), max_seq)
-        self._generation = reply.snapshot.generation
+        self._generation = snapshot.generation
         key = (system_id, thread_id)
         previous = self._metadata_acks.get(key)
         if previous is None or (
-            previous[1].revision != reply.snapshot.revision
-            or _history_fence(previous[1]) != _history_fence(reply.snapshot)
-            or previous[1].meta != reply.snapshot.meta
+            previous[1].revision != snapshot.revision
+            or _history_fence(previous[1]) != _history_fence(snapshot)
+            or previous[1].meta != snapshot.meta
         ):
             self._metadata_acks[key] = (
-                reply.snapshot.revision,
+                snapshot.revision,
                 replace(
-                    reply.snapshot,
+                    snapshot,
                     state=None,
-                    meta=deepcopy(reply.snapshot.meta),
+                    meta=deepcopy(snapshot.meta),
                 ),
             )
-        return reply.snapshot
+        return snapshot
+
+    async def _read_paged(self, system_id, thread_id, *, attempts=3):
+        """Снимок с состоянием страницами по ``PAGE_BYTES``.
+
+        Каждая страница — отдельная activity: результат одной activity — одна
+        запись истории Temporal, и тред любой длины не упирается в лимит
+        2 МБ на запись. Тред изменился между страницами — чтение заново.
+        """
+        for attempt in range(attempts):
+            first = await self._call(
+                "agent.thread.load",
+                ThreadStoreCall(
+                    self.store_id, system_id, thread_id, page_bytes=PAGE_BYTES
+                ),
+            )
+            snapshot, page = first.snapshot, first.page
+            if snapshot is None or page is None:
+                return snapshot
+            messages, keys = list(page.messages), list(page.keys)
+            cursor = page.next_cursor
+            try:
+                while cursor is not None:
+                    reply = await self._call(
+                        "agent.thread.load",
+                        ThreadStoreCall(
+                            self.store_id,
+                            system_id,
+                            thread_id,
+                            page_bytes=PAGE_BYTES,
+                            cursor=cursor,
+                            expect=[snapshot.revision, snapshot.generation],
+                        ),
+                    )
+                    messages += reply.page.messages
+                    keys += reply.page.keys
+                    cursor = reply.page.next_cursor
+            except ThreadStoreConflict:
+                if attempt + 1 == attempts:
+                    raise
+                continue
+            # Ключи приходят JSON-массивами: множество контракта ядра.
+            snapshot.state = ThreadState(
+                messages, {_hashable(key) for key in keys}, page.max_seq
+            )
+            return snapshot
 
     async def acommit_operation(self, system_id, thread_id, operation):
         key = (system_id, thread_id)
@@ -283,13 +337,24 @@ class TemporalThreadStore:
         return receipt.result
 
     async def aread_subagent_trace(self, system_id, thread_id):
-        reply = await self._call(
-            "agent.thread.read_trace",
-            ThreadStoreCall(self.store_id, system_id, thread_id),
-        )
-        if reply.trace is None:
-            raise ExecutionFailure("Thread store did not return a trace")
-        return reply.trace
+        """Трасса субагента страницами по ``PAGE_BYTES`` (как тред)."""
+        records, cursor = [], [0]
+        while cursor is not None:
+            reply = await self._call(
+                "agent.thread.read_trace",
+                ThreadStoreCall(
+                    self.store_id,
+                    system_id,
+                    thread_id,
+                    page_bytes=PAGE_BYTES,
+                    cursor=cursor,
+                ),
+            )
+            if reply.trace is None:
+                raise ExecutionFailure("Thread store did not return a trace")
+            records += reply.trace
+            cursor = None if reply.trace_next is None else [reply.trace_next]
+        return records
 
     @property
     def areplace_messages(self):
