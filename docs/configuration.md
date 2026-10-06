@@ -759,6 +759,12 @@ OpenRouter даже `404` «No endpoints found that support image input», — �
 `--security.read_guard.mode ask`). Путь — тот же, что в `config.yml` и в
 `gc-cli config explain`.
 
+Тот же контракт у `gc-cli`, `gc-acp` и `gc-chat`: путь через точку и флаги
+`--model`, `--completions_url`, `--level`. Свои флаги ACP и chat — ещё
+`--config` и `--profile`. `gc-acp` пропускает чужие флаги клиентов без точки
+(JetBrains — позиционный `acp`, `--experimental`) с пометкой в stderr;
+`gc-chat` на них отвечает ошибкой.
+
 - Прежние плоские имена (`--max_steps`, `--summary_params`) **не принимаются**:
   это ошибка при старте. Если у схемы есть настройка с тем же последним сегментом
   имени, сообщение подсказывает путь:

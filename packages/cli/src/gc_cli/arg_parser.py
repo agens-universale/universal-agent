@@ -1,8 +1,12 @@
 import argparse
 import sys
-from typing import Any, Dict, List
+from typing import Any, Dict
 
-import yaml
+from gc_core.config_modules.cli_args import (
+    coerce_cli_value,
+    parse_override_args,
+    setting_flag_overrides,
+)
 
 run_args = dict()
 extra_config_overrides: Dict[str, Any] = {}
@@ -17,57 +21,9 @@ def _parse_bool_cli(raw: str) -> bool:
     raise argparse.ArgumentTypeError("Ожидается true или false")
 
 
-def _coerce_value(raw: str) -> Any:
-    """
-    Преобразовать строковое значение из CLI к более подходящему типу.
-
-    Используем yaml.safe_load, чтобы поддержать числа, bool и т.п.
-    В случае неудачи или получения None возвращаем исходную строку.
-    """
-    try:
-        value = yaml.safe_load(raw)
-    except Exception:
-        return raw
-    return raw if value is None else value
-
-
-def _parse_unknown_args(args: List[str]) -> Dict[str, Any]:
-    """
-    Разобрать дополнительные аргументы вида:
-    --param value
-    --param=value
-    --flag
-
-    Возвращает словарь переопределений настроек: ключ — путь настройки через
-    точку (``--agent.max_steps 50``). Имя проверяет ``apply_cli_overrides``.
-    """
-    overrides: Dict[str, Any] = {}
-    i = 0
-    while i < len(args):
-        token = args[i]
-        if not token.startswith("--"):
-            i += 1
-            continue
-
-        key_part = token[2:]
-        value: Any = True
-
-        if "=" in key_part:
-            key, raw_val = key_part.split("=", 1)
-            value = _coerce_value(raw_val)
-        else:
-            key = key_part
-            if i + 1 < len(args) and not args[i + 1].startswith("--"):
-                raw_val = args[i + 1]
-                value = _coerce_value(raw_val)
-                i += 1
-
-        if key:
-            overrides[key] = value
-
-        i += 1
-
-    return overrides
+# Разбор ``--путь value`` — общий с gc-acp и gc-chat.
+_coerce_value = coerce_cli_value
+_parse_unknown_args = parse_override_args
 
 
 parser = argparse.ArgumentParser(
@@ -268,13 +224,6 @@ parser.add_argument(
     ),
 )
 
-#: Объявленные флаги-настройки → путь в схеме. Легаси-форс
-#: (``config.cli_forces_legacy_model``) узнаёт их по слою ``cli`` этих путей.
-SETTING_FLAGS = {
-    "model": "agent.model",
-    "completions_url": "backend.completions_url",
-}
-
 parser.add_argument(
     "--model",
     type=str,
@@ -432,11 +381,7 @@ if not CONFIG_COMMAND:
     _check_combinations(parsed_args)
 run_args = parsed_args
 extra_config_overrides = _parse_unknown_args(list(unknown_args))
-for _flag, _path in SETTING_FLAGS.items():
-    if getattr(parsed_args, _flag, None) is not None:
-        extra_config_overrides[_path] = getattr(parsed_args, _flag)
-if parsed_args.level is not None:
-    extra_config_overrides["level"] = parsed_args.level
+extra_config_overrides.update(setting_flag_overrides(parsed_args))
 
 
 if __name__ == "__main__":

@@ -12,8 +12,21 @@ from gc_core.backends.factory import (
     parse_os_backend_kind,
     resolve_os_backend,
 )
-from gc_core.config import load_settings, resolve_config_path
+from gc_core.config import (
+    cli_forces_legacy_model,
+    load_settings,
+    resolve_config_path,
+)
 from gc_core.config_modules.auth import build_auth_connector
+from gc_core.config_modules.cli_args import (
+    add_setting_flags,
+    apply_entry_overrides,
+    foreign_flags_notice,
+    override_error_text,
+    parse_override_args,
+    setting_flag_overrides,
+    split_setting_paths,
+)
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
@@ -43,6 +56,15 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    # Как у gc-cli: --путь.настройки value поверх профиля и config.yml. В
+    # stdout не печатаем — канал занят JSON-RPC.
+    for line in foreign_flags_notice("gc-acp", args.foreign_flags):
+        print(line, file=sys.stderr)
+    try:
+        loaded = apply_entry_overrides(loaded, args.overrides)
+    except ValueError as exc:
+        print(f"[gc-acp] {override_error_text(exc)}", file=sys.stderr)
+        return 2
     rejection = backend_rejection(loaded)
     if rejection is not None:
         print(rejection, file=sys.stderr)
@@ -171,21 +193,29 @@ async def _create_agent(
         auth_connector=auth_connector,
         tools_cache=tools_cache,
         os_backend=os_backend,
+        force_legacy=cli_forces_legacy_model(loaded),
     )
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     """Разобрать запуск. Чужие аргументы не роняют процесс.
 
-    Точка входа одна. Свои флаги — только ``--config`` и ``--profile``
-    (пустой args у VS Code и ``--profile acp`` в его настройках).
-    Остальное клиенты дописывают сами: JetBrains передаёт позиционный
-    ``acp``. Такие токены отбрасываются.
+    Свои флаги — ``--config``, ``--profile`` (пустой args у VS Code и
+    ``--profile acp`` в его настройках) и флаги-настройки gc-cli
+    (``--model``, ``--completions_url``, ``--level``). ``--путь.настройки``
+    — правка конфига, как у gc-cli; незнакомый путь — ошибка. Остальное
+    клиенты дописывают сами (JetBrains — позиционный ``acp``,
+    ``--experimental``): такие токены пропускаются (``foreign_flags``).
     """
-    parser = argparse.ArgumentParser(prog="gc-acp")
+    parser = argparse.ArgumentParser(prog="gc-acp", allow_abbrev=False)
     parser.add_argument("--config", default=None, help="путь к config.yml")
     parser.add_argument("--profile", default=None, help="имя профиля")
-    args, _unknown = parser.parse_known_args(argv)
+    add_setting_flags(parser)
+    args, unknown = parser.parse_known_args(argv)
+    args.overrides, args.foreign_flags = split_setting_paths(
+        parse_override_args(list(unknown))
+    )
+    args.overrides.update(setting_flag_overrides(args))
     return args
 
 

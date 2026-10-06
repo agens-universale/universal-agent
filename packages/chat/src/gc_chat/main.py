@@ -13,8 +13,21 @@ from gc_core.backends.factory import (
     parse_os_backend_kind,
     resolve_os_backend,
 )
-from gc_core.config import load_settings, resolve_config_path
+from gc_core.config import (
+    cli_forces_legacy_model,
+    load_settings,
+    resolve_config_path,
+)
 from gc_core.config_modules.auth import build_auth_connector
+from gc_core.config_modules.cli_args import (
+    add_setting_flags,
+    apply_entry_overrides,
+    override_error_text,
+    parse_override_args,
+    setting_flag_overrides,
+    split_setting_paths,
+)
+from gc_core.config_modules.path_hints import UnknownSettingError
 from gc_core.constants.tool_names import (
     ASK_HUMAN_TOOL_NAME,
     INTERMEDIATE_REPLY_TOOL_NAME,
@@ -46,6 +59,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    # Как у gc-cli: --путь.настройки value поверх профиля и config.yml.
+    try:
+        loaded = apply_entry_overrides(loaded, args.overrides)
+    except ValueError as exc:
+        print(f"[gc-chat] {override_error_text(exc)}", file=sys.stderr)
+        return 2
     rejection = backend_rejection(loaded)
     if rejection is not None:
         print(rejection, file=sys.stderr)
@@ -134,6 +153,7 @@ def build_facades(
 
 async def serve(loaded: LoadedSettings) -> None:
     lock = asyncio.Lock()
+    force_legacy = cli_forces_legacy_model(loaded)
 
     async def factory(
         agent_settings: LoadedSettings,
@@ -148,6 +168,7 @@ async def serve(loaded: LoadedSettings) -> None:
                 auth_connector=auth_connector,
                 tools_cache=tools_cache,
                 os_backend=os_backend,
+                force_legacy=force_legacy,
             )
 
     responses, completions = build_facades(loaded, factory)
@@ -199,10 +220,22 @@ def _origin(host: str, port: int) -> str:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(prog="gc-chat")
+    """Свои флаги — ``--config``, ``--profile`` и флаги-настройки gc-cli
+    (``--model``, ``--completions_url``, ``--level``); ``--путь.настройки``
+    — правка конфига, как у gc-cli. Прочее — ошибка разбора."""
+    parser = argparse.ArgumentParser(prog="gc-chat", allow_abbrev=False)
     parser.add_argument("--config", default=None, help="путь к config.yml")
     parser.add_argument("--profile", default=None, help="имя профиля")
-    return parser.parse_args(argv)
+    add_setting_flags(parser)
+    args, unknown = parser.parse_known_args(argv)
+    args.overrides, foreign = split_setting_paths(
+        parse_override_args(list(unknown))
+    )
+    if foreign:
+        # Прежнее плоское имя (`--max_steps`) — с подсказкой пути.
+        parser.error(str(UnknownSettingError(foreign[0], prefix="--")))
+    args.overrides.update(setting_flag_overrides(args))
+    return args
 
 
 def _force_utf8_stdio() -> None:

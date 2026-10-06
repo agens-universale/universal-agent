@@ -192,16 +192,20 @@ def test_unsupported_backend_is_rejected():
     assert "docker" in text
 
 
-def test_parse_args_keeps_own_flags_and_ignores_the_rest():
+def test_parse_args_keeps_own_flags_and_collects_setting_paths():
     bare = _parse_args([])
     assert bare.config is None
     assert bare.profile is None
+    assert bare.overrides == {} and bare.foreign_flags == []
 
     jetbrains = _parse_args(
         ["acp", "--experimental", "--config", "c.yml", "--profile", "work"]
     )
     assert jetbrains.config == "c.yml"
     assert jetbrains.profile == "work"
+    # Флаг клиента без точки — не настройка: пропускается.
+    assert jetbrains.overrides == {}
+    assert jetbrains.foreign_flags == ["experimental"]
 
     vscode = _parse_args(["--profile", "acp"])
     assert vscode.profile == "acp"
@@ -210,6 +214,102 @@ def test_parse_args_keeps_own_flags_and_ignores_the_rest():
     junk = _parse_args(["nope", "--foo", "bar", "acp"])
     assert junk.config is None
     assert junk.profile is None
+    assert junk.overrides == {} and junk.foreign_flags == ["foo"]
+
+
+def test_parse_args_coerces_setting_values():
+    args = _parse_args(
+        [
+            "--level",
+            "max",
+            "--agent.max_steps=50",
+            "--agent.verbose",
+            "true",
+            "--model",
+            "forced",
+        ]
+    )
+    assert args.overrides == {
+        "level": "max",
+        "agent.max_steps": 50,
+        "agent.verbose": True,
+        "agent.model": "forced",
+    }
+
+
+def _start(monkeypatch, tmp_path, argv, base=None):
+    held = {}
+
+    def load(path, profile_override=None):
+        held["profile"] = profile_override
+        return make_settings(
+            {
+                "os_backend": "local",
+                "paths.threads_data_path": str(tmp_path),
+                **(base or {}),
+            }
+        )
+
+    async def serve(loaded, protocol_out):
+        held["loaded"] = loaded
+
+    monkeypatch.setattr("gc_acp.main.load_settings", load)
+    monkeypatch.setattr("gc_acp.main.serve", serve)
+    return main(argv), held
+
+
+def test_setting_overrides_apply_after_profile(monkeypatch, tmp_path):
+    code, held = _start(
+        monkeypatch,
+        tmp_path,
+        [
+            "--profile",
+            "work",
+            "--level",
+            "max",
+            "--agent.max_steps",
+            "7",
+            "--model",
+            "forced",
+        ],
+        {"agent.max_steps": 100, "models": {"flash": {"model": "m"}}},
+    )
+    assert code == 0
+    loaded = held["loaded"]
+    assert held["profile"] == "work"
+    assert loaded.settings.level == "max"
+    assert loaded.settings.agent.max_steps == 7
+    assert loaded.settings.agent.model == "forced"
+    assert loaded.provenance.source("agent.model").layer == "cli"
+    assert any("легаси-форс" in n for n in loaded.runtime.notices)
+
+
+def test_unknown_setting_path_fails(monkeypatch, tmp_path, capsys):
+    code, held = _start(monkeypatch, tmp_path, ["--agent.max_step", "7"])
+    assert code == 2 and "loaded" not in held
+    err = capsys.readouterr().err
+    assert "неизвестная настройка --agent.max_step" in err
+
+
+def test_flat_name_is_skipped_with_path_hint(monkeypatch, tmp_path, capsys):
+    code, held = _start(monkeypatch, tmp_path, ["--max_steps", "7"])
+    assert code == 0
+    assert held["loaded"].settings.agent.max_steps != 7
+    assert "--max_steps пропущен" in capsys.readouterr().err
+
+
+def test_invalid_setting_value_is_rejected_without_value(
+    monkeypatch, tmp_path, capsys
+):
+    code, _ = _start(
+        monkeypatch,
+        tmp_path,
+        ["--backend.chat_completion_headers", "Bearer sk-secret"],
+    )
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "backend.chat_completion_headers" in err
+    assert "sk-secret" not in err
 
 
 def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
@@ -228,7 +328,12 @@ def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
 
     monkeypatch.setattr("gc_acp.main.load_settings", load)
     monkeypatch.setattr("gc_acp.main.serve", serve)
-    assert main(["acp", "--config", "c.yml", "--profile", "work"]) == 0
+    assert (
+        main(
+            ["acp", "--experimental", "--config", "c.yml", "--profile", "work"]
+        )
+        == 0
+    )
     assert held == {
         "path": "c.yml",
         "profile": "work",

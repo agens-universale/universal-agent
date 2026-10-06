@@ -25,7 +25,11 @@ uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#s
 ```bash
 gc-chat --config ./config.yml
 gc-chat --config ./config.yml --profile <имя>
+# настройки путём через точку поверх профиля/config.yml (как у gc-cli / gc-acp):
+gc-chat --config ./config.yml --profile work --level max --chat_api.port 9001
 ```
+
+Помимо `--config` / `--profile` настройку перекрывает путь через точку (`--chat_api.port 9001`, `--agent.max_steps 50`) и флаги `--model`, `--completions_url`, `--level` — так же, как у `gc-cli` (см. [переопределение из CLI](configuration.md#переопределение-настроек-из-cli)). Неизвестное имя, в том числе прежнее плоское (`--chat_api_port`), — ошибка с подсказкой пути, код выхода 2, порт не открывается.
 
 Без `--config` поиск конфига тот же, что у остальных команд: явный путь, затем `config.yml` в каталоге Config, затем пакетный шаблон. Конфиг не читается — сообщение в stderr, код выхода 1, порт не открывается.
 
@@ -54,7 +58,7 @@ gc-chat --config ./config.yml --profile <имя>
 
 Значения `off` и `on` в yaml пишите в кавычках: без них YAML читает их как boolean, и загрузка конфига падает.
 
-`agent.strict_turn_finish_validation` и режим текстового ответа других поверхностей (`tui.text_answer_mode`) на этом процессе не действуют: после загрузки фасад ставит оба из секции `chat_api`. Дефолт канала — проза без тула принимается, судья на `turn_finish` не зовётся. `session_todo` остаётся в схеме. Напоминания о нём этот процесс ставит в `0`, если в секции не задано другое число.
+`agent.strict_turn_finish_validation` и режим текстового ответа других поверхностей (`tui.text_answer_mode`) на этом процессе не действуют: после загрузки фасад ставит оба из секции `chat_api` — в том числе поверх профиля и CLI (`--tui.text_answer_mode`, `--agent.strict_turn_finish_validation`). Дефолт канала — проза без тула принимается, судья на `turn_finish` не зовётся. `session_todo` остаётся в схеме. Напоминания о нём этот процесс ставит в `0`, если в секции не задано другое число.
 
 После загрузки режим дописывает в `agent.stop_tools` имена `turn_ask_human` и `turn_intermediate_reply` (свои имена из конфига остаются): ни вопроса человеку, ни промежуточной реплики в схеме нет. Прогресс пишется прозой. Ролевая вставка ставится на копию настроек перед созданием агента, общие настройки процесса не меняются. У хода Responses это `chat_completions_responses_special_instructions.md`: вопрос пользователю — проза ответа, следующий запрос — ответ человека. У хода Chat Completions другой файл: следующий запрос не увидит трейс. Свой `paths.chat_completions_special_instructions_path` на этом процессе не читается. Порт `ask_human` остаётся и сразу возвращает пустую строку, чтобы случайный вызов не читал stdin.
 

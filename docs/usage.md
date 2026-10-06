@@ -164,14 +164,19 @@ Agent Client Protocol. В VS Code своего клиента нет: поста
 плюс hint «discussion ≠ implementation». TUI-шный `tui.text_answer_mode: judge`
 на этот канал не действует. Явный профиль-оверлей —
 `packages/acp/profiles/acp.yml` (скопируйте в `~/.config/gc/profiles/acp.yml`
-и при желании укажите `"args": ["--profile", "acp"]`):
+и при желании укажите `"args": ["--profile", "acp"]`). Помимо `--config` /
+`--profile` настройку перекрывает путь через точку (`--agent.max_steps 50`) и
+флаги `--model`, `--completions_url`, `--level` — так же, как у `gc-cli` (см.
+[переопределение из CLI](configuration.md#переопределение-настроек-из-cli)).
+Незнакомый путь — ошибка, код выхода 2. Флаги клиента без точки (JetBrains —
+`--experimental`) пропускаются с пометкой в stderr:
 
 ```json
 {
   "acp.agents": {
     "gc-acp": {
       "command": "/абсолютный/путь/gc-acp",
-      "args": []
+      "args": ["--profile", "work", "--level", "max"]
     }
   }
 }
