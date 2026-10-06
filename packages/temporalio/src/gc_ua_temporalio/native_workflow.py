@@ -48,6 +48,15 @@ IDLE_REFRESH = timedelta(days=1)
 DEDUP_WINDOW = 1000
 
 
+def _new_build_announced():
+    """Worker Versioning: текущей объявлена другая сборка (без versioning — нет)."""
+    info = workflow.info()
+    return (
+        info.get_current_deployment_version() is not None
+        and info.is_target_worker_deployment_version_changed()
+    )
+
+
 def _message_digest(text):
     return hashlib.sha256(text.encode()).hexdigest()
 
@@ -62,6 +71,9 @@ def _recent(values):
 # Без failure_exception_types=[Exception]: недетерминизм и сбой кода
 # workflow роняют только workflow task (ход продолжится на исправленном
 # воркере); доменные отказы переводит в ApplicationError ``session_failure``.
+# Worker Versioning (versioning.enabled у воркера): ход закреплён за сборкой,
+# где начался (default_versioning_behavior=PINNED у воркера); Continue-As-New
+# переходит на текущую сборку.
 @workflow.defn(name="NativeAgentWorkflow")
 class NativeAgentWorkflow:
     def __init__(self):
@@ -545,7 +557,11 @@ class NativeAgentWorkflow:
                 await self._continue(start, self.store)
             try:
                 await workflow.wait_condition(
-                    lambda: bool(self.pending_messages) or self.closed,
+                    lambda: (
+                        bool(self.pending_messages)
+                        or self.closed
+                        or _new_build_announced()
+                    ),
                     timeout=IDLE_REFRESH,
                 )
             except TimeoutError:
@@ -553,6 +569,11 @@ class NativeAgentWorkflow:
                 # payload_storage обновляют mtime, и очистка по сроку их не
                 # удалит, пока сессия жива.
                 await self._continue(start, self.store)
+            else:
+                if not self.pending_messages and not self.closed:
+                    # Объявлена новая сборка: простаивающая сессия переходит
+                    # на неё сразу, старый воркер не ждёт её сутки.
+                    await self._continue(start, self.store)
         self.closed = True
         await workflow.wait_condition(workflow.all_handlers_finished)
         await self._release_owner(start)
@@ -625,5 +646,12 @@ class NativeAgentWorkflow:
         )
         # Без await между проверкой и CAN: весь принятый ввод уже в resume.
         workflow.continue_as_new(
-            replace(start, messages=[], message_ids=None, resume=resume)
+            replace(start, messages=[], message_ids=None, resume=resume),
+            # Следующий ход — на текущей сборке; без versioning не задаётся
+            # (сервер отвергает поведение у неверсионированного воркера).
+            initial_versioning_behavior=(
+                workflow.ContinueAsNewVersioningBehavior.AUTO_UPGRADE
+                if workflow.info().get_current_deployment_version() is not None
+                else None
+            ),
         )

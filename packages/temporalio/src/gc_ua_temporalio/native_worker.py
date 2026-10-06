@@ -13,7 +13,8 @@ from pathlib import Path
 from gc_core.execution.resource_host import WorkerResourceHost
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from temporalio.client import Client
-from temporalio.worker import Worker
+from temporalio.common import VersioningBehavior, WorkerDeploymentVersion
+from temporalio.worker import Worker, WorkerDeploymentConfig
 
 from gc_ua_temporalio.native_activities import NativeActivities
 from gc_ua_temporalio.native_activity_config import resolve_activity_settings
@@ -116,7 +117,58 @@ def worker_options(config, native, threads):
         )
         entry["workflows"].extend(workflows)
         entry["activities"].extend(activities)
+    deployment = deployment_config(config)
+    if deployment is not None:
+        for entry in queues.values():
+            entry["deployment_config"] = deployment
     return list(queues.values())
+
+
+def deployment_config(config):
+    """``WorkerDeploymentConfig`` при включённом Worker Versioning."""
+    versioning = config.versioning
+    if not versioning.enabled:
+        return None
+    return WorkerDeploymentConfig(
+        version=WorkerDeploymentVersion(
+            deployment_name=versioning.deployment_name,
+            build_id=versioning.resolved_build_id(),
+        ),
+        use_worker_versioning=True,
+        default_versioning_behavior=VersioningBehavior.PINNED,
+    )
+
+
+async def set_current_version(client, config, *, attempts=50, delay=0.2):
+    """Объявить сборку воркера текущей (``versioning.set_current_on_start``).
+
+    Версия появляется на сервере после первого опроса очередей, поэтому
+    первые попытки могут не найти её — повторяем недолго.
+    """
+    from temporalio.api.workflowservice.v1 import (
+        SetWorkerDeploymentCurrentVersionRequest,
+    )
+    from temporalio.service import RPCError
+
+    versioning = config.versioning
+    request = SetWorkerDeploymentCurrentVersionRequest(
+        namespace=client.namespace,
+        deployment_name=versioning.deployment_name,
+        build_id=versioning.resolved_build_id(),
+        identity="gc-temporal-native-worker",
+    )
+    for attempt in range(attempts):
+        try:
+            await (
+                client.workflow_service.set_worker_deployment_current_version(
+                    request
+                )
+            )
+            return
+        except RPCError:
+            if attempt == attempts - 1:
+                raise
+            await asyncio.sleep(delay)
 
 
 async def serve(config):
@@ -130,6 +182,11 @@ async def serve(config):
         async with AsyncExitStack() as stack:
             for options in worker_options(config, native, threads):
                 await stack.enter_async_context(Worker(client, **options))
+            if (
+                config.versioning.enabled
+                and config.versioning.set_current_on_start
+            ):
+                await set_current_version(client, config)
             # Брошенные контексты (terminate посреди хода) и служебные данные
             # закрытых сессий — фоном, пока работает воркер.
             await NativeMaintenance(

@@ -38,6 +38,35 @@ class NativeStoreConfig(BaseModel):
     path: str
 
 
+class WorkerVersioningConfig(BaseModel):
+    """Worker Versioning Temporal: сборки воркера и закрепление ходов.
+
+    Ход закреплён за сборкой, на которой начался (PINNED), и доигрывается
+    ею; следующий ход после Continue-As-New идёт на текущей сборке. При
+    деплое новая сборка объявляется текущей
+    (``temporal worker deployment set-current-version``), старый воркер
+    гасится, когда его версия опустела (простаивающие сессии переходят
+    на новую сборку не позже чем через сутки).
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    enabled: bool = False
+    deployment_name: str = Field(default="ua-native", min_length=1)
+    #: Номер сборки; по умолчанию — версия пакета ``gc-ua-temporalio``.
+    #: Новый код — новый номер: иначе Temporal сочтёт его той же сборкой.
+    build_id: str | None = Field(default=None, min_length=1)
+    #: Объявить эту сборку текущей при старте воркера — для одного воркера
+    #: и локальной разработки. При раскатке это делает оператор.
+    set_current_on_start: bool = False
+
+    def resolved_build_id(self) -> str:
+        if self.build_id:
+            return self.build_id
+        from importlib.metadata import version
+
+        return version("gc-ua-temporalio")
+
+
 class NativeWorkerConfig(BaseModel):
     model_config = ConfigDict(
         extra="forbid", frozen=True, hide_input_in_errors=True
@@ -61,6 +90,10 @@ class NativeWorkerConfig(BaseModel):
     #: Таймауты и повторы activities по уровням (``native_activity_config``):
     #: сбои провайдера модели по умолчанию повторяются без ограничения.
     activities: ActivitiesConfig = Field(default_factory=ActivitiesConfig)
+    #: Worker Versioning (по умолчанию выключен).
+    versioning: WorkerVersioningConfig = Field(
+        default_factory=WorkerVersioningConfig
+    )
 
     @model_validator(mode="before")
     @classmethod
