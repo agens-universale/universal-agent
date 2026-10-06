@@ -25,7 +25,11 @@ uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#s
 ```bash
 gc-chat --config ./config.yml
 gc-chat --config ./config.yml --profile <имя>
+# любые --ключ value поверх профиля/config.yml (как у gc-cli / gc-acp):
+gc-chat --config ./config.yml --profile work --level max --chat_api_port 9001
 ```
+
+Помимо `--config` / `--profile` любые `--ключ value` перекрывают runtime-конфиг так же, как у `gc-cli` (уровень `--level`, модель `--model`, порт `--chat_api_port` и т.д.; см. [переопределение из CLI](configuration.md#переопределение-настроек-из-cli)).
 
 Без `--config` поиск конфига тот же, что у остальных команд: явный путь, затем `config.yml` в каталоге Config, затем пакетный шаблон. Конфиг не читается — сообщение в stderr, код выхода 1, порт не открывается.
 
@@ -54,7 +58,7 @@ gc-chat --config ./config.yml --profile <имя>
 
 Значения `off` и `on` в yaml пишите в кавычках: без них YAML читает их как boolean, и загрузка конфига падает.
 
-`agent.strict_turn_finish_validation` и уже лежащий в конфиге `text_answer_mode` на этом процессе не действуют: фасад перекрывает оба ключа после загрузки. Дефолт канала — проза без тула принимается, судья на `turn_finish` не зовётся. `session_todo` остаётся в схеме. Напоминания о нём этот процесс ставит в `0`, если в секции не задано другое число.
+`agent.strict_turn_finish_validation` и уже лежащий в конфиге `text_answer_mode` на этом процессе не действуют: фасад перекрывает оба ключа после загрузки. То же с профилем и с CLI: `tui.text_answer_mode` / `tui.finish_gate_mode` и плоские `--text_answer_mode` / `--strict_turn_finish_validation` контракт канала не меняют — читаются только `chat_api.*`. Дефолт канала — проза без тула принимается, судья на `turn_finish` не зовётся. `session_todo` остаётся в схеме. Напоминания о нём этот процесс ставит в `0`, если в секции не задано другое число.
 
 После загрузки режим дописывает в `stop_tools` имена `turn_ask_human` и `turn_intermediate_reply`: ни вопроса человеку, ни промежуточной реплики в схеме нет. Прогресс пишется прозой. Ролевая вставка ставится на копию конфига перед созданием агента, не в общий словарь процесса. У хода Responses это `chat_completions_responses_special_instructions.md`: вопрос пользователю — проза ответа, следующий запрос — ответ человека. У хода Chat Completions другой файл: следующий запрос не увидит трейс. Свой `paths.chat_completions_special_instructions_path` на этом процессе не читается. Порт `ask_human` остаётся и сразу возвращает пустую строку, чтобы случайный вызов не читал stdin.
 
