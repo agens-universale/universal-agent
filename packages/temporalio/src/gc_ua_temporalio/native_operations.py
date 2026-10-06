@@ -30,6 +30,7 @@ from temporalio.exceptions import (
 )
 from temporalio.exceptions import TimeoutError as TemporalTimeoutError
 
+from gc_ua_temporalio.message_refs import CONTEXT_MISSING, SentMessages
 from gc_ua_temporalio.native_activity_config import (
     DEFAULT_ACTIVITY_SETTINGS,
     activity_options,
@@ -96,6 +97,10 @@ INTERRUPTED_EFFECT = (
 )
 
 
+class _ModelContextMissing(Exception):
+    """Воркер не нашёл сообщений по ссылкам (``message_refs``)."""
+
+
 def session_failure(exc):
     """Доменный отказ сессии — ``ApplicationError``, run становится FAILED.
 
@@ -160,6 +165,10 @@ class NativeOperations:
         self.released = False
         #: Таймауты и повторы по уровням; после подготовки хода — с воркера.
         self.activity_settings = DEFAULT_ACTIVITY_SETTINGS
+        #: Сообщения, уже переданные activity модели в этом запуске.
+        self._sent_messages = SentMessages()
+        #: Прокси ThreadStore хода: прочитанные из треда сообщения — ссылки.
+        self.thread_store = None
         #: Ожидающая activity модели — её отменяет stop (``stop_model``).
         self._model_task = None
         self._stopped_model_task = None
@@ -245,6 +254,8 @@ class NativeOperations:
             }
             if cause.type in failures:
                 return failures[cause.type](cause.message)
+            if cause.type == CONTEXT_MISSING:
+                return _ModelContextMissing(cause.message)
             if cause.type == "ModelProviderTransient":
                 # Исчерпан заданный в activities.model лимит повторов.
                 return InfrastructureFailure(
@@ -262,19 +273,7 @@ class NativeOperations:
         provider = getattr(self, "router_provider", None)
         router = provider() if provider is not None else self.router
         self.router = router
-        task = asyncio.ensure_future(
-            self.call(
-                "agent.model.request",
-                {
-                    "request": asdict(request),
-                    "circuit_breaker": router.breaker.snapshot(),
-                    "routing": public_router_identity(router),
-                },
-                NativeModelReply,
-                operation_id=request.operation_id,
-                model=True,
-            )
-        )
+        task = asyncio.ensure_future(self._request_model(request, router))
         self._model_task = task
         try:
             reply = await task
@@ -289,6 +288,69 @@ class NativeOperations:
             self._model_task = None
         router.breaker.replace_from(reply.circuit_breaker)
         return reply.result
+
+    async def _request_model(self, request, router):
+        """Activity модели: уже переданные сообщения — ссылками
+        (``message_refs``). Воркер без них — повтор с сообщениями целиком."""
+        data = asdict(request)
+        thread = {
+            "store_id": self.start.store_id,
+            "system_id": self.start.system_id,
+            "thread_id": data["state"].get("thread_id")
+            or self.start.thread_id,
+        }
+        operation_id = request.operation_id
+        store = self.thread_store
+        stored = (
+            store.message_hashes.get(
+                (thread["system_id"], thread["thread_id"]), set()
+            )
+            if store is not None
+            else set()
+        )
+        for attempt in range(2):
+            if attempt:
+                stored = set()
+            state = dict(data["state"])
+            state["messages"], inline = self._sent_messages.encode(
+                state.get("messages"), also=stored
+            )
+            batch, inline_batch = self._sent_messages.encode(
+                data["messages"], also={*stored, *inline}
+            )
+            inline_tools = []
+            if isinstance(state.get("tools"), list):
+                # Схемы инструментов одинаковы на всех шагах хода.
+                state["tools"], inline_tools = self._sent_messages.encode(
+                    state["tools"]
+                )
+            try:
+                reply = await self.call(
+                    "agent.model.request",
+                    {
+                        "request": {**data, "state": state, "messages": batch},
+                        "circuit_breaker": router.breaker.snapshot(),
+                        "routing": public_router_identity(router),
+                        "thread": thread,
+                    },
+                    NativeModelReply,
+                    operation_id=operation_id,
+                    model=True,
+                )
+            except _ModelContextMissing:
+                if attempt:
+                    raise InfrastructureFailure(
+                        "Model context is not available on the worker"
+                    ) from None
+                # Воркер без этих сообщений (перезапуск, другой процесс, а
+                # в треде их нет): один повтор, всё целиком.
+                self._sent_messages.forget()
+                operation_id = f"{request.operation_id}/full"
+                continue
+            self._sent_messages.confirm(
+                [*inline, *inline_batch, *inline_tools]
+            )
+            return reply
 
     def stop_model(self):
         """stop: отменить ожидающую activity модели (и её повторы).

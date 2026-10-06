@@ -1,7 +1,9 @@
 """External operations of the real core executor. No agent loop lives here."""
 
 import asyncio
+from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
+from copy import deepcopy
 from dataclasses import asdict
 from types import SimpleNamespace
 
@@ -31,6 +33,13 @@ from temporalio import activity
 from temporalio.converter import value_to_type
 from temporalio.exceptions import ApplicationError
 
+from gc_ua_temporalio.message_refs import (
+    CONTEXT_MISSING,
+    decode,
+    is_ref,
+    message_hash,
+    refs_in,
+)
 from gc_ua_temporalio.native_activity_config import DEFAULT_ACTIVITY_SETTINGS
 from gc_ua_temporalio.native_contracts import (
     NativeCall,
@@ -38,6 +47,9 @@ from gc_ua_temporalio.native_contracts import (
     NativeModelReply,
     NativePreparedContext,
 )
+
+#: Владельцев хода с сообщениями в памяти воркера (``message_refs``).
+_MESSAGE_CACHE_OWNERS = 256
 
 #: Тип ошибки модельной activity, которую Temporal повторяет по политике.
 TRANSIENT_MODEL_FAILURE = "ModelProviderTransient"
@@ -98,6 +110,9 @@ class NativeActivities:
         activity_settings=None,
     ):
         self._operation_locks = {}
+        #: Владелец хода → {хэш: сообщение}, полученные activity модели
+        #: (``message_refs``). Снимается с освобождением контекста хода.
+        self._messages = OrderedDict()
         #: Итоговые таймауты и повторы activities (``resolve_activity_settings``)
         #: — уходят в workflow с подготовкой хода.
         self.activity_settings = activity_settings or DEFAULT_ACTIVITY_SETTINGS
@@ -304,7 +319,9 @@ class NativeActivities:
             materialize_router_identity,
         )
 
-        request = value_to_type(ModelRequest, call.data["request"])
+        request = value_to_type(
+            ModelRequest, await self._resolve_message_refs(call)
+        )
         model_ctx = copy(ctx)
         router = materialize_router_identity(call.data.get("routing"), ctx)
         model_ctx.model_router = router
@@ -471,4 +488,59 @@ class NativeActivities:
         release = getattr(self.context_provider, "release", None)
         if release is not None:
             await release(call)
+        self._messages.pop(call.owner_id, None)
         return True
+
+    async def _resolve_message_refs(self, call):
+        """Вход запроса к модели со ссылками → полные сообщения.
+
+        Ссылки ищутся в памяти воркера (сообщения прошлых запросов этого
+        хода), затем в треде ThreadStore. Не найдено — ``ModelContextMissing``:
+        workflow повторит запрос, передав сообщения целиком.
+        """
+        data = call.data["request"]
+        state = dict(data.get("state") or {})
+        batch = data.get("messages") or []
+        known = self._messages.setdefault(call.owner_id, {})
+        self._messages.move_to_end(call.owner_id)
+        while len(self._messages) > _MESSAGE_CACHE_OWNERS:
+            self._messages.popitem(last=False)
+        tools = (
+            state.get("tools") if isinstance(state.get("tools"), list) else []
+        )
+        for message in [*(state.get("messages") or []), *batch, *tools]:
+            if not is_ref(message):
+                known[message_hash(message)] = deepcopy(message)
+        refs = refs_in(state.get("messages")) + refs_in(batch) + refs_in(tools)
+        if any(digest not in known for digest in refs):
+            await self._load_thread_messages(call, known)
+        missing = [digest for digest in refs if digest not in known]
+        if missing:
+            raise ApplicationError(
+                f"Model context is not available on this worker: "
+                f"{len(missing)} message(s)",
+                type=CONTEXT_MISSING,
+                non_retryable=True,
+            )
+        if "messages" in state:
+            state["messages"] = decode(state["messages"], known)
+        if tools:
+            state["tools"] = decode(tools, known)
+        return {**data, "state": state, "messages": decode(batch, known)}
+
+    async def _load_thread_messages(self, call, known):
+        """Сообщения треда сессии — в память ссылок (промах кэша воркера)."""
+        thread = call.data.get("thread") or {}
+        store = self.stores.get(thread.get("store_id"))
+        if store is None or not thread.get("thread_id"):
+            return
+        capability = durable_store_capability(store)
+        if capability is None:
+            return
+        snapshot = await capability[0](
+            thread.get("system_id"), thread["thread_id"]
+        )
+        if snapshot is None or snapshot.state is None:
+            return
+        for message in snapshot.state.messages:
+            known.setdefault(message_hash(message), deepcopy(message))

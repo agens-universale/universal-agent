@@ -15,6 +15,7 @@ from gc_core.thread_store_durable import (
 from gc_core.thread_store_types import ThreadState
 from gc_core.utils.generate_message_id import generate_msg_id_sha256
 
+from gc_ua_temporalio.message_refs import message_hash
 from gc_ua_temporalio.thread_store_contracts import (
     PAGE_BYTES,
     ThreadStoreCall,
@@ -64,6 +65,8 @@ class TemporalThreadStore:
         # Per-thread (base revision, latest confirmed value). The interval above
         # base contains only contiguous own metadata receipts with one fence.
         self._metadata_acks = {}
+        #: (система, тред) → хэши сообщений последнего чтения треда.
+        self.message_hashes = {}
 
     async def aread_snapshot(
         self, system_id, thread_id, *, include_state=True
@@ -80,6 +83,12 @@ class TemporalThreadStore:
             snapshot = reply.snapshot
         if snapshot is None:
             raise ExecutionFailure("Thread store did not return a snapshot")
+        if snapshot.state is not None:
+            # Эти сообщения есть в треде: activity модели получает их
+            # ссылками, воркер найдёт их в хранилище (``message_refs``).
+            self.message_hashes[(system_id, thread_id)] = {
+                message_hash(message) for message in snapshot.state.messages
+            }
         self._generation = snapshot.generation
         key = (system_id, thread_id)
         previous = self._metadata_acks.get(key)

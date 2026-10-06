@@ -1,0 +1,312 @@
+"""Вход activity модели — ссылки на уже переданные сообщения.
+
+Без ``payload_storage`` (ни файлов, ни S3): длинный тред и длинный ход не
+упираются в лимит записи Temporal (2 МБ), а история хода растёт на новые
+сообщения, а не на весь контекст за шаг.
+"""
+
+import asyncio
+import json
+import shutil
+import threading
+from contextlib import asynccontextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+from gc_core.thread_store_file_durable import DurableFileThreadStore
+from gc_ua_temporalio.message_refs import (
+    REF_KEY,
+    SentMessages,
+    decode,
+    message_hash,
+)
+from gc_ua_temporalio.native_contracts import NativeRunRequest
+from gc_ua_temporalio.native_provider import NativeWorkerConfig
+from gc_ua_temporalio.native_worker import build_native_runtime, worker_options
+from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
+from live_support import call
+from temporalio.api.enums.v1 import EventType
+from temporalio.testing import WorkflowEnvironment
+from temporalio.worker import Replayer, Worker
+
+LIMIT = 2 * 1024 * 1024
+
+
+def finish():
+    return call(
+        "finish",
+        "turn_finish",
+        {
+            "solution_type": "full_solution",
+            "task": "test",
+            "task_report": "done",
+            "handoff": "{}",
+        },
+    )
+
+
+@pytest.fixture
+def growing_model():
+    """Модель читает файл ``steps`` раз (контекст растёт), затем finish.
+    Запоминает размер каждого тела запроса — провайдер должен получать
+    полный контекст."""
+    bodies = []
+    plan = {"steps": 0}
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_POST(self):
+            raw = self.rfile.read(int(self.headers["content-length"]))
+            body = json.loads(raw)
+            if not body.get("tools"):
+                reply = {"role": "assistant", "content": "ok"}
+                finish_reason = "stop"
+            else:
+                bodies.append(len(raw))
+                step = len(bodies)
+                tool = (
+                    call(f"r{step}", "fs_read_file", {"path": "big.txt"})
+                    if step <= plan["steps"]
+                    else finish()
+                )
+                reply = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [tool],
+                }
+                finish_reason = "tool_calls"
+            data = json.dumps(
+                {
+                    "id": f"r{len(bodies)}",
+                    "object": "chat.completion",
+                    "model": "scripted",
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": reply,
+                            "finish_reason": finish_reason,
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 40,
+                        "completion_tokens": 10,
+                        "total_tokens": 50,
+                    },
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield (
+            f"http://127.0.0.1:{server.server_port}/v1/chat/completions",
+            bodies,
+            plan,
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+@asynccontextmanager
+async def runtime(tmp_path, url, *, persist="step"):
+    binary = shutil.which("temporal")
+    if binary is None:
+        pytest.skip("Temporal CLI is required")
+    config = NativeWorkerConfig.model_validate(
+        {
+            "workflow_queue": "refs",
+            "model_queue": "refs",
+            "resource_queue": "refs",
+            "state_dir": str(tmp_path),
+            # Ни файлов, ни S3: крупные payload остались бы в истории.
+            "payload_storage": None,
+            "profiles": {
+                "test": {
+                    "workspace": str(tmp_path),
+                    "core": {
+                        "backend": {
+                            "api_mode": "chat_completions",
+                            "completions_url": url,
+                            "chat_completion_kwargs": {"stream": False},
+                        },
+                        "agent": {
+                            "model": "scripted",
+                            "max_steps": 200,
+                            "max_tool_calls": 400,
+                            "use_local_subagents": False,
+                            "strict_turn_finish_validation": False,
+                        },
+                        "tui": {"text_answer_mode": "deny"},
+                        "thread_store": {"persist": persist},
+                        "logging": {
+                            "save_logs": False,
+                            "console_trace": False,
+                        },
+                    },
+                }
+            },
+        }
+    )
+    contexts, native, threads = build_native_runtime(config)
+    try:
+        async with await WorkflowEnvironment.start_local(
+            dev_server_existing_path=binary
+        ) as env:
+            (options,) = worker_options(config, native, threads)
+            async with Worker(env.client, **options):
+                yield env, native
+    finally:
+        await contexts.aclose()
+
+
+def _request(text="go"):
+    return NativeRunRequest(
+        "test", "files", "test", "refs", [text], "refs", "refs"
+    )
+
+
+async def _payload_sizes(handle):
+    """(наибольшая запись истории, входы activity модели по порядку, вся
+    история в байтах)."""
+    largest, model_inputs, total = 0, [], 0
+    names = {}
+    async for event in handle.fetch_history_events():
+        total += event.ByteSize()
+        if event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED:
+            attrs = event.activity_task_scheduled_event_attributes
+            size = sum(p.ByteSize() for p in attrs.input.payloads)
+            names[event.event_id] = attrs.activity_type.name
+            if attrs.activity_type.name == "agent.model.request":
+                model_inputs.append(size)
+            largest = max(largest, size)
+        elif event.event_type == EventType.EVENT_TYPE_ACTIVITY_TASK_COMPLETED:
+            attrs = event.activity_task_completed_event_attributes
+            largest = max(
+                largest, sum(p.ByteSize() for p in attrs.result.payloads)
+            )
+    return largest, model_inputs, total
+
+
+async def test_long_thread_and_long_turn_stay_below_temporal_limits(
+    tmp_path, monkeypatch, growing_model
+):
+    """Тред 6 МБ + ход 30 шагов по 40 КБ без payload_storage: каждая запись
+    истории меньше 2 МБ, вход модели на шаг — новые сообщения и ссылки (а не
+    весь контекст), провайдер получает весь контекст."""
+    monkeypatch.chdir(tmp_path)
+    url, bodies, plan = growing_model
+    plan["steps"] = 30
+    (tmp_path / "big.txt").write_text("y" * 40_000)
+    store = DurableFileThreadStore(str(tmp_path / "threads"))
+    store.append_messages(
+        "test",
+        "refs",
+        [
+            {
+                "id": f"old{i}",
+                "role": "user" if i % 2 == 0 else "assistant",
+                "content": f"{i}:" + "x" * 50_000,
+            }
+            for i in range(120)
+        ],
+    )
+    async with runtime(tmp_path, url) as (env, _native):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            _request(),
+            id="refs-long",
+            task_queue="refs",
+        )
+        result = await asyncio.wait_for(handle.result(), 240)
+        largest, model_inputs, total = await _payload_sizes(handle)
+        history = await handle.fetch_history()
+    assert "done" in json.dumps(result, ensure_ascii=False)
+    assert len(model_inputs) == 31
+    # Провайдер получил весь контекст: тред 6 МБ и выросший ход.
+    assert bodies[0] > 6_000_000 and bodies[-1] > bodies[0] + 500_000
+    # История: ни одна запись не близка к лимиту. Вход модели на шаг —
+    # новый вывод инструмента (40 КБ) и ссылки (без них — весь контекст,
+    # 6–7 МБ на шаг). Вся история — тред (читается один раз, страницами) и
+    # новое за шаги: вывод инструмента, его запись в тред, вход модели.
+    assert largest < LIMIT
+    assert max(model_inputs) < 70_000, model_inputs
+    assert total < 6_100_000 + 31 * 200_000, total
+    await Replayer(workflows=[NativeAgentWorkflow]).replay_workflow(history)
+
+
+async def test_worker_without_context_gets_messages_resent(
+    tmp_path, monkeypatch, growing_model
+):
+    """Воркер «теряет» память перед каждым запросом (как после перезапуска),
+    а тред пишется только в конце хода: ссылок не найти ни в памяти, ни в
+    треде — workflow повторяет запрос с сообщениями целиком, ход доходит до
+    конца."""
+    monkeypatch.chdir(tmp_path)
+    url, bodies, plan = growing_model
+    plan["steps"] = 4
+    (tmp_path / "big.txt").write_text("y" * 1_000)
+    async with runtime(tmp_path, url, persist="turn") as (env, native):
+        original = native._resolve_message_refs
+        resent = []
+
+        async def forgetful(call):
+            native._messages.clear()
+            try:
+                return await original(call)
+            except Exception as exc:
+                resent.append(type(exc).__name__)
+                raise
+
+        native._resolve_message_refs = forgetful
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            _request(),
+            id="refs-forget",
+            task_queue="refs",
+        )
+        await asyncio.wait_for(handle.result(), 120)
+        history = await handle.fetch_history()
+    assert len(bodies) == 5
+    assert resent  # промахи были и закрылись повтором целиком
+    await Replayer(workflows=[NativeAgentWorkflow]).replay_workflow(history)
+
+
+def test_sent_messages_encode_refs_only_after_confirmation():
+    sent = SentMessages()
+    first = {"id": "a", "role": "user", "content": "hello"}
+    second = {"id": "b", "role": "assistant", "content": "hi"}
+    encoded, inline = sent.encode([first])
+    assert encoded == [first] and inline == [message_hash(first)]
+    # Не подтверждено (activity не завершилась) — снова целиком.
+    assert sent.encode([first])[0] == [first]
+    sent.confirm(inline)
+    encoded, inline = sent.encode([first, second])
+    assert encoded[0] == {REF_KEY: message_hash(first)}
+    assert encoded[1] == second and inline == [message_hash(second)]
+    # Батч повторяет хвост состояния — ссылкой на переданное в этом запросе.
+    batch, batch_inline = sent.encode([second], also=inline)
+    assert batch == [{REF_KEY: message_hash(second)}] and batch_inline == []
+    known = {message_hash(first): first, message_hash(second): second}
+    assert decode(encoded, known) == [first, second]
+    # Копии: правка результата не трогает память воркера.
+    decode(encoded, known)[0]["content"] = "changed"
+    assert known[message_hash(first)]["content"] == "hello"
+    sent.forget()
+    assert sent.encode([first])[0] == [first]
+
+
+def test_hash_ignores_key_order():
+    assert message_hash({"a": 1, "b": [1, 2]}) == message_hash(
+        {"b": [1, 2], "a": 1}
+    )
+    assert message_hash({"a": 1}) != message_hash({"a": 2})

@@ -421,6 +421,8 @@ class NativeAgentWorkflow:
                 epoch = receipt.owner_epoch
             store.owner_id, store.owner_epoch = owner, epoch
         self.store = store
+        # Сообщения, прочитанные из треда, идут в activity модели ссылками.
+        self.operations.thread_store = store
         ctx = assemble_native_context(
             prepared,
             operations=self.operations,

@@ -170,6 +170,7 @@ class NativeSubagentWorkflow:
                     capabilities=prepared.context.store_capabilities,
                     threads_dir=prepared.context.threads_dir,
                 )
+                operations.thread_store = store
                 parent_ctx = assemble_native_context(
                     request.parent_context,
                     operations=operations,
