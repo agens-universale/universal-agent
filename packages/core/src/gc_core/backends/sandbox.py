@@ -189,6 +189,11 @@ def sandbox_auto_workdir(cwd: Optional[str] = None) -> str:
 class SandboxBackend(LocalFsBackend):
     """Файлы — как у LocalFsBackend; exec-семейство — через ``wrapper``."""
 
+    # Файлы хостовые (`is_sandbox` False — guards и host-only тулы как у local),
+    # но всё, что исполняется, — под обёрткой. MCP `execute_on: os_backend`
+    # смотрит на этот флаг и гонит carrier/stdio-сервер через ту же изоляцию.
+    isolates_exec = True
+
     def __init__(
         self,
         *,
