@@ -293,7 +293,7 @@ sequenceDiagram
     participant M as agent.model.request
     C->>W: submit_message (Update-With-Start)
     W->>R: agent.context.prepare
-    W->>R: agent.thread.load + claim_owner (только первый run сессии;<br/>мёртвый владелец снимается)
+    W->>R: agent.thread.load + claim_owner (только первый run сессии,<br/>мёртвый владелец снимается)
     W->>E: arun(messages, thread_id)
     E->>R: agent.thread.load (ThreadSession)
     loop до завершения хода
