@@ -1,8 +1,6 @@
 """External operations of the real core executor. No agent loop lives here."""
 
 import asyncio
-import hashlib
-import json
 from contextlib import asynccontextmanager, suppress
 from dataclasses import asdict
 from types import SimpleNamespace
@@ -40,14 +38,6 @@ from gc_ua_temporalio.native_contracts import (
     NativeModelReply,
     NativePreparedContext,
 )
-from gc_ua_temporalio.native_operations import INTERRUPTED_EFFECT
-
-
-def _digest(call):
-    return hashlib.sha256(
-        json.dumps(asdict(call), sort_keys=True, ensure_ascii=False).encode()
-    ).hexdigest()
-
 
 #: Тип ошибки модельной activity, которую Temporal повторяет по политике.
 TRANSIENT_MODEL_FAILURE = "ModelProviderTransient"
@@ -96,8 +86,7 @@ class NativeActivities:
     """Dependency injection uses real RunContexts and the selected ThreadStore.
 
     ``context_provider(call)`` resolves a pinned configuration and resources on
-    the worker. ``receipts`` stores operation results independently of thread
-    history. It is not a replacement ThreadSession or agent implementation.
+    the worker. It is not a replacement ThreadSession or agent implementation.
     """
 
     def __init__(
@@ -105,9 +94,7 @@ class NativeActivities:
         *,
         context_provider,
         stores,
-        receipts,
         public_config,
-        preview_profiles=(),
         activity_settings=None,
     ):
         self._operation_locks = {}
@@ -118,9 +105,7 @@ class NativeActivities:
         self.stores = {
             name: athread_store(store) for name, store in stores.items()
         }
-        self.receipts = receipts
         self.public_config = public_config
-        self.preview_profiles = frozenset(preview_profiles)
         for store in self.stores.values():
             if durable_store_capability(store) is None:
                 raise ValueError(
@@ -159,73 +144,41 @@ class NativeActivities:
     async def _recorded(
         self, call, result_type, handler, *, resolve_context=True, effect=False
     ):
-        async with self._operation_scope(call):
-            return await self._recorded_once(
-                call,
-                result_type,
-                handler,
-                resolve_context=resolve_context,
-                effect=effect,
-            )
+        """Одна операция: контекст воркера, обработчик, перенос ошибок.
 
-    async def _recorded_once(
-        self, call, result_type, handler, *, resolve_context=True, effect=False
-    ):
-        if call.schema_version != 1:
-            raise ApplicationError(
-                "Unsupported native call", non_retryable=True
-            )
-        digest = _digest(call)
-        cached = await asyncio.to_thread(
-            self.receipts.operation_result,
-            call.owner_id,
-            call.operation_id,
-            digest,
-        )
-        if cached is not None:
-            return value_to_type(result_type, cached)
-        if effect and activity.in_activity() and activity.info().attempt > 1:
-            # Повтор внешнего эффекта только читает квитанцию: квитанции нет —
-            # исход неизвестен, и эффект второй раз не исполняется.
-            raise ApplicationError(
-                INTERRUPTED_EFFECT,
-                "ToolOutcomeUnknown",
-                type="DomainError",
-                non_retryable=True,
-            )
-        try:
-            ctx = (
-                await self.context_provider(call) if resolve_context else None
-            )
-            result = await handler(call, ctx)
-        except ExecutionFailure as exc:
-            raise ApplicationError(
-                str(exc), type=type(exc).__name__, non_retryable=True
-            ) from exc
-        except ApplicationError:
-            raise
-        except Exception as exc:
-            # Доменная ошибка (как в local): переносим тип и текст значением,
-            # workflow поднимет то же исключение, и ядро обработает его штатно.
-            raise ApplicationError(
-                str(exc),
-                type(exc).__name__,
-                type="DomainError",
-                non_retryable=True,
-            ) from exc
-        encoded = (
-            asdict(result)
-            if hasattr(result, "__dataclass_fields__")
-            else result
-        )
-        saved = await asyncio.to_thread(
-            self.receipts.save_operation_result,
-            call.owner_id,
-            call.operation_id,
-            digest,
-            encoded,
-        )
-        return value_to_type(result_type, saved)
+        Квитанций нет: повтор activity исполняет операцию заново («хотя бы
+        раз», как в Temporal). Эффект инструмента защищён политикой — одна
+        попытка по умолчанию (``native_activity_config``).
+        """
+        del result_type, effect  # тип результата сериализует Temporal
+        async with self._operation_scope(call):
+            if call.schema_version != 1:
+                raise ApplicationError(
+                    "Unsupported native call", non_retryable=True
+                )
+            try:
+                ctx = (
+                    await self.context_provider(call)
+                    if resolve_context
+                    else None
+                )
+                return await handler(call, ctx)
+            except ExecutionFailure as exc:
+                raise ApplicationError(
+                    str(exc), type=type(exc).__name__, non_retryable=True
+                ) from exc
+            except ApplicationError:
+                raise
+            except Exception as exc:
+                # Доменная ошибка (как в local): переносим тип и текст
+                # значением, workflow поднимет то же исключение, и ядро
+                # обработает его штатно.
+                raise ApplicationError(
+                    str(exc),
+                    type(exc).__name__,
+                    type="DomainError",
+                    non_retryable=True,
+                ) from exc
 
     @activity.defn(name="agent.context.prepare")
     async def prepare(self, call: NativeCall) -> NativePreparedContext:
@@ -341,13 +294,7 @@ class NativeActivities:
 
     @activity.defn(name="agent.model.request")
     async def model(self, call: NativeCall) -> NativeModelReply:
-        from gc_ua_temporalio.preview import commit_preview
-
-        result = await self._recorded(call, NativeModelReply, self._model)
-        await asyncio.to_thread(
-            commit_preview, self.receipts, call.owner_id, call.operation_id
-        )
-        return result
+        return await self._recorded(call, NativeModelReply, self._model)
 
     async def _model(self, call, ctx):
         from copy import copy
@@ -359,18 +306,6 @@ class NativeActivities:
 
         request = value_to_type(ModelRequest, call.data["request"])
         model_ctx = copy(ctx)
-        from gc_ua_temporalio.preview import PreviewSink
-
-        if call.profile in self.preview_profiles:
-            sink = PreviewSink(
-                self.receipts,
-                call.owner_id,
-                call.operation_id,
-                attempt=activity.info().attempt
-                if activity.in_activity()
-                else 1,
-            )
-            model_ctx.on_stream_delta = sink.delta
         router = materialize_router_identity(call.data.get("routing"), ctx)
         model_ctx.model_router = router
         router.breaker.replace_from(call.data["circuit_breaker"])

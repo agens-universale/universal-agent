@@ -40,17 +40,25 @@ def test_levels_merge_and_framework_non_retryable_types_are_kept():
         model["retry"]["non_retryable_error_types"]
     )
     assert settings["tools"]["exec_command"]["start_to_close"] == 7200
+    # Эффект — одна попытка по умолчанию; повторы — только явно у инструмента.
     options = activity_options(settings["resource"], effect=True)
-    assert (
-        options["retry_policy"].maximum_attempts == 2
-    )  # эффект — не настраивается
+    assert options["retry_policy"].maximum_attempts == 1
+    options = activity_options(settings["tools"]["exec_command"], effect=True)
+    assert options["retry_policy"].maximum_attempts == 1
+    explicit = resolve_activity_settings(
+        ActivitiesConfig.model_validate(
+            {"tools": {"exec_command": {"retry": {"maximum_attempts": 3}}}}
+        )
+    )
+    options = activity_options(explicit["tools"]["exec_command"], effect=True)
+    assert options["retry_policy"].maximum_attempts == 3
 
 
 def test_activity_config_is_validated_on_worker_start(tmp_path):
     with pytest.raises(ValidationError):
         NativeWorkerConfig.model_validate(
             {
-                "receipts_database": str(tmp_path / "r.sqlite"),
+                "state_dir": str(tmp_path),
                 "profiles": {},
                 "activities": {"model": {"retry": {"maximum_atempts": 3}}},
             }

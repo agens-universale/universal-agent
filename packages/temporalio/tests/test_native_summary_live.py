@@ -165,7 +165,7 @@ async def test_automatic_summary_full_trace_parity(
             "workflow_queue": "summary",
             "resource_queue": "summary",
             "model_queue": "summary",
-            "receipts_database": str(tmp_path / "receipts.sqlite"),
+            "state_dir": str(tmp_path),
             "thread_stores": {
                 "files": {
                     "kind": backend,

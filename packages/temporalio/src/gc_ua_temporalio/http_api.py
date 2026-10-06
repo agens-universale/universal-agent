@@ -1,11 +1,9 @@
 """Remote API mounted in gc-server, protected by its existing authentication."""
 
 import asyncio
-import json
 from dataclasses import dataclass
 
-from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, HTTPException
 from temporalio.client import (
     WorkflowQueryFailedError,
     WorkflowQueryRejectedError,
@@ -122,44 +120,4 @@ def _mount_views(registry, routes):
                 limit=limit,
                 token=token,
             )
-        )
-
-    @routes.get("/{system}/{thread}/events")
-    async def events(
-        system: str, thread: str, after: int = 0, limit: int = 200
-    ):
-        return await api_call(
-            asyncio.to_thread(
-                registry.views.events, system, thread, after=after, limit=limit
-            )
-        )
-
-    @routes.get("/{system}/{thread}/stream")
-    async def stream(
-        system: str, thread: str, request: Request, after: int = 0
-    ):
-        try:
-            cursor = int(request.headers.get("last-event-id", after))
-            if cursor < 0:
-                raise ValueError
-        except ValueError as exc:
-            raise HTTPException(400, "Invalid event cursor") from exc
-
-        async def body():
-            nonlocal cursor
-            while not await request.is_disconnected():
-                values = await asyncio.to_thread(
-                    registry.views.events, system, thread, after=cursor
-                )
-                for event in values:
-                    cursor = event["cursor"]
-                    yield f"id: {cursor}\nevent: {event['kind']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
-                if not values:
-                    yield ": heartbeat\n\n"
-                    await asyncio.sleep(1)
-
-        return StreamingResponse(
-            body(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache"},
         )

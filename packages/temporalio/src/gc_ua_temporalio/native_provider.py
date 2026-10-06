@@ -29,7 +29,6 @@ class NativeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     workspace: str
     store_id: str = "files"
-    preview_stream: bool = False
     core: AppConfig = Field(default_factory=AppConfig)
 
 
@@ -103,13 +102,14 @@ class NativeWorkerConfig(BaseModel):
     resource_queue: str = "ua-native-resource-local"
     model_queue: str = "ua-native-model"
     worker_id: str = "native-local"
-    thread_stores: dict[str, NativeStoreConfig] = Field(
-        default_factory=lambda: {"files": NativeStoreConfig(path="threads")}
-    )
-    receipts_database: str
+    #: Каталог служебного состояния воркера: от него считаются умолчания
+    #: ``thread_stores`` (``threads``) и ``payload_storage`` (``payloads``).
+    #: ``load(path)`` по умолчанию берёт каталог файла конфига.
+    state_dir: str | None = None
+    thread_stores: dict[str, NativeStoreConfig]
     profiles: dict[str, NativeProfile]
     #: Крупные payload истории Temporal — во внешнее хранилище (см. payload_storage).
-    #: По умолчанию — каталог ``payloads`` рядом с ``receipts_database``: без него
+    #: По умолчанию — каталог ``payloads`` в ``state_dir``: без него
     #: большой вывод тула или длинный ход упираются в лимиты Temporal (2 МБ на
     #: payload, 50 МБ на историю). Явный ``null`` выключает хранилище.
     payload_storage: PayloadStorageConfig | None = None
@@ -124,14 +124,15 @@ class NativeWorkerConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _state_defaults(cls, data):
-        """Служебное состояние по умолчанию — рядом с ``receipts_database``.
+        """Служебное состояние по умолчанию — в ``state_dir``.
 
         Не в cwd: воркер стартует в workspace агента, и треды по умолчанию
-        оказались бы в папке, которую агент читает и правит.
+        оказались бы в папке, которую агент читает и правит. Без
+        ``state_dir`` хранилище тредов задаётся явно (``thread_stores``).
         """
-        if not isinstance(data, dict) or not data.get("receipts_database"):
+        if not isinstance(data, dict) or not data.get("state_dir"):
             return data
-        root = Path(data["receipts_database"]).absolute().parent
+        root = Path(data["state_dir"]).absolute()
         data = dict(data)
         data.setdefault(
             "payload_storage", {"kind": "file", "path": str(root / "payloads")}
@@ -143,8 +144,7 @@ class NativeWorkerConfig(BaseModel):
         return data
 
     def state_paths(self):
-        """Служебные пути воркера для ``protected_paths``: треды, квитанции,
-        payload.
+        """Служебные пути воркера для ``protected_paths``: треды и payload.
 
         Базы SQLite — вместе с ``-wal``/``-shm``/``-journal`` (корень-файл не
         накрывает соседей). Каждый путь — в двух формах, ``abspath`` и
@@ -156,7 +156,6 @@ class NativeWorkerConfig(BaseModel):
             paths += (
                 [spec.path] if spec.kind == "file" else _db_files(spec.path)
             )
-        paths += _db_files(self.receipts_database)
         if self.payload_storage is not None and self.payload_storage.path:
             paths.append(self.payload_storage.path)
         forms = []
@@ -173,6 +172,9 @@ class NativeWorkerConfig(BaseModel):
         # (файл + ключ), а не подставляет пустую строку в адрес или токен.
         # Необязательное значение — с умолчанием: `${ENV:VAR:-}`.
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            # Служебное состояние по умолчанию — рядом с файлом конфига.
+            raw.setdefault("state_dir", str(Path(path).absolute().parent))
         return cls.model_validate(
             resolve_env_placeholders_strict(raw, source=str(path))
         )
@@ -206,20 +208,17 @@ class NativeContextProvider:
     ротация токена — перезапуск воркера; живые сессии продолжают работать.
     """
 
-    def __init__(
-        self, *, profiles, stores, receipts, resource_host, state_paths=()
-    ):
+    def __init__(self, *, profiles, stores, resource_host, state_paths=()):
         self.resource_host: WorkerResourceHost = resource_host
         self.stores = dict(stores)
-        self.receipts = receipts
         self._profiles = {}
         self._contexts = {}
         self._refs = {}
         self._locks = {}
         self._parents = {}
-        #: Привязки владельца уже записаны этим процессом: повторная запись —
-        #: синхронная SQLite-транзакция на event loop на каждую activity.
-        self._bound = set()
+        #: Привязка владельца к профилю и хранилищу (дайджест): владелец не
+        #: меняет их посреди жизни контекста на этом воркере.
+        self._bound = {}
         #: Последнее обращение к контексту владельца (``time.monotonic``):
         #: по нему обслуживание воркера находит брошенные контексты.
         self._last_used = {}
@@ -253,7 +252,7 @@ class NativeContextProvider:
                     }
                 )
             # Служебное состояние воркера агент не трогает, где бы оно ни
-            # лежало: история всех сессий, квитанции и payload — не его файлы.
+            # лежало: история всех сессий и payload — не его файлы.
             inside = list(state_paths)
             protected = settings.security.protected_paths
             if inside or any(str(p).startswith("~") for p in protected.extra):
@@ -302,15 +301,11 @@ class NativeContextProvider:
                 "Requested thread store differs from pinned profile"
             )
         digest = _digest([call.profile, store_id, call.child_context])
-        if (call.owner_id, digest) not in self._bound:
-            await asyncio.to_thread(
-                self.receipts.save_operation_result,
-                call.owner_id,
-                "__native_context_binding__",
-                digest,
-                {"profile": call.profile, "store_id": store_id},
+        bound = self._bound.setdefault(call.owner_id, digest)
+        if bound != digest:
+            raise ValueError(
+                "Native context owner is bound to another profile or store"
             )
-            self._bound.add((call.owner_id, digest))
         return store_id, loaded
 
     async def __call__(self, call):
@@ -430,7 +425,7 @@ class NativeContextProvider:
                 self._drop_context(child)
         ctx = self._contexts.pop(owner_id, None)
         self._last_used.pop(owner_id, None)
-        self._bound = {item for item in self._bound if item[0] != owner_id}
+        self._bound.pop(owner_id, None)
         self._refs.pop(owner_id, None)
         self._locks.pop(owner_id, None)
         self._parents.pop(owner_id, None)

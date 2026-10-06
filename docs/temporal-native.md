@@ -26,7 +26,7 @@
   "resource_queue": "ua-native-resource-project",
   "model_queue": "ua-native-model",
   "worker_id": "project-host",
-  "receipts_database": "/absolute/state/native-operations.sqlite",
+  "state_dir": "/absolute/state",
   "thread_stores": {
     "files": {"kind": "file", "path": "/absolute/state/threads"}
   },
@@ -50,8 +50,8 @@
 `{"kind": "sqlite", "path": "/absolute/state/threads.sqlite"}` выбирает
 существующий SQLite backend для конкретного store. Файловый store в Temporal —
 `DurableFileThreadStore`: те же файлы плюс служебная `.store/` (квитанции,
-журнал прерванной записи, владелец). База `receipts_database` содержит результаты
-завершённых activities и preview; это не копия истории агента.
+журнал прерванной записи, владелец). Своей базы у воркера нет: результаты
+activities хранит история Temporal.
 
 Workflow ссылается на профиль только по имени; конфигурацию каждая activity
 берёт из текущего процесса воркера. Смена настроек или токена — перезапуск

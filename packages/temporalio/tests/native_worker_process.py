@@ -59,13 +59,13 @@ async def main():
 
     async def recorded(call, result_type, handler, **kwargs):
         if result_type is NativeModelReply:
-            await gate("before_model_recorded", asdict(call))
+            await gate("before_model_activity", asdict(call))
         result = await original_recorded(call, result_type, handler, **kwargs)
         if result_type is NativeModelReply:
-            await gate("after_model_receipt", asdict(call))
+            await gate("after_model_activity", asdict(call))
         if result_type is ToolResult:
             await gate(
-                "after_tool_receipt",
+                "after_tool_activity",
                 {"call": asdict(call), "result": asdict(result)},
             )
         return result

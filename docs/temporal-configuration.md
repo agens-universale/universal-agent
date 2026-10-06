@@ -27,7 +27,7 @@ workflow; его histories не поддерживаются и не мигри�
   "model_queue": "ua-native-model",
   "resource_queue": "ua-native-resource-local",
   "worker_id": "native-local",
-  "receipts_database": "${ENV:UA_NATIVE_STATE}/receipts.sqlite",
+  "state_dir": "${ENV:UA_NATIVE_STATE}",
   "thread_stores": {
     "files": {
       "kind": "file",
@@ -38,7 +38,6 @@ workflow; его histories не поддерживаются и не мигри�
     "production": {
       "workspace": "${ENV:UA_NATIVE_WORKSPACE}",
       "store_id": "files",
-      "preview_stream": false,
       "core": {
         "backend": {
           "api_mode": "chat_completions",
@@ -61,8 +60,8 @@ workflow; его histories не поддерживаются и не мигри�
 
 Перед запуском задайте `UA_NATIVE_WORKSPACE`, `UA_NATIVE_STATE`, `UA_MODEL_NAME`,
 `UA_MODEL_URL` и `UA_MODEL_API_TOKEN` в окружении. Workspace и state — абсолютные
-пути; state размещайте **вне workspace**, чтобы служебная БД и история не попадали
-в результаты файловых инструментов. Каталоги создайте заранее. `${ENV:...}` и
+пути; state размещайте **вне workspace**, чтобы история и служебные файлы не
+попадали в результаты файловых инструментов. Каталоги создайте заранее. `${ENV:...}` и
 `${FILE:...}` раскрываются при загрузке строго: незаданная переменная (или
 нечитаемый файл) — отказ старта воркера со списком всех таких ссылок (файл +
 ключ). Необязательное значение пометьте умолчанием: `${ENV:VAR:-умолчание}`
@@ -70,20 +69,19 @@ workflow; его histories не поддерживаются и не мигри�
 
 FileThreadStore выбран явно и остаётся default для истории. Для SQLite замените
 store на `{"kind":"sqlite","path":"/absolute/state/threads.sqlite"}`.
-`receipts_database` — техническая SQLite worker'а: результаты завершённых
-activities и preview. Она не заменяет выбранный ThreadStore.
 
-Без `thread_stores` и `payload_storage` воркер кладёт треды и payload рядом с
-`receipts_database` (каталоги `threads` и `payloads`), а не в workspace агента.
-Все служебные пути (вместе с `-wal`/`-shm` баз, в форме `abspath` и `realpath`)
-попадают в `security.protected_paths.extra` профиля: агент не читает и не правит
-историю сессий, квитанции и payload. Файлы баз создаются с правами 0600,
-каталоги payload — 0700.
+`state_dir` — каталог служебного состояния воркера. Без `thread_stores` и
+`payload_storage` воркер кладёт треды и payload в него (каталоги `threads` и
+`payloads`), а не в workspace агента. Без `state_dir` воркер берёт каталог файла
+конфига. Своей базы у воркера нет: результаты activities хранит история
+Temporal, диалог — ThreadStore. Все служебные пути (вместе с `-wal`/`-shm` баз,
+в форме `abspath` и `realpath`) попадают в `security.protected_paths.extra`
+профиля: агент не читает и не правит историю сессий и payload. Файлы баз
+создаются с правами 0600, каталоги payload — 0700.
 
 Раз в 10 минут воркер обслуживает себя: освобождает контекст хода, чей workflow
 уже не исполняется (terminate посреди хода), вместе с его MCP-процессами;
-удаляет квитанции и preview workflow, которых Temporal уже не знает (истёк
-retention namespace); удаляет квитанции хранилища тредов старше 7 дней.
+удаляет служебные записи журнала хранилища тредов старше 7 дней.
 
 Текущий native deployment — **один процесс, один workspace**, в котором работают
 workflow/model/resource queues. Все профили этого worker должны указывать тот же
@@ -148,8 +146,8 @@ Structured output включается `start --structured-output-format /absolu
 `core.backend.api_mode: "responses"` и соответствующий endpoint в
 `core.backend.completions_url`, например `/v1/responses`. Это тот же модельный
 порт ядра; Responses cache-miss восстанавливает контекст общим механизмом.
-`preview_stream: true` — явный opt-in потокового preview, требующий совместимого
-streaming-провайдера; пример оставляет JSON Chat Completions без preview.
+Ответ модели воркер получает целиком, без потокового предпросмотра (как
+локальный CLI и server).
 
 Workflow знает профиль только по имени (как pydantic-ai — модель по ключу
 реестра): каждая activity берёт текущий профиль процесса воркера. Чтобы сменить
@@ -195,8 +193,6 @@ HTTP API, под существующей Bearer-авторизацией сер
 | `POST /messages` | `{"message_id":"m1","text":"..."}`: start или следующий ввод |
 | `GET /status` | Phase, ответ, pending human, active child, pending operation |
 | `GET /history?after=0&limit=100&token=...` | Сообщения и meta из ThreadStore |
-| `GET /events?after=0&limit=200` | Preview/commit events с cursor |
-| `GET /stream` | SSE; resume через `Last-Event-ID` или `after` |
 | `POST /answer` | `request_id`, `reply_id`, `answer` |
 | `POST /stop` | `{"turn_id":"..."}`: остановка текущего хода |
 | `POST /close` | Дождаться принятой работы и закрыть сессию |
@@ -213,19 +209,14 @@ HTTP API, под существующей Bearer-авторизацией сер
 
 `native-worker.json` — тот же `NativeWorkerConfig`, который загружает native
 worker. `temporal_store` должен совпадать с `store_id` выбранного профиля.
-API-процессу нужен доступ к выбранному File/SQLite ThreadStore и технической
-receipts DB; модель и инструменты исполняет worker. Помещайте receipts DB вне
-workspace агента (например, `/var/lib/universal-agent/native/receipts.sqlite`),
-чтобы служебные записи не попадали в результаты файловых инструментов.
+API-процессу нужен доступ к выбранному File/SQLite ThreadStore; модель и
+инструменты исполняет worker. Помещайте хранилище тредов вне workspace агента
+(например, `/var/lib/universal-agent/native/threads`), чтобы история не
+попадала в результаты файловых инструментов.
 
 `history` читает настоящие сообщения и метаданные ThreadStore. Поле `token`
 проверяет уже прочитанный префикс; при компактировании/замене истории сервер
 возвращает `reset: true`, и клиенту нужно перечитать историю целиком. UI title/pinned/archived записываются в `meta.tui` того же store.
-`events` содержит только необязательные previews с operation/attempt/cursor;
-canonical результат остаётся в ThreadStore. Preview включается явно через `profiles.<name>.preview_stream: true` в native
-worker config. Это подключает штатный stream callback; `tui_stream`/backend stream
-policy по-прежнему может его отключить. По умолчанию callback отсутствует,
-поэтому транспорт остаётся тем же, что у локального CLI/server.
 
 Native workflow ID имеет отдельное пространство имён. Чужой workflow owner
 не принимается как native-сессия. Сервер стартует native-сессии с `keep_alive`,
@@ -239,10 +230,13 @@ Native workflow ID имеет отдельное пространство имё
 Семантика как у Pydantic AI и как в local: ход продолжается, если модель может
 отреагировать. Доменная ошибка activity (`ValueError`, `OSError`, изменившиеся
 факты guard'а, потеря MCP-сессии) возвращается модели обычной ошибкой
-инструмента. Запрос к модели и read-only операции Temporal повторяет. Внешний
-эффект (запись, команда, MCP, project memory) исполняется не более одного раза:
-повтор после падения worker'а только читает квитанцию первой попытки, а без неё
-модель получает «исход неизвестен, проверьте состояние». Операторских команд нет.
+инструмента. Запрос к модели и read-only операции Temporal повторяет («хотя бы
+раз»): если воркер упал, когда ответ модели уже пришёл, запрос повторится и будет
+оплачен второй раз. Внешний эффект (запись, команда, MCP, project memory)
+исполняется одной попыткой: после падения worker'а или по лимиту времени
+Temporal его не повторяет, а модель получает «исход неизвестен, проверьте
+состояние». Повторы эффекта включаются явно (`activities.tools.<имя>.retry`) —
+тогда после падения он может выполниться второй раз. Операторских команд нет.
 
 Чтения (`fs_read_file` и другие fs-чтения, `fetch_url`, `fs_view_image`, чтение
 памяти проекта) после сбоя воркера повторяются, а не дают «исход неизвестен».
@@ -343,9 +337,10 @@ Worker Versioning; включается секцией `versioning`:
 задайте `model.schedule_to_close` или `model.retry.maximum_attempts`.
 
 Фреймворк всегда дописывает неповторяемые типы — доменные отказы и превышение
-размера payload. Эффект инструмента исполняется не более одного раза при любой
-политике: вторая попытка только читает квитанцию первой. Конфиг проверяется на
-старте воркера; смена действует со следующего хода.
+размера payload. Эффект инструмента по умолчанию исполняется одной попыткой
+(`maximum_attempts` уровня `resource` и `default` на него не действует); повторы
+эффекта включает только `activities.tools.<имя>.retry.maximum_attempts`. Конфиг
+проверяется на старте воркера; смена действует со следующего хода.
 
 Повтор всего workflow (`retry_policy`, `execution_timeout` в
 `NativeAgentClient.start`) по умолчанию не задан и не рекомендуется: ход
@@ -355,8 +350,8 @@ Worker Versioning; включается секцией `versioning`:
 
 Вход запроса к модели несёт всю переписку, а вывод тула может весить мегабайты.
 Temporal ограничивает payload 2 МБ, а историю — 50 МБ, поэтому external storage
-Temporal SDK включён по умолчанию: каталог `payloads` рядом с
-`receipts_database`. Задать явно:
+Temporal SDK включён по умолчанию: каталог `payloads` в `state_dir`. Задать
+явно:
 
 ```json
 "payload_storage": {"kind": "file", "path": "/absolute/state/payloads", "threshold_bytes": 32768}

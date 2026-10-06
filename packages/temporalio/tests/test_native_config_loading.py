@@ -24,7 +24,7 @@ async def test_native_file_interpolates_credentials_before_validation_and_keeps_
     monkeypatch.setenv("NATIVE_TEST_WORKSPACE", str(tmp_path))
     path = tmp_path / "native.json"
     raw = {
-        "receipts_database": str(tmp_path / "service" / "receipts.sqlite"),
+        "state_dir": str(tmp_path / "service"),
         "thread_stores": {"files": {"path": str(tmp_path / "threads")}},
         "profiles": {
             "test": {
@@ -81,7 +81,6 @@ def _native_with_header(tmp_path, value):
     path.write_text(
         json.dumps(
             {
-                "receipts_database": "receipts.sqlite",
                 "profiles": {
                     "test": {
                         "workspace": str(tmp_path),

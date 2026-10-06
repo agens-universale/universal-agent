@@ -1,10 +1,11 @@
 """Фоновое обслуживание воркера: брошенные контексты и служебные данные.
 
 Код workflow сам отпускает контекст хода и снимает владение тредом. Но после
-terminate, падения процесса или истечения retention никто этого не сделает:
-контексты с MCP-процессами жили бы до рестарта воркера, а квитанции и preview
-копились бы вечно. Решение «владелец мёртв» принимает Temporal: workflow не
-RUNNING, работает уже новая цепочка run или его нет вовсе.
+terminate или падения процесса никто этого не сделает: контексты с
+MCP-процессами жили бы до рестарта воркера. Решение «владелец мёртв»
+принимает Temporal: workflow не RUNNING, работает уже новая цепочка run или
+его нет вовсе. Ещё обслуживание чистит устаревшие записи журналов хранилища
+тредов и старые blob'ы payload.
 """
 
 import asyncio
@@ -39,13 +40,6 @@ def owner_workflow(owner):
     return owner, None
 
 
-def _turn_number(owner):
-    tail = owner.rsplit("/", 1)[-1]
-    if tail.startswith("turn-") and tail[5:].isdigit():
-        return int(tail[5:])
-    return None
-
-
 async def describe_workflow(client, workflow_id):
     """``("gone", None)``, ``("closed", None)`` или ``("running", first_run_id)``."""
     try:
@@ -75,9 +69,9 @@ def owner_state(owner, workflows):
 
 
 class NativeMaintenance:
-    def __init__(self, client, provider, technical, stores, payloads=None):
+    def __init__(self, client, provider, stores, payloads=None):
         self.client, self.provider = client, provider
-        self.technical, self.stores = technical, dict(stores)
+        self.stores = dict(stores)
         #: ``PayloadStorageConfig`` с ``prune_after_days`` — чистить blob'ы.
         self.payloads = payloads
 
@@ -102,53 +96,13 @@ class NativeMaintenance:
         results = await asyncio.gather(*(one(item) for item in ids))
         return {key: value for key, value in results if value is not None}
 
-    async def _drop_finished_turn_receipts(self, owners, workflows):
-        """Квитанции завершённых ходов живой keep-alive сессии.
-
-        Квитанция нужна только повтору activity своего хода; ход завершился —
-        его run закрыт Continue-As-New, повторов не будет. Номер текущего хода
-        — из query ``status`` сессии.
-        """
-        turns = {}
-        for owner in owners:
-            workflow_id, chain = owner_workflow(owner)
-            number = _turn_number(owner)
-            if number is None or owner_state(owner, workflows) != "running":
-                continue
-            if workflow_id not in turns:
-                try:
-                    status = await self.client.get_workflow_handle(
-                        workflow_id
-                    ).query("status")
-                    turns[workflow_id] = int(status.get("turns") or 0)
-                except Exception:
-                    turns[workflow_id] = None
-            done = turns[workflow_id]
-            if done is not None and number <= done:
-                await asyncio.to_thread(
-                    self.technical.delete_operations, owner
-                )
-
     async def run_once(self):
         idle = self.provider.idle_owners(IDLE_SECONDS)
-        technical = await asyncio.to_thread(self.technical.owners)
-        workflows = await self._describe_all([*idle, *technical])
+        workflows = await self._describe_all(idle)
         for owner in idle:
             if owner_state(owner, workflows) in ("closed", "gone"):
                 logger.info("Releasing abandoned native context %s", owner)
                 await self.provider.forget_owner(owner)
-        for owner in technical:
-            state = owner_state(owner, workflows)
-            if state == "gone":
-                await asyncio.to_thread(self.technical.delete_owner, owner)
-            elif state == "closed":
-                # Run закрыт (в том числе прошлая цепочка на том же ID):
-                # квитанции не нужны ни повторам, ни replay. Preview для UI
-                # остаются до удаления workflow из Temporal.
-                await asyncio.to_thread(
-                    self.technical.delete_operations, owner
-                )
-        await self._drop_finished_turn_receipts(technical, workflows)
         for store in self.stores.values():
             await asyncio.to_thread(_prune_store_receipts, store)
         payloads = self.payloads

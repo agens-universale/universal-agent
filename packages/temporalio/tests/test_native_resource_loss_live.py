@@ -9,11 +9,9 @@ from pathlib import Path
 
 import pytest
 from gc_core.thread_store_file_durable import DurableFileThreadStore
-from gc_ua_temporalio.native_activities import _digest
 from gc_ua_temporalio.native_client import NativeAgentClient
 from gc_ua_temporalio.native_contracts import NativeCall, NativeRunRequest
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
-from gc_ua_temporalio.storage.technical import TechnicalStore
 from live_support import call, wait_marker
 from native_restart_interceptor import RestartInterceptor
 from temporalio.client import WorkflowFailureError
@@ -113,7 +111,7 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
     ) as env:
         config = {
             "address": env.client.service_client.config.target_host,
-            "receipts_database": str(tmp_path / "receipts.sqlite"),
+            "state_dir": str(tmp_path),
             "thread_stores": {"files": {"path": str(tmp_path / "threads")}},
             "profiles": {
                 "test": {
@@ -145,7 +143,7 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             return process
 
         try:
-            first = start("after_tool_receipt")
+            first = start("after_tool_activity")
             handle = await NativeAgentClient(env.client).start(
                 NativeRunRequest(
                     "test",
@@ -169,24 +167,16 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
             first.wait(timeout=10)
             assert len(requests) == (1 if resource == "mcp" else 2)
             start("none")
-            # Ход не падает: первый эффект возвращается из квитанции, второй
-            # не исполняется — потерю ресурса модель видит ошибкой инструмента.
-            await asyncio.wait_for(handle.result(), 45)
+            # Ход не падает: первый эффект (одна попытка) не повторяется —
+            # модель получает «исход неизвестен»; потерю ресурса второй
+            # операции модель видит ошибкой инструмента.
+            await asyncio.wait_for(handle.result(), 90)
             # Первый эффект не повторяется. Второй — новая операция модели:
             # MCP-владелец этого хода потерян (ошибка инструмента), а фоновый
             # владелец ленивый и создаётся заново в новом процессе.
             expected = effects(before) * (1 if resource == "mcp" else 2)
             assert effects(audit.read_text()) == expected
-            original = marker["call"]
-            receipt = TechnicalStore(config["receipts_database"])
-            assert (
-                receipt.operation_result(
-                    original["owner_id"],
-                    original["operation_id"],
-                    _digest(value_to_type(NativeCall, original)),
-                )
-                == marker["result"]
-            )
+            del marker
             messages = DurableFileThreadStore(
                 tmp_path / "threads"
             ).load_messages("test", "lost")
@@ -197,6 +187,7 @@ async def test_actual_resource_host_sigkill_never_reconnects_or_repeats(
                 if m.get("role") == "tool"
                 or m.get("type") == "function_call_output"
             ]
+            assert any("ToolOutcomeUnknown" in o for o in outputs), outputs
             if resource == "mcp":
                 assert any("ResourceOwnerLost" in o for o in outputs), outputs
             history = await handle.fetch_history()

@@ -247,7 +247,7 @@ async def test_native_child_model_tools_input_human_and_replay(
         workflow_queue="child-test",
         model_queue="child-test",
         resource_queue="child-test",
-        receipts_database=str(tmp_path / "receipts.sqlite"),
+        state_dir=str(tmp_path),
         thread_stores={
             "files": NativeStoreConfig(path=str(tmp_path / "threads"))
         },

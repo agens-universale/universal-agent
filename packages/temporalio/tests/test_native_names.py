@@ -35,7 +35,7 @@ WORKFLOWS = {"NativeAgentWorkflow", "NativeSubagentWorkflow"}
 def test_registered_names_are_pinned(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     config = NativeWorkerConfig(
-        receipts_database=str(tmp_path / "receipts.sqlite"),
+        state_dir=str(tmp_path),
         thread_stores={"files": {"path": str(tmp_path / "threads")}},
         profiles={"p": NativeProfile(workspace=str(tmp_path))},
     )

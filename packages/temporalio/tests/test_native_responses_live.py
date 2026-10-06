@@ -142,7 +142,7 @@ async def test_responses_two_turns_exact_parity_and_cache_recovery(
             "workflow_queue": "responses",
             "model_queue": "responses",
             "resource_queue": "responses",
-            "receipts_database": str(tmp_path / "receipts.sqlite"),
+            "state_dir": str(tmp_path),
             "thread_stores": {
                 "files": {"path": str(tmp_path / "native_threads")}
             },

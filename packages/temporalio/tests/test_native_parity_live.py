@@ -397,7 +397,7 @@ async def test_actual_http_local_native_parity(
             "workflow_queue": "parity",
             "resource_queue": "parity",
             "model_queue": "parity",
-            "receipts_database": str(tmp_path / "receipts.sqlite"),
+            "state_dir": str(tmp_path),
             "thread_stores": {
                 "files": {
                     "kind": backend,

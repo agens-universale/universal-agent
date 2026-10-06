@@ -13,7 +13,6 @@ from gc_ua_temporalio.native_contracts import NativeRunRequest, UserMessage
 from gc_ua_temporalio.native_views import NativeViews
 from gc_ua_temporalio.payload_storage import data_converter
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_ua_temporalio.storage.technical import TechnicalStore
 
 
 class NativeRemoteClient(NativeAgentClient):
@@ -44,11 +43,7 @@ class NativeRunRegistry:
             if spec.kind == "file"
             else SQLiteThreadStore(spec.path)
         )
-        self.views = NativeViews(
-            store,
-            TechnicalStore(config.receipts_database),
-            workflow_id=self.workflow_id,
-        )
+        self.views = NativeViews(store, workflow_id=self.workflow_id)
         self._client = None
         self._connect_lock = asyncio.Lock()
 

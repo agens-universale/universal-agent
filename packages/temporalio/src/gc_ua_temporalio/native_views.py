@@ -6,8 +6,6 @@ import uuid
 
 from gc_core.thread_store_durable import ThreadStoreOperation
 
-from gc_ua_temporalio.storage.views import ViewEvents
-
 
 def _prefix(messages):
     return hashlib.sha256(
@@ -16,10 +14,9 @@ def _prefix(messages):
 
 
 class NativeViews:
-    def __init__(self, store, receipts, *, workflow_id=None):
+    def __init__(self, store, *, workflow_id=None):
         self.workflow_id = workflow_id
         self.store = store
-        self.technical = ViewEvents(receipts)
 
     def owner(self, system, thread):
         return self.store.read_snapshot(
@@ -48,27 +45,6 @@ class NativeViews:
             "meta": snapshot.meta,
             "ui_meta": snapshot.meta.get("tui", {}),
         }
-
-    def events(self, system, thread, *, after=0, limit=200):
-        if after < 0 or not 1 <= limit <= 400:
-            raise ValueError("Invalid event cursor/limit")
-        owner = (
-            self.workflow_id(system, thread)
-            if self.workflow_id
-            else self.owner(system, thread)
-        )
-        if not owner:
-            return []
-        # Native operations are scoped to owner/turn-N. No legacy projector read.
-        with self.technical.store.transaction(readonly=True) as db:
-            rows = db.execute(
-                "SELECT * FROM view_events WHERE (owner=? OR substr(owner,1,?)=?) AND cursor>? ORDER BY cursor LIMIT ?",
-                (owner, len(owner) + 1, owner + "/", after, limit),
-            ).fetchall()
-        return [
-            {**dict(row), "payload": json.loads(row["payload"])}
-            for row in rows
-        ]
 
     def patch_ui(self, system, thread, patch):
         if set(patch) - {"title", "pinned", "archived"}:

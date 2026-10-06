@@ -52,7 +52,7 @@ def test_worker_config_stores_payloads_by_default(tmp_path):
     from gc_ua_temporalio.native_provider import NativeWorkerConfig
 
     base = {
-        "receipts_database": str(tmp_path / "receipts.sqlite"),
+        "state_dir": str(tmp_path),
         "profiles": {},
     }
     config = NativeWorkerConfig.model_validate(base)

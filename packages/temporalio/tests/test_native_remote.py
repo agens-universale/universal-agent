@@ -4,7 +4,6 @@ import pytest
 from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_views import NativeViews
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_ua_temporalio.storage.technical import TechnicalStore
 
 
 @pytest.fixture(params=["file", "sqlite"])
@@ -14,9 +13,7 @@ def views(tmp_path, request):
         if request.param == "file"
         else SQLiteThreadStore(str(tmp_path / "threads.sqlite"))
     )
-    return NativeViews(
-        store, TechnicalStore(str(tmp_path / "receipts.sqlite"))
-    )
+    return NativeViews(store)
 
 
 def test_native_history_replacement_resets_prefix_without_meta_reset(views):
@@ -77,9 +74,6 @@ class _ApiClient:
         page = await self.request("GET", "history", params=self._token)
         self._token = {"token": page["token"]} if page.get("token") else {}
         return page
-
-    async def events(self):
-        return await self.request("GET", "events")
 
     async def send(self, message_id, text):
         return await self.request(
@@ -152,21 +146,19 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
             workflow_queue="remote-native",
             model_queue="remote-native",
             resource_queue="remote-native",
-            receipts_database=str(tmp_path / "receipts.sqlite"),
+            state_dir=str(tmp_path),
             thread_stores={
                 "files": NativeStoreConfig(path=str(tmp_path / "threads"))
             },
             profiles={
                 "test": NativeProfile(
-                    preview_stream=human,
                     workspace=str(workspace),
                     core=AppConfig.model_validate(
                         {
                             "backend": {
                                 "api_mode": "chat_completions",
                                 "completions_url": url,
-                                "stream": human,
-                                "chat_completion_kwargs": {"stream": human},
+                                "chat_completion_kwargs": {"stream": False},
                             },
                             "agent": {
                                 "model": "scripted",
@@ -178,10 +170,7 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
                                 "save_logs": False,
                                 "console_trace": False,
                             },
-                            "tui": {
-                                "text_answer_mode": "deny",
-                                "stream": human,
-                            },
+                            "tui": {"text_answer_mode": "deny"},
                         }
                     ),
                 )
@@ -246,14 +235,6 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
                     assert (await second.history())["messages"] == first_page[
                         "messages"
                     ]
-                    events = await second.events()
-                    assert any(
-                        event["kind"] == "committed" for event in events
-                    )
-                    if human:
-                        assert any(
-                            event["kind"] == "preview" for event in events
-                        )
                     await second.close_session()
                     await asyncio.wait_for(handle.result(), 20)
                     await second.aclose()
@@ -261,35 +242,3 @@ async def test_native_remote_api_real_workflow_reconnect_and_close(
                     assert registry.views.store.load_meta("test", "remote")
         finally:
             await provider.aclose()
-
-
-def test_native_events_cover_all_runs_without_history_projection(tmp_path):
-    receipts = TechnicalStore(str(tmp_path / "receipts.sqlite"))
-    views = NativeViews(
-        DurableFileThreadStore(str(tmp_path / "threads")),
-        receipts,
-        workflow_id=lambda *_: "native-session",
-    )
-    views.technical.emit(
-        "native-session/run-1/turn-1",
-        "op-1",
-        1,
-        1,
-        "preview",
-        {"text": "first"},
-    )
-    views.technical.emit(
-        "native-session/run-2/turn-2", "op-2", 1, 1, "committed", {}
-    )
-    views.technical.emit(
-        "native-session-other/run-1",
-        "op-3",
-        1,
-        1,
-        "preview",
-        {"text": "foreign"},
-    )
-    events = views.events("s", "t")
-    assert [event["operation"] for event in events] == ["op-1", "op-2"]
-    assert views.events("s", "t", after=events[0]["cursor"]) == events[1:]
-    assert views.history("s", "t")["messages"] == []

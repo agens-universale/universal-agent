@@ -16,7 +16,6 @@ from gc_ua_temporalio.native_provider import (
     NativeProfile,
 )
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_ua_temporalio.storage.technical import TechnicalStore
 
 
 def profile(tmp_path, **overrides):
@@ -30,12 +29,10 @@ def profile(tmp_path, **overrides):
 
 
 def make_provider(tmp_path, profiles=None, store=None):
-    receipts = TechnicalStore(str(tmp_path / "receipts.sqlite"))
     store = store or DurableFileThreadStore(str(tmp_path / "threads"))
     return NativeContextProvider(
         profiles=profiles or {"test": profile(tmp_path)},
         stores={"files": store},
-        receipts=receipts,
         resource_host=WorkerResourceHost("test"),
     ), store
 
@@ -292,9 +289,11 @@ async def test_poststeps_release_drops_context_logger_and_owner_cache(
 
 
 @pytest.mark.parametrize("operation", ["close", "release"])
-async def test_cleanup_retry_after_handler_before_receipt_never_rebuilds_context(
+async def test_cleanup_retry_on_restarted_worker_never_rebuilds_context(
     tmp_path, monkeypatch, operation
 ):
+    """Повтор close/release после падения воркера (квитанций нет — операция
+    исполняется снова) не собирает контекст заново и отвечает успехом."""
     from gc_ua_temporalio.native_activities import NativeActivities
     from gc_ua_temporalio.public_config import public_config_snapshot
 
@@ -307,24 +306,11 @@ async def test_cleanup_retry_after_handler_before_receipt_never_rebuilds_context
         return NativeActivities(
             context_provider=context_provider,
             stores={"files": store},
-            receipts=context_provider.receipts,
             public_config=public_config_snapshot,
         )
 
     request = call(operation_id=operation)
-    save = provider.receipts.save_operation_result
-
-    def crash_before_receipt(owner, operation_id, digest, result):
-        if operation_id == operation:
-            raise RuntimeError("process lost after cleanup")
-        return save(owner, operation_id, digest, result)
-
-    monkeypatch.setattr(
-        provider.receipts, "save_operation_result", crash_before_receipt
-    )
-    with pytest.raises(RuntimeError, match="process lost"):
-        await getattr(activities(provider), operation)(request)
-    monkeypatch.setattr(provider.receipts, "save_operation_result", save)
+    assert await getattr(activities(provider), operation)(request) is True
     restarted, _ = make_provider(tmp_path, store=store)
 
     async def forbidden(_call):
@@ -335,7 +321,6 @@ async def test_cleanup_retry_after_handler_before_receipt_never_rebuilds_context
     class CleanupOnly:
         close = restarted.close
         release = restarted.release
-        receipts = restarted.receipts
         __call__ = staticmethod(forbidden)
 
     try:
@@ -384,7 +369,7 @@ async def test_worker_state_inside_workspace_is_protected(
     tmp_path, monkeypatch
 ):
     """Служебное состояние по умолчанию — вне workspace; заданное внутри —
-    защищено от агента (история, квитанции, payload — не его файлы)."""
+    защищено от агента (история и payload — не его файлы)."""
     from gc_ua_temporalio.native_provider import NativeWorkerConfig
 
     workspace = tmp_path / "ws"
@@ -392,7 +377,7 @@ async def test_worker_state_inside_workspace_is_protected(
     monkeypatch.chdir(workspace)
     config = NativeWorkerConfig.model_validate(
         {
-            "receipts_database": str(tmp_path / "state" / "receipts.sqlite"),
+            "state_dir": str(tmp_path / "state"),
             "profiles": {},
         }
     )
@@ -403,7 +388,6 @@ async def test_worker_state_inside_workspace_is_protected(
     provider = NativeContextProvider(
         profiles={"test": profile(workspace)},
         stores={"files": DurableFileThreadStore(inside)},
-        receipts=TechnicalStore(str(tmp_path / "receipts.sqlite")),
         resource_host=WorkerResourceHost("test"),
         state_paths=[inside],
     )
@@ -412,12 +396,20 @@ async def test_worker_state_inside_workspace_is_protected(
         assert inside in ctx.settings.security.protected_paths.extra
     finally:
         await provider.aclose()
-    receipts = str(tmp_path / "state" / "receipts.sqlite")
-    paths = config.state_paths()
-    assert receipts + "-wal" in paths and receipts + "-shm" in paths
+    # База SQLite-хранилища тредов — вместе с -wal/-shm.
+    database = str(tmp_path / "state" / "threads.sqlite")
+    paths = NativeWorkerConfig.model_validate(
+        {
+            "thread_stores": {
+                "files": {"kind": "sqlite", "path": database}
+            },
+            "profiles": {},
+        }
+    ).state_paths()
+    assert database + "-wal" in paths and database + "-shm" in paths
     from gc_core.security.protected_paths import protected_decision
 
     assert (
-        protected_decision(receipts + "-wal", cwd=str(workspace), extra=paths)
+        protected_decision(database + "-wal", cwd=str(workspace), extra=paths)
         == "deny"
     )

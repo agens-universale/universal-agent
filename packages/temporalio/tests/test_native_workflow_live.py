@@ -14,7 +14,6 @@ from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from gc_ua_temporalio.public_config import public_config_snapshot
 from gc_testkit.settings import make_settings
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_ua_temporalio.storage.technical import TechnicalStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Replayer, Worker
@@ -67,14 +66,11 @@ async def test_native_executor_uses_real_file_session_and_replays(
             )
         return contexts[call.owner_id]
 
+    # История и мета агента — в переданном FileThreadStore.
     files = DurableFileThreadStore(str(tmp_path / "threads"))
-    # SQLite below is only the technical operation receipt store. Agent
-    # history/meta is asserted to live in the supplied FileThreadStore.
-    receipts = TechnicalStore(str(tmp_path / "operations.sqlite"))
     activities = NativeActivities(
         context_provider=context_provider,
         stores={"files": files},
-        receipts=receipts,
         public_config=public_config_snapshot,
     )
     if not batch_flags:

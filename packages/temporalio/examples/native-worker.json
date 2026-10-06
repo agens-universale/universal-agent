@@ -5,7 +5,7 @@
   "model_queue": "ua-native-model",
   "resource_queue": "ua-native-resource-local",
   "worker_id": "native-local",
-  "receipts_database": "${ENV:UA_NATIVE_STATE}/receipts.sqlite",
+  "state_dir": "${ENV:UA_NATIVE_STATE}",
   "payload_storage": {
     "kind": "file",
     "path": "${ENV:UA_NATIVE_STATE}/payloads",
@@ -21,7 +21,6 @@
     "production": {
       "workspace": "${ENV:UA_NATIVE_WORKSPACE}",
       "store_id": "files",
-      "preview_stream": false,
       "core": {
         "backend": {
           "api_mode": "chat_completions",

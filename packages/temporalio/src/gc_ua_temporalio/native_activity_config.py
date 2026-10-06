@@ -7,9 +7,12 @@
 
 Фреймворк всегда дописывает свои неповторяемые типы (доменные отказы и
 превышение размера payload — повтор их не исправит). Эффект инструмента
-(запись, команда, MCP) исполняется не более одного раза при любой политике:
-вторая попытка только читает квитанцию первой, поэтому число его попыток не
-настраивается.
+(запись, команда, MCP) по умолчанию исполняется одной попыткой: Temporal
+повторяет activity «хотя бы раз», и после падения воркера повтор исполнил бы
+эффект второй раз. Модель вместо повтора получает «исход неизвестен,
+проверьте состояние». Повторы эффекта включаются явно —
+``activities.tools.<имя>.retry.maximum_attempts`` (тогда эффект может
+выполниться повторно).
 
 В workflow настройки приходят данными из ``agent.context.prepare``: так код
 workflow остаётся детерминированным, а смена конфига действует со следующего
@@ -36,8 +39,8 @@ NON_RETRYABLE_ERROR_TYPES = (
     "PayloadSizeError",
 )
 
-#: Эффект: попытка исполнения и попытка, читающая её квитанцию.
-EFFECT_ATTEMPTS = 2
+#: Эффект по умолчанию — одна попытка (не больше одного исполнения).
+EFFECT_ATTEMPTS = 1
 
 
 class RetrySettings(BaseModel):
@@ -143,12 +146,18 @@ def resolve_activity_settings(
         )
         for level in ("model", "resource", "thread_store")
     }
-    resolved["tools"] = {
-        name: _merge(
+    resolved["tools"] = {}
+    for name, settings in config.tools.items():
+        merged = _merge(
             _FRAMEWORK["resource"], config.default, config.resource, settings
         )
-        for name, settings in config.tools.items()
-    }
+        if (
+            settings.retry is not None
+            and "maximum_attempts" in settings.retry.model_fields_set
+        ):
+            # Повторы эффекта этого инструмента включены явно.
+            merged["effect_attempts"] = settings.retry.maximum_attempts
+        resolved["tools"][name] = merged
     return resolved
 
 
@@ -162,7 +171,9 @@ def activity_options(settings: dict[str, Any], *, effect: bool = False):
 
     retry = dict(settings.get("retry") or {})
     if effect:
-        retry["maximum_attempts"] = EFFECT_ATTEMPTS
+        retry["maximum_attempts"] = settings.get(
+            "effect_attempts", EFFECT_ATTEMPTS
+        )
     options: dict[str, Any] = {
         "retry_policy": RetryPolicy(
             initial_interval=timedelta(

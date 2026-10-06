@@ -362,7 +362,7 @@ class NativeAgentWorkflow:
             f"{workflow.info().workflow_id}/turn-{self.turns + 1}"
         )
         # Владелец контекста — ход цепочки run: новый run на том же
-        # workflow ID не наследует кэш и квитанции прошлой цепочки.
+        # workflow ID не наследует контекст и ресурсы прошлой цепочки.
         chain = workflow.info().first_execution_run_id
         self.operations = NativeOperations(
             start, f"{owner}/{chain}/turn-{self.turns + 1}", self.new_id

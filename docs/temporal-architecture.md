@@ -175,7 +175,6 @@ flowchart TB
     WS["Workspace<br/>файлы и команды"]
     MCP["MCP-серверы"]
     TH["ThreadStore<br/>DurableFileThreadStore / SQLite / своя БД"]
-    TECH["TechnicalStore<br/>квитанции и preview"]
     PS["Payload storage<br/>файлы / S3"]
     CLI --> TS
     API --> TS
@@ -187,8 +186,6 @@ flowchart TB
     RQ --> RH
     RH --> MCP
     RQ --> TH
-    MQ --> TECH
-    RQ --> TECH
     API --> TH
     TS -. "ссылки на крупные payload" .-> PS
     Worker -. "DataConverter" .-> PS
@@ -197,7 +194,7 @@ flowchart TB
     classDef data fill:#fff0d6,stroke:#ae7925,color:#493414;
     class WF,TS control;
     class MQ,RQ,RH,LLM,WS,MCP io;
-    class TH,TECH,PS data;
+    class TH,PS data;
 ```
 
 | Элемент | Что это |
@@ -206,11 +203,10 @@ flowchart TB
 | [`NativeSubagentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py) | Субагент: настоящий `SubagentRunner.arun` в child workflow. |
 | [`native_worker`](../packages/temporalio/src/gc_ua_temporalio/native_worker.py) | Один процесс обслуживает все три очереди и один workspace; cwd должен совпадать с `profiles.<name>.workspace`. |
 | [`NativeContextProvider`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) | Собирает на worker'е штатный `acreate_run_context` по профилю воркера: workflow знает только имя профиля (как Pydantic AI — модель по ключу реестра). Смена настроек или токена — перезапуск воркера, живые сессии продолжают работу. |
-| [`NativeMaintenance`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) | Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит квитанции и preview workflow, которых Temporal уже не знает, и квитанции тредов старше 7 дней. |
-| ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-история-temporal-и-payload)). По умолчанию — каталог `threads` рядом с `receipts_database`, не в workspace агента. |
-| [`TechnicalStore`](../packages/temporalio/src/gc_ua_temporalio/storage/technical.py) | SQLite worker'а: результаты завершённых activities (повтор не платит второй раз) и необязательные preview. Не хранилище диалога. |
+| [`NativeMaintenance`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) | Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит служебные записи журнала тредов старше 7 дней. |
+| ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-история-temporal-и-payload)). По умолчанию — каталог `threads` в `state_dir` (по умолчанию — каталог конфига воркера), не в workspace агента. Своей базы у воркера нет: результаты activities хранит история Temporal. |
 | [`native_activity_config`](../packages/temporalio/src/gc_ua_temporalio/native_activity_config.py) | Таймауты и повторы activities по уровням (`model`, `resource`, `thread_store`, инструмент) — как `ActivityConfig` у Pydantic AI; в workflow приходят с подготовкой хода. |
-| [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK, включён по умолчанию (каталог `payloads` рядом с `receipts_database`): payload больше порога (32 КБ) лежат вне истории, и большой вывод инструмента или длинный ход не упираются в лимиты Temporal (2 МБ на payload, 50 МБ на историю). |
+| [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK, включён по умолчанию (каталог `payloads` в `state_dir`): payload больше порога (32 КБ) лежат вне истории, и большой вывод инструмента или длинный ход не упираются в лимиты Temporal (2 МБ на payload, 50 МБ на историю). |
 
 ## 2. Порты операций: один код, два исполнителя
 
@@ -280,7 +276,7 @@ readability на уровне модулей, как в develop, хотя workfl
 | `agent.tool.execute` | resource | Внешний эффект инструмента после повторной проверки фактов. Лимит времени — `timeout` инструмента (для `exec_command` без него — `agent.exec_timeout_sec`) + 5 минут, не меньше 15 минут | чтения (fs-чтения, `fetch_url`, `fs_view_image`) — до 5; эффект — см. [раздел 8](#8-ошибки-повторы-и-неизвестный-исход) |
 | `agent.memory.execute`, `agent.memory.hash` | resource | Project memory | чтение — до 5, запись — эффект / до 5 |
 | `agent.summary.trace` | resource | Запись summary trace | до 5 |
-| `agent.thread.load`, `agent.thread.commit`, `agent.thread.read_trace` | resource | Чтение и durable-операции ThreadStore | до 5, квитанция по `operation_id` |
+| `agent.thread.load`, `agent.thread.commit`, `agent.thread.read_trace` | resource | Чтение и durable-операции ThreadStore | до 5, повтор commit с тем же `operation_id` хранилище не дублирует |
 | `agent.subagent.prepare` | resource | Подготовка роли и контекста субагента | до 5 |
 | `agent.context.close`, `agent.context.release` | resource | Закрытие MCP и освобождение ресурсов хода | до 5 |
 
@@ -378,8 +374,8 @@ Probe вызывается только для файловых и команд�
 выключается (`security.protected_paths.enabled` не действует). Поэтому
 `Guard: protected_write` виден в истории и при выключенных `read_guard`,
 `write_guard`, `url_policy` и `command_moderation`. Под защитой — `~/.gc`,
-`.gc` проекта, каталоги состояния и все служебные пути воркера (треды,
-квитанции, payload; базы — вместе с `-wal`/`-shm`).
+`.gc` проекта, каталоги состояния и все служебные пути воркера (треды и
+payload; базы — вместе с `-wal`/`-shm`).
 Ожидание человека не занимает worker: это `workflow.wait_condition`.
 
 ## 5. MCP и фоновые процессы
@@ -411,7 +407,7 @@ Discovery, вызовы и teardown MCP идут в одной задаче, п�
 worker'а модель получает `ResourceOwnerLost` и может продолжить; внутреннее
 состояние MCP-сервера не восстанавливается. Фоновый владелец создаётся лениво.
 Владелец хода — `<workflow ID>/<первый run цепочки>/turn-N`: новая сессия на том
-же workflow ID не наследует кэш и квитанции прошлой. Контекст сессии, снятой
+же workflow ID не наследует контекст и ресурсы прошлой. Контекст сессии, снятой
 terminate посреди хода, освобождает `NativeMaintenance`.
 
 ## 6. Субагент в child workflow
@@ -517,11 +513,11 @@ replay восстанавливает буфер; при сбое коммита
 |---|---|
 | Доменная ошибка в activity (`ValueError`, `OSError`, …) | Переносится значением (`DomainError`) и поднимается в workflow тем же типом — ядро возвращает модели `internal_tool_error`, как в local |
 | Факты guard'а изменились до эффекта | `GuardPreconditionChanged` — ошибка инструмента, эффект не исполнен |
-| Запрос к модели упал вместе с worker'ом | Temporal повторяет; если ответ пришёл, а квитанция нет — повторная оплата одного запроса |
+| Запрос к модели упал вместе с worker'ом | Temporal повторяет («хотя бы раз», как у Pydantic AI); если ответ уже пришёл, а activity не завершилась — повторная оплата одного запроса |
 | Сбой провайдера модели: обрыв, 5xx, 408/425/429 | Temporal повторяет запрос по политике `activities.model` (по умолчанию без ограничения): ход ждёт и продолжается, run остаётся RUNNING; `stop` отменяет ожидающий запрос — ход остановлен |
 | Имя хоста не разрешается, сертификат TLS не принят, неверный URL | Не повторяется: ход завершается ошибкой провайдера |
 | Чтение (fs-чтения, `fetch_url`, `fs_view_image`, чтение памяти проекта), подготовка, хранилище | Повтор Temporal (до 5) |
-| Эффект инструмента (запись, команда, MCP, project memory) | Вторая попытка только читает квитанцию первой и **никогда не исполняет эффект заново**; квитанции нет — модель получает «исход неизвестен, проверьте состояние» (`ToolOutcomeUnknown`) |
+| Эффект инструмента (запись, команда, MCP, project memory) | Одна попытка: после падения worker'а Temporal **не исполняет эффект заново**, модель получает «исход неизвестен, проверьте состояние» (`ToolOutcomeUnknown`). Повторы включаются явно (`activities.tools.<имя>.retry`) — тогда эффект может выполниться второй раз |
 | Потеря MCP или фонового владельца | `ResourceOwnerLost` — ошибка инструмента |
 | Инструмент дольше лимита activity | `ToolOutcomeUnknown` «превысило лимит времени activity» |
 | Хранилище треда недоступно, подготовка контекста, исчерпаны повторы модели | Доменный отказ: run становится FAILED (`ApplicationError`) |
@@ -618,12 +614,13 @@ replay восстанавливает буфер; при сбое коммита
 - **Durable-контракт**: `assert_durable_conforms` проходят `DurableFileThreadStore` и
   `SQLiteThreadStore`; внешнее удаление файлов треда не ломает следующую запись.
 - **Падения** (SIGKILL worker'а, File и SQLite): до и после commit хранилища, до и после
-  квитанции модели, до запроса и после ответа модели — ход завершается, история без
+  activity модели, до запроса и после ответа модели — ход завершается, история без
   дублей, replay без новых вызовов; повторная оплата модели — только в окне «ответ
-  получен, квитанции нет». Для `persist: turn` — падения до и после финального commit.
-- **Живые ресурсы**: после SIGKILL первый эффект возвращается из квитанции, повторно
-  не исполняется; MCP-вызов после потери владельца — ошибка инструмента; отмена во
-  время teardown MCP.
+  получен, activity не завершилась». Для `persist: turn` — падения до и после
+  финального commit.
+- **Живые ресурсы**: после SIGKILL эффект не исполняется повторно, модель получает
+  «исход неизвестен»; MCP-вызов после потери владельца — ошибка инструмента; отмена
+  во время teardown MCP.
 - **Субагенты**: модель, инструменты, ввод, вопрос человеку, stop, fallback, replay.
 - **Изображения**: `fs_view_image` через границу эффекта (снимок возвращается в хвост
   батча), картиночные отказы модели через `ModelFailure`.
@@ -633,8 +630,8 @@ replay восстанавливает буфер; при сбое коммита
   воркер завершает ход; владение снимается после Continue-As-New, при ошибке и
   отмене; после terminate тред захватывает следующая сессия, живой владелец не
   уступает; смена профиля при перезапуске воркера подхватывается живой сессией.
-- **Обслуживание воркера**: контекст хода после terminate освобождается, квитанции
-  исчезнувших workflow и старые квитанции тредов удаляются.
+- **Обслуживание воркера**: контекст хода после терминации освобождается, старые
+  служебные записи журнала тредов удаляются.
 
 ## 13. С каких файлов начинать
 

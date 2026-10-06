@@ -28,8 +28,8 @@ from temporalio.worker import Replayer
     [
         ("before_store_commit", "step"),
         ("after_store_receipt", "step"),
-        ("after_model_receipt", "step"),
-        ("before_model_recorded", "step"),
+        ("after_model_activity", "step"),
+        ("before_model_activity", "step"),
         ("before_model_request", "step"),
         ("after_model_response", "step"),
         # persist: turn — первая запись треда в конце хода, после модели.
@@ -57,7 +57,7 @@ async def test_native_sigkill_durable_boundaries(
         )
         config = {
             "address": env.client.service_client.config.target_host,
-            "receipts_database": str(tmp_path / "receipts.sqlite"),
+            "state_dir": str(tmp_path),
             "thread_stores": {
                 "selected": {"kind": backend, "path": str(store_path)}
             },
@@ -133,16 +133,20 @@ async def test_native_sigkill_durable_boundaries(
                 if persist == "turn"
                 else 1
                 if checkpoint
-                in {"after_model_receipt", "after_model_response"}
+                in {"after_model_activity", "after_model_response"}
                 else 0
             )
             start("none")
-            # Как в pydantic-ai: запрос к модели повторяется после падения.
-            # Повторная оплата — только если ответ пришёл, а квитанция нет.
+            # Как в pydantic-ai: запрос к модели повторяется после падения
+            # («хотя бы раз»). Повторная оплата — если ответ уже пришёл, а
+            # activity не успела завершиться.
             expected_requests = (
-                3 if checkpoint == "after_model_response" else 2
+                3
+                if checkpoint
+                in {"after_model_activity", "after_model_response"}
+                else 2
             )
-            result = await asyncio.wait_for(handle.result(), 45)
+            result = await asyncio.wait_for(handle.result(), 90)
             assert "Recovered successfully" in str(result["answer"])
             assert len(requests) == expected_requests
             store = (

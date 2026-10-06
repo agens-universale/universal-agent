@@ -12,7 +12,6 @@ from gc_ua_temporalio.native_maintenance import (
 )
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_ua_temporalio.storage.technical import TechnicalStore
 from live_support import call
 from test_native_workflow_controls import finish, request, runtime, wait_status
 
@@ -24,7 +23,7 @@ def test_owner_workflow_parses_turn_and_child_owners():
     assert owner_workflow("wf/child_abc") == ("wf/child_abc", None)
 
 
-async def test_terminated_turn_context_and_gone_receipts_are_released(
+async def test_terminated_turn_context_is_released(
     tmp_path, monkeypatch, scripted_http
 ):
     monkeypatch.chdir(tmp_path)
@@ -38,8 +37,6 @@ async def test_terminated_turn_context_and_gone_receipts_are_released(
 
     script.extend([slow, [finish("done")]])
     async with runtime(tmp_path, url) as (env, provider, config):
-        technical = TechnicalStore(config.receipts_database)
-        technical.save_operation_result("gone-wf/run/turn-1", "op", "d", 1)
         handle = await env.client.start_workflow(
             NativeAgentWorkflow.run,
             request(),
@@ -51,11 +48,8 @@ async def test_terminated_turn_context_and_gone_receipts_are_released(
         )
         await handle.terminate("operator")
         assert provider.idle_owners(0)
-        await NativeMaintenance(
-            env.client, provider, technical, provider.stores
-        ).run_once()
+        await NativeMaintenance(env.client, provider, provider.stores).run_once()
         assert provider.idle_owners(0) == []
-        assert "gone-wf/run/turn-1" not in technical.owners()
 
 
 def test_old_store_receipts_are_pruned(tmp_path):
@@ -90,35 +84,3 @@ def test_owner_state_is_unknown_without_reliable_facts():
     assert owner_state("old/run-1/turn-3", workflows) == "closed"
     # describe не удался — состояние неизвестно.
     assert owner_state("missing/run/turn-1", workflows) is None
-
-
-async def test_finished_turn_receipts_of_live_session_are_dropped(
-    tmp_path, monkeypatch, scripted_http
-):
-    monkeypatch.chdir(tmp_path)
-    url, _, script = scripted_http
-    script.extend([[finish("first")]])
-    async with runtime(tmp_path, url) as (env, provider, config):
-        technical = TechnicalStore(config.receipts_database)
-        handle = await env.client.start_workflow(
-            NativeAgentWorkflow.run,
-            request(keep_alive=True),
-            id="controls",
-            task_queue="native-controls",
-        )
-        await wait_status(
-            handle, lambda s: s["turns"] == 1 and s["phase"] == "idle"
-        )
-        chain = handle.first_execution_run_id
-        finished = f"controls/{chain}/turn-1"
-        assert finished in technical.owners()
-        await NativeMaintenance(
-            env.client, provider, technical, provider.stores
-        ).run_once()
-        with technical.transaction(readonly=True) as db:
-            left = db.execute(
-                "SELECT count(*) FROM operations WHERE owner=?", (finished,)
-            ).fetchone()[0]
-        assert left == 0
-        await handle.signal(NativeAgentWorkflow.close_session)
-        await handle.result()

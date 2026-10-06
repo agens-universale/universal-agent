@@ -1,4 +1,4 @@
-"""Native operation redelivery and error transport across the activity boundary."""
+"""Повторная доставка операции и перенос ошибок через границу activity."""
 
 import asyncio
 from types import SimpleNamespace
@@ -14,7 +14,6 @@ from gc_core.thread_store_file_durable import DurableFileThreadStore
 from gc_ua_temporalio.native_activities import NativeActivities
 from gc_ua_temporalio.native_contracts import NativeCall
 from gc_ua_temporalio.public_config import public_config_snapshot
-from gc_ua_temporalio.storage.technical import TechnicalStore
 
 
 def activities(tmp_path):
@@ -23,19 +22,18 @@ def activities(tmp_path):
     async def provider(_call):
         return ctx
 
-    receipts = TechnicalStore(str(tmp_path / "receipts.sqlite"))
     native = NativeActivities(
         context_provider=provider,
         stores={"files": DurableFileThreadStore(str(tmp_path / "threads"))},
-        receipts=receipts,
         public_config=public_config_snapshot,
     )
     return native, ctx
 
 
-async def test_concurrent_redelivery_has_one_handler_and_bounded_lock_cache(
-    tmp_path,
-):
+async def test_concurrent_redelivery_waits_for_original_attempt(tmp_path):
+    """Повтор той же операции на этом воркере ждёт исходную попытку, а не
+    исполняется параллельно. Квитанций нет: после неё повтор исполняется
+    заново («хотя бы раз»); эффекты защищает политика — одна попытка."""
     native, _ = activities(tmp_path)
     entered, release = asyncio.Event(), asyncio.Event()
     calls = []
@@ -51,11 +49,10 @@ async def test_concurrent_redelivery_has_one_handler_and_bounded_lock_cache(
     await entered.wait()
     second = asyncio.create_task(native._recorded(request, str, handler))
     await asyncio.sleep(0)
+    assert calls == [1]  # второй ждёт замок исходной попытки
     release.set()
     assert await asyncio.gather(first, second) == ["recorded", "recorded"]
-    assert calls == [1] and not native._operation_locks
-    assert await native._recorded(request, str, handler) == "recorded"
-    assert calls == [1] and not native._operation_locks
+    assert calls == [1, 1] and not native._operation_locks
 
 
 async def test_domain_error_crosses_the_boundary_as_the_same_type(tmp_path):

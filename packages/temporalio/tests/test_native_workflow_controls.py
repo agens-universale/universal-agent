@@ -122,7 +122,7 @@ async def runtime(tmp_path, url, *, core_extra=None):
             "workflow_queue": "native-controls",
             "model_queue": "native-controls",
             "resource_queue": "native-controls",
-            "receipts_database": str(tmp_path / "receipts.sqlite"),
+            "state_dir": str(tmp_path),
             "profiles": {
                 "test": {
                     "workspace": str(tmp_path),

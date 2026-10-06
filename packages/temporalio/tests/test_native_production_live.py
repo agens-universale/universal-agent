@@ -35,7 +35,7 @@ async def test_production_provider_worker_client_and_replay(
             "workflow_queue": "native-production",
             "model_queue": "native-production",
             "resource_queue": "native-production",
-            "receipts_database": str(tmp_path / "receipts.sqlite"),
+            "state_dir": str(tmp_path),
             # По умолчанию недоступный провайдер Temporal повторяет без
             # ограничения (ход ждёт). Здесь лимит задан явно: после него —
             # отказ сессии (FAILED).

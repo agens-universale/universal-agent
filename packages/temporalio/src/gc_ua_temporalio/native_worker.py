@@ -29,7 +29,6 @@ from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
 from gc_ua_temporalio.payload_storage import data_converter
 from gc_ua_temporalio.public_config import public_config_snapshot
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_ua_temporalio.storage.technical import TechnicalStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
 
 
@@ -55,24 +54,16 @@ def build_stores(config):
 
 def build_native_runtime(config):
     stores = build_stores(config)
-    receipts = TechnicalStore(config.receipts_database)
     provider = NativeContextProvider(
         profiles=config.profiles,
         stores=stores,
-        receipts=receipts,
         resource_host=WorkerResourceHost(config.worker_id),
         state_paths=config.state_paths(),
     )
     native = NativeActivities(
         context_provider=provider,
         stores=stores,
-        receipts=receipts,
         public_config=public_config_snapshot,
-        preview_profiles={
-            name
-            for name, profile in config.profiles.items()
-            if profile.preview_stream
-        },
         activity_settings=resolve_activity_settings(config.activities),
     )
     return provider, native, ThreadStoreActivities(stores)
@@ -203,7 +194,6 @@ async def serve(config):
             await NativeMaintenance(
                 client,
                 provider,
-                native.receipts,
                 provider.stores,
                 payloads=config.payload_storage,
             ).serve()
