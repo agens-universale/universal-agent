@@ -339,6 +339,7 @@ async def arequest_chat_completion_once(
             url=prepared.url,
             **prepared.network_kwargs,
             use_retry=False,
+            allow_auth_retry=False,
             logger=getattr(ctx, "logger", None),
         )
         _raise_on_embedded_choice_error(res)
@@ -406,6 +407,9 @@ async def _asend_chat_completion_text(
             ctx, state, resolved=resolved, headers=headers
         )
         await before_send(prepared)
+        from gc_core.vision.service import confirmed_route_headers
+
+        headers = confirmed_route_headers(prepared)
     url = resolved.url if resolved is not None else cfg["completions_url"]
     (
         verify,

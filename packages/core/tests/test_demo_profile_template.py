@@ -133,8 +133,9 @@ def test_demo_profile_has_full_and_minimal_registry_forms(demo_profile_raw):
     for entry in models.values():
         backend = entry.get("backend") or {}
         assert "chat_completion_kwargs" not in backend
-        assert isinstance(entry.get("main"), dict)
-        assert isinstance(entry.get("auxiliary"), dict)
+        for section in ("main", "auxiliary"):
+            if section in entry:
+                assert isinstance(entry[section], dict)
     assert models["flash"]["auxiliary"]["chat_template_kwargs"] == {
         "enable_thinking": False
     }

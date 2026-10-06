@@ -537,7 +537,7 @@ async def test_settings_apply_endpoint_writes_and_reloads(tmp_path):
         app.screen.query_one(
             "#conn-url", Input
         ).value = "https://new-host/v1/chat/completions"
-        await pilot.press("enter")  # применить (умный Enter → probe → ok)
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         await pilot.pause()
         assert "https://new-host/v1/chat/completions" in cfg_file.read_text(
@@ -577,7 +577,7 @@ async def test_flash_plain_saved_has_no_trailing_dot(tmp_path):
         app.screen.query_one(
             "#conn-url", Input
         ).value = "https://new-host/v1/chat/completions"
-        await pilot.press("enter")  # сохранить
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         await pilot.pause()
         flash = str(app.screen.query_one("#set-flash", Static).render())
@@ -859,7 +859,7 @@ async def test_settings_auth_no_auth_writes_empty_header(tmp_path):
         ed.escape_presets()
         ed.move(2)  # адрес → токен → галка «без авторизации»
         ed.toggle_no_auth()  # ● без авторизации
-        await pilot.press("enter")  # применить (умный Enter → probe → ok)
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
@@ -1263,9 +1263,7 @@ async def test_apply_endpoint_oserror_shows_notice(tmp_path, monkeypatch):
         app.screen.query_one(
             "#conn-url", Input
         ).value = "https://new/v1/chat/completions"
-        await pilot.press(
-            "enter"
-        )  # применить (умный Enter → probe → ok) → ожидаем OSError
+        await pilot.press("ctrl+s")  # сохранить → ожидаем OSError
         await pilot.pause()
         await pilot.pause()
         assert app.screen is scr  # приложение живо
@@ -1308,7 +1306,7 @@ async def test_apply_endpoint_notice_when_runner_alive(tmp_path, monkeypatch):
         scr.query_one(
             "#conn-url", Input
         ).value = "https://new/v1/chat/completions"
-        await pilot.press("enter")  # применить (умный Enter → probe → ok)
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         await pilot.pause()
         assert scr._view == "menu"  # v2: флэш — в хабе
@@ -1316,8 +1314,8 @@ async def test_apply_endpoint_notice_when_runner_alive(tmp_path, monkeypatch):
         assert any("следующего запуска" in r for r in rows)
 
 
-async def test_apply_unchanged_value_reports_no_change(tmp_path):
-    """skip-unchanged: значение из конфига не тронуто → «ничего не изменено», без записи."""
+async def test_apply_unchanged_value_exits_without_writing(tmp_path):
+    """Ctrl+S закрывает неизменённую форму и сохраняет файл побайтово."""
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen
 
@@ -1339,11 +1337,9 @@ async def test_apply_unchanged_value_reports_no_change(tmp_path):
         await pilot.press(
             "enter"
         )  # секция «Подключение» (предзаполнена из конфига)
-        await pilot.press("enter")  # применить без изменений
+        await pilot.press("ctrl+s")  # сохранить без изменений
         await pilot.pause()
-        assert scr._view == 0  # остаёмся в секции
-        title = str(scr.query_one("#set-title", Static).render())
-        assert "ничего не изменено" in title  # реплика в слоте заголовка
+        assert scr._view == "menu"  # Ctrl+S завершает и неизменённую форму
         assert cfg_file.read_text(encoding="utf-8") == original
 
 
@@ -1375,7 +1371,7 @@ async def test_flash_disappears_on_next_key(tmp_path):
         scr.query_one(
             "#conn-url", Input
         ).value = "https://new/v1/chat/completions"
-        await pilot.press("enter")  # применить (умный Enter → probe → ok)
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         await pilot.pause()
         assert scr.query("#set-flash")  # флэш есть
@@ -1611,7 +1607,7 @@ async def test_apply_model_writes_and_returns_to_hub(tmp_path, monkeypatch):
         await pilot.pause()  # [old-model] [вписать вручную…] — на неё
         inp = scr.query_one(Input)
         inp.value = "new-model"
-        await pilot.press("enter")  # применить
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
         assert "new-model" in content
@@ -1746,6 +1742,42 @@ async def test_hub_glyphs_ok_after_config_probe():
         assert any(
             "Модели" in r and "✓" in r for r in rows
         )  # test-model в списке
+
+
+async def test_hub_connection_accepts_alternative_after_missing_catalog(tmp_path, monkeypatch):
+    from gc_core import model_picker
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+
+    def get_ex(url, headers, verify, *, config_proxy=None):
+        return model_picker.HttpReply(401 if url.endswith("/config") else 404, None)
+
+    def post_ex(url, headers, body, verify, *, config_proxy=None):
+        return model_picker.HttpReply(
+            200 if headers.get("Authorization") == "Bearer secret" else 401, {}
+        )
+
+    monkeypatch.setattr(model_picker, "_requests_get_ex", get_ex)
+    monkeypatch.setattr(model_picker, "_requests_post_ex", post_ex)
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        "backend:\n  completions_url: http://x/v1/chat/completions\n"
+        "  chat_completion_headers:\n    Authorization: secret\n",
+        encoding="utf-8",
+    )
+    cfg = _cfg()
+    cfg["completions_url"] = "http://x/v1/chat/completions"
+    cfg["chat_completion_headers"] = {"Authorization": "secret"}
+    before = cfg_file.read_bytes()
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=cfg, config_path=str(cfg_file), on_apply=lambda: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        await scr.workers.wait_for_complete()
+        await pilot.pause()
+        assert any("Подключение" in row and "✓" in row for row in _menu_lines(scr))
+        assert cfg_file.read_bytes() == before
 
 
 async def test_hub_glyphs_bang_on_network_unknown():
@@ -2003,15 +2035,13 @@ async def test_smart_enter_rejected_saves_immediately_with_warn(tmp_path):
         scr, cfg_file = await _open_addr_with_probe(
             app, pilot, tmp_path, _probe_rejected()
         )
-        await pilot.press(
-            "enter"
-        )  # умный Enter → probe → rejected → сохранено сразу
+        await pilot.press("ctrl+s")  # rejected → сохранено сразу
         await pilot.pause()
         await pilot.pause()
         assert scr._view == "menu"  # сохранено, вернулись в хаб
         assert "new" in cfg_file.read_text(encoding="utf-8")
         flash = str(scr.query_one("#set-flash").render())
-        assert "сервер отклонил токен" in flash
+        assert "Сохранено" in flash
 
 
 async def test_smart_enter_unknown_saves_immediately_with_warn(tmp_path):
@@ -2022,13 +2052,13 @@ async def test_smart_enter_unknown_saves_immediately_with_warn(tmp_path):
         scr, cfg_file = await _open_addr_with_probe(
             app, pilot, tmp_path, _probe_unknown()
         )
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
         assert scr._view == "menu"  # сохранено сразу (сеть не наказывает)
         assert "new" in cfg_file.read_text(encoding="utf-8")
         flash = str(app.screen.query_one("#set-flash").render())
-        assert "Сохранено" in flash and "не удалось" in flash
+        assert "Сохранено" in flash
 
 
 async def test_ctrl_space_probes_draft_without_saving(tmp_path):
@@ -2054,7 +2084,7 @@ async def test_ctrl_space_probes_draft_without_saving(tmp_path):
         assert "авторизация не требуется" in probe_line
         # Пресет-лист не раскрывался (адрес чужой, Ctrl+Space его больше не спрашивает) —
         # Enter сразу про сохранение, свернуть нечего.
-        await pilot.press("enter")  # проверено → Enter сохраняет без повтора
+        await pilot.press("ctrl+s")  # сохранить без повтора
         await pilot.pause()
         assert scr._view == "menu"
 
@@ -2096,6 +2126,81 @@ async def test_draft_probe_invalidated_by_edit_during_flight(tmp_path):
         assert "old" in cfg_file.read_text(
             encoding="utf-8"
         )  # файл не тронут непроверенным
+
+
+async def test_accepted_literal_auth_is_saved_only_by_ctrl_s(tmp_path):
+    import yaml
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_file = _write_cfg(tmp_path)
+    before = cfg_file.read_bytes()
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file), on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        token = scr.query_one("#conn-token", Input)
+        token.value = "secret-token"
+        await pilot.pause()
+        scr._on_draft_probe(
+            ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth="Bearer secret-token"),
+            gen=scr._draft_gen, section=0, on_done=None,
+        )
+        await pilot.pause()
+        assert token.value == "Bearer secret-token"
+        assert cfg_file.read_bytes() == before
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert scr._view == "menu"
+        saved = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+        assert saved["backend"]["chat_completion_headers"]["Authorization"] == "Bearer secret-token"
+
+
+async def test_accepted_auth_cancels_stale_env_save_confirmation(tmp_path):
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_file = _write_cfg(tmp_path)
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(
+            config=_cfg(),
+            config_path=str(cfg_file),
+            on_apply=lambda: None,
+            probe_fn=_fake_probe(_probe_ok()),
+        )
+        app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        token = scr.query_one("#conn-token", Input)
+        token.value = "secret-token"
+        await pilot.pause()
+        scr._pending_env_save = (0, {"Authorization": "secret-token"}, "", True)
+
+        scr._on_draft_probe(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth="Bearer secret-token",
+            ),
+            gen=scr._draft_gen,
+            section=0,
+            on_done=None,
+        )
+        assert token.value == "Bearer secret-token"
+        assert scr._pending_env_save is None
 
 
 async def test_draft_probe_no_auth_choice_probes_without_old_token(tmp_path):
@@ -2243,9 +2348,11 @@ async def test_model_dirty_state_toggles_on_move(tmp_path, monkeypatch):
         title = scr.query_one("#set-title", Static)
         assert scr._is_dirty(1) is False  # исходный выбор == модель конфига
         await pilot.press("down")  # → other-model
+        await pilot.press("enter")
         await pilot.pause()
         assert scr._is_dirty(1) is True
         await pilot.press("up")  # обратно → test-model
+        await pilot.press("enter")
         await pilot.pause()
         assert scr._is_dirty(1) is False
         assert "изменено" not in str(
@@ -2323,9 +2430,11 @@ async def test_model_dirty_state_no_false_negative_when_active_not_first(
         await pilot.pause()  # worker fetch отработал
         assert scr._is_dirty(1) is False  # курсор сразу на active — не dirty
         await pilot.press("up")  # → other-model
+        await pilot.press("enter")
         await pilot.pause()
         assert scr._is_dirty(1) is True
         await pilot.press("down")  # обратно → test-model (active)
+        await pilot.press("enter")
         await pilot.pause()
         assert scr._is_dirty(1) is False
 
@@ -2544,12 +2653,15 @@ async def test_auth_section_repeated_enter_no_change_does_not_crash(tmp_path):
         scr = app.screen
         open_settings_section(scr, "Подключение")
         await pilot.pause()
+        original = cfg_file.read_bytes()
         for _ in range(3):
-            await pilot.press("enter")  # ничего не введено/не менялось
+            await pilot.press("ctrl+s")
             await pilot.pause()
-        assert app.screen is scr  # приложение живо, без DuplicateIds
-        title = str(scr.query_one("#set-title", Static).render())
-        assert "ничего не изменено" in title
+            assert scr._view == "menu"
+            assert cfg_file.read_bytes() == original
+            open_settings_section(scr, "Подключение")
+            await pilot.pause()
+        assert app.screen is scr  # повторные входы и выходы не ломают DOM
 
 
 async def test_title_note_clears_to_true_state(tmp_path):
@@ -2576,7 +2688,7 @@ async def test_title_note_clears_to_true_state(tmp_path):
         await pilot.pause()
         scr = app.screen
         await pilot.press("enter")  # секция «Адрес»
-        await pilot.press("enter")  # без изменений → title-note
+        scr._title_note("ничего не изменено")  # проверяем автогашение реплики
         await pilot.pause()
         title = scr.query_one("#set-title", Static)
         assert "ничего не изменено" in str(title.render())
@@ -2755,7 +2867,7 @@ async def test_env_ref_token_survives_save_without_changes(
         open_settings_section(scr, "Подключение")
         await pilot.pause()
         assert scr._is_dirty(0) is False  # ничего не трогали
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
@@ -2786,7 +2898,7 @@ async def test_env_ref_missing_var_not_shown_as_token_set(
         assert "***" not in row  # не «токен задан»
         open_settings_section(scr, "Подключение")
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
@@ -2832,7 +2944,7 @@ async def test_literal_over_env_ref_needs_confirm_then_writes(
         await pilot.press("down")  # курсор → токен
         await pilot.pause()
         scr.query_one("#conn-token", Input).value = "sk-typed-by-hand"
-        await pilot.press("enter")  # probe → запись → confirm
+        await pilot.press("ctrl+s")  # запись → confirm
         await pilot.pause()
         await pilot.pause()
         banner = " ".join(str(w.render()) for w in scr.query(".set-confirm"))
@@ -2866,7 +2978,7 @@ async def test_literal_token_edit_saves_without_confirm(tmp_path):
         await pilot.press("down")  # курсор → токен
         await pilot.pause()
         scr.query_one("#conn-token", Input).value = "sk-new"
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
         assert not scr.query(
@@ -2899,7 +3011,7 @@ async def test_bearer_without_token_hints_instead_of_nothing_changed(tmp_path):
         )  # курсор → галка «без авторизации» (единств. вариант — Bearer)
         ed.toggle_no_auth()  # снять галку → выбран Bearer, токен НЕ введён
         await pilot.pause()
-        await pilot.press("enter")  # попытка сохранить
+        await pilot.press("ctrl+s")  # попытка сохранить
         await pilot.pause()
         title = str(scr.query_one("#set-title", Static).render())
         assert "введите токен" in title
@@ -2929,7 +3041,7 @@ async def test_env_ref_endpoint_shown_as_ref_and_not_rewritten(
         assert "real-host" not in row  # резолвнутое значение не показываем
         await pilot.press("enter")  # секция «Подключение»
         await pilot.pause()
-        await pilot.press("enter")  # сохранить без правок
+        await pilot.press("ctrl+s")  # сохранить без правок
         await pilot.pause()
         await pilot.pause()
         assert cfg_file.read_text(encoding="utf-8") == original
@@ -3054,7 +3166,8 @@ async def test_saving_overridden_field_warns_it_will_not_apply(
     async with app.run_test() as pilot:
         scr = await _open_model_section(app, pilot, cfg_file, cfg)
         await pilot.press("down")  # выбрать другую модель в списке
-        await pilot.press("enter")  # сохранить
+        await pilot.press("enter")
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         await pilot.pause()
         text = _screen_text(scr)
@@ -4113,7 +4226,8 @@ async def test_settings_model_filter_and_save(tmp_path, monkeypatch):
         # вручную» больше нет, поэтому одного down хватает; ↑↓ доходят до ed.move()
         # при фокусе в поле-фильтре.
         await pilot.press("down")
-        await pilot.press("enter")  # сохранить выбранную
+        await pilot.press("enter")
+        await pilot.press("ctrl+s")  # сохранить выбранную
         await pilot.pause()
         await pilot.pause()
         content = cfg_file.read_text(encoding="utf-8")
@@ -4402,6 +4516,7 @@ async def test_alt_down_on_the_agent_model_field_keeps_the_chosen_row(
         )
         ed = scr.query_one(ModelEditor)
         await pilot.press("down")  # текущая → gpt
+        await pilot.press("enter")
         assert ed.peek() == "openai/gpt-5.6-terra"  # предусловие: выбор сделан
         await pilot.press("alt+down")
         await wait_until(
@@ -4606,7 +4721,7 @@ async def test_ctrl_u_over_env_ref_warns_about_deletion_not_a_leak(
         assert ed.clear_token() is True  # маска была — есть что стирать
         await pilot.pause()
 
-        await pilot.press("enter")  # сохранение → страж
+        await pilot.press("ctrl+s")  # сохранение → страж
         await pilot.pause()
         await pilot.pause()
         banner = " ".join(
@@ -4639,7 +4754,7 @@ async def test_literal_over_env_ref_still_warns_about_the_leak(
         ).value = "sk-typed-by-hand"
         await pilot.pause()
 
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
         banner = " ".join(
@@ -4718,7 +4833,7 @@ async def test_ctrl_u_dismisses_the_pending_env_confirm(tmp_path, monkeypatch):
         ).value = "https://typed-by-hand/v1/chat/completions"
         await pilot.pause()
 
-        await pilot.press("enter")  # сохранение → страж перезаписи ссылки
+        await pilot.press("ctrl+s")  # сохранение → страж перезаписи ссылки
         await pilot.pause()
         await pilot.pause()
         assert list(scr.query("#set-envconfirm")), (
@@ -4950,7 +5065,7 @@ async def test_ctrl_u_under_the_env_banner_is_not_lost(tmp_path, monkeypatch):
         ).value = "http://typed/v1/chat/completions"
         await pilot.pause()
 
-        await pilot.press("enter")  # страж: ссылка в адресе будет перезаписана
+        await pilot.press("ctrl+s")  # страж: ссылка в адресе будет перезаписана
         await pilot.pause()
         await pilot.pause()
         assert (
@@ -4968,9 +5083,7 @@ async def test_ctrl_u_under_the_env_banner_is_not_lost(tmp_path, monkeypatch):
             scr._pending_env_save is None
         )  # прежний снимок протух вместе с формой
 
-        await pilot.press(
-            "enter"
-        )  # страж поднимается заново — уже по текущей форме
+        await pilot.press("ctrl+s")  # страж поднимается заново — уже по текущей форме
         await pilot.pause()
         await pilot.pause()
         assert scr._pending_env_save is not None

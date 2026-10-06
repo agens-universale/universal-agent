@@ -5,7 +5,8 @@ import io
 import logging
 import secrets
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from types import MappingProxyType
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from enum import StrEnum
@@ -22,6 +23,7 @@ from gc_core.utils.llm_chat_client import (
     PreparedChatCompletion,
     arequest_chat_completion_once,
 )
+from gc_core.utils.http_auth import authorization_attempts
 
 
 class ProbeStatus(StrEnum):
@@ -38,6 +40,7 @@ class ProbeResult:
     status: ProbeStatus
     reason: str
     retry_after_sec: float = 0.0
+    authorization_alternative: bool = False
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,10 @@ async def aprobe_route(
 ) -> ProbeResult:
     started = time.perf_counter()
     previous = None
+    auth_key = next((key for key in prepared.headers if key.lower() == "authorization"), None)
+    auth_forms = authorization_attempts(prepared.headers.get(auth_key)) if auth_key else []
+    authorization_alternative = False
+    requests = 0
     for attempt in range(2):
         challenge = make_challenge(retry=bool(attempt), previous_code=previous)
         url = (
@@ -153,23 +160,39 @@ async def aprobe_route(
                 ],
             }
         ]
-        try:
-            outcome = await arequest_chat_completion_once(
-                ctx,
-                state,
-                prepared=prepared,
-                messages=messages,
-                max_tokens=512,
-                request_label="vision_probe",
-            )
-        except (httpx.HTTPError, EmbeddedChoiceError, ValueError) as exc:
-            return _record_result(
-                ctx, _classify_error(exc), attempt + 1, started
-            )
+        while True:
+            requests += 1
+            try:
+                outcome = await arequest_chat_completion_once(
+                    ctx,
+                    state,
+                    prepared=prepared,
+                    messages=messages,
+                    max_tokens=512,
+                    request_label="vision_probe",
+                )
+                break
+            except (httpx.HTTPError, EmbeddedChoiceError, ValueError) as exc:
+                if (
+                    not authorization_alternative
+                    and isinstance(exc, httpx.HTTPStatusError)
+                    and exc.response.status_code == 401
+                    and len(auth_forms) == 2
+                ):
+                    headers = dict(prepared.headers)
+                    headers[auth_key] = auth_forms[1]
+                    prepared = replace(prepared, headers=MappingProxyType(headers))
+                    authorization_alternative = True
+                    continue  # Повтор того же задания; распознавание ещё не состоялось.
+                return _record_result(
+                    ctx, _classify_error(exc), requests, started
+                )
         result = classify_answer(challenge.code, outcome)
+        if result.status is ProbeStatus.CONFIRMED and authorization_alternative:
+            result = replace(result, authorization_alternative=True)
         if result.status is not ProbeStatus.UNCONFIRMED:
             return _record_result(
-                ctx, result, attempt + 1, started, outcome.finish_reason
+                ctx, result, requests, started, outcome.finish_reason
             )
         previous = challenge.code
-    return _record_result(ctx, result, 2, started, outcome.finish_reason)
+    return _record_result(ctx, result, requests, started, outcome.finish_reason)

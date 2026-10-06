@@ -4,6 +4,7 @@ import logging
 import os
 import re
 from copy import deepcopy
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
@@ -36,6 +37,7 @@ from gc_core.utils.format_messages import (
     format_message_chat_completions_to_send_backend,
 )
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.http_auth import authorization_attempts
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.ssl_config import get_backend_client_cert
@@ -359,13 +361,29 @@ async def _aread_error_text(response: "httpx.Response") -> Optional[str]:
         return None
 
 
-@retry_with_backoff_async(
-    should_retry=_default_should_retry_backend_exception,
-    retry_log_level=logging.ERROR,
-    no_more_retries_log_level=logging.ERROR,
-    operation_name="Backend request",
-)
 async def arequest_backend_responses(
+    data: Dict,
+    headers: Dict,
+    url: str,
+    verify: bool = True,
+    cert: Optional[Tuple[str, str]] = None,
+    logger: Optional[logging.Logger] = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
+    config_proxy: Optional[str] = None,
+    use_retry: bool = False,
+) -> Tuple[Dict, Dict]:
+    return await _arequest_authorized(
+        partial(
+            _arequest_backend_responses_once, data, url=url, verify=verify,
+            cert=cert, logger=logger, timeout=timeout, config_proxy=config_proxy,
+        ),
+        headers,
+        use_retry=use_retry,
+        logger=logger,
+    )
+
+
+async def _arequest_backend_responses_once(
     data: Dict,
     headers: Dict,
     url: str,
@@ -518,19 +536,68 @@ async def _astream_chat_completions(
         return assembled
 
 
-@retry_with_backoff_async(
-    should_retry=_default_should_retry_backend_exception,
-    retry_log_level=logging.ERROR,
-    no_more_retries_log_level=logging.ERROR,
-    operation_name="Backend chat completion request",
-)
 async def arequest_backend_chat_completions(
     data: Dict,
     headers: Dict,
     url: str,
     verify: bool = True,
     cert: Optional[Tuple[str, str]] = None,
-    use_retry: bool = True,
+    use_retry: bool = False,
+    logger: Optional[logging.Logger] = None,
+    on_delta: Optional[OnDelta] = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
+    config_proxy: Optional[str] = None,
+    allow_auth_retry: bool = True,
+):
+    """Запрос с ограниченным подбором raw/Bearer только после HTTP 401."""
+    return await _arequest_authorized(
+        partial(
+            _arequest_backend_chat_completions_once, data, url=url,
+            verify=verify, cert=cert, logger=logger, on_delta=on_delta,
+            timeout=timeout, config_proxy=config_proxy,
+        ),
+        headers,
+        allow_auth_retry=allow_auth_retry,
+        use_retry=use_retry,
+        logger=logger,
+    )
+
+
+@retry_with_backoff_async(
+    should_retry=_default_should_retry_backend_exception,
+    retry_log_level=logging.ERROR,
+    no_more_retries_log_level=logging.ERROR,
+    operation_name="Backend request",
+)
+async def _arequest_with_backoff(request, headers: Dict, logger=None):
+    return await request(headers=headers)
+
+
+async def _arequest_authorized(request, headers: Dict, *, allow_auth_retry: bool = True,
+                              use_retry: bool = True, logger=None):
+    """Одна альтернатива Authorization после реального HTTP 401."""
+    auth_key = next((key for key in headers if key.lower() == "authorization"), None)
+    candidates = authorization_attempts(headers.get(auth_key)) if auth_key else []
+    attempts = candidates if allow_auth_retry and candidates else [None]
+    for index, authorization in enumerate(attempts):
+        call_headers = dict(headers)
+        if auth_key and authorization is not None:
+            call_headers[auth_key] = authorization
+        try:
+            return await _arequest_with_backoff(
+                request, headers=call_headers, use_retry=use_retry, logger=logger
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 401 or index + 1 == len(attempts):
+                raise
+
+
+async def _arequest_backend_chat_completions_once(
+    data: Dict,
+    headers: Dict,
+    url: str,
+    verify: bool = True,
+    cert: Optional[Tuple[str, str]] = None,
     logger: Optional[logging.Logger] = None,
     on_delta: Optional[OnDelta] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
@@ -542,9 +609,6 @@ async def arequest_backend_chat_completions(
     TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None → всегда
     non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
     """
-    # `use_retry` забирает из kwargs декоратор ретраев (retry_with_backoff_async) —
-    # до тела функции он не доходит; в сигнатуре остаётся как часть интерфейса.
-    del use_retry
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 

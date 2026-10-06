@@ -17,10 +17,12 @@ def context():
             "backend_api_mode": "responses",
             "backend_request_timeout_sec": 3,
             "use_retry": True,
-            "chat_completion_kwargs": {
-                "stream": True,
-                "response_format": {"type": "json_object"},
-                "provider": {"order": ["route-a"]},
+            "auxiliary_llm_params": {
+                "completion_kwargs": {
+                    "stream": True,
+                    "response_format": {"type": "json_object"},
+                    "provider": {"order": ["route-a"]},
+                },
             },
         },
         auth_connector=None,
@@ -96,7 +98,7 @@ async def test_snapshot_budget_finish_reason_and_usage(monkeypatch):
     )
     ctx, st = context(), state()
     prepared = await client.aprepare_chat_completion(ctx, st, resolved=model())
-    ctx.config_dict["chat_completion_kwargs"]["provider"]["order"] = [
+    ctx.config_dict["auxiliary_llm_params"]["completion_kwargs"]["provider"]["order"] = [
         "route-b"
     ]
     result = await client.arequest_chat_completion_once(

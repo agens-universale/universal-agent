@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from typing import Optional
 
 from gc_core import model_picker
+from gc_core.utils.http_auth import authorization_attempts
 
 # Заглушка для POST-проверки без заданной модели: инертное имя, которое сервер
 # гарантированно не знает — ответ (401 vs 400/404/5xx) судит только токен.
@@ -29,6 +30,15 @@ _DUMMY_MODEL = "gc-connection-probe"
 # нельзя (LiteLLM отдаёт 400 «No connected db.» на любой неизвестный ключ).
 _CANARY_TOKEN = "Bearer gc-probe-invalid-token"
 _CANARY_NAKED = "gc-probe-invalid-token"
+
+
+def accepted_literal_auth(source: str | None, accepted: str | None) -> str | None:
+    """Принятая форма для черновика; ссылки на секреты не раскрываются и не заменяются."""
+    if not source or "${ENV:" in source or "${FILE:" in source:
+        return None
+    if accepted == source.strip() or accepted not in authorization_attempts(source):
+        return None
+    return accepted
 
 
 def _non_latin1_reason(auth: Optional[str]) -> str:
@@ -69,7 +79,8 @@ class ProbeResult:
     # проверки модели), а мусорному «No connected db.» (застрял на поиске ключа).
     body_signature: str = ""
     # Форма Authorization, которую сервер принял (`authorization_attempts`).
-    # None — токен не принимали / auth не интерпретировался. Пишется в конфиг as-is.
+    # None — токен не принимали / auth не интерпретировался. Только результат пробы;
+    # исходный источник токена в форме и конфиге не меняется.
     accepted_auth: Optional[str] = None
 
     @property
@@ -100,7 +111,7 @@ def probe(
         )
     else:
         out = fetch_ex(endpoint, auth, verify=verify)
-    if out.models:
+    if out.models is not None:
         return ProbeResult(
             "ok", out.status, out.models, out.latency_ms, "доступен"
         )
@@ -121,18 +132,23 @@ def probe(
     # с инертной заглушкой и судит только токен.
     dummy = not model
     probe_model = model or _DUMMY_MODEL
-    if post_ex is None:
-        status, net_err, lat, payload = model_picker.probe_post(
-            endpoint,
-            auth,
-            probe_model,
-            verify=verify,
-            config_proxy=config_proxy,
-        )
-    else:
-        status, net_err, lat, payload = post_ex(
-            endpoint, auth, probe_model, verify=verify
-        )
+    # Справочники и чат могут принимать разные схемы. Подбор для чата
+    # начинается с настроенного формата независимо от ответа справочников.
+    for variant in authorization_attempts(auth) or [auth]:
+        if post_ex is None:
+            status, net_err, lat, payload = model_picker.probe_post(
+                endpoint,
+                variant,
+                probe_model,
+                verify=verify,
+                config_proxy=config_proxy,
+            )
+        else:
+            status, net_err, lat, payload = post_ex(
+                endpoint, variant, probe_model, verify=verify
+            )
+        if status != 401:
+            break
     return _verdict_from_post(status, net_err, lat, payload, dummy)
 
 
@@ -388,14 +404,10 @@ def probe_connection(
     спорную ветку: сервер отказал не 401-м, и без неё пришлось бы гадать, отказ
     это про токен или уже про модель.
 
-    Токен пробуется в двух формах (`authorization_attempts`): как передан и
-    со схемой ``Bearer``, если её не было. Вторая форма уходит только когда
-    первая отвергнута 401 — принятый заголовок вторым запросом не проверяем.
+    Принятая форма заголовка возвращается вызывающему для рабочего запроса.
 
     Живёт здесь, а не в экранах: пробу зовут и /settings, и мастер, а скопированный
     differential-танец разъехался бы при первой правке одной из копий."""
-    from gc_core.onboarding import authorization_attempts
-
     run = probe_fn or probe_auth
     attempts = authorization_attempts(token)
     has_token = bool(attempts)

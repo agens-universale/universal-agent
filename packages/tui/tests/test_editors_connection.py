@@ -14,6 +14,28 @@ def _harness(editor):
     return _App()
 
 
+@pytest.mark.parametrize("source,accepted,expected", [
+    ("secret", "Bearer secret", "Bearer secret"),
+    ("Bearer secret", "secret", "secret"),
+    ("${ENV:TOKEN}", "Bearer secret", None),
+    ("${FILE:/secret}", "Bearer secret", None),
+    ("Basic secret", "Bearer secret", None),
+    ("secret", "Bearer different", None),
+])
+@pytest.mark.parametrize("typed", [True, False])
+async def test_accepted_literal_auth_updates_draft_but_never_secret_references(source, accepted, expected, typed):
+    from gc_tui.editors.connection import ConnectionEditor
+
+    ed = ConnectionEditor(url_current="http://old/v1/chat/completions", auth_header=source)
+    async with _harness(ed).run_test() as pilot:
+        if typed:
+            ed.query_one("#conn-token", Input).value = source
+        await pilot.pause()
+        assert ed.apply_accepted_auth(accepted) is (expected is not None)
+        assert ed.query_one("#conn-token", Input).value == (expected if expected is not None else source if typed else "")
+        assert ed.submit()[1] == (expected if expected is not None else source if typed else None)
+
+
 async def test_url_prefilled_token_empty():
     """Адрес предзаполнен сырым значением; поле токена пустое (секрет не заезжает)."""
     from gc_tui.editors.connection import ConnectionEditor
@@ -81,7 +103,7 @@ async def test_submit_valid_pair():
 
 
 async def test_submit_writes_bearer_when_field_shows_bearer():
-    """Проба подставила Bearer в поле — submit пишет его as-is."""
+    """Явно введённый Bearer сохраняется без изменения."""
     from gc_tui.editors.connection import ConnectionEditor
 
     ed = ConnectionEditor(
@@ -95,8 +117,7 @@ async def test_submit_writes_bearer_when_field_shows_bearer():
         ).value = "https://new/v1/chat/completions"
         ed.move(1)
         await pilot.pause()
-        ed.query_one("#conn-token", Input).value = "sk-NEW"
-        assert ed.apply_accepted_auth("Bearer sk-NEW") is True
+        ed.query_one("#conn-token", Input).value = "Bearer sk-NEW"
         assert ed.query_one("#conn-token", Input).value == "Bearer sk-NEW"
         url, header, error, _proxy = ed.submit()
         assert url == "https://new/v1/chat/completions"
@@ -395,7 +416,7 @@ async def test_edit_mode_prefilled_url_shows_canon_preset_hint():
         await pilot.pause()
         assert (
             str(ed.query_one(".conn-url-preset-hint").render())
-            == "Alt+↓ — показать список"
+            == "Enter — показать список"
         )
 
         ed.reload_presets()  # Alt+↓
@@ -438,7 +459,7 @@ async def test_no_match_collapses_the_list_and_says_so():
         assert not ed.presets_open
         assert (
             _hint_under_address(ed)
-            == "в списке такого нет · Alt+↓ — показать список"
+            == "в списке такого нет · Enter — показать список"
         )
 
         # Стрелка — обычная навигация формы, список её не забирает.

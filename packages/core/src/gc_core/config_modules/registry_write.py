@@ -42,6 +42,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 import yaml
@@ -58,6 +59,14 @@ from gc_core.config_modules.model_registry import LEVELS
 from gc_core.config_modules.profiles import validate_profile_text
 from gc_core.config_origin import error_origins
 from gc_core.utils.user_text import read_user_text
+
+
+class _YamlValue(Enum):
+    NULL = "null"
+
+
+# None в fields исторически удаляет ключ. Явный YAML null — отдельная команда.
+YAML_NULL = _YamlValue.NULL
 
 
 class RegistryWriteError(ValueError):
@@ -314,7 +323,8 @@ def _upsert_model_text(
     вызывающий что-то знает, а блок записи переписывается целиком — без наложения
     поля, которых форма не знает вовсе (`pricing`) или не трогала в этот
     раз (`token`), молча терялись бы. Правило: ключ со значением — установить,
-    ключ со значением `None` — удалить из записи, отсутствующий ключ — сохранить
+    ключ со значением `None` — удалить, `YAML_NULL` — записать YAML null,
+    отсутствующий ключ — сохранить
     как был. Старая запись читается из ТЕКУЩЕГО текста — в транзакции это уже
     результат предыдущих операций, а не состояние диска.
 
@@ -331,7 +341,7 @@ def _upsert_model_text(
         if value is None:
             entry.pop(key, None)
         else:
-            entry[key] = value
+            entry[key] = None if value is YAML_NULL else value
     key = _yaml_key(alias)
     text = ocw.ensure_section_anchor_text(text, "models", template)
     if ocw.entry_uses_yaml_anchors(text, "models", key):
@@ -807,6 +817,7 @@ def write_assign(
 
 
 __all__ = [
+    "YAML_NULL",
     "RegistryWriteError",
     "RemovalReport",
     "apply_registry_ops",

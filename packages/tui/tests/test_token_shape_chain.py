@@ -128,8 +128,8 @@ async def test_naked_in_field_survives_save_into_call_headers(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_bearer_applied_to_field_then_saved_as_written(tmp_path):
-    """Проба приняла Bearer → поле показывает Bearer → конфиг и runtime с Bearer."""
+async def test_explicit_bearer_saved_as_written(tmp_path):
+    """Явный Bearer сохраняется в конфиге и применяется в runtime."""
     from gc_tui.editors.connection import ConnectionEditor
     from textual.app import App, ComposeResult
     from textual.widgets import Input
@@ -161,8 +161,7 @@ async def test_bearer_applied_to_field_then_saved_as_written(tmp_path):
         ).value = "https://api.example/v1/chat/completions"
         ed.move(1)
         await pilot.pause()
-        ed.query_one("#conn-token", Input).value = "sk-naked"
-        assert ed.apply_accepted_auth("Bearer sk-naked") is True
+        ed.query_one("#conn-token", Input).value = "Bearer sk-naked"
         assert ed.query_one("#conn-token", Input).value == "Bearer sk-naked"
         _url, header, error, _proxy = ed.submit()
         assert error is None

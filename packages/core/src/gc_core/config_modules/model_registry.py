@@ -24,6 +24,10 @@ from pydantic import (
 )
 
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.env_interpolation import (
+    _FILE_MARKER,
+    resolve_env_only,
+)
 from gc_core.config_modules.chat_completions import (
     auxiliary_llm_from_config_dict,
 )
@@ -48,6 +52,7 @@ MODEL_BACKEND_OVERLAY_KEYS = (
     "openai_strict_tools_schema",
     "send_tool_strict",
     "claude_prompt_cache",
+    "vision",
     "chat_completion_headers",
     "completions_url",
 )
@@ -82,23 +87,37 @@ LEVEL_FALLBACK: dict[str, tuple[str, str, str]] = {
 }
 
 
+def _parse_mapping_text(text: str) -> dict[str, Any] | None:
+    """Синтаксис полей модели; ошибка без содержимого строки с возможным секретом."""
+    try:
+        loaded = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        mark = getattr(exc, "problem_mark", None)
+        where = (
+            f" (строка {mark.line + 1}, столбец {mark.column + 1})"
+            if mark else ""
+        )
+        raise ValueError(f"неверный YAML{where}") from exc
+    if loaded is not None and not isinstance(loaded, dict):
+        raise ValueError("нужен YAML-mapping, не список и не скаляр")
+    return loaded
+
+
 def parse_completion_kwargs_text(text: str) -> dict[str, Any] | None:
-    """Текст поля ``main``/``auxiliary`` → mapping или «снять ключ».
+    """Текст поля ``main``/``auxiliary`` → mapping или отсутствие mapping.
 
     Пустое поле, YAML ``null`` / ``~`` и текст из одних комментариев — ``None``:
-    секция не задана, как ``auxiliary: null`` в файле. Запрос берёт глобальный
-    словарь. Явный пустой mapping (``{}``) — ``{}``: в запрос эти ключи не класть.
+    способ записи отсутствия определяет редактор (снять ключ или явный null).
+    Явный пустой mapping (``{}``) — ``{}``: в запрос эти ключи не класть.
     JSON object — валидный YAML, разбирается тем же путём. Список и скаляр —
     ошибка. Protected-ключи — ошибка: в файл их не кладут, рантайм всё равно
     вырежет."""
     raw = text.strip()
     if not raw:
         return None
-    loaded = yaml.safe_load(raw)
+    loaded = _parse_mapping_text(raw)
     if loaded is None:
         return None
-    if not isinstance(loaded, dict):
-        raise ValueError("нужен YAML-mapping, не список и не скаляр")
     forbidden = [
         str(key) for key in loaded if key in PROTECTED_COMPLETION_KEYS
     ]
@@ -128,16 +147,29 @@ def _reject_disallowed_backend_keys(loaded: dict) -> None:
 
 
 def _validated_backend_overlay(loaded: dict) -> dict[str, Any]:
-    """Только явно заданные ключи: дефолты схемы в файл модели не копируются."""
+    """Проверить копию, сохранить исходные ссылки и значения.
+
+    FILE-поля проверит загрузчик при записи транзакции; редактор не читает
+    файлы на каждое изменение текста. ENV раскрывается без дискового I/O.
+    """
+    headers = loaded.get("chat_completion_headers")
+    if headers is not None and not isinstance(headers, dict):
+        raise ValueError("chat_completion_headers: нужен YAML-mapping")
+    effective = resolve_env_only(loaded)
+    immediate = {
+        key: value
+        for key, value in effective.items()
+        if not (isinstance(value, str) and _FILE_MARKER.search(value))
+    }
     try:
-        model = BackendConfig.model_validate(loaded)
+        BackendConfig.model_validate(immediate)
     except ValidationError as exc:
         err = exc.errors()[0]
         loc = ".".join(str(part) for part in err.get("loc") or ())
         msg = err.get("msg") or "неверное значение"
         where = f"{loc}: " if loc else ""
         raise ValueError(f"{where}{msg}") from exc
-    return model.model_dump(exclude_unset=True)
+    return copy.deepcopy(loaded)
 
 
 def parse_model_backend_text(text: str) -> dict[str, Any] | None:
@@ -151,11 +183,9 @@ def parse_model_backend_text(text: str) -> dict[str, Any] | None:
     raw = text.strip()
     if not raw:
         return None
-    loaded = yaml.safe_load(raw)
+    loaded = _parse_mapping_text(raw)
     if loaded is None:
         return {}
-    if not isinstance(loaded, dict):
-        raise ValueError("нужен YAML-mapping, не список и не скаляр")
     _reject_disallowed_backend_keys(loaded)
     return _validated_backend_overlay(loaded)
 
@@ -368,6 +398,11 @@ def validate_registry_pairs(
             raise ValueError(problem)
 
 
+def model_authorization_header(token: str | None) -> str | None:
+    """Сохранить настроенную форму token для первой транспортной попытки."""
+    return token
+
+
 class ModelEntry(BaseModel):
     """Запись реестра `models`: алиас (ключ словаря) → провайдерская модель + точечные
     оверлеи backend/pricing поверх эффективной секции backend."""
@@ -490,13 +525,7 @@ class ModelEntry(BaseModel):
     def authorization_header(self) -> str | None:
         """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
         иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        if (
-            self.token is None
-            or not self.token
-            or self.token.startswith("Bearer ")
-        ):
-            return self.token
-        return f"Bearer {self.token}"
+        return model_authorization_header(self.token)
 
 
 class SlotsConfig(BaseModel):

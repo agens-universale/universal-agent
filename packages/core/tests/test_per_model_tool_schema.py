@@ -372,3 +372,19 @@ def test_responses_projects_global_flags_and_ignores_alias():
         OPTIONAL_EMPTY_AS_OMIT_HINT
         in projected["parameters"]["properties"]["note"]["description"]
     )
+
+
+def test_responses_explicit_empty_tools_not_revived_by_projection():
+    tool = _canon_tool()
+    state = SimpleNamespace(
+        default_model="responses-model",
+        tools=[tool],
+        call_metadata={},
+        previous_response_id=None,
+    )
+    data = create_call_data_responses(
+        [], state, tools=[],
+        config_dict={"openai_strict_tools_schema": True},
+    )
+    assert data["tools"] == []
+    assert state.tools == [tool]

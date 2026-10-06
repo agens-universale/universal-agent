@@ -103,14 +103,15 @@ async def test_fallback_recipient_must_pass_its_own_probe(
         await adescribe_image(
             ctx, st, att, question="what", task_context="private task"
         )
-    assert len(spy.requests) == 4
+    assert len(spy.requests) == 5
     assert [r.url.host for r in spy.requests] == [
+        "eyes.test",
         "eyes.test",
         "eyes.test",
         "main.test",
         "main.test",
     ]
-    assert all(pngs(r) == [challenge.png] for r in spy.requests[2:])
+    assert all(pngs(r) == [challenge.png] for r in spy.requests[3:])
     assert not ctx.model_router.breaker.is_open("main")
 
 
@@ -152,7 +153,7 @@ async def test_changed_eyes_access_restores_tool_without_probing_text_request(
                 if change == "token"
                 else request.headers["x-target"]
             )
-            if access in {"Bearer old-token", "old"}:
+            if access in {"Bearer old-token", "old-token", "old"}:
                 return httpx.Response(401)
             return httpx.Response(
                 200,
@@ -186,10 +187,10 @@ async def test_changed_eyes_access_restores_tool_without_probing_text_request(
     await pr._arequest_backend_canonical([message], st, ctx)
     assert st.vision_audience.tool_visible
     assert b"fs_view_image" in spy.requests[-1].content
-    assert len(spy.requests) == 2  # Probe happens only when the tool is used.
+    assert len(spy.requests) == 3  # Two rejected auth forms, then the text request.
     assert (
         auth.calls == 2
     )  # Main and candidate key share one auth acquisition.
     audience = await aensure_view_audience(ctx, st)
     assert audience.eyes is not None and audience.tool_visible
-    assert len(spy.requests) == 3
+    assert len(spy.requests) == 4

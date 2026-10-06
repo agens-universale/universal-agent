@@ -413,3 +413,54 @@ def test_parse_model_backend_text_overlays_named_keys_only():
         assert "общем backend" in str(exc)
     else:
         raise AssertionError("api_mode модели должен отвергаться")
+
+
+def test_yaml_syntax_errors_are_validation_errors():
+    import pytest
+
+    for parse in (parse_completion_kwargs_text, parse_model_backend_text):
+        with pytest.raises(ValueError, match="YAML"):
+            parse("chat_completion_headers: {")
+
+
+def test_backend_validation_preserves_environment_references(monkeypatch):
+    monkeypatch.setenv("MODEL_SETTING", "16384")
+    for key in ("chat_completions_max_tokens", "request_timeout_sec"):
+        assert parse_model_backend_text(
+            key + ': "${ENV:MODEL_SETTING}"'
+        ) == {key: "${ENV:MODEL_SETTING}"}
+
+
+def test_backend_validation_checks_resolved_environment_values(monkeypatch):
+    import pytest
+
+    monkeypatch.setenv("MODEL_TIMEOUT", "-1")
+    with pytest.raises(ValueError, match="request_timeout_sec"):
+        parse_model_backend_text('request_timeout_sec: "${ENV:MODEL_TIMEOUT}"')
+
+
+def test_backend_field_parsing_does_not_read_credential_files(monkeypatch):
+    from gc_core.config_modules import env_interpolation
+
+    def unexpected_read(*args):
+        raise AssertionError("editor must not read a file on a keystroke")
+
+    monkeypatch.setattr(env_interpolation, "_read_secret_file", unexpected_read)
+    assert parse_model_backend_text(
+        'request_timeout_sec: "${FILE:timeout.txt}"'
+    ) == {"request_timeout_sec": "${FILE:timeout.txt}"}
+
+
+def test_file_reference_cannot_replace_a_header_mapping():
+    import pytest
+
+    from gc_core.config_modules.model_registry import parse_model_backend_text
+
+    with pytest.raises(ValueError, match="chat_completion_headers"):
+        parse_model_backend_text("chat_completion_headers: '${FILE:/tmp/headers}'")
+
+
+def test_model_backend_accepts_vision_from_current_config():
+    assert parse_model_backend_text("vision: false\n") == {"vision": False}
+    assert parse_model_backend_text("vision: true\n") == {"vision": True}
+    assert parse_model_backend_text("vision: null\n") == {"vision": None}
