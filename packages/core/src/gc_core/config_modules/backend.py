@@ -41,6 +41,11 @@ def _parse_max_tokens_str(raw: str, default: int) -> int:
     return n if n >= 1 else default
 
 
+def _is_blank(value: Any) -> bool:
+    """Не задано: ``None`` или пустая строка (``${HEADERS:-}``)."""
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
 class _BackendNormalizers:
     """Нормализация полей backend — общая для секции ``backend`` и её
     переопределения на модели (``models.<alias>.backend``)."""
@@ -83,21 +88,30 @@ class _BackendNormalizers:
     )
     @classmethod
     def normalize_chat_completion_kwargs(cls, value: Any) -> dict[str, Any]:
-        if value is None:
+        if _is_blank(value):
             return {}
         if isinstance(value, dict):
             return value
-        return {}
+        # Строка/список молча становились {} — параметры терялись без следа.
+        raise ValueError(
+            "backend.chat_completion_kwargs должен быть словарём (ключ: значение)"
+        )
 
     @field_validator(
         "chat_completion_headers", mode="before", check_fields=False
     )
     @classmethod
     def normalize_chat_completion_headers(cls, value: Any) -> dict[str, str]:
-        if value is None:
+        if _is_blank(value):
             return {}
         if not isinstance(value, dict):
-            return {}
+            # Строка (``Authorization: Bearer …`` одной строкой) молча
+            # становилась {}: запрос уходил без заголовков. Значение в
+            # сообщение не попадает — в нём может быть токен.
+            raise ValueError(
+                "backend.chat_completion_headers должен быть словарём "
+                "(заголовок: значение)"
+            )
         normalized: dict[str, str] = {}
         for key, raw_val in value.items():
             if not isinstance(key, str):

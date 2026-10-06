@@ -10,6 +10,7 @@ from gc_ua_temporalio import sandbox_passthrough  # noqa: F401
 
 # isort: split
 from gc_core.agent_executor import AgentExecutor
+from gc_core.execution.contracts import ModelRequestStopped
 from gc_core.execution.environment import execution_environment
 from gc_core.execution.human import HumanRequestInterrupted
 from gc_core.security.confirm_port import (
@@ -166,6 +167,11 @@ class NativeAgentWorkflow:
         self.stop_requested = True
         if self.executor is not None:
             self.executor.stop_run()
+        stop_model = getattr(self.operations, "stop_model", None)
+        if stop_model is not None:
+            # Не ждать конца повторов запроса к модели (сбой провайдера
+            # Temporal повторяет без ограничения).
+            stop_model()
         stop_child = getattr(self.operations, "stop_child", None)
         if stop_child is not None:
             try:
@@ -446,13 +452,18 @@ class NativeAgentWorkflow:
         ran = False
         self.formatted_answer = self.post_error = None
         try:
-            self.answer = await self.executor.arun(
-                [value["content"] for value in messages],
-                thread_id=start.thread_id,
-                system=start.system_id,
-                message_ids=[value["message_id"] for value in messages],
-                account_run=start.format_text is None,
-            )
+            try:
+                self.answer = await self.executor.arun(
+                    [value["content"] for value in messages],
+                    thread_id=start.thread_id,
+                    system=start.system_id,
+                    message_ids=[value["message_id"] for value in messages],
+                    account_run=start.format_text is None,
+                )
+            except ModelRequestStopped:
+                # stop отменил запрос к модели вне шага цикла (сжатие
+                # контекста и т.п.) — ход остановлен, не упал.
+                self.answer = None
             ran = True
             if start.format_text is not None:
                 self.phase = "postprocessing"
@@ -466,6 +477,9 @@ class NativeAgentWorkflow:
                     )
                 except StructuredOutputError as exc:
                     self.post_error = str(exc)
+                except ModelRequestStopped:
+                    # Повторный stop прервал постобработку.
+                    self.post_error = "Stopped"
         finally:
             try:
                 # stop/ошибка: отложенные шаги не должны остаться только в

@@ -182,11 +182,22 @@ async def serve(config):
         async with AsyncExitStack() as stack:
             for options in worker_options(config, native, threads):
                 await stack.enter_async_context(Worker(client, **options))
-            if (
-                config.versioning.enabled
-                and config.versioning.set_current_on_start
-            ):
-                await set_current_version(client, config)
+            if not config.versioning.enabled:
+                # Без versioning новый код доигрывает ходы, начатые старым:
+                # изменённая логика workflow ломает их replay (NDE).
+                logging.getLogger(__name__).warning(
+                    "Worker Versioning выключен: перед выкладкой изменённого "
+                    "кода workflow дождитесь окончания ходов или включите "
+                    "versioning.enabled"
+                )
+            else:
+                logging.getLogger(__name__).info(
+                    "Worker Versioning: deployment %s, build %s",
+                    config.versioning.deployment_name,
+                    config.versioning.resolved_build_id(),
+                )
+                if config.versioning.set_current_on_start:
+                    await set_current_version(client, config)
             # Брошенные контексты (terminate посреди хода) и служебные данные
             # закрытых сессий — фоном, пока работает воркер.
             await NativeMaintenance(

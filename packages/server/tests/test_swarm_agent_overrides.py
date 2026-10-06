@@ -38,3 +38,12 @@ def test_registry_address_without_token_is_rejected():
     raw = {"models": {"ds": {"url": "https://a.example", "token": "FILE"}}}
     with pytest.raises(ValueError, match="models.ds"):
         _apply_agent_overrides_to_raw(raw, {"models.ds.url": "https://evil"})
+
+
+def test_typo_inside_section_is_rejected():
+    with pytest.raises(UnknownSettingError, match="security.read_gard"):
+        _apply_agent_overrides_to_raw(
+            {}, {"security": {"read_gard": {"mode": "ask"}}}
+        )
+    with pytest.raises(UnknownSettingError, match="agent.max_step"):
+        _apply_agent_overrides_to_raw({}, {"agent": {"max_step": 5}})

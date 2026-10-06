@@ -31,13 +31,15 @@ def _apply_agent_overrides_to_raw(
     """``agent_overrides`` поверх сырого YAML с семантикой ``override_settings``."""
     if not isinstance(overrides, dict) or not overrides:
         return raw
-    for key in overrides:
-        mapped = map_legacy_path(str(key))
-        if mapped is not None:
-            check_setting_path(mapped)
     updates = expand_section_updates(
         {str(key): value for key, value in overrides.items()}
     )
+    # Каждый раскрытый путь: опечатка внутри секции (``security:
+    # {read_gard: …}``) иначе молча легла бы лишним ключом.
+    for key in updates:
+        mapped = map_legacy_path(key)
+        if mapped is not None:
+            check_setting_path(mapped)
     # Правило пары адрес+токен — как в CLI и webhook: адрес записи реестра
     # без токена оставил бы токен файла на новом адресе.
     check_registry_pairs(updates)

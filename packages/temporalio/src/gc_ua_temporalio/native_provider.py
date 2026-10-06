@@ -6,6 +6,7 @@ import json
 import os
 import time
 from dataclasses import replace
+from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
@@ -52,8 +53,9 @@ class WorkerVersioningConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     enabled: bool = False
     deployment_name: str = Field(default="ua-native", min_length=1)
-    #: Номер сборки; по умолчанию — версия пакета ``gc-ua-temporalio``.
-    #: Новый код — новый номер: иначе Temporal сочтёт его той же сборкой.
+    #: Номер сборки; по умолчанию — версия пакета ``gc-ua-temporalio`` и
+    #: хэш кода (``0.3.1+a1b2c3d4e5f6``): правка без подъёма версии — тоже
+    #: новая сборка, иначе Temporal отдал бы закреплённые ходы новому коду.
     build_id: str | None = Field(default=None, min_length=1)
     #: Объявить эту сборку текущей при старте воркера — для одного воркера
     #: и локальной разработки. При раскатке это делает оператор.
@@ -64,7 +66,31 @@ class WorkerVersioningConfig(BaseModel):
             return self.build_id
         from importlib.metadata import version
 
-        return version("gc-ua-temporalio")
+        return f"{version('gc-ua-temporalio')}+{code_fingerprint()}"
+
+
+@lru_cache(maxsize=1)
+def code_fingerprint() -> str:
+    """sha256 исходников ``gc_core`` и ``gc_ua_temporalio`` (12 hex).
+
+    Код workflow и всё, что он исполняет, живёт в этих пакетах. Пути
+    относительны пакету и отсортированы — хэш одинаков на всех воркерах
+    одной сборки.
+    """
+    import gc_core
+
+    import gc_ua_temporalio
+
+    digest = hashlib.sha256()
+    for package in (gc_core, gc_ua_temporalio):
+        root = Path(package.__file__).parent
+        for path in sorted(root.rglob("*.py")):
+            digest.update(
+                f"{package.__name__}/{path.relative_to(root).as_posix()}\0".encode()
+            )
+            digest.update(path.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()[:12]
 
 
 class NativeWorkerConfig(BaseModel):

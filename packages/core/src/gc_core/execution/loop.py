@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple, Union
 
-from gc_core.execution.contracts import ExecutionFailure
+from gc_core.execution.contracts import ExecutionFailure, ModelRequestStopped
 from gc_core.settings import settings_of
 
 if TYPE_CHECKING:
@@ -150,6 +150,10 @@ class AgentLoop:
             )
         except ExecutionFailure:
             raise
+        except ModelRequestStopped:
+            # stop во время ожидания модели — как stop между шагами.
+            self.bindings.clear_loop_detector(self.state)
+            return _Outcome(result=None)
         except Exception as backend_exc:
             if not await self._atry_recover_context_overflow(backend_exc):
                 raise

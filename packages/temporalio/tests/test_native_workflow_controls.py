@@ -430,3 +430,41 @@ async def test_resubmit_after_stopped_turn_is_accepted_again(
         assert any("SECOND" in json.dumps(body) for body in requests[-1:])
         await handle.signal(NativeAgentWorkflow.close_session)
         await handle.result()
+
+
+async def test_stop_cancels_model_request_retried_without_limit(
+    tmp_path, monkeypatch
+):
+    """Провайдер недоступен, Temporal повторяет запрос без ограничения:
+    stop отменяет ожидающую activity модели, ход завершается остановленным,
+    а не ждёт конца повторов."""
+    monkeypatch.chdir(tmp_path)
+    async with runtime(tmp_path, "http://127.0.0.1:1") as (env, _, _):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            request(),
+            id="controls",
+            task_queue="native-controls",
+        )
+        status = await wait_status(handle, lambda s: s["phase"] == "running")
+        async with asyncio.timeout(30):
+            while True:
+                described = await handle.describe()
+                attempts = [
+                    activity.attempt
+                    for activity in described.raw_description.pending_activities
+                    if activity.activity_type.name == "agent.model.request"
+                ]
+                if attempts and attempts[0] >= 2:
+                    break
+                await asyncio.sleep(0.1)
+        await handle.execute_update(
+            NativeAgentWorkflow.stop_turn, status["turn_id"]
+        )
+        result = await asyncio.wait_for(handle.result(), 15)
+        assert result["answer"] is None
+        assert (await handle.query(NativeAgentWorkflow.status))[
+            "phase"
+        ] == "stopped"
+        history = await handle.fetch_history()
+    await Replayer(workflows=[NativeAgentWorkflow]).replay_workflow(history)

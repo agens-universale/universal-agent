@@ -61,7 +61,9 @@ def is_transient_provider_failure(failure) -> bool:
 
     Не транзиентны: отказ по существу (4xx), авторизация, переполнение
     контекста, отказ из-за картинок, открытый предохранитель алиаса,
-    вложенный отказ с кодом провайдера (``insufficient_quota``).
+    вложенный отказ с кодом провайдера (``insufficient_quota``), а также
+    транспорт, который повтор не исправит: неразрешимое имя, сертификат TLS,
+    неверный URL (``details["permanent"]``).
     """
     if failure is None or failure.kind != "provider":
         return False
@@ -74,7 +76,11 @@ def is_transient_provider_failure(failure) -> bool:
     ):
         return False
     details = failure.details or {}
-    if "alias" in details or details.get("raw_code") is not None:
+    if (
+        "alias" in details
+        or details.get("raw_code") is not None
+        or details.get("permanent")
+    ):
         return False
     if "status_code" not in details:
         return True  # транспорт: обрыв, таймаут, отказ соединения

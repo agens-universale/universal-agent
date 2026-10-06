@@ -31,6 +31,15 @@ class OutcomeUnknown(ExecutionFailure):
     """An external operation may have completed; do not blindly repeat it."""
 
 
+class ModelRequestStopped(Exception):
+    """Запрос к модели прерван остановкой хода (stop во время ожидания).
+
+    Не ошибка хода: цикл завершает ход как остановленный, так же как при
+    проверке stop между шагами. Durable-исполнитель отменяет ожидающую
+    activity модели — иначе stop ждал бы конца её повторов.
+    """
+
+
 class ToolOutcomeUnknown(Exception):
     """Исход внешнего эффекта инструмента неизвестен.
 

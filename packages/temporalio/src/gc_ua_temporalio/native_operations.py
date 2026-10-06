@@ -11,6 +11,7 @@ from gc_core.execution.contracts import (
     ExecutionFailure,
     GuardPreconditionChanged,
     InfrastructureFailure,
+    ModelRequestStopped,
     OutcomeUnknown,
     ToolOutcomeUnknown,
     ToolResult,
@@ -159,6 +160,9 @@ class NativeOperations:
         self.released = False
         #: Таймауты и повторы по уровням; после подготовки хода — с воркера.
         self.activity_settings = DEFAULT_ACTIVITY_SETTINGS
+        #: Ожидающая activity модели — её отменяет stop (``stop_model``).
+        self._model_task = None
+        self._stopped_model_task = None
 
     def next_operation_id(self, kind):
         return self.new_id(kind)
@@ -257,19 +261,44 @@ class NativeOperations:
         provider = getattr(self, "router_provider", None)
         router = provider() if provider is not None else self.router
         self.router = router
-        reply = await self.call(
-            "agent.model.request",
-            {
-                "request": asdict(request),
-                "circuit_breaker": router.breaker.snapshot(),
-                "routing": public_router_identity(router),
-            },
-            NativeModelReply,
-            operation_id=request.operation_id,
-            model=True,
+        task = asyncio.ensure_future(
+            self.call(
+                "agent.model.request",
+                {
+                    "request": asdict(request),
+                    "circuit_breaker": router.breaker.snapshot(),
+                    "routing": public_router_identity(router),
+                },
+                NativeModelReply,
+                operation_id=request.operation_id,
+                model=True,
+            )
         )
+        self._model_task = task
+        try:
+            reply = await task
+        except asyncio.CancelledError:
+            # Отмену workflow не глотаем: только отмена от stop.
+            if self._stopped_model_task is not task:
+                raise
+            # Отменено stop'ом: activity могла повторять сбой провайдера
+            # сколько угодно — ход завершается как остановленный.
+            raise ModelRequestStopped("Ход остановлен") from None
+        finally:
+            self._model_task = None
         router.breaker.replace_from(reply.circuit_breaker)
         return reply.result
+
+    def stop_model(self):
+        """stop: отменить ожидающую activity модели (и её повторы).
+
+        Следующие запросы не блокируются: stop между шагами ловит цикл, а
+        постобработка остановленного хода (``format_text``) идёт, как в local.
+        """
+        task = self._model_task
+        if task is not None and not task.done():
+            self._stopped_model_task = task
+            task.cancel()
 
     async def tool_effect(self, request):
         metadata = self.tool_metadata.get(request.name, {})

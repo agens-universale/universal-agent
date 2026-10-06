@@ -1,5 +1,8 @@
 """Worker-only provider error encoding; no HTTP objects enter durable history."""
 
+import socket
+import ssl
+
 import httpx
 from gc_core.execution.contracts import ExecutionFailure, ModelFailure
 from gc_core.model_router import AliasCircuitOpenError
@@ -34,6 +37,43 @@ def _provider_failure(exc, message, details=None):
     )
 
 
+#: Отказ транспорта, который повтор не исправит: адрес не разрешается, TLS
+#: не принимает сертификат, URL неверен. Временный сбой DNS (``EAI_AGAIN``)
+#: остаётся транзиентным.
+_PERMANENT_DNS = {
+    code
+    for code in (
+        getattr(socket, "EAI_NONAME", None),
+        getattr(socket, "EAI_NODATA", None),
+        getattr(socket, "EAI_SERVICE", None),
+    )
+    if code is not None
+}
+
+
+def _permanent_transport_reason(exc: httpx.TransportError) -> str | None:
+    if isinstance(exc, (httpx.UnsupportedProtocol, httpx.LocalProtocolError)):
+        return "invalid_url"
+    seen = set()
+    cause = exc
+    while cause is not None and id(cause) not in seen:
+        seen.add(id(cause))
+        if isinstance(cause, ssl.SSLCertVerificationError):
+            return "tls"
+        if (
+            isinstance(cause, socket.gaierror)
+            and cause.errno in _PERMANENT_DNS
+        ):
+            return "dns"
+        cause = cause.__cause__ or cause.__context__
+    text = str(exc)
+    if "CERTIFICATE_VERIFY_FAILED" in text:
+        return "tls"
+    if "nodename nor servname" in text or "Name or service not known" in text:
+        return "dns"
+    return None
+
+
 def encode_model_failure(exc: Exception) -> ModelFailure:
     """Classify supported errors; never serialize a live provider exception."""
     name = type(exc).__name__
@@ -49,6 +89,12 @@ def encode_model_failure(exc: Exception) -> ModelFailure:
         )
         return _provider_failure(exc, message, {"status_code": status})
     if isinstance(exc, httpx.TransportError):
+        reason = _permanent_transport_reason(exc)
+        if reason is not None:
+            # str(exc) может содержать адрес с учётными данными — только причина.
+            return _provider_failure(
+                exc, f"{name}: {reason}", {"permanent": reason}
+            )
         return _provider_failure(exc, name)
     if isinstance(exc, EmbeddedChoiceError):
         return _provider_failure(

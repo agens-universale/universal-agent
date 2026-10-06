@@ -119,3 +119,29 @@ def test_explicit_chat_mode_uses_model_headers_in_responses():
     assert "Authorization" not in build_call_headers(
         _StateStub(), ctx, resolved
     )
+
+
+def test_string_instead_of_headers_or_kwargs_is_a_validation_error():
+    """Строка на месте словаря раньше молча становилась {} — запрос уходил
+    без заголовков. Теперь ошибка валидации без значения (там может быть
+    токен); пустая строка (``${HEADERS:-}``) — «не задано»."""
+    import pytest
+    from gc_core.config import apply_cli_overrides
+    from gc_testkit.settings import make_settings
+    from pydantic import ValidationError
+
+    for path in (
+        "backend.chat_completion_headers",
+        "backend.chat_completion_kwargs",
+    ):
+        with pytest.raises(ValidationError) as exc:
+            apply_cli_overrides(
+                make_settings(),
+                extra_overrides={path: "Authorization: Bearer sk-secret"},
+            )
+        assert path in str(exc.value)
+        assert "sk-secret" not in str(exc.value)
+        loaded = apply_cli_overrides(
+            make_settings(), extra_overrides={path: ""}
+        )
+        assert loaded.settings.backend.model_dump()[path.split(".")[1]] == {}
