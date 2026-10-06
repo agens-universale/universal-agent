@@ -26,3 +26,18 @@ with workflow.unsafe.imports_passed_through():
     import pydantic  # noqa: F401
     import readability  # noqa: F401
     import trafilatura  # noqa: F401
+
+    # Остальные сторонние библиотеки, которые ядро импортирует напрямую.
+    # В песочнице каждый запуск workflow импортировал бы их заново, а копии
+    # attrs/jsonschema удерживаются после конца workflow: +1,4 МБ RSS на
+    # сессию (замер 06.10, 600 сессий). Состояния workflow в них нет.
+    import attr  # noqa: F401
+    import attrs  # noqa: F401
+    import chardet  # noqa: F401
+    import dotenv  # noqa: F401
+    import idna  # noqa: F401
+    import jsonschema  # noqa: F401
+    import pydantic_settings  # noqa: F401
+    import referencing  # noqa: F401
+    import typing_inspection  # noqa: F401
+    import yaml  # noqa: F401
