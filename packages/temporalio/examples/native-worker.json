@@ -19,7 +19,6 @@
   },
   "profiles": {
     "production": {
-      "revision": "v1",
       "workspace": "${ENV:UA_NATIVE_WORKSPACE}",
       "store_id": "files",
       "preview_stream": false,

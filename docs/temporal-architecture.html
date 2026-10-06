@@ -80,20 +80,21 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
   <aside class="sidebar">
     <a class="brand" href="#top">Universal Agent<br>Local / Temporal</a>
     <p class="sidebar-subtitle">Нативная архитектура и реализация<br>02.10.2026</p>
-    <nav aria-label="Оглавление"><a href="#section-0">0. Как устроен штатный агент без Temporal</a>
-<a href="#section-1">1. Процессы, очереди и хранилища</a>
-<a href="#section-2">2. Порты операций: один код, два исполнителя</a>
-<a href="#section-3">3. Один ход</a>
-<a href="#section-4">4. Guards, подтверждение и эффект</a>
-<a href="#section-5">5. MCP и фоновые процессы</a>
-<a href="#section-6">6. Субагент в child workflow</a>
-<a href="#section-7">7. Хранение: тред, история Temporal и payload</a>
-<a href="#section-8">8. Ошибки, повторы и неизвестный исход</a>
-<a href="#section-9">9. Сервер и клиент</a>
-<a href="#section-10">10. Конфигурация</a>
-<a href="#section-11">11. Ограничения</a>
-<a href="#section-12">12. Проверки</a>
-<a href="#section-13">13. С каких файлов начинать</a></nav>
+    <nav aria-label="Оглавление"><a href="#с-чего-начать-изучение">С чего начать изучение</a>
+<a href="#0-как-устроен-штатный-агент-без-temporal">0. Как устроен штатный агент без Temporal</a>
+<a href="#1-процессы-очереди-и-хранилища">1. Процессы, очереди и хранилища</a>
+<a href="#2-порты-операций-один-код-два-исполнителя">2. Порты операций: один код, два исполнителя</a>
+<a href="#3-один-ход">3. Один ход</a>
+<a href="#4-guards-подтверждение-и-эффект">4. Guards, подтверждение и эффект</a>
+<a href="#5-mcp-и-фоновые-процессы">5. MCP и фоновые процессы</a>
+<a href="#6-субагент-в-child-workflow">6. Субагент в child workflow</a>
+<a href="#7-хранение-тред-история-temporal-и-payload">7. Хранение: тред, история Temporal и payload</a>
+<a href="#8-ошибки-повторы-и-неизвестный-исход">8. Ошибки, повторы и неизвестный исход</a>
+<a href="#9-сервер-и-клиент">9. Сервер и клиент</a>
+<a href="#10-конфигурация">10. Конфигурация</a>
+<a href="#11-ограничения">11. Ограничения</a>
+<a href="#12-проверки">12. Проверки</a>
+<a href="#13-с-каких-файлов-начинать">13. С каких файлов начинать</a></nav>
     <div class="sidebar-footer">Исходник документа:<br><a href="temporal-architecture.md">temporal-architecture.md</a><br>Схемы встроены в страницу и доступны без интернета.</div>
   </aside>
   <main id="top">
@@ -108,10 +109,11 @@ footer { color: var(--muted); font-size: 13px; margin-top: 24px; }
       <p class="review-note">Сначала показан обычный агент, затем фактическая интеграция: процессы, activities, ход, guards, MCP, субагенты, хранение и семантика ошибок.</p>
       <div class="badges"><span class="badge">9 схем</span><span class="badge">Общий AgentExecutor и AgentLoop</span><span class="badge">Штатный ThreadSession</span><span class="badge">Явные внешние операции</span></div>
     </header>
-    <article class="reader"><p><strong>Статус: реализовано в ветке <code>feat/temporal-runtime</code>.</strong> База сравнения — <code>develop</code>
-<code>824870f6</code> (влит 05.10.2026, вместе с изображениями). Документ описывает фактические
-классы, activities и поведение; итоги проверок — в <a href="#12-%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B8">разделе 12</a>,
-порядок чтения кода — в <a href="#13-%D1%81-%D0%BA%D0%B0%D0%BA%D0%B8%D1%85-%D1%84%D0%B0%D0%B9%D0%BB%D0%BE%D0%B2-%D0%BD%D0%B0%D1%87%D0%B8%D0%BD%D0%B0%D1%82%D1%8C">разделе 13</a>.</p>
+    <article class="reader"><p><strong>Статус: реализовано в ветке <code>feat/temporal-runtime</code>.</strong> База — <code>develop</code>
+<code>8f43bf03</code> (влит 05.10.2026: изображения, gc-chat); эталон поведения local —
+трассы develop <code>824870f6</code>. Документ описывает фактические классы, activities и
+поведение; итоги проверок — в <a href="#12-%D0%BF%D1%80%D0%BE%D0%B2%D0%B5%D1%80%D0%BA%D0%B8">разделе 12</a>, порядок чтения кода — в
+<a href="#13-%D1%81-%D0%BA%D0%B0%D0%BA%D0%B8%D1%85-%D1%84%D0%B0%D0%B9%D0%BB%D0%BE%D0%B2-%D0%BD%D0%B0%D1%87%D0%B8%D0%BD%D0%B0%D1%82%D1%8C">разделе 13</a>.</p>
 <p>Основное решение: <strong>один <code>AgentExecutor</code>, один <code>ThreadSession</code>, один агентский цикл</strong>.
 Temporal меняет только исполнителя внешних операций: модель, внешние эффекты
 инструментов, I/O хранилища и подготовку контекста. Пакет <code>gc-ua-temporalio</code>
@@ -122,8 +124,32 @@ Temporal меняет только исполнителя внешних опе�
 локально и к Temporal Server не обращаются. TUI и <code>gc-cli</code> работают только локально;
 Temporal включается worker'ом <code>gc-temporal-native-worker</code>, клиентом
 <code>gc-temporal-native</code> или server backend <code>execution_backend: temporal-native</code>.</p>
+<h2 id="с-чего-начать-изучение">С чего начать изучение</h2>
+<ol>
+<li><strong>Картина целиком — 15 минут.</strong> Прочитайте вступление выше, затем
+<a href="#02-%D0%BE%D0%B4%D0%B8%D0%BD-%D1%88%D1%82%D0%B0%D1%82%D0%BD%D1%8B%D0%B9-%D1%85%D0%BE%D0%B4">раздел 0.2</a> (штатный ход без Temporal) и
+<a href="#3-%D0%BE%D0%B4%D0%B8%D0%BD-%D1%85%D0%BE%D0%B4">раздел 3</a> (тот же ход в Temporal). Главная мысль: агентский
+цикл один и тот же, Temporal подменяет только исполнителей внешних операций
+(модель, эффекты инструментов, хранилище) через порты
+<a href="#2-%D0%BF%D0%BE%D1%80%D1%82%D1%8B-%D0%BE%D0%BF%D0%B5%D1%80%D0%B0%D1%86%D0%B8%D0%B9-%D0%BE%D0%B4%D0%B8%D0%BD-%D0%BA%D0%BE%D0%B4-%D0%B4%D0%B2%D0%B0-%D0%B8%D1%81%D0%BF%D0%BE%D0%BB%D0%BD%D0%B8%D1%82%D0%B5%D0%BB%D1%8F">раздела 2</a>.</li>
+<li><strong>Запустить и посмотреть.</strong> Поднимите dev-сервер и worker по
+<a href="temporal-configuration.md#native-quickstart">quickstart</a>, отправьте одно
+сообщение клиентом <code>gc-temporal-native start</code> и откройте ход в Temporal UI
+(<code>http://localhost:8233</code>): каждая activity подписана (<code>Model: …</code>, <code>Tool: …</code>,
+<code>Guard: …</code>, <code>Thread store: …</code>) — это и есть таблица
+<a href="#activities">Activities</a> в живом виде.</li>
+<li><strong>Как переживаются сбои.</strong> <a href="#8-%D0%BE%D1%88%D0%B8%D0%B1%D0%BA%D0%B8-%D0%BF%D0%BE%D0%B2%D1%82%D0%BE%D1%80%D1%8B-%D0%B8-%D0%BD%D0%B5%D0%B8%D0%B7%D0%B2%D0%B5%D1%81%D1%82%D0%BD%D1%8B%D0%B9-%D0%B8%D1%81%D1%85%D0%BE%D0%B4">Раздел 8</a>
+(что видит модель при падении, что становится FAILED, что ждёт исправленного
+воркера) и <a href="#7-%D1%85%D1%80%D0%B0%D0%BD%D0%B5%D0%BD%D0%B8%D0%B5-%D1%82%D1%80%D0%B5%D0%B4-%D0%B8%D1%81%D1%82%D0%BE%D1%80%D0%B8%D1%8F-temporal-%D0%B8-payload">раздел 7</a> (три
+хранилища: тред, история Temporal, payload).</li>
+<li><strong>Код.</strong> Пять файлов из <a href="#13-%D1%81-%D0%BA%D0%B0%D0%BA%D0%B8%D1%85-%D1%84%D0%B0%D0%B9%D0%BB%D0%BE%D0%B2-%D0%BD%D0%B0%D1%87%D0%B8%D0%BD%D0%B0%D1%82%D1%8C">раздела 13</a> по порядку,
+затем тема, которая нужна (guards, субагенты, MCP, хранилища).</li>
+<li><strong>Поведение в тестах.</strong> <code>test_native_workflow_live.py</code> (ход на настоящем
+Temporal + replay) и <code>test_native_parity_live.py</code> (local и Temporal на одних
+ответах модели) — самые короткие исполняемые описания.</li>
+</ol>
 <p>Схемы для просмотра отдельно и вставки в Outline:</p>
-<div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="Нативная интеграция с Temporal">
+<div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="С чего начать изучение">
 <thead>
 <tr>
 <th scope="col">Схема</th>
@@ -179,8 +205,8 @@ Temporal включается worker'ом <code>gc-temporal-native-worker</code>
 </tr>
 </tbody>
 </table></div>
-<h2 id="section-0">0. Как устроен штатный агент без Temporal</h2>
-<h3>0.1. Основные классы</h3>
+<h2 id="0-как-устроен-штатный-агент-без-temporal">0. Как устроен штатный агент без Temporal</h2>
+<h3 id="01-основные-классы">0.1. Основные классы</h3>
 <p>Клиент передаёт сообщения исполнителю. <code>AgentExecutor</code> открывает тред, создаёт
 состояние хода и запускает общий цикл. Модель предлагает текст или инструменты;
 цикл проверяет результат, исполняет действия и передаёт outputs следующему запросу.
@@ -235,7 +261,7 @@ Temporal включается worker'ом <code>gc-temporal-native-worker</code>
 </tr>
 </tbody>
 </table></div>
-<h3>0.2. Один штатный ход</h3>
+<h3 id="02-один-штатный-ход">0.2. Один штатный ход</h3>
 
 <figure class="diagram" id="diagram-2">
   <div class="diagram-toolbar">
@@ -259,7 +285,7 @@ Temporal включается worker'ом <code>gc-temporal-native-worker</code>
 post-run шаге вызывающий использует <code>account_run=False</code>, затем вызывает
 <code>aclose_run_accounting()</code>. Отмена во время MCP teardown после завершившегося цикла
 не должна потерять его итог и usage; cancellation пробрасывается после сохранения.</p>
-<h3>0.3. Модель, инструменты и остальные подсистемы</h3>
+<h3 id="03-модель-инструменты-и-остальные-подсистемы">0.3. Модель, инструменты и остальные подсистемы</h3>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="0. Как устроен штатный агент без Temporal">
 <thead>
 <tr>
@@ -310,7 +336,7 @@ post-run шаге вызывающий использует <code>account_run=Fa
 Необработанный хвост возвращает <code>take_undelivered_messages()</code>. Продолжение треда
 в локальном режиме создаёт новый ход на сохранённых данных; файловое хранилище
 не сохраняет стек Python, HTTP-запрос или живую MCP-сессию.</p>
-<h2 id="section-1">1. Процессы, очереди и хранилища</h2>
+<h2 id="1-процессы-очереди-и-хранилища">1. Процессы, очереди и хранилища</h2>
 
 <figure class="diagram" id="diagram-3">
   <div class="diagram-toolbar">
@@ -348,11 +374,15 @@ post-run шаге вызывающий использует <code>account_run=Fa
 </tr>
 <tr>
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/native_provider.py"><code>NativeContextProvider</code></a></td>
-<td>Собирает на worker'е штатный <code>acreate_run_context</code> по профилю воркера: workflow знает только имя профиля.</td>
+<td>Собирает на worker'е штатный <code>acreate_run_context</code> по профилю воркера: workflow знает только имя профиля (как Pydantic AI — модель по ключу реестра). Смена настроек или токена — перезапуск воркера, живые сессии продолжают работу.</td>
+</tr>
+<tr>
+<td><a href="../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py"><code>NativeMaintenance</code></a></td>
+<td>Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит квитанции и preview workflow, которых Temporal уже не знает, и квитанции тредов старше 7 дней.</td>
 </tr>
 <tr>
 <td>ThreadStore</td>
-<td>История диалога. <code>DurableFileThreadStore</code>, <code>SQLiteThreadStore</code> или своя реализация durable-контракта (<a href="#7-%D1%85%D1%80%D0%B0%D0%BD%D0%B5%D0%BD%D0%B8%D0%B5-%D1%82%D1%80%D0%B5%D0%B4-%D0%B8%D1%81%D1%82%D0%BE%D1%80%D0%B8%D1%8F-temporal-%D0%B8-payload">раздел 7</a>).</td>
+<td>История диалога. <code>DurableFileThreadStore</code>, <code>SQLiteThreadStore</code> или своя реализация durable-контракта (<a href="#7-%D1%85%D1%80%D0%B0%D0%BD%D0%B5%D0%BD%D0%B8%D0%B5-%D1%82%D1%80%D0%B5%D0%B4-%D0%B8%D1%81%D1%82%D0%BE%D1%80%D0%B8%D1%8F-temporal-%D0%B8-payload">раздел 7</a>). По умолчанию — каталог <code>threads</code> рядом с <code>receipts_database</code>, не в workspace агента.</td>
 </tr>
 <tr>
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/storage/technical.py"><code>TechnicalStore</code></a></td>
@@ -360,11 +390,11 @@ post-run шаге вызывающий использует <code>account_run=Fa
 </tr>
 <tr>
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/payload_storage.py">Payload storage</a></td>
-<td>External storage Temporal SDK, включён по умолчанию: payload больше порога (32 КБ) лежат вне истории.</td>
+<td>External storage Temporal SDK, включён по умолчанию (каталог <code>payloads</code> рядом с <code>receipts_database</code>): payload больше порога (32 КБ) лежат вне истории, и большой вывод инструмента или длинный ход не упираются в лимиты Temporal (2 МБ на payload, 50 МБ на историю).</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="section-2">2. Порты операций: один код, два исполнителя</h2>
+<h2 id="2-порты-операций-один-код-два-исполнителя">2. Порты операций: один код, два исполнителя</h2>
 
 <figure class="diagram" id="diagram-4">
   <div class="diagram-toolbar">
@@ -407,7 +437,7 @@ readability на уровне модулей, как в develop, хотя workfl
 на worker'е и приходят в workflow полями <code>ModelFailure.image_*</code>. Журнал правок
 (<code>agent_edits</code>) в durable-исполнении выключен: <code>NativeContextProvider</code> гасит
 <code>agent_edits.record</code> в профиле.</p>
-<h3>Activities</h3>
+<h3 id="activities">Activities</h3>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="2. Порты операций: один код, два исполнителя">
 <thead>
 <tr>
@@ -463,14 +493,14 @@ readability на уровне модулей, как в develop, хотя workfl
 <tr>
 <td><code>agent.tool.execute</code></td>
 <td>resource</td>
-<td>Внешний эффект инструмента после повторной проверки фактов</td>
-<td>read-only — до 5; эффект — см. <a href="#8-%D0%BE%D1%88%D0%B8%D0%B1%D0%BA%D0%B8-%D0%BF%D0%BE%D0%B2%D1%82%D0%BE%D1%80%D1%8B-%D0%B8-%D0%BD%D0%B5%D0%B8%D0%B7%D0%B2%D0%B5%D1%81%D1%82%D0%BD%D1%8B%D0%B9-%D0%B8%D1%81%D1%85%D0%BE%D0%B4">раздел 8</a></td>
+<td>Внешний эффект инструмента после повторной проверки фактов. Лимит времени — <code>timeout</code> инструмента (для <code>exec_command</code> без него — <code>agent.exec_timeout_sec</code>) + 5 минут, не меньше 15 минут</td>
+<td>чтения (fs-чтения, <code>fetch_url</code>, <code>fs_view_image</code>) — до 5; эффект — см. <a href="#8-%D0%BE%D1%88%D0%B8%D0%B1%D0%BA%D0%B8-%D0%BF%D0%BE%D0%B2%D1%82%D0%BE%D1%80%D1%8B-%D0%B8-%D0%BD%D0%B5%D0%B8%D0%B7%D0%B2%D0%B5%D1%81%D1%82%D0%BD%D1%8B%D0%B9-%D0%B8%D1%81%D1%85%D0%BE%D0%B4">раздел 8</a></td>
 </tr>
 <tr>
 <td><code>agent.memory.execute</code>, <code>agent.memory.hash</code></td>
 <td>resource</td>
 <td>Project memory</td>
-<td>эффект / до 5</td>
+<td>чтение — до 5, запись — эффект / до 5</td>
 </tr>
 <tr>
 <td><code>agent.summary.trace</code></td>
@@ -501,7 +531,7 @@ readability на уровне модулей, как в develop, хотя workfl
 <p>Имена закреплены тестом <a href="../packages/temporalio/tests/test_native_names.py"><code>test_native_names.py</code></a>:
 это данные совместимости живых сессий. Подписи в Temporal UI безопасны —
 без промптов, содержимого файлов и credentials.</p>
-<h2 id="section-3">3. Один ход</h2>
+<h2 id="3-один-ход">3. Один ход</h2>
 
 <figure class="diagram" id="diagram-5">
   <div class="diagram-toolbar">
@@ -526,8 +556,17 @@ finish gate и учёт делает <code>AgentExecutor</code>. Workflow отв
 треда. Диалог уже лежит в ThreadStore, переносить его не нужно. Списки
 дедупликации ограничены последними 1000 записями. Простаивающая сессия держит
 почти пустую историю, поэтому релиз нового кода её не ломает; ход, идущий в
-момент релиза, доигрывается старым кодом — worker нужно останавливать мягко.</p>
-<h2 id="section-4">4. Guards, подтверждение и эффект</h2>
+момент релиза, доигрывается старым кодом — worker нужно останавливать мягко.
+Если несовместимый код всё же получил такой ход, недетерминизм роняет только
+workflow task: run остаётся RUNNING и продолжит ход на исправленном воркере
+(<a href="#8-%D0%BE%D1%88%D0%B8%D0%B1%D0%BA%D0%B8-%D0%BF%D0%BE%D0%B2%D1%82%D0%BE%D1%80%D1%8B-%D0%B8-%D0%BD%D0%B5%D0%B8%D0%B7%D0%B2%D0%B5%D1%81%D1%82%D0%BD%D1%8B%D0%B9-%D0%B8%D1%81%D1%85%D0%BE%D0%B4">раздел 8</a>).</p>
+<p><strong>Владение тредом.</strong> Тред принадлежит сессии (workflow ID): локальный TUI/CLI и
+workflow с другим ID в него не пишут. Сессия снимает владение сама — при
+закрытии (в том числе после Continue-As-New без хода), при ошибке и отмене.
+После terminate или падения процесса следующая сессия с любым ID проверяет
+workflow владельца: не RUNNING или не найден — владение снимается и тред
+захватывается; живой владелец не уступает.</p>
+<h2 id="4-guards-подтверждение-и-эффект">4. Guards, подтверждение и эффект</h2>
 
 <figure class="diagram" id="diagram-6">
   <div class="diagram-toolbar">
@@ -550,9 +589,15 @@ finish gate и учёт делает <code>AgentExecutor</code>. Workflow отв
 выполняются в workflow, а факты о файловой системе приносит
 <a href="../packages/core/src/gc_core/security/guard_probe.py"><code>evaluate_guard_probe</code></a>.
 Probe вызывается только для файловых и командных инструментов и только для
-включённых проверок; защищённые пути (<code>protected_paths</code>) включены по умолчанию.
+включённых проверок. Исключение — <strong>защита системных путей</strong> (<code>protected_read</code>,
+<code>protected_write</code>): она работает всегда, как в develop, и настройкой не
+выключается (<code>security.protected_paths.enabled</code> не действует). Поэтому
+<code>Guard: protected_write</code> виден в истории и при выключенных <code>read_guard</code>,
+<code>write_guard</code>, <code>url_policy</code> и <code>command_moderation</code>. Под защитой — <code>~/.gc</code>,
+<code>.gc</code> проекта, каталоги состояния и все служебные пути воркера (треды,
+квитанции, payload; базы — вместе с <code>-wal</code>/<code>-shm</code>).
 Ожидание человека не занимает worker: это <code>workflow.wait_condition</code>.</p>
-<h2 id="section-5">5. MCP и фоновые процессы</h2>
+<h2 id="5-mcp-и-фоновые-процессы">5. MCP и фоновые процессы</h2>
 
 <figure class="diagram" id="diagram-7">
   <div class="diagram-toolbar">
@@ -575,8 +620,11 @@ Discovery, вызовы и teardown MCP идут в одной задаче, п�
 остаётся живой; закрывается владелец только при потере транспорта
 (<code>McpSessionLostError</code>). Ресурсы не переживают процесс: после перезапуска
 worker'а модель получает <code>ResourceOwnerLost</code> и может продолжить; внутреннее
-состояние MCP-сервера не восстанавливается. Фоновый владелец создаётся лениво.</p>
-<h2 id="section-6">6. Субагент в child workflow</h2>
+состояние MCP-сервера не восстанавливается. Фоновый владелец создаётся лениво.
+Владелец хода — <code>&lt;workflow ID&gt;/&lt;первый run цепочки&gt;/turn-N</code>: новая сессия на том
+же workflow ID не наследует кэш и квитанции прошлой. Контекст сессии, снятой
+terminate посреди хода, освобождает <code>NativeMaintenance</code>.</p>
+<h2 id="6-субагент-в-child-workflow">6. Субагент в child workflow</h2>
 
 <figure class="diagram" id="diagram-8">
   <div class="diagram-toolbar">
@@ -594,8 +642,11 @@ worker'а модель получает <code>ResourceOwnerLost</code> и мож
 </figure>
 <p>Одновременно активен один ребёнок, как в local. Сигнал ребёнка, пришедший раньше
 handle, ждёт его, а сигнал неактивного ребёнка игнорируется и родителя не роняет.
-Сообщение, пришедшее после конца цикла ребёнка, возвращается родителю.</p>
-<h2 id="section-7">7. Хранение: тред, история Temporal и payload</h2>
+Сообщение, пришедшее после конца цикла ребёнка или не доставленное ему сигналом,
+возвращается родителю. Вопрос человеку от ребёнка, который завершился, снимается.
+Ребёнок, снятый terminate или по таймауту, — ошибка инструмента
+<code>subagent_interrupted</code> (часть его действий могла выполниться), а не отказ сессии.</p>
+<h2 id="7-хранение-тред-история-temporal-и-payload">7. Хранение: тред, история Temporal и payload</h2>
 
 <figure class="diagram" id="diagram-9">
   <div class="diagram-toolbar">
@@ -695,10 +746,15 @@ handle, ждёт его, а сигнал неактивного ребёнка �
 </tbody>
 </table></div>
 <p>В режиме <code>turn</code> шаги до сброса защищены историей workflow: после падения worker'а
-replay восстанавливает буфер. Шаги теряются из треда, только если workflow
+replay восстанавливает буфер; при сбое коммита буфер не очищается, и повторный
+сброс дописывает шаги. Шаги теряются из треда, только если workflow
 принудительно завершить (<code>terminate</code>) до сброса. Local без durable-исполнителя
 <code>turn</code> отклоняет.</p>
-<h2 id="section-8">8. Ошибки, повторы и неизвестный исход</h2>
+<p><strong>Сброс треда</strong> в durable-хранилище убирает то же, что локальный: файлы истории,
+картинки треда, журнал правок. Квитанции прошлого поколения остаются (поздний
+повтор операции получает прежний исход), но без meta треда. Квитанции старше
+7 дней удаляет <code>NativeMaintenance</code>.</p>
+<h2 id="8-ошибки-повторы-и-неизвестный-исход">8. Ошибки, повторы и неизвестный исход</h2>
 <p>Семантика как у Pydantic AI и как в local: ход продолжается, если модель может
 отреагировать на ошибку.</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="8. Ошибки, повторы и неизвестный исход">
@@ -722,7 +778,7 @@ replay восстанавливает буфер. Шаги теряются из
 <td>Temporal повторяет; если ответ пришёл, а квитанция нет — повторная оплата одного запроса</td>
 </tr>
 <tr>
-<td>Read-only инструмент, подготовка, хранилище</td>
+<td>Чтение (fs-чтения, <code>fetch_url</code>, <code>fs_view_image</code>, чтение памяти проекта), подготовка, хранилище</td>
 <td>Повтор Temporal (до 5)</td>
 </tr>
 <tr>
@@ -734,15 +790,23 @@ replay восстанавливает буфер. Шаги теряются из
 <td><code>ResourceOwnerLost</code> — ошибка инструмента</td>
 </tr>
 <tr>
+<td>Инструмент дольше лимита activity</td>
+<td><code>ToolOutcomeUnknown</code> «превысило лимит времени activity»</td>
+</tr>
+<tr>
 <td>Хранилище треда недоступно, подготовка контекста, исчерпаны повторы модели</td>
-<td><code>InfrastructureFailure</code> — ход завершается ошибкой</td>
+<td>Доменный отказ: run становится FAILED (<code>ApplicationError</code>)</td>
+</tr>
+<tr>
+<td>Недетерминизм после деплоя, запрет песочницы, баг в коде workflow</td>
+<td>Падает только workflow task, run остаётся RUNNING и продолжает ход на исправленном воркере. Если сбой случился после того, как код запланировал уборку (<code>finally</code> с activity), replay исправленного кода может разойтись — тогда <code>temporal workflow reset</code> на событие до хода</td>
 </tr>
 </tbody>
 </table></div>
 <p>Операторского восстановления нет: решение после неизвестного исхода принимает
 модель, как после падения процесса в local. Exactly-once внешних эффектов не
 обещается.</p>
-<h2 id="section-9">9. Сервер и клиент</h2>
+<h2 id="9-сервер-и-клиент">9. Сервер и клиент</h2>
 <p><code>execution_backend: temporal-native</code> монтирует HTTP API
 <a href="../packages/temporalio/src/gc_ua_temporalio/http_api.py"><code>http_api</code></a> и
 переводит <code>/events/webhook</code>, <code>/runs</code>, <code>/logs</code> на Temporal. Сообщение отправляется
@@ -751,12 +815,15 @@ replay восстанавливает буфер. Шаги теряются из
 продолжает тот же тред. Статусы: <code>idle</code>/<code>completed</code> → <code>completed</code>,
 <code>stopped</code> → <code>cancelled</code>, <code>failed</code> → <code>failed</code>.</p>
 <p>Команды клиента: <code>gc-temporal-native start | status | result | stop | answer | close | send</code>;
-<code>--config</code> (JSON воркера) нужен, чтобы читать крупные payload из <code>payload_storage</code>.</p>
-<h2 id="section-10">10. Конфигурация</h2>
+<code>--config</code> (JSON воркера) нужен, чтобы читать крупные payload из <code>payload_storage</code>.
+Ошибки update и query сессии (устаревший ход, сессия ещё не готова) API отдаёт
+как 409. Повтор сообщения с тем же <code>message_id</code> — <code>duplicate: true</code>, кроме
+сообщения, отброшенного остановкой хода: его повтор принимается заново.</p>
+<h2 id="10-конфигурация">10. Конфигурация</h2>
 <p><a href="temporal-configuration.md#native-quickstart">Native quickstart и настройки</a>,
 <a href="temporal-native.md">размещение worker'а</a>, пример
 <a href="../packages/temporalio/examples/native-worker.json"><code>native-worker.json</code></a>.</p>
-<h2 id="section-11">11. Ограничения</h2>
+<h2 id="11-ограничения">11. Ограничения</h2>
 <ul>
 <li>Один процесс worker'а обслуживает все очереди и один workspace; раздельное
 развёртывание model/resource не поддержано этим entrypoint.</li>
@@ -779,10 +846,13 @@ worker'а: несколько worker'ов на разных хостах тре�
 передаётся: ответ — строка.</li>
 <li>Журнал правок агента (<code>agent_edits</code>: дифф, откат) в durable-исполнении не ведётся.</li>
 <li>Одновременно активен один субагент.</li>
+<li>Защиту системных путей (<code>protected_*</code>) конфигом не выключить.</li>
+<li>Дедупликация <code>message_id</code> — последние 1000 ID в пределах сессии; после
+закрытия сессии повтор того же ID обрабатывается снова.</li>
 <li>Workflow histories прежнего экспериментального протокола не поддерживаются и
 не мигрируются; этот протокол удалён.</li>
 </ul>
-<h2 id="section-12">12. Проверки</h2>
+<h2 id="12-проверки">12. Проверки</h2>
 <p>Прогоны 05.10.2026 после исправлений по ревью и слияния develop <code>8f43bf03</code>:</p>
 <div class="table-scroll" tabindex="0" role="region" aria-label="Таблица компонентов"><table aria-label="12. Проверки">
 <thead>
@@ -860,9 +930,16 @@ worker'а: несколько worker'ов на разных хостах тре�
 <li><strong>Субагенты</strong>: модель, инструменты, ввод, вопрос человеку, stop, fallback, replay.</li>
 <li><strong>Изображения</strong>: <code>fs_view_image</code> через границу эффекта (снимок возвращается в хвост
 батча), картиночные отказы модели через <code>ModelFailure</code>.</li>
-<li><strong>External storage</strong>: вход activity 200 КБ хранится по ссылке, история без тела.</li>
+<li><strong>External storage</strong>: вход activity 200 КБ хранится по ссылке, история без тела;
+повторная ссылка продлевает жизнь blob'а для очистки, битый blob перезаписывается.</li>
+<li><strong>Отказы и владение</strong>: баг в коде workflow оставляет run RUNNING, исправленный
+воркер завершает ход; владение снимается после Continue-As-New, при ошибке и
+отмене; после terminate тред захватывает следующая сессия, живой владелец не
+уступает; смена профиля при перезапуске воркера подхватывается живой сессией.</li>
+<li><strong>Обслуживание воркера</strong>: контекст хода после terminate освобождается, квитанции
+исчезнувших workflow и старые квитанции тредов удаляются.</li>
 </ul>
-<h2 id="section-13">13. С каких файлов начинать</h2>
+<h2 id="13-с-каких-файлов-начинать">13. С каких файлов начинать</h2>
 <p>Быстрый путь — пять файлов в таком порядке:</p>
 <ol>
 <li><a href="../packages/temporalio/src/gc_ua_temporalio/native_worker.py"><code>native_worker.py</code></a> —
@@ -926,6 +1003,10 @@ signals/updates (<code>submit_message</code>, <code>answer_human</code>, <code>s
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/payload_storage.py"><code>payload_storage.py</code></a></td>
 </tr>
 <tr>
+<td>Отказы и обслуживание</td>
+<td><code>session_failure</code> в <a href="../packages/temporalio/src/gc_ua_temporalio/native_operations.py"><code>native_operations.py</code></a> (что делает run FAILED), захват треда — <code>_claim</code> в <a href="../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py"><code>thread_store_activities.py</code></a>, <a href="../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py"><code>native_maintenance.py</code></a></td>
+</tr>
+<tr>
 <td>Клиент и сервер</td>
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/native_client.py"><code>native_client.py</code></a>, <a href="../packages/temporalio/src/gc_ua_temporalio/http_api.py"><code>http_api.py</code></a></td>
 </tr>
@@ -938,6 +1019,9 @@ signals/updates (<code>submit_message</code>, <code>answer_human</code>, <code>s
 <p>Тесты, которые лучше всего показывают поведение целиком:
 <a href="../packages/temporalio/tests/test_native_workflow_live.py"><code>test_native_workflow_live.py</code></a>
 (ход на настоящем Temporal + replay),
+<a href="../packages/temporalio/tests/test_native_ownership_live.py"><code>test_native_ownership_live.py</code></a>
+и <a href="../packages/temporalio/tests/test_native_failure_policy_live.py"><code>test_native_failure_policy_live.py</code></a>
+(владение тредом и политика отказов),
 <a href="../packages/temporalio/tests/test_native_parity_live.py"><code>test_native_parity_live.py</code></a>
 (local и Temporal на одних ответах модели),
 <a href="../packages/temporalio/tests/test_native_names.py"><code>test_native_names.py</code></a>

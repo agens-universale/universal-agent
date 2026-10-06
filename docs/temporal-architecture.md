@@ -1,9 +1,10 @@
 # Universal Agent: нативная интеграция с Temporal
 
-**Статус: реализовано в ветке `feat/temporal-runtime`.** База сравнения — `develop`
-`824870f6` (влит 05.10.2026, вместе с изображениями). Документ описывает фактические
-классы, activities и поведение; итоги проверок — в [разделе 12](#12-проверки),
-порядок чтения кода — в [разделе 13](#13-с-каких-файлов-начинать).
+**Статус: реализовано в ветке `feat/temporal-runtime`.** База — `develop`
+`8f43bf03` (влит 05.10.2026: изображения, gc-chat); эталон поведения local —
+трассы develop `824870f6`. Документ описывает фактические классы, activities и
+поведение; итоги проверок — в [разделе 12](#12-проверки), порядок чтения кода — в
+[разделе 13](#13-с-каких-файлов-начинать).
 
 Основное решение: **один `AgentExecutor`, один `ThreadSession`, один агентский цикл**.
 Temporal меняет только исполнителя внешних операций: модель, внешние эффекты
@@ -16,6 +17,30 @@ Temporal меняет только исполнителя внешних опе�
 локально и к Temporal Server не обращаются. TUI и `gc-cli` работают только локально;
 Temporal включается worker'ом `gc-temporal-native-worker`, клиентом
 `gc-temporal-native` или server backend `execution_backend: temporal-native`.
+
+## С чего начать изучение
+
+1. **Картина целиком — 15 минут.** Прочитайте вступление выше, затем
+   [раздел 0.2](#02-один-штатный-ход) (штатный ход без Temporal) и
+   [раздел 3](#3-один-ход) (тот же ход в Temporal). Главная мысль: агентский
+   цикл один и тот же, Temporal подменяет только исполнителей внешних операций
+   (модель, эффекты инструментов, хранилище) через порты
+   [раздела 2](#2-порты-операций-один-код-два-исполнителя).
+2. **Запустить и посмотреть.** Поднимите dev-сервер и worker по
+   [quickstart](temporal-configuration.md#native-quickstart), отправьте одно
+   сообщение клиентом `gc-temporal-native start` и откройте ход в Temporal UI
+   (`http://localhost:8233`): каждая activity подписана (`Model: …`, `Tool: …`,
+   `Guard: …`, `Thread store: …`) — это и есть таблица
+   [Activities](#activities) в живом виде.
+3. **Как переживаются сбои.** [Раздел 8](#8-ошибки-повторы-и-неизвестный-исход)
+   (что видит модель при падении, что становится FAILED, что ждёт исправленного
+   воркера) и [раздел 7](#7-хранение-тред-история-temporal-и-payload) (три
+   хранилища: тред, история Temporal, payload).
+4. **Код.** Пять файлов из [раздела 13](#13-с-каких-файлов-начинать) по порядку,
+   затем тема, которая нужна (guards, субагенты, MCP, хранилища).
+5. **Поведение в тестах.** `test_native_workflow_live.py` (ход на настоящем
+   Temporal + replay) и `test_native_parity_live.py` (local и Temporal на одних
+   ответах модели) — самые короткие исполняемые описания.
 
 Схемы для просмотра отдельно и вставки в Outline:
 
@@ -180,10 +205,11 @@ flowchart TB
 | [`NativeAgentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_workflow.py) | Сессия: очередь сообщений, ответы человека, stop/close, один ход за run. Внутри хода — настоящий `AgentExecutor.arun`. |
 | [`NativeSubagentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py) | Субагент: настоящий `SubagentRunner.arun` в child workflow. |
 | [`native_worker`](../packages/temporalio/src/gc_ua_temporalio/native_worker.py) | Один процесс обслуживает все три очереди и один workspace; cwd должен совпадать с `profiles.<name>.workspace`. |
-| [`NativeContextProvider`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) | Собирает на worker'е штатный `acreate_run_context` по профилю воркера: workflow знает только имя профиля. |
-| ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-история-temporal-и-payload)). |
+| [`NativeContextProvider`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) | Собирает на worker'е штатный `acreate_run_context` по профилю воркера: workflow знает только имя профиля (как Pydantic AI — модель по ключу реестра). Смена настроек или токена — перезапуск воркера, живые сессии продолжают работу. |
+| [`NativeMaintenance`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) | Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит квитанции и preview workflow, которых Temporal уже не знает, и квитанции тредов старше 7 дней. |
+| ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-история-temporal-и-payload)). По умолчанию — каталог `threads` рядом с `receipts_database`, не в workspace агента. |
 | [`TechnicalStore`](../packages/temporalio/src/gc_ua_temporalio/storage/technical.py) | SQLite worker'а: результаты завершённых activities (повтор не платит второй раз) и необязательные preview. Не хранилище диалога. |
-| [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK, включён по умолчанию: payload больше порога (32 КБ) лежат вне истории. |
+| [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK, включён по умолчанию (каталог `payloads` рядом с `receipts_database`): payload больше порога (32 КБ) лежат вне истории, и большой вывод инструмента или длинный ход не упираются в лимиты Temporal (2 МБ на payload, 50 МБ на историю). |
 
 ## 2. Порты операций: один код, два исполнителя
 
@@ -250,8 +276,8 @@ readability на уровне модулей, как в develop, хотя workfl
 | `agent.skills.list` | resource | Список skills, если не пришёл в prepare | до 5 |
 | `agent.model.request` | model | Запрос к модели через общий модельный порт | до 5 |
 | `agent.guard.probe` | resource | Факты для guard'а (+ факты следующей проверки того же пути) | до 5 |
-| `agent.tool.execute` | resource | Внешний эффект инструмента после повторной проверки фактов | read-only — до 5; эффект — см. [раздел 8](#8-ошибки-повторы-и-неизвестный-исход) |
-| `agent.memory.execute`, `agent.memory.hash` | resource | Project memory | эффект / до 5 |
+| `agent.tool.execute` | resource | Внешний эффект инструмента после повторной проверки фактов. Лимит времени — `timeout` инструмента (для `exec_command` без него — `agent.exec_timeout_sec`) + 5 минут, не меньше 15 минут | чтения (fs-чтения, `fetch_url`, `fs_view_image`) — до 5; эффект — см. [раздел 8](#8-ошибки-повторы-и-неизвестный-исход) |
+| `agent.memory.execute`, `agent.memory.hash` | resource | Project memory | чтение — до 5, запись — эффект / до 5 |
 | `agent.summary.trace` | resource | Запись summary trace | до 5 |
 | `agent.thread.load`, `agent.thread.commit`, `agent.thread.read_trace` | resource | Чтение и durable-операции ThreadStore | до 5, квитанция по `operation_id` |
 | `agent.subagent.prepare` | resource | Подготовка роли и контекста субагента | до 5 |
@@ -273,7 +299,7 @@ sequenceDiagram
     participant M as agent.model.request
     C->>W: submit_message (Update-With-Start)
     W->>R: agent.context.prepare
-    W->>R: agent.thread.load + claim_owner (только первый run сессии)
+    W->>R: agent.thread.load + claim_owner (только первый run сессии;<br/>мёртвый владелец снимается)
     W->>E: arun(messages, thread_id)
     E->>R: agent.thread.load (ThreadSession)
     loop до завершения хода
@@ -299,6 +325,16 @@ finish gate и учёт делает `AgentExecutor`. Workflow отвечает 
 дедупликации ограничены последними 1000 записями. Простаивающая сессия держит
 почти пустую историю, поэтому релиз нового кода её не ломает; ход, идущий в
 момент релиза, доигрывается старым кодом — worker нужно останавливать мягко.
+Если несовместимый код всё же получил такой ход, недетерминизм роняет только
+workflow task: run остаётся RUNNING и продолжит ход на исправленном воркере
+([раздел 8](#8-ошибки-повторы-и-неизвестный-исход)).
+
+**Владение тредом.** Тред принадлежит сессии (workflow ID): локальный TUI/CLI и
+workflow с другим ID в него не пишут. Сессия снимает владение сама — при
+закрытии (в том числе после Continue-As-New без хода), при ошибке и отмене.
+После terminate или падения процесса следующая сессия с любым ID проверяет
+workflow владельца: не RUNNING или не найден — владение снимается и тред
+захватывается; живой владелец не уступает.
 
 ## 4. Guards, подтверждение и эффект
 
@@ -336,7 +372,13 @@ sequenceDiagram
 выполняются в workflow, а факты о файловой системе приносит
 [`evaluate_guard_probe`](../packages/core/src/gc_core/security/guard_probe.py).
 Probe вызывается только для файловых и командных инструментов и только для
-включённых проверок; защищённые пути (`protected_paths`) включены по умолчанию.
+включённых проверок. Исключение — **защита системных путей** (`protected_read`,
+`protected_write`): она работает всегда, как в develop, и настройкой не
+выключается (`security.protected_paths.enabled` не действует). Поэтому
+`Guard: protected_write` виден в истории и при выключенных `read_guard`,
+`write_guard`, `url_policy` и `command_moderation`. Под защитой — `~/.gc`,
+`.gc` проекта, каталоги состояния и все служебные пути воркера (треды,
+квитанции, payload; базы — вместе с `-wal`/`-shm`).
 Ожидание человека не занимает worker: это `workflow.wait_condition`.
 
 ## 5. MCP и фоновые процессы
@@ -345,7 +387,7 @@ Probe вызывается только для файловых и команд�
 flowchart TB
     WF["workflow: ход N"] -->|"agent.context.prepare"| PR["NativeContextProvider"]
     PR --> RH["WorkerResourceHost"]
-    RH --> OW["LiveResourceOwner '…/turn-N'<br/>одна задача asyncio"]
+    RH --> OW["LiveResourceOwner<br/>'workflow/первый run/turn-N'<br/>одна задача asyncio"]
     OW --> S1["stdio / SSE / Streamable HTTP<br/>persistent-сессии"]
     OW --> BG["фоновые команды"]
     WF -->|"agent.tool.execute (live)"| OW
@@ -367,6 +409,9 @@ Discovery, вызовы и teardown MCP идут в одной задаче, п�
 (`McpSessionLostError`). Ресурсы не переживают процесс: после перезапуска
 worker'а модель получает `ResourceOwnerLost` и может продолжить; внутреннее
 состояние MCP-сервера не восстанавливается. Фоновый владелец создаётся лениво.
+Владелец хода — `<workflow ID>/<первый run цепочки>/turn-N`: новая сессия на том
+же workflow ID не наследует кэш и квитанции прошлой. Контекст сессии, снятой
+terminate посреди хода, освобождает `NativeMaintenance`.
 
 ## 6. Субагент в child workflow
 
@@ -390,7 +435,10 @@ sequenceDiagram
 
 Одновременно активен один ребёнок, как в local. Сигнал ребёнка, пришедший раньше
 handle, ждёт его, а сигнал неактивного ребёнка игнорируется и родителя не роняет.
-Сообщение, пришедшее после конца цикла ребёнка, возвращается родителю.
+Сообщение, пришедшее после конца цикла ребёнка или не доставленное ему сигналом,
+возвращается родителю. Вопрос человеку от ребёнка, который завершился, снимается.
+Ребёнок, снятый terminate или по таймауту, — ошибка инструмента
+`subagent_interrupted` (часть его действий могла выполниться), а не отказ сессии.
 
 ## 7. Хранение: тред, история Temporal и payload
 
@@ -449,9 +497,15 @@ flowchart LR
 | `turn` | В точках сброса: конец хода, перед компакцией, перед ожиданием человека (кроме вопроса субагента — тред родителя пишется в конце его хода), при stop/ошибке | Temporal |
 
 В режиме `turn` шаги до сброса защищены историей workflow: после падения worker'а
-replay восстанавливает буфер. Шаги теряются из треда, только если workflow
+replay восстанавливает буфер; при сбое коммита буфер не очищается, и повторный
+сброс дописывает шаги. Шаги теряются из треда, только если workflow
 принудительно завершить (`terminate`) до сброса. Local без durable-исполнителя
 `turn` отклоняет.
+
+**Сброс треда** в durable-хранилище убирает то же, что локальный: файлы истории,
+картинки треда, журнал правок. Квитанции прошлого поколения остаются (поздний
+повтор операции получает прежний исход), но без meta треда. Квитанции старше
+7 дней удаляет `NativeMaintenance`.
 
 ## 8. Ошибки, повторы и неизвестный исход
 
@@ -463,10 +517,12 @@ replay восстанавливает буфер. Шаги теряются из
 | Доменная ошибка в activity (`ValueError`, `OSError`, …) | Переносится значением (`DomainError`) и поднимается в workflow тем же типом — ядро возвращает модели `internal_tool_error`, как в local |
 | Факты guard'а изменились до эффекта | `GuardPreconditionChanged` — ошибка инструмента, эффект не исполнен |
 | Запрос к модели упал вместе с worker'ом | Temporal повторяет; если ответ пришёл, а квитанция нет — повторная оплата одного запроса |
-| Read-only инструмент, подготовка, хранилище | Повтор Temporal (до 5) |
+| Чтение (fs-чтения, `fetch_url`, `fs_view_image`, чтение памяти проекта), подготовка, хранилище | Повтор Temporal (до 5) |
 | Эффект инструмента (запись, команда, MCP, project memory) | Вторая попытка только читает квитанцию первой и **никогда не исполняет эффект заново**; квитанции нет — модель получает «исход неизвестен, проверьте состояние» (`ToolOutcomeUnknown`) |
 | Потеря MCP или фонового владельца | `ResourceOwnerLost` — ошибка инструмента |
-| Хранилище треда недоступно, подготовка контекста, исчерпаны повторы модели | `InfrastructureFailure` — ход завершается ошибкой |
+| Инструмент дольше лимита activity | `ToolOutcomeUnknown` «превысило лимит времени activity» |
+| Хранилище треда недоступно, подготовка контекста, исчерпаны повторы модели | Доменный отказ: run становится FAILED (`ApplicationError`) |
+| Недетерминизм после деплоя, запрет песочницы, баг в коде workflow | Падает только workflow task, run остаётся RUNNING и продолжает ход на исправленном воркере. Если сбой случился после того, как код запланировал уборку (`finally` с activity), replay исправленного кода может разойтись — тогда `temporal workflow reset` на событие до хода |
 
 Операторского восстановления нет: решение после неизвестного исхода принимает
 модель, как после падения процесса в local. Exactly-once внешних эффектов не
@@ -484,6 +540,9 @@ replay восстанавливает буфер. Шаги теряются из
 
 Команды клиента: `gc-temporal-native start | status | result | stop | answer | close | send`;
 `--config` (JSON воркера) нужен, чтобы читать крупные payload из `payload_storage`.
+Ошибки update и query сессии (устаревший ход, сессия ещё не готова) API отдаёт
+как 409. Повтор сообщения с тем же `message_id` — `duplicate: true`, кроме
+сообщения, отброшенного остановкой хода: его повтор принимается заново.
 
 ## 10. Конфигурация
 
@@ -514,6 +573,9 @@ replay восстанавливает буфер. Шаги теряются из
   передаётся: ответ — строка.
 - Журнал правок агента (`agent_edits`: дифф, откат) в durable-исполнении не ведётся.
 - Одновременно активен один субагент.
+- Защиту системных путей (`protected_*`) конфигом не выключить.
+- Дедупликация `message_id` — последние 1000 ID в пределах сессии; после
+  закрытия сессии повтор того же ID обрабатывается снова.
 - Workflow histories прежнего экспериментального протокола не поддерживаются и
   не мигрируются; этот протокол удалён.
 
@@ -561,7 +623,14 @@ replay восстанавливает буфер. Шаги теряются из
 - **Субагенты**: модель, инструменты, ввод, вопрос человеку, stop, fallback, replay.
 - **Изображения**: `fs_view_image` через границу эффекта (снимок возвращается в хвост
   батча), картиночные отказы модели через `ModelFailure`.
-- **External storage**: вход activity 200 КБ хранится по ссылке, история без тела.
+- **External storage**: вход activity 200 КБ хранится по ссылке, история без тела;
+  повторная ссылка продлевает жизнь blob'а для очистки, битый blob перезаписывается.
+- **Отказы и владение**: баг в коде workflow оставляет run RUNNING, исправленный
+  воркер завершает ход; владение снимается после Continue-As-New, при ошибке и
+  отмене; после terminate тред захватывает следующая сессия, живой владелец не
+  уступает; смена профиля при перезапуске воркера подхватывается живой сессией.
+- **Обслуживание воркера**: контекст хода после terminate освобождается, квитанции
+  исчезнувших workflow и старые квитанции тредов удаляются.
 
 ## 13. С каких файлов начинать
 
@@ -595,12 +664,16 @@ replay восстанавливает буфер. Шаги теряются из
 | MCP и фоновые процессы | [`execution/resource_host.py`](../packages/core/src/gc_core/execution/resource_host.py), [`connect_mcp/durable_scope.py`](../packages/core/src/gc_core/tools/connect_mcp/durable_scope.py) |
 | Субагенты | [`native_child_workflow.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py), [`native_child_transport.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_transport.py), [`native_child_preparation.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_preparation.py) |
 | Крупные payload | [`payload_storage.py`](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) |
+| Отказы и обслуживание | `session_failure` в [`native_operations.py`](../packages/temporalio/src/gc_ua_temporalio/native_operations.py) (что делает run FAILED), захват треда — `_claim` в [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), [`native_maintenance.py`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) |
 | Клиент и сервер | [`native_client.py`](../packages/temporalio/src/gc_ua_temporalio/native_client.py), [`http_api.py`](../packages/temporalio/src/gc_ua_temporalio/http_api.py) |
 | Конфиг worker'а | [пример `native-worker.json`](../packages/temporalio/examples/native-worker.json), [`temporal-configuration.md`](temporal-configuration.md) |
 
 Тесты, которые лучше всего показывают поведение целиком:
 [`test_native_workflow_live.py`](../packages/temporalio/tests/test_native_workflow_live.py)
 (ход на настоящем Temporal + replay),
+[`test_native_ownership_live.py`](../packages/temporalio/tests/test_native_ownership_live.py)
+и [`test_native_failure_policy_live.py`](../packages/temporalio/tests/test_native_failure_policy_live.py)
+(владение тредом и политика отказов),
 [`test_native_parity_live.py`](../packages/temporalio/tests/test_native_parity_live.py)
 (local и Temporal на одних ответах модели),
 [`test_native_names.py`](../packages/temporalio/tests/test_native_names.py)
