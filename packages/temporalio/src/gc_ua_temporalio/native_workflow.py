@@ -581,9 +581,9 @@ class NativeAgentWorkflow:
                     timeout=IDLE_REFRESH,
                 )
             except TimeoutError:
-                # Долго простаивающая сессия перезаписывает свой вход: blob'ы
-                # payload_storage обновляют mtime, и очистка по сроку их не
-                # удалит, пока сессия жива.
+                # Долго простаивающая сессия раз в сутки начинает новый run:
+                # переходит на текущую сборку воркера (versioning) и не
+                # держит открытым один run неделями.
                 await self._continue(start, self.store)
             else:
                 if not self.pending_messages and not self.closed:

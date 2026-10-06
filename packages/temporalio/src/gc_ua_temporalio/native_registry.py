@@ -11,7 +11,6 @@ from temporalio.client import Client
 from gc_ua_temporalio.native_client import NativeAgentClient
 from gc_ua_temporalio.native_contracts import NativeRunRequest, UserMessage
 from gc_ua_temporalio.native_views import NativeViews
-from gc_ua_temporalio.payload_storage import data_converter
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
 
 
@@ -52,11 +51,7 @@ class NativeRunRegistry:
             if self._client is None:
                 self._client = NativeRemoteClient(
                     await Client.connect(
-                        self.config.address,
-                        namespace=self.config.namespace,
-                        data_converter=data_converter(
-                            self.config.payload_storage
-                        ),
+                        self.config.address, namespace=self.config.namespace
                     ),
                     workflow_queue=self.config.workflow_queue,
                 )

@@ -5,7 +5,7 @@ terminate или падения процесса никто этого не сд
 MCP-процессами жили бы до рестарта воркера. Решение «владелец мёртв»
 принимает Temporal: workflow не RUNNING, работает уже новая цепочка run или
 его нет вовсе. Ещё обслуживание чистит устаревшие записи журналов хранилища
-тредов и старые blob'ы payload.
+тредов.
 """
 
 import asyncio
@@ -14,8 +14,6 @@ import logging
 from gc_core.thread_store_journal import prune_durable_receipts
 from temporalio.client import WorkflowExecutionStatus
 from temporalio.service import RPCError, RPCStatusCode
-
-from gc_ua_temporalio.payload_storage import prune_file_payloads
 
 logger = logging.getLogger(__name__)
 
@@ -69,11 +67,9 @@ def owner_state(owner, workflows):
 
 
 class NativeMaintenance:
-    def __init__(self, client, provider, stores, payloads=None):
+    def __init__(self, client, provider, stores):
         self.client, self.provider = client, provider
         self.stores = dict(stores)
-        #: ``PayloadStorageConfig`` с ``prune_after_days`` — чистить blob'ы.
-        self.payloads = payloads
 
     async def _describe_all(self, owners):
         """Одно ``describe`` на workflow, параллельно и с ограничением; сбой
@@ -105,18 +101,6 @@ class NativeMaintenance:
                 await self.provider.forget_owner(owner)
         for store in self.stores.values():
             await asyncio.to_thread(_prune_store_receipts, store)
-        payloads = self.payloads
-        if (
-            payloads is not None
-            and payloads.kind == "file"
-            and payloads.path
-            and payloads.prune_after_days
-        ):
-            await asyncio.to_thread(
-                prune_file_payloads,
-                payloads.path,
-                max_age_seconds=payloads.prune_after_days * 24 * 3600,
-            )
 
     async def serve(self):
         while True:

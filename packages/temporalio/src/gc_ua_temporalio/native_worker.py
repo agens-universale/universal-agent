@@ -26,7 +26,6 @@ from gc_ua_temporalio.native_provider import (
     NativeWorkerConfig,
 )
 from gc_ua_temporalio.native_workflow import NativeAgentWorkflow
-from gc_ua_temporalio.payload_storage import data_converter
 from gc_ua_temporalio.public_config import public_config_snapshot
 from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
@@ -166,9 +165,7 @@ async def serve(config):
     provider, native, threads = build_native_runtime(config)
     try:
         client = await Client.connect(
-            config.address,
-            namespace=config.namespace,
-            data_converter=data_converter(config.payload_storage),
+            config.address, namespace=config.namespace
         )
         async with AsyncExitStack() as stack:
             for options in worker_options(config, native, threads):
@@ -195,7 +192,6 @@ async def serve(config):
                 client,
                 provider,
                 provider.stores,
-                payloads=config.payload_storage,
             ).serve()
     finally:
         await provider.aclose()

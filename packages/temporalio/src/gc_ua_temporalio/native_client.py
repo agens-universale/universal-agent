@@ -139,19 +139,8 @@ async def _unlock(args, temporal):
 
 
 async def _run(args):
-    from gc_ua_temporalio.payload_storage import data_converter
-
-    storage = None
-    if args.config:
-        from gc_ua_temporalio.native_provider import NativeWorkerConfig
-
-        storage = NativeWorkerConfig.load(args.config).payload_storage
     client = NativeAgentClient(
-        await Client.connect(
-            args.address,
-            namespace=args.namespace,
-            data_converter=data_converter(storage),
-        ),
+        await Client.connect(args.address, namespace=args.namespace),
         workflow_queue=args.workflow_queue,
     )
     if args.command == "unlock":
@@ -204,7 +193,7 @@ def main():
     parser.add_argument("--namespace", default="default")
     parser.add_argument(
         "--config",
-        help="native-worker.json воркера: читать крупные payload (payload_storage)",
+        help="native-worker.json воркера (для unlock: хранилища тредов)",
     )
     parser.add_argument("--workflow-queue", default="ua-native-workflow")
     commands = parser.add_subparsers(dest="command", required=True)

@@ -22,7 +22,6 @@ from gc_core.settings import LoadedSettings, RuntimeEnv
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from gc_ua_temporalio.native_activity_config import ActivitiesConfig
-from gc_ua_temporalio.payload_storage import PayloadStorageConfig
 
 
 class NativeProfile(BaseModel):
@@ -102,17 +101,12 @@ class NativeWorkerConfig(BaseModel):
     resource_queue: str = "ua-native-resource-local"
     model_queue: str = "ua-native-model"
     worker_id: str = "native-local"
-    #: Каталог служебного состояния воркера: от него считаются умолчания
-    #: ``thread_stores`` (``threads``) и ``payload_storage`` (``payloads``).
-    #: ``load(path)`` по умолчанию берёт каталог файла конфига.
+    #: Каталог служебного состояния воркера: от него считается умолчание
+    #: ``thread_stores`` (``threads``). ``load(path)`` по умолчанию берёт
+    #: каталог файла конфига.
     state_dir: str | None = None
     thread_stores: dict[str, NativeStoreConfig]
     profiles: dict[str, NativeProfile]
-    #: Крупные payload истории Temporal — во внешнее хранилище (см. payload_storage).
-    #: По умолчанию — каталог ``payloads`` в ``state_dir``: без него
-    #: большой вывод тула или длинный ход упираются в лимиты Temporal (2 МБ на
-    #: payload, 50 МБ на историю). Явный ``null`` выключает хранилище.
-    payload_storage: PayloadStorageConfig | None = None
     #: Таймауты и повторы activities по уровням (``native_activity_config``):
     #: сбои провайдера модели по умолчанию повторяются без ограничения.
     activities: ActivitiesConfig = Field(default_factory=ActivitiesConfig)
@@ -135,9 +129,6 @@ class NativeWorkerConfig(BaseModel):
         root = Path(data["state_dir"]).absolute()
         data = dict(data)
         data.setdefault(
-            "payload_storage", {"kind": "file", "path": str(root / "payloads")}
-        )
-        data.setdefault(
             "thread_stores",
             {"files": {"kind": "file", "path": str(root / "threads")}},
         )
@@ -156,8 +147,6 @@ class NativeWorkerConfig(BaseModel):
             paths += (
                 [spec.path] if spec.kind == "file" else _db_files(spec.path)
             )
-        if self.payload_storage is not None and self.payload_storage.path:
-            paths.append(self.payload_storage.path)
         forms = []
         for path in paths:
             for form in (os.path.abspath(path), os.path.realpath(path)):

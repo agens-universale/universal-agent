@@ -6,11 +6,6 @@
   "resource_queue": "ua-native-resource-local",
   "worker_id": "native-local",
   "state_dir": "${ENV:UA_NATIVE_STATE}",
-  "payload_storage": {
-    "kind": "file",
-    "path": "${ENV:UA_NATIVE_STATE}/payloads",
-    "threshold_bytes": 32768
-  },
   "thread_stores": {
     "files": {
       "kind": "file",

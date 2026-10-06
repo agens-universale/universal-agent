@@ -34,8 +34,8 @@ Temporal включается worker'ом `gc-temporal-native-worker`, клие�
    [Activities](#activities) в живом виде.
 3. **Как переживаются сбои.** [Раздел 8](#8-ошибки-повторы-и-неизвестный-исход)
    (что видит модель при падении, что становится FAILED, что ждёт исправленного
-   воркера) и [раздел 7](#7-хранение-тред-история-temporal-и-payload) (три
-   хранилища: тред, история Temporal, payload).
+   воркера) и [раздел 7](#7-хранение-тред-и-история-temporal) (два
+   хранилища: тред и история Temporal).
 4. **Код.** Пять файлов из [раздела 13](#13-с-каких-файлов-начинать) по порядку,
    затем тема, которая нужна (guards, субагенты, MCP, хранилища).
 5. **Поведение в тестах.** `test_native_workflow_live.py` (ход на настоящем
@@ -54,7 +54,7 @@ Temporal включается worker'ом `gc-temporal-native-worker`, клие�
 | Guards, подтверждение и эффект | [Открыть](diagrams/temporal/04-guards.png) | [Открыть](diagrams/temporal/04-guards.svg) |
 | MCP и фоновые процессы | [Открыть](diagrams/temporal/05-mcp.png) | [Открыть](diagrams/temporal/05-mcp.svg) |
 | Субагент в child workflow | [Открыть](diagrams/temporal/06-child.png) | [Открыть](diagrams/temporal/06-child.svg) |
-| Три истории: тред, Temporal, payload | [Открыть](diagrams/temporal/07-persistence.png) | [Открыть](diagrams/temporal/07-persistence.svg) |
+| Тред и история Temporal | [Открыть](diagrams/temporal/07-persistence.png) | [Открыть](diagrams/temporal/07-persistence.svg) |
 
 ## 0. Как устроен штатный агент без Temporal
 
@@ -175,7 +175,6 @@ flowchart TB
     WS["Workspace<br/>файлы и команды"]
     MCP["MCP-серверы"]
     TH["ThreadStore<br/>DurableFileThreadStore / SQLite / своя БД"]
-    PS["Payload storage<br/>файлы / S3"]
     CLI --> TS
     API --> TS
     TS <--> WF
@@ -187,14 +186,12 @@ flowchart TB
     RH --> MCP
     RQ --> TH
     API --> TH
-    TS -. "ссылки на крупные payload" .-> PS
-    Worker -. "DataConverter" .-> PS
     classDef control fill:#e9e5ff,stroke:#6552ad,color:#251b45;
     classDef io fill:#e5f4ed,stroke:#338466,color:#173d2f;
     classDef data fill:#fff0d6,stroke:#ae7925,color:#493414;
     class WF,TS control;
     class MQ,RQ,RH,LLM,WS,MCP io;
-    class TH,PS data;
+    class TH data;
 ```
 
 | Элемент | Что это |
@@ -204,9 +201,9 @@ flowchart TB
 | [`native_worker`](../packages/temporalio/src/gc_ua_temporalio/native_worker.py) | Один процесс обслуживает все три очереди и один workspace; cwd должен совпадать с `profiles.<name>.workspace`. |
 | [`NativeContextProvider`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) | Собирает на worker'е штатный `acreate_run_context` по профилю воркера: workflow знает только имя профиля (как Pydantic AI — модель по ключу реестра). Смена настроек или токена — перезапуск воркера, живые сессии продолжают работу. |
 | [`NativeMaintenance`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) | Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит служебные записи журнала тредов старше 7 дней. |
-| ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-история-temporal-и-payload)). По умолчанию — каталог `threads` в `state_dir` (по умолчанию — каталог конфига воркера), не в workspace агента. Своей базы у воркера нет: результаты activities хранит история Temporal. |
+| ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-и-история-temporal)). По умолчанию — каталог `threads` в `state_dir` (по умолчанию — каталог конфига воркера), не в workspace агента. Своей базы у воркера нет: результаты activities хранит история Temporal. |
 | [`native_activity_config`](../packages/temporalio/src/gc_ua_temporalio/native_activity_config.py) | Таймауты и повторы activities по уровням (`model`, `resource`, `thread_store`, инструмент) — как `ActivityConfig` у Pydantic AI; в workflow приходят с подготовкой хода. |
-| [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK, включён по умолчанию (каталог `payloads` в `state_dir`): payload больше порога (32 КБ) лежат вне истории, и большой вывод инструмента или длинный ход не упираются в лимиты Temporal (2 МБ на payload, 50 МБ на историю). |
+| [`message_refs`](../packages/temporalio/src/gc_ua_temporalio/message_refs.py) | Вход activity модели: новые сообщения целиком, уже переданные и прочитанные из треда — хэш-ссылкой; воркер держит сообщения хода в памяти. Вместе со страничным чтением треда и потолком вывода инструмента (1 МБ) держит записи истории меньше лимита Temporal (2 МБ) без отдельного хранилища payload. |
 
 ## 2. Порты операций: один код, два исполнителя
 
@@ -374,8 +371,8 @@ Probe вызывается только для файловых и команд�
 выключается (`security.protected_paths.enabled` не действует). Поэтому
 `Guard: protected_write` виден в истории и при выключенных `read_guard`,
 `write_guard`, `url_policy` и `command_moderation`. Под защитой — `~/.gc`,
-`.gc` проекта, каталоги состояния и все служебные пути воркера (треды и
-payload; базы — вместе с `-wal`/`-shm`).
+`.gc` проекта, каталоги состояния и хранилища тредов воркера (базы — вместе с
+`-wal`/`-shm`).
 Ожидание человека не занимает worker: это `workflow.wait_condition`.
 
 ## 5. MCP и фоновые процессы
@@ -437,7 +434,7 @@ handle, ждёт его, а сигнал неактивного ребёнка �
 Ребёнок, снятый terminate или по таймауту, — ошибка инструмента
 `subagent_interrupted` (часть его действий могла выполниться), а не отказ сессии.
 
-## 7. Хранение: тред, история Temporal и payload
+## 7. Хранение: тред и история Temporal
 
 ```mermaid
 flowchart LR
@@ -449,25 +446,32 @@ flowchart LR
         H1["входы и результаты activities,<br/>signals и updates"]
         H2["replay после падения;<br/>обнуляется Continue-As-New"]
     end
-    subgraph X["External storage — крупные payload"]
-        X1["тела payload больше порога"]
-        X2["в истории — sha256-ссылка;<br/>чистить по сроку"]
+    subgraph W["Память воркера — сообщения хода"]
+        W1["вход модели: новые сообщения целиком,<br/>прочие — хэш-ссылкой"]
+        W2["промах: ищет в треде,<br/>нет — повтор целиком"]
     end
-    H -->|"agent.thread.load / commit"| T
-    H -.->|"DataConverter"| X
+    H -->|"agent.thread.load страницами / commit"| T
+    H -.->|"agent.model.request: ссылки"| W
+    W -.->|"промах кэша"| T
     classDef data fill:#fff0d6,stroke:#ae7925,color:#493414;
     classDef control fill:#e9e5ff,stroke:#6552ad,color:#251b45;
     classDef io fill:#e5f4ed,stroke:#338466,color:#173d2f;
     class T,T1,T2 data;
     class H,H1,H2 control;
-    class X,X1,X2 io;
+    class W,W1,W2 io;
 ```
 
 | Слой | Что хранит | Сколько живёт |
 |---|---|---|
 | ThreadStore | История диалога — источник правды | Постоянно |
 | Event History | Журнал выполнения одного run | Пока run открыт + retention namespace |
-| External storage | Крупные payload этого журнала | Нужно чистить: lifecycle S3 или `prune_file_payloads` |
+| Память воркера | Сообщения текущего хода для ссылок во входе модели | Пока жив контекст хода; не durable — промах закрывает тред или повтор целиком |
+
+Запись истории Temporal — не больше 2 МБ, история run — 50 МБ. Тред читается
+страницами по 1 МБ, вход модели несёт только новое за шаг (остальное —
+хэш-ссылки), вывод инструмента через границу activity — не больше 1 МБ, после
+хода — Continue-As-New. Своего хранилища payload нет: всё в истории Temporal и
+удаляется по retention ([размер истории](temporal-configuration.md#размер-истории-temporal)).
 
 **Durable-контракт хранилища.** Повтор activity может прийти дважды, поэтому
 хранилище в Temporal реализует два метода поверх обычного `ThreadStore`:
@@ -539,7 +543,7 @@ replay восстанавливает буфер; при сбое коммита
 
 Команды клиента: `gc-temporal-native start | status | result | stop | answer | close | send | unlock`
 (`unlock` снимает владение тредом у сессии, которой больше нет — для локального TUI/CLI);
-`--config` (JSON воркера) нужен, чтобы читать крупные payload из `payload_storage`.
+`--config` (JSON воркера) нужен `unlock`: он находит хранилище тредов.
 Ошибки update и query сессии (устаревший ход, сессия ещё не готова) API отдаёт
 как 409. Повтор сообщения с тем же `message_id` — `duplicate: true`, кроме
 сообщения, отброшенного остановкой хода: его повтор принимается заново.
@@ -560,11 +564,13 @@ replay восстанавливает буфер; при сбое коммита
 - Запрос к модели может быть оплачен дважды при падении после ответа.
 - Worker Versioning включается секцией `versioning` (по умолчанию выключен):
   ход закреплён за сборкой, где начался, следующий ход идёт на текущей; номер
-  сборки — версия пакета `gc-ua-temporalio`. Без versioning ход, идущий в
+  сборки — версия пакета `gc-ua-temporalio` и хэш исходников. Без versioning ход, идущий в
   момент несовместимого релиза, ждёт исправленного воркера.
 - Настройки профиля воркер берёт из своего JSON при каждой activity: смена
   настроек или токена — перезапуск воркера, живые сессии продолжают работу.
-- Blob'ы external storage Temporal не удаляет — нужна очистка по сроку.
+- Живая часть треда читается в историю каждого хода (страницами): тред без
+  работающего сжатия в десятки мегабайт упрётся в лимит истории run (50 МБ).
+- Вывод MCP-инструмента больше 1 МБ обрезается воркером (локально — нет).
 - История Temporal не шифруется (`PayloadCodec` нет).
 - Файлы картинок (`ImageStore`, карман процесса `_staging/<pid>`) лежат на диске
   worker'а: несколько worker'ов на разных хостах требуют общего тома для каталога
@@ -624,8 +630,11 @@ replay восстанавливает буфер; при сбое коммита
 - **Субагенты**: модель, инструменты, ввод, вопрос человеку, stop, fallback, replay.
 - **Изображения**: `fs_view_image` через границу эффекта (снимок возвращается в хвост
   батча), картиночные отказы модели через `ModelFailure`.
-- **External storage**: вход activity 200 КБ хранится по ссылке, история без тела;
-  повторная ссылка продлевает жизнь blob'а для очистки, битый blob перезаписывается.
+- **Размер истории**: тред 5 и 20 МБ читается страницами меньше 2 МБ (файлы и
+  SQLite), изменение треда между страницами — чтение заново; тред 6 МБ и ход из
+  30 шагов по 40 КБ без хранилища payload — вход модели 40–45 КБ на шаг, записи
+  меньше 2 МБ, провайдер получает весь контекст, replay проходит; воркер без
+  памяти сообщений — повтор запроса целиком; ответ MCP в 5 МБ обрезается до 1 МБ.
 - **Отказы и владение**: баг в коде workflow оставляет run RUNNING, исправленный
   воркер завершает ход; владение снимается после Continue-As-New, при ошибке и
   отмене; после terminate тред захватывает следующая сессия, живой владелец не
@@ -664,7 +673,7 @@ replay восстанавливает буфер; при сбое коммита
 | Тред и хранилища | [`thread_store_proxy.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_proxy.py) и [`thread_store_transport.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_transport.py) (сторона workflow), [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), [`thread_store_durable.py`](../packages/core/src/gc_core/thread_store_durable.py) (контракт), [`storage/sqlite.py`](../packages/temporalio/src/gc_ua_temporalio/storage/sqlite.py), [`thread_store_file_durable.py`](../packages/core/src/gc_core/thread_store_file_durable.py) и [`thread_store_journal.py`](../packages/core/src/gc_core/thread_store_journal.py), [`durable_thread_store_conformance.py`](../packages/testkit/src/gc_testkit/durable_thread_store_conformance.py) |
 | MCP и фоновые процессы | [`execution/resource_host.py`](../packages/core/src/gc_core/execution/resource_host.py), [`connect_mcp/durable_scope.py`](../packages/core/src/gc_core/tools/connect_mcp/durable_scope.py) |
 | Субагенты | [`native_child_workflow.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py), [`native_child_transport.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_transport.py), [`native_child_preparation.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_preparation.py) |
-| Крупные payload | [`payload_storage.py`](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) |
+| Размер истории | [`message_refs.py`](../packages/temporalio/src/gc_ua_temporalio/message_refs.py) (ссылки во входе модели), страницы треда — `_state_page` в [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), `cap_tool_output` в [`native_activities.py`](../packages/temporalio/src/gc_ua_temporalio/native_activities.py) |
 | Отказы и обслуживание | `session_failure` в [`native_operations.py`](../packages/temporalio/src/gc_ua_temporalio/native_operations.py) (что делает run FAILED), захват треда — `_claim` в [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), [`native_maintenance.py`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) |
 | Клиент и сервер | [`native_client.py`](../packages/temporalio/src/gc_ua_temporalio/native_client.py), [`http_api.py`](../packages/temporalio/src/gc_ua_temporalio/http_api.py) |
 | Конфиг worker'а | [пример `native-worker.json`](../packages/temporalio/examples/native-worker.json), [`temporal-configuration.md`](temporal-configuration.md) |

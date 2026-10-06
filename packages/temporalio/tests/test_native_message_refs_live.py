@@ -1,8 +1,8 @@
 """Вход activity модели — ссылки на уже переданные сообщения.
 
-Без ``payload_storage`` (ни файлов, ни S3): длинный тред и длинный ход не
-упираются в лимит записи Temporal (2 МБ), а история хода растёт на новые
-сообщения, а не на весь контекст за шаг.
+Без внешнего хранилища payload (всё в истории Temporal): длинный тред и
+длинный ход не упираются в лимит записи Temporal (2 МБ), а история хода
+растёт на новые сообщения, а не на весь контекст за шаг.
 """
 
 import asyncio
@@ -131,8 +131,6 @@ async def runtime(tmp_path, url, *, persist="step", core_extra=None):
             "model_queue": "refs",
             "resource_queue": "refs",
             "state_dir": str(tmp_path),
-            # Ни файлов, ни S3: крупные payload остались бы в истории.
-            "payload_storage": None,
             "profiles": {
                 "test": {
                     "workspace": str(tmp_path),
@@ -204,7 +202,7 @@ async def _payload_sizes(handle):
 async def test_long_thread_and_long_turn_stay_below_temporal_limits(
     tmp_path, monkeypatch, growing_model
 ):
-    """Тред 6 МБ + ход 30 шагов по 40 КБ без payload_storage: каждая запись
+    """Тред 6 МБ + ход 30 шагов по 40 КБ, всё в истории Temporal: каждая запись
     истории меньше 2 МБ, вход модели на шаг — новые сообщения и ссылки (а не
     весь контекст), провайдер получает весь контекст."""
     monkeypatch.chdir(tmp_path)
