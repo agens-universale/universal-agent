@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import os
+import re
 import shlex
 from pathlib import Path
 from typing import Optional, Sequence
@@ -30,6 +31,7 @@ from gc_core.backends.walk_util import FlatWalkMixin
 
 #: Потолок на одну файловую операцию (stat, upload, download): зависший
 #: транспорт — пауза контейнера, мёртвый хост — иначе вешал бы цикл агента.
+_ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 FS_OP_TIMEOUT_SEC = 300
 
 
@@ -100,6 +102,13 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         body = build_harbor_shell_command(command, exec_init=exec_init)
         merged_env = {**self._env, **(env or {})}
         if merged_env:
+            bad = [k for k in merged_env if not _ENV_NAME_RE.fullmatch(str(k))]
+            if bad:
+                # Имя без кавычек уходит в `export` той стороны: не идентификатор —
+                # это команда, а не переменная. Тулы режут раньше, это страховка.
+                raise ValueError(
+                    f"invalid environment variable name(s): {bad}"
+                )
             assignments = " ".join(
                 f"{k}={shlex.quote(str(v))}" for k, v in merged_env.items()
             )
@@ -260,7 +269,7 @@ def ssh_argv_prefix(
             "-o",
             "ControlMaster=auto",
             "-o",
-            f"ControlPath={control_dir / 'cm-%C'}",
+            f"ControlPath={control_dir / '%C'}",
             "-o",
             "ControlPersist=600",
         ]

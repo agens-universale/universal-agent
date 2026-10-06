@@ -209,3 +209,17 @@ async def test_run_context_uses_provisioned_registry(host_layers):
     ctx = await acreate_run_context(cfg, os_backend=backend)
     detail = await ctx.skills_registry.load_skill_detail("beta")
     assert detail["root_path"] == f"/work/{RUNTIME_SUBDIR}/user/beta"
+
+
+async def test_junk_dirs_inside_skills_are_skipped(host_layers):
+    junk = host_layers / "usr" / "beta" / "node_modules" / "left-pad"
+    junk.mkdir(parents=True)
+    (junk / "index.js").write_text("x", encoding="utf-8")
+    git = host_layers / "usr" / "beta" / ".git"
+    git.mkdir()
+    (git / "HEAD").write_text("ref", encoding="utf-8")
+    backend = RemoteFs()
+    await aprovision_remote_skills(
+        backend, {"launch_root": "/work", "os_backend": DOCKER}
+    )
+    assert not any("node_modules" in k or "/.git/" in k for k in backend.files)

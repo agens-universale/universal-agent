@@ -27,6 +27,10 @@ class RecordingShell(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         for needle, res in self._answers.items():
             if needle in command:
                 return res
+        if command.startswith("if test "):
+            return ExecResult(
+                return_code=0, stdout="1\n"
+            )  # «есть» по умолчанию
         return ExecResult(return_code=0)
 
     async def _aupload_bytes(self, data, path):
@@ -63,16 +67,28 @@ def test_mixin_completes_the_protocol():
 
 
 async def test_exists_runs_test_e():
-    be = RecordingShell()
+    # Ответ — явные 0/1 в stdout: код возврата транспорта и «нет файла»
+    # иначе неразличимы (см. test_transport_failure_is_an_error_not_a_missing_file).
+    be = RecordingShell(
+        answers={"test -e": ExecResult(return_code=0, stdout="1\n")}
+    )
     assert await be.exists("/w/a.txt") is True
-    assert be.commands == ["test -e /w/a.txt"]
+    assert be.commands == ["if test -e /w/a.txt; then echo 1; else echo 0; fi"]
 
 
 async def test_is_file_and_is_dir_default_to_shell_test():
-    be = RecordingShell(answers={"test -f": ExecResult(return_code=1)})
+    be = RecordingShell(
+        answers={
+            "test -f": ExecResult(return_code=0, stdout="0\n"),
+            "test -d": ExecResult(return_code=0, stdout="1\n"),
+        }
+    )
     assert await be.is_file("/w/x") is False
     assert await be.is_dir("/w") is True
-    assert be.commands == ["test -f /w/x", "test -d /w"]
+    assert be.commands == [
+        "if test -f /w/x; then echo 1; else echo 0; fi",
+        "if test -d /w; then echo 1; else echo 0; fi",
+    ]
 
 
 async def test_write_encodes_and_uploads():
@@ -127,3 +143,50 @@ async def test_aprime_default_cwd_runs_pwd_once():
     assert await be.aprime_default_cwd() == "/work"
     assert be.commands.count("pwd") == 1
     assert be.default_cwd() == "/work"
+
+
+async def test_transport_failure_is_an_error_not_a_missing_file():
+    # Остановленный контейнер / мёртвый ssh: `test` не выполнился вовсе —
+    # это OSError, а не «файла нет» (иначе модель пересоздаёт существующее).
+    dead = RecordingShell(
+        answers={
+            "test -e": ExecResult(
+                return_code=1,
+                stderr="Error response from daemon: container is not running",
+            )
+        }
+    )
+    with pytest.raises(OSError, match="not running"):
+        await dead.exists("/etc")
+    alive = RecordingShell(
+        answers={
+            "test -e /missing": ExecResult(return_code=0, stdout="0\n"),
+            "test -d /etc": ExecResult(return_code=0, stdout="1\n"),
+        }
+    )
+    assert await alive.exists("/missing") is False
+    assert await alive.is_dir("/etc") is True
+
+
+async def test_busybox_find_is_reported_not_treated_as_empty_dir():
+    busybox = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1, stderr="find: unrecognized: -printf"
+            ),
+        }
+    )
+    with pytest.raises(OSError, match="GNU find"):
+        await busybox.listdir("/etc")
+    with pytest.raises(OSError, match="GNU find"):
+        await busybox.walk_entries("/etc")
+    gone = RecordingShell(
+        answers={
+            "-printf": ExecResult(
+                return_code=1,
+                stderr="find: '/nope': No such file or directory",
+            )
+        }
+    )
+    with pytest.raises(FileNotFoundError):
+        await gone.listdir("/nope")

@@ -212,7 +212,10 @@ async def test_fs_ops_have_a_timeout():
         ["sh", "-c", "sleep 30", "hang"], fs_op_timeout_sec=1
     )
     t0 = asyncio.get_running_loop().time()
-    assert await be.exists("/x") is False
+    # Зависший транспорт — ошибка, а не «файла нет»: иначе модель пересоздаёт
+    # существующее (остановленный контейнер выглядел как пустой диск).
+    with pytest.raises(OSError):
+        await be.exists("/x")
     with pytest.raises(OSError):
         await be.write("/x", "y")
     with pytest.raises(OSError):
@@ -242,3 +245,31 @@ async def test_download_errors_are_not_all_file_not_found(be, tmp_path):
     assert not isinstance(ei.value, FileNotFoundError)
     with pytest.raises(FileNotFoundError):
         await be.read_bytes(str(tmp_path / "missing.txt"))
+
+
+def test_env_names_must_be_identifiers():
+    # Имя переменной уходит в `export K=V` без кавычек: `X=1; cmd; Y` в имени —
+    # команда мимо модерации. Тул режет раньше, бэкенд — страховка.
+    import pytest
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+    from gc_core.tools.exec.execute_command import _parse_env_vars
+
+    b = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+    with pytest.raises(ValueError, match="invalid environment variable name"):
+        b._shell("echo hi", env={"X=1; touch /tmp/pwned; Y": "v"})
+    assert "export OK_1=v;" in b._shell("echo hi", env={"OK_1": "v"})
+
+    env, err = _parse_env_vars(
+        [{"name": "X=1; touch /tmp/pwned; Y", "value": "v"}]
+    )
+    assert env == {} and err["field"] == "env_vars[0].name"
+    env, err = _parse_env_vars([{"name": "GOOD_NAME", "value": "v"}])
+    assert env == {"GOOD_NAME": "v"} and err is None

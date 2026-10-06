@@ -164,6 +164,9 @@ def sandbox_auto_workdir(cwd: Optional[str] = None) -> str:
     """
     path = gc_paths()["state"] / "sandboxes" / project_slug(cwd)
     path.mkdir(parents=True, exist_ok=True)
+    # Janitor судит о возрасте по mtime самого каталога, а правки внутри его
+    # не обновляют — отмечаем каждый запуск, иначе живой workdir сносится.
+    os.utime(path, None)
     return str(path)
 
 

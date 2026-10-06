@@ -15,7 +15,7 @@ import posixpath
 import shlex
 import uuid
 from abc import abstractmethod
-from typing import Iterable, Optional, Sequence
+from typing import Any, Iterable, Optional, Sequence
 
 from gc_core.backends.capabilities import parse_find_printf_entries
 from gc_core.backends.protocol import (
@@ -138,32 +138,35 @@ class PosixShellFsMixin:
         return await self.sha256(path)
 
     # --- stat ---
+    async def _test(self, expr: str, path: str) -> bool:
+        """``test`` с явным ответом: код возврата транспорта и «нет файла» не
+        различимы (остановленный контейнер выглядел как пустой диск)."""
+        q = shlex.quote(path)
+        res = await self._afs_exec(
+            f"if {expr.format(p=q)}; then echo 1; else echo 0; fi"
+        )
+        answer = (res.stdout or "").strip().splitlines()
+        if res.return_code != 0 or not answer or answer[-1] not in ("0", "1"):
+            raise OSError(
+                (res.stderr or "").strip()
+                or f"backend unavailable while checking {path}"
+            )
+        return answer[-1] == "1"
+
     async def exists(self, path: str) -> bool:
-        return (
-            await self._afs_exec(f"test -e {shlex.quote(path)}")
-        ).return_code == 0
+        return await self._test("test -e {p}", path)
 
     async def lexists(self, path: str) -> bool:
-        return (
-            await self._afs_exec(
-                f"test -e {shlex.quote(path)} || test -L {shlex.quote(path)}"
-            )
-        ).return_code == 0
+        return await self._test("test -e {p} || test -L {p}", path)
 
     async def is_file(self, path: str) -> bool:
-        return (
-            await self._afs_exec(f"test -f {shlex.quote(path)}")
-        ).return_code == 0
+        return await self._test("test -f {p}", path)
 
     async def is_dir(self, path: str) -> bool:
-        return (
-            await self._afs_exec(f"test -d {shlex.quote(path)}")
-        ).return_code == 0
+        return await self._test("test -d {p}", path)
 
     async def is_symlink(self, path: str) -> bool:
-        return (
-            await self._afs_exec(f"test -L {shlex.quote(path)}")
-        ).return_code == 0
+        return await self._test("test -L {p}", path)
 
     async def realpath(self, path: str) -> str:
         res = await self._afs_exec(f"readlink -f {shlex.quote(path)}")
@@ -237,7 +240,7 @@ class PosixShellFsMixin:
             )
         )
         if res.return_code != 0:
-            raise FileNotFoundError(path)
+            raise self._find_failure(path, res)
         if res.stdout_hit_capture_cap:
             raise WalkOutputTooLargeError(
                 path, ceiling_chars=self.walk_output_max_chars
@@ -248,6 +251,29 @@ class PosixShellFsMixin:
         """Recursive listing under `path` as [(relpath, is_dir)] (relpath excludes path)."""
         return [(e.rel, e.is_dir) for e in await self.walk_entries(path)]
 
+    @staticmethod
+    def _find_failure(path: str, res: Any) -> OSError:
+        """Отказ ``find``: нет каталога — ``FileNotFoundError``; busybox без
+        ``-printf`` или мёртвый транспорт — ``OSError`` с текстом, а не «пусто»."""
+        err = (res.stderr or "").strip()
+        low = err.lower()
+        if any(
+            m in low
+            for m in (
+                "printf",
+                "unrecognized",
+                "bad option",
+                "invalid predicate",
+                "unknown predicate",
+            )
+        ):
+            return OSError(
+                f"GNU find with -printf is required on the backend: {err}"
+            )
+        if "no such file" in low or not err:
+            return FileNotFoundError(path)
+        return OSError(err)
+
     async def listdir(self, path: str) -> list:
         """Immediate children via private traverse channel (same ceiling as walk)."""
         # Тот же общий рецепт, что у обхода: без -H find не идёт по ссылке-аргументу,
@@ -255,7 +281,7 @@ class PosixShellFsMixin:
         head = " ".join(shlex.quote(a) for a in find_walk_head(path))
         res = await self._afs_exec(f"{head} -maxdepth 1 -printf '%f\\t%y\\n'")
         if res.return_code != 0:
-            raise FileNotFoundError(path)
+            raise self._find_failure(path, res)
         if res.stdout_hit_capture_cap:
             raise WalkOutputTooLargeError(
                 path, ceiling_chars=self.walk_output_max_chars

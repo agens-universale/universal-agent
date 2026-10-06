@@ -40,6 +40,17 @@ LAYERS = ("system", "user", "project")
 PROVISIONED_KINDS = frozenset({"docker", "ssh", "exec"})
 #: Потолок на весь провижининг: медленный ssh не должен держать старт рана.
 PROVISION_TIMEOUT_SEC = 120
+#: Не скиллы, а мусор рядом с ними: в копию не идут и в хэш не входят.
+SKIP_DIRS = frozenset(
+    {
+        "__pycache__",
+        ".git",
+        "node_modules",
+        ".venv",
+        ".mypy_cache",
+        ".pytest_cache",
+    }
+)
 
 
 def _host_layer_roots() -> Dict[str, str]:
@@ -55,7 +66,7 @@ def _layer_files(layer: str, root: str) -> List[Tuple[str, bytes]]:
     """[(``<слой>/<rel>``, bytes)] одного слоя; ``__pycache__`` пропускается."""
     files: List[Tuple[str, bytes]] = []
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d != "__pycache__")
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for name in sorted(filenames):
             full = os.path.join(dirpath, name)
             if os.path.islink(full) or not os.path.isfile(full):
@@ -158,8 +169,9 @@ async def aprovision_remote_skills(
 ) -> Optional[SkillsRegistry]:
     """Скопировать слои скиллов в среду исполнения и вернуть реестр по ним.
 
-    ``None`` — провижининг не нужен (хост, Harbor, выключен) или не удался:
-    тогда остаётся реестр по умолчанию, как и до этого изменения.
+    ``None`` — провижининг не нужен (хост, Harbor, выключен) или не удался.
+    При отказе остаётся реестр по умолчанию: он читает хостовые корни через
+    remote-бэкенд и скиллов не найдёт — ран идёт без них, с предупреждением.
     """
     log = run_logger or logger
     if not should_provision(config_dict, backend):
@@ -185,7 +197,7 @@ async def aprovision_remote_skills(
                 )
     except Exception as exc:  # провижининг не должен ронять старт рана
         log.warning(
-            "skills_runtime: provisioning failed (%s), skills stay host-only",
+            "skills_runtime: provisioning failed (%s) — skills are unavailable in this run",
             exc,
         )
         return None

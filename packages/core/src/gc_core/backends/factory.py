@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import sys
+import tempfile
+from pathlib import Path
 from typing import Any, Optional
 
 from gc_core.backends.harbor import HarborBackend
@@ -50,6 +54,18 @@ def os_backend_section(config_dict: dict) -> dict:
     raise ValueError(
         f"unsupported os_backend: {raw!r} (expected str or section)"
     )
+
+
+def ssh_control_dir() -> Path:
+    """Короткий каталог для ControlPath: unix-сокет ограничен ~104 байтами
+    (macOS), а ssh добавляет к пути временный суффикс. ``<state>/ssh`` с длинным
+    логином или своим GC_HOME не влезал — все операции падали."""
+    if os.name == "nt":
+        return gc_paths()["state"] / "ssh"
+    path = Path(tempfile.gettempdir() if sys.platform != "darwin" else "/tmp")
+    path = path / f"gc-ssh-{os.getuid()}"
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return path
 
 
 def parse_os_backend_kind(config_dict: dict) -> str:
@@ -139,9 +155,7 @@ def _remote_argv_prefix(kind: str, section: dict) -> list:
     if kind == "ssh":
         if not (section.get("ssh") or {}).get("host"):
             raise ValueError("os_backend.ssh.host обязателен при kind=ssh")
-        return ssh_argv_prefix(
-            section, control_dir=gc_paths()["state"] / "ssh"
-        )
+        return ssh_argv_prefix(section, control_dir=ssh_control_dir())
     prefix = list((section.get("exec") or {}).get("argv_prefix") or [])
     if not prefix:
         raise ValueError(
