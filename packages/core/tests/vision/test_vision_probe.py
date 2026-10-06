@@ -184,11 +184,15 @@ async def test_failures_stop_after_one_actual_request(
 
 
 @pytest.mark.parametrize("second", ["success", "wrong", "401"])
-async def test_401_uses_remaining_probe_attempt_for_alternative_auth(monkeypatch, probe_http, second):
+async def test_401_repeats_same_image_and_preserves_recognition_retry(monkeypatch, probe_http, second):
     from gc_core.vision import probe
 
     challenge = make_challenge(retry=False)
-    monkeypatch.setattr(probe, "make_challenge", lambda **kwargs: challenge)
+    retry_challenge = make_challenge(retry=True, previous_code=challenge.code)
+    monkeypatch.setattr(
+        probe, "make_challenge",
+        lambda **kwargs: retry_challenge if kwargs["retry"] else challenge,
+    )
     requests, responses = probe_http
     responses.append(httpx.Response(401))
     responses.append(
@@ -196,11 +200,21 @@ async def test_401_uses_remaining_probe_attempt_for_alternative_auth(monkeypatch
             200, json={"choices": [{"message": {"content": challenge.code if second == "success" else "wrong"}, "finish_reason": "stop"}]}
         )
     )
+    if second == "wrong":
+        responses.append(httpx.Response(
+            200, json={"choices": [{"message": {"content": retry_challenge.code}, "finish_reason": "stop"}]}
+        ))
     ctx, st = context(), state()
     prepared = await aprepare_chat_completion(ctx, st, resolved=model())
     result = await aprobe_route(ctx, st, prepared)
-    assert result.status is {"success": ProbeStatus.CONFIRMED, "wrong": ProbeStatus.UNCONFIRMED, "401": ProbeStatus.BLOCKED}[second]
-    assert [r.headers["Authorization"] for r in requests] == ["Bearer secret", "secret"]
+    assert result.status is (ProbeStatus.BLOCKED if second == "401" else ProbeStatus.CONFIRMED)
+    assert result.authorization_alternative is (second != "401")
+    assert [r.headers["Authorization"] for r in requests] == (
+        ["Bearer secret", "secret", "secret"] if second == "wrong" else ["Bearer secret", "secret"]
+    )
+    assert requests[0].content == requests[1].content
+    if second == "wrong":
+        assert requests[2].content != requests[1].content
     assert prepared.headers["Authorization"] == "Bearer secret"
 
 

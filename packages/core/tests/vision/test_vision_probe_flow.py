@@ -42,6 +42,40 @@ async def test_successful_probe_auth_form_is_used_for_native_request(tmp_path, m
     assert spy.requests[1].headers["Authorization"] == spy.requests[2].headers["Authorization"]
 
 
+async def test_auth_retry_and_second_image_confirmation_admit_native_pixels(tmp_path, monkeypatch):
+    first = make_challenge(retry=False)
+    second = make_challenge(retry=True, previous_code=first.code)
+    monkeypatch.setattr(
+        probe, "make_challenge", lambda **kwargs: second if kwargs["retry"] else first,
+    )
+
+    def handler(request):
+        if request.headers.get("Authorization") == "Bearer secret":
+            return httpx.Response(401)
+        if pngs(request) in ([first.png], [second.png]):
+            text = "wrong" if pngs(request) == [first.png] else second.code
+            return httpx.Response(200, json={"choices": [{"message": {"content": text}, "finish_reason": "stop"}]})
+        return httpx.Response(200, json=OK)
+
+    spy = install_transport(monkeypatch, handler)
+    ctx = _ctx(tmp_path, _cfg(chat_completion_headers={"Authorization": "Bearer secret"}), [])
+    att, message = _user_with_image(ctx.image_store)
+    st = _state([message])
+    st.vision_probe_turn = "root-one"
+    await pr._arequest_backend_canonical([message], st, ctx)
+    assert len(spy.requests) == 4
+    assert spy.requests[0].content == spy.requests[1].content
+    assert pngs(spy.requests[2]) == [second.png]
+    assert pngs(spy.requests[3]) == [ctx.image_store.read_for_send(att)]
+    assert [r.headers["Authorization"] for r in spy.requests] == ["Bearer secret", "secret", "secret", "secret"]
+
+    st.vision_probe_turn = "root-two"
+    await pr._arequest_backend_canonical([message], st, ctx)
+    assert len(spy.requests) == 5
+    assert spy.requests[-1].headers["Authorization"] == "secret"
+    assert pngs(spy.requests[-1]) == [ctx.image_store.read_for_send(att)]
+
+
 @pytest.mark.parametrize(
     "answer,finish,expected_probes",
     [("correct", "stop", 1), ("wrong", "stop", 2), ("", "length", 1)],

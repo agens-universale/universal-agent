@@ -25,6 +25,70 @@ def _screen(**over):
     return OnboardingScreen(**kw)
 
 
+@pytest.mark.asyncio
+async def test_connection_step_submits_accepted_literal_auth(tmp_path):
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.onboarding import STEP_CONNECTION
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_path = _write_conn_cfg(tmp_path, url="https://example.test/chat", auth="secret", model="m")
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(config=_resolved_conn_cfg(cfg_path), config_path=str(cfg_path), probe=lambda *a, **k: ProbeResult("unknown", None, None, 0, "offline"))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONNECTION)
+        await pilot.pause()
+        scr._on_auto_probe_done(
+            ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth="Bearer secret"),
+            scr._probe_gen,
+        )
+        assert scr.query_one("#conn-token", Input).value == "Bearer secret"
+        scr._submit_connection()
+        assert scr._values["Authorization"] == "Bearer secret"
+        assert "Bearer secret" not in cfg_path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_connection_edit_invalidates_inflight_probe_before_accepted_auth(tmp_path):
+    from gc_tui.app import TuiApp
+    from gc_tui.screens.onboarding import STEP_CONNECTION
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_path = _write_conn_cfg(
+        tmp_path, url="https://example.test/chat", auth="secret", model="m"
+    )
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config={})
+    async with app.run_test() as pilot:
+        scr = _screen(config=_resolved_conn_cfg(cfg_path), config_path=str(cfg_path))
+        await pilot.app.push_screen(scr)
+        await pilot.pause()
+        scr._goto(STEP_CONNECTION)
+        await pilot.pause()
+        stale_gen = scr._probe_gen
+        token = scr.query_one("#conn-token", Input)
+        token.value = "new-secret"
+        await pilot.pause()
+        assert scr._probe_gen != stale_gen
+        assert scr._last_probed_snapshot is None
+
+        scr._on_auto_probe_done(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth="Bearer secret",
+            ),
+            stale_gen,
+        )
+        assert token.value == "new-secret"
+
+
 class _FakeMcp:
     def installable_names(self):
         return ["duckduckgo", "office"]

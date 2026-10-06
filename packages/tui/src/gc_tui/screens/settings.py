@@ -1818,6 +1818,15 @@ class SettingsScreen(Screen):
             or self._view != section
         ):
             return
+        if result.auth_state == "accepted":
+            ed = self._connection_editor()
+            if ed.apply_accepted_auth(result.accepted_auth):
+                # Принятая форма меняет черновик программно. Старое
+                # подтверждение ENV/FILE-сохранения держит прежний снимок и
+                # после такой правки могло записать уже не показанное значение.
+                self._cancel_env_confirm()
+                self._last_probed_snapshot = ed.probe_snapshot()
+                self._update_dirty()
         self._draft_checked = result
         show = self._show_probe_line if manual else self._set_probe_line
         show(connection_line_text(result))

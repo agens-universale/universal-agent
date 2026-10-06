@@ -19,6 +19,7 @@ from dataclasses import dataclass, replace
 from typing import Optional
 
 from gc_core import model_picker
+from gc_core.utils.http_auth import authorization_attempts
 
 # Заглушка для POST-проверки без заданной модели: инертное имя, которое сервер
 # гарантированно не знает — ответ (401 vs 400/404/5xx) судит только токен.
@@ -29,6 +30,15 @@ _DUMMY_MODEL = "gc-connection-probe"
 # нельзя (LiteLLM отдаёт 400 «No connected db.» на любой неизвестный ключ).
 _CANARY_TOKEN = "Bearer gc-probe-invalid-token"
 _CANARY_NAKED = "gc-probe-invalid-token"
+
+
+def accepted_literal_auth(source: str | None, accepted: str | None) -> str | None:
+    """Принятая форма для черновика; ссылки на секреты не раскрываются и не заменяются."""
+    if not source or "${ENV:" in source or "${FILE:" in source:
+        return None
+    if accepted == source.strip() or accepted not in authorization_attempts(source):
+        return None
+    return accepted
 
 
 def _non_latin1_reason(auth: Optional[str]) -> str:
@@ -393,8 +403,6 @@ def probe_connection(
 
     Живёт здесь, а не в экранах: пробу зовут и /settings, и мастер, а скопированный
     differential-танец разъехался бы при первой правке одной из копий."""
-    from gc_core.utils.http_auth import authorization_attempts
-
     run = probe_fn or probe_auth
     attempts = authorization_attempts(token)
     has_token = bool(attempts)

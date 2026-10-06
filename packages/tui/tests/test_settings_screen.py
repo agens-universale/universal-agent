@@ -2092,6 +2092,81 @@ async def test_draft_probe_invalidated_by_edit_during_flight(tmp_path):
         )  # файл не тронут непроверенным
 
 
+async def test_accepted_literal_auth_is_saved_only_by_ctrl_s(tmp_path):
+    import yaml
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_file = _write_cfg(tmp_path)
+    before = cfg_file.read_bytes()
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=_cfg(), config_path=str(cfg_file), on_apply=lambda: None, probe_fn=_fake_probe(_probe_ok()))
+        app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        token = scr.query_one("#conn-token", Input)
+        token.value = "secret-token"
+        await pilot.pause()
+        scr._on_draft_probe(
+            ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth="Bearer secret-token"),
+            gen=scr._draft_gen, section=0, on_done=None,
+        )
+        await pilot.pause()
+        assert token.value == "Bearer secret-token"
+        assert cfg_file.read_bytes() == before
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert scr._view == "menu"
+        saved = yaml.safe_load(cfg_file.read_text(encoding="utf-8"))
+        assert saved["backend"]["chat_completion_headers"]["Authorization"] == "Bearer secret-token"
+
+
+async def test_accepted_auth_cancels_stale_env_save_confirmation(tmp_path):
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+    from gc_tui.services.settings_probe import ProbeResult
+    from textual.widgets import Input
+
+    cfg_file = _write_cfg(tmp_path)
+    app = app_mod.TuiApp(config=_cfg())
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(
+            config=_cfg(),
+            config_path=str(cfg_file),
+            on_apply=lambda: None,
+            probe_fn=_fake_probe(_probe_ok()),
+        )
+        app.push_screen(scr)
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        token = scr.query_one("#conn-token", Input)
+        token.value = "secret-token"
+        await pilot.pause()
+        scr._pending_env_save = (0, {"Authorization": "secret-token"}, "", True)
+
+        scr._on_draft_probe(
+            ProbeResult(
+                "ok",
+                200,
+                None,
+                1,
+                "ok",
+                auth_state="accepted",
+                accepted_auth="Bearer secret-token",
+            ),
+            gen=scr._draft_gen,
+            section=0,
+            on_done=None,
+        )
+        assert token.value == "Bearer secret-token"
+        assert scr._pending_env_save is None
+
+
 async def test_draft_probe_no_auth_choice_probes_without_old_token(tmp_path):
     """M1: выбор «без авторизации» проверяется БЕЗ старого токена из конфига — probe
     получает auth=None, а не «Bearer old» (иначе проверяется не то, что сохранится)."""

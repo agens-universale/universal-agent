@@ -1905,6 +1905,10 @@ class OnboardingScreen(Screen):
             return  # протухший результат (правка/переход обесценили)
         from gc_tui.services.probe_presentation import connection_line_text
 
+        if result.auth_state == "accepted":
+            ed = self._connection_editor()
+            if ed is not None and ed.apply_accepted_auth(result.accepted_auth):
+                self._last_probed_snapshot = ed.probe_snapshot()
         self._set_conn_probe_line(connection_line_text(result))
 
     def _set_conn_probe_line(self, text) -> None:
@@ -2140,10 +2144,14 @@ class OnboardingScreen(Screen):
         сворачивает список, как только совпадений не осталось, и раскрывает обратно,
         как только они появились), а футер шага именно от раскрытости списка и
         зависит (`_footer_text`)."""
-        if (
-            self._step_id() in _MARK_STEPS
-            or self._step_id() == STEP_CONNECTION
-        ):
+        if self._step_id() == STEP_CONNECTION:
+            # Любая ручная правка подключения обесценивает летящую пробу и её
+            # снимок. Программная подстановка принятой формы использует
+            # `write_field`, поэтому сюда не попадает.
+            self._probe_gen += 1
+            self._last_probed_snapshot = None
+            self._refresh_footer()
+        elif self._step_id() in _MARK_STEPS:
             self._refresh_footer()
 
     def on_key(self, event: events.Key) -> None:
@@ -2161,6 +2169,8 @@ class OnboardingScreen(Screen):
             if ed is not None and ed.clear_token():
                 event.prevent_default()
                 event.stop()
+                self._probe_gen += 1
+                self._last_probed_snapshot = None
                 self._refresh_footer()
             return
         if event.key == "ctrl+u" and self._voice_clear_token():

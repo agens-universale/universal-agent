@@ -3193,8 +3193,12 @@ async def test_inherited_model_token_uses_runtime_normalization():
         assert form._current_auth_header() == "Basic abc"
 
 
-@pytest.mark.parametrize("source", ["secret", "${ENV:MODEL_SOURCE}"])
-async def test_probe_preserves_token_source_and_submit_keeps_token_key(monkeypatch, source):
+@pytest.mark.parametrize("source,expected", [
+    ("secret", "Bearer secret"),
+    ("${ENV:MODEL_SOURCE}", "${ENV:MODEL_SOURCE}"),
+    ("${FILE:/not/read/by/probe/callback}", "${FILE:/not/read/by/probe/callback}"),
+])
+async def test_probe_normalizes_literal_token_and_preserves_secret_references(monkeypatch, source, expected):
     from textual.widgets import TextArea
 
     monkeypatch.setenv("MODEL_SOURCE", "secret")
@@ -3208,11 +3212,26 @@ async def test_probe_preserves_token_source_and_submit_keeps_token_key(monkeypat
         token.value = source
         form.query_one("#mef-backend", TextArea).load_text("request_timeout_sec: 45")
         form._on_probe(ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth="Bearer secret"), form._probe_gen)
-        assert token.value == source
+        assert token.value == expected
         ok, alias, fields = form.submit()
         assert ok is True
-        assert fields["token"] == source
+        assert fields["token"] == expected
         assert fields["backend"] == {"request_timeout_sec": 45}
+
+
+@pytest.mark.parametrize("source,accepted", [("secret", "Bearer secret"), ("Bearer secret", "secret")])
+async def test_probe_normalizes_existing_literal_token_without_retyping(source, accepted):
+    form = _form(
+        initial={"alias": "m", "url": "https://example.test/chat", "token": source},
+        existing_aliases={"m"},
+    )
+    async with _harness(form).run_test() as pilot:
+        await pilot.pause()
+        assert form.query_one("#mef-token", Input).value == ""
+        form._on_probe(ProbeResult("ok", 200, None, 1, "ok", auth_state="accepted", accepted_auth=accepted), form._probe_gen)
+        assert form.query_one("#mef-token", Input).value == accepted
+        assert form.is_dirty()
+        assert form.submit()[2]["token"] == accepted
 
 
 @pytest.mark.parametrize("from_header", [True, False])

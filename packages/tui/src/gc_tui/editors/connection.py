@@ -33,6 +33,7 @@ from gc_tui.editors.field_list import LIST_CLOSED_HINT, write_field
 from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT
 from gc_tui.editors.preset_list import preset_list_controller
 from gc_tui.palette import DEEP_DIM
+from gc_tui.services.settings_probe import accepted_literal_auth
 from gc_tui.widgets.paste_input import PasteInput
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -548,6 +549,19 @@ class ConnectionEditor(Vertical):
             return True  # галка отличается от действующего варианта
         # галка ○ (Bearer) и введён новый токен
         return bool(not self._no_auth and token)
+
+    def apply_accepted_auth(self, accepted: str | None) -> bool:
+        """Запомнить принятую форму литерала в поле до явного сохранения формы."""
+        if self._no_auth:
+            return False
+        field = self.query_one(_SEL_CONN_TOKEN, Input)
+        source = field.value.strip() or (None if self._token_cleared else self._auth_header)
+        value = accepted_literal_auth(source, accepted)
+        if value is None:
+            return False
+        write_field(field, value)
+        self._token_cleared = False
+        return True
 
     def submit(self) -> tuple[str | None, str | None, str | None, str | None]:
         """(url|None, header|None, error|None, proxy|None). None-значение = не менять.

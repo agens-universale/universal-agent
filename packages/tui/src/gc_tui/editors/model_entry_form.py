@@ -79,6 +79,7 @@ from gc_tui.services.probe_presentation import (
     connection_line_text,
     plural_models,
 )
+from gc_tui.services.settings_probe import accepted_literal_auth
 from gc_tui.services.yaml_view import safe_yaml_dump
 from gc_tui.widgets.paste_input import PasteInput
 
@@ -1998,7 +1999,26 @@ class ModelEntryForm(Vertical):
     def _on_probe(self, result, gen: int) -> None:
         if gen != self._probe_gen or not self.is_mounted:
             return
+        if result.auth_state == "accepted":
+            self.apply_accepted_auth(result.accepted_auth)
         self._set_probe_line(connection_line_text(result))
+
+    def apply_accepted_auth(self, accepted: str | None) -> bool:
+        """Нормализовать свой текстовый token; наследуемые и YAML-источники не менять."""
+        if self._no_auth or not self.own_connection():
+            return False
+        field = self.query_one(_SEL_MEF_TOKEN, Input)
+        source = field.value.strip() or (self._token_current if self._own_token_active() else None)
+        if self._current_auth_value()[0] != source:
+            return False
+        value = accepted_literal_auth(source, accepted)
+        if value is None:
+            return False
+        write_field(field, value)
+        self._token_cleared = False
+        self._sync_pair_state()
+        self._sync_token_label()
+        return True
 
     def _set_probe_line(self, text: Text, *, reveal: bool = True) -> None:
         for w in self.query("#mef-probe-line"):
