@@ -20,6 +20,7 @@ from gc_core.run_context import acreate_run_context
 from gc_core.settings import LoadedSettings, RuntimeEnv
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from gc_ua_temporalio.native_activity_config import ActivitiesConfig
 from gc_ua_temporalio.payload_storage import PayloadStorageConfig
 
 
@@ -57,6 +58,9 @@ class NativeWorkerConfig(BaseModel):
     #: большой вывод тула или длинный ход упираются в лимиты Temporal (2 МБ на
     #: payload, 50 МБ на историю). Явный ``null`` выключает хранилище.
     payload_storage: PayloadStorageConfig | None = None
+    #: Таймауты и повторы activities по уровням (``native_activity_config``):
+    #: сбои провайдера модели по умолчанию повторяются без ограничения.
+    activities: ActivitiesConfig = Field(default_factory=ActivitiesConfig)
 
     @model_validator(mode="before")
     @classmethod

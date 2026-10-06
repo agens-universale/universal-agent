@@ -138,8 +138,16 @@ class NativeMaintenance:
                 logger.info("Releasing abandoned native context %s", owner)
                 await self.provider.forget_owner(owner)
         for owner in technical:
-            if owner_state(owner, workflows) == "gone":
+            state = owner_state(owner, workflows)
+            if state == "gone":
                 await asyncio.to_thread(self.technical.delete_owner, owner)
+            elif state == "closed":
+                # Run закрыт (в том числе прошлая цепочка на том же ID):
+                # квитанции не нужны ни повторам, ни replay. Preview для UI
+                # остаются до удаления workflow из Temporal.
+                await asyncio.to_thread(
+                    self.technical.delete_operations, owner
+                )
         await self._drop_finished_turn_receipts(technical, workflows)
         for store in self.stores.values():
             await asyncio.to_thread(_prune_store_receipts, store)

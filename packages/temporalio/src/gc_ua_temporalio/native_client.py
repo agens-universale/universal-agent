@@ -17,7 +17,22 @@ class NativeAgentClient:
     def __init__(self, client, *, workflow_queue="ua-native-workflow"):
         self.client, self.workflow_queue = client, workflow_queue
 
-    async def start(self, request: NativeRunRequest, *, workflow_id=None):
+    async def start(
+        self,
+        request: NativeRunRequest,
+        *,
+        workflow_id=None,
+        retry_policy=None,
+        execution_timeout=None,
+    ):
+        """Старт сессии.
+
+        ``retry_policy`` и ``execution_timeout`` — параметры Temporal для всего
+        workflow, по умолчанию не заданы. Повтор workflow начинает ход заново
+        с тем же входом, и уже выполненные эффекты инструментов повторятся —
+        сбои отдельных шагов повторяются activities (секция ``activities``
+        конфига воркера).
+        """
         if request.format_text is not None and not request.format_text.strip():
             raise ValueError("Structured output format must be nonempty")
         if not request.messages or not all(
@@ -29,6 +44,8 @@ class NativeAgentClient:
             request,
             id=workflow_id or f"ua-native-{uuid.uuid4().hex}",
             task_queue=self.workflow_queue,
+            retry_policy=retry_policy,
+            execution_timeout=execution_timeout,
             id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,
         )
 
@@ -108,6 +125,11 @@ async def _unlock(args, temporal):
             "unlock: нужен --config (JSON воркера с thread_stores)"
         )
     stores = build_stores(NativeWorkerConfig.load(args.config))
+    if args.store not in stores:
+        raise SystemExit(
+            f"unlock: хранилища {args.store!r} нет в конфиге воркера; "
+            f"есть: {', '.join(sorted(stores)) or 'никаких'}"
+        )
     released = await release_stale_owner(
         stores[args.store], args.system, args.thread, temporal
     )

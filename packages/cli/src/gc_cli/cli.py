@@ -786,6 +786,11 @@ async def arun_cli() -> int:
             file=sys.stderr,
         )
         return 2
+    except ValueError as exc:
+        # Правило пары адрес+токен и прочие отказы правки — текстом, без
+        # трейсбека (значения в сообщении нет).
+        print(f"[gc] некорректный параметр: {exc}", file=sys.stderr)
+        return 2
     # Режим запуска для ядра: от него зависит запись журнала правок
     # (`agent_edits.record.cli`, по умолчанию выключена — журнал здесь не смотрят).
     loaded = loaded.with_runtime(run_mode=RUN_MODE_CLI)

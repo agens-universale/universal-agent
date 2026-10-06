@@ -212,7 +212,7 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
       ``agent.model``/``backend.completions_url`` видны легаси-форсу (§2) как
       заданные из CLI. Ключ — путь через точку (``agent.max_steps``) или
       вложенная секция (``agent: {max_steps: 100}``): секция раскладывается на
-      листья и перекрывает только заданные поля — как deep-merge у swarm.
+      листья и перекрывает только заданные поля — так же, как у swarm.
       Незнакомое схеме имя (прежнее плоское ``max_steps``) — ``ValueError``
       с подсказкой пути.
     """

@@ -14,13 +14,13 @@ from gc_core.execution.contracts import (
     OutcomeUnknown,
     ToolOutcomeUnknown,
     ToolResult,
+    TurnFailure,
 )
 from gc_core.execution.resource_contracts import ResourceOwnerLost
 from gc_core.project_memory.operations import ProjectMemoryReply
 from gc_core.run_preparation import PreparedPrompts
 from gc_core.state_preparation import PreparedState
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import (
     ActivityError,
     ApplicationError,
@@ -29,6 +29,10 @@ from temporalio.exceptions import (
 )
 from temporalio.exceptions import TimeoutError as TemporalTimeoutError
 
+from gc_ua_temporalio.native_activity_config import (
+    DEFAULT_ACTIVITY_SETTINGS,
+    activity_options,
+)
 from gc_ua_temporalio.native_contracts import (
     NativeCall,
     NativeGuardProbes,
@@ -94,7 +98,8 @@ INTERRUPTED_EFFECT = (
 def session_failure(exc):
     """Доменный отказ сессии — ``ApplicationError``, run становится FAILED.
 
-    Доменный — ``ExecutionFailure`` ядра, ошибка, поднятая из исхода
+    Доменный — ``TurnFailure`` ядра (``ExecutionFailure``, ошибка провайдера,
+    переполнение контекста), ошибка, поднятая из исхода
     activity/child workflow (в цепочке ``__cause__`` есть ``FailureError``),
     или восстановленный исход модельной операции (``restored_model_failure``).
     Всё остальное — сбой кода workflow: недетерминизм после деплоя, запрет
@@ -105,7 +110,7 @@ def session_failure(exc):
         return exc
     current, seen = exc, set()
     while current is not None and id(current) not in seen:
-        if isinstance(current, (ExecutionFailure, FailureError)) or getattr(
+        if isinstance(current, (TurnFailure, FailureError)) or getattr(
             current, "restored_model_failure", False
         ):
             return ApplicationError(
@@ -152,6 +157,8 @@ class NativeOperations:
         self._settings_cache = None
         self.closed = False
         self.released = False
+        #: Таймауты и повторы по уровням; после подготовки хода — с воркера.
+        self.activity_settings = DEFAULT_ACTIVITY_SETTINGS
 
     def next_operation_id(self, kind):
         return self.new_id(kind)
@@ -169,7 +176,7 @@ class NativeOperations:
         model=False,
         effect=False,
         tool=False,
-        start_to_close=ACTIVITY_TIMEOUT,
+        settings=None,
     ):
         """Execute one activity.
 
@@ -195,10 +202,14 @@ class NativeOperations:
                 task_queue=self.start.model_queue
                 if model
                 else self.start.resource_queue,
-                start_to_close_timeout=start_to_close,
-                heartbeat_timeout=timedelta(seconds=30),
-                retry_policy=RetryPolicy(maximum_attempts=2 if effect else 5),
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+                **activity_options(
+                    settings
+                    or self.activity_settings[
+                        "model" if model else "resource"
+                    ],
+                    effect=effect,
+                ),
             )
         except ActivityError as exc:
             raise self._activity_error(
@@ -229,6 +240,11 @@ class NativeOperations:
             }
             if cause.type in failures:
                 return failures[cause.type](cause.message)
+            if cause.type == "ModelProviderTransient":
+                # Исчерпан заданный в activities.model лимит повторов.
+                return InfrastructureFailure(
+                    f"Model provider unavailable: {cause.message}"
+                )
         if effect:
             return ToolOutcomeUnknown(INTERRUPTED_EFFECT)
         if tool:
@@ -265,8 +281,23 @@ class NativeOperations:
             operation_id=request.operation_id,
             effect=effect,
             tool=True,
-            start_to_close=self._tool_timeout(request),
+            settings=self._tool_settings(request),
         )
+
+    def _tool_settings(self, request):
+        """Уровень инструмента: ``activities.tools.<имя>`` или ``resource``;
+        лимит времени без явного — от ``timeout`` инструмента."""
+        settings = dict(
+            self.activity_settings.get("tools", {}).get(request.name)
+            or self.activity_settings["resource"]
+        )
+        explicit = request.name in self.activity_settings.get("tools", {})
+        if not (explicit and settings.get("start_to_close") is not None):
+            settings["start_to_close"] = max(
+                self._tool_timeout(request).total_seconds(),
+                settings.get("start_to_close") or 0,
+            )
+        return settings
 
     def _tool_timeout(self, request):
         """Лимит activity инструмента: его ``timeout`` (у команд без него —

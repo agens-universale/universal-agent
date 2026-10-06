@@ -199,3 +199,20 @@ def test_section_override_keeps_other_fields_and_pair_rule_holds(tmp_path):
         override_settings(
             base, {"models.ds.url": "https://evil.example/v1/chat/completions"}
         )
+
+
+def test_section_override_marks_only_its_leaves_in_provenance():
+    """`--agent '{"max_steps": 2}'` не делает agent.model «из CLI»
+    (иначе включался бы легаси-форс модели)."""
+    from gc_core.config import cli_forces_legacy_model
+    from gc_core.settings import LoadedSettings
+
+    loaded = LoadedSettings(
+        settings=override_settings(
+            default_settings(), {"models": {"ds": {"model": "x"}}}
+        )
+    ).with_overrides({"agent": {"max_steps": 2}}, layer="cli")
+    assert loaded.settings.agent.max_steps == 2
+    assert loaded.provenance.source("agent.max_steps").layer == "cli"
+    assert loaded.provenance.source("agent.model").layer != "cli"
+    assert cli_forces_legacy_model(loaded) is False

@@ -145,6 +145,10 @@ class NativeSubagentWorkflow:
             operations.child_context = request.child_context
             operations.resource_owner = request.parent_context.resource_owner
             operations.tool_metadata = request.parent_context.tool_metadata
+            if request.parent_context.activity_settings:
+                operations.activity_settings = (
+                    request.parent_context.activity_settings
+                )
             try:
                 prepared = await operations.call(
                     "agent.subagent.prepare",
@@ -157,7 +161,8 @@ class NativeSubagentWorkflow:
                 store = TemporalThreadStore(
                     request.start.store_id,
                     ThreadStoreTransport(
-                        task_queue=request.start.resource_queue
+                        task_queue=request.start.resource_queue,
+                        settings=operations.activity_settings["thread_store"],
                     ),
                     owner_id=request.store_owner_id,
                     owner_epoch=request.store_owner_epoch,

@@ -147,7 +147,7 @@ def expand_section_updates(updates: Mapping[str, Any]) -> dict[str, Any]:
     return out
 
 
-def _check_registry_pairs(updates: Mapping[str, Any]) -> None:
+def check_registry_pairs(updates: Mapping[str, Any]) -> None:
     """Правило пары «адрес + токен» для правок записей реестра моделей.
 
     ``models.ds.url`` без токена оставил бы токен файла и отправил его на
@@ -187,7 +187,7 @@ def override_settings(
     if not updates:
         return settings
     updates = expand_section_updates(updates)
-    _check_registry_pairs(updates)
+    check_registry_pairs(updates)
     merged = settings.model_dump(by_alias=True, exclude_unset=True)
     for dotted, value in updates.items():
         _replace_at(merged, dotted, value)
@@ -215,7 +215,11 @@ class LoadedSettings:
             settings=override_settings(
                 self.settings, updates, config_dir=self.runtime.config_dir
             ),
-            provenance=self.provenance.with_layer(layer, updates),
+            # По листьям: секция `agent: {max_steps: 2}` не должна помечать
+            # источником CLI остальные поля секции (agent.model → легаси-форс).
+            provenance=self.provenance.with_layer(
+                layer, expand_section_updates(updates)
+            ),
         )
 
     def with_runtime(self, **values: Any) -> LoadedSettings:

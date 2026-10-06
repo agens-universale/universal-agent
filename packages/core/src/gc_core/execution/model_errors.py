@@ -6,6 +6,7 @@ from gc_core.execution.contracts import (
     ModelFailure,
     ModelProviderError,
     OutcomeUnknown,
+    TurnFailure,
 )
 
 _DOMAIN_ERRORS = {cls.__name__: cls for cls in (ValueError, RuntimeError)}
@@ -22,7 +23,9 @@ def restore_model_failure(failure: ModelFailure) -> Exception:
     операции, а не сбой кода вызывающего (durable-исполнитель отличает их).
     """
     exc = _restore_model_failure(failure)
-    exc.restored_model_failure = True
+    if not isinstance(exc, TurnFailure):
+        # Восстановленная доменная ошибка (ValueError…) — тоже исход операции.
+        exc.restored_model_failure = True
     return exc
 
 

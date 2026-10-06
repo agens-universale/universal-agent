@@ -16,6 +16,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from gc_ua_temporalio.native_activities import NativeActivities
+from gc_ua_temporalio.native_activity_config import resolve_activity_settings
 from gc_ua_temporalio.native_child_preparation import NativeChildActivities
 from gc_ua_temporalio.native_child_workflow import NativeSubagentWorkflow
 from gc_ua_temporalio.native_maintenance import NativeMaintenance
@@ -71,6 +72,7 @@ def build_native_runtime(config):
             for name, profile in config.profiles.items()
             if profile.preview_stream
         },
+        activity_settings=resolve_activity_settings(config.activities),
     )
     return provider, native, ThreadStoreActivities(stores)
 

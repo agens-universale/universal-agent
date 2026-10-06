@@ -107,6 +107,8 @@ class NativePreparedContext:
     skills: list[dict] | None = None
     prompts_request: PromptPreparationRequest | None = None
     prompts: PreparedPrompts | None = None
+    #: Таймауты и повторы activities воркера (``native_activity_config``).
+    activity_settings: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass

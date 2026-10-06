@@ -33,6 +33,7 @@ from temporalio import activity
 from temporalio.converter import value_to_type
 from temporalio.exceptions import ApplicationError
 
+from gc_ua_temporalio.native_activity_config import DEFAULT_ACTIVITY_SETTINGS
 from gc_ua_temporalio.native_contracts import (
     NativeCall,
     NativeGuardProbes,
@@ -46,6 +47,43 @@ def _digest(call):
     return hashlib.sha256(
         json.dumps(asdict(call), sort_keys=True, ensure_ascii=False).encode()
     ).hexdigest()
+
+
+#: Тип ошибки модельной activity, которую Temporal повторяет по политике.
+TRANSIENT_MODEL_FAILURE = "ModelProviderTransient"
+
+#: Коды, при которых повтор того же запроса имеет смысл.
+_TRANSIENT_STATUSES = {408, 425, 429}
+
+
+def is_transient_provider_failure(failure) -> bool:
+    """Сбой провайдера, который проходит сам: транспорт, 5xx, 408/425/429.
+
+    Не транзиентны: отказ по существу (4xx), авторизация, переполнение
+    контекста, отказ из-за картинок, открытый предохранитель алиаса,
+    вложенный отказ с кодом провайдера (``insufficient_quota``).
+    """
+    if failure is None or failure.kind != "provider":
+        return False
+    if (
+        failure.auth_error
+        or failure.context_overflow
+        or failure.image_rejection
+        or failure.image_request
+        or failure.response_cache_miss
+    ):
+        return False
+    details = failure.details or {}
+    if "alias" in details or details.get("raw_code") is not None:
+        return False
+    if "status_code" not in details:
+        return True  # транспорт: обрыв, таймаут, отказ соединения
+    status = details.get("status_code")
+    try:
+        status = int(status)
+    except (TypeError, ValueError):
+        return False
+    return status >= 500 or status in _TRANSIENT_STATUSES
 
 
 class NativeActivities:
@@ -64,8 +102,12 @@ class NativeActivities:
         receipts,
         public_config,
         preview_profiles=(),
+        activity_settings=None,
     ):
         self._operation_locks = {}
+        #: Итоговые таймауты и повторы activities (``resolve_activity_settings``)
+        #: — уходят в workflow с подготовкой хода.
+        self.activity_settings = activity_settings or DEFAULT_ACTIVITY_SETTINGS
         self.context_provider = context_provider
         self.stores = {
             name: athread_store(store) for name, store in stores.items()
@@ -237,6 +279,7 @@ class NativeActivities:
             skills=await ctx.skills_registry.list_skills(),
             prompts_request=prompts_request,
             prompts=prompts,
+            activity_settings=self.activity_settings,
         )
 
     @activity.defn(name="agent.state.prepare")
@@ -330,6 +373,18 @@ class NativeActivities:
         except ModelOperationError as exc:
             result = exc.result
             result.failure = encode_model_failure(exc.cause)
+            if call.child_context is None and is_transient_provider_failure(
+                result.failure
+            ):
+                # Обрыв, недоступность, 5xx, 429: повторит Temporal по политике
+                # activities.model — ход ждёт провайдера, а не падает. Запрос
+                # субагента остаётся данными: его fallback на модель родителя
+                # решается в workflow.
+                raise ApplicationError(
+                    result.failure.message,
+                    result.failure.error_type,
+                    type=TRANSIENT_MODEL_FAILURE,
+                ) from exc
         return NativeModelReply(result, router.breaker.snapshot())
 
     @activity.defn(name="agent.tool.execute")

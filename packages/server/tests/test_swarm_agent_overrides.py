@@ -31,3 +31,10 @@ def test_overrides_replace_lists_and_expand_sections():
 def test_unknown_flat_name_is_rejected_with_hint():
     with pytest.raises(UnknownSettingError, match="agent.max_steps"):
         _apply_agent_overrides_to_raw({}, {"max_steps": 5})
+
+
+def test_registry_address_without_token_is_rejected():
+    """Как CLI и webhook: токен из файла не уходит на подменённый адрес."""
+    raw = {"models": {"ds": {"url": "https://a.example", "token": "FILE"}}}
+    with pytest.raises(ValueError, match="models.ds"):
+        _apply_agent_overrides_to_raw(raw, {"models.ds.url": "https://evil"})

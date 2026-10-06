@@ -209,6 +209,7 @@ flowchart TB
 | [`NativeMaintenance`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) | Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит квитанции и preview workflow, которых Temporal уже не знает, и квитанции тредов старше 7 дней. |
 | ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-история-temporal-и-payload)). По умолчанию — каталог `threads` рядом с `receipts_database`, не в workspace агента. |
 | [`TechnicalStore`](../packages/temporalio/src/gc_ua_temporalio/storage/technical.py) | SQLite worker'а: результаты завершённых activities (повтор не платит второй раз) и необязательные preview. Не хранилище диалога. |
+| [`native_activity_config`](../packages/temporalio/src/gc_ua_temporalio/native_activity_config.py) | Таймауты и повторы activities по уровням (`model`, `resource`, `thread_store`, инструмент) — как `ActivityConfig` у Pydantic AI; в workflow приходят с подготовкой хода. |
 | [Payload storage](../packages/temporalio/src/gc_ua_temporalio/payload_storage.py) | External storage Temporal SDK, включён по умолчанию (каталог `payloads` рядом с `receipts_database`): payload больше порога (32 КБ) лежат вне истории, и большой вывод инструмента или длинный ход не упираются в лимиты Temporal (2 МБ на payload, 50 МБ на историю). |
 
 ## 2. Порты операций: один код, два исполнителя
@@ -274,7 +275,7 @@ readability на уровне модулей, как в develop, хотя workfl
 | `agent.prompts.prepare` | resource | Промпты, если запрос отличается от предвычисленного | до 5 |
 | `agent.prompt.read` | resource | Ленивые промпты (finish gate, summary, judges) | до 5 |
 | `agent.skills.list` | resource | Список skills, если не пришёл в prepare | до 5 |
-| `agent.model.request` | model | Запрос к модели через общий модельный порт | до 5 |
+| `agent.model.request` | model | Запрос к модели через общий модельный порт | сбой провайдера — без ограничения, пауза до 1 мин (`activities.model`) |
 | `agent.guard.probe` | resource | Факты для guard'а (+ факты следующей проверки того же пути) | до 5 |
 | `agent.tool.execute` | resource | Внешний эффект инструмента после повторной проверки фактов. Лимит времени — `timeout` инструмента (для `exec_command` без него — `agent.exec_timeout_sec`) + 5 минут, не меньше 15 минут | чтения (fs-чтения, `fetch_url`, `fs_view_image`) — до 5; эффект — см. [раздел 8](#8-ошибки-повторы-и-неизвестный-исход) |
 | `agent.memory.execute`, `agent.memory.hash` | resource | Project memory | чтение — до 5, запись — эффект / до 5 |
@@ -517,6 +518,7 @@ replay восстанавливает буфер; при сбое коммита
 | Доменная ошибка в activity (`ValueError`, `OSError`, …) | Переносится значением (`DomainError`) и поднимается в workflow тем же типом — ядро возвращает модели `internal_tool_error`, как в local |
 | Факты guard'а изменились до эффекта | `GuardPreconditionChanged` — ошибка инструмента, эффект не исполнен |
 | Запрос к модели упал вместе с worker'ом | Temporal повторяет; если ответ пришёл, а квитанция нет — повторная оплата одного запроса |
+| Сбой провайдера модели: обрыв, 5xx, 408/425/429 | Temporal повторяет запрос по политике `activities.model` (по умолчанию без ограничения): ход ждёт и продолжается, run остаётся RUNNING |
 | Чтение (fs-чтения, `fetch_url`, `fs_view_image`, чтение памяти проекта), подготовка, хранилище | Повтор Temporal (до 5) |
 | Эффект инструмента (запись, команда, MCP, project memory) | Вторая попытка только читает квитанцию первой и **никогда не исполняет эффект заново**; квитанции нет — модель получает «исход неизвестен, проверьте состояние» (`ToolOutcomeUnknown`) |
 | Потеря MCP или фонового владельца | `ResourceOwnerLost` — ошибка инструмента |

@@ -92,6 +92,8 @@ class NativeAgentWorkflow:
         #: Прокси треда с подтверждённым владением (после claim или resume).
         self.store = None
         self.owner_released = False
+        #: Уровень activities.thread_store; до подготовки хода — умолчания.
+        self.store_settings = None
 
     def new_id(self, prefix):
         self.sequence += 1
@@ -355,11 +357,17 @@ class NativeAgentWorkflow:
         self.operations.resource_owner = prepared.resource_owner
         self.operations.tool_metadata = prepared.tool_metadata
         self.operations.prepared = prepared
+        if prepared.activity_settings:
+            self.operations.activity_settings = prepared.activity_settings
+        self.store_settings = self.operations.activity_settings["thread_store"]
         if store is None and self.resumed_store is not None:
             epoch, generation = self.resumed_store
             store = TemporalThreadStore(
                 start.store_id,
-                ThreadStoreTransport(task_queue=start.resource_queue),
+                ThreadStoreTransport(
+                    task_queue=start.resource_queue,
+                    settings=self.store_settings,
+                ),
                 owner_id=owner,
                 owner_epoch=epoch,
                 generation=generation,
@@ -369,7 +377,10 @@ class NativeAgentWorkflow:
         if store is None:
             store = TemporalThreadStore(
                 start.store_id,
-                ThreadStoreTransport(task_queue=start.resource_queue),
+                ThreadStoreTransport(
+                    task_queue=start.resource_queue,
+                    settings=self.store_settings,
+                ),
                 capabilities=prepared.store_capabilities,
                 threads_dir=prepared.threads_dir,
             )
@@ -569,7 +580,10 @@ class NativeAgentWorkflow:
             epoch, generation = self.resumed_store
             store = TemporalThreadStore(
                 start.store_id,
-                ThreadStoreTransport(task_queue=start.resource_queue),
+                ThreadStoreTransport(
+                    task_queue=start.resource_queue,
+                    settings=self.store_settings,
+                ),
                 owner_id=workflow.info().workflow_id,
                 owner_epoch=epoch,
                 generation=generation,
@@ -600,8 +614,14 @@ class NativeAgentWorkflow:
             turns=self.turns,
             answer=self.answer,
             terminal_outcome=self.terminal_outcome,
-            store_owner_epoch=store.owner_epoch if store else None,
-            store_generation=store._generation if store else None,
+            # Run из CAN без хода владеет тредом по resume: передать его дальше,
+            # иначе суточный CAN простаивающей сессии терял бы владение.
+            store_owner_epoch=store.owner_epoch
+            if store
+            else (self.resumed_store[0] if self.resumed_store else None),
+            store_generation=store._generation
+            if store
+            else (self.resumed_store[1] if self.resumed_store else None),
         )
         # Без await между проверкой и CAN: весь принятый ввод уже в resume.
         workflow.continue_as_new(

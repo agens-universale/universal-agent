@@ -36,6 +36,14 @@ async def test_production_provider_worker_client_and_replay(
             "model_queue": "native-production",
             "resource_queue": "native-production",
             "receipts_database": str(tmp_path / "receipts.sqlite"),
+            # По умолчанию недоступный провайдер Temporal повторяет без
+            # ограничения (ход ждёт). Здесь лимит задан явно: после него —
+            # отказ сессии (FAILED).
+            "activities": {
+                "model": {
+                    "retry": {"maximum_attempts": 2, "initial_interval": 0.1}
+                }
+            },
             "profiles": {
                 "test": {
                     "workspace": str(tmp_path),
@@ -93,7 +101,10 @@ async def test_production_provider_worker_client_and_replay(
                 if provider_unavailable:
                     with pytest.raises(WorkflowFailureError) as failure:
                         await asyncio.wait_for(handle.result(), 20)
-                    assert failure.value.cause.type == "ModelProviderError"
+                    assert failure.value.cause.type == "InfrastructureFailure"
+                    assert "Model provider unavailable" in str(
+                        failure.value.cause
+                    )
                     history = await handle.fetch_history()
                     await Replayer(
                         workflows=[NativeAgentWorkflow]

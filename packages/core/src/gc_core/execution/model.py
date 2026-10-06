@@ -4,6 +4,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 from gc_core.execution.contracts import (
+    ContextWindowExceeded,
     ModelOperationCancelled,
     ModelOperationError,
     ModelRequest,
@@ -76,11 +77,9 @@ async def arequest_model(operations, state, messages, *, consumer, **kwargs):
         # the same error recognised by the native compaction/retry policy.
         # Old histories carry no updated main counters with this flag.
         apply_model_result(state, result, main=False)
-        overflow = RuntimeError("Model context window exceeded")
         # Исход модельной операции, а не сбой кода: если сжатие не помогло,
         # ход завершается ошибкой (durable-исполнитель — FAILED), как в local.
-        overflow.restored_model_failure = True
-        raise overflow
+        raise ContextWindowExceeded("Model context window exceeded")
     apply_model_result(state, result, main=consumer == "main")
     if result.failure is not None:
         raise restore_model_failure(result.failure)

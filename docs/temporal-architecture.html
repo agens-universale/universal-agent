@@ -389,6 +389,10 @@ post-run шаге вызывающий использует <code>account_run=Fa
 <td>SQLite worker'а: результаты завершённых activities (повтор не платит второй раз) и необязательные preview. Не хранилище диалога.</td>
 </tr>
 <tr>
+<td><a href="../packages/temporalio/src/gc_ua_temporalio/native_activity_config.py"><code>native_activity_config</code></a></td>
+<td>Таймауты и повторы activities по уровням (<code>model</code>, <code>resource</code>, <code>thread_store</code>, инструмент) — как <code>ActivityConfig</code> у Pydantic AI; в workflow приходят с подготовкой хода.</td>
+</tr>
+<tr>
 <td><a href="../packages/temporalio/src/gc_ua_temporalio/payload_storage.py">Payload storage</a></td>
 <td>External storage Temporal SDK, включён по умолчанию (каталог <code>payloads</code> рядом с <code>receipts_database</code>): payload больше порога (32 КБ) лежат вне истории, и большой вывод инструмента или длинный ход не упираются в лимиты Temporal (2 МБ на payload, 50 МБ на историю).</td>
 </tr>
@@ -482,7 +486,7 @@ readability на уровне модулей, как в develop, хотя workfl
 <td><code>agent.model.request</code></td>
 <td>model</td>
 <td>Запрос к модели через общий модельный порт</td>
-<td>до 5</td>
+<td>сбой провайдера — без ограничения, пауза до 1 мин (<code>activities.model</code>)</td>
 </tr>
 <tr>
 <td><code>agent.guard.probe</code></td>
@@ -776,6 +780,10 @@ replay восстанавливает буфер; при сбое коммита
 <tr>
 <td>Запрос к модели упал вместе с worker'ом</td>
 <td>Temporal повторяет; если ответ пришёл, а квитанция нет — повторная оплата одного запроса</td>
+</tr>
+<tr>
+<td>Сбой провайдера модели: обрыв, 5xx, 408/425/429</td>
+<td>Temporal повторяет запрос по политике <code>activities.model</code> (по умолчанию без ограничения): ход ждёт и продолжается, run остаётся RUNNING</td>
 </tr>
 <tr>
 <td>Чтение (fs-чтения, <code>fetch_url</code>, <code>fs_view_image</code>, чтение памяти проекта), подготовка, хранилище</td>

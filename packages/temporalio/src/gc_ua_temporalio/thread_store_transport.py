@@ -1,7 +1,6 @@
 """Workflow transport for the native store's async facade."""
 
 import asyncio
-from datetime import timedelta
 
 from gc_core.execution.contracts import ExecutionFailure, InfrastructureFailure
 from gc_core.thread_store_durable import (
@@ -11,13 +10,16 @@ from gc_core.thread_store_durable import (
     ThreadStoreRecoveryError,
 )
 from temporalio import workflow
-from temporalio.common import RetryPolicy
 from temporalio.exceptions import (
     ActivityError,
     ApplicationError,
     CancelledError,
 )
 
+from gc_ua_temporalio.native_activity_config import (
+    DEFAULT_ACTIVITY_SETTINGS,
+    activity_options,
+)
 from gc_ua_temporalio.thread_store_contracts import ThreadStoreReply
 
 _STORE_ERRORS = {
@@ -33,9 +35,10 @@ _STORE_ERRORS = {
 
 
 class ThreadStoreTransport:
-    def __init__(self, *, task_queue, timeout_seconds=120):
+    def __init__(self, *, task_queue, settings=None):
         self.task_queue = task_queue
-        self.timeout_seconds = timeout_seconds
+        #: Уровень ``activities.thread_store`` (данные с воркера).
+        self.settings = settings or DEFAULT_ACTIVITY_SETTINGS["thread_store"]
 
     async def __call__(self, name, request):
         try:
@@ -45,9 +48,8 @@ class ThreadStoreTransport:
                 result_type=ThreadStoreReply,
                 summary=f"Thread store: {request.operation.kind if request.operation else name.rsplit('.', 1)[-1]}",
                 task_queue=self.task_queue,
-                start_to_close_timeout=timedelta(seconds=self.timeout_seconds),
-                retry_policy=RetryPolicy(maximum_attempts=5),
                 cancellation_type=workflow.ActivityCancellationType.WAIT_CANCELLATION_COMPLETED,
+                **activity_options(self.settings),
             )
         except ActivityError as exc:
             cause = exc.cause

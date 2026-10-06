@@ -265,3 +265,54 @@ async def test_unlock_releases_only_a_dead_owner(
         await handle.terminate("operator")
         assert await release_stale_owner(*args) == "controls"
         assert owner(tmp_path) is None
+
+
+async def test_idle_refresh_continue_as_new_keeps_ownership(
+    tmp_path, monkeypatch, scripted_http
+):
+    """Ход → CAN → простой (суточный CAN без хода) → close: владение снято.
+    Run из CAN без хода передаёт владение по resume дальше."""
+    from datetime import timedelta
+
+    from gc_ua_temporalio import native_workflow
+    from gc_ua_temporalio.native_worker import (
+        build_native_runtime,
+        worker_options,
+    )
+    from temporalio.testing import WorkflowEnvironment
+    from temporalio.worker import UnsandboxedWorkflowRunner
+
+    binary = shutil.which("temporal")
+    if binary is None:
+        pytest.skip("Temporal CLI is required")
+    monkeypatch.chdir(tmp_path)
+    # Без песочницы подмена константы модуля видна коду workflow.
+    monkeypatch.setattr(native_workflow, "IDLE_REFRESH", timedelta(seconds=1))
+    url, _, script = scripted_http
+    script.append([finish("first")])
+    config = _config(tmp_path, url, "scripted")
+    contexts, native, threads = build_native_runtime(config)
+    (options,) = worker_options(config, native, threads)
+    options["workflow_runner"] = UnsandboxedWorkflowRunner()
+    try:
+        async with await WorkflowEnvironment.start_local(
+            dev_server_existing_path=binary
+        ) as env:
+            async with Worker(env.client, **options):
+                handle = await env.client.start_workflow(
+                    NativeAgentWorkflow.run,
+                    request(keep_alive=True),
+                    id="controls",
+                    task_queue="native-controls",
+                )
+                runs = {handle.first_execution_run_id}
+                async with asyncio.timeout(30):
+                    while len(runs) < 3:  # ход → CAN, затем CAN простоя
+                        runs.add((await handle.describe()).run_id)
+                        await asyncio.sleep(0.2)
+                assert owner(tmp_path) == "controls"
+                await handle.signal(NativeAgentWorkflow.close_session)
+                await handle.result()
+    finally:
+        await contexts.aclose()
+    assert owner(tmp_path) is None

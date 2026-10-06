@@ -675,3 +675,34 @@ def test_flat_param_name_fails_with_path_hint(monkeypatch, tmp_path, capsys):
     err = capsys.readouterr().err
     assert "неизвестная настройка --max_steps" in err
     assert "--agent.max_steps" in err
+
+
+def test_registry_pair_violation_is_reported_without_traceback(
+    monkeypatch, tmp_path, capsys
+):
+    base = tmp_path / "base.yml"
+    base.write_text(
+        "agent: {model: m}\n"
+        "models:\n"
+        "  ds: {model: x, url: 'https://a.example/v1/chat/completions', token: T}\n",
+        encoding="utf-8",
+    )
+    ap = _reload_arg_parser_with_argv(
+        [
+            "gc-cli",
+            "--config",
+            str(base),
+            "--models.ds.url",
+            "https://evil.example/v1/chat/completions",
+            "-q",
+            "x",
+        ],
+        monkeypatch,
+    )
+    monkeypatch.setattr(cli, "arg_parser", ap)
+    monkeypatch.setattr(cli, "_ensure_project_gc_dir", lambda: None)
+    monkeypatch.setattr(cli, "_ensure_user_skills_dir", lambda: None)
+
+    assert cli.main() == 2
+    err = capsys.readouterr().err
+    assert "models.ds" in err and "Traceback" not in err

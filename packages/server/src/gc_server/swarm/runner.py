@@ -13,7 +13,11 @@ from gc_core.config_modules import env_vars
 from gc_core.config_modules.compat import map_legacy_path
 from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.path_hints import check_setting_path
-from gc_core.settings import _replace_at, expand_section_updates
+from gc_core.settings import (
+    _replace_at,
+    check_registry_pairs,
+    expand_section_updates,
+)
 from gc_core.utils.user_text import read_user_text_or_none
 
 from gc_server.swarm import storage as storage
@@ -34,6 +38,9 @@ def _apply_agent_overrides_to_raw(
     updates = expand_section_updates(
         {str(key): value for key, value in overrides.items()}
     )
+    # Правило пары адрес+токен — как в CLI и webhook: адрес записи реестра
+    # без токена оставил бы токен файла на новом адресе.
+    check_registry_pairs(updates)
     result = copy.deepcopy(raw)
     for dotted, value in updates.items():
         _replace_at(result, dotted, copy.deepcopy(value))

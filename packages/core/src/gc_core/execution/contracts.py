@@ -9,7 +9,17 @@ from typing import Any, Awaitable, Callable, Literal
 from gc_core.execution.guard_contracts import GuardProbeCheck
 
 
-class ExecutionFailure(RuntimeError):
+class TurnFailure(Exception):
+    """Штатный отказ хода: ход завершается ошибкой, как в local.
+
+    Базовый класс доменных отказов (как ``AgentRunError`` у Pydantic AI):
+    durable-исполнитель переводит его в отказ run (FAILED). Любое другое
+    исключение из кода workflow он считает сбоем кода и повторяет workflow
+    task до исправленного воркера.
+    """
+
+
+class ExecutionFailure(TurnFailure, RuntimeError):
     """An execution/persistence failure, never model-visible tool feedback."""
 
 
@@ -146,7 +156,11 @@ class ModelFailure:
     image_limit: int | None = None
 
 
-class ModelProviderError(RuntimeError):
+class ContextWindowExceeded(TurnFailure, RuntimeError):
+    """Контекст не помещается в окно модели и после сжатия истории."""
+
+
+class ModelProviderError(TurnFailure, RuntimeError):
     """Provider failure restored without importing an HTTP client in workflow.
 
     Native backend-error predicates consume the explicit classification. The
