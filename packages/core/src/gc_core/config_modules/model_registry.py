@@ -398,6 +398,11 @@ def validate_registry_pairs(
             raise ValueError(problem)
 
 
+def model_authorization_header(token: str | None) -> str | None:
+    """Сохранить настроенную форму token для первой транспортной попытки."""
+    return token
+
+
 class ModelEntry(BaseModel):
     """Запись реестра `models`: алиас (ключ словаря) → провайдерская модель + точечные
     оверлеи backend/pricing поверх эффективной секции backend."""
@@ -520,13 +525,7 @@ class ModelEntry(BaseModel):
     def authorization_header(self) -> str | None:
         """Bearer-нормализация token: None → наследование, "" → явно без авторизации,
         иначе — `Bearer <token>` (уже с префиксом — не дублируется)."""
-        if (
-            self.token is None
-            or not self.token
-            or self.token.startswith("Bearer ")
-        ):
-            return self.token
-        return f"Bearer {self.token}"
+        return model_authorization_header(self.token)
 
 
 class SlotsConfig(BaseModel):

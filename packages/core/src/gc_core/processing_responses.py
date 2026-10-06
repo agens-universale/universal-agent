@@ -857,6 +857,9 @@ async def _aprepare_native_vision(
     )
     if candidates and not _declared_blind(resolved, cfg):
         await aensure_route(ctx, state, prepared)
+        from gc_core.vision.service import confirmed_route_headers
+
+        call_headers.update(confirmed_route_headers(prepared))
     return key
 
 

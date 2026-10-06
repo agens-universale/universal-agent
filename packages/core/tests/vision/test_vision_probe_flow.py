@@ -20,6 +20,28 @@ def pngs(request):
     ]
 
 
+async def test_successful_probe_auth_form_is_used_for_native_request(tmp_path, monkeypatch):
+    challenge = make_challenge(retry=False)
+    monkeypatch.setattr(probe, "make_challenge", lambda **kwargs: challenge)
+
+    def handler(request):
+        if request.headers.get("Authorization", "").startswith("Bearer "):
+            return httpx.Response(401)
+        if pngs(request) == [challenge.png]:
+            return httpx.Response(200, json={"choices": [{"message": {"content": challenge.code}, "finish_reason": "stop"}]})
+        return httpx.Response(200, json=OK)
+
+    spy = install_transport(monkeypatch, handler)
+    ctx = _ctx(tmp_path, _cfg(chat_completion_headers={"Authorization": "Bearer secret"}), [])
+    _, message = _user_with_image(ctx.image_store)
+    st = _state([message])
+    st.vision_probe_turn = "root-one"
+    await pr._arequest_backend_canonical([message], st, ctx)
+    assert len(spy.requests) == 3
+    assert spy.requests[0].headers["Authorization"].startswith("Bearer ")
+    assert spy.requests[1].headers["Authorization"] == spy.requests[2].headers["Authorization"]
+
+
 @pytest.mark.parametrize(
     "answer,finish,expected_probes",
     [("correct", "stop", 1), ("wrong", "stop", 2), ("", "length", 1)],

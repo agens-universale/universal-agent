@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Callable, Optional
 
+from gc_core.utils.http_auth import authorization_attempts
+
 
 @dataclass(frozen=True)
 class ModelInfo:
@@ -262,7 +264,7 @@ def probe_fetch(
     else:
         get_ex = http_get_ex
     base = api_base(completions_url)
-    headers = _headers(auth_header)
+    auth_forms = authorization_attempts(auth_header) or [auth_header]
     t0 = time.monotonic()
     if not base:
         return FetchOutcome(None, None, "пустой адрес", 0)
@@ -272,9 +274,15 @@ def probe_fetch(
         ("/config", parse_config_models),
         ("/models", parse_models_list),
     ):
-        reply = get_ex(base + path, headers, verify)
+        for index, form in enumerate(auth_forms):
+            reply = get_ex(base + path, _headers(form), verify)
+            if reply.status != 401 or index + 1 == len(auth_forms):
+                break
         parsed = _parse_reply_models(reply, parser)
-        if parsed:
+        payload = reply.payload if isinstance(reply.payload, dict) else {}
+        source = payload.get("chat") if path == "/config" else payload
+        raw_models = source.get("models" if path == "/config" else "data") if isinstance(source, dict) else None
+        if reply.status is not None and 200 <= reply.status < 300 and (parsed or isinstance(raw_models, list)):
             return FetchOutcome(
                 parsed, reply.status, "", int((time.monotonic() - t0) * 1000)
             )
@@ -346,16 +354,9 @@ def fetch_models(
     http_get: Optional[Callable] = None,
 ):
     if http_get is None:
-
-        def get(url, headers, verify):
-            reply = _requests_get_ex(
-                url, headers, verify, config_proxy=config_proxy
-            )
-            if reply.status is None:
-                raise OSError(reply.network_error or "нет соединения")
-            if reply.payload is None:
-                raise ValueError(f"bad response status={reply.status}")
-            return reply.payload
+        return probe_fetch(
+            completions_url, auth_header, verify=verify, config_proxy=config_proxy
+        ).models
     else:
         get = http_get
     base = api_base(completions_url)
