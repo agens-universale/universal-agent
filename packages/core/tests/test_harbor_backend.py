@@ -49,6 +49,9 @@ class FakeEnv:
 
     async def exec(self, command, **kw):
         self.calls.append(command)
+        if command.startswith("if test "):
+            # Проверки существования отвечают явными 0/1 (см. PosixShellFsMixin._test).
+            return FakeExecResult(stdout="1\n", return_code=0)
         return FakeExecResult(stdout=f"ran:{command}", return_code=0)
 
     async def upload_file(self, src, dst):
@@ -707,7 +710,9 @@ async def test_fs_helpers_use_raw_channel(loop_in_thread):
     env = FakeEnv()
     backend = HarborBackend(env, loop_in_thread, exec_init="bashrc")
     assert await backend.exists("/work/a.txt") is True
-    assert env.calls == ["test -e /work/a.txt"]
+    assert env.calls == [
+        "if test -e /work/a.txt; then echo 1; else echo 0; fi"
+    ]
     assert await backend.lexists("/work/a.txt") is True
     assert await backend.is_symlink("/work/a.txt") is True
     env.calls.clear()
