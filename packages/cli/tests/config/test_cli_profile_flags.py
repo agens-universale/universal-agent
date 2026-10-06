@@ -289,7 +289,8 @@ def test_model_override_without_registry_is_plain_legacy_not_forced(
 # --- --models: CLI-реестр доезжает до Router В ТОЙ ЖЕ форме, что и файловый ---------
 
 
-def test_cli_models_override_carries_its_own_token_to_the_router():
+@pytest.mark.parametrize("token", ["sk-own", "Bearer sk-own"])
+def test_cli_models_override_carries_its_own_token_to_the_router(token):
     """`--models` кладётся в плоский `config_dict` МИМО схемы, а Router читает
     СЕРИАЛИЗОВАННУЮ запись (`authorization_header`, `config._serialize_model_entry`) —
     сырой `token` из CLI до него не доезжал вовсе, и запись со своим адресом уходила на
@@ -306,7 +307,7 @@ def test_cli_models_override_carries_its_own_token_to_the_router():
             "models": {
                 "gc": {
                     "url": "https://own/v1/chat/completions",
-                    "token": "sk-own",
+                    "token": token,
                 }
             },
         },
@@ -317,4 +318,4 @@ def test_cli_models_override_carries_its_own_token_to_the_router():
     )
 
     assert resolved.url == "https://own/v1/chat/completions"
-    assert resolved.authorization == "Bearer sk-own"
+    assert resolved.authorization == token

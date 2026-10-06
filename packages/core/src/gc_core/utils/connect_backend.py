@@ -4,12 +4,14 @@ import logging
 import os
 import re
 from copy import deepcopy
+from functools import partial
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 import httpx
 
 from gc_core.config_modules.backend import DEFAULT_REQUEST_TIMEOUT_SEC
+from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.message_policy.chat_completions import (
     prepare_chat_completion_messages_for_api,
 )
@@ -35,6 +37,7 @@ from gc_core.utils.format_messages import (
     format_message_chat_completions_to_send_backend,
 )
 from gc_core.utils.http_proxy import resolve_proxies
+from gc_core.utils.http_auth import authorization_attempts
 from gc_core.utils.prompt_cache import apply_prompt_cache, prompt_cache_enabled
 from gc_core.utils.schema_markers import schema_without_internal_markers
 from gc_core.utils.ssl_config import get_backend_client_cert
@@ -358,13 +361,29 @@ async def _aread_error_text(response: "httpx.Response") -> Optional[str]:
         return None
 
 
-@retry_with_backoff_async(
-    should_retry=_default_should_retry_backend_exception,
-    retry_log_level=logging.ERROR,
-    no_more_retries_log_level=logging.ERROR,
-    operation_name="Backend request",
-)
 async def arequest_backend_responses(
+    data: Dict,
+    headers: Dict,
+    url: str,
+    verify: bool = True,
+    cert: Optional[Tuple[str, str]] = None,
+    logger: Optional[logging.Logger] = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
+    config_proxy: Optional[str] = None,
+    use_retry: bool = False,
+) -> Tuple[Dict, Dict]:
+    return await _arequest_authorized(
+        partial(
+            _arequest_backend_responses_once, data, url=url, verify=verify,
+            cert=cert, logger=logger, timeout=timeout, config_proxy=config_proxy,
+        ),
+        headers,
+        use_retry=use_retry,
+        logger=logger,
+    )
+
+
+async def _arequest_backend_responses_once(
     data: Dict,
     headers: Dict,
     url: str,
@@ -517,19 +536,68 @@ async def _astream_chat_completions(
         return assembled
 
 
-@retry_with_backoff_async(
-    should_retry=_default_should_retry_backend_exception,
-    retry_log_level=logging.ERROR,
-    no_more_retries_log_level=logging.ERROR,
-    operation_name="Backend chat completion request",
-)
 async def arequest_backend_chat_completions(
     data: Dict,
     headers: Dict,
     url: str,
     verify: bool = True,
     cert: Optional[Tuple[str, str]] = None,
-    use_retry: bool = True,
+    use_retry: bool = False,
+    logger: Optional[logging.Logger] = None,
+    on_delta: Optional[OnDelta] = None,
+    timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
+    config_proxy: Optional[str] = None,
+    allow_auth_retry: bool = True,
+):
+    """Запрос с ограниченным подбором raw/Bearer только после HTTP 401."""
+    return await _arequest_authorized(
+        partial(
+            _arequest_backend_chat_completions_once, data, url=url,
+            verify=verify, cert=cert, logger=logger, on_delta=on_delta,
+            timeout=timeout, config_proxy=config_proxy,
+        ),
+        headers,
+        allow_auth_retry=allow_auth_retry,
+        use_retry=use_retry,
+        logger=logger,
+    )
+
+
+@retry_with_backoff_async(
+    should_retry=_default_should_retry_backend_exception,
+    retry_log_level=logging.ERROR,
+    no_more_retries_log_level=logging.ERROR,
+    operation_name="Backend request",
+)
+async def _arequest_with_backoff(request, headers: Dict, logger=None):
+    return await request(headers=headers)
+
+
+async def _arequest_authorized(request, headers: Dict, *, allow_auth_retry: bool = True,
+                              use_retry: bool = True, logger=None):
+    """Одна альтернатива Authorization после реального HTTP 401."""
+    auth_key = next((key for key in headers if key.lower() == "authorization"), None)
+    candidates = authorization_attempts(headers.get(auth_key)) if auth_key else []
+    attempts = candidates if allow_auth_retry and candidates else [None]
+    for index, authorization in enumerate(attempts):
+        call_headers = dict(headers)
+        if auth_key and authorization is not None:
+            call_headers[auth_key] = authorization
+        try:
+            return await _arequest_with_backoff(
+                request, headers=call_headers, use_retry=use_retry, logger=logger
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 401 or index + 1 == len(attempts):
+                raise
+
+
+async def _arequest_backend_chat_completions_once(
+    data: Dict,
+    headers: Dict,
+    url: str,
+    verify: bool = True,
+    cert: Optional[Tuple[str, str]] = None,
     logger: Optional[logging.Logger] = None,
     on_delta: Optional[OnDelta] = None,
     timeout: float = DEFAULT_REQUEST_TIMEOUT_SEC,
@@ -541,9 +609,6 @@ async def arequest_backend_chat_completions(
     TUI через ctx.on_stream_delta). CLI/server/swarm → on_delta=None → всегда
     non-stream, независимо от cfg["stream"]. Флаг stream — TUI-only.
     """
-    # `use_retry` забирает из kwargs декоратор ретраев (retry_with_backoff_async) —
-    # до тела функции он не доходит; в сигнатуре остаётся как часть интерфейса.
-    del use_retry
     proxies = resolve_proxies(config_proxy, os.environ, url)
     client = get_async_client(verify=verify, cert=cert, proxies=proxies)
 
@@ -834,15 +899,81 @@ def _responses_input_without_message_call_id(messages):
     return cleaned
 
 
+def _tool_schema_flags(
+    resolved: Optional[ResolvedModel],
+    cfg: Dict,
+    *,
+    honor_alias: bool,
+) -> tuple[bool, bool]:
+    """``openai_strict_tools_schema``, ``send_tool_strict``.
+
+    В ``chat_completions`` незаписанный ключ алиаса берётся из глобального
+    backend. В ``responses`` алиас не читается: на провод идёт проекция глобали.
+    """
+    if honor_alias:
+        openai_strict = _config_value(
+            resolved, cfg, "openai_strict_tools_schema", False
+        )
+        send_tool_strict = _config_value(
+            resolved, cfg, "send_tool_strict", True
+        )
+    else:
+        openai_strict = cfg.get("openai_strict_tools_schema", False)
+        send_tool_strict = cfg.get("send_tool_strict", True)
+    return bool(openai_strict), bool(send_tool_strict)
+
+
+def project_tool_specs(
+    tools: Optional[List],
+    *,
+    openai_strict: bool,
+    send_tool_strict: bool,
+) -> List:
+    """Копия спек под флаги этого запроса. Исходный список не меняется.
+
+    ``openai_strict`` разворачивает ``required`` на каждом object и вешает
+    подсказку пустой строки. Иначе остаётся семантический ``required`` и
+    подсказка «пропусти поле». ``send_tool_strict: false`` снимает ``strict``.
+    """
+    from gc_core.tools.schema_optional import (
+        apply_openai_strict_schema_tree,
+        augment_optional_property_descriptions,
+    )
+
+    projected = deepcopy(tools) if isinstance(tools, list) else []
+    for tool in projected:
+        if not isinstance(tool, dict):
+            continue
+        body = tool
+        function = tool.get("function")
+        if isinstance(function, dict) and "parameters" not in tool:
+            body = function
+        if openai_strict:
+            from gc_core.tools import _apply_openai_strict_tools_schema
+
+            _apply_openai_strict_tools_schema(body)
+            params = body.get("parameters")
+            if isinstance(params, dict):
+                apply_openai_strict_schema_tree(params)
+        augment_optional_property_descriptions(
+            body, openai_strict=openai_strict
+        )
+        if not send_tool_strict:
+            body.pop("strict", None)
+    return projected
+
+
 def create_call_data_responses(
     messages,
     state,
     tools: Optional[List] = None,
     set_previous_response_id: bool = True,
     resolved: Optional[ResolvedModel] = None,
+    config_dict: Optional[Dict] = None,
 ) -> Dict:
     # Responses-режим: из ResolvedModel действует только провайдерский id модели —
     # url/token/backend-квирки per-model в этом API-режиме не применяются (спека §4).
+    # Схема тулов — проекция глобальных флагов, без чтения алиаса.
     call_data = dict()
     call_data["model"] = (
         resolved.model if resolved is not None else state.default_model
@@ -850,7 +981,16 @@ def create_call_data_responses(
     call_data["input"] = _responses_input_without_message_call_id(messages)
     # Явный набор (в том числе пустой) — решение вызывающего: главный цикл
     # фильтрует набор на запрос (`fs_view_image`, спека §9.2). None — набор state.
-    call_data["tools"] = tools if tools is not None else state.tools
+    cfg = config_dict if isinstance(config_dict, dict) else {}
+    openai_strict, send_tool_strict = _tool_schema_flags(
+        resolved, cfg, honor_alias=False
+    )
+    raw_tools = tools if tools is not None else state.tools
+    call_data["tools"] = project_tool_specs(
+        raw_tools,
+        openai_strict=openai_strict,
+        send_tool_strict=send_tool_strict,
+    )
     call_data["metadata"] = state.call_metadata
     call_data["previous_response_id"] = (
         state.previous_response_id if set_previous_response_id else None
@@ -938,7 +1078,16 @@ def create_call_data_completions(
     state_tools = deepcopy(state.tools) if state is not None else []
     to_send_messages = _merge_state_messages(state_messages, messages)
 
+    cfg = config_dict if isinstance(config_dict, dict) else {}
     to_send_tools = tools if tools is not None else state_tools
+    openai_strict, send_tool_strict = _tool_schema_flags(
+        resolved, cfg, honor_alias=True
+    )
+    to_send_tools = project_tool_specs(
+        to_send_tools,
+        openai_strict=openai_strict,
+        send_tool_strict=send_tool_strict,
+    )
     to_send_tools = normalize_chat_completions_tools(to_send_tools)
 
     to_send_messages_formatted = []
@@ -955,8 +1104,6 @@ def create_call_data_completions(
         effective_model = state.default_model
     if resolved is not None:
         effective_model = resolved.model
-
-    cfg = config_dict if isinstance(config_dict, dict) else {}
 
     configured_max_tokens = _safe_positive_int(
         _config_value(resolved, cfg, "chat_completions_max_tokens")
@@ -991,7 +1138,7 @@ def create_call_data_completions(
 
     _apply_chat_completion_kwargs(
         data,
-        _config_value(resolved, cfg, "chat_completion_kwargs"),
+        effective_completion_kwargs(resolved, cfg, section="main"),
         prompt_cache_on=prompt_cache_on,
     )
 

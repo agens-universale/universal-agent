@@ -29,10 +29,11 @@ from textual.css.query import NoMatches
 from textual.message import Message
 from textual.widgets import Input, Static
 
-from gc_tui.editors.field_list import write_field
+from gc_tui.editors.field_list import LIST_CLOSED_HINT, write_field
 from gc_tui.editors.preset_list import PRESET_HINT as _PRESET_HINT
 from gc_tui.editors.preset_list import preset_list_controller
 from gc_tui.palette import DEEP_DIM
+from gc_tui.services.settings_probe import accepted_literal_auth
 from gc_tui.widgets.paste_input import PasteInput
 
 # Константы вместо повторяющихся литералов (Sonar S1192).
@@ -46,10 +47,8 @@ _TOKEN_CLEAR_HINT = "Ctrl+U — очистить токен"
 _PRESET_HINT_EMPTY = (
     "выберите провайдера или впишите свой адрес · Enter — подставить"
 )
-# Набранного нет в каталоге: список свёрнут (предлагать нечего), но молчать об этом —
-# значит оставить человека гадать, сработал ли фильтр. Клавиша названа та же, что и в
-# обычном свёрнутом состоянии: у `Enter` здесь ровно его всегдашний смысл — сохранить.
-PRESET_NO_MATCH_CLOSED = "в списке такого нет · Alt+↓ — показать список"
+
+PRESET_NO_MATCH_CLOSED = f"в списке такого нет · {LIST_CLOSED_HINT}"
 
 
 def _auth_active(header: str | None) -> int | None:
@@ -83,6 +82,7 @@ class ConnectionEditor(Vertical):
         proxy_current: str = "",
         presets: list | None = None,
         create_mode: bool = False,
+        closed_hint: str = LIST_CLOSED_HINT,
     ) -> None:
         super().__init__(classes="onb-dyn")
         self._url_current = url_current or ""
@@ -90,6 +90,7 @@ class ConnectionEditor(Vertical):
         self._proxy_current = proxy_current or ""
         self._presets = list(presets) if presets is not None else []
         self.create_mode = create_mode
+        self._closed_hint = closed_hint
         self._no_auth = False if create_mode else (auth_header == "")
         # Позиции курсора: url/token/proxy всегда; галка — только вне create_mode
         # (None-элемент = «не Input», как в _POSITIONS ModelEntryForm).
@@ -291,6 +292,7 @@ class ConnectionEditor(Vertical):
             input_id="conn-url",
             hint=hint,
             on_pick=self._apply_preset,
+            closed_hint=self._closed_hint,
         )
         # Канон 2026-08-17: раскрываем, только если поле пусто (решает `can_open`).
         # При заданном адресе список остаётся свёрнутым, стрелки — у формы, а способ
@@ -401,14 +403,20 @@ class ConnectionEditor(Vertical):
         (VoiceEndpointEditor._apply_url_preset) пишет пресет так же."""
         write_field(self.query_one("#conn-url", Input), preset.url)
 
-    def enter_presets(self) -> bool:
-        """Список раскрыт (канон 2026-08-17: раскрывается на пустом поле либо по
-        Alt+↓) — Enter подставляет выделенный пресет и сворачивает список
-        (True, обработано — хост НЕ сабмитит форму); список свёрнут — Enter здесь
-        обычный submit секции (False). Сам собой список второй раз не открывается:
-        значение уже задано, и вернуть его можно только явным Alt+↓."""
-        if not self._presets_ctrl.is_open:
+    def enter_presets(self, *, open_closed: bool = True) -> bool:
+        """Обработать Enter для списка адресных пресетов.
+
+        Открытый список всегда отдаёт выбранное значение. В настройках закрытый
+        список открывается Enter; мастер передаёт ``open_closed=False``, чтобы его
+        Enter сохранял подключение и переводил к следующему шагу.
+        """
+        # Enter belongs to the focused field. A token/proxy field must never
+        # open the address catalogue just because the section routes the key to
+        # its editor.
+        if not self.on_url_field:
             return False
+        if not self._presets_ctrl.is_open:
+            return self._presets_ctrl.reload() if open_closed else False
         self._presets_ctrl.pick()  # подстановку делает `_apply_preset`
         return True
 
@@ -441,10 +449,11 @@ class ConnectionEditor(Vertical):
                 # Набрано то, чего в каталоге нет. Список свёрнут — но молчать нельзя:
                 # строка под полем говорит, что совпадений не нашлось, и чем список
                 # вернуть. Раньше он оставался раскрытым пустым с обещанием «Enter —
-                # оставить свой адрес» — выдуманное значение клавиши, которая везде
-                # сохраняет форму; заодно первое нажатие уходило на сворачивание,
+                # оставить свой адрес»; заодно первое нажатие уходило на сворачивание,
                 # а не на переход дальше.
-                self._presets_ctrl.close(closed_hint=PRESET_NO_MATCH_CLOSED)
+                self._presets_ctrl.close(
+                    closed_hint=f"в списке такого нет · {self._closed_hint}"
+                )
                 return
             if self._presets_ctrl.is_open:
                 self._presets_ctrl.apply_filter(value)
@@ -541,9 +550,25 @@ class ConnectionEditor(Vertical):
         # галка ○ (Bearer) и введён новый токен
         return bool(not self._no_auth and token)
 
+    def apply_accepted_auth(self, accepted: str | None) -> bool:
+        """Запомнить принятую форму литерала в поле до явного сохранения формы."""
+        if self._no_auth:
+            return False
+        field = self.query_one(_SEL_CONN_TOKEN, Input)
+        source = field.value.strip() or (None if self._token_cleared else self._auth_header)
+        value = accepted_literal_auth(source, accepted)
+        if value is None:
+            return False
+        write_field(field, value)
+        self._token_cleared = False
+        return True
+
     def submit(self) -> tuple[str | None, str | None, str | None, str | None]:
         """(url|None, header|None, error|None, proxy|None). None-значение = не менять.
-        proxy возвращается даже при ошибке (settings screen пишет его отдельно)."""
+        proxy возвращается даже при ошибке (settings screen пишет его отдельно).
+
+        Токен из поля уходит в Authorization as-is; подбор формы делает транспорт.
+        """
         url, _auth_idx, token, proxy = self.peek()
         # адрес
         out_url: str | None = None
@@ -563,7 +588,7 @@ class ConnectionEditor(Vertical):
             if active != 1:
                 header = ""  # снять действующую авторизацию
         elif token:
-            header = onboarding.authorization_header(token)
+            header = token
         elif self._token_cleared:
             header = ""  # Ctrl+U: стереть сохранённый токен
         elif active == 1 and not self.create_mode:

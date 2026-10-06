@@ -4,10 +4,7 @@ from gc_core.config_modules.chat_completions import (
     subagent_role_max_tokens_from_ctx,
 )
 from gc_core.model_router import SUBAGENT_CONSUMER_PREFIX
-from gc_core.summarize.llm import (
-    arequest_auxiliary_completion_text,
-    auxiliary_llm_completion_kwargs,
-)
+from gc_core.summarize.llm import arequest_auxiliary_completion_text
 from gc_core.tools.subagents.abstract_subagent import AbstractSubagent
 
 _ROLE_GENERATE_PROMPT = """Write prompt for AI assistant by role name and short role descriptions. Please make prompt as good as possible according with some examples.
@@ -187,9 +184,9 @@ class SpecialAgent(AbstractSubagent):
     async def afinalize_role(self, ctx: Any, state: Any) -> None:
         """Нативная форма: LLM-вызов идёт на loop вызывающего, без потока.
 
-        Роль генерируется через aux chat/completions (профиль kwargs +
-        strip_think); зовётся runner'ом после сборки child-контекста — нужны
-        ``ctx.model_router`` и сетевые параметры для Bearer.
+        Роль генерируется через aux chat/completions: модель субагента, секция
+        ``auxiliary`` и strip_think. Зовётся runner'ом после сборки
+        child-контекста — нужны ``ctx.model_router`` и сетевые параметры для Bearer.
         """
         self.agent_role = await self._agenerate_role(ctx, state)
 
@@ -208,9 +205,6 @@ class SpecialAgent(AbstractSubagent):
             "max_tokens": subagent_role_max_tokens_from_ctx(ctx),
             "consumer": f"{SUBAGENT_CONSUMER_PREFIX}{self.agent_name}",
             "request_label": "subagent_special_agent",
-            # Профиль aux-вызовов — с develop: без него роль шла бы мимо
-            # `auxiliary_llm` kwargs, которыми правятся все служебные вызовы.
-            "payload_overrides": auxiliary_llm_completion_kwargs(ctx),
         }
 
     async def _agenerate_role(self, ctx: Any, state: Any) -> str:

@@ -41,6 +41,9 @@ INTENTIONAL_TEMPLATE_OVERRIDES: set = {
     "tui.stream",  # true (явно), кодовый дефолт None (наследуется от backend.stream)
     # --- Preset суммаризации: включена в шаблоне, выключена в кодовом дефолте ---
     "summary.chat_completions_summary_trigger_chars",  # 200000 вместо 0 (выключено)
+    # Шаблон вырезает мысль: копирование reasoning_content даёт 400 у части бэкендов.
+    # Кодовый дефолт (ключа нет) — false, поле копируется.
+    "strip_tags_projection.strip_think",
     # --- Preset безопасности: SSRF-blacklist и файловые фильтры ---
     "security.url_policy.url_blacklist",  # SSRF-blacklist cloud metadata/loopback/RFC1918
     "security.read_guard.allowed_read_paths",  # whitelist путей навыков
@@ -126,8 +129,6 @@ EXPERT_ONLY_KEYS: set = {
     # Секция целиком — корп-сценарий mTLS; wiring через runbook, не для публичного шаблона.
     "agent_auth",
     # --- backend: параметры chat_completions ---
-    # Vendor-specific kwargs (temperature, top_p, …); живёт в backend.chat_completion_kwargs.
-    "backend.chat_completion_kwargs",
     # Минимум токенов в ответе (провайдеро-специфичный параметр).
     "backend.chat_completions_min_response_tokens",
     # Ретрай ошибки, зашитой прокси в HTTP-200 (choices[0].error / top-level
@@ -142,8 +143,7 @@ EXPERT_ONLY_KEYS: set = {
     # --- chat_completions: вспомогательный LLM (summary / finish gate / intent scope) ---
     # Тюнинг вспомогательных вызовов; публичный шаблон не нацелен на chat_completions.
     "chat_completions.auxiliary_llm.max_tokens",
-    "chat_completions.auxiliary_llm.completion_kwargs",
-    "chat_completions.auxiliary_llm.judge_max_tokens",  # запас под CoT судей; секции нет в шаблоне
+    "chat_completions.auxiliary_llm.judge_max_tokens",  # запас под CoT судей; в шаблоне только completion_kwargs: null
     "chat_completions.auxiliary_llm.subagent_role_max_tokens",  # лимит генерации роли special_agent
     # --- backend mTLS: корп-сценарий, справочник — demo_config.yml ---
     "backend.cert_path",
@@ -481,6 +481,60 @@ DEMO_KNOWN_GAPS: set = {
     "tui.bang_shell.max_output_bytes",
     "tui.bang_shell.max_output_lines",
 }
+
+
+_RUNTIME_PAYLOAD_KEYS = frozenset(
+    {"model", "messages", "tools", "max_tokens", "max_completion_tokens"}
+)
+
+
+def test_shipped_template_kwargs_are_null_and_strip_think_stays_on():
+    """Поставка: оба глобальных словаря явно null (не {}), strip_think включён."""
+    raw = _template_raw()
+    assert raw["backend"]["chat_completion_kwargs"] is None
+    assert (
+        raw["chat_completions"]["auxiliary_llm"]["completion_kwargs"] is None
+    )
+    assert raw["strip_tags_projection"]["strip_think"] is True
+
+
+def test_demo_config_has_no_live_vendor_kwargs():
+    """Разобранный demo_config не несёт vendor-kwargs и непустых main/auxiliary."""
+    raw = yaml.safe_load(DEMO_CONFIG_PATH.read_text(encoding="utf-8")) or {}
+    assert raw["backend"]["chat_completion_kwargs"] is None
+    assert (
+        raw["chat_completions"]["auxiliary_llm"]["completion_kwargs"] is None
+    )
+    for alias, entry in (raw.get("models") or {}).items():
+        if not isinstance(entry, dict):
+            continue
+        for section in ("main", "auxiliary"):
+            assert not entry.get(section), (
+                f"models.{alias}.{section} в demo_config.yml непустой"
+            )
+
+
+def test_default_template_payload_has_only_runtime_keys():
+    """Старт из шаблона: в тело запроса не попадает ни один vendor-ключ."""
+    from types import SimpleNamespace
+
+    from gc_core.config_modules.model_registry import (
+        effective_completion_kwargs,
+    )
+    from gc_core.utils.connect_backend import create_call_data_completions
+
+    cfg = flatten_app_config(AppConfig.model_validate(_template_raw()))
+    assert cfg["chat_completion_kwargs"] == {}
+    state = SimpleNamespace(messages=[], tools=[], default_model="m")
+    data = create_call_data_completions(
+        [{"role": "user", "content": "hi"}],
+        state=state,
+        config_dict=cfg,
+    )
+    assert set(data) <= _RUNTIME_PAYLOAD_KEYS
+    assert "max_tokens" in data or "max_completion_tokens" in data
+    assert effective_completion_kwargs(None, cfg, section="auxiliary") == {}
+    assert effective_completion_kwargs(None, cfg, section="main") == {}
 
 
 def test_demo_config_covers_the_same_keys_as_the_template():

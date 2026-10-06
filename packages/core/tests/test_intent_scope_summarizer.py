@@ -1,21 +1,21 @@
 from types import SimpleNamespace
 
+from gc_core.config_modules.model_registry import effective_completion_kwargs
 from gc_core.intent_scope import summarizer
-from gc_core.summarize.llm import auxiliary_llm_completion_kwargs
 from gc_testkit import run_coro
 
 
-def test_auxiliary_llm_completion_kwargs_from_auxiliary_llm():
-    ctx = SimpleNamespace(
-        auxiliary_llm=SimpleNamespace(
-            completion_kwargs={
+def test_auxiliary_section_absent_uses_global_auxiliary_kwargs():
+    cfg = {
+        "auxiliary_llm_params": {
+            "completion_kwargs": {
                 "reasoning_effort": "none",
                 "separate_reasoning": False,
                 "chat_template_kwargs": {"enable_thinking": False},
             }
-        )
-    )
-    assert auxiliary_llm_completion_kwargs(ctx) == {
+        }
+    }
+    assert effective_completion_kwargs(None, cfg, section="auxiliary") == {
         "reasoning_effort": "none",
         "separate_reasoning": False,
         "chat_template_kwargs": {"enable_thinking": False},

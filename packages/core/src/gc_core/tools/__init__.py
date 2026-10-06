@@ -16,10 +16,7 @@ from gc_core.tools.inject_tool_fields import (
     strip_injected_tool_args,
 )
 from gc_core.tools.registry import _apply_stop_tools, get_builtin_tools_data
-from gc_core.tools.schema_optional import (
-    apply_openai_strict_parameters,
-    augment_optional_property_descriptions,
-)
+from gc_core.tools.schema_optional import apply_openai_strict_parameters
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.tools.skills.skills_tools import get_skills_tools_data
 from gc_core.tools.subagents.registry import is_subagent_tool
@@ -324,18 +321,17 @@ def _normalize_tool_spec(
     entry: Dict[str, Any],
     *,
     inject_tool_fields,
-    openai_strict: bool,
-    send_tool_strict: bool,
 ) -> None:
+    """Канон: семантический ``required`` и ``strict`` исходной спеки.
+
+    ``openai_strict_tools_schema`` и ``send_tool_strict`` канон не мутируют.
+    Подсказки необязательных полей и полный ``required`` появляются на копии
+    в момент отправки (``project_tool_specs``).
+    """
     _ensure_spec_has_required(spec)
     if inject_tool_fields:
         injected = apply_injected_fields_to_spec(spec, inject_tool_fields)
         entry["injected_fields"].extend(injected)
-    if openai_strict:
-        _apply_openai_strict_tools_schema(spec)
-    augment_optional_property_descriptions(spec, openai_strict=openai_strict)
-    if not send_tool_strict:
-        spec.pop("strict", None)
 
 
 def _finish_tools_data(
@@ -390,11 +386,10 @@ def _finish_tools_data(
     # при создании RunContext, когда logger ещё не привязан к контексту.
     _fallback_logger.debug("Collected tools_data: %s", tools_data)
 
-    openai_strict = bool(config_dict.get("openai_strict_tools_schema", False))
-    send_tool_strict = bool(config_dict.get("send_tool_strict", True))
     inject_tool_fields = resolve_inject_tool_fields(config_dict)
 
-    # Бэкенд требует parameters.required — нормализуем все spec'и
+    # Бэкенд требует parameters.required — нормализуем все spec'и.
+    # Флаги схемы на канон не накладываются: проекция — на отправке.
     for v in tools_data.values():
         v.setdefault("injected_fields", [])
         spec = v.get("spec")
@@ -403,8 +398,6 @@ def _finish_tools_data(
                 spec,
                 v,
                 inject_tool_fields=inject_tool_fields,
-                openai_strict=openai_strict,
-                send_tool_strict=send_tool_strict,
             )
 
     tools_spec = [v["spec"] for v in tools_data.values()]

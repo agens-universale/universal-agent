@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from gc_core import config_raw
 from gc_core.app_version import REPO_GIT_URL
+from gc_core.utils.http_auth import authorization_attempts
 
 
 def _mcp_hint() -> str:

@@ -8,6 +8,33 @@ def test_auth_helpers_live_in_core():
     )
 
 
+def test_authorization_attempts_try_bare_key_and_bearer():
+    """Ключ без схемы пробуется как вставлен и с префиксом Bearer.
+    Уже собранный заголовок Bearer даёт и голый ключ — сервер мог ждать
+    ровно одну из двух форм. Basic не переписываем."""
+    from gc_core import onboarding
+
+    assert onboarding.authorization_attempts("sk-abc") == [
+        "sk-abc",
+        "Bearer sk-abc",
+    ]
+    assert onboarding.authorization_attempts("  sk-abc  ") == [
+        "sk-abc",
+        "Bearer sk-abc",
+    ]
+    assert onboarding.authorization_attempts("Bearer sk-abc") == [
+        "Bearer sk-abc",
+        "sk-abc",
+    ]
+    assert onboarding.authorization_attempts("bearer sk-abc") == [
+        "bearer sk-abc",
+        "sk-abc",
+    ]
+    assert onboarding.authorization_attempts("Basic abc") == ["Basic abc"]
+    assert onboarding.authorization_attempts("") == []
+    assert onboarding.authorization_attempts(None) == []
+
+
 def test_mask_secret_shows_recognisable_edges():
     """Голый ключ (`gsk_…`, `sk-…`) — не заголовок: схемы у него нет, и «схема + первые
     три» вырождались в «***». Человек узнаёт свой ключ по краям — их и показываем."""

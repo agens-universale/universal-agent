@@ -26,6 +26,17 @@ def _base_payload():
     }
 
 
+def test_identical_answers_from_different_responses_have_distinct_ids():
+    first = _base_payload()
+    second = _base_payload()
+    second["id"] = "chatcmpl-second"
+    a = output_chat_completion_to_response(first)["output"][0]
+    b = output_chat_completion_to_response(second)["output"][0]
+    assert a["content"] == b["content"]
+    assert a["id"] != b["id"]
+    assert output_chat_completion_to_response(first)["output"][0]["id"] == a["id"]
+
+
 class ConvertationsTest(unittest.TestCase):
     def test_output_chat_completion_uses_created_field(self):
         payload = _base_payload()

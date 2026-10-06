@@ -22,10 +22,17 @@
 - `agent.loop_detector.enabled` (по умолчанию `true`) — kill-switch напоминания о повторном вызове того же тула с теми же аргументами. Тул **всегда исполняется**; после батча в тред может уйти одно technical user-сообщение. В кольцо из 10 слотов попадают **все** вызовы; пороги (`consecutive` / `in_window`) считаются только у помеченных встроенных тулов (чтение, think, memory и т.п. — не write/exec/finish). Окно живёт только в рантайме, в тред и snapshot не пишется. `false` — не записывать окно и не слать notice. MCP по умолчанию не маркируются; opt-in — `mcp.servers.<name>.loop_control_tools` (см. [MCP-серверы](#mcp-серверы)).
 - Для режима `backend_api_mode: chat_completions` можно передавать токен провайдера
   (например OpenRouter) через `chat_completions_auth_token` (или алиас `openrouter_api_key`);
-  тогда клиент отправит `Authorization: Bearer <token>` в запрос к `completions_url`.
+  клиент сначала передаст настроенный формат заголовка в запрос к `completions_url`.
+  Для голого ключа и Bearer после HTTP 401 допускается одна попытка альтернативного
+  формата на том же задании; второй слот проверки остаётся для новой картинки после
+  неподтверждённого ответа. Basic и другие явные схемы передаются как есть. Проба и рабочие запросы
+  используют одно правило; ENV/FILE не раскрываются при сохранении настроек.
+  В формах подключения и моделей успешная проба подставляет принятую форму
+  текстового токена в черновик. Она записывается только при сохранении формы;
+  ссылки ENV/FILE остаются исходными ссылками.
   Опционально для OpenRouter поддерживаются заголовки `openrouter_http_referer`
   и `openrouter_x_title` (в запросе это `HTTP-Referer` и `X-OpenRouter-Title`).
-- `strip_tags_projection.strip_think` (по умолчанию `true`) не копирует скрытое поле мысли бэкенда (`reasoning_content`) в историю. Salvage `<think>` — только если кроме ризонинга ничего нет (нет прозы и нет тулов): тогда мысль кладётся в историю как `<think>…</think>` и в следующем запросе модель её снова видит. Смешанный ход (think + проза) в историю кладёт только прозу. Из саммари, intent, судей, дайджеста и памяти `<think>` вырезается всегда. При `false` скрытое поле копируется в историю как есть и уходит в следующий запрос, но из саммари, intent, судей, дайджеста и памяти по-прежнему исключается.
+- `strip_tags_projection.strip_think`: кодовый дефолт (ключа нет) — `false`, скрытое поле мысли бэкенда (`reasoning_content`) копируется в историю. Поставляемый `config.default.yml` ставит `true`: поле в историю не копируется (следующий запрос с мыслью часть бэкендов, в том числе DeepSeek, отвергает с 400). `false` копирует поле; `true` вырезание включает. Salvage `<think>` при `true` — только если кроме ризонинга ничего нет (нет прозы и нет тулов): тогда мысль кладётся в историю как `<think>…</think>`. Смешанный ход (think + проза) кладёт только прозу. У записи реестра свой `models.<alias>.strip_think`: `true` вырезает, `false` копирует, отсутствие ключа оставляет глобальный флаг. Служебные вызовы (summary, судьи, finish_gate, intent) и вырезание `<think>` из саммари, intent, дайджеста и памяти от этого флага не зависят: мысль там режется всегда.
 - Для хранения истории тредов:
   - по умолчанию используется папка `threads` в корне проекта (`mini-cli-pub/threads`);
   - опциональный параметр `threads_data_path` в `config.yml` должен быть **абсолютным путём** к директории хранения; если не задан — используется кросс-платформенный дефолт `<state>/projects/<project-slug>/threads/` (на Linux/macOS — `~/.local/state/gc/...`, на Windows — `~/.gc/...`);
@@ -79,7 +86,7 @@
     `session_todo`; `0` = выкл. В IDE-чате иначе легко толкает к реализации вопреки обсуждению.
   - Канал ACP также подставляет bundled special instructions
     (`chat_completions_acp_special_instructions.md`: discussion ≠ implementation).
-    Пример профиля — `packages/acp/profiles/acp.yml`.
+    Пример профиля — `packages/acp/profiles/acp.yml`. Гайд по процессу — [acp.md](acp.md).
   - `tui.file_view.enabled` / `max_file_bytes` / `page_lines` (`null` = авто по высоте)
     — постраничный просмотр `/view` в TUI (см. [tui.md](tui.md#просмотр-файла-view)).
 - **Правки агента**: секция `agent_edits` — журнал правок, снимки для отката, дифф в ленте
@@ -463,8 +470,17 @@ models:                                  # реестр: алиас → пров
     url: https://openrouter.ai/api/v1/chat/completions
     token: "${ENV:OPENROUTER_API_KEY}"
     pricing: {input: 12, output: 48}     # тариф этой модели (формат секции pricing)
-    backend:                             # частичный backend поверх эффективного
-      chat_completion_kwargs: {temperature: 0.2}
+    main:                                # kwargs диалога и субагентов
+      temperature: 1.0
+      top_p: 1.0
+      tool_choice: auto
+      chat_template_kwargs:
+        enable_thinking: true
+    auxiliary:                           # summary, судьи, finish_gate, intent_scope
+      temperature: 1.0
+      top_p: 1.0
+      chat_template_kwargs:
+        enable_thinking: false
 
 slots:                                   # уровни — указатели на алиасы, не копии
   light: flash
@@ -505,7 +521,61 @@ assign:                                  # привязки отдельных �
 - имена `light`, `default`, `max`, `auto` зарезервированы и алиасом быть не могут;
 - одно и то же нельзя задать дважды: `token` вместе с
   `backend.chat_completion_headers.Authorization`, а `url` вместе с
-  `backend.completions_url` — ошибка валидации.
+  `backend.completions_url` — ошибка валидации;
+- `main` и `auxiliary` читаются одинаково и друг в друга не подставляются.
+  Агент поставляется без предзаданных vendor-схем: в шаблоне первого запуска
+  `backend.chat_completion_kwargs` и
+  `chat_completions.auxiliary_llm.completion_kwargs` равны `null`. Дефолт любого
+  запроса — серверные дефолты модели. Сэмплинг и диалекты thinking собираются
+  в профиле, per-алиас (рабочий референс — `demo_profile.yml`).
+
+На каждом слое непустая секция и `{}` заменяют нижнюю целиком. Отсутствующий
+ключ сохраняет значение нижнего слоя; YAML `null` явно его сбрасывает.
+Если после наложения слоёв секции нет или она равна `null`, берётся глобальный
+словарь своей роли (`backend.chat_completion_kwargs` для диалога и цикла субагента,
+`chat_completions.auxiliary_llm.completion_kwargs` для summary, судей,
+finish_gate, intent и черновика роли). Явный `{}` заменяет глобаль пустым
+набором: эти ключи в запрос не класть, даже если глобаль непустая (старый
+конфиг или свои kwargs). Секция с ключами заменяет глобальный словарь целиком,
+без слияния. При пустой глобали поставки обе ветки дают payload без
+vendor-ключей; это следствие пустой глобали, а не слияние семантик.
+
+Что задаётся на алиасе:
+
+| Ключ | Где |
+|---|---|
+| `main` | kwargs диалога и цикла субагента |
+| `auxiliary` | kwargs summary, судей, finish_gate, intent, черновика роли |
+| `strip_think` | вырезание мысли из истории. В поставке глобально `strip_tags_projection.strip_think: true` (нестрогий бэкенд отвечает 400 на мысль в истории). `false` на алиасе сохраняет скрытое поле; ключа нет — остаётся глобальный флаг |
+| `backend.use_max_tokens_param` | `true` — в тело `max_tokens`, `false` — `max_completion_tokens`. Нет ключа — глобальный `backend`. Профиль может перекрыть и сам глобальный ключ своей секцией `backend` |
+| `backend.openai_strict_tools_schema` | проекция схемы тулов в `chat_completions`: `true` — все properties в `required`. Нет ключа — глобальный `backend` |
+| `backend.send_tool_strict` | слать ли `function.strict`. `false` снимает поле с копии на отправке. Нет ключа — глобальный `backend` |
+| `backend.chat_completions_max_tokens` | потолок ответа этой модели |
+| `backend.request_timeout_sec` | таймаут одного запроса |
+| `backend.proxy` | HTTP/SOCKS-прокси |
+| `backend.use_ssl` | TLS / путь к CA-bundle |
+| `backend.cert_path`, `backend.key_path` | клиентский сертификат (mTLS) |
+| `backend.use_retry` | ретраи транспорта |
+| `backend.retry_embedded_choice_errors` | ошибка внутри HTTP-200 |
+| `backend.claude_prompt_cache` | разметка prompt cache |
+| `backend.chat_completion_headers` | дополнительные заголовки |
+| `backend.completions_url` | свой адрес (пара с токеном) |
+
+В `main`, `auxiliary` и в overrides нельзя писать ключи, которые рантайм ставит
+сам: `model`, `messages`, `tools`, `max_tokens`, `max_completion_tokens`. Форма
+их отклоняет, обе воронки режут их безусловно — иначе пользовательский словарь
+затёр бы историю, список тулов или лимит ответа. При включённой разметке
+prompt cache к этому набору добавляется `cache_control`: его пишет разметка,
+чужое значение на проводе даёт 400. `api_mode` и `stream` остаются глобальными:
+один ран — один протокол. `openai_strict_tools_schema` и `send_tool_strict`
+можно задать на алиасе; ключа нет — берётся глобальный `backend`. В
+`chat_completions` схема тулов проецируется на каждый запрос под резолвнутую
+модель. В `responses` per-alias этих флагов нет: на провод идёт проекция
+глобальных.
+
+Старый `models.<alias>.backend.chat_completion_kwargs` при загрузке переносится
+в `main` с предупреждением. Явно заданный `main` имеет приоритет. Сохранение карточки
+модели записывает новый формат; служебные параметры задаются отдельно в `auxiliary`.
 
 **`slots`** — какой алиас стоит за каким уровнем. Не заданный слот резолвится **матрицей
 фоллбэков**: `light` → `light, default, max`; `default` → `default, max, light`;
@@ -1036,7 +1106,7 @@ ddgs-mcp --http
 
 Секция `chat_api` живёт в том же `config.yml`, что и агент. Читает её только процесс `gc-chat`: и `POST /v1/responses`, и `POST /v1/chat/completions` на одном порту. В шаблон CLI и в `demo_config.yml` она не входит: без секции схема подставляет дефолты (`127.0.0.1:8090`, без токена, любой origin, проза `allow`, finish-gate `off`, напоминания `session_todo` выключены).
 
-Аннотированный образец для копирования в свой конфиг — [`demo_config_chat.yml`](../demo_config_chat.yml). Запуск, ключи и контракт HTTP — [responses.md](responses.md).
+Аннотированный образец для копирования в свой конфиг — [`demo_config_chat.yml`](../demo_config_chat.yml). Обзор процесса — [chat.md](chat.md); детальный контракт Responses — [responses.md](responses.md).
 
 ## Где gc-cli хранит runtime-данные
 

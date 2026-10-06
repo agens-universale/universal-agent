@@ -288,7 +288,7 @@ async def test_creating_the_first_entry_writes_valid_yaml(tmp_path):
         form.query_one("#mef-model", Input).value = "google/gemini-2.5-flash"
         form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         doc = _doc(cfg_file)
         assert doc["models"]["flash"]["model"] == "google/gemini-2.5-flash"
@@ -317,7 +317,7 @@ async def test_second_entry_is_written_together_with_the_default_slot(
         form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
         form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
         await pilot.pause()
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         assert _editor(scr).picker_open, (
             "пикер «какая модель по умолчанию» не открылся"
@@ -358,7 +358,7 @@ async def test_a_write_failure_past_the_slot_picker_closes_it_and_refocuses(
         form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         assert _editor(scr).picker_open
         await pilot.press("enter")  # выбор → запись падает
@@ -398,7 +398,7 @@ async def test_the_default_slot_picker_describes_the_entry_being_written(
         form.query_one("#mef-token", Input).value = "sk-OWN"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         ed = _editor(scr)
         assert ed.picker_open
@@ -450,7 +450,7 @@ async def test_the_base_section_asks_about_the_default_when_a_profile_holds_mode
         form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
         form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
         await pilot.pause()
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         assert _editor(scr).picker_open, (
             "пикер «какая модель по умолчанию» не открылся"
@@ -498,7 +498,7 @@ async def test_renaming_an_entry_moves_its_references(tmp_path):
         form.query_one("#mef-alias", Input).value = "turbo"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         doc = _doc(cfg_file)
         assert set(doc["models"]) == {"turbo", "opus"}
@@ -536,7 +536,7 @@ async def test_editing_fields_without_renaming_keeps_the_edited_alias_a_candidat
         form.query_one("#mef-model", Input).value = "m-a-2"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → должен спросить дефолт
+        await pilot.press("ctrl+s")  # submit → должен спросить дефолт
         await pilot.pause()
 
         assert ed.picker_open, (
@@ -563,7 +563,7 @@ async def test_renaming_to_a_taken_alias_leaves_the_file_untouched(tmp_path):
         form.query_one("#mef-alias", Input).value = "opus"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert "уже используется" in _texts(scr)
         assert cfg_file.read_bytes() == before
@@ -736,10 +736,13 @@ async def test_reserve_save_returns_to_the_registry_list(tmp_path):
         await pilot.press("enter")
         await _wait_legacy_list(pilot, scr)
         await pilot.press("down")
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
-        assert "other-model" in cfg_file.read_text(encoding="utf-8")
+        # Навигация по списку не применяет подсветку сама по себе: Ctrl+S
+        # сохраняет исходное значение формы. Выбор другой строки подтверждается
+        # отдельным Enter.
+        assert "test-model" in cfg_file.read_text(encoding="utf-8")
         assert scr._view == 1  # остались в секции
         assert any("flash" in r for r in _rows(scr))  # и видим список записей
 
@@ -768,7 +771,8 @@ async def test_reserve_save_under_the_env_banner_still_returns_to_the_list(
             await pilot.press("enter")  # открыть под-форму
             await _wait_legacy_list(pilot, scr)
             await pilot.press("down")
-            await pilot.press("enter")  # submit → подтверждение
+            await pilot.press("enter")
+            await pilot.press("ctrl+s")  # submit → подтверждение
             await pilot.pause()
             assert (
                 scr._pending_env_save is not None
@@ -797,6 +801,7 @@ async def test_empty_state_save_returns_to_the_hub(tmp_path):
         await _wait_legacy_list(pilot, scr)
         await pilot.press("down")
         await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         await pilot.pause()
         assert "other-model" in cfg_file.read_text(encoding="utf-8")
@@ -824,8 +829,9 @@ async def test_env_ref_confirm_is_answerable_from_the_models_section(tmp_path):
             # строки: ссылка (действующая) → test-model → other-model
             await pilot.press("down")
             await pilot.press("down")
+            await pilot.press("enter")
             await pilot.press(
-                "enter"
+                "ctrl+s"
             )  # submit → подтверждение перезаписи ссылки
             await pilot.pause()
             assert "открытым текстом" in _texts(scr)
@@ -863,7 +869,8 @@ async def test_arrow_after_env_confirm_cancels_it(tmp_path):
         ):
             await _wait_legacy_list(pilot, scr)
             await pilot.press("down")  # ссылка → test-model
-            await pilot.press("enter")  # submit → подтверждение перезаписи
+            await pilot.press("enter")
+            await pilot.press("ctrl+s")  # submit → подтверждение перезаписи
             await pilot.pause()
             assert scr._pending_env_save is not None
             await pilot.press("down")  # курсор уехал → снимок больше не про то
@@ -903,7 +910,8 @@ async def test_new_entry_after_env_confirm_cancels_it(tmp_path):
         ):
             await _wait_legacy_list(pilot, scr)
             await pilot.press("down")
-            await pilot.press("enter")  # submit → подтверждение перезаписи
+            await pilot.press("enter")
+            await pilot.press("ctrl+s")  # submit → подтверждение перезаписи
             await pilot.pause()
             assert scr._pending_env_save is not None
             await pilot.press("alt+n")  # уходим в форму записи реестра
@@ -920,7 +928,7 @@ async def test_new_entry_after_env_confirm_cancels_it(tmp_path):
             ).value = "google/gemini-2.5-flash"
             form._presets_ctrl.close()  # раскрытый на входе пресет-лист съел бы Enter
             await pilot.pause()
-            await pilot.press("enter")
+            await pilot.press("ctrl+s")
             await pilot.pause()
             content = cfg_file.read_text(encoding="utf-8")
             assert (
@@ -955,7 +963,8 @@ async def test_list_reload_after_env_confirm_cancels_it(tmp_path):
         ):
             await _wait_legacy_list(pilot, scr)
             await pilot.press("down")
-            await pilot.press("enter")  # submit → подтверждение перезаписи
+            await pilot.press("enter")
+            await pilot.press("ctrl+s")  # submit → подтверждение перезаписи
             await pilot.pause()
             assert scr._pending_env_save is not None
             await pilot.press("alt+down")  # перечитать список
@@ -1014,7 +1023,7 @@ async def test_entry_form_asks_before_writing_a_literal_over_an_env_ref(
         form.query_one("#mef-token", Input).value = "sk-PLAIN"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → подтверждение
+        await pilot.press("ctrl+s")  # submit → подтверждение
         await pilot.pause()
         assert "открытым текстом" in _texts(scr)
         assert "GC_TEST_TOKEN_REF" in _texts(scr)  # баннер называет переменную
@@ -1051,7 +1060,7 @@ async def test_entry_form_env_confirm_escape_returns_to_the_form_with_the_draft(
         form.query_one("#mef-token", Input).value = "sk-PLAIN"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → подтверждение
+        await pilot.press("ctrl+s")  # submit → подтверждение
         await pilot.pause()
         assert "открытым текстом" in _texts(scr)
         await pilot.press("escape")  # отмена — назад в форму
@@ -1060,7 +1069,7 @@ async def test_entry_form_env_confirm_escape_returns_to_the_form_with_the_draft(
         assert scr.query(ModelEntryForm), "форма закрылась — черновик потерян"
         assert form.query_one("#mef-token", Input).value == "sk-PLAIN"
         assert cfg_file.read_bytes() == before
-        await pilot.press("enter")  # вопрос поднимается заново
+        await pilot.press("ctrl+s")  # вопрос поднимается заново
         await pilot.pause()
         assert "открытым текстом" in _texts(scr)
 
@@ -1083,7 +1092,7 @@ async def test_entry_form_untouched_ref_fields_raise_no_banner(
         form.query_one("#mef-model", Input).value = "giga/model-2"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")
+        await pilot.press("ctrl+s")
         await pilot.pause()
         assert "открытым текстом" not in _texts(scr)
         content = cfg_file.read_text(encoding="utf-8")
@@ -1116,7 +1125,7 @@ async def test_ctrl_u_is_swallowed_while_the_env_confirm_banner_is_up(
         form.query_one("#mef-token", Input).value = "sk-PLAIN"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → баннер перезаписи
+        await pilot.press("ctrl+s")  # submit → баннер перезаписи
         await pilot.pause()
         assert ed._env_pending is not None
         before = cfg_file.read_bytes()
@@ -1173,7 +1182,8 @@ async def test_reserve_row_edits_agent_model_through_its_own_subform(tmp_path):
         await pilot.press("enter")  # открыть под-форму
         await _wait_legacy_list(pilot, scr)
         await pilot.press("down")  # выбрать другую модель
-        await pilot.press("enter")  # сохранить
+        await pilot.press("enter")
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
         await pilot.pause()
         assert "other-model" in cfg_file.read_text(encoding="utf-8")
@@ -1329,7 +1339,7 @@ async def test_footer_is_positional_over_the_section_rows(tmp_path):
 
 async def test_form_footer_follows_the_filter_of_the_address_list(tmp_path):
     """Печать в адресе меняет судьбу пресет-листа — вместе с ним меняется и обещание
-    Enter (подставить ↔ оставить своё ↔ сохранить). Футер обязан догонять её тем же
+    Enter (подставить ↔ открыть список). Футер обязан догонять её тем же
     событием, иначе он обещает подстановку там, где подставлять уже нечего.
 
     Признак, по которому футер решает, — `presets_have_selection` (есть ли ПОДСВЕЧЕННАЯ
@@ -1355,18 +1365,20 @@ async def test_form_footer_follows_the_filter_of_the_address_list(tmp_path):
         # что случилось и чем список вернуть, говорит постоянная строка под полем.
         assert form.presets_open is False
         assert "Enter — оставить своё" not in _footer(scr)
-        assert "Alt+↓ — показать список" in _footer(scr)
+        assert "Enter — список" in _footer(scr)
         hint = str(form.query(".mef-url-preset-hint").last().render())
-        assert hint == "в списке такого нет · Alt+↓ — показать список", hint
+        assert hint == "в списке такого нет · Enter — показать список", hint
         # Alt+↓ поверх своего адреса: строки видны все, подсвеченной нет — Enter
-        # оставит набранное, и футер обязан сказать именно это.
+        # оставит набранное; это действие объясняется под полем.
         await pilot.press("alt+down")
         await pilot.pause()
         assert (form.presets_open, form.presets_have_selection) == (
             True,
             False,
         )
-        assert "Enter — оставить своё" in _footer(scr)
+        assert "Enter" not in _footer(scr)
+        hint = str(form.query(".mef-url-preset-hint").last().render())
+        assert "Enter — оставить свой адрес" in hint
 
 
 async def test_the_form_footer_promises_returning_the_shared_pair_where_the_key_works(
@@ -1486,7 +1498,7 @@ async def test_ctrl_u_in_the_entry_form_returns_the_record_to_the_shared_token(
         assert form.token_cleared is True  # клавиша дошла и сработала
         placeholder = form.query_one("#mef-token", Input).placeholder
         assert placeholder.startswith("наследуется"), placeholder
-        await pilot.press("enter")  # сохранить
+        await pilot.press("ctrl+s")  # сохранить
         await pilot.pause()
     entry = _doc(cfg_file)["models"]["flash"]
     assert "token" not in entry, entry
@@ -2685,10 +2697,9 @@ async def test_a_no_change_reply_does_not_resurrect_the_hidden_title(tmp_path):
     вниз и обратно — прямо под курсором, которым только что нажали Enter."""
     async with _section(tmp_path) as (pilot, scr, _cfg_file):
         await _wait_legacy_list(pilot, scr)
-        await pilot.press("enter")  # сохранение без единой правки
+        await pilot.press("ctrl+s")  # сохранение без единой правки
         await pilot.pause()
-        assert scr.query_one("#set-title", Static).display is False
-        assert "ничего не изменено" in _texts(scr)
+        assert scr._view == "menu"
 
 
 async def test_delete_that_would_leave_the_registry_without_a_default_is_refused_at_once(
@@ -2964,7 +2975,7 @@ async def test_form_fields_are_deaf_while_the_default_slot_question_hangs(
         form.query_one("#mef-token", Input).value = "sk-OWN"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         assert _editor(scr).picker_open
         fields = ("alias", "model", "url", "token")
@@ -3002,7 +3013,7 @@ async def test_alt_down_does_not_reach_the_form_while_the_default_slot_question_
         form._presets_ctrl.close()
         await pilot.pause()
         assert form.on_url_field  # там, где Alt+↓ форме есть что делать
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         assert _editor(scr).picker_open
         before = cfg_file.read_bytes()
@@ -3030,7 +3041,7 @@ async def test_form_takes_input_back_when_the_question_is_dismissed(tmp_path):
         form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         assert _editor(scr).picker_open
         before = _cfg_file.read_bytes()
@@ -3148,21 +3159,31 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
     фокус в поле и на id ещё и раскрывал список поверх живого пикера — то же
     двоевластие, что чинил фикс отказа записи, только мышью."""
     body = 'models:\n  flash:\n    model: "google/gemini-2.5-flash"\n'
-    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+    # Подсказка main/auxiliary больше не в своём скролле на 8 строк — блок
+    # полный, форма выше экрана. Высота 80 оставляла #mef-model вне viewport
+    # после submit/пикера; клик падал OutOfBounds.
+    async with _section(tmp_path, body, size=(100, 200)) as (
+        pilot,
+        scr,
+        cfg_file,
+    ):
         await pilot.press("n")
         await pilot.pause()
         from gc_tui.editors.model_entry_form import ModelEntryForm
 
         form = scr.query(ModelEntryForm).last()
         form.query_one("#mef-alias", Input).value = "opus"
-        form.query_one("#mef-model", Input).value = "anthropic/claude-opus"
+        model_input = form.query_one("#mef-model", Input)
+        model_input.value = "anthropic/claude-opus"
         form._presets_ctrl.close()
         await pilot.pause()
-        await pilot.press("enter")  # submit → пикер default
+        await pilot.press("ctrl+s")  # submit → пикер default
         await pilot.pause()
         ed = _editor(scr)
         assert ed.picker_open
         idx_before = form._idx
+        model_input.scroll_visible(animate=False)
+        await pilot.pause()
         await pilot.click("#mef-model")
         await pilot.pause()
         assert ed.picker_open, "клик убил пикер вопроса"
@@ -3177,6 +3198,44 @@ async def test_a_click_into_the_form_is_dead_while_a_question_hangs(tmp_path):
         assert form.query_one("#mef-model", Input).value == model_before, (
             "печать после клика изменила поле под вопросом"
         )
+
+
+async def test_slot_picker_lists_the_whole_registry(tmp_path):
+    """Селектор слота показывает весь models, не три слота. Два алиаса с одним
+    id — две строки. /level по-прежнему light/default/max."""
+    from gc_tui.toggles import TOGGLES
+
+    body = (
+        "models:\n"
+        "  flash:\n"
+        '    model: "shared-id"\n'
+        "  twin:\n"
+        '    model: "shared-id"\n'
+        "  extra:\n"
+        '    model: "other-id"\n'
+        "slots:\n"
+        '  light: "flash"\n'
+        '  default: "flash"\n'
+        '  max: "flash"\n'
+    )
+    async with _section(tmp_path, body) as (pilot, scr, _cfg):
+        ed = _editor(scr)
+        _goto(ed, "slot", level="light")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        labels = [r["label"] for r in ed._picker["rows"]]
+        assert labels[0] == "не задан"
+        assert labels[1:] == ["flash", "twin", "extra"]
+        assert [ed._entry_model(a) for a in ("flash", "twin")] == [
+            "shared-id",
+            "shared-id",
+        ]
+    assert tuple(v.value for v in TOGGLES["level"].values) == (
+        "light",
+        "default",
+        "max",
+    )
 
 
 async def test_ctrl_down_on_a_registry_entry_scrolls_the_section(tmp_path):
@@ -3205,3 +3264,395 @@ async def test_ctrl_down_on_a_registry_entry_scrolls_the_section(tmp_path):
         await pilot.pause()
         await pilot.pause()
         assert scroll.scroll_offset.y > top
+
+
+async def test_backend_secret_reference_requires_confirmation(tmp_path, monkeypatch):
+    from textual.widgets import TextArea
+
+    monkeypatch.setenv("REVIEW_TOKEN", "old-secret")
+    body = """models:
+  flash:
+    backend:
+      completions_url: https://example.test/v1/chat/completions
+      chat_completion_headers:
+        Authorization: ${ENV:REVIEW_TOKEN}
+slots:
+  default: flash
+"""
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        ed = _editor(scr)
+        form = ed._form
+        form._presets_ctrl.close()
+        area = form.query_one("#mef-backend", TextArea)
+        area.load_text(area.text.replace("${ENV:REVIEW_TOKEN}", "new-secret"))
+        form._idx = form._positions.index("mef-alias")
+        form._focus_position()
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert "${ENV:REVIEW_TOKEN}" in cfg_file.read_text()
+        assert "открытым текстом" in _texts(scr)
+        await pilot.press("enter")
+        await pilot.pause()
+        entry = _doc(cfg_file)["models"]["flash"]
+        assert entry["backend"]["chat_completion_headers"]["Authorization"] == "new-secret"
+
+
+async def test_explicit_null_sections_survive_an_unrelated_form_edit(tmp_path):
+    from textual.widgets import TextArea
+
+    body = "models:\n  flash:\n    main: null\n    auxiliary: null\nslots:\n  default: flash\n"
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        assert form.query_one("#mef-main", TextArea).text.strip() == "null"
+        form.query_one("#mef-model", Input).value = "updated-id"
+        form._presets_ctrl.close()
+        form._idx = form._positions.index("mef-alias")
+        form._focus_position()
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        entry = _doc(cfg_file)["models"]["flash"]
+        assert entry["model"] == "updated-id"
+        assert "main" in entry and entry["main"] is None
+        assert "auxiliary" in entry and entry["auxiliary"] is None
+
+
+@pytest.mark.parametrize("focus", ["mef-main", "mef-alias", None])
+async def test_ctrl_s_saves_model_draft_from_any_focus(tmp_path, focus):
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        ed = _editor(scr)
+        form = ed._form
+        form._presets_ctrl.close()
+        form.query_one("#mef-main", TextArea).load_text("temperature: 0.31")
+        if focus is None:
+            scr.set_focus(None)
+        else:
+            form._idx = form._positions.index(focus)
+            form._focus_position()
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert _doc(cfg_file)["models"]["flash"]["main"] == {"temperature": 0.31}
+        assert ed.form_open is False
+
+
+@pytest.mark.parametrize("from_header", [True, False])
+async def test_credential_source_switch_still_confirms_env_overwrite(tmp_path, monkeypatch, from_header):
+    from textual.widgets import TextArea
+
+    monkeypatch.setenv("MODEL_SWITCH", "secret")
+    credential = (
+        "    backend:\n      chat_completion_headers:\n        Authorization: '${ENV:MODEL_SWITCH}'\n"
+        if from_header else "    token: '${ENV:MODEL_SWITCH}'\n"
+    )
+    body = "models:\n  flash:\n    model: test-model\n    url: https://example.test/chat\n" + credential
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        ed = _editor(scr)
+        form = ed._form
+        before = cfg_file.read_bytes()
+        if from_header:
+            form.query_one("#mef-token", Input).value = "new"
+        else:
+            form.query_one("#mef-backend", TextArea).load_text("chat_completion_headers:\n  Authorization: new")
+        ed._submit_form()
+        await pilot.pause()
+        assert ed._env_pending is not None
+        assert "MODEL_SWITCH" in _texts(scr)
+        assert cfg_file.read_bytes() == before
+        ed.escape()
+        await pilot.pause()
+        assert cfg_file.read_bytes() == before
+        assert ed.form_open is True
+
+
+async def test_enter_in_alias_does_not_save_model(tmp_path):
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form._presets_ctrl.close()
+        form.query_one("#mef-main", TextArea).load_text("temperature: 0.31")
+        form._idx = form._positions.index("mef-alias")
+        form._focus_position()
+        before = cfg_file.read_bytes()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert cfg_file.read_bytes() == before
+        assert _editor(scr).form_open is True
+
+
+async def test_yaml_footer_and_save_shortcut_match_the_actual_keys(tmp_path):
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form._presets_ctrl.close()
+        form._idx = form._positions.index("mef-main")
+        form._focus_position()
+        scr._refresh_footer()
+        area = form.query_one("#mef-main", TextArea)
+        area.load_text("temperature: 0.4")
+        area.cursor_location = (0, len(area.text))
+        await pilot.pause()
+        assert "Ctrl+S — сохранить" in _footer(scr)
+        assert "Enter — сохранить" not in _footer(scr)
+        await pilot.press("enter")
+        await pilot.pause()
+        assert area.text.endswith("\n")
+
+
+async def test_escape_dirty_model_form_asks_before_discard(tmp_path):
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        ed = _editor(scr)
+        form = ed._form
+        form._presets_ctrl.close()
+        form.query_one("#mef-main", TextArea).load_text("temperature: 0.9")
+        before = cfg_file.read_bytes()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert ed.form_open is True
+        assert "Выйти без сохранения" in _texts(scr)
+        assert cfg_file.read_bytes() == before
+        await pilot.press("escape")
+        await pilot.pause()
+        assert ed.form_open is True
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert ed.form_open is False
+
+
+async def test_section_switch_protects_dirty_model_draft(tmp_path):
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form.query_one("#mef-main", TextArea).load_text("temperature: [")
+        before = cfg_file.read_bytes()
+        old_view = scr._view
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert scr._view == old_view
+        assert "Выйти без сохранения" in _texts(scr)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert _editor(scr)._form is form
+        await pilot.press("pagedown", "enter")
+        await pilot.pause()
+        assert scr._view == old_view + 1
+        assert cfg_file.read_bytes() == before
+
+
+async def test_legacy_model_dirty_exit_keeps_draft_until_confirmed(tmp_path):
+    async with _section(tmp_path, "agent:\n  model: old\n") as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        scr.query_one("#onb-model", Input).value = "new-model"
+        before = cfg_file.read_bytes()
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert "Выйти без сохранения" in _texts(scr)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr.query_one("#onb-model", Input).value == "new-model"
+        await pilot.press("escape", "enter")
+        await pilot.pause()
+        assert scr._view == "menu"
+        assert cfg_file.read_bytes() == before
+
+
+async def test_ctrl_s_saves_connection_and_enter_does_not(tmp_path):
+    body = "backend:\n  completions_url: https://example.test/v1/chat/completions\n"
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        from textual.widgets import Input
+
+        await pilot.press("pageup")
+        await pilot.pause()
+        url = scr.query_one("#conn-url", Input)
+        url.value = "https://changed.test/v1/chat/completions"
+        before = cfg_file.read_bytes()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert cfg_file.read_bytes() == before
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        assert "changed.test" in cfg_file.read_text()
+
+
+async def test_escape_dirty_connection_asks_before_discard(tmp_path):
+    from textual.widgets import Input
+
+    body = "backend:\n  completions_url: https://example.test/v1/chat/completions\n"
+    async with _section(tmp_path, body) as (pilot, scr, cfg_file):
+        await pilot.press("pageup")
+        await pilot.pause()
+        scr.query_one("#conn-url", Input).value = (
+            "https://changed.test/v1/chat/completions"
+        )
+        before = cfg_file.read_bytes()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert "Выйти без сохранения" in _texts(scr)
+        assert cfg_file.read_bytes() == before
+        await pilot.press("escape")
+        await pilot.pause()
+        assert scr.query_one("#conn-url", Input)
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+
+
+async def test_yaml_validation_error_is_revealed_in_small_window(tmp_path):
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY, size=(100, 25)) as (pilot, scr, cfg_file):
+        before = cfg_file.read_bytes()
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form._presets_ctrl.close()
+        form.query_one("#mef-main", TextArea).load_text("model: forbidden")
+        form._idx = form._positions.index("mef-alias")
+        form._focus_position()
+        await pilot.pause()
+        await pilot.press("ctrl+s")
+        await pilot.pause()
+        error = form.query_one("#mef-error", Static)
+        viewport = scr.query_one("#set-scroll").content_region
+        assert error.display is True
+        assert error.region.y >= viewport.y
+        assert error.region.bottom <= viewport.bottom
+        assert cfg_file.read_bytes() == before
+
+
+async def test_yaml_help_is_optional_and_escape_keeps_the_draft(tmp_path):
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form._presets_ctrl.close()
+        area = form.query_one("#mef-main", TextArea)
+        area.load_text("temperature: 0.4")
+        await pilot.press("f1")
+        await pilot.pause()
+        assert scr.app.screen.__class__.__name__ == "ModelHelpScreen"
+        assert "Параметры модели" in " ".join(
+            str(w.render()) for w in scr.app.screen.query("Static")
+        )
+        await pilot.press("escape")
+        await pilot.pause()
+        assert _editor(scr)._form is form
+        assert area.text == "temperature: 0.4"
+
+
+async def test_model_help_keeps_backend_keys_readable_without_focused_prose(tmp_path):
+    from gc_tui.widgets.block_panel import BlockPanel
+
+    from textual.containers import VerticalScroll
+    from gc_tui.widgets.trace_row import TraceRow
+
+    async with _section(tmp_path, _REGISTRY, size=(70, 25)) as (pilot, scr, cfg_file):
+        await pilot.press("enter", "f1")
+        await pilot.pause()
+        help_screen = scr.app.screen
+        assert help_screen.focused is help_screen.query_one("#model-help-body", VerticalScroll)
+        assert all(not row.can_focus for row in help_screen.query(TraceRow))
+        assert len(help_screen.query(BlockPanel)) > 1
+        assert not help_screen.query(".table-block")
+        text = " ".join(str(w.render()) for w in help_screen.query(Static))
+        assert "retry_embedded_choice_errors" in text
+        assert "chat_completions_min_response_tokens" in text
+        await pilot.press("pagedown")
+        await pilot.pause()
+        assert help_screen.query_one("#model-help-body", VerticalScroll).scroll_y > 0
+
+
+async def test_dirty_model_confirmation_blocks_typing(tmp_path):
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form._presets_ctrl.close()
+        form.query_one("#mef-alias", Input).value = "changed"
+        form._idx = form._positions.index("mef-alias")
+        form._focus_position()
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("z")
+        assert form.query_one("#mef-alias", Input).value == "changed"
+
+
+@pytest.mark.parametrize("size", [(105, 26), (98, 50)])
+async def test_reopened_model_starts_at_top(tmp_path, size):
+    from textual.containers import VerticalScroll
+
+    async with _section(tmp_path, _REGISTRY, size=size) as (pilot, scr, cfg_file):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form._presets_ctrl.close()
+        body = scr.query_one("#set-scroll", VerticalScroll)
+        body.scroll_end(animate=False)
+        await pilot.pause()
+        assert body.scroll_y > 0
+        assert body.vertical_scrollbar.position > 0
+        await pilot.press("escape")
+        await pilot.pause()
+        await pilot.press("enter")
+        await pilot.pause()
+        assert body.scroll_y == 0
+        assert body.scroll_target_y == 0
+        assert body.vertical_scrollbar.position == 0
+        body.scroll_end(animate=False)
+        await pilot.pause()
+        assert body.scroll_y > 0
+        assert body.vertical_scrollbar.position == body.scroll_y
+
+
+async def test_yaml_fields_use_settings_frame_and_focus_palette(tmp_path):
+    from gc_tui.palette import BAND_BG, INK, RUN_COLOR
+    from textual.color import Color
+    from textual.widgets import TextArea
+
+    async with _section(tmp_path, _REGISTRY) as (pilot, scr, _):
+        await pilot.press("enter")
+        await pilot.pause()
+        form = _editor(scr)._form
+        form._presets_ctrl.close()
+        form._idx = form._positions.index("mef-main")
+        form._focus_position()
+        await pilot.pause()
+        area = form.query_one("#mef-main", TextArea)
+        assert area.styles.border_top == ("round", Color.parse(RUN_COLOR))
+        assert area.styles.background == Color.parse(BAND_BG)
+        assert area.styles.color == Color.parse(INK)
+        body = scr.query_one("#set-scroll")
+        for name in ("scrollbar_color", "scrollbar_color_hover", "scrollbar_color_active",
+                     "scrollbar_background", "scrollbar_background_hover", "scrollbar_background_active"):
+            assert getattr(area.styles, name) == getattr(body.styles, name)

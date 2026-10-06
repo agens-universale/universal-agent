@@ -72,17 +72,18 @@ _FOOTER_RESERVE = (
 )
 # Пустое состояние: клавиатуру держит поле легаси-редактора, поэтому вход в реестр
 # обещается модификаторным написанием (см. докстринг модуля).
-_FOOTER_EMPTY = "↑/↓ · Enter — сохранить · Alt+↓ — перечитать список · Alt+N — добавить в реестр · PgUp/PgDn — секции · Esc"
+_FOOTER_EMPTY = "↑/↓ · Ctrl+S — сохранить/выйти · Alt+↓ — перечитать список · Alt+N — добавить · PgUp/PgDn — секции · Esc"
 # Под-форма резервной модели: свой путь сохранения (решение 3) — Enter списка занят
 # реестром, а save-машины у секции больше нет.
 _FOOTER_RESERVE_FORM = (
-    "↑/↓ · Enter — сохранить · Alt+↓ — перечитать список · Esc — к списку"
+    "↑/↓ · Ctrl+S — сохранить/выйти · Alt+↓ — перечитать список · Esc — назад"
 )
-_FOOTER_FORM_URL = "Enter — сохранить · Alt+↓ — показать список · Ctrl+Space — проверить связь · Esc — к списку"
-_FOOTER_FORM_MODEL = "Enter — сохранить · Alt+↓ — перечитать список · Ctrl+Space — проверить связь · Esc — к списку"
-_FOOTER_FORM_NOAUTH = "↑/↓ · Enter — сохранить · Space — переключить · Ctrl+Space — проверить связь · Esc — к списку"
+_FOOTER_FORM_URL = "Ctrl+S — сохранить/выйти · Alt+↓ — показать список · Ctrl+Space — проверить связь · Esc — назад"
+_FOOTER_FORM_MODEL = "Ctrl+S — сохранить/выйти · Alt+↓ — перечитать список · Ctrl+Space — проверить связь · Esc — назад"
+_FOOTER_FORM_NOAUTH = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
+_FOOTER_FORM_STRIP = "↑/↓ · Ctrl+S — сохранить/выйти · Space — переключить · Ctrl+Space — проверить связь · Esc — назад"
 _FOOTER_FORM_FIELD = (
-    "↑/↓ · Enter — сохранить · Ctrl+Space — проверить связь · Esc — к списку"
+    "↑/↓ · Ctrl+S — сохранить/выйти · Ctrl+Space — проверить связь · Esc — назад"
 )
 # Пара своя и курсор на одном из её полей: `Ctrl+U` возвращает общее подключение
 # ЦЕЛИКОМ (§5). Слова взяты из словаря формы, а не списаны заново: ту же клавишу
@@ -92,9 +93,9 @@ _FOOTER_FORM_FIELD = (
 # Прежнее «Ctrl+U — очистить» с адреса ушло: это был встроенный `delete_left_all`
 # Textual, а над заполненным адресом клавишу теперь забирает пара — над пустым же
 # стирать нечего, и обещать её там значило бы обещать мёртвую клавишу.
-_FOOTER_FORM_URL_PAIR = f"Enter — сохранить · Alt+↓ — показать список · {CTRL_U_PAIR} · Ctrl+Space — проверить связь · Esc — к списку"
-_FOOTER_FORM_LIST = "↑/↓ — выбор · Enter — подставить · Esc — свернуть · Ctrl+Space — проверить связь"
-_FOOTER_FORM_LIST_NO_MATCH = "↑/↓ · Enter — оставить своё · Esc — свернуть · Ctrl+Space — проверить связь"
+_FOOTER_FORM_URL_PAIR = f"Ctrl+S — сохранить/выйти · Enter — список · {CTRL_U_PAIR} · Esc — назад"
+_FOOTER_FORM_LIST = "↑/↓ · Enter — подставить · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
+_FOOTER_FORM_LIST_NO_MATCH = "↑/↓ · Ctrl+S — сохранить/выйти · Esc · Ctrl+Space — проверить связь"
 # Футер раскрытого списка НЕ модальный: `Ctrl+Space` под ним работает, и `Ctrl+U` над
 # своим адресом тоже (список адреса раскрывают поверх заполненного поля, `Alt+↓`).
 # Молчание о работающей клавише — та же ложь футера, что обещание мёртвой.
@@ -103,7 +104,8 @@ _FOOTER_FORM_LIST_NO_MATCH_PAIR = (
     f"{_FOOTER_FORM_LIST_NO_MATCH} · {CTRL_U_PAIR}"
 )
 _FOOTER_PICKER = "↑/↓ — выбор · Enter — выбрать · Esc — отмена"
-_FOOTER_CONFIRM = "Enter — удалить · Esc — отмена"
+_FOOTER_CONFIRM = "Enter — подтвердить · Esc — отмена"
+_FOOTER_DIRTY_CONFIRM = "Enter — выйти без сохранения · Esc — остаться"
 # Подтверждение перезаписи ${ENV:…} литералом (L22) — свои клавиши, свой глагол:
 # здесь Enter не удаляет, а сохраняет.
 _FOOTER_ENV_CONFIRM = "Enter — сохранить · Esc — отмена"
@@ -747,6 +749,7 @@ class ModelsSectionEditor(Vertical):
         # ссылки давало пустое тело секции.
         self._legacy_open = self._legacy_default()
         self._legacy = None
+        self._legacy_baseline: str | None = None
         self._measured_width = (
             None  # ширина рамки, под которую посчитаны колонки
         )
@@ -757,6 +760,7 @@ class ModelsSectionEditor(Vertical):
         # (алиас, поля) записи, ждущей ответа на «затереть ссылку ${ENV:…}
         # литералом?» (L22): форма при этом жива, отмена возвращает в неё.
         self._env_pending = None
+        self._dirty_exit_pending = False
         self._writing_entry = (
             None  # (алиас, запись) транзакции в полёте, см. `_own_entry`
         )
@@ -1524,6 +1528,10 @@ class ModelsSectionEditor(Vertical):
                     markup=False,
                 )
             self._legacy = self._make_legacy_editor()
+            if self._legacy_baseline is None and getattr(self._legacy, "models_loaded", True):
+                self._legacy_baseline = getattr(
+                    self._legacy, "initial_value", self._legacy.peek()
+                )
             yield self._legacy
             yield from self._legacy_hint_widgets()
             return
@@ -1716,6 +1724,15 @@ class ModelsSectionEditor(Vertical):
         return self._legacy_editor_factory()
 
     def on_mount(self) -> None:
+        if (
+            self._legacy_open
+            and self._legacy is not None
+            and self._legacy_baseline is None
+            and getattr(self._legacy, "models_loaded", True)
+        ):
+            self._legacy_baseline = getattr(
+                self._legacy, "initial_value", self._legacy.peek()
+            )
         self._schedule_layout_pass()
 
     def on_resize(self) -> None:
@@ -1789,6 +1806,8 @@ class ModelsSectionEditor(Vertical):
         self._document = self._read_document()
         self._shadow = self._read_shadow()
         self._legacy_open = self._legacy_default()
+        self._legacy = None
+        self._legacy_baseline = None
         rows = self._rows()
         self._idx = min(self._idx, max(len(rows) - 1, 0))
         self._rebuild()
@@ -1796,7 +1815,11 @@ class ModelsSectionEditor(Vertical):
     # --- состояние наружу (для позиционного футера экрана) --------------------
     @property
     def awaiting_confirm(self) -> bool:
-        return self._pending is not None
+        return (
+            self._pending is not None
+            or self._env_pending is not None
+            or self._dirty_exit_pending
+        )
 
     @property
     def picker_open(self) -> bool:
@@ -1810,6 +1833,45 @@ class ModelsSectionEditor(Vertical):
     def legacy_open(self) -> bool:
         """Легаси-редактор на экране: пустое состояние либо под-форма резервной."""
         return self._legacy_open
+
+    @property
+    def legacy_dirty(self) -> bool:
+        """Есть ли несохранённое значение в легаси-редакторе.
+
+        Редактор показывает эффективное значение (в том числе унаследованное),
+        тогда как `_reserve_model()` знает только ключ текущего файла. Сравнение с
+        ним ошибочно считало унаследованную модель черновиком сразу после входа.
+        """
+        if not self._legacy_open or self._legacy is None:
+            return False
+        # Пока сетевой список ещё загружается, `ModelEditor.peek()` не может
+        # вернуть выбор (поле ещё не смонтировано) и отдаёт None. Это состояние
+        # не является правкой пользователя: навигация по секциям не должна
+        # поднимать ложное подтверждение выхода.
+        if not getattr(self._legacy, "models_loaded", True):
+            return False
+        if self._legacy_baseline is None:
+            self._legacy_baseline = getattr(
+                self._legacy, "initial_value", self._legacy.peek()
+            )
+        value = self._legacy.peek()
+        manual_value = getattr(self._legacy, "_manual_value", lambda: None)()
+        if getattr(self._legacy, "_typed_own_name", lambda: False)():
+            value = manual_value
+        initial_value = getattr(self._legacy, "initial_value", None)
+        if value is None:
+            # During the short interval between a response and list mounting,
+            # the model picker has no selected row yet. A manually edited input
+            # is still a real draft, so compare its text with the baseline;
+            # an absent input remains clean.
+            value = manual_value
+            if value is None:
+                return False
+        if not self._legacy_baseline and initial_value and value == initial_value:
+            # The effective model may become known asynchronously after the body
+            # was first composed; promote that resolved value to the baseline.
+            self._legacy_baseline = initial_value
+        return value != self._legacy_baseline
 
     @property
     def showing_list(self) -> bool:
@@ -1827,6 +1889,8 @@ class ModelsSectionEditor(Vertical):
     def footer_text(self) -> str:
         if self._env_pending is not None:
             return _FOOTER_ENV_CONFIRM
+        if self._dirty_exit_pending:
+            return _FOOTER_DIRTY_CONFIRM
         if self._pending is not None:
             return _FOOTER_CONFIRM
         if self._picker is not None:
@@ -1866,6 +1930,8 @@ class ModelsSectionEditor(Vertical):
 
     def _form_footer(self) -> str:
         form = self._form
+        if form.help_open:
+            return "F1 / Esc — закрыть справку"
         if form.presets_open:
             return _list_footer(
                 form.presets_have_selection, form.can_return_shared_pair
@@ -1877,6 +1943,11 @@ class ModelsSectionEditor(Vertical):
         # Обещание «вернуть наследование» гейтится ТЕМ ЖЕ предикатом, что и сама клавиша
         # (`can_return_shared_pair`): свой гейт витрины разошёлся бы с клавишей на
         # первой правке правила — ложь того же рода, что стережёт `test_footer_contract`.
+        if form.keeps_key("enter"):
+            return (
+                "Enter — новая строка · Ctrl+S — сохранить/выйти · "
+                "F1 — справка · Esc — к списку"
+            )
         if form.on_url_field:
             return (
                 _FOOTER_FORM_URL_PAIR
@@ -1887,6 +1958,8 @@ class ModelsSectionEditor(Vertical):
             return _FOOTER_FORM_MODEL
         if form.on_no_auth_row:
             return _FOOTER_FORM_NOAUTH
+        if form.on_strip_row:
+            return _FOOTER_FORM_STRIP
         # Остались поле токена и поле алиаса. Ни одному из них футер клавишу не
         # обещает: у токена её называет ПОДПИСЬ ПОЛЯ (`_TOKEN_LABEL_INHERIT`, канон
         # `ConnectionEditor._token_label`) — повторять то же обещание в одном кадре
@@ -1897,6 +1970,33 @@ class ModelsSectionEditor(Vertical):
         return _FOOTER_FORM_FIELD
 
     # --- клавиши --------------------------------------------------------------
+    def toggle_form_help(self) -> bool:
+        if self._form is None or self._picker is not None:
+            return False
+        self._form.toggle_help()
+        return True
+
+    def open_form_help(self) -> bool:
+        if self._form is None or self._picker is not None:
+            return False
+        from gc_tui.screens.model_help import ModelHelpScreen
+
+        self.app.push_screen(ModelHelpScreen())
+        return True
+
+    def form_keeps_key(self, key: str) -> bool:
+        """YAML-поля формы держат Enter и стрелки внутри текста.
+
+        Пикер и баннер перезаписи ссылки клавишу не отдают: там стрелки водят
+        по списку, а Enter подтверждает."""
+        if (
+            self._form is None
+            or self._picker is not None
+            or self._env_pending is not None
+        ):
+            return False
+        return self._form.keeps_key(key)
+
     def move(self, delta: int) -> None:
         if self._pending is not None or self._env_pending is not None:
             return
@@ -1918,6 +2018,12 @@ class ModelsSectionEditor(Vertical):
         self._refresh_rows()
 
     def enter(self) -> None:
+        if self._dirty_exit_pending:
+            self._clear_dirty_exit_confirm()
+            self._form = None
+            self._legacy_open = self._legacy_default()
+            self._rebuild()
+            return
         if self._env_pending is not None:
             # Подтверждение перезаписи ссылки: снимок (алиас, поля) зафиксирован
             # на момент submit, фокус на время вопроса снят — правки под баннером
@@ -1933,13 +2039,11 @@ class ModelsSectionEditor(Vertical):
             self._pick()
             return
         if self._form is not None:
-            if self._form.enter():
-                return  # Enter израсходован списком формы
-            self._submit_form()
+            self._form.enter()
             return
         if self._legacy_open:
-            if self._on_legacy_save is not None:
-                self._on_legacy_save()
+            if self._legacy is not None:
+                self._legacy.mark()
             return
         row = self._row_at_cursor()
         if row is None:
@@ -1961,6 +2065,23 @@ class ModelsSectionEditor(Vertical):
             )
         else:
             self._open_form(row["alias"])
+
+    def save_form(self) -> bool:
+        """Сохранить текущий черновик, не выбирая подсвеченную строку списка."""
+        if (
+            self._env_pending is not None
+            or self._pending is not None
+            or self._dirty_exit_pending
+            or self._picker is not None
+        ):
+            return False
+        if self._form is not None:
+            self._submit_form()
+            return True
+        if self._legacy_open and self._on_legacy_save is not None:
+            self._on_legacy_save()
+            return True
+        return False
 
     def escape(self) -> bool:
         """Свернуть СВОЁ под-состояние и съесть клавишу; сворачивать нечего — False,
@@ -1984,9 +2105,22 @@ class ModelsSectionEditor(Vertical):
                 # (та же беда, что лечит `set_focus(None)` перед сносом тела).
                 self._form.refocus()
             return True
+        if self._dirty_exit_pending:
+            self._clear_dirty_exit_confirm()
+            if self._form is not None:
+                self._form.refocus()
+            return True
         if self._form is not None:
             if self._form.escape():
                 return True  # закрыт только список формы
+            if self._form.is_dirty():
+                self._dirty_exit_pending = True
+                self._ask(
+                    "Выйти без сохранения?",
+                    _FOOTER_DIRTY_CONFIRM,
+                )
+                self.screen.set_focus(None)
+                return True
             self._form = None
             self._legacy_open = (
                 self._legacy_default()
@@ -1998,6 +2132,11 @@ class ModelsSectionEditor(Vertical):
             self._rebuild()
             return True
         return False
+
+    def _clear_dirty_exit_confirm(self) -> None:
+        self._dirty_exit_pending = False
+        for widget in self.query(".models-confirm"):
+            widget.remove()
 
     def new_entry(self) -> bool:
         """`n`/`Alt+N`: новая запись реестра. False — состояние занято, клавиша не наша.
@@ -2049,7 +2188,9 @@ class ModelsSectionEditor(Vertical):
         if self._picker is not None or self._env_pending is not None:
             return False  # висит вопрос (слот / перезапись ссылки) — клавиши не формы
         if self._form is not None:
-            return self._form.toggle_no_auth()
+            return (
+                self._form.toggle_no_auth() or self._form.cycle_strip_think()
+            )
         return False
 
     def clear_token(self) -> bool:
@@ -2101,6 +2242,7 @@ class ModelsSectionEditor(Vertical):
         self._form = ModelEntryForm(
             interaction_gate=lambda: (
                 self._picker is not None or self._env_pending is not None
+                or self._dirty_exit_pending
             ),
             initial=initial,
             existing_aliases=self._own_aliases,
@@ -2126,8 +2268,8 @@ class ModelsSectionEditor(Vertical):
             return  # ошибка осталась В форме, писать нечего
         # Гейт «ссылка не может стать литералом молча» (L22) — ДО транзакции и до
         # вопроса о слоте: та же дверь, что у плоского `_do_save` экрана, тем же
-        # предикатом (`config_raw.env_refs_overwritten`). Судятся token и url —
-        # ключи записи, где живут секрет и адрес, — по СЫРОЙ записи файла цели:
+        # предикатом (`config_raw.env_refs_overwritten`). Судятся все изменённые
+        # поля, включая вложенные заголовки backend, по СЫРОЙ записи файла цели:
         # один Enter поверх `${ENV:…}` иначе клал секрет открытым текстом в файл,
         # который может лежать в репозитории. Затирание ссылки ПУСТЫМ значением
         # (Ctrl+U, галка ●) вопрос не поднимает: это явные действия формы со
@@ -2135,9 +2277,17 @@ class ModelsSectionEditor(Vertical):
         from gc_core import config_raw
 
         prev = self._form.original_alias
-        pair = {k: v for k, v in fields.items() if k in ("token", "url")}
         old = self._own_entry(prev) if prev is not None else {}
-        written, _erased = config_raw.env_refs_overwritten(pair, old)
+        written, _erased = config_raw.env_refs_overwritten(fields, old)
+        merged = self._merged_entry(prev, fields)
+        old_auth = old.get("token")
+        if old_auth is None:
+            old_auth = ((old.get("backend") or {}).get("chat_completion_headers") or {}).get("Authorization")
+        new_auth = merged.get("token")
+        if new_auth is None:
+            new_auth = ((merged.get("backend") or {}).get("chat_completion_headers") or {}).get("Authorization")
+        credential_refs, _ = config_raw.env_refs_overwritten({"token": new_auth}, {"token": old_auth})
+        written = sorted(set(written) | set(credential_refs))
         if written:
             self._env_pending = (alias, fields)
             self._ask(
@@ -2548,6 +2698,9 @@ class ModelsSectionEditor(Vertical):
         return " ".join(parts)
 
     def confirm_pending(self) -> None:
+        if self._dirty_exit_pending:
+            self.enter()
+            return
         pending = self._pending
         self._clear_confirm()
         if pending is None:

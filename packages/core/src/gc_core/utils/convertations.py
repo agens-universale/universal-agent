@@ -105,9 +105,9 @@ def _nonempty_content(content):
     return content
 
 
-def _canonical_message_item(dct_choice, *, text, role, reasoning=None):
+def _canonical_message_item(dct_choice, *, text, role, reasoning=None, response_id=None):
     item = {
-        "id": "msg_" + get_md5_hash(dct_choice),
+        "id": "msg_" + get_md5_hash({"response_id": response_id, "choice": dct_choice}),
         "type": "message",
         "status": "completed",
         "content": [
@@ -175,6 +175,7 @@ def get_output_list(
                     text=text_out,
                     role=msg_obj.get("role"),
                     reasoning=item_reasoning,
+                    response_id=dct.get("id"),
                 )
             )
 

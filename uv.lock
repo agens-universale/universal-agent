@@ -43,14 +43,14 @@ name = "aiohttp"
 version = "3.14.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiohappyeyeballs" },
-    { name = "aiosignal" },
-    { name = "attrs" },
-    { name = "frozenlist" },
-    { name = "multidict" },
-    { name = "propcache" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
-    { name = "yarl" },
+    { name = "aiohappyeyeballs", marker = "python_full_version >= '3.12'" },
+    { name = "aiosignal", marker = "python_full_version >= '3.12'" },
+    { name = "attrs", marker = "python_full_version >= '3.12'" },
+    { name = "frozenlist", marker = "python_full_version >= '3.12'" },
+    { name = "multidict", marker = "python_full_version >= '3.12'" },
+    { name = "propcache", marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version == '3.12.*'" },
+    { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/58/d9/22ce5786ac0c1653ae8b6c23bded02c1686d11f0dbb45b31ce128e0df985/aiohttp-3.14.3.tar.gz", hash = "sha256:9491196535a88924a60afd5b5f434b5b203b6cc616250878dbdb223a8f7844bc", size = 7971213, upload-time = "2026-07-23T01:57:27.037Z" }
 wheels = [
@@ -161,8 +161,8 @@ name = "aiosignal"
 version = "1.4.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "frozenlist" },
-    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+    { name = "frozenlist", marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version == '3.12.*'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/62/06741b579156360248d1ec624842ad0edf697050bbaf7c3e46394e106ad1/aiosignal-1.4.0.tar.gz", hash = "sha256:f47eecd9468083c2029cc99945502cb7708b082c232f9aca65da147157b251c7", size = 25007, upload-time = "2025-07-03T22:54:43.528Z" }
 wheels = [
@@ -245,9 +245,9 @@ name = "boto3"
 version = "1.43.82"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "botocore" },
-    { name = "jmespath" },
-    { name = "s3transfer" },
+    { name = "botocore", marker = "python_full_version >= '3.12'" },
+    { name = "jmespath", marker = "python_full_version >= '3.12'" },
+    { name = "s3transfer", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3f/b1/5d8bc6b7335d86f15d43a34a4bbbeced202aef2b4e942c67a5846120c1ff/boto3-1.43.82.tar.gz", hash = "sha256:bc5a7824568c117110bac8fe7ccfac63f0a946f253953d42e73a8c1fb65162e0", size = 112671, upload-time = "2026-08-27T20:08:42.01Z" }
 wheels = [
@@ -259,9 +259,9 @@ name = "botocore"
 version = "1.43.82"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "jmespath" },
-    { name = "python-dateutil" },
-    { name = "urllib3" },
+    { name = "jmespath", marker = "python_full_version >= '3.12'" },
+    { name = "python-dateutil", marker = "python_full_version >= '3.12'" },
+    { name = "urllib3", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ed/96/54e8d9a09689bf870bc723bf95ee8f5a4bba3b9c203baaaca3fb557d4924/botocore-1.43.82.tar.gz", hash = "sha256:347573c0bab52e29c923e28128764fcc50f469ed98dc5460220026cd3672ac0c", size = 16007302, upload-time = "2026-08-27T20:08:36.615Z" }
 wheels = [
@@ -801,7 +801,7 @@ name = "deprecation"
 version = "2.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "packaging" },
+    { name = "packaging", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5a/d3/8ae2869247df154b64c1884d7346d412fed0c49df84db635aab2d1c40e62/deprecation-2.1.0.tar.gz", hash = "sha256:72b3bde64e5d778694b0cf68178aed03d15e15477116add3fb773e581f9518ff", size = 173788, upload-time = "2020-04-20T14:23:38.738Z" }
 wheels = [
@@ -822,7 +822,7 @@ name = "dirhash"
 version = "0.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "scantree" },
+    { name = "scantree", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1d/70/49f93897f3a4f7ab5f20a854ebc91aad47854e9fb2cd169e3a4452fa3f5e/dirhash-0.5.0.tar.gz", hash = "sha256:e60760f0ab2e935d8cb088923ea2c6492398dca42cec785df778985fd4cd5386", size = 21377, upload-time = "2024-08-03T22:14:13.322Z" }
 wheels = [
@@ -1057,7 +1057,7 @@ wheels = [
 
 [[package]]
 name = "gc-acp"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/acp" }
 dependencies = [
     { name = "gc-core" },
@@ -1068,7 +1068,7 @@ requires-dist = [{ name = "gc-core", editable = "packages/core" }]
 
 [[package]]
 name = "gc-chat"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/chat" }
 dependencies = [
     { name = "fastapi" },
@@ -1085,7 +1085,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-cli"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/cli" }
 dependencies = [
     { name = "gc-core" },
@@ -1100,7 +1100,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-core"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/core" }
 dependencies = [
     { name = "certifi" },
@@ -1135,7 +1135,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-mcp"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/mcp" }
 dependencies = [
     { name = "gc-core" },
@@ -1150,7 +1150,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-server"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/server" }
 dependencies = [
     { name = "fastapi" },
@@ -1173,7 +1173,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-testkit"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/testkit" }
 dependencies = [
     { name = "pytest" },
@@ -1184,7 +1184,7 @@ requires-dist = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [[package]]
 name = "gc-tui"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/tui" }
 dependencies = [
     { name = "gc-core" },
@@ -1215,7 +1215,7 @@ requires-dist = [
 
 [[package]]
 name = "gc-ua"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "gc-acp" },
@@ -1345,8 +1345,8 @@ name = "h2"
 version = "4.4.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "hpack" },
-    { name = "hyperframe" },
+    { name = "hpack", marker = "python_full_version >= '3.12'" },
+    { name = "hyperframe", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e7/85/7c366e69d84c17bb778fe41419e1fbcce3033d5b7ce29bbffff0a98b859f/h2-4.4.1.tar.gz", hash = "sha256:4e866ffb1a869ae14dd9b5e6beb5c24a13da0495ad72b65925ded182521c1516", size = 2157281, upload-time = "2026-08-03T11:45:09.509Z" }
 wheels = [
@@ -1358,27 +1358,27 @@ name = "harbor"
 version = "0.22.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "dirhash" },
-    { name = "fastapi" },
-    { name = "filelock" },
-    { name = "httpx" },
-    { name = "jinja2" },
-    { name = "litellm" },
-    { name = "packaging" },
-    { name = "pathspec" },
-    { name = "platformdirs" },
-    { name = "pydantic" },
-    { name = "pyjwt" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "requests" },
-    { name = "rich" },
-    { name = "shortuuid" },
-    { name = "supabase" },
-    { name = "tenacity" },
-    { name = "toml" },
-    { name = "typer" },
-    { name = "uvicorn" },
+    { name = "dirhash", marker = "python_full_version >= '3.12'" },
+    { name = "fastapi", marker = "python_full_version >= '3.12'" },
+    { name = "filelock", marker = "python_full_version >= '3.12'" },
+    { name = "httpx", marker = "python_full_version >= '3.12'" },
+    { name = "jinja2", marker = "python_full_version >= '3.12'" },
+    { name = "litellm", marker = "python_full_version >= '3.12'" },
+    { name = "packaging", marker = "python_full_version >= '3.12'" },
+    { name = "pathspec", marker = "python_full_version >= '3.12'" },
+    { name = "platformdirs", marker = "python_full_version >= '3.12'" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "pyjwt", marker = "python_full_version >= '3.12'" },
+    { name = "python-dotenv", marker = "python_full_version >= '3.12'" },
+    { name = "pyyaml", marker = "python_full_version >= '3.12'" },
+    { name = "requests", marker = "python_full_version >= '3.12'" },
+    { name = "rich", marker = "python_full_version >= '3.12'" },
+    { name = "shortuuid", marker = "python_full_version >= '3.12'" },
+    { name = "supabase", marker = "python_full_version >= '3.12'" },
+    { name = "tenacity", marker = "python_full_version >= '3.12'" },
+    { name = "toml", marker = "python_full_version >= '3.12'" },
+    { name = "typer", marker = "python_full_version >= '3.12'" },
+    { name = "uvicorn", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/12/a0/a37532fb647b93ef709b63a7fbdf613a84837a569fdd88f69dd7105bf093/harbor-0.22.0.tar.gz", hash = "sha256:becf0ce354026cc37899855e0a0d2687cd5188034a43635849245069aad0938b", size = 1832554, upload-time = "2026-08-22T03:22:39.798Z" }
 wheels = [
@@ -1528,7 +1528,7 @@ wheels = [
 
 [package.optional-dependencies]
 http2 = [
-    { name = "h2" },
+    { name = "h2", marker = "python_full_version >= '3.12'" },
 ]
 socks = [
     { name = "socksio" },
@@ -1607,7 +1607,7 @@ name = "importlib-metadata"
 version = "8.9.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "zipp" },
+    { name = "zipp", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e7/72/c600ae4f68c28fc19f9c31b9403053e5dbb8cace2e6842c7b7c3e4d42fe9/importlib_metadata-8.9.0.tar.gz", hash = "sha256:58850626cef4bd2df100378b0f2aea9724a7b92f10770d547725b047078f99ee", size = 56140, upload-time = "2026-03-20T16:56:26.362Z" }
 wheels = [
@@ -1829,20 +1829,20 @@ name = "litellm"
 version = "1.98.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "aiohttp" },
-    { name = "boto3" },
-    { name = "click" },
-    { name = "fastuuid" },
-    { name = "httpx" },
-    { name = "importlib-metadata" },
-    { name = "jinja2" },
-    { name = "jsonschema" },
-    { name = "openai" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "python-dotenv" },
-    { name = "tiktoken" },
-    { name = "tokenizers" },
+    { name = "aiohttp", marker = "python_full_version >= '3.12'" },
+    { name = "boto3", marker = "python_full_version >= '3.12'" },
+    { name = "click", marker = "python_full_version >= '3.12'" },
+    { name = "fastuuid", marker = "python_full_version >= '3.12'" },
+    { name = "httpx", marker = "python_full_version >= '3.12'" },
+    { name = "importlib-metadata", marker = "python_full_version >= '3.12'" },
+    { name = "jinja2", marker = "python_full_version >= '3.12'" },
+    { name = "jsonschema", marker = "python_full_version >= '3.12'" },
+    { name = "openai", marker = "python_full_version >= '3.12'" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "pydantic-settings", marker = "python_full_version >= '3.12'" },
+    { name = "python-dotenv", marker = "python_full_version >= '3.12'" },
+    { name = "tiktoken", marker = "python_full_version >= '3.12'" },
+    { name = "tokenizers", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9c/97/c9da198af273d700bf44d7d82eb21c5b8078c82574b31856b71b1298234b/litellm-1.98.0.tar.gz", hash = "sha256:0e6ba5d645a73ca6d0ffb4e8ec539d94b6e8fad691f2a54c6819011e6d0de8bf", size = 17577139, upload-time = "2026-08-22T22:19:21.931Z" }
 wheels = [
@@ -2616,14 +2616,14 @@ name = "openai"
 version = "2.54.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "anyio" },
-    { name = "distro" },
-    { name = "httpx" },
-    { name = "jiter" },
-    { name = "pydantic" },
-    { name = "sniffio" },
-    { name = "tqdm" },
-    { name = "typing-extensions" },
+    { name = "anyio", marker = "python_full_version >= '3.12'" },
+    { name = "distro", marker = "python_full_version >= '3.12'" },
+    { name = "httpx", marker = "python_full_version >= '3.12'" },
+    { name = "jiter", marker = "python_full_version >= '3.12'" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "sniffio", marker = "python_full_version >= '3.12'" },
+    { name = "tqdm", marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/50/9a/8c75e8c8a5b407a0586faeb2afac91674ff955c191ecc1d6d3b6669f6788/openai-2.54.0.tar.gz", hash = "sha256:e3e6f8bc1ba30ddf381ace1a14340eed381cb984a1a59bd0f34b5be3b5d49cfa", size = 1100285, upload-time = "2026-08-11T18:46:59.035Z" }
 wheels = [
@@ -2859,10 +2859,10 @@ name = "postgrest"
 version = "2.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "deprecation" },
-    { name = "httpx", extra = ["http2"] },
-    { name = "pydantic" },
-    { name = "yarl" },
+    { name = "deprecation", marker = "python_full_version >= '3.12'" },
+    { name = "httpx", extra = ["http2"], marker = "python_full_version >= '3.12'" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/e2/22/88c470d8838d2678a44e0172d061630b8837cba3fb7fb492e28f6578c309/postgrest-2.31.0.tar.gz", hash = "sha256:2f395d84b2ee34fc57622ff2f711df603e2ede625f98e5015240741888f7bd0c", size = 14419, upload-time = "2026-06-04T13:37:20.474Z" }
 wheels = [
@@ -3508,9 +3508,9 @@ name = "realtime"
 version = "2.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pydantic" },
-    { name = "typing-extensions" },
-    { name = "websockets" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "typing-extensions", marker = "python_full_version >= '3.12'" },
+    { name = "websockets", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/df/34/54a1eaaefa24db5cb12596fd74792e08efa53ed30dc5bce2c0a68ded6146/realtime-2.31.0.tar.gz", hash = "sha256:9e641cb4d77ca0fe768515f8cf9f83550c79f49ce1550a95afc2dc0e252be8c9", size = 18716, upload-time = "2026-06-04T13:37:22.089Z" }
 wheels = [
@@ -3842,7 +3842,7 @@ name = "s3transfer"
 version = "0.19.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "botocore" },
+    { name = "botocore", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/76/43/35e4d8aa320bffe8287fe8f65f578fa2d2db0a64212f0e710dce58267854/s3transfer-0.19.2.tar.gz", hash = "sha256:ba0309fd86be3c27dbf78cdd813c13c5e1df16e5874b99d2535ebbdfb9892993", size = 165592, upload-time = "2026-07-22T19:30:44.432Z" }
 wheels = [
@@ -3854,8 +3854,8 @@ name = "scantree"
 version = "0.0.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "attrs" },
-    { name = "pathspec" },
+    { name = "attrs", marker = "python_full_version >= '3.12'" },
+    { name = "pathspec", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b3/e4/40998faefc72ba1ddeb640a44fba92935353525dba110488806da8339c0b/scantree-0.0.4.tar.gz", hash = "sha256:15bd5cb24483b04db2c70653604e8ea3522e98087db7e38ab8482f053984c0ac", size = 24643, upload-time = "2024-08-03T20:08:59.413Z" }
 wheels = [
@@ -3972,10 +3972,10 @@ name = "storage3"
 version = "2.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "deprecation" },
-    { name = "httpx", extra = ["http2"] },
-    { name = "pydantic" },
-    { name = "yarl" },
+    { name = "deprecation", marker = "python_full_version >= '3.12'" },
+    { name = "httpx", extra = ["http2"], marker = "python_full_version >= '3.12'" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/13/30/fee43d523d3f680a833a4aae5bf8094de0b9031b0c2bddb3e0bc6e829e1b/storage3-2.31.0.tar.gz", hash = "sha256:d2161e2ea650dc115a1787c30e09b118365589ac772f4dd8643e3a503ecfc667", size = 20348, upload-time = "2026-06-04T13:37:23.703Z" }
 wheels = [
@@ -3996,13 +3996,13 @@ name = "supabase"
 version = "2.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "httpx" },
-    { name = "postgrest" },
-    { name = "realtime" },
-    { name = "storage3" },
-    { name = "supabase-auth" },
-    { name = "supabase-functions" },
-    { name = "yarl" },
+    { name = "httpx", marker = "python_full_version >= '3.12'" },
+    { name = "postgrest", marker = "python_full_version >= '3.12'" },
+    { name = "realtime", marker = "python_full_version >= '3.12'" },
+    { name = "storage3", marker = "python_full_version >= '3.12'" },
+    { name = "supabase-auth", marker = "python_full_version >= '3.12'" },
+    { name = "supabase-functions", marker = "python_full_version >= '3.12'" },
+    { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fe/8e/54a2f950629689b1613434a61fc3bff5f92f84ba6b20213f5b2add05c1bb/supabase-2.31.0.tar.gz", hash = "sha256:3467b09d00482b9a0138235bdbde7a350426f93cf2a1342372eaddfc669f1206", size = 9805, upload-time = "2026-06-04T13:37:25.22Z" }
 wheels = [
@@ -4014,9 +4014,9 @@ name = "supabase-auth"
 version = "2.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "httpx", extra = ["http2"] },
-    { name = "pydantic" },
-    { name = "pyjwt", extra = ["crypto"] },
+    { name = "httpx", extra = ["http2"], marker = "python_full_version >= '3.12'" },
+    { name = "pydantic", marker = "python_full_version >= '3.12'" },
+    { name = "pyjwt", extra = ["crypto"], marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/61/8a/408689cf39820f0d46d2731d6747ff94dbefc87ae977b4b5c4066da5b070/supabase_auth-2.31.0.tar.gz", hash = "sha256:0945b33fa96239c76dc8eaf96d7d2c94991950d24b4cfe4a5c2da9aa5e909663", size = 39151, upload-time = "2026-06-04T13:37:27.375Z" }
 wheels = [
@@ -4028,9 +4028,9 @@ name = "supabase-functions"
 version = "2.31.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "httpx", extra = ["http2"] },
-    { name = "strenum" },
-    { name = "yarl" },
+    { name = "httpx", extra = ["http2"], marker = "python_full_version >= '3.12'" },
+    { name = "strenum", marker = "python_full_version >= '3.12'" },
+    { name = "yarl", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/84/5d/61c2446ed26a57fa5543f9c270a731320911569202340d15341f72cdba7c/supabase_functions-2.31.0.tar.gz", hash = "sha256:4ad027b3ae3bd28b31233339f4db1da6965affd3546f655b421baf40cee2690f", size = 4683, upload-time = "2026-06-04T13:37:28.878Z" }
 wheels = [
@@ -4092,8 +4092,8 @@ name = "tiktoken"
 version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "regex" },
-    { name = "requests" },
+    { name = "regex", marker = "python_full_version >= '3.12'" },
+    { name = "requests", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/66/62/167a842aa0429d45f5e797354fd4343a96f6043d67d0513c675c7b8d36e6/tiktoken-0.14.0.tar.gz", hash = "sha256:231dec90efcdccf1b565a1416107736f1e09b1a08fe736ef9d6363e626d03874", size = 38898, upload-time = "2026-08-17T19:49:49.514Z" }
 wheels = [
@@ -4162,7 +4162,7 @@ name = "tokenizers"
 version = "0.23.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "huggingface-hub" },
+    { name = "huggingface-hub", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/c1/60/21f715d9faba5f5407ff759472ade058ec4a507ad62bcea47cb847239a73/tokenizers-0.23.1.tar.gz", hash = "sha256:1feeeadf865a7915adc25445dea30e9933e593c31bb96c277cee36de227c8bfa", size = 365748, upload-time = "2026-04-27T14:43:25.606Z" }
 wheels = [
@@ -4246,10 +4246,10 @@ name = "typer"
 version = "0.27.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "annotated-doc" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "rich" },
-    { name = "shellingham" },
+    { name = "annotated-doc", marker = "python_full_version >= '3.12'" },
+    { name = "colorama", marker = "python_full_version >= '3.12' and sys_platform == 'win32'" },
+    { name = "rich", marker = "python_full_version >= '3.12'" },
+    { name = "shellingham", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ae/40/4a3db7990d1f62a53182aa96eaef57aeb2886a27f90a195bc66713565d31/typer-0.27.1.tar.gz", hash = "sha256:a79bef8469a79c45498e7b814ecf8d603cc7644e9acbd9e19cac0334240b18df", size = 203994, upload-time = "2026-08-03T14:41:03.438Z" }
 wheels = [
@@ -4570,9 +4570,9 @@ name = "yarl"
 version = "1.24.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "idna" },
-    { name = "multidict" },
-    { name = "propcache" },
+    { name = "idna", marker = "python_full_version >= '3.12'" },
+    { name = "multidict", marker = "python_full_version >= '3.12'" },
+    { name = "propcache", marker = "python_full_version >= '3.12'" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/31/33/ebe9e3d1f86c7a0b51094c0a146392045ca1631d2664889539dec8088a33/yarl-1.24.5.tar.gz", hash = "sha256:e81b83143bee16329c23db3c1b2d82b29892fcbcb849186d2f6e98a5abe9a57f", size = 228679, upload-time = "2026-07-20T02:07:45.435Z" }
 wheels = [

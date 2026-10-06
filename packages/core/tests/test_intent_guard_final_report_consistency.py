@@ -175,7 +175,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
         self.assertIn("Return ONLY a single raw JSON object", user_content)
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
-    def test_uses_auxiliary_llm_completion_kwargs(self, mock_llm) -> None:
+    def test_does_not_prebind_profile_kwargs(self, mock_llm) -> None:
         mock_llm.return_value = _validator_json()
         run_coro(
             avalidate_final_report_vs_user_intent(
@@ -186,10 +186,7 @@ class ValidateFinalReportConsistencyTest(unittest.TestCase):
                 trace_digest=self.digest,
             )
         )
-        self.assertEqual(
-            mock_llm.call_args.kwargs["payload_overrides"],
-            {"reasoning_effort": "none"},
-        )
+        self.assertIsNone(mock_llm.call_args.kwargs["payload_overrides"])
 
     @patch("gc_core.summarize.llm.arequest_chat_completion_text")
     def test_request_label_finish_gate(self, mock_llm) -> None:

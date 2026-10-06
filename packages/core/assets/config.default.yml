@@ -17,6 +17,8 @@ level: default               # light | default | max
 # Хотите уровни моделей (light/default/max) и привязки потребителей к ним —
 # раскомментируйте и заполните под свои модели (полный референс — demo_profile.yml,
 # симметричный пример как обычных секций config.yml — demo_config.yml):
+# main/auxiliary заменяют словарь целиком: {} — без kwargs, null — общий словарь.
+# Отсутствующий ключ наследуется из нижнего слоя конфигурации.
 # models:
 #   glm-local:
 #     url: http://127.0.0.1:8014/v1/chat/completions
@@ -33,13 +35,17 @@ backend:
   completions_url: "http://your-backend:PORT/v1/chat/completions"
   chat_completions_max_tokens: 8096
   use_ssl: false
+  # true -> max_tokens; false -> max_completion_tokens.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   use_max_tokens_param: true
   # true — провайдер требует OpenAI strict tools (все properties в required).
-  # false — типично для GigaCode и non-OpenAI; при true локальная валидация всё равно
-  # принимает omit semantic optional (x-optional-keys).
+  # false — типично для GigaCode и non-OpenAI. Локальная проверка читает канон
+  # (семантический required), даже если на провод ушёл полный required.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   openai_strict_tools_schema: false
   # Слать ли провайдеру поле function.strict в схемах тулов.
   # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   send_tool_strict: true
   # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
   # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
@@ -57,6 +63,11 @@ backend:
   # HTTP/SOCKS-прокси для backend-вызовов. null/пусто → из env
   # (HTTPS_PROXY/HTTP_PROXY/ALL_PROXY). Пример: "socks5h://proxy.example:1080"
   proxy: null
+  # Vendor-параметры тела запроса (сэмплинг, диалект thinking). Агент
+  # поставляется без предзаданных схем: null — секция не задана, в запрос
+  # уходят серверные дефолты модели. Не {}: на алиасе «секции нет» и «слать
+  # пусто» — разные вещи. Диалект стека собирается в профиле (demo_profile.yml).
+  chat_completion_kwargs: null
   chat_completion_headers:
     Authorization: "Bearer <ВПИШИТЕ_ТОКЕН>"
     # Можно не хранить токен в файле:
@@ -199,14 +210,22 @@ summary:
   last_dialog_steps_count: 5
   last_dialog_step_message_max_chars: 1500
 
+# Вспомогательные LLM (summary, finish gate, intent scope, judges).
+chat_completions:
+  auxiliary_llm:
+    # Служебный вызов, когда у алиаса нет своей секции auxiliary.
+    # null — секция не задана: серверные дефолты модели, без vendor-ключей.
+    # Диалект (enable_thinking и соседние) — в профиле, per-алиас.
+    # Не {}: явный пустой словарь на алиасе значит «не слать этих ключей».
+    completion_kwargs: null
+
 # tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
-# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
-#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
-#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
-#   Смешанный ход (think + проза) — в историю только проза.
-#   Из саммари, intent, судей и памяти <think> вырезается всегда.
-# strip_think: false — копировать скрытое поле мысли в историю как есть
-#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
+# Кодовый дефолт (ключа нет) — strip_think: false: копировать скрытое поле мысли.
+# В этом шаблоне true: мысль в историю не копируется. Копирование даёт 400
+# у DeepSeek и части strict-бэкендов; кому нужно поле в следующем запросе —
+# ставят false явно. Salvage <think> при true — только если кроме ризонинга
+# ничего нет (нет прозы и нет тулов). Смешанный ход — в историю только проза.
+# Из саммари, intent, судей и памяти <think> вырезается всегда.
 # В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
   strip_think: true

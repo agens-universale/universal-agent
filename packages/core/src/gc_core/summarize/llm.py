@@ -2,7 +2,6 @@
 
 from typing import Any, Dict, List, Optional
 
-from gc_core.config_modules.merge import deep_merge
 from gc_core.config_modules.strip_tags_projection import (
     projection_tags_from_config,
 )
@@ -20,21 +19,6 @@ def _require_auxiliary_llm(ctx: Any) -> Any:
             "RunContext.auxiliary_llm обязателен; создавайте контекст через create_run_context."
         )
     return auxiliary_llm
-
-
-def auxiliary_llm_completion_kwargs(ctx: Any) -> Dict[str, Any]:
-    """
-    Единый профиль chat/completions для вспомогательных LLM-вызовов:
-    thread summary, finish gate, intent scope (flat: ``auxiliary_llm_params``;
-    YAML: ``chat_completions.auxiliary_llm``).
-    """
-    auxiliary_llm = _require_auxiliary_llm(ctx)
-    completion_kwargs = getattr(auxiliary_llm, "completion_kwargs", None)
-    if not isinstance(completion_kwargs, dict):
-        raise RuntimeError(
-            "RunContext.auxiliary_llm.completion_kwargs must be a dict"
-        )
-    return dict(completion_kwargs)
 
 
 def auxiliary_llm_judge_max_tokens(ctx: Any) -> int:
@@ -111,11 +95,12 @@ async def arequest_summary_text(
     payload_overrides: Optional[Dict[str, Any]] = None,
     logger: Any | None = None,
 ) -> str:
-    """Summary/intent-scope aux call: dirty logged, projected text returned."""
-    completion_kwargs = auxiliary_llm_completion_kwargs(ctx)
-    effective_overrides = completion_kwargs
-    if isinstance(payload_overrides, dict) and payload_overrides:
-        effective_overrides = deep_merge(completion_kwargs, payload_overrides)
+    """Summary/intent-scope aux call: dirty logged, projected text returned.
+
+    Kwargs профиля берёт сборка payload у той ``ResolvedModel``, которой
+    запрос реально уходит — в том числе у запасной, если алиас уже в
+    предохранителе. ``payload_overrides`` — только добавка этого вызова.
+    """
     auxiliary_llm = getattr(ctx, "auxiliary_llm", None)
     default_max_tokens = getattr(auxiliary_llm, "max_tokens", None)
     if not isinstance(default_max_tokens, int) or default_max_tokens < 1:
@@ -131,7 +116,7 @@ async def arequest_summary_text(
         else default_max_tokens,
         request_label=request_label,
         consumer=consumer,
-        payload_overrides=effective_overrides,
+        payload_overrides=payload_overrides,
         logger=logger,
     )
 

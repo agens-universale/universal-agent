@@ -49,10 +49,21 @@ level: default
 # Ниже — короткая версия прямо в config.yml (профиль не обязателен для работы
 # реестра моделей).
 # -----------------------------------------------------------------------------
+# main/auxiliary заменяют словарь целиком: {} — без kwargs, null — общий словарь.
+# Отсутствующий ключ наследуется из нижнего слоя конфигурации.
 # models:
 #   flash:                                  # алиас — язык slots/assign
 #     model: qwen/qwen-2.5-flash            # провайдерский id; опущен → id = алиас
 #     url: https://openrouter.ai/api/v1/chat/completions
+#     main:
+#       temperature: 1.0
+#       tool_choice: auto
+#       chat_template_kwargs:
+#         enable_thinking: true
+#     auxiliary:
+#       temperature: 1.0
+#       chat_template_kwargs:
+#         enable_thinking: false
 #     token: sk-or-...                      # адрес и токен — ПАРА: задан один →
 #                                            # задавайте и второй; "" = «без
 #                                            # авторизации»; нет обоих → пара
@@ -82,14 +93,17 @@ backend:
   api_mode: chat_completions
   completions_url: "http://127.0.0.1:8014/v1/chat/completions"
   chat_completions_max_tokens: 32768
-  # true -> отправлять max_tokens; false -> max_completion_tokens
+  # true -> отправлять max_tokens; false -> max_completion_tokens.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
+  # Профиль может задать и свой backend.use_max_tokens_param поверх этого файла.
   use_max_tokens_param: true
   # true — провайдер требует OpenAI strict tools (все properties в required).
-  # false — типично для GigaCode и non-OpenAI; при true локальная валидация
-  # принимает omit semantic optional (x-optional-keys).
+  # false — типично для GigaCode и non-OpenAI. Локальная проверка читает канон.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   openai_strict_tools_schema: false
   # Слать ли провайдеру поле function.strict в схемах тулов.
   # false — если сборка провайдера (vllm/sglang) отвечает на это поле 500.
+  # Можно переопределить на алиасе: models.<alias>.backend (нет ключа — этот дефолт).
   send_tool_strict: true
   # Разметка prompt cache для claude-моделей в главном цикле: не задано — авто по id
   # модели; true — включить всем; false — выключить (аварийный рычаг, если прокси
@@ -101,17 +115,12 @@ backend:
   # ваши картинки отправляются только после её успеха. Обычно ставится
   # на одну модель: models.<alias>.backend.vision: false.
   # vision: false
-  # Vendor-specific параметры. Настраивайте под свой провайдер.
-  chat_completion_kwargs:
-    temperature: 0.7
-    top_p: 0.8
-    top_k: 20
-    min_p: 0.0
-    repetition_penalty: 1.2
-    separate_reasoning: true
-    chat_template_kwargs:
-      enable_thinking: false
-    tool_choice: auto
+  # Vendor-параметры тела запроса (сэмплинг, диалект thinking, tool_choice).
+  # Диалект конкретного стека (Qwen/vLLM и другие) для других провайдеров не нужен
+  # и здесь не задаётся: его собирают в профиле, per-алиас. Рабочий референс —
+  # demo_profile.yml. null — секция не задана: в запрос уходят серверные дефолты
+  # модели. Это не «{} — осознанно слать пусто» (на алиасе это разные вещи).
+  chat_completion_kwargs: null
   # Заголовки для chat/completions (всё, что должно уйти в HTTP headers).
   # Примеры:
   # chat_completion_headers:
@@ -169,10 +178,11 @@ chat_completions:
     # Генерация роли special_agent (subagent:subagent_special_agent) — одноразовый
     # системный промпт; потолок с запасом под мысль модели.
     subagent_role_max_tokens: 24576
-    completion_kwargs:
-      separate_reasoning: false
-      chat_template_kwargs:
-        enable_thinking: false
+    # Служебный вызов, когда у алиаса нет своей секции auxiliary (и без реестра
+    # моделей). Явный models.<alias>.auxiliary: {} этот словарь не подмешивает.
+    # Диалект стека (Qwen/vLLM: enable_thinking и соседние ключи) для других
+    # провайдеров не нужен; настраивается в профиле. null — секция не задана.
+    completion_kwargs: null
 
 # TUI: что показывать во время стриминга. На подсчёт токенов и индикатор
 # (спиннер, «↓ N токенов», «обдумал за Nс») НЕ влияет — только рендер контента.
@@ -400,16 +410,14 @@ project_memory:
   compaction_max_tokens: 16384
 
 # tags — какие ещё теги вырезать из саммари, intent, digest и т.п. (не из истории).
-# strip_think: true (дефолт) — скрытое поле мысли бэкенда в историю не копировать.
-#   Salvage <think> — только если кроме ризонинга ничего нет (нет прозы и нет тулов):
-#   тогда мысль кладём в историю как <think>…</think> и в следующем запросе модель её видит.
-#   Смешанный ход (think + проза) — в историю только проза.
+# strip_think: false (дефолт) — копировать скрытое поле мысли в историю.
+# strip_think: true — не копировать. Включают, когда следующий запрос с мыслью
+#   бэкенд не принимает. Salvage <think> при true — только если кроме ризонинга
+#   ничего нет (нет прозы и нет тулов). Смешанный ход — в историю только проза.
 #   Из саммари, intent, судей и памяти <think> вырезается всегда.
-# strip_think: false — копировать скрытое поле мысли в историю как есть
-#   и отдать в следующем запросе. DeepSeek / часть strict-бэкендов → 400.
 # В бэкенд уходит то, что лежит в истории. Остальной state — без мыслей всегда.
 strip_tags_projection:
-  strip_think: true
+  strip_think: false
   tags:
     - redacted_thinking
 

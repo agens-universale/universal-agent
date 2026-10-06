@@ -8,7 +8,11 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any, Dict, List, NamedTuple, Optional
 
-from gc_core.model_router import AliasCircuitOpenError, ResolvedModel
+from gc_core.config_modules.model_registry import effective_completion_kwargs
+from gc_core.model_router import (
+    AliasCircuitOpenError,
+    ResolvedModel,
+)
 from gc_core.request_backend_policy import (
     _raise_on_embedded_choice_error,
     arequest_chat_completions_with_policy,
@@ -49,7 +53,6 @@ _PROTECTED_CHAT_COMPLETION_KEYS = frozenset(
         "model",
         "messages",
         "tools",
-        "tool_choice",
         "max_tokens",
         "max_completion_tokens",
     }
@@ -186,8 +189,9 @@ def _build_chat_completion_payload(
 ) -> Dict[str, Any]:
     cfg = getattr(ctx, "config_dict", {}) or {}
     # tools НЕ отправляем: этот клиент text-only (судья команд, суммаризация,
-    # finish-gate, компакция памяти) — инструменты не использует. Пустой
-    # "tools": [] — бессмысленный шум; для plain-completion ключ опускаем.
+    # finish-gate, генерация роли, компакция памяти) — инструменты не
+    # использует. Пустой "tools": [] — бессмысленный шум; для plain-completion
+    # ключ опускаем.
     model = (
         resolved.model
         if resolved is not None
@@ -207,9 +211,12 @@ def _build_chat_completion_payload(
     else:
         payload["max_completion_tokens"] = max_tokens
 
-    extra = backend_override_value(resolved, "chat_completion_kwargs")
-    if extra is NO_BACKEND_OVERRIDE:
-        extra = cfg.get("chat_completion_kwargs")
+    # Секцию задаёт функция вызова, не id потребителя. Этот клиент — служебный
+    # one-shot, поэтому всегда ``auxiliary`` той модели, которой уходит запрос.
+    # Диалог и цикл субагента собираются в connect_backend и читают ``main``.
+    # ``consumer`` выбирает алиас выше по стеку. При откате на запасную
+    # ``resolved`` уже активная: словарь мёртвого алиаса сюда не подмешивается.
+    extra = effective_completion_kwargs(resolved, cfg, section="auxiliary")
     if isinstance(extra, dict) and extra:
         for key, value in extra.items():
             if key in _PROTECTED_CHAT_COMPLETION_KEYS:
@@ -332,6 +339,7 @@ async def arequest_chat_completion_once(
             url=prepared.url,
             **prepared.network_kwargs,
             use_retry=False,
+            allow_auth_retry=False,
             logger=getattr(ctx, "logger", None),
         )
         _raise_on_embedded_choice_error(res)
@@ -399,6 +407,9 @@ async def _asend_chat_completion_text(
             ctx, state, resolved=resolved, headers=headers
         )
         await before_send(prepared)
+        from gc_core.vision.service import confirmed_route_headers
+
+        headers = confirmed_route_headers(prepared)
     url = resolved.url if resolved is not None else cfg["completions_url"]
     (
         verify,

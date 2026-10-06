@@ -31,3 +31,13 @@ def test_readable_document_still_parses(tmp_path):
     path = tmp_path / "ok.yml"
     path.write_text("slots:\n  default: x\n", encoding="utf-8")
     assert config_raw.read_document(path) == {"slots": {"default": "x"}}
+
+
+def test_nested_reference_removal_requires_confirmation():
+    from gc_core.config_raw import env_refs_overwritten
+
+    old = {"backend": {"chat_completion_headers": {"Authorization": "${ENV:KEY}"}}}
+    assert env_refs_overwritten({"backend": {}}, old) == ([], ["KEY"])
+    assert env_refs_overwritten({"backend": None}, old) == ([], ["KEY"])
+    assert env_refs_overwritten({}, old) == ([], [])
+    assert env_refs_overwritten(old, old) == ([], [])

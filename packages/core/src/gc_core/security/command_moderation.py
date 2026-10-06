@@ -26,7 +26,6 @@ from gc_core.security.path_policy import (
 from gc_core.security.protected_paths import protected_paths
 from gc_core.summarize.llm import (
     arequest_auxiliary_completion_text,
-    auxiliary_llm_completion_kwargs,
     auxiliary_llm_judge_max_tokens,
 )
 from gc_core.utils.project_data import os_label
@@ -736,7 +735,6 @@ def _default_judge_client(
             max_tokens=auxiliary_llm_judge_max_tokens(ctx),
             request_label="command_moderation_judge",
             consumer="command_judge",
-            payload_overrides=auxiliary_llm_completion_kwargs(ctx),
         )
         tags = projection_tags_from_config(cfg)
         return _parse_judge_json(

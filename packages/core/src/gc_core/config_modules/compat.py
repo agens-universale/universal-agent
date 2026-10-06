@@ -126,6 +126,24 @@ def map_legacy_path(dotted: str) -> Optional[str]:
 def apply_compat(raw: Dict[str, Any]) -> List[str]:
     """Мутирует raw. Возвращает человекочитаемые факты для startup-notices."""
     facts: List[str] = []
+    models = raw.get("models")
+    for alias, entry in (models.items() if isinstance(models, dict) else ()):
+        if not isinstance(entry, dict):
+            continue
+        backend = entry.get("backend")
+        if (
+            not isinstance(backend, dict)
+            or "chat_completion_kwargs" not in backend
+        ):
+            continue
+        legacy = backend.pop("chat_completion_kwargs")
+        if "main" not in entry:
+            entry["main"] = legacy
+        facts.append(
+            f"models.{alias}.backend.chat_completion_kwargs переименован в "
+            f"models.{alias}.main; явно заданный main имеет приоритет — "
+            "сохраните запись модели в настройках или обновите файл вручную"
+        )
     for old, new in RENAMES.items():
         explicit_new = _has_path(raw, new)
         present, value = _pop_path(raw, old)

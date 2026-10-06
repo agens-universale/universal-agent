@@ -540,7 +540,8 @@ async def test_filter_reselects_survivor_by_identity_across_index_shift():
     async with app.run_test() as pilot:
         await pilot.pause()
         ed.move(2)  # ▸ на keep-me (current, alpha, keep-me, …)
-        assert ed.submit() == "keep-me"
+        assert ed.submit() == "gigacode"  # курсор не подтверждает выбор
+        assert ed.mark() == "keep-me"
         ed.query_one(
             "#onb-model", Input
         ).value = "e"  # keep-me, beta остаются; alpha,gamma — нет
@@ -548,6 +549,7 @@ async def test_filter_reselects_survivor_by_identity_across_index_shift():
         assert (
             ed.submit() == "keep-me"
         )  # identity сохранён (clamp по позиции вернул бы beta)
+        assert ed._list.selected_item.model.id == "keep-me"
         assert ed.submit() != "beta"
 
 
@@ -568,13 +570,17 @@ async def test_filter_moves_cursor_to_anchor_when_selection_filtered_out():
     async with app.run_test() as pilot:
         await pilot.pause()
         ed.move(1)  # ▸ на glm-5.2-fp8 (current, glm, gpt)
-        assert ed.submit() == "glm-5.2-fp8"
+        assert ed.submit() == "gigacode"
+        assert ed.mark() == "glm-5.2-fp8"
         ed.query_one("#onb-model", Input).value = "gpt"  # исключает glm-*
         await pilot.pause()
         assert (
             ed.submit() != "openai/gpt-5.6-terra"
         )  # не подменяет выбор по позиции
-        assert ed.submit() == "gigacode"  # первая видимая = якорь «текущая»
+        assert ed._list.selected_item.model.id == "gigacode"
+        assert ed.submit() == "glm-5.2-fp8"  # фильтр не меняет подтверждённый выбор
+        assert ed.mark() == "gigacode"
+        assert ed.submit() == "gigacode"
 
 
 def _M(id_: str, tool_capable: bool = True) -> ModelInfo:
@@ -918,22 +924,23 @@ async def test_a_stale_answer_does_not_remount_over_a_fresh_list(tmp_path):
 
 
 async def test_reload_keeps_the_row_under_the_cursor(tmp_path):
-    """В /settings пометки ● нет вовсе — выбор и есть курсор, и перечитывание не имеет
-    права молча вернуть его на якорь: секция перестала бы читаться «изменено», а Enter
-    не сохранил бы ничего. Канон — `_reselect_idx` пути фильтрации («клэмп молча
-    подменял бы модель»)."""
+    """Перечитывание сохраняет курсор и явно подтверждённый выбор.
+    Навигация до подтверждения сохраняемое значение не меняет."""
     from form_harness import mounted_model_editor
     from gc_testkit.tui_support import wait_until
 
     models = [_M("a/one"), _M("b/two")]
     async with mounted_model_editor(tmp_path, models=models) as (pilot, ed):
         ed.move(1)  # с a/one на b/two
-        assert ed.peek() == "b/two"  # предусловие: выбор сделан стрелкой
+        assert ed.peek() == "a/one"  # навигация не фиксирует выбор
+        assert ed.mark() == "b/two"
+        assert ed.peek() == "b/two"
         models.append(_M("c/three"))
         ed.reload()
         await wait_until(
             pilot, lambda: len(_row_texts(ed)) == 3, "список перечитан"
         )
+        assert ed._list.selected_item.model.id == "b/two", "курсор уехал на якорь"
         assert ed.peek() == "b/two", "выбор уехал на якорь"
 
 

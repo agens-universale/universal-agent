@@ -25,21 +25,26 @@ uv tool install -e .                 # полный агент
 Профиль — отдельный дистрибутив со своим пакетом (`packages/<профиль>/src/gc_*`). Код чужих
 профилей физически не попадает на диск.
 
-| Команда | Ядро | TUI | server |
-|---|---|---|---|
-| `gc-ua` | да | да | да |
-| `gc-cli` | да | — | — |
-| `gc-tui` | да | да | — |
-| `gc-server` | да | — | да |
+| Команда | Ядро | TUI | server | acp | chat |
+|---|---|---|---|---|---|
+| `gc-ua` | да | да | да | да | да |
+| `gc-cli` | да | — | — | — | — |
+| `gc-tui` | да | да | — | — | — |
+| `gc-server` | да | — | да | — | — |
+| `gc-acp` | да | — | — | да | — |
+| `gc-chat` | да | — | — | — | да |
 
 ```bash
 uv tool install "gc-ua @ git+https://gitverse.ru/gigacode-ai/universal-agent"
 uv tool install "gc-cli @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/cli" --with-executables-from gc-mcp
 uv tool install "gc-tui @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/tui" --with-executables-from gc-mcp
 uv tool install "gc-server @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/server" --with-executables-from gc-mcp
+uv tool install "gc-acp @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/acp"
+uv tool install "gc-chat @ git+https://gitverse.ru/gigacode-ai/universal-agent#subdirectory=packages/chat"
 ```
 
-`gc-chat` в таблицу не входит. Это отдельная команда HTTP-фасадов Responses и Chat Completions: установка и секция конфига — [responses.md](responses.md).
+`gc-acp` — IDE по Agent Client Protocol: [acp.md](acp.md). `gc-chat` — HTTP-фасады
+Responses и Chat Completions: [chat.md](chat.md).
 
 Хвост `#subdirectory=` обязателен у всех, кроме `gc-ua`: uv читает из git только
 корневой `pyproject.toml`, а корень — это полный профиль. Устройство раскладки
@@ -57,9 +62,10 @@ exist`. Мета уже содержит всё, что даёт лист, та�
 тем же дистрибутивом.
 
 Каждый дистрибутив кладёт в PATH только свою команду: `gc-cli` → `gc-cli`,
-`gc-tui` → `gc-ua`, `gc-server` → `gc-serve`, полный `gc-ua` — все пять.
-Менеджер MCP — отдельный дистрибутив. `uv tool` не экспортирует команды
-зависимостей, поэтому у узкого профиля стоит штатный флаг:
+`gc-tui` → `gc-ua`/`gc-voice`, `gc-server` → `gc-serve`, `gc-acp` → `gc-acp`,
+`gc-chat` → `gc-chat`; полный `gc-ua` — все листовые. Менеджер MCP — отдельный
+дистрибутив. `uv tool` не экспортирует команды зависимостей, поэтому у узкого
+профиля стоит штатный флаг:
 
 ```bash
 uv tool install "gc-cli @ ...#subdirectory=packages/cli" --with-executables-from gc-mcp
@@ -144,8 +150,10 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 
 ## VS Code (ACP)
 
-Редактор поднимает агента отдельным процессом `gc-acp` и говорит с ним по
-Agent Client Protocol. В VS Code своего клиента нет: поставьте расширение
+Редактор поднимает агента процессом `gc-acp` по Agent Client Protocol.
+Установка, `settings.json`, секция `acp` и профиль — [acp.md](acp.md).
+
+В VS Code своего клиента нет: поставьте расширение
 [ACP Client](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
 (`formulahendry.acp-client`) — Extensions, поиск `ACP Client`, либо
 `code --install-extension formulahendry.acp-client`.

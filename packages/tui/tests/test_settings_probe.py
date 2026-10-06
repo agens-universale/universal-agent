@@ -144,6 +144,52 @@ def test_stage1_401_with_working_post_is_ok():
     assert r.verdict == "ok" and r.auth_ok
 
 
+@pytest.mark.parametrize("source, accepted", [("secret", "Bearer secret"), ("Bearer secret", "secret")])
+def test_menu_probe_fallback_retries_chat_auth_after_catalog_failure(monkeypatch, source, accepted):
+    calls = []
+
+    def get_ex(url, headers, verify, *, config_proxy=None):
+        calls.append((url.rsplit("/", 1)[-1], headers.get("Authorization")))
+        return mp.HttpReply(401 if url.endswith("/config") else 404, None)
+
+    def post_ex(url, headers, body, verify, *, config_proxy=None):
+        token = headers.get("Authorization")
+        calls.append(("chat", token))
+        return mp.HttpReply(200 if token == accepted else 401, {})
+
+    monkeypatch.setattr(mp, "_requests_get_ex", get_ex)
+    monkeypatch.setattr(mp, "_requests_post_ex", post_ex)
+    result = probe("http://x/v1/chat/completions", source, True, "m1")
+    assert result.verdict == "ok"
+    assert calls == [("config", source), ("config", accepted), ("models", source), ("chat", source), ("chat", accepted)]
+
+
+@pytest.mark.parametrize("status", [200, 403, 404, 500, None])
+def test_menu_probe_fallback_does_not_retry_without_401(status):
+    calls = []
+
+    def post_ex(endpoint, auth, model, *, verify=True):
+        calls.append(auth)
+        return status, "timeout" if status is None else "", 1, {}
+
+    result = probe("http://x/v1/chat/completions", "secret", True, "m1", fetch_ex=_fetch(status=404), post_ex=post_ex)
+    assert result.http_status == status
+    assert calls == ["secret"]
+
+
+@pytest.mark.parametrize("auth, expected", [("secret", ["secret", "Bearer secret"]), ("Basic encoded", ["Basic encoded"]), (None, [None])])
+def test_menu_probe_fallback_limits_401_retries(auth, expected):
+    calls = []
+
+    def post_ex(endpoint, token, model, *, verify=True):
+        calls.append(token)
+        return 401, "", 1, {}
+
+    result = probe("http://x/v1/chat/completions", auth, True, "m1", fetch_ex=_fetch(status=404), post_ex=post_ex)
+    assert result.verdict == "rejected"
+    assert calls == expected
+
+
 def test_stage1_401_and_post_401_is_rejected():
     """401 и на models-цепочке, и на самом chat/completions → токен отклонён."""
     r = probe(
@@ -448,8 +494,64 @@ def test_probe_connection_skips_canary_on_plain_401():
     r = probe_connection(
         "http://x/v1/chat/completions", "Bearer bad", True, "", probe_fn=fake
     )
-    assert len(calls) == 2  # control + токен, канарейки нет
+    assert calls == [None, "Bearer bad", "bad"]
     assert r.auth_state == "rejected"
+
+
+def test_probe_connection_returns_the_accepted_token_shape():
+    """Подобранная форма возвращается хозяину формы для сохранения."""
+    from gc_tui.services.settings_probe import probe_connection
+
+    def scripted(accepted: str):
+        calls = []
+
+        def fake(
+            endpoint, auth, verify, model, *, config_proxy=None, post_ex=None
+        ):
+            calls.append(auth)
+            if auth is None:
+                return ProbeResult(
+                    "rejected", 401, None, 5, "токен отклонён (401)"
+                )
+            if auth == accepted:
+                return ProbeResult("ok", 200, None, 5, "доступен")
+            return ProbeResult(
+                "rejected", 401, None, 5, "токен отклонён (401)"
+            )
+
+        return calls, fake
+
+    calls, fake = scripted("Bearer sk-live")
+    result = probe_connection(
+        "http://x/v1/chat/completions", "sk-live", True, "", probe_fn=fake
+    )
+    assert calls == [None, "sk-live", "Bearer sk-live"]
+    assert result.auth_state == "accepted"
+    assert result.accepted_auth == "Bearer sk-live"
+
+    calls, fake = scripted("sk-live")
+    result = probe_connection(
+        "http://x/v1/chat/completions",
+        "Bearer sk-live",
+        True,
+        "",
+        probe_fn=fake,
+    )
+    assert calls == [None, "Bearer sk-live", "sk-live"]
+    assert result.auth_state == "accepted"
+    assert result.accepted_auth == "sk-live"
+
+    calls, fake = scripted("Bearer sk-live")
+    result = probe_connection(
+        "http://x/v1/chat/completions",
+        "Bearer sk-live",
+        True,
+        "",
+        probe_fn=fake,
+    )
+    assert calls == [None, "Bearer sk-live"]
+    assert result.auth_state == "accepted"
+    assert result.accepted_auth == "Bearer sk-live"
 
 
 def test_probe_connection_skips_probing_when_server_needs_no_token():
@@ -593,3 +695,20 @@ def test_auth_404_control_not_about_auth():
         and "404" in r.detail
         and "авторизаци" not in r.detail
     )
+
+
+def test_probe_reports_the_form_that_must_be_carried_into_runtime():
+    from gc_core.config_modules.model_registry import ModelEntry
+    from gc_tui.services.settings_probe import probe_connection
+
+    auth = ModelEntry(url="https://example.test/v1/chat/completions", token="secret").authorization_header
+
+    def bare_only(endpoint, header, verify, model, **kwargs):
+        if header == "secret":
+            return ProbeResult("ok", 200, None, 1, "доступен")
+        return ProbeResult("rejected", 401, None, 1, "отказ")
+
+    result = probe_connection("https://example.test/v1/chat/completions", auth, True, "m", probe_fn=bare_only)
+    assert result.auth_state == "accepted"
+    assert result.verdict == "ok"
+    assert result.accepted_auth == "secret"

@@ -185,13 +185,13 @@ def test_one_model_may_stand_in_two_slots():
     assert validate_model_sections(cfg) == []
 
 
-def test_token_bearer_normalization():
+def test_token_preserves_configured_authorization_form():
     url = "http://x/v1"  # пара §2: токен без адреса — половина, схема её не примет
     assert (
         ModelEntry.model_validate(
             {"url": url, "token": "sk-1"}
         ).authorization_header
-        == "Bearer sk-1"
+        == "sk-1"
     )
     assert (
         ModelEntry.model_validate(

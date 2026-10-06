@@ -117,15 +117,39 @@ def test_demo_profile_models_demonstrate_both_token_semantics(
 
 def test_demo_profile_has_full_and_minimal_registry_forms(demo_profile_raw):
     """Полная форма (model+url+token+pricing+backend) и минимальная. Минимальная
-    после правила пары (§2) — это ровно `url` + `token`, а не «только url»."""
+    после правила пары (§2) и секций kwargs — `url` + `token` + `main` +
+    `auxiliary`."""
     models = demo_profile_raw["models"]
     full_form_keys = {"model", "url", "token", "pricing", "backend"}
     assert any(full_form_keys <= set(entry) for entry in models.values()), (
         "нет примера полной формы записи модели (model/url/token/pricing/backend)"
     )
-    assert any(set(entry) == {"url", "token"} for entry in models.values()), (
-        "нет примера минимальной формы записи модели (url + token)"
+    assert any(
+        set(entry) == {"url", "token", "main", "auxiliary"}
+        for entry in models.values()
+    ), (
+        "нет примера минимальной формы записи модели (url + token + main + auxiliary)"
     )
+    for entry in models.values():
+        backend = entry.get("backend") or {}
+        assert "chat_completion_kwargs" not in backend
+        for section in ("main", "auxiliary"):
+            if section in entry:
+                assert isinstance(entry[section], dict)
+    assert models["flash"]["auxiliary"]["chat_template_kwargs"] == {
+        "enable_thinking": False
+    }
+    assert models["glm-local"]["auxiliary"]["chat_template_kwargs"] == {
+        "thinking": False,
+        "reasoning_effort": "none",
+    }
+    assert models["deepseek-max"]["auxiliary"]["chat_template_kwargs"] == {
+        "thinking": False,
+        "reasoning_effort": "none",
+    }
+    assert models["deepseek-max"]["strip_think"] is False
+    assert "strip_think" not in models["flash"]
+    assert "strip_think" not in models["glm-local"]
 
 
 def test_demo_profile_has_slots_and_overlay_example(demo_profile_raw):

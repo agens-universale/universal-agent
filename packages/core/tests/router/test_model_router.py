@@ -350,7 +350,7 @@ def test_model_inherits_url_and_token_from_effective_backend_when_unset():
     )  # None = наследовать эффективный заголовок
 
 
-def test_model_token_normalized_to_bearer():
+def test_model_token_preserves_configured_authorization_format():
     router = _router(
         {
             "models": {
@@ -359,7 +359,7 @@ def test_model_token_normalized_to_bearer():
             "slots": {"default": "secure"},
         }
     )
-    assert router.resolve("main").authorization == "Bearer sk-abc"
+    assert router.resolve("main").authorization == "sk-abc"
 
 
 def test_model_token_empty_string_means_explicitly_no_auth():

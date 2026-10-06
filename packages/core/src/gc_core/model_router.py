@@ -38,6 +38,7 @@ CONSUMERS = (
 )
 SUBAGENT_CONSUMER_PREFIX = "subagent:"
 
+
 # Привязки assign, у которых значение читается скалярным полем AssignConfig (все,
 # кроме subagents-словаря и запрещённого main).
 _SCALAR_ASSIGN_FIELDS = (
@@ -65,6 +66,11 @@ class ResolvedModel:
     backend_overrides: dict  # плоские ключи backend поверх эффективных
     tariff: object | None
     source: str  # человекочитаемое «почему» — питает витрины/футер/notices
+    # None — секция в записи не задана. {} — задана пустой (replace без ключей).
+    main: dict | None = None
+    auxiliary: dict | None = None
+    # None — у алиаса ключа нет, persist берёт глобальный strip_think.
+    strip_think: bool | None = None
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -308,6 +314,17 @@ class ModelRouter:
             )
         backend_overrides = entry.get("backend_overrides") or {}
         model_id = entry.get("model") or alias
+        main = (
+            entry.get("main") if isinstance(entry.get("main"), dict) else None
+        )
+        auxiliary = (
+            entry.get("auxiliary")
+            if isinstance(entry.get("auxiliary"), dict)
+            else None
+        )
+        strip_think = entry.get("strip_think")
+        if not isinstance(strip_think, bool):
+            strip_think = None
         url = (
             entry.get("url")
             or backend_overrides.get("completions_url")
@@ -321,6 +338,9 @@ class ModelRouter:
             backend_overrides=backend_overrides,
             tariff=entry.get("pricing"),
             source=source,
+            main=main,
+            auxiliary=auxiliary,
+            strip_think=strip_think,
         )
         # Сессионный предохранитель (спека §8): открытый алиас — мгновенный отказ
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).
