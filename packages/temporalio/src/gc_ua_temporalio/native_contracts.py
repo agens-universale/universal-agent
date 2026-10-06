@@ -10,10 +10,11 @@ from gc_core.execution.resource_contracts import ResourceOwnerRef
 from gc_core.run_preparation import PreparedPrompts, PromptPreparationRequest
 from gc_core.tools.subagents.custom.file_definitions import SubagentDefinition
 
-#: Предел текста сообщения. Крупный текст уходит во внешнее хранилище
-#: payload; предел лишь отсекает явно ошибочный ввод (webhook кладёт в текст
-#: весь свой JSON).
-MAX_MESSAGE_CHARS = 1_000_000
+#: Предел текста сообщения в байтах UTF-8. Текст целиком идёт во вход
+#: update и при первой отправке — во вход activity модели; запись истории
+#: ограничена 2 МБ, и 1 МБ оставляет место промпту и остальному входу.
+#: Считаем байты, а не символы: миллион символов кириллицы — 2 МБ.
+MAX_MESSAGE_BYTES = 1_000_000
 
 
 @dataclass
@@ -26,11 +27,12 @@ class UserMessage:
             not self.message_id
             or len(self.message_id) > 128
             or not self.text.strip()
-            or len(self.text) > MAX_MESSAGE_CHARS
+            or len(self.text.encode("utf-8", "surrogatepass"))
+            > MAX_MESSAGE_BYTES
         ):
             raise ValueError(
                 "Message requires an ID <= 128 chars and nonempty text "
-                f"<= {MAX_MESSAGE_CHARS} chars"
+                f"<= {MAX_MESSAGE_BYTES} bytes (UTF-8)"
             )
 
 

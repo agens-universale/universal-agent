@@ -468,3 +468,15 @@ async def test_stop_cancels_model_request_retried_without_limit(
         ] == "stopped"
         history = await handle.fetch_history()
     await Replayer(workflows=[NativeAgentWorkflow]).replay_workflow(history)
+
+
+def test_message_limit_counts_utf8_bytes_not_chars():
+    """Запись истории ограничена байтами: 600 тыс. символов кириллицы — 1,2 МБ,
+    больше предела, хотя символов меньше миллиона."""
+    from gc_ua_temporalio.native_contracts import MAX_MESSAGE_BYTES
+
+    UserMessage("m", "a" * MAX_MESSAGE_BYTES).validate()
+    with pytest.raises(ValueError, match="bytes"):
+        UserMessage("m", "я" * 600_000).validate()
+    with pytest.raises(ValueError, match="bytes"):
+        UserMessage("m", "\ud800" * (MAX_MESSAGE_BYTES // 3 + 1)).validate()
