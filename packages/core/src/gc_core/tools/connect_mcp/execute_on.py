@@ -45,9 +45,20 @@ def runs_in_agent_runtime(
     cfg = server_cfg if isinstance(server_cfg, dict) else {}
     if str(cfg.get("execute_on") or "agent") == "agent":
         return True
-    # execute_on: os_backend, но песочницы нет — сервер всё равно поднимется
+    # execute_on: os_backend, но изоляции нет — сервер всё равно поднимется
     # в нашем процессе (см. ветку с тем же условием в `resolve_mcp_client`).
-    return os_backend is None or not getattr(os_backend, "is_sandbox", False)
+    return not exec_is_isolated(os_backend)
+
+
+def exec_is_isolated(os_backend: Optional[Any]) -> bool:
+    """Команды бэкенда исполняются не в нашем процессе: контейнер/ssh
+    (`is_sandbox`) или OS-обёртка над хостом (`isolates_exec`, kind=sandbox)."""
+    if os_backend is None:
+        return False
+    return bool(
+        getattr(os_backend, "is_sandbox", False)
+        or getattr(os_backend, "isolates_exec", False)
+    )
 
 
 def resolve_mcp_client(
@@ -67,7 +78,7 @@ def resolve_mcp_client(
         return AgentRuntimeClient(server_name, cfg)
 
     # Locus is os_backend from here on.
-    if os_backend is None or not getattr(os_backend, "is_sandbox", False):
+    if not exec_is_isolated(os_backend):
         # Same filesystem, same network, same PATH as the agent — routing through
         # exec would buy nothing and only add a shell round-trip. Not an error:
         # one config is meant to work in both modes.
@@ -109,6 +120,7 @@ def resolve_mcp_client(
 __all__ = [
     "OS_BACKEND_TRANSPORTS",
     "McpExecuteOnError",
+    "exec_is_isolated",
     "resolve_mcp_client",
     "runs_in_agent_runtime",
 ]

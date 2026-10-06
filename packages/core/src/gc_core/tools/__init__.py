@@ -26,6 +26,8 @@ _fallback_logger = logging.getLogger(__name__)
 _LEGACY_UNKNOWN_TOOL_MARKER = "there is not such tool"
 
 INTERNAL_TOOL_ERROR = "internal_tool_error"
+#: Бэкенды, у которых файловая система — не хост.
+_REMOTE_OS_BACKENDS = frozenset({"harbor", "docker", "ssh", "exec"})
 _INTERNAL_TOOL_ERROR_MESSAGE_CAP = 500
 _INTERNAL_TOOL_ERROR_GUIDANCE_CAP = 800
 _INTERNAL_TOOL_ERROR_GUIDANCE = (
@@ -365,8 +367,9 @@ def _finish_tools_data(
         for k, v in subagent_tools.items():
             tools_data[k] = v
 
-    if parse_os_backend_kind(config_dict) == "harbor":
-        # Host-only: writes to local disk; not available in harbor/sandbox mode.
+    if parse_os_backend_kind(config_dict) in _REMOTE_OS_BACKENDS:
+        # Host-only: пишет на локальный диск. Когда файлы живут «там» (harbor,
+        # docker, ssh, exec), на хосте им не место — тул снимается.
         tools_data.pop("download_file", None)
 
     # Каталог до вычитания: валидатор stop_tools сверяется с ним, а не с уже

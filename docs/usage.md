@@ -153,9 +153,44 @@ gc-cli -q "создай подпапку test_project. В ней напиши н
 Редактор поднимает агента процессом `gc-acp` по Agent Client Protocol.
 Установка, `settings.json`, секция `acp` и профиль — [acp.md](acp.md).
 
-Кратко: расширение
-[ACP Client](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client),
-в `settings.json` путь из `which gc-acp`, `os_backend: local`.
+В VS Code своего клиента нет: поставьте расширение
+[ACP Client](https://marketplace.visualstudio.com/items?itemName=formulahendry.acp-client)
+(`formulahendry.acp-client`) — Extensions, поиск `ACP Client`, либо
+`code --install-extension formulahendry.acp-client`.
+
+Команда приезжает вместе с полным агентом (`uv tool install -e .` или
+установка `gc-ua` из раздела выше) и лежит в `PATH` рядом с `gc-ua`. Путь
+для настройки: `which gc-acp` (обычно `~/.local/bin/gc-acp`). В клоне для
+разработки после `uv sync` это `<корень>/.venv/bin/gc-acp`. Узкий профиль
+`gc-cli` эту команду наружу не кладёт: `uv tool` экспортирует только скрипты
+запрошенного дистрибутива. Тогда отдельно
+`uv tool install -e packages/acp`.
+
+В `settings.json` аргументы оставьте пустыми. Конфиг ищется так же, как у
+`gc-cli`, без `--config`. Канал ACP по умолчанию: проза без tool-call разрешена
+(`acp.text_answer_mode: allow`), finish-gate выключен (`off`), todo-reminder выключен,
+плюс hint «discussion ≠ implementation». TUI-шный `tui.text_answer_mode: judge`
+на этот канал не действует. Явный профиль-оверлей —
+`packages/acp/profiles/acp.yml` (скопируйте в `~/.config/gc/profiles/acp.yml`
+и при желании укажите `"args": ["--profile", "acp"]`). Помимо `--config` /
+`--profile` любые `--ключ value` перекрывают runtime-конфиг так же, как у
+`gc-cli` (уровень `--level`, модель `--model`, `max_steps` и т.д.; см.
+[переопределение из CLI](configuration.md#переопределение-настроек-из-cli)):
+
+```json
+{
+  "acp.agents": {
+    "gc-acp": {
+      "command": "/абсолютный/путь/gc-acp",
+      "args": ["--profile", "work", "--level", "max"]
+    }
+  }
+}
+```
+
+Панель ACP на боковой панели, агент `gc-acp`, Connect. В конфиге нужен
+`os_backend: local`. Между кусками ответа клиент показывает, какой тул
+вызван и короткое превью аргументов.
 
 ## Ключи запуска gc-cli
 

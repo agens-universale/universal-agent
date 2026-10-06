@@ -225,6 +225,9 @@ class FsBackend(ABC):
     # Self-isolated sandbox (task container); tools use it to skip host-only
     # affordances. Security guards do NOT read this flag.
     is_sandbox: bool = False
+    # Exec-семейство идёт через OS-изоляцию (bwrap / sandbox-exec), хотя файлы
+    # хостовые: MCP `execute_on: os_backend` обязан идти той же обёрткой.
+    isolates_exec: bool = False
     # Backend-preferred default exec timeout; None → tool class default.
     default_exec_timeout: Optional[int] = None
     # Умеет ли бэкенд отцепить команду в фон (см. `aspawn_background`).

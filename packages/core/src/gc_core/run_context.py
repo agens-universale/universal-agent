@@ -20,11 +20,13 @@ from gc_core.config_modules.intent_scope import (
 from gc_core.execution_workspace import (
     ExecutionWorkspace,
     aprime_backend_cwd,
+    areconcile_remote_root,
     build_execution_workspace,
 )
 from gc_core.mcp_session_owner import new_owner_token, use_owner
 from gc_core.model_router import CircuitBreaker, ModelRouter
 from gc_core.tools import abuild_tools_data
+from gc_core.tools.skills.provision import aprovision_remote_skills
 from gc_core.tools.skills.registry import SkillsRegistry, get_skills_registry
 from gc_core.trace_id import trace_header_name, trace_id_from_config
 from gc_core.utils.logging_module import create_run_logger, generate_run_id
@@ -231,6 +233,14 @@ async def acreate_run_context(  # noqa: PLR0913  # S107: won't fix, см. CONTRI
     # которому он принадлежит, так и не появилось.
     try:
         await aprime_backend_cwd(prep.backend, config_dict)
+        await areconcile_remote_root(prep.backend, config_dict)
+        # Remote-бэкенд: скиллы лежат на хосте, а реестр читает через бэкенд —
+        # копируем набор «туда» и пересобираем реестр по удалённым корням.
+        provisioned = await aprovision_remote_skills(
+            prep.backend, config_dict, run_logger=prep.run_logger
+        )
+        if provisioned is not None:
+            prep.skills_registry = provisioned
         # Каталог имён ДО вычитания stop_tools: валидатор сверяется с ним, иначе
         # успешно снятый тул снова считается опечаткой. Способность пришла с
         # develop, у нас её не было; тело, которое список заполняет, слилось
@@ -350,6 +360,14 @@ def _prepare_run_context(
         loop=loop,
         override=os_backend,
     )
+    # sandbox.workdir=auto: каталог рана обязан стать launch_root — его читают
+    # write_guard (`launch_root_from_config`) и workspace, а бэкенда у них нет.
+    # Побеждает безусловно: TUI/ACP ставят launch_root=cwd ещё до сборки, и
+    # без перезаписи guards пускали бы файловые тулы в реальный проект.
+    auto_workdir = getattr(backend, "auto_workdir", None)
+    if auto_workdir:
+        config_dict["launch_root"] = auto_workdir
+        config_dict["project_root"] = auto_workdir
     skills_registry = get_skills_registry(config_dict, backend=backend)
     # Логгер создаётся ДО сборки тулов: она предупреждает о пропущенных файлах
     # сабагентов и нераспознанных именах тулов, и эти варнинги обязаны попасть в

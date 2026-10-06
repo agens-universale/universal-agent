@@ -8,13 +8,16 @@ import sys
 from typing import Any
 
 import uvicorn
+import yaml
 from gc_core.aio.agent import AsyncAgent
 from gc_core.backends.factory import (
     parse_os_backend_kind,
     resolve_os_backend,
 )
 from gc_core.config import (
+    apply_cli_overrides,
     build_auth_connector,
+    cli_forces_legacy_model,
     load_config_ex,
     resolve_config_path,
 )
@@ -50,6 +53,12 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 1
+    # Как у gc-cli / gc-acp: --ключ value поверх профиля/config.yml.
+    apply_cli_overrides(config, extra_overrides=args.overrides)
+    if cli_forces_legacy_model(config):
+        config.setdefault("compat_notices", []).append(
+            "--model: уровни отключены на этот запуск (легаси-форс)"
+        )
     rejection = backend_rejection(config)
     if rejection is not None:
         print(rejection, file=sys.stderr)
@@ -139,6 +148,7 @@ def build_facades(
 
 async def serve(config: dict) -> None:
     lock = asyncio.Lock()
+    force_legacy = cli_forces_legacy_model(config)
 
     async def factory(
         agent_config: dict,
@@ -153,6 +163,7 @@ async def serve(config: dict) -> None:
                 auth_connector=auth_connector,
                 tools_cache=tools_cache,
                 os_backend=os_backend,
+                force_legacy=force_legacy,
             )
 
     responses, completions = build_facades(config, factory)
@@ -203,11 +214,58 @@ def _origin(host: str, port: int) -> str:
     return "http://" + shown + ":" + str(port)
 
 
+def _coerce_cli_value(raw: str) -> Any:
+    """Строка CLI → тип через yaml.safe_load (как у gc-cli)."""
+    try:
+        value = yaml.safe_load(raw)
+    except Exception:
+        return raw
+    return raw if value is None else value
+
+
+def _parse_unknown_args(tokens: list[str]) -> dict[str, Any]:
+    """``--param value`` / ``--param=value`` / ``--flag`` → оверрайды конфига.
+
+    Позиционные токены пропускаются. Контракт тот же, что у ``gc-cli`` /
+    ``gc-acp``: любой ``--ключ`` ложится в runtime-конфиг поверх профиля и
+    файловых слоёв.
+    """
+    overrides: dict[str, Any] = {}
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if not token.startswith("--"):
+            i += 1
+            continue
+        key_part = token[2:]
+        value: Any = True
+        if "=" in key_part:
+            key, raw_val = key_part.split("=", 1)
+            value = _coerce_cli_value(raw_val)
+        else:
+            key = key_part
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+                value = _coerce_cli_value(tokens[i + 1])
+                i += 1
+        if key:
+            overrides[key] = value
+        i += 1
+    return overrides
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """Разобрать запуск. Чужие аргументы не роняют процесс.
+
+    Свои флаги — ``--config`` и ``--profile``. Остальные ``--ключ`` —
+    оверрайды конфига (как у gc-cli / gc-acp). Позиционные токены
+    отбрасываются.
+    """
     parser = argparse.ArgumentParser(prog="gc-chat")
     parser.add_argument("--config", default=None, help="путь к config.yml")
     parser.add_argument("--profile", default=None, help="имя профиля")
-    return parser.parse_args(argv)
+    args, unknown = parser.parse_known_args(argv)
+    args.overrides = _parse_unknown_args(list(unknown))
+    return args
 
 
 def _force_utf8_stdio() -> None:
