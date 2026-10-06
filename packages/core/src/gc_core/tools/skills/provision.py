@@ -122,6 +122,24 @@ async def _remote_manifest(backend: Any, path: str) -> Optional[str]:
         return None
 
 
+async def _copy_modified(backend: Any, root: str, manifest: str) -> bool:
+    """Копию трогали после заливки? Манифест пишется последним, значит всё в
+    копии старше него; файл новее — модель переписала скилл, и подмена
+    пережила бы следующий ран (копия для модели — класс `skills`, на запись)."""
+    res = await arun_backend_exec_raw(
+        backend,
+        f"find {_q(root)} -newer {_q(manifest)} -print 2>/dev/null | head -n 1",
+    )
+    touched = (res.stdout or "").strip()
+    if touched:
+        logger.warning(
+            "skills_runtime: %s was modified after provisioning (%s) — re-copying",
+            root,
+            touched.splitlines()[0],
+        )
+    return bool(touched)
+
+
 async def _swap_in(backend: Any, staged: str, root: str) -> None:
     """Подменить живую копию заготовленной одним шагом (rm -rf && mv)."""
     res = await arun_backend_exec_raw(
@@ -186,7 +204,11 @@ async def aprovision_remote_skills(
     digest = _digest(files)
     try:
         async with asyncio.timeout(PROVISION_TIMEOUT_SEC):
-            if await _remote_manifest(backend, manifest_path) == digest:
+            if await _remote_manifest(
+                backend, manifest_path
+            ) == digest and not await _copy_modified(
+                backend, remote_root, manifest_path
+            ):
                 log.debug("skills_runtime: up to date at %s", remote_root)
             else:
                 await _upload_set(backend, files, remote_root, digest)

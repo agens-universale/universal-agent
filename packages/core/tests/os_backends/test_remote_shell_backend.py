@@ -273,3 +273,70 @@ def test_env_names_must_be_identifiers():
     assert env == {} and err["field"] == "env_vars[0].name"
     env, err = _parse_env_vars([{"name": "GOOD_NAME", "value": "v"}])
     assert env == {"GOOD_NAME": "v"} and err is None
+
+
+def test_watchdog_wrap_variants():
+    import shlex
+
+    from gc_core.backends.remote_shell import watchdog_wrap
+
+    body = "cd '/w' || exit; echo hi"
+    assert watchdog_wrap(body, None, "timeout") == body
+    assert watchdog_wrap(body, 5, None) == body
+    assert watchdog_wrap(body, 5, "timeout").startswith("timeout 7 sh -c ")
+    assert watchdog_wrap(body, 5, "gtimeout").startswith("gtimeout 7 sh -c ")
+    perl = watchdog_wrap(body, 5, "perl")
+    assert perl.startswith("perl -e ") and perl.endswith(
+        " 7 sh -c " + shlex.quote(body)
+    )
+    assert "setpgrp" in perl and "alarm" in perl
+    setsid = watchdog_wrap(body, 5, "setsid")
+    # busybox: своя сессия + kill по группе, stdin возвращён через fd 3
+    assert f"setsid sh -c {shlex.quote(body)} <&3 3<&- &" in setsid
+    assert "sleep 7; kill -TERM -- -$p" in setsid and setsid.startswith(
+        "exec 3<&0;"
+    )
+
+
+async def test_timed_out_command_does_not_outlive_the_timeout():
+    # Таймаут убивал только локальный клиент: `sleep 300 &` в контейнере жил
+    # дальше. Сторож той стороны (timeout / gtimeout / perl) убивает группу.
+    import asyncio
+    import os
+    import signal
+
+    from gc_core.backends.remote_shell import RemoteShellBackend
+
+    be = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=10000,
+        walk_output_max_chars=10000,
+    )
+    if await be._awatchdog() is None:
+        pytest.skip("no timeout/gtimeout/perl on this host")
+    res = await be.aexec("sleep 300 & echo $!; wait", timeout=1)
+    assert res.timed_out is True
+    pid = int(res.stdout.strip().splitlines()[0])
+    await asyncio.sleep(3.5)  # сторож срабатывает на timeout + 2 с
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+async def test_watchdog_probe_is_cached_and_reported():
+    from gc_core.backends.remote_shell import RemoteShellBackend
+
+    be = RemoteShellBackend(
+        ["env"],
+        cwd=None,
+        env={},
+        exec_init=None,
+        exec_output_capture_max_chars=1000,
+        walk_output_max_chars=1000,
+    )
+    first = await be._awatchdog()
+    assert first in ("timeout", "gtimeout", "setsid", "perl", None)
+    be._afs_exec = None  # вторая проба не должна исполняться
+    assert await be._awatchdog() == first

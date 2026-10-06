@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 import os
 import re
 import shlex
@@ -31,8 +32,57 @@ from gc_core.backends.walk_util import FlatWalkMixin
 
 #: Потолок на одну файловую операцию (stat, upload, download): зависший
 #: транспорт — пауза контейнера, мёртвый хост — иначе вешал бы цикл агента.
+logger = logging.getLogger(__name__)
+_MISSING = object()
 _ENV_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+#: Сторож на той стороне: таймаут убивает только локальный клиент
+#: (`docker exec` / `ssh`), команда в контейнере или на хосте жила бы дальше.
+#: Проба один раз на бэкенд; порядок — по надёжности.
+_WATCHDOG_PROBE = (
+    "if timeout --version >/dev/null 2>&1; then echo timeout; "
+    "elif command -v gtimeout >/dev/null 2>&1; then echo gtimeout; "
+    "elif command -v setsid >/dev/null 2>&1; then echo setsid; "
+    "elif command -v perl >/dev/null 2>&1; then echo perl; "
+    "else echo none; fi"
+)
+_WATCHDOG_TOOLS = ("timeout", "gtimeout", "setsid", "perl")
+#: perl есть на macOS из коробки: setpgrp делает его лидером группы, alarm
+#: по истечении шлёт KILL всей группе — то же, что GNU timeout.
+_PERL_WATCHDOG = (
+    'setpgrp(0,0);$SIG{ALRM}=sub{kill("KILL",-getpgrp());exit(124)};'
+    "alarm(shift);my $p=fork;if(!$p){exec @ARGV}waitpid($p,0);exit($?>>8)"
+)
+#: busybox `timeout` убивает только прямого потомка, фон переживает. Поэтому
+#: тело уходит в свою сессию (`setsid`, pid = pgid) и sh-сторож бьёт по группе.
+#: stdin фонового списка POSIX подменяет на /dev/null — возвращаем его через fd 3,
+#: иначе `python3 -` и argv со stdin остались бы без кода.
+_SETSID_WATCHDOG = (
+    "exec 3<&0; setsid sh -c {body} <&3 3<&- & p=$!; "
+    "(sleep {limit}; kill -TERM -- -$p; sleep 2; kill -KILL -- -$p) >/dev/null 2>&1 & w=$!; "
+    "wait $p; rc=$?; kill $w >/dev/null 2>&1; exit $rc"
+)
+#: Запас сторожа над таймаутом клиента: `timed_out` по-прежнему решает хост.
+_WATCHDOG_SLACK_SEC = 2
+#: Потолок одной файловой операции миксина (зависший транспорт).
 FS_OP_TIMEOUT_SEC = 300
+
+
+def watchdog_wrap(
+    body: str, timeout: Optional[int], tool: Optional[str]
+) -> str:
+    """Обернуть тело `sh -c` в сторож той стороны (GNU timeout / gtimeout / setsid / perl)."""
+    if not timeout or not tool:
+        return body
+    limit = int(timeout) + _WATCHDOG_SLACK_SEC
+    inner = f"sh -c {shlex.quote(body)}"
+    if tool in ("timeout", "gtimeout"):
+        return f"{tool} {limit} {inner}"
+    if tool == "setsid":
+        return _SETSID_WATCHDOG.format(body=shlex.quote(body), limit=limit)
+    if tool == "perl":
+        return f"perl -e {shlex.quote(_PERL_WATCHDOG)} {limit} {inner}"
+    return body
 
 
 class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
@@ -174,6 +224,36 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         return base64.b64decode(res.stdout or "", validate=False)
 
     # --- exec-семейство ---
+    async def _awatchdog(self) -> Optional[str]:
+        """Какой сторож есть на той стороне; `None` — никакого (одна проба)."""
+        cached = getattr(self, "_watchdog_tool", _MISSING)
+        if cached is not _MISSING:
+            return cached
+        tool: Optional[str] = None
+        try:
+            res = await self._afs_exec(_WATCHDOG_PROBE)
+            answer = (res.stdout or "").strip().splitlines()
+            if (
+                res.return_code == 0
+                and answer
+                and answer[-1] in _WATCHDOG_TOOLS
+            ):
+                tool = answer[-1]
+        except Exception:
+            tool = None
+        if tool is None:
+            logger.warning(
+                "remote backend has no GNU timeout/gtimeout/setsid/perl: a "
+                "timed-out command keeps running on the remote side"
+            )
+        self._watchdog_tool = tool
+        return tool
+
+    async def _aguarded(self, body: str, timeout: Optional[int]) -> str:
+        if not timeout:
+            return body
+        return watchdog_wrap(body, timeout, await self._awatchdog())
+
     async def aexec(
         self,
         command,
@@ -183,8 +263,9 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         env=None,
         capture_max_chars=None,
     ):
+        body = self._shell(command, cwd=cwd, env=env, exec_init=self.exec_init)
         return await self._run(
-            self._shell(command, cwd=cwd, env=env, exec_init=self.exec_init),
+            await self._aguarded(body, timeout),
             timeout=timeout,
             capture_max_chars=self._capture_cap(capture_max_chars),
         )
@@ -198,8 +279,9 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         env=None,
         capture_max_chars=None,
     ):
+        body = self._shell(command, cwd=cwd, env=env)
         return await self._run(
-            self._shell(command, cwd=cwd, env=env),
+            await self._aguarded(body, timeout),
             timeout=timeout,
             capture_max_chars=self._capture_cap(capture_max_chars),
         )
@@ -226,8 +308,9 @@ class RemoteShellBackend(PosixShellFsMixin, FlatWalkMixin, FsBackend):
         self, code, *, cwd=None, timeout=None, env=None, capture_max_chars=None
     ):
         # Код — на stdin, не heredoc: нет коллизии с маркером и лимита длины аргумента.
+        body = self._shell("python3 -", cwd=cwd, env=env)
         return await self._run(
-            self._shell("python3 -", cwd=cwd, env=env),
+            await self._aguarded(body, timeout),
             stdin_text=code,
             timeout=timeout,
             capture_max_chars=self._capture_cap(capture_max_chars),

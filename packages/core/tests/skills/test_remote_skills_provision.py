@@ -28,8 +28,14 @@ class RemoteFs(FakeBackend):
     def default_cwd(self):
         return "/work"
 
+    tampered: str = ""  # что вернёт `find -newer manifest`
+
     async def aexec(self, command, **kwargs):
         self.exec_commands.append(command)
+        if command.startswith("find "):
+            return SimpleNamespace(
+                stdout=self.tampered, stderr="", return_code=0, timed_out=False
+            )
         rm_part, mv_part = command.split(" && ")
         root = shlex.split(rm_part)[2]
         staged = shlex.split(mv_part)[1]
@@ -91,10 +97,9 @@ async def test_provisions_three_layers_and_registry_reads_remote(host_layers):
     assert f"{root}/project/alpha/SKILL.md" in backend.files
     assert f"{root}/{MANIFEST_NAME}" in backend.files
     # одна подмена живой копии, staging-каталога после неё нет
-    assert len(backend.exec_commands) == 1
-    assert backend.exec_commands[0].startswith(
-        f"rm -rf {root} && mv {root}.staging-"
-    )
+    swaps = [c for c in backend.exec_commands if c.startswith("rm -rf ")]
+    assert len(swaps) == 1
+    assert swaps[0].startswith(f"rm -rf {root} && mv {root}.staging-")
     assert not any(".staging-" in k for k in backend.files)
 
     skills = {s["id"]: s for s in await registry.list_skills(include_all=True)}
@@ -115,10 +120,18 @@ async def test_second_run_with_same_set_copies_nothing(host_layers):
         "os_backend": {"kind": "ssh", "ssh": {"host": "h"}},
     }
     await aprovision_remote_skills(backend, cfg)
-    writes, cmds = backend.writes, list(backend.exec_commands)
+    writes = backend.writes
+    swaps = lambda: [
+        c for c in backend.exec_commands if c.startswith("rm -rf ")
+    ]  # noqa: E731
+    n_swaps = len(swaps())
     await aprovision_remote_skills(backend, cfg)
     assert backend.writes == writes
-    assert backend.exec_commands == cmds
+    assert len(swaps()) == n_swaps
+    # проверка свежести копии спрашивалась: find -newer manifest
+    assert any(
+        c.startswith("find ") and "-newer" in c for c in backend.exec_commands
+    )
 
     # Изменился файл на хосте → копия пересобирается с нуля
     (host_layers / "usr" / "beta" / "SKILL.md").write_text(
@@ -126,7 +139,7 @@ async def test_second_run_with_same_set_copies_nothing(host_layers):
     )
     await aprovision_remote_skills(backend, cfg)
     assert backend.writes > writes
-    assert len(backend.exec_commands) == len(cmds) + 1
+    assert len(swaps()) == n_swaps + 1
 
 
 async def test_root_fallbacks_project_root_then_backend_cwd(host_layers):
@@ -223,3 +236,16 @@ async def test_junk_dirs_inside_skills_are_skipped(host_layers):
         backend, {"launch_root": "/work", "os_backend": DOCKER}
     )
     assert not any("node_modules" in k or "/.git/" in k for k in backend.files)
+
+
+async def test_tampered_copy_is_recopied_even_with_same_manifest(host_layers):
+    # Модель переписала скилл в копии (класс `skills`, запись разрешена):
+    # манифест совпадает, но файл новее него → перезаливаем, подмена не
+    # переживает следующий ран.
+    backend = RemoteFs()
+    cfg = {"launch_root": "/work", "os_backend": DOCKER}
+    await aprovision_remote_skills(backend, cfg)
+    writes = backend.writes
+    backend.tampered = f"/work/{RUNTIME_SUBDIR}/system/alpha/SKILL.md\n"
+    await aprovision_remote_skills(backend, cfg)
+    assert backend.writes > writes
