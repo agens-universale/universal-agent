@@ -262,3 +262,29 @@ def test_bwrap_extra_ro_inside_root_stays_read_only(tmp_path):
     # повторов одного ro-bind нет
     pairs = [argv[i + 1] for i, a in enumerate(argv) if a == "--ro-bind"]
     assert len(pairs) == len(set(pairs))
+
+
+@pytest.mark.skipif(
+    not HAVE_TOOL, reason="нужен bwrap (Linux) или sandbox-exec (macOS)"
+)
+async def test_shell_does_not_inherit_agent_process_env(tmp_path, monkeypatch):
+    # Shell модели получал os.environ агента целиком (токены, ключи), хотя
+    # run_python чистил окружение. Теперь оба — один allowlist.
+    monkeypatch.setenv("GC_SB_TEST_SECRET", "leak")
+    root = _root(tmp_path) if "_root" in globals() else str(tmp_path)
+    be = SandboxBackend(
+        wrapper=build_sandbox_wrapper(root, {"sandbox": {"network": True}}),
+        root=root,
+        auto_workdir=None,
+        exec_output_capture_max_chars=5000,
+    )
+    res = await be.aexec(
+        'echo "s=${GC_SB_TEST_SECRET:-absent} p=${PATH:+set}"', timeout=20
+    )
+    assert res.stdout.strip() == "s=absent p=set", res.stdout + res.stderr
+    res = await be.aexec_argv(
+        ["sh", "-c", 'echo "${GC_SB_TEST_SECRET:-absent}/${EXPLICIT:-none}"'],
+        env={"EXPLICIT": "ok"},
+        timeout=20,
+    )
+    assert res.stdout.strip() == "absent/ok"

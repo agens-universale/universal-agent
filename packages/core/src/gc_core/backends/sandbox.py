@@ -223,12 +223,17 @@ class SandboxBackend(LocalFsBackend):
         env=None,
         capture_max_chars=None,
     ):
-        return await super().aexec_argv(
+        # Не через LocalFsBackend.aexec_argv: тот доливает os.environ целиком, и
+        # токены процесса агента утекали бы в shell модели. Окружение — тот же
+        # allowlist, что у arun_python (`_sanitize_env`), поверх него env вызова.
+        return await _arun_bounded_process(
             [*self._wrap(cwd), "sh", "-c", command],
+            shell=False,
             cwd=cwd,
             timeout=timeout,
-            env=env,
-            capture_max_chars=capture_max_chars,
+            env=_sanitize_env(env),
+            stdin_text=None,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     async def aexec_argv(
@@ -241,13 +246,14 @@ class SandboxBackend(LocalFsBackend):
         env=None,
         capture_max_chars=None,
     ):
-        return await super().aexec_argv(
-            [*self._wrap(cwd), *argv],
-            stdin=stdin,
+        return await _arun_bounded_process(
+            [*self._wrap(cwd), *[str(a) for a in argv]],
+            shell=False,
             cwd=cwd,
             timeout=timeout,
-            env=env,
-            capture_max_chars=capture_max_chars,
+            env=_sanitize_env(env),
+            stdin_text=stdin,
+            capture_max_chars=self._exec_capture_max_chars(capture_max_chars),
         )
 
     async def arun_python(
