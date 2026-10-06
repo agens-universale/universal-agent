@@ -1744,6 +1744,42 @@ async def test_hub_glyphs_ok_after_config_probe():
         )  # test-model в списке
 
 
+async def test_hub_connection_accepts_alternative_after_missing_catalog(tmp_path, monkeypatch):
+    from gc_core import model_picker
+    from gc_tui import app as app_mod
+    from gc_tui.screens.settings import SettingsScreen
+
+    def get_ex(url, headers, verify, *, config_proxy=None):
+        return model_picker.HttpReply(401 if url.endswith("/config") else 404, None)
+
+    def post_ex(url, headers, body, verify, *, config_proxy=None):
+        return model_picker.HttpReply(
+            200 if headers.get("Authorization") == "Bearer secret" else 401, {}
+        )
+
+    monkeypatch.setattr(model_picker, "_requests_get_ex", get_ex)
+    monkeypatch.setattr(model_picker, "_requests_post_ex", post_ex)
+    cfg_file = tmp_path / "config.yml"
+    cfg_file.write_text(
+        "backend:\n  completions_url: http://x/v1/chat/completions\n"
+        "  chat_completion_headers:\n    Authorization: secret\n",
+        encoding="utf-8",
+    )
+    cfg = _cfg()
+    cfg["completions_url"] = "http://x/v1/chat/completions"
+    cfg["chat_completion_headers"] = {"Authorization": "secret"}
+    before = cfg_file.read_bytes()
+    app = app_mod.TuiApp(config=cfg)
+    async with app.run_test() as pilot:
+        scr = SettingsScreen(config=cfg, config_path=str(cfg_file), on_apply=lambda: None)
+        app.push_screen(scr)
+        await pilot.pause()
+        await scr.workers.wait_for_complete()
+        await pilot.pause()
+        assert any("Подключение" in row and "✓" in row for row in _menu_lines(scr))
+        assert cfg_file.read_bytes() == before
+
+
 async def test_hub_glyphs_bang_on_network_unknown():
     from gc_tui import app as app_mod
     from gc_tui.screens.settings import SettingsScreen

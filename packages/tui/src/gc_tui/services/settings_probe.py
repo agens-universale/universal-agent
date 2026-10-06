@@ -132,18 +132,23 @@ def probe(
     # с инертной заглушкой и судит только токен.
     dummy = not model
     probe_model = model or _DUMMY_MODEL
-    if post_ex is None:
-        status, net_err, lat, payload = model_picker.probe_post(
-            endpoint,
-            auth,
-            probe_model,
-            verify=verify,
-            config_proxy=config_proxy,
-        )
-    else:
-        status, net_err, lat, payload = post_ex(
-            endpoint, auth, probe_model, verify=verify
-        )
+    # Справочники и чат могут принимать разные схемы. Подбор для чата
+    # начинается с настроенного формата независимо от ответа справочников.
+    for variant in authorization_attempts(auth) or [auth]:
+        if post_ex is None:
+            status, net_err, lat, payload = model_picker.probe_post(
+                endpoint,
+                variant,
+                probe_model,
+                verify=verify,
+                config_proxy=config_proxy,
+            )
+        else:
+            status, net_err, lat, payload = post_ex(
+                endpoint, variant, probe_model, verify=verify
+            )
+        if status != 401:
+            break
     return _verdict_from_post(status, net_err, lat, payload, dummy)
 
 

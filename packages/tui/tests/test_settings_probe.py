@@ -144,6 +144,52 @@ def test_stage1_401_with_working_post_is_ok():
     assert r.verdict == "ok" and r.auth_ok
 
 
+@pytest.mark.parametrize("source, accepted", [("secret", "Bearer secret"), ("Bearer secret", "secret")])
+def test_menu_probe_fallback_retries_chat_auth_after_catalog_failure(monkeypatch, source, accepted):
+    calls = []
+
+    def get_ex(url, headers, verify, *, config_proxy=None):
+        calls.append((url.rsplit("/", 1)[-1], headers.get("Authorization")))
+        return mp.HttpReply(401 if url.endswith("/config") else 404, None)
+
+    def post_ex(url, headers, body, verify, *, config_proxy=None):
+        token = headers.get("Authorization")
+        calls.append(("chat", token))
+        return mp.HttpReply(200 if token == accepted else 401, {})
+
+    monkeypatch.setattr(mp, "_requests_get_ex", get_ex)
+    monkeypatch.setattr(mp, "_requests_post_ex", post_ex)
+    result = probe("http://x/v1/chat/completions", source, True, "m1")
+    assert result.verdict == "ok"
+    assert calls == [("config", source), ("config", accepted), ("models", source), ("chat", source), ("chat", accepted)]
+
+
+@pytest.mark.parametrize("status", [200, 403, 404, 500, None])
+def test_menu_probe_fallback_does_not_retry_without_401(status):
+    calls = []
+
+    def post_ex(endpoint, auth, model, *, verify=True):
+        calls.append(auth)
+        return status, "timeout" if status is None else "", 1, {}
+
+    result = probe("http://x/v1/chat/completions", "secret", True, "m1", fetch_ex=_fetch(status=404), post_ex=post_ex)
+    assert result.http_status == status
+    assert calls == ["secret"]
+
+
+@pytest.mark.parametrize("auth, expected", [("secret", ["secret", "Bearer secret"]), ("Basic encoded", ["Basic encoded"]), (None, [None])])
+def test_menu_probe_fallback_limits_401_retries(auth, expected):
+    calls = []
+
+    def post_ex(endpoint, token, model, *, verify=True):
+        calls.append(token)
+        return 401, "", 1, {}
+
+    result = probe("http://x/v1/chat/completions", auth, True, "m1", fetch_ex=_fetch(status=404), post_ex=post_ex)
+    assert result.verdict == "rejected"
+    assert calls == expected
+
+
 def test_stage1_401_and_post_401_is_rejected():
     """401 и на models-цепочке, и на самом chat/completions → токен отклонён."""
     r = probe(

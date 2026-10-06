@@ -252,7 +252,7 @@ def probe_fetch(
     config_proxy: Optional[str] = None,
     http_get_ex: Optional[Callable] = None,
 ) -> FetchOutcome:
-    """models-цепочка (/config → /models) с кодами. 401 приоритетнее прочих кодов."""
+    """models-цепочка (/config → /models); без доступного каталога 401 приоритетнее прочих кодов."""
     import time
 
     if http_get_ex is None:
@@ -270,6 +270,7 @@ def probe_fetch(
         return FetchOutcome(None, None, "пустой адрес", 0)
     statuses: list = []
     net_errors: list = []
+    empty_catalog_status = None
     for path, parser in (
         ("/config", parse_config_models),
         ("/models", parse_models_list),
@@ -283,14 +284,20 @@ def probe_fetch(
         source = payload.get("chat") if path == "/config" else payload
         raw_models = source.get("models" if path == "/config" else "data") if isinstance(source, dict) else None
         if reply.status is not None and 200 <= reply.status < 300 and (parsed or isinstance(raw_models, list)):
-            return FetchOutcome(
-                parsed, reply.status, "", int((time.monotonic() - t0) * 1000)
-            )
+            if parsed:
+                return FetchOutcome(
+                    parsed, reply.status, "", int((time.monotonic() - t0) * 1000)
+                )
+            # Пустой /config ещё не исключает каталог на /models. Если и
+            # там моделей нет, сохраняем факт доступного пустого каталога.
+            empty_catalog_status = reply.status
         if reply.status is not None:
             statuses.append(reply.status)
         else:
             net_errors.append(reply.network_error)
     latency = int((time.monotonic() - t0) * 1000)
+    if empty_catalog_status is not None:
+        return FetchOutcome([], empty_catalog_status, "", latency)
     if 401 in statuses:
         return FetchOutcome(None, 401, "", latency)
     if statuses:
