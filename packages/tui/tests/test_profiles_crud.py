@@ -724,6 +724,32 @@ async def test_space_on_the_none_row_deactivates(tmp_path, monkeypatch):
     assert 'profile: ""' in base_cfg.read_text(encoding="utf-8")
 
 
+async def test_space_activates_under_launch_flag_by_the_file_pointer(
+    tmp_path, monkeypatch
+):
+    """`gc-ua --profile home` при пустом указателе в файле: «home» действует
+    флагом, но в файле его нет — Space пишет указатель, а не отвечает «уже
+    активен» (сравнение — с указателем в файлах, его и пишет активация)."""
+    from gc_tui import app as app_mod
+
+    project_dir = tmp_path / "project"
+    project_dir.mkdir()
+    monkeypatch.chdir(project_dir)
+    base_cfg = _write(tmp_path / "base" / "config.yml", _base_config_text())
+    _write(tmp_path / "base" / "profiles" / "home.yml", _PROFILE_BODY)
+
+    cfg = dict(_base_dict(), profile="home")
+    app = app_mod.TuiApp(settings=tui_settings(cfg))
+    app._profile_override = "home"
+    async with app.run_test() as pilot:
+        scr = await _profiles_screen(pilot, app, base_cfg, config=cfg)
+        await _put_cursor(pilot, scr, "profile", "home")
+        await pilot.press("space")
+        await pilot.pause()
+
+    assert 'profile: "home"' in base_cfg.read_text(encoding="utf-8")
+
+
 # --- гейт по фокусу и Esc внутри ввода --------------------------------------------
 
 

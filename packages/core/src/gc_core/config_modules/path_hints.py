@@ -75,9 +75,16 @@ def _paths_by_last_segment() -> dict[str, tuple[str, ...]]:
     return {name: tuple(sorted(paths)) for name, paths in found.items()}
 
 
+#: Прежние имена, у которых нет совпадающего последнего сегмента в схеме.
+_RENAMED = {"agent_url": "backend.completions_url"}
+
+
 def suggest_paths(name: str) -> list[str]:
     """Пути схемы, чей последний сегмент совпадает с последним сегментом
-    ``name``: ``max_steps`` → ``["agent.max_steps"]``."""
+    ``name``: ``max_steps`` → ``["agent.max_steps"]``; прежнее имя без такого
+    совпадения — по таблице (``agent_url`` → ``backend.completions_url``)."""
+    if name in _RENAMED:
+        return [_RENAMED[name]]
     last = name.rsplit(".", 1)[-1]
     return [
         path for path in _paths_by_last_segment().get(last, ()) if path != name

@@ -4397,11 +4397,25 @@ class SettingsScreen(Screen):
             self._profiles_base_path(), project_doc=self._project_config_doc()
         )
 
+    def _file_profile_pointer(self):
+        """Указатель профиля В ФАЙЛАХ (база, managed, проект) — без флага
+        запуска `--profile`: именно его пишут активация и деактивация. Под
+        `gc-ua --profile X` `_config_profile()` вернул бы X, и экран отвечал бы
+        «уже активен» / писал `profile: ""` мимо того, что в файле."""
+        if getattr(self.app, "_profile_override", None) is None:
+            return self._config_profile()
+        from gc_core.config_modules.layers import resolve_profile_pointer
+
+        try:
+            return resolve_profile_pointer(self._profiles_base_path()) or None
+        except (OSError, ValueError):
+            return self._config_profile()
+
     def _deactivate_profile(self) -> None:
         """Space на «— без профиля» (клавиша перевешена решением В1 волны B):
         деактивация записью `profile: ""` по единому правилу записи; «ничего не
         активно» — честный no-op."""
-        config_active = self._config_profile()
+        config_active = self._file_profile_pointer()
         if config_active is None:
             self._title_note("профиль не выбран")
             return
@@ -4439,7 +4453,7 @@ class SettingsScreen(Screen):
         активен» — сравнение с КОНФИГ-указателем (`_config_profile()`, то, что
         реально пишет активация), не с сессионным выбором: сессия — отдельный
         механизм (`/profiles`), запись файла её не трогает."""
-        config_active = self._config_profile()
+        config_active = self._file_profile_pointer()
         if name == config_active:
             self._title_note("уже активен")
             return

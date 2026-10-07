@@ -340,3 +340,13 @@ def test_jetbrains_acp_arg_starts_protocol(monkeypatch, tmp_path):
         "started": True,
         "text_answer_mode": "allow",
     }
+
+
+def test_abbreviated_own_flags_fail_instead_of_default_config(capsys):
+    """`--conf x.yml` / `--prof acp` — не флаги клиента: пропуск запустил бы
+    агента на конфиге по умолчанию. Чужие флаги клиента — по-прежнему мимо."""
+    assert main(["--conf", "x.yml"]) == 2
+    assert "--conf (--config)" in capsys.readouterr().err
+    assert main(["--prof", "acp"]) == 2
+    assert "--prof (--profile)" in capsys.readouterr().err
+    assert _parse_args(["acp", "--experimental"]).abbreviated == []

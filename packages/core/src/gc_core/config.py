@@ -204,7 +204,50 @@ def _cli_updates(
             if value is None:
                 continue
         updates[mapped] = value
-    return updates, trace_id, facts
+    return _paths_from_cwd(updates), trace_id, facts
+
+
+def _is_cli_path_key(dotted: str) -> bool:
+    """Пути, которые настройки считают от каталога конфига (``resolve_paths``)."""
+    return (
+        dotted.startswith("paths.")
+        or dotted.endswith("_prompt_path")
+        or dotted == "security.write_guard.extra_paths"
+    )
+
+
+def _paths_from_cwd(updates: Dict[str, Any]) -> Dict[str, Any]:
+    """Относительный путь из командной строки или ``agent_overrides`` — от
+    текущего каталога, как набрал человек (и как было до типизированных
+    настроек), а не от каталога конфига."""
+    from gc_core.settings import expand_section_updates
+
+    def absolute(value: Any) -> Any:
+        if isinstance(value, str) and value.strip():
+            expanded = os.path.expanduser(value)
+            return (
+                expanded
+                if os.path.isabs(expanded)
+                else os.path.abspath(expanded)
+            )
+        if isinstance(value, list):
+            return [absolute(item) for item in value]
+        return value
+
+    sections = ("paths", "summary", "intent_scope", "security")
+    with_paths = {
+        key: value
+        for key, value in updates.items()
+        if key.split(".", 1)[0] in sections
+    }
+    if not with_paths:
+        return updates
+    rest = {
+        key: value for key, value in updates.items() if key not in with_paths
+    }
+    for key, value in expand_section_updates(with_paths).items():
+        rest[key] = absolute(value) if _is_cli_path_key(key) else value
+    return rest
 
 
 def _set_nested(document: Dict[str, Any], dotted: str, value: Any) -> None:

@@ -62,3 +62,11 @@ def test_cli_override_by_path_applies():
     )
     assert loaded.settings.agent.max_steps == 50
     assert loaded.provenance.source("agent.max_steps").layer == "cli"
+
+
+def test_old_agent_url_points_to_completions_url():
+    with pytest.raises(UnknownSettingError) as exc:
+        apply_cli_overrides(
+            make_settings(), extra_overrides={"agent_url": "http://x"}
+        )
+    assert "--backend.completions_url" in str(exc.value)

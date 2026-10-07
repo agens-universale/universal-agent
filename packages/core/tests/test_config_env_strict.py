@@ -353,3 +353,14 @@ def test_repair_message_summarises_missing_variables(stack):
     )
     assert "не заданы переменные окружения: GC_T_A" in message
     assert "\n" not in message
+
+
+def test_file_path_with_dash_colon_keeps_it_when_default_is_given(tmp_path):
+    """Умолчание отделяет последний ``:-``: путь с ``:-`` внутри работает."""
+    folder = tmp_path / "a:-b"
+    folder.mkdir()
+    token = folder / "tok"
+    token.write_text("value\n")
+    assert resolve_env_placeholders_strict(f"${{FILE:{token}:-}}") == "value"
+    missing = tmp_path / "x:-y" / "tok"
+    assert resolve_env_placeholders(f"${{FILE:{missing}:-dflt}}") == "dflt"

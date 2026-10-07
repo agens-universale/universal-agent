@@ -104,7 +104,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         dest="auto_mcp",
         help="Не поднимать HTTP/SSE MCP-daemon'ы при старте",
     )
-    args, _unknown = parser.parse_known_args(args_list)
+    parser.add_argument(
+        "-h", "--help", action="store_true", help="Показать справку и выйти"
+    )
+    args, unknown = parser.parse_known_args(args_list)
+    if args.help:
+        print(parser.format_help())
+        return 0
+    if unknown:
+        # Как gc-cli: незнакомый или сокращённый флаг — ошибка, а не тихий
+        # запуск на другом конфиге (`--conf my.yml` → ~/.gc/config.yml).
+        print(
+            f"gc-ua: неизвестные аргументы: {' '.join(unknown)} (флаги не "
+            "сокращаются: --config, --profile, --init-config, --task-root, "
+            "--no-auto-mcp; справка — gc-ua --help)",
+            file=sys.stderr,
+        )
+        return 2
 
     # Паритет с gc-cli: создать <cwd>/.gc/ (project-local слой: config overlay,
     # project skills). Тихо игнорит отсутствие прав на запись в cwd.

@@ -220,6 +220,19 @@ def build_agent_settings_for_server(server_cfg: Dict[str, Any]):
     updates: Dict[str, Any] = {}
     log_block = server_cfg.get("logging")
     if isinstance(log_block, dict) and log_block:
+        from gc_core.config_modules.logging_config import LoggingConfig
+        from gc_core.config_modules.unknown_keys import (
+            drop_unknown_keys,
+            unknown_key_notice,
+        )
+
+        # Лишний ключ не роняет старт (как в YAML агента): отбрасывается с
+        # предупреждением.
+        log_block, unknown = drop_unknown_keys(log_block, LoggingConfig)
+        for item in unknown:
+            logger.warning(
+                unknown_key_notice(item, "config_server.yml: logging")
+            )
         for key, value in log_block.items():
             updates[f"logging.{key}"] = value
     agent_cfg = server_cfg.get("agent") or {}

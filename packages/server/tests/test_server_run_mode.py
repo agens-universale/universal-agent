@@ -16,3 +16,20 @@ def test_agent_settings_for_server_declare_the_server_run_mode(monkeypatch):
     loaded = server_config.build_agent_settings_for_server({})
 
     assert loaded.runtime.run_mode == "server"
+
+
+def test_unknown_logging_key_in_server_config_is_dropped_not_fatal(
+    monkeypatch, caplog
+):
+    """Лишний ключ в `logging:` config_server.yml (`logging_format: json`):
+    на develop уходил в logging_params, сервер стартовал. Теперь — тоже
+    старт, ключ отброшен с предупреждением (как в YAML агента)."""
+    monkeypatch.setattr(
+        server_config, "load_settings", lambda *a, **kw: make_settings()
+    )
+    with caplog.at_level("WARNING"):
+        loaded = server_config.build_agent_settings_for_server(
+            {"logging": {"logging_format": "json", "save_logs": False}}
+        )
+    assert loaded.settings.logging.save_logs is False
+    assert "logging_format" in caplog.text
