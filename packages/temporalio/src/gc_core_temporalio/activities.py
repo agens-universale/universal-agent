@@ -460,6 +460,12 @@ class AgentActivities:
                     result.failure.error_type,
                     type=TRANSIENT_MODEL_FAILURE,
                 ) from exc
+        # Ответ модели воркер знает сам: в кэш ссылок, чтобы на следующем
+        # шаге он ушёл во вход хэшем, а не целиком ещё раз.
+        known = self._messages.get(call.owner_id)
+        if known is not None:
+            for message in result.messages or []:
+                known[message_hash(message)] = deepcopy(message)
         return ModelReply(result, router.breaker.snapshot())
 
     @activity.defn(name="agent.tool.execute")

@@ -3,6 +3,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import time
 from dataclasses import replace
@@ -25,8 +26,14 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from gc_core_temporalio.activity_config import ActivitiesConfig
 from gc_core_temporalio.public_config import (
     fingerprint_mismatch,
+    public_config_snapshot,
     settings_fingerprint,
 )
+
+logger = logging.getLogger(__name__)
+
+#: Бэкенды ОС, которые под воркером Temporal не прогонялись.
+_UNTESTED_BACKENDS = frozenset({"docker", "ssh", "exec", "sandbox"})
 
 
 class AgentProfile(BaseModel):
@@ -310,6 +317,18 @@ class ContextProvider:
             # Отпечаток — исходного профиля, до правок воркера выше: их у
             # приложения нет, и они не должны давать расхождение.
             self._fingerprints[name] = settings_fingerprint(profile.core)
+            # Снимок для истории проверяется на старте воркера, а не на
+            # первом ходе: неизвестный параметр модели (extra_body, …) —
+            # отказ сразу, с путём.
+            public_config_snapshot(loaded)
+            kind = settings.os_backend.kind
+            if kind in _UNTESTED_BACKENDS:
+                logger.warning(
+                    "Профиль %s: os_backend.kind=%s под воркером Temporal не "
+                    "проверялся (проверены local и harbor)",
+                    name,
+                    kind,
+                )
 
     def check_settings(self, profile, expected):
         """Сверить отпечаток настроек приложения с профилем воркера.

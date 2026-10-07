@@ -287,3 +287,20 @@ async def test_ask_refuses_to_answer_a_dropped_message(monkeypatch):
     monkeypatch.setattr(session, "wait", wait)
     with pytest.raises(MessageNotProcessed, match="m1"):
         await session.ask("hello")
+
+
+def test_plugin_installs_its_sandbox_unless_the_app_set_its_own(caplog):
+    """Умолчание Worker (SandboxedWorkflowRunner с умолчаниями SDK) —
+    заменяется песочницей плагина; свой runner приложения — сохраняется с
+    предупреждением."""
+    from gc_core_temporalio.plugin import _keep_user_runner
+    from temporalio.worker import UnsandboxedWorkflowRunner
+    from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner
+
+    default = SandboxedWorkflowRunner()
+    ours = _keep_user_runner(default)
+    assert ours is not default and isinstance(ours, SandboxedWorkflowRunner)
+    assert ours.restrictions != default.restrictions
+    custom = UnsandboxedWorkflowRunner()
+    assert _keep_user_runner(custom) is custom
+    assert "не применена" in caplog.text

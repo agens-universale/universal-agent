@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 import os
 import socket
 from pathlib import Path
@@ -45,6 +46,8 @@ from gc_core_temporalio.maintenance import WorkerMaintenance
 from gc_core_temporalio.provider import AgentProfile, WorkerConfig
 from gc_core_temporalio.worker import build_runtime, workflow_runner
 from gc_core_temporalio.workflow import AgentWorkflow
+
+logger = logging.getLogger(__name__)
 
 #: Имя хранилища тредов, если оно одно (``thread_store=``).
 DEFAULT_STORE = "default"
@@ -151,7 +154,7 @@ class AgentPlugin(SimplePlugin):
                 threads.commit,
                 threads.read_trace,
             ],
-            workflow_runner=workflow_runner(),
+            workflow_runner=_keep_user_runner,
             run_context=self._run_context,
         )
 
@@ -203,6 +206,29 @@ class AgentPlugin(SimplePlugin):
                         await self._maintenance
                     self._maintenance = None
                 await self.provider.aclose()
+
+
+def _keep_user_runner(existing):
+    """Песочница плагина (запрет сетевых клиентов в коде workflow), если
+    приложение не задало свой ``workflow_runner``; свой — не перекрывать
+    молча, а предупредить, что защита плагина к нему не применена."""
+    from temporalio.worker.workflow_sandbox import (
+        SandboxedWorkflowRunner,
+        SandboxRestrictions,
+    )
+
+    # Worker подставляет SandboxedWorkflowRunner() с умолчаниями SDK, если
+    # приложение runner не задавало, — это не «свой» runner.
+    if existing is None or (
+        type(existing) is SandboxedWorkflowRunner
+        and existing.restrictions == SandboxRestrictions.default
+    ):
+        return workflow_runner()
+    logger.warning(
+        "Worker с собственным workflow_runner: песочница AgentPlugin (запрет "
+        "HTTP- и MCP-клиентов в коде workflow) к нему не применена"
+    )
+    return existing
 
 
 def _profile(spec, workspace, default_store):

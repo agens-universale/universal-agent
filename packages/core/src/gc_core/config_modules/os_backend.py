@@ -69,9 +69,21 @@ class OsBackendConfig(BaseModel):
     # старте рана: реестр читает их через бэкенд, а лежат они на хосте.
     # Только для remote-kind (docker/ssh/exec); Harbor-адаптер грузит сам.
     provision_skills: bool = True
-    docker: DockerBackendConfig = Field(default_factory=DockerBackendConfig)
-    ssh: SshBackendConfig = Field(default_factory=SshBackendConfig)
-    exec: ExecBackendConfig = Field(default_factory=ExecBackendConfig)
+    # Параметры подключения (хост, пользователь, ключ, префикс команды — в
+    # нём бывают токены) нужны только процессу, который исполняет команды:
+    # в публичный снимок (историю Temporal) не идут.
+    docker: DockerBackendConfig = Field(
+        default_factory=DockerBackendConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
+    ssh: SshBackendConfig = Field(
+        default_factory=SshBackendConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
+    exec: ExecBackendConfig = Field(
+        default_factory=ExecBackendConfig,
+        json_schema_extra=gc_meta(worker_only=True),
+    )
     sandbox: SandboxBackendConfig = Field(default_factory=SandboxBackendConfig)
 
     @model_validator(mode="before")

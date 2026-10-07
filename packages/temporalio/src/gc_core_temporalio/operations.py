@@ -39,7 +39,11 @@ from gc_core_temporalio.contracts import (
     GuardProbes,
     ModelReply,
 )
-from gc_core_temporalio.message_refs import CONTEXT_MISSING, SentMessages
+from gc_core_temporalio.message_refs import (
+    CONTEXT_MISSING,
+    SentMessages,
+    message_hash,
+)
 from gc_core_temporalio.model_routing import public_router_identity
 from gc_core_temporalio.sizes import ACTIVITY_INPUT_LIMIT, payload_size
 
@@ -159,6 +163,8 @@ class WorkflowOperations:
         #: Записать отложенные шаги хода в тред (``AgentExecutor.aflush_thread``):
         #: перед повтором запроса модели после промаха кэша воркера.
         self.flush_thread = None
+        #: Предупреждение о размере истории уже выдано в этом ходе.
+        self._history_warned = False
         self._prompts = {}
         self.tool_metadata = {}
         #: Снимок подготовки хода (PreparedContext), см. prompt/skills.
@@ -304,6 +310,7 @@ class WorkflowOperations:
     async def _request_model(self, request, router):
         """Activity модели: уже переданные сообщения — ссылками
         (``message_refs``). Воркер без них — повтор с сообщениями целиком."""
+        self._warn_history_size()
         data = asdict(request)
         thread = {
             "store_id": self.start.store_id,
@@ -372,7 +379,33 @@ class WorkflowOperations:
             self._sent_messages.confirm(
                 [*inline, *inline_batch, *inline_tools]
             )
+            # Ответ модели уже у воркера (activity положила его в кэш):
+            # дальше — ссылкой. Промах кэша закрывает повтор через тред.
+            self._sent_messages.confirm(
+                message_hash(message)
+                for message in (reply.result.messages or [])
+            )
             return reply
+
+    def _warn_history_size(self):
+        """Сервер советует новый run посреди хода — предупредить в логе.
+
+        Continue-As-New у сессии — после хода (как у Deep Agents); посреди
+        хода размер истории ограничивают настройки агента, а не пакет. Ход не
+        трогаем: только сигнал человеку, пока до лимита (50 МБ) есть запас.
+        """
+        info = workflow.info()
+        if self._history_warned or not info.is_continue_as_new_suggested():
+            return
+        self._history_warned = True
+        workflow.logger.warning(
+            "История хода велика (%s событий, %s байт): сервер советует новый "
+            "run, а ход ещё идёт. Ход ограничивают agent.max_steps, "
+            "agent.tool_output_inline_max_chars и вывод инструментов; при "
+            "лимите 50 МБ сервер прервёт run",
+            info.get_current_history_length(),
+            info.get_current_history_size(),
+        )
 
     def stop_model(self):
         """stop: отменить ожидающую activity модели (и её повторы).
