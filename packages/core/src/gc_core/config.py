@@ -309,6 +309,11 @@ def _serialize_model_entry(entry: ModelEntry) -> Dict[str, Any]:
         projected["auxiliary"] = copy.deepcopy(entry.auxiliary)
     if isinstance(entry.strip_think, bool):
         projected["strip_think"] = entry.strip_think
+    # 0 = «не задан» — резолв порога читает 0 и отсутствие ключа одинаково.
+    if entry.summary_trigger_chars > 0:
+        projected["summary_trigger_chars"] = entry.summary_trigger_chars
+    if entry.summary_trigger_tokens > 0:
+        projected["summary_trigger_tokens"] = entry.summary_trigger_tokens
     return projected
 
 

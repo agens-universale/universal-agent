@@ -114,7 +114,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 123,
             )
             self.assertEqual(
-                cfg["summary_params"]["incremental_batch_chars"], 172
+                cfg["summary_params"]["incremental_batch_chars"], 147
             )
             self.assertEqual(
                 cfg["summary_params"][
@@ -300,7 +300,7 @@ class ChatCompletionsPromptConfigTest(unittest.TestCase):
                 )
             cfg = load_config(cfg_path)
             self.assertEqual(
-                cfg["summary_params"]["incremental_batch_chars"], 70000
+                cfg["summary_params"]["incremental_batch_chars"], 60000
             )
             self.assertEqual(
                 cfg["summary_params"][

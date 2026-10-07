@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import gc
+from collections.abc import Callable, Iterator
 from copy import copy as shallow_copy
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +24,7 @@ from gc_core.summarize.compaction import (
     exceeded_summary_triggers,
     history_exceeds_summary_trigger,
 )
+from gc_core.summarize.config import ResolvedSummaryLimits
 from gc_core.summarize.summary_logging import (
     SummaryCompactionLog,
     append_summary_trace_record,
@@ -335,6 +337,7 @@ class RunSummaryCoordinator:
         is_cli_mode: bool,
         pre_backend_trigger_reason: str,
         logger: Any | None = None,
+        limits_provider: Callable[[], ResolvedSummaryLimits] | None = None,
     ) -> None:
         self._ctx = ctx
         self._state = state
@@ -343,6 +346,7 @@ class RunSummaryCoordinator:
         self._turn_end_trigger_chars = turn_end_trigger_chars
         self._summary_trigger_tokens = summary_trigger_tokens
         self._turn_end_trigger_tokens = turn_end_trigger_tokens
+        self._limits_provider = limits_provider
         self._is_cli_mode = is_cli_mode
         self._pre_backend_trigger_reason = pre_backend_trigger_reason
         self._logger = logger
@@ -353,6 +357,51 @@ class RunSummaryCoordinator:
         # сказано ли об этом в лог в этом прогоне.
         self._backend_requested = False
         self._blind_token_trigger_warned = False
+
+    def _refresh_limits(self) -> ResolvedSummaryLimits:
+        """Пороги на момент проверки: провайдер алиаса истории или снимок конструктора."""
+        if self._limits_provider is not None:
+            limits = self._limits_provider()
+            self._summary_trigger_chars = limits.chars_during
+            self._summary_trigger_tokens = limits.tokens_during
+            self._turn_end_trigger_chars = limits.chars_after
+            self._turn_end_trigger_tokens = limits.tokens_after
+            return limits
+        return ResolvedSummaryLimits(
+            chars_during=self._summary_trigger_chars,
+            tokens_during=self._summary_trigger_tokens,
+            chars_after=self._turn_end_trigger_chars,
+            tokens_after=self._turn_end_trigger_tokens,
+            incremental_batch_chars=0,
+            max_dialogue_chars=0,
+        )
+
+    @contextlib.contextmanager
+    def _overlay_batch_dialogue(
+        self, limits: ResolvedSummaryLimits
+    ) -> Iterator[None]:
+        """На время сжатия подставить батч/диалог резолва в ``summary_params``."""
+        if (
+            limits.incremental_batch_chars <= 0
+            and limits.max_dialogue_chars <= 0
+        ):
+            yield
+            return
+        cfg = getattr(self._ctx, "config_dict", None)
+        if not isinstance(cfg, dict):
+            yield
+            return
+        previous = cfg.get("summary_params")
+        overlay = dict(previous) if isinstance(previous, dict) else {}
+        if limits.incremental_batch_chars > 0:
+            overlay["incremental_batch_chars"] = limits.incremental_batch_chars
+        if limits.max_dialogue_chars > 0:
+            overlay["max_dialogue_chars"] = limits.max_dialogue_chars
+        cfg["summary_params"] = overlay
+        try:
+            yield
+        finally:
+            cfg["summary_params"] = previous
 
     async def on_summary_applied(self, event: dict[str, Any]) -> None:
         if self._thread_session is not None:
@@ -384,6 +433,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        limits = self._refresh_limits()
         if (
             self._summary_trigger_chars <= 0
             and self._summary_trigger_tokens <= 0
@@ -413,20 +463,22 @@ class RunSummaryCoordinator:
                     break
                 exceeded_chars, exceeded_tokens = _hit_pair(hits)
                 async with _asummarizing_flag(self._thread_session):
-                    await arun_summary_compaction(
-                        ctx=self._ctx,
-                        state=state,
-                        trigger_reason=trigger_reason,
-                        is_cli_mode=self._is_cli_mode,
-                        on_summary_applied=self.on_summary_applied,
-                        trigger_threshold_chars=self._summary_trigger_chars,
-                        exceeded_chars=exceeded_chars,
-                        exceeded_tokens=exceeded_tokens,
-                    )
+                    with self._overlay_batch_dialogue(limits):
+                        await arun_summary_compaction(
+                            ctx=self._ctx,
+                            state=state,
+                            trigger_reason=trigger_reason,
+                            is_cli_mode=self._is_cli_mode,
+                            on_summary_applied=self.on_summary_applied,
+                            trigger_threshold_chars=self._summary_trigger_chars,
+                            exceeded_chars=exceeded_chars,
+                            exceeded_tokens=exceeded_tokens,
+                        )
                 # Число забыто сжатием. Символы выключены — спросить провайдера
                 # некого, следующий круг вёл бы только их.
                 if self._summary_trigger_chars <= 0:
                     break
+                limits = self._refresh_limits()
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             if rounds > 0:
                 gc.collect()
@@ -452,15 +504,17 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        limits = self._refresh_limits()
         async with _asummarizing_flag(self._thread_session):
-            await arun_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason=trigger_reason,
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-                trigger_threshold_chars=self._summary_trigger_chars,
-            )
+            with self._overlay_batch_dialogue(limits):
+                await arun_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason=trigger_reason,
+                    is_cli_mode=self._is_cli_mode,
+                    on_summary_applied=self.on_summary_applied,
+                    trigger_threshold_chars=self._summary_trigger_chars,
+                )
         # C1: старая история отцеплена компакцией — собираем циклический мусор.
         gc.collect()
 
@@ -505,6 +559,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        limits = self._refresh_limits()
         if (
             self._summary_trigger_chars <= 0
             and self._summary_trigger_tokens <= 0
@@ -547,17 +602,18 @@ class RunSummaryCoordinator:
         # Суммаризуем полный ``state.messages`` (включая preserved_batch); суффикс не снимаем
         # до вызова. После компакции снова добавляем preserved_batch (сводка + сырой хвост).
         async with _asummarizing_flag(self._thread_session):
-            await arun_summary_compaction(
-                ctx=self._ctx,
-                state=state,
-                trigger_reason=self._pre_backend_trigger_reason,
-                is_cli_mode=self._is_cli_mode,
-                on_summary_applied=self.on_summary_applied,
-                trigger_threshold_chars=self._summary_trigger_chars,
-                exceeded_chars=exceeded_chars,
-                exceeded_tokens=exceeded_tokens,
-                kept_messages=preserved_batch,
-            )
+            with self._overlay_batch_dialogue(limits):
+                await arun_summary_compaction(
+                    ctx=self._ctx,
+                    state=state,
+                    trigger_reason=self._pre_backend_trigger_reason,
+                    is_cli_mode=self._is_cli_mode,
+                    on_summary_applied=self.on_summary_applied,
+                    trigger_threshold_chars=self._summary_trigger_chars,
+                    exceeded_chars=exceeded_chars,
+                    exceeded_tokens=exceeded_tokens,
+                    kept_messages=preserved_batch,
+                )
         msgs = getattr(state, "messages", None)
         if isinstance(msgs, list):
             msgs.extend(preserved_batch)
@@ -582,6 +638,7 @@ class RunSummaryCoordinator:
         state = self._state
         if state.backend_api_mode != "chat_completions":
             return
+        limits = self._refresh_limits()
         if (
             self._turn_end_trigger_chars <= 0
             and self._turn_end_trigger_tokens <= 0
@@ -601,16 +658,17 @@ class RunSummaryCoordinator:
         logger = self._logger
         try:
             async with _asummarizing_flag(self._thread_session):
-                await arun_summary_compaction(
-                    ctx=self._ctx,
-                    state=state,
-                    trigger_reason="turn_end",
-                    is_cli_mode=self._is_cli_mode,
-                    on_summary_applied=self.on_summary_applied,
-                    trigger_threshold_chars=self._turn_end_trigger_chars,
-                    exceeded_chars=exceeded_chars,
-                    exceeded_tokens=exceeded_tokens,
-                )
+                with self._overlay_batch_dialogue(limits):
+                    await arun_summary_compaction(
+                        ctx=self._ctx,
+                        state=state,
+                        trigger_reason="turn_end",
+                        is_cli_mode=self._is_cli_mode,
+                        on_summary_applied=self.on_summary_applied,
+                        trigger_threshold_chars=self._turn_end_trigger_chars,
+                        exceeded_chars=exceeded_chars,
+                        exceeded_tokens=exceeded_tokens,
+                    )
             # C1: старая история отцеплена компакцией — собираем циклический мусор.
             gc.collect()
         except Exception as summarize_exc:

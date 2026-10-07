@@ -46,7 +46,7 @@ def _patch_memory_patch_empty(monkeypatch):
 
 def _ctx(trigger_chars: int = 120000):
     incremental_batch_chars = (
-        int(trigger_chars * 1.4) if trigger_chars > 0 else 0
+        int(trigger_chars * 1.2) if trigger_chars > 0 else 0
     )
     return types.SimpleNamespace(
         config_dict={

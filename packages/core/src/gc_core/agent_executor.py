@@ -55,10 +55,7 @@ from gc_core.run_summary_coordinator import (
 from gc_core.security.permission_store import PermissionStore
 from gc_core.states import SharedStateData, State
 from gc_core.summarize.config import (
-    parse_summary_trigger_chars,
-    parse_summary_trigger_tokens,
-    parse_summary_turn_end_trigger_chars,
-    parse_summary_turn_end_trigger_tokens,
+    resolve_summary_limits_for_router,
 )
 from gc_core.thread_store import (
     ThreadSession,
@@ -877,24 +874,18 @@ class AgentExecutor:
         await aset_tui_finish_gate_checking(thread_session, False)
         await self._amcp_snapshot(thread_session, thread_id, system_id)
 
-        summary_trigger_chars = parse_summary_trigger_chars(config_dict)
-        summary_trigger_tokens = parse_summary_trigger_tokens(config_dict)
-        turn_end_trigger_tokens = parse_summary_turn_end_trigger_tokens(
-            config_dict
+        limits_provider = functools.partial(
+            self._history_summary_limits, config_dict
         )
-        turn_end_trigger_chars = parse_summary_turn_end_trigger_chars(
-            config_dict
-        )
+        initial_limits = limits_provider()
+        summary_trigger_chars = initial_limits.chars_during
+        summary_trigger_tokens = initial_limits.tokens_during
 
-        chat_completions_system_prompt: str | None = None
-        special_instructions: str | None = None
-        if backend_api_mode == "chat_completions":
-            chat_completions_system_prompt, special_instructions = (
-                self._load_chat_completions_prompts(
-                    effective_verbose=effective_verbose,
-                    logger=logger,
-                )
+        chat_completions_system_prompt, special_instructions = (
+            self._optional_chat_completions_prompts(
+                backend_api_mode, effective_verbose, logger
             )
+        )
 
         state, rendered_system_prompt = await self._abuild_run_state(
             effective_verbose=effective_verbose,
@@ -916,31 +907,17 @@ class AgentExecutor:
         self._ctx.permission_store = PermissionStore(
             session_rules=state.shared.confirm_rules
         )
+        self._seed_thread_history_messages(
+            state, thread_session, backend_api_mode
+        )
 
-        if (
-            thread_session is not None
-            and backend_api_mode == "chat_completions"
-            and thread_session.history_messages
-        ):
-            state.messages.extend(
-                [
-                    _shallow_copy_msg(m)
-                    for m in thread_session.history_messages
-                    if isinstance(m, dict)
-                ]
-            )
-
-        summary = RunSummaryCoordinator(
-            ctx=self._ctx,
+        summary = self._make_run_summary_coordinator(
             state=state,
             thread_session=thread_session,
-            summary_trigger_chars=summary_trigger_chars,
-            turn_end_trigger_chars=turn_end_trigger_chars,
-            summary_trigger_tokens=summary_trigger_tokens,
-            turn_end_trigger_tokens=turn_end_trigger_tokens,
+            limits=initial_limits,
             is_cli_mode=is_cli_mode,
-            pre_backend_trigger_reason="pre_backend",
             logger=logger,
+            limits_provider=limits_provider,
         )
         self._ctx.on_summary_applied = summary.on_summary_applied
         self._ctx.is_cli_mode = is_cli_mode
@@ -986,22 +963,6 @@ class AgentExecutor:
             )
         )
 
-        def get_pending_messages() -> list[dict]:
-            with self._lock:
-                out = self._pending_messages[:]
-                self._pending_messages.clear()
-            # Вне замка: копия картинок в тред — файловая операция, а замок ждут
-            # поток TUI и обработчик сервера.
-            return self._commit_queued(out)
-
-        def check_stop() -> bool:
-            with self._lock:
-                return (
-                    self._state.stop_requested
-                    if self._state is not None
-                    else False
-                )
-
         # Снимок usage до прогона: для resume треда state.usage гидрирован кумулятивом,
         # отчёт же показывает токены именно этого прогона (дельту). Тот же baseline
         # кладём на state — по нему TUI-футер считает live-«запрос» текущего хода.
@@ -1041,8 +1002,8 @@ class AgentExecutor:
                 pre_backend_compaction_hook=summary.apre_backend_compaction_hook,
                 turn_end_compaction_hook=summary.aturn_end_compact_if_needed,
                 force_compact_hook=summary.aforce_compact_once,
-                get_pending_messages=get_pending_messages,
-                check_stop=check_stop,
+                get_pending_messages=self._take_pending_messages,
+                check_stop=self._check_stop_requested,
                 session_meta=(
                     thread_session.meta if thread_session is not None else None
                 ),
@@ -1158,6 +1119,78 @@ class AgentExecutor:
         ход её реально увидит. ``None`` — у ``ctx`` нет ``model_router`` (тестовые двойники).
         """
         return getattr(self._ctx, "model_router", None)
+
+    def _history_summary_limits(self, config_dict: dict):
+        """Пороги сжатия алиаса истории на момент проверки (не снимок старта run)."""
+        return resolve_summary_limits_for_router(
+            config_dict, self.get_model_router(), consumer="main"
+        )
+
+    def _optional_chat_completions_prompts(
+        self, backend_api_mode: str, effective_verbose: bool, logger
+    ) -> tuple[str | None, str | None]:
+        if backend_api_mode != "chat_completions":
+            return None, None
+        return self._load_chat_completions_prompts(
+            effective_verbose=effective_verbose, logger=logger
+        )
+
+    def _seed_thread_history_messages(
+        self, state, thread_session, backend_api_mode: str
+    ) -> None:
+        if (
+            thread_session is None
+            or backend_api_mode != "chat_completions"
+            or not thread_session.history_messages
+        ):
+            return
+        state.messages.extend(
+            [
+                _shallow_copy_msg(m)
+                for m in thread_session.history_messages
+                if isinstance(m, dict)
+            ]
+        )
+
+    def _make_run_summary_coordinator(
+        self,
+        *,
+        state,
+        thread_session,
+        limits,
+        is_cli_mode: bool,
+        logger,
+        limits_provider,
+    ) -> RunSummaryCoordinator:
+        return RunSummaryCoordinator(
+            ctx=self._ctx,
+            state=state,
+            thread_session=thread_session,
+            summary_trigger_chars=limits.chars_during,
+            turn_end_trigger_chars=limits.chars_after,
+            summary_trigger_tokens=limits.tokens_during,
+            turn_end_trigger_tokens=limits.tokens_after,
+            is_cli_mode=is_cli_mode,
+            pre_backend_trigger_reason="pre_backend",
+            logger=logger,
+            limits_provider=limits_provider,
+        )
+
+    def _take_pending_messages(self) -> list[dict]:
+        with self._lock:
+            out = self._pending_messages[:]
+            self._pending_messages.clear()
+        # Вне замка: копия картинок в тред — файловая операция, а замок ждут
+        # поток TUI и обработчик сервера.
+        return self._commit_queued(out)
+
+    def _check_stop_requested(self) -> bool:
+        with self._lock:
+            return (
+                self._state.stop_requested
+                if self._state is not None
+                else False
+            )
 
     def usage_meta_snapshot(self) -> Optional[tuple[dict, Optional[dict]]]:
         """Снимок usage для TUI-футера: ``(session_meta, request_meta | None)``.

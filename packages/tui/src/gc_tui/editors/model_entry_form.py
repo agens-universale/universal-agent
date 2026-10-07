@@ -24,6 +24,7 @@ placeholder, контракт наружу — `peek()`/`is_dirty()`/`submit()`.
 
 from __future__ import annotations
 
+import json
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -111,6 +112,17 @@ def _list_outcome(models) -> str | None:
     if models is None:
         return LIST_FAILED
     return LIST_EMPTY if not models else None
+
+
+def _split_fetch_result(result) -> tuple:
+    """(models, payload) из ответа fetch: список, кортеж каталога или FetchOutcome."""
+    if isinstance(result, tuple) and len(result) == 2:
+        return result[0], result[1]
+    payload = getattr(result, "payload", None)
+    models = getattr(result, "models", result)
+    if payload is not None or hasattr(result, "models"):
+        return models, payload if isinstance(payload, dict) else None
+    return result, None
 
 
 _ALIAS_LABEL = "Алиас"
@@ -354,6 +366,10 @@ _STRIP_HINT = (
     "default — глобальный флаг · true — вырезать мысль из истории · "
     "false — копировать скрытое поле"
 )
+_SUMMARY_CHARS_LABEL = "Суммаризация · символы (по ходу хода)"
+_SUMMARY_TOKENS_LABEL = "Суммаризация · токены (по ходу хода)"
+_SUMMARY_TRIGGER_HINT = "0 — порог не задан"
+_MODEL_META_NONE = "метаданных нет"
 
 
 def _strip_choice(value) -> str:
@@ -363,6 +379,29 @@ def _strip_choice(value) -> str:
     if value is False:
         return "false"
     return "default"
+
+
+def _summary_trigger_text(value) -> str:
+    """Текст поля порога. Нет ключа / нечисло — ``0`` (порог не задан)."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return "0"
+    return str(number) if number > 0 else "0"
+
+
+def _parse_summary_trigger_field(raw: str) -> int | None:
+    """Разобрать поле порога. Пусто / ``0`` → 0. Нечисло → None (ошибка формы)."""
+    text = (raw or "").strip()
+    if not text:
+        return 0
+    try:
+        number = int(text)
+    except ValueError:
+        return None
+    if number < 0:
+        return None
+    return number
 
 
 def _completion_field_text(value) -> str:
@@ -615,6 +654,12 @@ class ModelEntryForm(Vertical):
         )
         self._backend_text = _completion_field_text(initial.get("backend"))
         self._strip_think = _strip_choice(initial.get("strip_think"))
+        self._summary_chars0 = _summary_trigger_text(
+            initial.get("summary_trigger_chars")
+        )
+        self._summary_tokens0 = _summary_trigger_text(
+            initial.get("summary_trigger_tokens")
+        )
         # Второе написание пары (`backend.completions_url` / `proxy` /
         # `chat_completion_headers.Authorization`) правится YAML-полем транспорта:
         # правило §2 считает его таким же своим подключением, и запись, задавшую пару
@@ -640,11 +685,11 @@ class ModelEntryForm(Vertical):
         self._verify = verify
         self._config_proxy = config_proxy
         if fetch is None:
-            from gc_core.model_picker import fetch_models
+            from gc_core.model_picker import fetch_models_catalog
 
             from gc_tui.services.model_list_cache import make_cached_fetch
 
-            fetch = make_cached_fetch(fetch_models)
+            fetch = make_cached_fetch(fetch_models_catalog)
         if probe is None:
             # `probe_auth`, а не `probe`: вердикт об авторизации идёт СТРОГО по
             # chat/completions — у публичного `/models` (OpenRouter) он получился бы
@@ -667,6 +712,8 @@ class ModelEntryForm(Vertical):
             "mef-token",
             None,
             "mef-model",
+            "mef-summary-chars",
+            "mef-summary-tokens",
             "mef-alias",
             "mef-strip",
             "mef-main",
@@ -675,6 +722,8 @@ class ModelEntryForm(Vertical):
         )
         self._idx = 0
         self._models: list = []
+        # Сырое тело ответа каталога — JSON карточки под id; в запись не пишется.
+        self._models_payload: dict | None = None
         # Чем кончилась последняя загрузка: None — не ходили или всё хорошо, иначе
         # готовая строка состояния. Пустой `_models` сам по себе двусмыслен — «ещё не
         # ходили», «сервер ответил пусто» и «не достучались» выглядят одинаково, а
@@ -769,6 +818,8 @@ class ModelEntryForm(Vertical):
             "url": self._url0,
             "token": "",
             "model": self._model0,
+            "summary_trigger_chars": self._summary_chars0,
+            "summary_trigger_tokens": self._summary_tokens0,
             "main": self._main_text,
             "auxiliary": self._aux_text,
             "backend": self._backend_text,
@@ -1203,6 +1254,32 @@ class ModelEntryForm(Vertical):
         )
         status.display = False
         yield status
+        yield Static(
+            self._model_metadata_text(),
+            id="mef-model-meta",
+            classes=_CLS_ONB_HINT_ONB_DYN,
+            markup=False,
+        )
+        yield Static(
+            _SUMMARY_CHARS_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
+        )
+        yield PasteInput(
+            value=self._summary_chars0,
+            placeholder=_SUMMARY_TRIGGER_HINT,
+            id="mef-summary-chars",
+            classes=icls,
+        )
+        yield Static(_SUMMARY_TRIGGER_HINT, classes=_CLS_ONB_HINT_ONB_DYN)
+        yield Static(
+            _SUMMARY_TOKENS_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP
+        )
+        yield PasteInput(
+            value=self._summary_tokens0,
+            placeholder=_SUMMARY_TRIGGER_HINT,
+            id="mef-summary-tokens",
+            classes=icls,
+        )
+        yield Static(_SUMMARY_TRIGGER_HINT, classes=_CLS_ONB_HINT_ONB_DYN)
         yield Static(_ALIAS_LABEL, classes=_CLS_ONB_HINT_ONB_DYN_SET_GROUP_GAP)
         yield PasteInput(
             value=self._alias0,
@@ -1662,6 +1739,7 @@ class ModelEntryForm(Vertical):
         # write_field глушит Input.Changed (иначе список сужался бы сам по себе) —
         # призрак алиаса пересчитываем руками, ему это событие и было нужно.
         self._refresh_alias_placeholder()
+        self._refresh_model_metadata()
         self._invalidate_probe()
 
     def reload_presets(self) -> bool:
@@ -1748,22 +1826,27 @@ class ModelEntryForm(Vertical):
                 url, auth, normalize_token=normalize_token
             )
             verify, config_proxy = self._resolved_transport(backend)
-            models = self._fetch(
+            result = self._fetch(
                 url,
                 auth,
                 verify=verify,
                 config_proxy=config_proxy,
                 refresh=refresh,
             )
+            models, payload = _split_fetch_result(result)
         except Exception:
             models = None
-        self.app.call_from_thread(self._on_models, models, gen, refresh)
+            payload = None
+        self.app.call_from_thread(
+            self._on_models, models, payload, gen, refresh
+        )
 
-    def _on_models(self, models, gen: int, refresh: bool) -> None:
+    def _on_models(self, models, payload, gen: int, refresh: bool) -> None:
         # Поколение протухло — ответ не про эту загрузку: не трогаем ни состояние,
         # ни DOM.
         if gen != self._list_gen or not self.is_mounted:
             return
+        self._models_payload = payload if isinstance(payload, dict) else None
         if self._positions[self._idx] != "mef-model":
             # Курсор успел уйти с поля: список запоминаем (вернётся — раскроется
             # сам), но раскрывать и вешать счётчик под чужим полем нельзя. Провал
@@ -1772,6 +1855,7 @@ class ModelEntryForm(Vertical):
             # загрузку теми же параметрами не даст.
             self._models = list(models or [])
             self._list_status = _list_outcome(models)
+            self._refresh_model_metadata()
             return
         if not models:
             # Исход вместо молчания: сервер мог лежать, а клавиша выглядела бы
@@ -1780,6 +1864,7 @@ class ModelEntryForm(Vertical):
             self._list_status = _list_outcome(models)
             self._list.close()
             self._set_status(self._list_status)
+            self._refresh_model_metadata()
             return
         self._models = list(models)
         self._list_status = None
@@ -1791,6 +1876,7 @@ class ModelEntryForm(Vertical):
         self._list.open(forced=refresh, filter_text=self._model_value())
         n = len(self._models)
         self._set_status(f"{n} {plural_models(n)}")
+        self._refresh_model_metadata()
 
     def _set_status(self, text: str) -> None:
         """Строка состояния списка ПОД рамкой (§3.2.2: внутри рамки только выбор).
@@ -1863,6 +1949,7 @@ class ModelEntryForm(Vertical):
                 # моделей раскрывать нечего — Alt+вниз остаётся походом в сеть.
                 self._list.reopen_for_typing(value)
             self._refresh_alias_placeholder()
+            self._refresh_model_metadata()
         elif event.input.id == "mef-url":
             # Канон 2026-08-17 в редакции 2026-08-18 (эталон — `ConnectionEditor`):
             # список раскрыт, пока значение складывается И есть из чего выбирать.
@@ -2185,11 +2272,35 @@ class ModelEntryForm(Vertical):
             "url": self._field_value("mef-url"),
             "token": self._field_value("mef-token"),
             "model": self._field_value("mef-model"),
+            "summary_trigger_chars": self._field_value("mef-summary-chars"),
+            "summary_trigger_tokens": self._field_value("mef-summary-tokens"),
             "main": self._yaml_text("mef-main"),
             "auxiliary": self._yaml_text("mef-auxiliary"),
             "backend": self._yaml_text("mef-backend"),
             "strip_think": self._strip_think,
         }
+
+    def _model_metadata_text(self) -> str:
+        """Сырой JSON объекта(ов) выбранной модели или «метаданных нет»."""
+        from gc_core.model_picker import match_model_objects
+
+        matched = match_model_objects(
+            self._models_payload, self._model_value()
+        )
+        if not matched:
+            return _MODEL_META_NONE
+        return "\n".join(
+            json.dumps(obj, ensure_ascii=False, indent=2) for obj in matched
+        )
+
+    def _refresh_model_metadata(self) -> None:
+        if not self.is_mounted:
+            return
+        try:
+            widget = self.query_one("#mef-model-meta", Static)
+        except NoMatches:
+            return
+        widget.update(self._model_metadata_text())
 
     def is_dirty(self) -> bool:
         try:
@@ -2389,6 +2500,21 @@ class ModelEntryForm(Vertical):
             if self._strip_think == "default"
             else self._strip_think == "true"
         )
+        chars = _parse_summary_trigger_field(values["summary_trigger_chars"])
+        tokens = _parse_summary_trigger_field(values["summary_trigger_tokens"])
+        if chars is None:
+            return self._fail(
+                "summary_trigger_chars: нужно целое ≥ 0 "
+                f"({_SUMMARY_TRIGGER_HINT})"
+            )
+        if tokens is None:
+            return self._fail(
+                "summary_trigger_tokens: нужно целое ≥ 0 "
+                f"({_SUMMARY_TRIGGER_HINT})"
+            )
+        # 0 в снимке = «не задан»; писатель может опустить ключ — кладём явно.
+        fields["summary_trigger_chars"] = chars
+        fields["summary_trigger_tokens"] = tokens
         return True, alias, fields
 
     def _write_yaml(self, field_id: str, value: object) -> None:

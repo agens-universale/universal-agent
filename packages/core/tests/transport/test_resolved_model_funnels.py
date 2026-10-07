@@ -644,7 +644,7 @@ def test_thread_summarizer_batch_declares_summary_consumer(monkeypatch):
             "completions_url": "http://example.test/v1/chat/completions",
             "summary_params": {
                 "chat_completions_summary_trigger_chars": 999999,
-                "incremental_batch_chars": int(999999 * 1.4),
+                "incremental_batch_chars": int(999999 * 1.2),
                 "max_accumulated_summary_chars": 20000,
                 "last_dialog_steps_count": 5,
                 "last_dialog_step_message_max_chars": 5000,

@@ -184,3 +184,39 @@ async def test_meter_token_mid_turn_not_replaced_by_turn_end(tmp_path):
         scr.attach_active_task(tid)
         meter = scr._context_meter()
         assert _meter_percent(meter) == 0
+
+
+@pytest.mark.asyncio
+async def test_meter_uses_per_model_mid_turn_threshold(tmp_path):
+    """Бар делит сэмпл на mid-turn активного алиаса, не на глобальный summary."""
+    pytest.importorskip("textual")
+    from gc_tui.app import TuiApp
+
+    tid = "ctxm0000000000000000000000000008a"
+    # 500 символов при пороге модели 1000 → 50%.
+    content = "x" * 500
+    _write_task(tmp_path, tid, content)
+    config = {
+        "model": "M",
+        "backend_api_mode": "chat_completions",
+        "summary_params": {
+            "chat_completions_summary_trigger_chars": 10_000_000,
+            "chat_completions_summary_turn_end_trigger_chars": 1,
+        },
+        "models": {
+            "m": {
+                "model": "m",
+                "url": "http://x/v1/chat/completions",
+                "authorization_header": "",
+                "backend_overrides": {},
+                "summary_trigger_chars": 1000,
+            }
+        },
+        "slots": {"default": "m"},
+    }
+    app = TuiApp(threads_dir=str(tmp_path), system="cli", config=config)
+    async with app.run_test() as pilot:
+        scr = pilot.app.screen
+        scr.attach_active_task(tid)
+        meter = scr._context_meter()
+        assert _meter_percent(meter) == 50

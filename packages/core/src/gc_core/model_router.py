@@ -71,6 +71,9 @@ class ResolvedModel:
     auxiliary: dict | None = None
     # None — у алиаса ключа нет, persist берёт глобальный strip_think.
     strip_think: bool | None = None
+    # Mid-turn пороги сжатия. 0 = не задан (как отсутствие ключа в снимке).
+    summary_trigger_chars: int = 0
+    summary_trigger_tokens: int = 0
 
 
 class AliasCircuitOpenError(RuntimeError):
@@ -130,6 +133,15 @@ def _level_phrase(requested_level: str, resolved_level: str) -> str:
     if requested_level == resolved_level:
         return f"уровень {requested_level}"
     return f"фоллбэк {requested_level} → {resolved_level}"
+
+
+def _nonneg_int(raw: Any) -> int:
+    """0 и отсутствие ключа — одно и то же для порогов сжатия на модели."""
+    try:
+        value = int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+    return value if value > 0 else 0
 
 
 class ModelRouter:
@@ -325,6 +337,10 @@ class ModelRouter:
         strip_think = entry.get("strip_think")
         if not isinstance(strip_think, bool):
             strip_think = None
+        summary_trigger_chars = _nonneg_int(entry.get("summary_trigger_chars"))
+        summary_trigger_tokens = _nonneg_int(
+            entry.get("summary_trigger_tokens")
+        )
         url = (
             entry.get("url")
             or backend_overrides.get("completions_url")
@@ -341,6 +357,8 @@ class ModelRouter:
             main=main,
             auxiliary=auxiliary,
             strip_think=strip_think,
+            summary_trigger_chars=summary_trigger_chars,
+            summary_trigger_tokens=summary_trigger_tokens,
         )
         # Сессионный предохранитель (спека §8): открытый алиас — мгновенный отказ
         # резолва, без обращения к транспорту, В ЛЮБОМ потребителе (единая точка).

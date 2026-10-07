@@ -15,6 +15,11 @@ from typing import Any, Callable, Optional
 
 from gc_core.utils.http_auth import authorization_attempts
 
+# Пути каталога моделей: /config (gigacode) предпочтительнее /models.
+_CONFIG_PATH = "/config"
+_MODELS_PATH = "/models"
+_MODEL_ID_KEYS = ("id", "name", "model")
+
 
 @dataclass(frozen=True)
 class ModelInfo:
@@ -39,6 +44,49 @@ class FetchOutcome:
     status: Optional[int]
     network_error: str
     latency_ms: int
+    # Сырое тело ответа, из которого собран список id (форма показывает JSON карточки).
+    payload: Optional[dict] = None
+
+
+def match_model_objects(payload: Optional[dict], model_id: str) -> list[dict]:
+    """Объекты карточки с ``id``/``name``/``model`` == model_id из сырого тела.
+
+    Ищет в ``data[]``, верхнем ``models[]`` и ``chat.models[]`` — что есть в теле.
+    Совпало несколько — все, по порядку обхода коллекций и элементов.
+    """
+    if not isinstance(payload, dict) or not model_id:
+        return []
+    found: list[dict] = []
+    for collection in _model_object_collections(payload):
+        for obj in collection:
+            if _card_matches_model_id(obj, model_id):
+                found.append(obj)
+    return found
+
+
+def _card_matches_model_id(obj: Any, model_id: str) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    for key in _MODEL_ID_KEYS:
+        if key in obj and str(obj[key]) == model_id:
+            return True
+    return False
+
+
+def _model_object_collections(payload: dict) -> list[list]:
+    collections: list[list] = []
+    data = payload.get("data")
+    if isinstance(data, list):
+        collections.append(data)
+    models = payload.get("models")
+    if isinstance(models, list):
+        collections.append(models)
+    chat = payload.get("chat")
+    if isinstance(chat, dict):
+        chat_models = chat.get("models")
+        if isinstance(chat_models, list):
+            collections.append(chat_models)
+    return collections
 
 
 def parse_config_models(payload: dict) -> list:
@@ -255,47 +303,88 @@ def probe_fetch(
     """models-цепочка (/config → /models); без доступного каталога 401 приоритетнее прочих кодов."""
     import time
 
-    if http_get_ex is None:
-
-        def get_ex(url, headers, verify):
-            return _requests_get_ex(
-                url, headers, verify, config_proxy=config_proxy
-            )
-    else:
-        get_ex = http_get_ex
+    get_ex = http_get_ex or (
+        lambda url, headers, verify: _requests_get_ex(
+            url, headers, verify, config_proxy=config_proxy
+        )
+    )
     base = api_base(completions_url)
-    auth_forms = authorization_attempts(auth_header) or [auth_header]
-    t0 = time.monotonic()
     if not base:
         return FetchOutcome(None, None, "пустой адрес", 0)
+    auth_forms = authorization_attempts(auth_header) or [auth_header]
+    t0 = time.monotonic()
     statuses: list = []
     net_errors: list = []
     empty_catalog_status = None
     for path, parser in (
-        ("/config", parse_config_models),
-        ("/models", parse_models_list),
+        (_CONFIG_PATH, parse_config_models),
+        (_MODELS_PATH, parse_models_list),
     ):
-        for index, form in enumerate(auth_forms):
-            reply = get_ex(base + path, _headers(form), verify)
-            if reply.status != 401 or index + 1 == len(auth_forms):
-                break
-        parsed = _parse_reply_models(reply, parser)
-        payload = reply.payload if isinstance(reply.payload, dict) else {}
-        source = payload.get("chat") if path == "/config" else payload
-        raw_models = source.get("models" if path == "/config" else "data") if isinstance(source, dict) else None
-        if reply.status is not None and 200 <= reply.status < 300 and (parsed or isinstance(raw_models, list)):
-            if parsed:
+        reply = _probe_auth_forms(get_ex, base + path, auth_forms, verify)
+        hit = _catalog_hit(reply, parser, path)
+        if hit is not None:
+            models, payload = hit
+            if models:
                 return FetchOutcome(
-                    parsed, reply.status, "", int((time.monotonic() - t0) * 1000)
+                    models,
+                    reply.status,
+                    "",
+                    int((time.monotonic() - t0) * 1000),
+                    payload=payload,
                 )
-            # Пустой /config ещё не исключает каталог на /models. Если и
-            # там моделей нет, сохраняем факт доступного пустого каталога.
+            # Пустой /config ещё не исключает каталог на /models.
             empty_catalog_status = reply.status
-        if reply.status is not None:
+        elif reply.status is not None:
             statuses.append(reply.status)
         else:
             net_errors.append(reply.network_error)
-    latency = int((time.monotonic() - t0) * 1000)
+    return _probe_fetch_fallback(
+        empty_catalog_status,
+        statuses,
+        net_errors,
+        int((time.monotonic() - t0) * 1000),
+    )
+
+
+def _probe_auth_forms(
+    get_ex: Callable, url: str, auth_forms: list, verify: bool | str
+) -> HttpReply:
+    """Один путь: перебрать формы Authorization, остановиться после не-401."""
+    reply = HttpReply(None, None, "нет попыток")
+    for index, form in enumerate(auth_forms):
+        reply = get_ex(url, _headers(form), verify)
+        if reply.status != 401 or index + 1 == len(auth_forms):
+            break
+    return reply
+
+
+def _catalog_hit(
+    reply: HttpReply, parser: Callable, path: str
+) -> tuple[list, Optional[dict]] | None:
+    """Успешный каталог (200 + разобранный список или пустой raw-массив)."""
+    if reply.status is None or not (200 <= reply.status < 300):
+        return None
+    parsed = _parse_reply_models(reply, parser)
+    payload = reply.payload if isinstance(reply.payload, dict) else {}
+    raw_models = _raw_models_collection(payload, path)
+    if not (parsed or isinstance(raw_models, list)):
+        return None
+    return parsed, payload if isinstance(payload, dict) else None
+
+
+def _raw_models_collection(payload: dict, path: str) -> Any:
+    source = payload.get("chat") if path == _CONFIG_PATH else payload
+    if not isinstance(source, dict):
+        return None
+    return source.get("models" if path == _CONFIG_PATH else "data")
+
+
+def _probe_fetch_fallback(
+    empty_catalog_status: Optional[int],
+    statuses: list,
+    net_errors: list,
+    latency: int,
+) -> FetchOutcome:
     if empty_catalog_status is not None:
         return FetchOutcome([], empty_catalog_status, "", latency)
     if 401 in statuses:
@@ -308,6 +397,25 @@ def probe_fetch(
         "; ".join(dict.fromkeys(net_errors)) or "нет соединения",
         latency,
     )
+
+
+def fetch_models_catalog(
+    completions_url: str,
+    auth_header: Optional[str],
+    *,
+    verify: bool | str = True,
+    config_proxy: Optional[str] = None,
+    http_get_ex: Optional[Callable] = None,
+) -> tuple[Optional[list], Optional[dict]]:
+    """Список id и сырое тело ответа — для формы модели (карточка JSON)."""
+    out = probe_fetch(
+        completions_url,
+        auth_header,
+        verify=verify,
+        config_proxy=config_proxy,
+        http_get_ex=http_get_ex,
+    )
+    return out.models, out.payload
 
 
 def probe_post(
@@ -362,7 +470,10 @@ def fetch_models(
 ):
     if http_get is None:
         return probe_fetch(
-            completions_url, auth_header, verify=verify, config_proxy=config_proxy
+            completions_url,
+            auth_header,
+            verify=verify,
+            config_proxy=config_proxy,
         ).models
     else:
         get = http_get
@@ -371,14 +482,14 @@ def fetch_models(
         return None
     headers = _headers(auth_header)
     try:
-        cfg = get(base + "/config", headers, verify)
+        cfg = get(base + _CONFIG_PATH, headers, verify)
         parsed = parse_config_models(cfg)
         if parsed:
             return parsed
     except Exception:
         pass
     try:
-        lst = get(base + "/models", headers, verify)
+        lst = get(base + _MODELS_PATH, headers, verify)
         return parse_models_list(lst)
     except Exception:
         pass

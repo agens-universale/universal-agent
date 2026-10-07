@@ -26,7 +26,9 @@ def make_cached_fetch(fetch):
         if not refresh and key in _CACHE:
             return _CACHE[key]
         models = fetch(url, auth, verify=verify, config_proxy=config_proxy)
-        if models:
+        # Кортеж (models, payload) из каталога формы — кэшируем по списку id.
+        cacheable = models[0] if isinstance(models, tuple) else models
+        if cacheable:
             _CACHE[key] = models
         return models
 

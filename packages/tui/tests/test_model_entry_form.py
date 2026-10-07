@@ -119,6 +119,68 @@ async def test_strip_shortcut_survives_every_switch():
             assert "Space — переключить" in text
 
 
+async def test_summary_trigger_fields_default_zero_and_hint():
+    form = _form(initial={"alias": "m"})
+    async with _harness(form).run_test() as pilot:
+        chars = form.query_one("#mef-summary-chars", Input)
+        tokens = form.query_one("#mef-summary-tokens", Input)
+        assert chars.value == "0"
+        assert tokens.value == "0"
+        assert "0 — порог не задан" in chars.placeholder
+        assert "0 — порог не задан" in tokens.placeholder
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 0
+        assert fields["summary_trigger_tokens"] == 0
+
+
+async def test_summary_trigger_fields_roundtrip_and_not_meta():
+    form = _form(
+        initial={
+            "alias": "m",
+            "model": "qwen",
+            "summary_trigger_chars": 100000,
+            "summary_trigger_tokens": 116128,
+        }
+    )
+    async with _harness(form).run_test() as pilot:
+        assert form.query_one("#mef-summary-chars", Input).value == "100000"
+        assert form.query_one("#mef-summary-tokens", Input).value == "116128"
+        meta = str(form.query_one("#mef-model-meta", Static).render())
+        assert "метаданных нет" in meta
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert fields["summary_trigger_chars"] == 100000
+        assert fields["summary_trigger_tokens"] == 116128
+        assert "meta" not in fields
+        assert all(
+            k not in fields for k in ("context", "context_length", "n_ctx")
+        )
+
+
+async def test_model_metadata_shows_raw_json_from_payload():
+    form = _form(initial={"alias": "m", "model": "qwen/qwen"})
+    form._models_payload = {
+        "data": [
+            {
+                "id": "qwen/qwen",
+                "context_length": 131072,
+                "architecture": {"modality": "text"},
+            }
+        ]
+    }
+    async with _harness(form).run_test() as pilot:
+        form._refresh_model_metadata()
+        meta = str(form.query_one("#mef-model-meta", Static).render())
+        assert '"id": "qwen/qwen"' in meta
+        assert "131072" in meta
+        assert "architecture" in meta
+        ok, _, fields = form.submit()
+        assert ok is True
+        assert "context_length" not in fields
+        assert fields["summary_trigger_chars"] == 0
+
+
 def _rows(form) -> list:
     """Строки списка моделей НА ЭКРАНЕ (фильтр гасит их через `display`)."""
     return [w for w in form.query(".mef-model-row") if w.display]
@@ -1782,6 +1844,8 @@ async def test_empty_model_id_means_the_alias_is_the_id():
             "auxiliary": None,
             "backend": None,
             "strip_think": None,
+            "summary_trigger_chars": 0,
+            "summary_trigger_tokens": 0,
         }
 
 

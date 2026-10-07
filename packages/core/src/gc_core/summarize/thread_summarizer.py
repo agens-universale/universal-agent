@@ -75,7 +75,7 @@ class _SummaryLimits:
             params, "max_accumulated_summary_chars", 20000
         )
         # Размер батча для инкрементальной суммаризации.
-        # По умолчанию нормализуется в config.py как int(trigger * 1.4).
+        # По умолчанию нормализуется в config.py как int(trigger * 1.2).
         self.batch_chars_limit = _int_param(
             params, "incremental_batch_chars", 10**12
         )

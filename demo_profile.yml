@@ -83,6 +83,10 @@ models:
     url: https://api.provider.example/v1/chat/completions
     token: "${ENV:DEEPSEEK_API_KEY}"
     strip_think: false                   # как дефолт кода: копировать мысль; true — вырезать
+    # Пороги сжатия по ходу хода на ЭТОЙ модели. 0 / нет ключа — шкала не задана;
+    # оба 0 — весь набор из глобального summary. Хотя бы одно > 0 — режим модели.
+    summary_trigger_chars: 0
+    summary_trigger_tokens: 116128
     main:
       temperature: 1.0
       top_p: 1.0

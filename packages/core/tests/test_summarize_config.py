@@ -143,16 +143,16 @@ def test_batch_from_chars_threshold_when_set():
         "  chat_completions_summary_trigger_chars: 200000\n"
         "  chat_completions_summary_trigger_tokens: 50000\n"
     )
-    assert params["incremental_batch_chars"] == 280000
+    assert params["incremental_batch_chars"] == 240000
 
 
 def test_batch_from_tokens_threshold_when_chars_off():
-    # Два символа на токен — тот же курс, что и в оценке хвоста; ×1.4 — как у символов.
+    # Два символа на токен — тот же курс, что и в оценке хвоста; ×1.2 — как у символов.
     params = _load_summary(
         "  chat_completions_summary_trigger_chars: 0\n"
         "  chat_completions_summary_trigger_tokens: 100000\n"
     )
-    assert params["incremental_batch_chars"] == 280000
+    assert params["incremental_batch_chars"] == 240000
 
 
 def test_explicit_batch_wins_over_tokens_threshold():

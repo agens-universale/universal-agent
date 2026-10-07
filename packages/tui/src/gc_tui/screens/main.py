@@ -1156,18 +1156,22 @@ class TraceScreen(Screen):
         if self._store is None or self._active_task_id is None:
             return None
         meta = self._store.get_task_meta(self._active_task_id)
-        from gc_core.summarize.config import (
-            parse_summary_trigger_chars,
-            parse_summary_trigger_tokens,
-            parse_summary_turn_end_trigger_chars,
-            parse_summary_turn_end_trigger_tokens,
-        )
+        from gc_core.summarize.config import resolve_summary_limits_for_router
 
-        # Токенная шкала — сохранённое число провайдера без хвоста. Числа нет
-        # или токенный порог выключен — символы, как раньше. Знаменатель шкалы —
-        # её mid-turn; mid-turn 0 подменяется её turn-end, и только тогда.
-        token_mid = parse_summary_trigger_tokens(cfg)
-        token_end = parse_summary_turn_end_trigger_tokens(cfg)
+        # Знаменатель — mid-turn активной шкалы резолва алиаса истории.
+        # mid-turn 0 подменяется turn-end той же шкалы.
+        router = None
+        display_router = getattr(self.app, "display_router", None)
+        if callable(display_router):
+            try:
+                router = display_router()
+            except Exception:
+                router = None
+        limits = resolve_summary_limits_for_router(
+            cfg, router, consumer="main"
+        )
+        token_mid = limits.tokens_during
+        token_end = limits.tokens_after
         saved_tokens = meta.get("last_main_prompt_tokens")
         if (
             not isinstance(saved_tokens, bool)
@@ -1180,9 +1184,7 @@ class TraceScreen(Screen):
                 return None
             return render_context_meter(saved_tokens, denominator)
 
-        threshold = parse_summary_trigger_chars(
-            cfg
-        ) or parse_summary_turn_end_trigger_chars(cfg)
+        threshold = limits.chars_during or limits.chars_after
         if threshold <= 0:
             return None
         # Источник символьной шкалы — meta.runtime.live_history_chars (persist).
@@ -4030,7 +4032,11 @@ class TraceScreen(Screen):
             and getattr(runner, "_last_target", None)
             == (self._active_task_id, self.app._system)
             and self._store is not None
-            and (self._store.get_task_meta(self._active_task_id).get("tui") or {}).get("status") == "running"
+            and (
+                self._store.get_task_meta(self._active_task_id).get("tui")
+                or {}
+            ).get("status")
+            == "running"
         )
         if (
             (self._was_running or _finished_before_poll)

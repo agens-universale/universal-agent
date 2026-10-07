@@ -24,12 +24,12 @@ from pydantic import (
 )
 
 from gc_core.config_modules.backend import BackendConfig
+from gc_core.config_modules.chat_completions import (
+    auxiliary_llm_from_config_dict,
+)
 from gc_core.config_modules.env_interpolation import (
     _FILE_MARKER,
     resolve_env_only,
-)
-from gc_core.config_modules.chat_completions import (
-    auxiliary_llm_from_config_dict,
 )
 from gc_core.config_modules.pricing import ModelTariff
 
@@ -95,7 +95,8 @@ def _parse_mapping_text(text: str) -> dict[str, Any] | None:
         mark = getattr(exc, "problem_mark", None)
         where = (
             f" (строка {mark.line + 1}, столбец {mark.column + 1})"
-            if mark else ""
+            if mark
+            else ""
         )
         raise ValueError(f"неверный YAML{where}") from exc
     if loaded is not None and not isinstance(loaded, dict):
@@ -422,6 +423,10 @@ class ModelEntry(BaseModel):
     # None — ключа нет, ход берёт глобальный strip_tags_projection.strip_think.
     # true — вырезать мысль из истории. false — копировать скрытое поле.
     strip_think: bool | None = None
+    # Mid-turn пороги сжатия на алиасе. 0 / нет ключа — шкала не задана.
+    # Хотя бы одно > 0 — режим модели (см. summarize.config.resolve_summary_limits).
+    summary_trigger_chars: int = 0
+    summary_trigger_tokens: int = 0
 
     @field_validator("strip_think", mode="before")
     @classmethod
@@ -433,6 +438,15 @@ class ModelEntry(BaseModel):
         raise ValueError(
             "strip_think: true, false или отсутствие ключа (глобальный флаг)"
         )
+
+    @field_validator("summary_trigger_chars", "summary_trigger_tokens")
+    @classmethod
+    def _summary_trigger_nonneg(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError(
+                "summary_trigger_chars/tokens: отрицательное недопустимо"
+            )
+        return value
 
     @field_validator("main", "auxiliary", mode="before")
     @classmethod
