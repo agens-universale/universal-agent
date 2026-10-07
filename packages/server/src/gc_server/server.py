@@ -296,7 +296,7 @@ async def get_run_status(system: str, task_id: str):
         )
 
     if temporal_registry is not None:
-        from gc_ua_temporalio.http_api import api_call
+        from gc_core_temporalio.http_api import api_call
 
         return await api_call(
             temporal_registry.legacy_status(sys_norm, task_norm)
@@ -478,7 +478,7 @@ async def events_webhook(request: Request):
     payload["system"] = system
 
     if temporal_registry is not None:
-        from gc_ua_temporalio.http_api import api_call
+        from gc_core_temporalio.http_api import api_call
 
         return await api_call(
             temporal_registry.webhook(system, task_id, payload)
@@ -647,7 +647,7 @@ async def get_thread_logs(system: str, task_id: str):
         )
 
     if temporal_registry is not None:
-        from gc_ua_temporalio.http_api import api_call
+        from gc_core_temporalio.http_api import api_call
 
         return await api_call(
             temporal_registry.legacy_logs(sys_norm, task_norm)

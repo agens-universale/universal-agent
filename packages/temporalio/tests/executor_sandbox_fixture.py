@@ -2,7 +2,7 @@
 
 from temporalio import workflow
 
-from gc_ua_temporalio import sandbox_passthrough  # noqa: F401
+from gc_core_temporalio import sandbox_passthrough  # noqa: F401
 
 from gc_core.agent_executor import AgentExecutor
 from gc_core.config_modules.root import AppConfig

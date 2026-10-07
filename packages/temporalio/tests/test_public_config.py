@@ -19,7 +19,7 @@ from gc_core.settings import (
     _alias_path,
     is_explicit,
 )
-from gc_ua_temporalio.public_config import (
+from gc_core_temporalio.public_config import (
     PublicConfigError,
     is_private_path,
     public_config_snapshot,

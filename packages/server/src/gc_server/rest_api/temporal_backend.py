@@ -8,11 +8,11 @@ def configure_temporal(app, config):
     backend = server.get("execution_backend", "local")
     if backend == "local":
         return None
-    if backend != "temporal-native":
+    if backend != "temporal":
         raise ValueError("Unknown server.execution_backend")
-    from gc_ua_temporalio.http_api import router
-    from gc_ua_temporalio.native_provider import NativeWorkerConfig
-    from gc_ua_temporalio.native_registry import NativeRunRegistry
+    from gc_core_temporalio.http_api import router
+    from gc_core_temporalio.provider import WorkerConfig
+    from gc_core_temporalio.registry import RunRegistry
 
     path = server.get("temporal_config")
     if not path:
@@ -22,8 +22,8 @@ def configure_temporal(app, config):
         source = config.get("config_path")
         base = Path(source).resolve().parent if source else Path.cwd()
         path = base / path
-    registry = NativeRunRegistry(
-        NativeWorkerConfig.load(path),
+    registry = RunRegistry(
+        WorkerConfig.load(path),
         profile=server.get("temporal_profile", "demo"),
         store_id=server.get("temporal_store"),
     )

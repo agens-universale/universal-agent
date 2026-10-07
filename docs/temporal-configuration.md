@@ -1,8 +1,8 @@
 # Настройка Temporal
 
-Пакет `gc-ua-temporalio` запускает настоящий агентский цикл `gc-core` через
-Temporal: worker `gc-temporal-native-worker`, клиент `gc-temporal-native`,
-server backend `temporal-native`. Прежний экспериментальный протокол
+Пакет `gc-core-temporalio` запускает настоящий агентский цикл `gc-core` через
+Temporal: worker `gc-temporal-worker`, клиент `gc-temporal`,
+server backend `temporal`. Прежний экспериментальный протокол
 (`gc-temporal-worker`, `gc-temporal`, server `temporal`) удалён вместе с его
 workflow; его histories не поддерживаются и не мигрируются.
 
@@ -14,8 +14,8 @@ workflow; его histories не поддерживаются и не мигри�
 
 ### Конфигурация и размещение
 
-Готовый [examples/native-worker.json](../packages/temporalio/examples/native-worker.json)
-читает `NativeWorkerConfig`. `profiles.production.core` — полный обычный
+Готовый [examples/worker.json](../packages/temporalio/examples/worker.json)
+читает `WorkerConfig`. `profiles.production.core` — полный обычный
 структурированный `AppConfig`, а не сокращённая схема. Неизвестные поля
 отклоняются при валидации. Пример не содержит секретов:
 
@@ -23,10 +23,10 @@ workflow; его histories не поддерживаются и не мигри�
 {
   "address": "localhost:7233",
   "namespace": "default",
-  "workflow_queue": "ua-native-workflow",
-  "model_queue": "ua-native-model",
-  "resource_queue": "ua-native-resource-local",
-  "worker_id": "native-local",
+  "workflow_queue": "ua-workflow",
+  "model_queue": "ua-model",
+  "resource_queue": "ua-resource-local",
+  "worker_id": "local",
   "state_dir": "${ENV:UA_NATIVE_STATE}",
   "thread_stores": {
     "files": {
@@ -106,23 +106,23 @@ export UA_MODEL_URL=https://your-provider/v1/chat/completions
 # UA_MODEL_API_TOKEN заранее предоставлен окружением/хранилищем секретов.
 mkdir -p "$UA_NATIVE_WORKSPACE" "$UA_NATIVE_STATE"
 cd "$UA_NATIVE_WORKSPACE"
-uv run --project "$UA_REPO" --extra temporal gc-temporal-native-worker \
-  --config "$UA_REPO/packages/temporalio/examples/native-worker.json"
+uv run --project "$UA_REPO" --extra temporal gc-temporal-worker \
+  --config "$UA_REPO/packages/temporalio/examples/worker.json"
 ```
 
 `uv run --project` выбирает Python project, **сохраняя cwd вызывающего процесса**;
 это проверено запуском Python из другого каталога. Не заменяйте его на
 `--directory "$UA_REPO"`: worker тогда окажется вне workspace. При установленном
-пакете можно вызвать `gc-temporal-native-worker` напрямую из workspace.
+пакете можно вызвать `gc-temporal-worker` напрямую из workspace.
 
 В другом терминале с тем же `UA_REPO`:
 
 ```bash
-uv run --project "$UA_REPO" --extra temporal gc-temporal-native \
+uv run --project "$UA_REPO" --extra temporal gc-temporal \
   --address localhost:7233 --namespace default \
-  --workflow-queue ua-native-workflow start \
+  --workflow-queue ua-workflow start \
   --profile production --store files --system cli --thread example \
-  --resource-queue ua-native-resource-local --model-queue ua-native-model \
+  --resource-queue ua-resource-local --model-queue ua-model \
   --prompt 'Прочитай README рабочей папки и кратко опиши проект'
 ```
 
@@ -132,7 +132,7 @@ uv run --project "$UA_REPO" --extra temporal gc-temporal-native \
 Старт с `--keep-alive` сохраняет сессию для `send WORKFLOW_ID --message-id UNIQUE_ID
 --text TEXT`; `close WORKFLOW_ID` закрывает её после принятой работы.
 `answer WORKFLOW_ID --request-id REQUEST_ID --answer TEXT` отвечает человеку.
-`unlock --config native-worker.json --system SYSTEM --thread THREAD` снимает
+`unlock --config worker.json --system SYSTEM --thread THREAD` снимает
 владение тредом у сессии, которой больше нет (terminate, падение процесса):
 после этого тред снова открывается локально в TUI/CLI. Живую сессию команда
 не трогает.
@@ -180,8 +180,8 @@ server:
   host: 127.0.0.1
   port: 8000
   auth_token: ${ENV:GC_REMOTE_TOKEN}
-  execution_backend: temporal-native
-  temporal_config: /absolute/path/native-worker.json
+  execution_backend: temporal
+  temporal_config: /absolute/path/worker.json
   temporal_profile: production
   temporal_store: files
 ```
@@ -205,7 +205,7 @@ HTTP API, под существующей Bearer-авторизацией сер
 | `PATCH /ui` | Только `title`, `pinned`, `archived` |
 | `GET /metrics` | То же, что `status` |
 
-Прямой SDK: `gc_ua_temporalio.native_client.NativeAgentClient` — методы `start`, `status`,
+Прямой SDK: `gc_core_temporalio.client.AgentClient` — методы `start`, `status`,
 `submit_message`, `answer_human`, `stop_turn`, `stop`, `close_session`, `result`,
 `submit_with_start`. Он получает уже
 подключённый `temporalio.client.Client`, поэтому встраивающее приложение может
@@ -213,7 +213,7 @@ HTTP API, под существующей Bearer-авторизацией сер
 
 ### Native HTTP backend
 
-`native-worker.json` — тот же `NativeWorkerConfig`, который загружает native
+`worker.json` — тот же `WorkerConfig`, который загружает native
 worker. `temporal_store` должен совпадать с `store_id` выбранного профиля.
 API-процессу нужен доступ к выбранному File/SQLite ThreadStore; модель и
 инструменты исполняет worker. Помещайте хранилище тредов вне workspace агента
@@ -282,11 +282,11 @@ workflow reset` на событие до хода.
 Worker Versioning; включается секцией `versioning`:
 
 ```json
-"versioning": {"enabled": true, "deployment_name": "ua-native"}
+"versioning": {"enabled": true, "deployment_name": "ua-agent"}
 ```
 
-Номер сборки по умолчанию — версия пакета `gc-ua-temporalio` и хэш исходников
-`gc_core` и `gc_ua_temporalio` (`0.4.0+a1b2c3d4e5f6`): правка кода без подъёма
+Номер сборки по умолчанию — версия пакета `gc-core-temporalio` и хэш исходников
+`gc_core` и `gc_core_temporalio` (`0.4.0+a1b2c3d4e5f6`): правка кода без подъёма
 версии — тоже новая сборка. `build_id` задаёт номер явно (например, git-коммит
 из CI). Без versioning воркер на старте предупреждает: изменённый код workflow
 доигрывает ходы, начатые старым, и может сломать их replay.
@@ -351,7 +351,7 @@ Worker Versioning; включается секцией `versioning`:
 проверяется на старте воркера; смена действует со следующего хода.
 
 Повтор всего workflow (`retry_policy`, `execution_timeout` в
-`NativeAgentClient.start`) по умолчанию не задан и не рекомендуется: ход
+`AgentClient.start`) по умолчанию не задан и не рекомендуется: ход
 начнётся заново с тем же входом, и уже выполненные эффекты повторятся.
 
 ### Размер истории Temporal

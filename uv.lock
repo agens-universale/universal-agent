@@ -22,12 +22,12 @@ members = [
     "gc-chat",
     "gc-cli",
     "gc-core",
+    "gc-core-temporalio",
     "gc-mcp",
     "gc-server",
     "gc-testkit",
     "gc-tui",
     "gc-ua",
-    "gc-ua-temporalio",
 ]
 
 [[package]]
@@ -1135,6 +1135,21 @@ requires-dist = [
 ]
 
 [[package]]
+name = "gc-core-temporalio"
+version = "0.4.0"
+source = { editable = "packages/temporalio" }
+dependencies = [
+    { name = "gc-core" },
+    { name = "temporalio" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gc-core", editable = "packages/core" },
+    { name = "temporalio", specifier = "==1.33.0" },
+]
+
+[[package]]
 name = "gc-mcp"
 version = "0.4.0"
 source = { editable = "packages/mcp" }
@@ -1230,15 +1245,15 @@ dependencies = [
 
 [package.optional-dependencies]
 temporal = [
-    { name = "gc-ua-temporalio" },
+    { name = "gc-core-temporalio" },
 ]
 
 [package.dev-dependencies]
 dev = [
     { name = "complexipy" },
     { name = "fastapi" },
+    { name = "gc-core-temporalio" },
     { name = "gc-testkit" },
-    { name = "gc-ua-temporalio" },
     { name = "harbor", marker = "python_full_version >= '3.12'" },
     { name = "httpie" },
     { name = "office-mcp" },
@@ -1267,8 +1282,8 @@ lint = [
 ]
 test = [
     { name = "fastapi" },
+    { name = "gc-core-temporalio" },
     { name = "gc-testkit" },
-    { name = "gc-ua-temporalio" },
     { name = "harbor", marker = "python_full_version >= '3.12'" },
     { name = "office-mcp" },
     { name = "psutil" },
@@ -1287,10 +1302,10 @@ requires-dist = [
     { name = "gc-chat", editable = "packages/chat" },
     { name = "gc-cli", editable = "packages/cli" },
     { name = "gc-core", editable = "packages/core" },
+    { name = "gc-core-temporalio", marker = "extra == 'temporal'", editable = "packages/temporalio" },
     { name = "gc-mcp", editable = "packages/mcp" },
     { name = "gc-server", editable = "packages/server" },
     { name = "gc-tui", editable = "packages/tui" },
-    { name = "gc-ua-temporalio", marker = "extra == 'temporal'", editable = "packages/temporalio" },
 ]
 provides-extras = ["temporal", "all"]
 
@@ -1298,8 +1313,8 @@ provides-extras = ["temporal", "all"]
 dev = [
     { name = "complexipy", specifier = ">=4" },
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gc-core-temporalio", editable = "packages/temporalio" },
     { name = "gc-testkit", editable = "packages/testkit" },
-    { name = "gc-ua-temporalio", editable = "packages/temporalio" },
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = ">=0.16" },
     { name = "httpie", specifier = ">=3.2.4" },
     { name = "office-mcp", editable = "packages/mcp/external/vendor/office-mcp" },
@@ -1328,8 +1343,8 @@ lint = [
 ]
 test = [
     { name = "fastapi", specifier = ">=0.115.0" },
+    { name = "gc-core-temporalio", editable = "packages/temporalio" },
     { name = "gc-testkit", editable = "packages/testkit" },
-    { name = "gc-ua-temporalio", editable = "packages/temporalio" },
     { name = "harbor", marker = "python_full_version >= '3.12'", specifier = ">=0.16" },
     { name = "office-mcp", editable = "packages/mcp/external/vendor/office-mcp" },
     { name = "psutil", specifier = ">=5.9,<7" },
@@ -1340,21 +1355,6 @@ test = [
     { name = "rich", specifier = ">=13" },
     { name = "textual", specifier = ">=0.55" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.31.1" },
-]
-
-[[package]]
-name = "gc-ua-temporalio"
-version = "0.4.0"
-source = { editable = "packages/temporalio" }
-dependencies = [
-    { name = "gc-core" },
-    { name = "temporalio" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gc-core", editable = "packages/core" },
-    { name = "temporalio", specifier = "==1.33.0" },
 ]
 
 [[package]]

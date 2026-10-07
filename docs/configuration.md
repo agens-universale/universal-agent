@@ -1287,4 +1287,4 @@ CLI-флаги (`--agent.max_steps 999` и т.п.) перебивают и globa
 
 Opt-in интеграция настраивается отдельно от локального `config.yml`: см.
 [профили, server и remote API](temporal-configuration.md) и
-[размещение worker и восстановление](temporal-native.md).
+[размещение worker и восстановление](temporal.md).

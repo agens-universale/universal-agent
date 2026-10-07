@@ -1,4 +1,4 @@
-# gc-ua-temporalio
+# gc-core-temporalio
 
 Опциональный Temporal runtime для Universal Agent. Native entrypoints запускают
 настоящие `AgentExecutor` и `ThreadSession` из `gc-core`; локальный режим остаётся
@@ -8,12 +8,12 @@
 (`gc_testkit.durable_thread_store_conformance`).
 
 - [Native quickstart, конфигурация и управление](../../docs/temporal-configuration.md#native-quickstart)
-- [Пример native-worker.json](examples/native-worker.json) — `${ENV:...}`, без секретов.
+- [Пример worker.json](examples/worker.json) — `${ENV:...}`, без секретов.
 - [Архитектура, проверки и ограничения](../../docs/temporal-architecture.md)
-- [Размещение worker и восстановление](../../docs/temporal-native.md)
+- [Размещение worker и восстановление](../../docs/temporal.md)
 
-`gc-temporal-native-worker` / `gc-temporal-native` используют native workflow.
-Server включает Temporal явно: `execution_backend: temporal-native`; TUI и
+`gc-temporal-worker` / `gc-temporal` используют native workflow.
+Server включает Temporal явно: `execution_backend: temporal`; TUI и
 `gc-cli` работают только локально.
 
 Сейчас native worker обслуживает workflow/model/resource queues одним процессом

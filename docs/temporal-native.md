@@ -22,9 +22,9 @@
 {
   "address": "localhost:7233",
   "namespace": "default",
-  "workflow_queue": "ua-native-workflow",
+  "workflow_queue": "ua-workflow",
   "resource_queue": "ua-native-resource-project",
-  "model_queue": "ua-native-model",
+  "model_queue": "ua-model",
   "worker_id": "project-host",
   "state_dir": "/absolute/state",
   "thread_stores": {
@@ -64,18 +64,18 @@ Workflow ссылается на профиль только по имени; к
 
 ```sh
 uv run --project /absolute/universal-agent --extra temporal \
-  gc-temporal-native-worker --config /absolute/native-worker.json
+  gc-temporal-worker --config /absolute/worker.json
 ```
 
 Либо из другого каталога с установленным пакетом используйте
-`gc-temporal-native-worker --config /absolute/native-worker.json` напрямую.
+`gc-temporal-worker --config /absolute/worker.json` напрямую.
 Фактический cwd процесса должен совпадать с workspace профиля.
 
 Запуск клиента:
 
 ```sh
 uv run --project /absolute/universal-agent --extra temporal \
-  gc-temporal-native start --profile project \
+  gc-temporal start --profile project \
   --system cli --thread example --store files \
   --resource-queue ua-native-resource-project \
   --prompt 'Прочитай README и опиши устройство проекта'

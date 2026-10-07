@@ -81,7 +81,7 @@ def _source_text() -> str:
         if "gc_core/config_modules/" in text or text.endswith(
             (
                 "gc_core/config.py",
-                "gc_ua_temporalio/public_config.py",
+                "gc_core_temporalio/public_config.py",
             )
         ):
             continue

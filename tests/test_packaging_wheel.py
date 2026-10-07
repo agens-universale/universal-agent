@@ -46,7 +46,7 @@ MANIFESTS = {
     "gc_tui": "packages/tui",
     "gc_server": "packages/server",
     "gc_mcp": "packages/mcp",
-    "gc_ua_temporalio": "packages/temporalio",
+    "gc_core_temporalio": "packages/temporalio",
     "gc_acp": "packages/acp",
     "gc_chat": "packages/chat",
 }
@@ -333,9 +333,9 @@ OWN_COMMANDS = {
     "gc_tui": {"gc-ua", "gc-voice"},
     "gc_server": {"gc-serve"},
     "gc_mcp": {"gc-mcp", "gc-mcp-install"},
-    "gc_ua_temporalio": {
-        "gc-temporal-native",
-        "gc-temporal-native-worker",
+    "gc_core_temporalio": {
+        "gc-temporal",
+        "gc-temporal-worker",
     },
     "gc_acp": {"gc-acp"},
     "gc_chat": {"gc-chat"},
@@ -385,7 +385,7 @@ def test_each_distribution_declares_only_its_own_commands():
                 *(
                     commands
                     for leaf, commands in OWN_COMMANDS.items()
-                    if leaf != "gc_ua_temporalio"
+                    if leaf != "gc_core_temporalio"
                 )
             )
             assert got == expected, sub
@@ -432,7 +432,7 @@ def test_meta_pulls_every_profile():
         f"gc-chat=={ver}",
     }
     assert root["project"]["optional-dependencies"]["temporal"] == [
-        f"gc-ua-temporalio=={ver}"
+        f"gc-core-temporalio=={ver}"
     ]
 
 

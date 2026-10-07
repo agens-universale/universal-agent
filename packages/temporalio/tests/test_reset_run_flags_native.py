@@ -6,16 +6,16 @@ import pytest
 from gc_core.run_summary_coordinator import areset_run_flags
 from gc_core.thread_store import ThreadSession
 from gc_core.thread_store_file_durable import DurableFileThreadStore
-from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
-from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
-from gc_ua_temporalio.thread_store_contracts import (
+from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_core_temporalio.thread_store_activities import ThreadStoreActivities
+from gc_core_temporalio.thread_store_contracts import (
     ThreadStoreCall,
     ThreadStoreReply,
 )
-from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
-from gc_ua_temporalio.thread_store_transport import _STORE_ERRORS
+from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
+from gc_core_temporalio.thread_store_transport import _STORE_ERRORS
 from temporalio.exceptions import ApplicationError
-from test_native_thread_store import wire
+from test_thread_store import wire
 
 
 @pytest.mark.parametrize("backend", ["file", "sqlite"])

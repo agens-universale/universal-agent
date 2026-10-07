@@ -11,7 +11,7 @@ from gc_core.thread_store_durable import (
     ThreadStoreOperationMismatch,
     ThreadStoreOwnershipError,
 )
-from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 
 
 def operation(identity="append", kind="append_messages", **payload):
@@ -199,7 +199,7 @@ def test_process_death_rolls_back_unacknowledged_batch(tmp_path):
     path = tmp_path / "s.sqlite"
     script = """
 import os, sys
-from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 from gc_core.thread_store_durable import ThreadStoreOperation
 class Crash(SQLiteThreadStore):
     def _after_messages(self, db):
@@ -230,7 +230,7 @@ def test_parallel_process_sidecars_share_sequence(tmp_path):
     SQLiteThreadStore(path)
     script = """
 import sys
-from gc_ua_temporalio.storage.sqlite import SQLiteThreadStore
+from gc_core_temporalio.storage.sqlite import SQLiteThreadStore
 store = SQLiteThreadStore(sys.argv[1])
 for index in range(5):
     store.append_subagent_trace("s", "t", parent_call_id="p", child_run_id=sys.argv[2], kind="event", payload={"i": index})
@@ -248,13 +248,15 @@ for index in range(5):
 
 def test_sqlite_temporal_wire_conformance(tmp_path):
     from gc_testkit.thread_store_conformance import assert_conforms_async
-    from gc_ua_temporalio.thread_store_activities import ThreadStoreActivities
-    from gc_ua_temporalio.thread_store_contracts import (
+    from gc_core_temporalio.thread_store_activities import (
+        ThreadStoreActivities,
+    )
+    from gc_core_temporalio.thread_store_contracts import (
         ThreadStoreCall,
         ThreadStoreReply,
     )
-    from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
-    from gc_ua_temporalio.thread_store_transport import _STORE_ERRORS
+    from gc_core_temporalio.thread_store_proxy import TemporalThreadStore
+    from gc_core_temporalio.thread_store_transport import _STORE_ERRORS
     from temporalio.converter import DataConverter
     from temporalio.exceptions import ApplicationError
 

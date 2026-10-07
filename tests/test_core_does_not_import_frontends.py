@@ -35,7 +35,13 @@ import pathlib
 
 from gc_testkit.paths import REPO
 
-FRONTENDS = {"gc_cli", "gc_tui", "gc_server", "gc_ua_temporalio", "temporalio"}
+FRONTENDS = {
+    "gc_cli",
+    "gc_tui",
+    "gc_server",
+    "gc_core_temporalio",
+    "temporalio",
+}
 
 
 def _frontend_imports(path: pathlib.Path) -> list[str]:

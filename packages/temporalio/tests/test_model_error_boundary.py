@@ -23,7 +23,7 @@ from gc_core.utils.backend_errors import (
     is_retriable_backend_error,
 )
 from gc_core.utils.chat_completions_stream import BackendStreamError
-from gc_ua_temporalio.model_error_encoding import encode_model_failure
+from gc_core_temporalio.model_error_encoding import encode_model_failure
 from temporalio.converter import value_to_type
 
 

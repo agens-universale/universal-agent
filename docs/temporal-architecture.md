@@ -8,15 +8,15 @@
 
 Основное решение: **один `AgentExecutor`, один `ThreadSession`, один агентский цикл**.
 Temporal меняет только исполнителя внешних операций: модель, внешние эффекты
-инструментов, I/O хранилища и подготовку контекста. Пакет `gc-ua-temporalio`
+инструментов, I/O хранилища и подготовку контекста. Пакет `gc-core-temporalio`
 связывает штатное ядро с workflow и activities; бизнес-правила остаются в `gc_core`.
 Тот же принцип у Pydantic AI (`TemporalDurability`) и у Deep Agents
 (`temporalio.contrib.deepagents`).
 
 **Temporal — опциональный backend.** SDK, CLI, server и TUI по умолчанию работают
 локально и к Temporal Server не обращаются. TUI и `gc-cli` работают только локально;
-Temporal включается worker'ом `gc-temporal-native-worker`, клиентом
-`gc-temporal-native` или server backend `execution_backend: temporal-native`.
+Temporal включается worker'ом `gc-temporal-worker`, клиентом
+`gc-temporal` или server backend `execution_backend: temporal`.
 
 ## С чего начать изучение
 
@@ -28,7 +28,7 @@ Temporal включается worker'ом `gc-temporal-native-worker`, клие�
    [раздела 2](#2-порты-операций-один-код-два-исполнителя).
 2. **Запустить и посмотреть.** Поднимите dev-сервер и worker по
    [quickstart](temporal-configuration.md#native-quickstart), отправьте одно
-   сообщение клиентом `gc-temporal-native start` и откройте ход в Temporal UI
+   сообщение клиентом `gc-temporal start` и откройте ход в Temporal UI
    (`http://localhost:8233`): каждая activity подписана (`Model: …`, `Tool: …`,
    `Guard: …`, `Thread store: …`) — это и есть таблица
    [Activities](#activities) в живом виде.
@@ -38,8 +38,8 @@ Temporal включается worker'ом `gc-temporal-native-worker`, клие�
    хранилища: тред и история Temporal).
 4. **Код.** Пять файлов из [раздела 13](#13-с-каких-файлов-начинать) по порядку,
    затем тема, которая нужна (guards, субагенты, MCP, хранилища).
-5. **Поведение в тестах.** `test_native_workflow_live.py` (ход на настоящем
-   Temporal + replay) и `test_native_parity_live.py` (local и Temporal на одних
+5. **Поведение в тестах.** `test_workflow_live.py` (ход на настоящем
+   Temporal + replay) и `test_parity_live.py` (local и Temporal на одних
    ответах модели) — самые короткие исполняемые описания.
 
 ## 0. Как устроен штатный агент без Temporal
@@ -95,19 +95,19 @@ post-run шаге вызывающий использует `account_run=False`,
 
 | Элемент | Что это |
 |---|---|
-| [`NativeAgentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_workflow.py) | Сессия: очередь сообщений, ответы человека, stop/close, один ход за run. Внутри хода — настоящий `AgentExecutor.arun`. |
-| [`NativeSubagentWorkflow`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py) | Субагент: настоящий `SubagentRunner.arun` в child workflow. |
-| [`native_worker`](../packages/temporalio/src/gc_ua_temporalio/native_worker.py) | Один процесс обслуживает все три очереди и один workspace; cwd должен совпадать с `profiles.<name>.workspace`. |
-| [`NativeContextProvider`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) | Собирает на worker'е штатный `acreate_run_context` по профилю воркера: workflow знает только имя профиля (как Pydantic AI — модель по ключу реестра). Смена настроек или токена — перезапуск воркера, живые сессии продолжают работу. |
-| [`NativeMaintenance`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) | Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит служебные записи журнала тредов старше 7 дней. |
+| [`AgentWorkflow`](../packages/temporalio/src/gc_core_temporalio/workflow.py) | Сессия: очередь сообщений, ответы человека, stop/close, один ход за run. Внутри хода — настоящий `AgentExecutor.arun`. |
+| [`SubagentWorkflow`](../packages/temporalio/src/gc_core_temporalio/child_workflow.py) | Субагент: настоящий `SubagentRunner.arun` в child workflow. |
+| [`worker`](../packages/temporalio/src/gc_core_temporalio/worker.py) | Один процесс обслуживает все три очереди и один workspace; cwd должен совпадать с `profiles.<name>.workspace`. |
+| [`ContextProvider`](../packages/temporalio/src/gc_core_temporalio/provider.py) | Собирает на worker'е штатный `acreate_run_context` по профилю воркера: workflow знает только имя профиля (как Pydantic AI — модель по ключу реестра). Смена настроек или токена — перезапуск воркера, живые сессии продолжают работу. |
+| [`WorkerMaintenance`](../packages/temporalio/src/gc_core_temporalio/maintenance.py) | Фон воркера раз в 10 минут: освобождает контекст хода, чей workflow уже не исполняется (terminate посреди хода), вместе с MCP-процессами; чистит служебные записи журнала тредов старше 7 дней. |
 | ThreadStore | История диалога. `DurableFileThreadStore`, `SQLiteThreadStore` или своя реализация durable-контракта ([раздел 7](#7-хранение-тред-и-история-temporal)). По умолчанию — каталог `threads` в `state_dir` (по умолчанию — каталог конфига воркера), не в workspace агента. Своей базы у воркера нет: результаты activities хранит история Temporal. |
-| [`native_activity_config`](../packages/temporalio/src/gc_ua_temporalio/native_activity_config.py) | Таймауты и повторы activities по уровням (`model`, `resource`, `thread_store`, инструмент) — как `ActivityConfig` у Pydantic AI; в workflow приходят с подготовкой хода. |
-| [`message_refs`](../packages/temporalio/src/gc_ua_temporalio/message_refs.py) | Вход activity модели: новые сообщения целиком, уже переданные и прочитанные из треда — хэш-ссылкой; воркер держит сообщения хода в памяти. Вместе со страничным чтением треда и потолком вывода инструмента (1 МБ) держит записи истории меньше лимита Temporal (2 МБ) без отдельного хранилища payload. |
+| [`activity_config`](../packages/temporalio/src/gc_core_temporalio/activity_config.py) | Таймауты и повторы activities по уровням (`model`, `resource`, `thread_store`, инструмент) — как `ActivityConfig` у Pydantic AI; в workflow приходят с подготовкой хода. |
+| [`message_refs`](../packages/temporalio/src/gc_core_temporalio/message_refs.py) | Вход activity модели: новые сообщения целиком, уже переданные и прочитанные из треда — хэш-ссылкой; воркер держит сообщения хода в памяти. Вместе со страничным чтением треда и потолком вывода инструмента (1 МБ) держит записи истории меньше лимита Temporal (2 МБ) без отдельного хранилища payload. |
 
 ## 2. Порты операций: один код, два исполнителя
 
 Ядро не импортирует Temporal. Порты заполняет
-[`assemble_native_context`](../packages/temporalio/src/gc_ua_temporalio/native_context.py)
+[`assemble_context`](../packages/temporalio/src/gc_core_temporalio/context.py)
 через штатный `assemble_run_context`; без портов (локально) ядро вызывает те же
 функции напрямую. Чистые инструменты (memory, todo, calculator) исполняются в
 workflow и activities не порождают.
@@ -118,7 +118,7 @@ workflow и всё, что он импортирует, загружаются �
 readability на уровне модулей, как в develop, хотя workflow ими не пользуется:
 модель, инструменты и MCP идут через activities. Поэтому модули workflow первым
 делом импортируют
-[`sandbox_passthrough`](../packages/temporalio/src/gc_ua_temporalio/sandbox_passthrough.py):
+[`sandbox_passthrough`](../packages/temporalio/src/gc_core_temporalio/sandbox_passthrough.py):
 эти сторонние пакеты песочница берёт готовыми из процесса worker'а (тот же приём
 у `temporalio.contrib.deepagents`). Код самого ядра по-прежнему загружается в
 песочнице и проходит её проверки
@@ -133,7 +133,7 @@ readability на уровне модулей, как в develop, хотя workfl
 приходит в `ToolStateView.vision`, снимок возвращается в хвост батча через
 `StateDelta.pending_tool_attachments`. Картиночные отказы модели классифицируются
 на worker'е и приходят в workflow полями `ModelFailure.image_*`. Журнал правок
-(`agent_edits`) в durable-исполнении выключен: `NativeContextProvider` гасит
+(`agent_edits`) в durable-исполнении выключен: `ContextProvider` гасит
 `agent_edits.record` в профиле.
 
 ### Activities
@@ -154,7 +154,7 @@ readability на уровне модулей, как в develop, хотя workfl
 | `agent.subagent.prepare` | resource | Подготовка роли и контекста субагента | до 5 |
 | `agent.context.close`, `agent.context.release` | resource | Закрытие MCP и освобождение ресурсов хода | до 5 |
 
-Имена закреплены тестом [`test_native_names.py`](../packages/temporalio/tests/test_native_names.py):
+Имена закреплены тестом [`test_names.py`](../packages/temporalio/tests/test_names.py):
 это данные совместимости живых сессий. Подписи в Temporal UI безопасны —
 без промптов, содержимого файлов и credentials.
 
@@ -165,7 +165,7 @@ finish gate и учёт делает `AgentExecutor`. Workflow отвечает 
 сообщений, ожидания, stop/close и Continue-As-New.
 
 **Continue-As-New после каждого хода.** Новый run получает только состояние
-доставки ([`NativeResume`](../packages/temporalio/src/gc_ua_temporalio/native_contracts.py)):
+доставки ([`SessionResume`](../packages/temporalio/src/gc_core_temporalio/contracts.py)):
 принятые ID сообщений, ответы человека, недоставленные сообщения, эпоху владельца
 треда. Диалог уже лежит в ThreadStore, переносить его не нужно. Списки
 дедупликации ограничены последними 1000 записями. Простаивающая сессия держит
@@ -212,7 +212,7 @@ worker'а модель получает `ResourceOwnerLost` и может про
 состояние MCP-сервера не восстанавливается. Фоновый владелец создаётся лениво.
 Владелец хода — `<workflow ID>/<первый run цепочки>/turn-N`: новая сессия на том
 же workflow ID не наследует контекст и ресурсы прошлой. Контекст сессии, снятой
-terminate посреди хода, освобождает `NativeMaintenance`.
+terminate посреди хода, освобождает `WorkerMaintenance`.
 
 ## 6. Субагент в child workflow
 
@@ -251,7 +251,7 @@ handle, ждёт его, а сигнал неактивного ребёнка �
 |---|---|---|
 | [`FileThreadStore`](../packages/core/src/gc_core/thread_store_file.py) | local по умолчанию | Как в develop: `data_*.jsonl`, `meta_*.json`, без журнала. В тред, которым владеет Temporal, не пишет. |
 | [`DurableFileThreadStore`](../packages/core/src/gc_core/thread_store_file_durable.py) | Temporal, один хост | Те же файлы + `.store/`: квитанции, журнал прерванной записи, владелец. |
-| [`SQLiteThreadStore`](../packages/temporalio/src/gc_ua_temporalio/storage/sqlite.py) | Temporal | Транзакции SQLite. |
+| [`SQLiteThreadStore`](../packages/temporalio/src/gc_core_temporalio/storage/sqlite.py) | Temporal | Транзакции SQLite. |
 
 
 **Когда писать тред** — `thread_store.persist` в профиле:
@@ -270,7 +270,7 @@ replay восстанавливает буфер; при сбое коммита
 **Сброс треда** в durable-хранилище убирает то же, что локальный: файлы истории,
 картинки треда, журнал правок. Квитанции прошлого поколения остаются (поздний
 повтор операции получает прежний исход), но без meta треда. Квитанции старше
-7 дней удаляет `NativeMaintenance`.
+7 дней удаляет `WorkerMaintenance`.
 
 ## 8. Ошибки, повторы и неизвестный исход
 
@@ -297,15 +297,15 @@ replay восстанавливает буфер; при сбое коммита
 
 ## 9. Сервер и клиент
 
-`execution_backend: temporal-native` монтирует HTTP API
-[`http_api`](../packages/temporalio/src/gc_ua_temporalio/http_api.py) и
+`execution_backend: temporal` монтирует HTTP API
+[`http_api`](../packages/temporalio/src/gc_core_temporalio/http_api.py) и
 переводит `/events/webhook`, `/runs`, `/logs` на Temporal. Сообщение отправляется
 через **Update-With-Start**: одна атомарная операция «доставить, при необходимости
 открыв сессию». Закрытая или упавшая сессия с тем же ID начинается новым run и
 продолжает тот же тред. Статусы: `idle`/`completed` → `completed`,
 `stopped` → `cancelled`, `failed` → `failed`.
 
-Команды клиента: `gc-temporal-native start | status | result | stop | answer | close | send | unlock`
+Команды клиента: `gc-temporal start | status | result | stop | answer | close | send | unlock`
 (`unlock` снимает владение тредом у сессии, которой больше нет — для локального TUI/CLI);
 `--config` (JSON воркера) нужен `unlock`: он находит хранилище тредов.
 Ошибки update и query сессии (устаревший ход, сессия ещё не готова) API отдаёт
@@ -315,8 +315,8 @@ replay восстанавливает буфер; при сбое коммита
 ## 10. Конфигурация
 
 [Native quickstart и настройки](temporal-configuration.md#native-quickstart),
-[размещение worker'а](temporal-native.md), пример
-[`native-worker.json`](../packages/temporalio/examples/native-worker.json).
+[размещение worker'а](temporal.md), пример
+[`worker.json`](../packages/temporalio/examples/worker.json).
 
 ## 11. Ограничения
 
@@ -328,7 +328,7 @@ replay восстанавливает буфер; при сбое коммита
 - Запрос к модели может быть оплачен дважды при падении после ответа.
 - Worker Versioning включается секцией `versioning` (по умолчанию выключен):
   ход закреплён за сборкой, где начался, следующий ход идёт на текущей; номер
-  сборки — версия пакета `gc-ua-temporalio` и хэш исходников. Без versioning ход, идущий в
+  сборки — версия пакета `gc-core-temporalio` и хэш исходников. Без versioning ход, идущий в
   момент несовместимого релиза, ждёт исправленного воркера.
 - Настройки профиля воркер берёт из своего JSON при каждой activity: смена
   настроек или токена — перезапуск воркера, живые сессии продолжают работу.
@@ -425,20 +425,20 @@ replay восстанавливает буфер; при сбое коммита
 
 Быстрый путь — пять файлов в таком порядке:
 
-1. [`native_worker.py`](../packages/temporalio/src/gc_ua_temporalio/native_worker.py) —
-   `build_native_runtime` и `worker_options`: что поднимает worker, какие хранилища и
+1. [`worker.py`](../packages/temporalio/src/gc_core_temporalio/worker.py) —
+   `build_runtime` и `worker_options`: что поднимает worker, какие хранилища и
    activities на каких очередях.
-2. [`native_provider.py`](../packages/temporalio/src/gc_ua_temporalio/native_provider.py) —
-   `NativeWorkerConfig`/`NativeProfile` (конфиг worker'а) и `NativeContextProvider`:
+2. [`provider.py`](../packages/temporalio/src/gc_core_temporalio/provider.py) —
+   `WorkerConfig`/`AgentProfile` (конфиг worker'а) и `ContextProvider`:
    как профиль превращается в штатный `RunContext` на worker'е.
-3. [`native_workflow.py`](../packages/temporalio/src/gc_ua_temporalio/native_workflow.py) —
-   `NativeAgentWorkflow`: `run` → `_run_session` → `_run_turn` → `AgentExecutor.arun`;
+3. [`workflow.py`](../packages/temporalio/src/gc_core_temporalio/workflow.py) —
+   `AgentWorkflow`: `run` → `_run_session` → `_run_turn` → `AgentExecutor.arun`;
    signals/updates (`submit_message`, `answer_human`, `stop`, `close_session`).
-4. [`native_operations.py`](../packages/temporalio/src/gc_ua_temporalio/native_operations.py) —
-   `NativeOperations`: как порты ядра (модель, инструмент, guard, промпты) становятся
+4. [`operations.py`](../packages/temporalio/src/gc_core_temporalio/operations.py) —
+   `WorkflowOperations`: как порты ядра (модель, инструмент, guard, промпты) становятся
    вызовами activities.
-5. [`native_activities.py`](../packages/temporalio/src/gc_ua_temporalio/native_activities.py) —
-   `NativeActivities`: что исполняется на worker'е (`_prepare`, `_model`, `_tool`, `_guard`).
+5. [`activities.py`](../packages/temporalio/src/gc_core_temporalio/activities.py) —
+   `AgentActivities`: что исполняется на worker'е (`_prepare`, `_model`, `_tool`, `_guard`).
 
 Дальше по темам:
 
@@ -446,24 +446,24 @@ replay восстанавливает буфер; при сбое коммита
 |---|---|
 | Граница ядра (порты и контракты) | [`execution/contracts.py`](../packages/core/src/gc_core/execution/contracts.py) (DTO операций), [`execution/model.py`](../packages/core/src/gc_core/execution/model.py) (модельный запрос и `MODEL_STATE_FIELDS`), [`execution/tool_effects.py`](../packages/core/src/gc_core/execution/tool_effects.py) (эффект инструмента на worker'е), [`execution/reducers.py`](../packages/core/src/gc_core/execution/reducers.py) (применение результатов к `State`), [`context_preparation.py`](../packages/core/src/gc_core/context_preparation.py) и [`run_context.py`](../packages/core/src/gc_core/run_context.py) (`assemble_run_context`) |
 | Цикл хода в ядре | [`agent_executor.py`](../packages/core/src/gc_core/agent_executor.py), [`execution/loop.py`](../packages/core/src/gc_core/execution/loop.py), [`execution/policy.py`](../packages/core/src/gc_core/execution/policy.py), [`execution/state.py`](../packages/core/src/gc_core/execution/state.py) (снимок `State`) |
-| Песочница и сборка контекста workflow | [`sandbox_passthrough.py`](../packages/temporalio/src/gc_ua_temporalio/sandbox_passthrough.py), [`native_context.py`](../packages/temporalio/src/gc_ua_temporalio/native_context.py), [`public_config.py`](../packages/temporalio/src/gc_ua_temporalio/public_config.py) (что из настроек попадает в историю), [`execution/environment.py`](../packages/core/src/gc_core/execution/environment.py) (детерминированные id и время) |
+| Песочница и сборка контекста workflow | [`sandbox_passthrough.py`](../packages/temporalio/src/gc_core_temporalio/sandbox_passthrough.py), [`context.py`](../packages/temporalio/src/gc_core_temporalio/context.py), [`public_config.py`](../packages/temporalio/src/gc_core_temporalio/public_config.py) (что из настроек попадает в историю), [`execution/environment.py`](../packages/core/src/gc_core/execution/environment.py) (детерминированные id и время) |
 | Guards | [`security/guard_probe.py`](../packages/core/src/gc_core/security/guard_probe.py): `probe_step` (запрос фактов из guard'а) и `evaluate_guard_probe` (факты на worker'е); guard'ы — `security/path_policy.py`, `read_guard.py`, `command_guard.py` |
-| Ошибки модели | [`model_error_encoding.py`](../packages/temporalio/src/gc_ua_temporalio/model_error_encoding.py) (классификация на worker'е → `ModelFailure`) |
-| Тред и хранилища | [`thread_store_proxy.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_proxy.py) и [`thread_store_transport.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_transport.py) (сторона workflow), [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), [`thread_store_durable.py`](../packages/core/src/gc_core/thread_store_durable.py) (контракт), [`storage/sqlite.py`](../packages/temporalio/src/gc_ua_temporalio/storage/sqlite.py), [`thread_store_file_durable.py`](../packages/core/src/gc_core/thread_store_file_durable.py) и [`thread_store_journal.py`](../packages/core/src/gc_core/thread_store_journal.py), [`durable_thread_store_conformance.py`](../packages/testkit/src/gc_testkit/durable_thread_store_conformance.py) |
+| Ошибки модели | [`model_error_encoding.py`](../packages/temporalio/src/gc_core_temporalio/model_error_encoding.py) (классификация на worker'е → `ModelFailure`) |
+| Тред и хранилища | [`thread_store_proxy.py`](../packages/temporalio/src/gc_core_temporalio/thread_store_proxy.py) и [`thread_store_transport.py`](../packages/temporalio/src/gc_core_temporalio/thread_store_transport.py) (сторона workflow), [`thread_store_activities.py`](../packages/temporalio/src/gc_core_temporalio/thread_store_activities.py), [`thread_store_durable.py`](../packages/core/src/gc_core/thread_store_durable.py) (контракт), [`storage/sqlite.py`](../packages/temporalio/src/gc_core_temporalio/storage/sqlite.py), [`thread_store_file_durable.py`](../packages/core/src/gc_core/thread_store_file_durable.py) и [`thread_store_journal.py`](../packages/core/src/gc_core/thread_store_journal.py), [`durable_thread_store_conformance.py`](../packages/testkit/src/gc_testkit/durable_thread_store_conformance.py) |
 | MCP и фоновые процессы | [`execution/resource_host.py`](../packages/core/src/gc_core/execution/resource_host.py), [`connect_mcp/durable_scope.py`](../packages/core/src/gc_core/tools/connect_mcp/durable_scope.py) |
-| Субагенты | [`native_child_workflow.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_workflow.py), [`native_child_transport.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_transport.py), [`native_child_preparation.py`](../packages/temporalio/src/gc_ua_temporalio/native_child_preparation.py) |
-| Размер истории | [`message_refs.py`](../packages/temporalio/src/gc_ua_temporalio/message_refs.py) (ссылки во входе модели), страницы треда — `_state_page` в [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), `cap_tool_output` в [`native_activities.py`](../packages/temporalio/src/gc_ua_temporalio/native_activities.py) |
-| Отказы и обслуживание | `session_failure` в [`native_operations.py`](../packages/temporalio/src/gc_ua_temporalio/native_operations.py) (что делает run FAILED), захват треда — `_claim` в [`thread_store_activities.py`](../packages/temporalio/src/gc_ua_temporalio/thread_store_activities.py), [`native_maintenance.py`](../packages/temporalio/src/gc_ua_temporalio/native_maintenance.py) |
-| Клиент и сервер | [`native_client.py`](../packages/temporalio/src/gc_ua_temporalio/native_client.py), [`http_api.py`](../packages/temporalio/src/gc_ua_temporalio/http_api.py) |
-| Конфиг worker'а | [пример `native-worker.json`](../packages/temporalio/examples/native-worker.json), [`temporal-configuration.md`](temporal-configuration.md) |
+| Субагенты | [`child_workflow.py`](../packages/temporalio/src/gc_core_temporalio/child_workflow.py), [`child_transport.py`](../packages/temporalio/src/gc_core_temporalio/child_transport.py), [`child_preparation.py`](../packages/temporalio/src/gc_core_temporalio/child_preparation.py) |
+| Размер истории | [`message_refs.py`](../packages/temporalio/src/gc_core_temporalio/message_refs.py) (ссылки во входе модели), страницы треда — `_state_page` в [`thread_store_activities.py`](../packages/temporalio/src/gc_core_temporalio/thread_store_activities.py), `cap_tool_output` в [`activities.py`](../packages/temporalio/src/gc_core_temporalio/activities.py) |
+| Отказы и обслуживание | `session_failure` в [`operations.py`](../packages/temporalio/src/gc_core_temporalio/operations.py) (что делает run FAILED), захват треда — `_claim` в [`thread_store_activities.py`](../packages/temporalio/src/gc_core_temporalio/thread_store_activities.py), [`maintenance.py`](../packages/temporalio/src/gc_core_temporalio/maintenance.py) |
+| Клиент и сервер | [`client.py`](../packages/temporalio/src/gc_core_temporalio/client.py), [`http_api.py`](../packages/temporalio/src/gc_core_temporalio/http_api.py) |
+| Конфиг worker'а | [пример `worker.json`](../packages/temporalio/examples/worker.json), [`temporal-configuration.md`](temporal-configuration.md) |
 
 Тесты, которые лучше всего показывают поведение целиком:
-[`test_native_workflow_live.py`](../packages/temporalio/tests/test_native_workflow_live.py)
+[`test_workflow_live.py`](../packages/temporalio/tests/test_workflow_live.py)
 (ход на настоящем Temporal + replay),
-[`test_native_ownership_live.py`](../packages/temporalio/tests/test_native_ownership_live.py)
-и [`test_native_failure_policy_live.py`](../packages/temporalio/tests/test_native_failure_policy_live.py)
+[`test_ownership_live.py`](../packages/temporalio/tests/test_ownership_live.py)
+и [`test_failure_policy_live.py`](../packages/temporalio/tests/test_failure_policy_live.py)
 (владение тредом и политика отказов),
-[`test_native_parity_live.py`](../packages/temporalio/tests/test_native_parity_live.py)
+[`test_parity_live.py`](../packages/temporalio/tests/test_parity_live.py)
 (local и Temporal на одних ответах модели),
-[`test_native_names.py`](../packages/temporalio/tests/test_native_names.py)
+[`test_names.py`](../packages/temporalio/tests/test_names.py)
 (закреплённые имена activities и workflow).
