@@ -90,23 +90,29 @@ class SQLiteDurableOperations:
         )
 
     def read_snapshot(self, system_id, thread_id, *, include_state=True):
-        with self.transaction() as db:
-            row = self._row(db, system_id, thread_id)
-            control = self._control(db, system_id, thread_id)
-            maximum = db.execute(
-                _SELECT_MAX_SEQ,
-                (system_id, thread_id),
-            ).fetchone()[0]
+        # Чтение без блокировки записи и без вставки строк: статус и история
+        # по любому ID не должны ни ждать писателя, ни заводить пустой тред.
+        # Нет строки — те же значения, что у только что созданной.
+        with self.transaction(readonly=True) as db:
+            key = (system_id, thread_id)
+            row = db.execute(
+                "SELECT * FROM threads WHERE system=? AND thread=?", key
+            ).fetchone()
+            control = db.execute(
+                "SELECT * FROM durable_control WHERE system=? AND thread=?",
+                key,
+            ).fetchone()
+            maximum = db.execute(_SELECT_MAX_SEQ, key).fetchone()[0]
             return ThreadStoreSnapshot(
-                meta=json.loads(row["meta"]),
+                meta=json.loads(row["meta"]) if row else {},
                 state=self._state(db, system_id, thread_id)
                 if include_state
                 else None,
-                revision=control["revision"],
-                generation=control["generation"],
+                revision=control["revision"] if control else 0,
+                generation=control["generation"] if control else 0,
                 max_seq=maximum,
-                owner_id=row["owner"],
-                owner_epoch=row["epoch"],
+                owner_id=row["owner"] if row else None,
+                owner_epoch=row["epoch"] if row else 0,
             )
 
     def commit_operation(self, system_id, thread_id, operation):

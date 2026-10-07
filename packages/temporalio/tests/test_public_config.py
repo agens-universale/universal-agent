@@ -382,3 +382,15 @@ def test_model_auxiliary_and_os_backend_env_do_not_leak_into_history():
         )
     )
     assert "SECRET" not in json.dumps(snapshot.settings)
+
+
+@pytest.mark.parametrize(
+    "kind", ["local", "harbor", "docker", "ssh", "exec", "sandbox"]
+)
+def test_runtime_backend_kind_from_schema_is_public(kind):
+    snapshot = public_config_snapshot(
+        LoadedSettings(
+            settings=AppConfig(), runtime=RuntimeEnv(os_backend=kind)
+        )
+    )
+    assert snapshot.runtime["os_backend"] == kind

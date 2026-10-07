@@ -1,12 +1,14 @@
 """External operations of the real core executor. No agent loop lives here."""
 
 import asyncio
+import json
 from collections import OrderedDict
 from contextlib import asynccontextmanager, suppress
 from copy import deepcopy
 from dataclasses import asdict
 from types import SimpleNamespace
 
+from gc_core.constants.tool_names import EXEC_FETCH_URL_NAME
 from gc_core.context_preparation import PreparedRunContext
 from gc_core.execution.contracts import (
     ExecutionFailure,
@@ -71,6 +73,58 @@ def cap_tool_output(result, limit=TOOL_OUTPUT_LIMIT_BYTES):
     return result
 
 
+#: Память воркера под кэш страниц ``fetch_url`` всех сессий (байты JSON).
+FETCH_CACHE_LIMIT_BYTES = 64 * 1024 * 1024
+
+
+class FetchPageCache:
+    """Кэш страниц ``fetch_url`` по сессиям — в памяти воркера.
+
+    Локально кэш лежит в ``state.shared`` и пишется в meta треда. Через
+    Temporal он шёл бы во вход и результат каждой activity ``fetch_url`` и в
+    checkpoint субагента — а страница бывает в мегабайты при лимите записи
+    2 МБ. Поэтому workflow кэш не видит, а воркер держит его по сессии
+    (``session_key``: субагент делит кэш с родителем, как локально).
+    Кэш — только ускорение: после перезапуска воркера или вытеснения
+    ``fetch_url`` скачает страницу заново. Сессии вытесняются по давности,
+    пока сумма не уложится в ``limit_bytes``.
+    """
+
+    def __init__(self, limit_bytes=FETCH_CACHE_LIMIT_BYTES):
+        self.limit_bytes = limit_bytes
+        self._sessions = OrderedDict()
+        self._size = 0
+
+    @staticmethod
+    def session_key(call):
+        """Сессия вызова: workflow ID корневого workflow (стабилен через
+        Continue-As-New, кэш живёт между ходами, как в meta локально); у
+        субагента — переданный ему ``child_context["session_id"]``."""
+        return (call.child_context or {}).get(
+            "session_id"
+        ) or activity.info().workflow_id
+
+    def get(self, key):
+        entry = self._sessions.get(key)
+        if entry is None:
+            return []
+        self._sessions.move_to_end(key)
+        return entry[0]
+
+    def put(self, key, pages):
+        old = self._sessions.pop(key, None)
+        if old is not None:
+            self._size -= old[1]
+        size = len(json.dumps(pages, ensure_ascii=False, default=str).encode())
+        if not pages or size > self.limit_bytes:
+            return
+        self._sessions[key] = (pages, size)
+        self._size += size
+        while self._size > self.limit_bytes:
+            _, (_, dropped) = self._sessions.popitem(last=False)
+            self._size -= dropped
+
+
 #: Владельцев хода с сообщениями в памяти воркера (``message_refs``).
 _MESSAGE_CACHE_OWNERS = 256
 
@@ -107,9 +161,17 @@ def is_transient_provider_failure(failure) -> bool:
         or details.get("permanent")
     ):
         return False
+    if details.get("transport"):
+        return True  # обрыв, таймаут, отказ соединения
     if "status_code" not in details:
-        return True  # транспорт: обрыв, таймаут, отказ соединения
+        # Неизвестный сбой провайдера: повтор без ограничения не включаем.
+        return False
     status = details.get("status_code")
+    if status is None:
+        # Ошибка в стриме или пустой выбор без кода вовсе (код с текстом —
+        # отсечён выше по ``raw_code``): транзиентна, как в ядре
+        # (``is_retriable_backend_error``).
+        return True
     try:
         status = int(status)
     except (TypeError, ValueError):
@@ -136,6 +198,8 @@ class NativeActivities:
         #: Владелец хода → {хэш: сообщение}, полученные activity модели
         #: (``message_refs``). Снимается с освобождением контекста хода.
         self._messages = OrderedDict()
+        #: Страницы ``fetch_url`` по сессиям (``FetchPageCache``).
+        self.fetch_pages = FetchPageCache()
         #: Итоговые таймауты и повторы activities (``resolve_activity_settings``)
         #: — уходят в workflow с подготовкой хода.
         self.activity_settings = activity_settings or DEFAULT_ACTIVITY_SETTINGS
@@ -408,9 +472,17 @@ class NativeActivities:
                     )
                 ).result
             )
-        return cap_tool_output(
-            await execute_native_tool_effect(request, ctx=ctx)
-        )
+        if request.name != EXEC_FETCH_URL_NAME:
+            return cap_tool_output(
+                await execute_native_tool_effect(request, ctx=ctx)
+            )
+        session = self.fetch_pages.session_key(call)
+        request.state.fetch_url_cache = self.fetch_pages.get(session)
+        result = await execute_native_tool_effect(request, ctx=ctx)
+        if result.delta.fetch_url_cache is not None:
+            self.fetch_pages.put(session, result.delta.fetch_url_cache)
+            result.delta.fetch_url_cache = None
+        return cap_tool_output(result)
 
     @activity.defn(name="agent.memory.execute")
     async def memory(self, call: NativeCall) -> ProjectMemoryReply:

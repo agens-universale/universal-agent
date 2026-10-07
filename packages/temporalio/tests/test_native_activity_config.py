@@ -68,7 +68,11 @@ def test_activity_config_is_validated_on_worker_start(tmp_path):
 @pytest.mark.parametrize(
     ("details", "flags", "transient"),
     [
-        ({}, {}, True),  # обрыв транспорта
+        ({"transport": True}, {}, True),  # обрыв транспорта
+        # Неизвестный сбой без кода — не повторять без конца.
+        ({}, {}, False),
+        # Стрим/embedded без кода вовсе — транзиентный, как в ядре.
+        ({"status_code": None, "raw_code": None}, {}, True),
         ({"status_code": 503}, {}, True),
         ({"status_code": 429}, {}, True),
         ({"status_code": 400}, {}, False),
@@ -148,3 +152,23 @@ def test_default_build_id_is_version_plus_code_hash():
     assert release == version("gc-ua-temporalio")
     assert len(digest) == 12 and int(digest, 16) >= 0
     assert WorkerVersioningConfig(build_id="b1").resolved_build_id() == "b1"
+
+
+def test_stream_and_embedded_errors_without_code_are_retried_like_core():
+    from gc_core.utils.backend_errors import (
+        EmbeddedChoiceError,
+        is_retriable_backend_error,
+    )
+    from gc_core.utils.chat_completions_stream import BackendStreamError
+
+    for exc in (
+        BackendStreamError("stream cut", status_code=None),
+        EmbeddedChoiceError("empty choice", status_code=None, raw_code=None),
+    ):
+        failure = encode_model_failure(exc)
+        assert is_retriable_backend_error(exc)
+        assert is_transient_provider_failure(failure), exc
+    quota = EmbeddedChoiceError(
+        "quota", status_code=None, raw_code="insufficient_quota"
+    )
+    assert not is_transient_provider_failure(encode_model_failure(quota))

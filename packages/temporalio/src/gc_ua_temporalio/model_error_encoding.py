@@ -95,7 +95,7 @@ def encode_model_failure(exc: Exception) -> ModelFailure:
             return _provider_failure(
                 exc, f"{name}: {reason}", {"permanent": reason}
             )
-        return _provider_failure(exc, name)
+        return _provider_failure(exc, name, {"transport": True})
     if isinstance(exc, EmbeddedChoiceError):
         return _provider_failure(
             exc,

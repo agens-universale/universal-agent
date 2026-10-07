@@ -366,9 +366,14 @@ class NativeOperations:
     async def tool_effect(self, request):
         metadata = self.tool_metadata.get(request.name, {})
         effect = not metadata.get("effect_is_read_only", False)
+        data = asdict(request)
+        # Кэш страниц ``fetch_url`` живёт в памяти воркера
+        # (``native_activities.FetchPageCache``): страница бывает в мегабайты,
+        # а вход и результат activity — записи истории (лимит 2 МБ).
+        data["state"]["fetch_url_cache"] = []
         return await self.call(
             "agent.tool.execute",
-            {**asdict(request), "effect": effect},
+            {**data, "effect": effect},
             ToolResult,
             operation_id=request.operation_id,
             effect=effect,

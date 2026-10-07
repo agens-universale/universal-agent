@@ -66,9 +66,9 @@ def growing_model():
             else:
                 bodies.append(len(raw))
                 step = len(bodies)
-                name, arguments = plan.get(
-                    "tool", ("fs_read_file", {"path": "big.txt"})
-                )
+                name, arguments = plan.get("by_step", {}).get(
+                    step
+                ) or plan.get("tool", ("fs_read_file", {"path": "big.txt"}))
                 tool = (
                     call(f"r{step}", name, arguments)
                     if step <= plan["steps"]
@@ -406,3 +406,86 @@ async def test_long_turn_written_at_the_end_in_parts(
     assert len(outputs) >= 120
     assert len({m["id"] for m in messages}) == len(messages)
     await Replayer(workflows=[NativeAgentWorkflow]).replay_workflow(history)
+
+
+@pytest.fixture
+def big_page():
+    """HTML-страница 3 МБ текста; считает скачивания."""
+    paragraph = "<p>" + "страница с большим текстом " * 40 + "</p>\n"
+    text = (
+        "<html><head><title>big</title></head><body><article>"
+        + paragraph * 1_400
+        + "</article></body></html>"
+    ).encode()
+    hits = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *_args):
+            pass
+
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(text)))
+            self.end_headers()
+            self.wfile.write(text)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{server.server_port}/page.txt", hits
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join()
+
+
+async def test_fetch_url_cache_stays_on_the_worker(
+    tmp_path, monkeypatch, growing_model, big_page
+):
+    """Страница 3 МБ читается ``exec_fetch_url`` двумя кусками: второй — из
+    кэша воркера (скачивание одно), кэш не идёт ни во вход и результат
+    activity, ни в meta треда — записи истории меньше 2 МБ."""
+    monkeypatch.chdir(tmp_path)
+    url, _bodies, plan = growing_model
+    page, hits = big_page
+    plan["steps"] = 2
+    plan["by_step"] = {
+        1: ("exec_fetch_url", {"url": page, "limit": 1000}),
+        2: ("exec_fetch_url", {"url": page, "offset": 1000, "limit": 1000}),
+    }
+    extra = {"security": {"url_policy": {"enabled": False}}}
+    async with runtime(tmp_path, url, core_extra=extra) as (env, native):
+        handle = await env.client.start_workflow(
+            NativeAgentWorkflow.run,
+            _request(),
+            id="refs-fetch-cache",
+            task_queue="refs",
+        )
+        await asyncio.wait_for(handle.result(), 120)
+        largest, _, _ = await _payload_sizes(handle)
+        history = await handle.fetch_history()
+        cached = native.fetch_pages.get(handle.id)
+    assert len(hits) == 1, hits
+    assert [key for key, _ in cached] == [page]
+    assert largest < 200_000, largest
+    meta = DurableFileThreadStore(str(tmp_path / "threads")).load_meta(
+        "test", "refs"
+    )
+    assert not (meta.get("shared") or {}).get("fetch_url_cache")
+    await Replayer(workflows=[NativeAgentWorkflow]).replay_workflow(history)
+
+
+def test_fetch_page_cache_evicts_whole_sessions_by_size():
+    from gc_ua_temporalio.native_activities import FetchPageCache
+
+    cache = FetchPageCache(limit_bytes=1_000)
+    cache.put("a", [["u1", {"content": "x" * 400}]])
+    cache.put("b", [["u2", {"content": "x" * 400}]])
+    cache.get("a")  # «a» свежее «b»
+    cache.put("c", [["u3", {"content": "x" * 400}]])
+    assert cache.get("b") == [] and cache.get("a") and cache.get("c")
+    cache.put("big", [["u4", {"content": "x" * 2_000}]])
+    assert cache.get("big") == []  # больше всего лимита — не держим

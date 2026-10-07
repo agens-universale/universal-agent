@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import time
 from dataclasses import replace
 
 import pytest
@@ -292,3 +293,32 @@ def test_sqlite_temporal_wire_conformance(tmp_path):
         )
 
     assert_conforms_async(factory)
+
+
+def test_snapshot_read_neither_creates_rows_nor_waits_for_writer(tmp_path):
+    """Статус/история по любому ID: снимок без вставки строк и без ожидания
+    писателя, который держит блокировку записи."""
+    path = tmp_path / "threads.sqlite"
+    store = SQLiteThreadStore(path)
+    snapshot = store.read_snapshot("s", "unknown")
+    assert (snapshot.revision, snapshot.generation, snapshot.max_seq) == (
+        0,
+        0,
+        0,
+    )
+    assert snapshot.meta == {} and snapshot.owner_id is None
+    with sqlite3.connect(path) as db:
+        assert db.execute("SELECT count(*) FROM threads").fetchone()[0] == 0
+        assert (
+            db.execute("SELECT count(*) FROM durable_control").fetchone()[0]
+            == 0
+        )
+    writer = sqlite3.connect(path, isolation_level=None, timeout=0)
+    try:
+        writer.execute("BEGIN IMMEDIATE")
+        started = time.monotonic()
+        store.read_snapshot("s", "unknown")
+        assert time.monotonic() - started < 1
+    finally:
+        writer.rollback()
+        writer.close()

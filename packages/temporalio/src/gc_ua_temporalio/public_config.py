@@ -26,9 +26,10 @@ import dataclasses
 import math
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Any
+from typing import Any, get_args
 
 from gc_core.config_modules.field_meta import _nested_model, meta_for_parts
+from gc_core.config_modules.os_backend import OsBackendKind
 from gc_core.config_modules.root import AppConfig
 from gc_core.settings import RuntimeEnv, runtime_of, settings_of
 from gc_core.usage.currency import provider_currency_for_url
@@ -248,7 +249,9 @@ def public_runtime(runtime: RuntimeEnv) -> dict[str, Any]:
         if isinstance(value, tuple):
             value = list(value)
         output[name] = _json_value(value, f"runtime.{name}")
-    if output.get("os_backend") not in (None, "local", "harbor"):
+    # Вид бэкенда — имя из схемы (секретов в нём нет); всё остальное о
+    # бэкенде (адреса, ``env``) остаётся на воркере.
+    if output.get("os_backend") not in (None, *get_args(OsBackendKind)):
         raise PublicConfigError("Invalid public backend kind")
     if output.get("run_mode") not in (None, "tui", "cli", "server"):
         raise PublicConfigError("Invalid public run mode")

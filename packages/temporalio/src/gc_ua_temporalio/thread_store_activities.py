@@ -70,6 +70,23 @@ async def _invoke(store, name, *args, **kwargs):
     return await asyncio.to_thread(getattr(store, name), *args, **kwargs)
 
 
+def _without_fetch_cache(snapshot):
+    """Снимок без кэша страниц ``fetch_url`` в meta (``shared``).
+
+    Кэш остаётся в meta треда, который вёл локальный режим; под Temporal он
+    живёт в памяти воркера (``native_activities.FetchPageCache``) и в
+    историю не идёт — ни ответом этой activity, ни через состояние workflow
+    (checkpoint субагента, запись meta).
+    """
+    meta = snapshot.meta if snapshot is not None else None
+    shared = meta.get("shared") if isinstance(meta, dict) else None
+    if not isinstance(shared, dict) or not shared.get("fetch_url_cache"):
+        return snapshot
+    return replace(
+        snapshot, meta={**meta, "shared": {**shared, "fetch_url_cache": {}}}
+    )
+
+
 class ThreadStoreActivities:
     def __init__(self, stores):
         self.raw = dict(stores)
@@ -106,10 +123,13 @@ class ThreadStoreActivities:
                     request.thread_id,
                     include_state=request.include_state,
                 )
-                return ThreadStoreReply(snapshot=snapshot)
+                return ThreadStoreReply(
+                    snapshot=_without_fetch_cache(snapshot)
+                )
             snapshot, messages, keys = await self._paged_snapshot(
                 store, request
             )
+            snapshot = _without_fetch_cache(snapshot)
             if snapshot.state is None:
                 # Хранилище не отдало состояние — как без страниц.
                 return ThreadStoreReply(snapshot=snapshot)

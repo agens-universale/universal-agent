@@ -165,7 +165,12 @@ class NativeChildTransport:
             resource_owner=self.operations.resource_owner,
         )
         router = self.ctx.model_router
+        parent = self.operations.child_context or {}
         child_context = {
+            # Корневая сессия (workflow ID верхнего workflow, стабилен через
+            # Continue-As-New): субагенты делят с ней кэш страниц воркера.
+            "session_id": parent.get("session_id")
+            or workflow.info().workflow_id,
             "parent_owner_id": self.operations.owner_id,
             "parent_context": self.operations.child_context,
             "tool_name": tool_name,

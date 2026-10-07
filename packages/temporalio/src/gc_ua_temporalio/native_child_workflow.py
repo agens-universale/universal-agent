@@ -40,6 +40,17 @@ from gc_ua_temporalio.thread_store_proxy import TemporalThreadStore
 from gc_ua_temporalio.thread_store_transport import ThreadStoreTransport
 
 
+async def drain_signals(tasks, *, failed):
+    """Дождаться отправленных родителю сигналов (checkpoint, вопрос).
+
+    Ребёнок уже упал — сбой сигнала (родитель закрыт) не подменяет его
+    ошибку: родителю важна причина отказа, а не то, что сигнал не дошёл.
+    Ход ребёнка удался — сбой сигнала поднимается, как раньше.
+    """
+    if tasks:
+        await asyncio.gather(*tasks, return_exceptions=failed)
+
+
 @workflow.defn(name="NativeSubagentWorkflow")
 class NativeSubagentWorkflow:
     def __init__(self):
@@ -225,6 +236,7 @@ class NativeSubagentWorkflow:
                     preparation=PreparedNativeChild(prepared, child_ctx),
                     input_scope_factory=self.input_scope,
                 )
+                failed = True
                 try:
                     output = await runner.arun(
                         request.tool_name,
@@ -232,12 +244,12 @@ class NativeSubagentWorkflow:
                         arun_agent,
                         parent_call_id=request.parent_call_id,
                     )
+                    failed = False
                 finally:
                     # Цикл ребёнка закончился: дальнейший ввод — родителю.
                     self.parent_ctx = None
                     checkpoint = self.checkpoint(parent_state, parent_ctx)
-                    if self.signal_tasks:
-                        await asyncio.gather(*self.signal_tasks)
+                    await drain_signals(self.signal_tasks, failed=failed)
                 undelivered, self.pending_messages = self.pending_messages, []
             except asyncio.CancelledError:
                 await operations.release_context()

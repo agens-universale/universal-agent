@@ -480,3 +480,18 @@ def test_message_limit_counts_utf8_bytes_not_chars():
         UserMessage("m", "я" * 600_000).validate()
     with pytest.raises(ValueError, match="bytes"):
         UserMessage("m", "\ud800" * (MAX_MESSAGE_BYTES // 3 + 1)).validate()
+
+
+async def test_child_signal_failure_does_not_mask_child_error():
+    """Ребёнок упал, а сигнал родителю не дошёл: наружу — ошибка ребёнка."""
+    from gc_ua_temporalio.native_child_workflow import drain_signals
+
+    async def broken_signal():
+        raise RuntimeError("parent is closed")
+
+    task = asyncio.ensure_future(broken_signal())
+    await drain_signals([task], failed=True)  # не поднимает
+    task = asyncio.ensure_future(broken_signal())
+    with pytest.raises(RuntimeError, match="parent is closed"):
+        await drain_signals([task], failed=False)
+    await drain_signals([], failed=False)
