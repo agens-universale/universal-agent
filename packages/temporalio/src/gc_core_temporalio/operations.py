@@ -266,7 +266,7 @@ class WorkflowOperations:
             # Чтение не удалось и после повторов: ошибка инструмента, модель
             # может повторить или обойтись, сессия не падает (как в local).
             return RuntimeError(TOOL_RETRIES_EXHAUSTED)
-        return InfrastructureFailure(f"Native activity failed: {name}")
+        return InfrastructureFailure(f"Activity failed: {name}")
 
     async def model(self, request):
         provider = getattr(self, "router_provider", None)

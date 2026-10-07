@@ -66,7 +66,7 @@ def assemble_context(prepared, *, operations, store, logger, human_request):
                 )
             }
         if name not in candidates:
-            raise ExecutionFailure(f"No prepared native tool factory: {name}")
+            raise ExecutionFailure(f"No prepared tool factory: {name}")
         tools[name] = {
             **deepcopy(metadata),
             "tool_fabric": candidates[name]["tool_fabric"],

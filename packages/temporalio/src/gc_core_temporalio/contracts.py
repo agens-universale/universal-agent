@@ -37,13 +37,6 @@ class UserMessage:
 
 
 @dataclass
-class HumanReply:
-    request_id: str
-    reply_id: str
-    answer: str
-
-
-@dataclass
 class SessionResume:
     """Delivery receipts across Continue-As-New; agent state stays in its store."""
 

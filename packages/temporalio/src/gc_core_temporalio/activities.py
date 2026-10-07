@@ -211,7 +211,7 @@ class AgentActivities:
         for store in self.stores.values():
             if durable_store_capability(store) is None:
                 raise ValueError(
-                    "Native Temporal requires a durable ThreadStore capability"
+                    "Temporal requires a durable ThreadStore capability"
                 )
 
     @asynccontextmanager
@@ -256,7 +256,7 @@ class AgentActivities:
         async with self._operation_scope(call):
             if call.schema_version != 1:
                 raise ApplicationError(
-                    "Unsupported native call", non_retryable=True
+                    "Unsupported activity call", non_retryable=True
                 )
             try:
                 ctx = (

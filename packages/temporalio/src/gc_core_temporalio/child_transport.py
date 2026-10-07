@@ -266,7 +266,7 @@ def _child_error(exc):
             return restore_domain_error(cause)
         if cause.type in ("ExecutionFailure", "InfrastructureFailure"):
             return ExecutionFailure(cause.message)
-    return InfrastructureFailure("Native child workflow failed")
+    return InfrastructureFailure("Child workflow failed")
 
 
 def install_subagents(

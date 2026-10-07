@@ -238,7 +238,7 @@ class ContextProvider:
             if workspace.resolve() != cwd:
                 raise ValueError(
                     f"Profile {name}: start worker in workspace {workspace}; "
-                    f"current cwd is {cwd}. Native worker never calls chdir."
+                    f"current cwd is {cwd}. The worker never calls chdir."
                 )
             if profile.store_id not in stores:
                 raise ValueError(
@@ -303,7 +303,7 @@ class ContextProvider:
 
     async def _resolve(self, call):
         if call.schema_version != 1 or not call.owner_id:
-            raise ValueError("Invalid native context request")
+            raise ValueError("Invalid context request")
         store_id, loaded = self._profiles[call.profile]
         if "store_id" in call.data and call.data["store_id"] != store_id:
             raise ValueError(
@@ -313,7 +313,7 @@ class ContextProvider:
         bound = self._bound.setdefault(call.owner_id, digest)
         if bound != digest:
             raise ValueError(
-                "Native context owner is bound to another profile or store"
+                "Context owner is bound to another profile or store"
             )
         return store_id, loaded
 

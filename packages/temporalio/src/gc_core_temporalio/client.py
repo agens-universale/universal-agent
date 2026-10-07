@@ -117,6 +117,17 @@ class AgentClient:
         )
 
 
+class MessageNotProcessed(RuntimeError):
+    """Сообщение отброшено остановкой хода до того, как ход его взял;
+    повтор с тем же ID принимается заново."""
+
+    def __init__(self, message_id):
+        super().__init__(
+            f"Message {message_id} was dropped by a stopped turn; resend it"
+        )
+        self.message_id = message_id
+
+
 def session_workflow_id(store_id, system_id, thread_id):
     """ID workflow сессии треда: один тред — одна сессия, у любого клиента."""
     digest = hashlib.sha256(
@@ -187,8 +198,14 @@ class AgentSession:
         )
 
     async def ask(self, text, *, message_id=None):
-        """Отправить и дождаться: ответ хода (как ``AsyncAgent.run``)."""
+        """Отправить и дождаться: ответ хода (как ``AsyncAgent.run``).
+
+        Сообщение, отброшенное остановкой хода, — ``MessageNotProcessed``:
+        ответа на него нет, а ответ прошлого хода выдавать за него нельзя.
+        """
         reply = await self.wait(await self.send(text, message_id=message_id))
+        if not reply["delivered"]:
+            raise MessageNotProcessed(reply["message_id"])
         return reply["answer"]
 
     async def answer_human(self, request_id, answer, *, reply_id=None):

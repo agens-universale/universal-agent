@@ -97,7 +97,7 @@ class WorkerMaintenance:
         workflows = await self._describe_all(idle)
         for owner in idle:
             if owner_state(owner, workflows) in ("closed", "gone"):
-                logger.info("Releasing abandoned native context %s", owner)
+                logger.info("Releasing abandoned context %s", owner)
                 await self.provider.forget_owner(owner)
         for store in self.stores.values():
             await asyncio.to_thread(_prune_store_receipts, store)
@@ -108,7 +108,7 @@ class WorkerMaintenance:
             try:
                 await self.run_once()
             except Exception:
-                logger.exception("Native worker maintenance failed")
+                logger.exception("Worker maintenance failed")
 
 
 def _prune_store_receipts(store):

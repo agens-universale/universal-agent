@@ -350,7 +350,7 @@ class AgentWorkflow:
         if start.format_text is not None and not start.format_text.strip():
             raise ValueError("Structured output format must be nonempty")
         if start.schema_version != 1:
-            raise ValueError("Invalid native run request")
+            raise ValueError("Invalid run request")
         if start.resume is not None:
             self._restore_delivery(start.resume)
         else:
@@ -360,7 +360,7 @@ class AgentWorkflow:
 
     def _restore_delivery(self, resume):
         if resume.schema_version != 1:
-            raise ValueError("Unsupported native resume")
+            raise ValueError("Unsupported session resume")
         self.closed = self.closed or resume.closed
         if resume.store_owner_epoch is not None:
             self.resumed_store = (
@@ -384,7 +384,7 @@ class AgentWorkflow:
             if start.keep_alive:
                 # Сессия, открытая Update-With-Start: ввод придёт update'ом.
                 return
-            raise ValueError("Native run requires messages")
+            raise ValueError("Run requires messages")
         ids = start.message_ids or [self.new_id("m") for _ in start.messages]
         if len(ids) != len(start.messages) or len(set(ids)) != len(ids):
             raise ValueError("Message IDs must match messages and be unique")
@@ -598,9 +598,7 @@ class AgentWorkflow:
                         await asyncio.shield(self.operations.mcp_cleanup())
                         await asyncio.shield(self.operations.release_context())
                     except (Exception, asyncio.CancelledError):
-                        workflow.logger.exception(
-                            "Native context cleanup failed"
-                        )
+                        workflow.logger.exception("Context cleanup failed")
                 try:
                     # Упавшая сессия не держит тред: иначе он закрыт для
                     # локального TUI/CLI и для workflow с другим ID.

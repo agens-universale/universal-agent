@@ -267,3 +267,23 @@ def test_custom_thread_store_must_declare_its_paths(tmp_path):
     with pytest.raises(ValueError, match="protected_paths"):
         store_paths(Undeclared())
     assert store_paths(Declared()) == [str(tmp_path / "s3-cache")]
+
+
+async def test_ask_refuses_to_answer_a_dropped_message(monkeypatch):
+    """Сообщение, отброшенное остановкой хода: ask не выдаёт ответ прошлого
+    хода за ответ на него."""
+    import pytest
+    from gc_core_temporalio import AgentSession, MessageNotProcessed
+
+    session = AgentSession(None, agent="a", thread_id="t", task_queue="q")
+
+    async def send(_text, **_options):
+        return "m1"
+
+    async def wait(message_id):
+        return {"message_id": message_id, "delivered": False, "answer": "old"}
+
+    monkeypatch.setattr(session, "send", send)
+    monkeypatch.setattr(session, "wait", wait)
+    with pytest.raises(MessageNotProcessed, match="m1"):
+        await session.ask("hello")
