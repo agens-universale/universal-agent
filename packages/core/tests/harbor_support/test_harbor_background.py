@@ -14,7 +14,10 @@ import threading
 
 import pytest
 from gc_core.backends.harbor import HarborBackend
-from gc_core.tools.exec.execute_command import ExecuteCommand
+from gc_core.tools.exec.execute_command import (
+    ExecuteCommand,
+    probe_total_in_command,
+)
 from gc_testkit.harbor_fakes import bind_os_backend
 
 
@@ -37,6 +40,9 @@ class _Env:
 
     async def exec(self, command, **kw):
         self.calls.append((command, kw))
+        total = probe_total_in_command(str(command))
+        if total is not None:
+            return _Res(f"{total}\n")
         if self._exc is not None:
             raise self._exc
         return self._res
@@ -71,7 +77,8 @@ def test_the_tool_starts_a_background_command_in_harbor(loop_in_thread):
 
     assert res["ok"] is True, res
     assert res["background"] == {"pid": 4242, "output": "not captured"}, res
-    assert len(env.calls) == 1, "фоновый запуск — один exec в контейнере"
+    spawned = [c for c, _ in env.calls if "npm run dev" in c]
+    assert len(spawned) == 1, "фоновый запуск — один exec команды в контейнере"
 
 
 async def test_the_command_is_detached_inside_the_container(loop_in_thread):
